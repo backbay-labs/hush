@@ -17,11 +17,10 @@ hush/
 ├── crates/            # Rust reference implementation
 │   ├── hushspec/      # Core library: parsing, validation, types
 │   └── hushspec-testkit/  # Test utilities and fixture runners
-├── packages/          # TypeScript/JS packages
-│   └── core/          # @hushspec/core - TS reference implementation
-├── bindings/          # Language bindings
-│   ├── python/        # Python SDK (hushspec)
-│   └── go/            # Go SDK (hushspec)
+├── packages/          # Language SDKs
+│   ├── hushspec/      # TypeScript (@hushspec/core)
+│   ├── python/        # Python (hushspec)
+│   └── go/            # Go (hushspec)
 ├── rulesets/          # Example and built-in ruleset YAML files
 ├── fixtures/          # Test fixtures (valid/invalid documents, edge cases)
 └── docs/              # Documentation source (mdBook)
@@ -69,20 +68,20 @@ npm run lint
 
 ```bash
 # Install with dev dependencies
-pip install -e "bindings/python[dev]"
+pip install -e "packages/python[dev]"
 
 # Run tests
-pytest bindings/python/tests
+pytest packages/python/tests
 ```
 
 ### Go
 
 ```bash
 # Run tests
-cd bindings/go && go test ./...
+cd packages/go && go test ./...
 
 # Vet
-cd bindings/go && go vet ./...
+cd packages/go && go vet ./...
 ```
 
 ### Conformance Testkit
@@ -108,7 +107,9 @@ cargo run -p hushspec-testkit -- --fixtures fixtures
 - `schemas/` -- JSON Schema files for validating HushSpec YAML/JSON documents
 - `crates/hushspec/src/lib.rs` -- Rust library entry point
 - `crates/hushspec-testkit/src/lib.rs` -- Test kit entry point
-- `packages/core/src/index.ts` -- TypeScript library entry point
+- `packages/hushspec/src/index.ts` -- TypeScript library entry point
+- `packages/python/hushspec/__init__.py` -- Python library entry point
+- `packages/go/hushspec/` -- Go library entry point
 - `rulesets/` -- Built-in and example ruleset YAML files
 - `fixtures/` -- Test fixture files (used by both Rust and TS test suites)
 - `Cargo.toml` -- Rust workspace root

@@ -61,9 +61,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install -e "bindings/python[dev]"
+      - run: pip install -e "packages/python[dev]"
 
-      - run: pytest bindings/python/tests -v
+      - run: pytest packages/python/tests -v
 
   go:
     name: Go
@@ -75,9 +75,9 @@ jobs:
         with:
           go-version: '1.22'
 
-      - run: cd bindings/go && go test ./... -v
+      - run: cd packages/go && go test ./... -v
 
-      - run: cd bindings/go && go vet ./...
+      - run: cd packages/go && go vet ./...
 
   conformance:
     name: Conformance

@@ -145,7 +145,7 @@ console.log(result.valid); // true
 ### Python
 
 ```bash
-pip install hushspec  # or from source: pip install ./bindings/python
+pip install hushspec  # or from source: pip install ./packages/python
 ```
 
 ```python
@@ -159,7 +159,7 @@ assert result.is_valid()
 ### Go
 
 ```go
-import "github.com/backbay-labs/hush/bindings/go/hushspec"
+import "github.com/backbay-labs/hush/packages/go/hushspec"
 
 spec, err := hushspec.Parse(yamlString)
 result := hushspec.Validate(spec)
@@ -186,8 +186,7 @@ hush policy migrate policy.yaml --to hushspec
 spec/           Normative specification (core + 3 extensions)
 schemas/        JSON Schema definitions (draft 2020-12)
 crates/         Rust reference crate (hushspec) + testkit CLI
-packages/       TypeScript reference package (@hushspec/core)
-bindings/       Python and Go SDKs
+packages/       Language SDKs (TypeScript, Python, Go)
 rulesets/       6 built-in security rulesets
 fixtures/       31 conformance test fixtures
 docs/           mdBook documentation site
