@@ -28,6 +28,64 @@ describe('parse', () => {
     }
   });
 
+  it('rejects unknown nested rule fields', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  egress:
+    default: block
+    extra_field: true
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('unknown field at rules.egress');
+    }
+  });
+
+  it('rejects invalid enum values', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  egress:
+    default: maybe
+`);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects invalid field types', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  tool_access:
+    enabled: "yes"
+`);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects invalid regex patterns', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  secret_patterns:
+    patterns:
+      - name: bad
+        pattern: "["
+        severity: critical
+`);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects invalid numeric ranges', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      top_k: 0
+`);
+    expect(result.ok).toBe(false);
+  });
+
   it('rejects missing hushspec field', () => {
     const result = parse('name: test\n');
     expect(result.ok).toBe(false);
@@ -83,8 +141,8 @@ describe('validate', () => {
     expect(result.errors[0].code).toBe('unsupported_version');
   });
 
-  it('detects duplicate secret pattern names', () => {
-    const spec = parseOrThrow(`
+  it('rejects duplicate secret pattern names', () => {
+    const result = parse(`
 hushspec: "0.1.0"
 rules:
   secret_patterns:
@@ -96,9 +154,7 @@ rules:
         pattern: "b"
         severity: critical
 `);
-    const result = validate(spec);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('duplicate_pattern_name');
+    expect(result.ok).toBe(false);
   });
 
   it('warns when no rules present', () => {

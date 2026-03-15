@@ -1,4 +1,4 @@
-export { HushSpec, MergeStrategy } from './schema.js';
+export type { HushSpec, MergeStrategy } from './schema.js';
 export type {
   Rules,
   ForbiddenPathsRule,

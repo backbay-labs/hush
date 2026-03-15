@@ -396,7 +396,10 @@ The detection extension schema is defined in a separate specification document. 
 
 ### 9.4 Extension Versioning
 
-Each extension module maintains an independent version track. Extension versions are declared within the extension object itself (e.g., `extensions.posture.version`). Core HushSpec version changes do not imply extension version changes, and vice versa.
+In HushSpec v0.1.0, extension modules do **not** declare independent version
+fields inside documents. The posture, origins, and detection companion specs are
+versioned alongside the core HushSpec release. A future major version MAY add
+in-document extension versioning if interoperability needs require it.
 
 ### 9.5 Unknown Extensions
 

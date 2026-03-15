@@ -1,19 +1,6 @@
 import YAML from 'yaml';
 import type { HushSpec } from './schema.js';
-
-const KNOWN_TOP_LEVEL_KEYS = new Set([
-  'hushspec', 'name', 'description', 'extends', 'merge_strategy', 'rules', 'extensions',
-]);
-
-const KNOWN_RULE_KEYS = new Set([
-  'forbidden_paths', 'path_allowlist', 'egress', 'secret_patterns',
-  'patch_integrity', 'shell_commands', 'tool_access', 'computer_use',
-  'remote_desktop_channels', 'input_injection',
-]);
-
-const KNOWN_EXTENSION_KEYS = new Set([
-  'posture', 'origins', 'detection',
-]);
+import { validateForParse } from './validate.js';
 
 /** Result of parsing a YAML string into a HushSpec document. */
 export type ParseResult =
@@ -23,54 +10,29 @@ export type ParseResult =
 /**
  * Parse a YAML string into a HushSpec document.
  *
- * Returns an ok/error result. Rejects unknown top-level fields
- * and unknown rules (fail-closed).
+ * Returns an ok/error result. Rejects malformed documents, unknown fields,
+ * and structurally invalid values.
  */
 export function parse(yaml: string): ParseResult {
   let doc: unknown;
   try {
     doc = YAML.parse(yaml);
-  } catch (e) {
-    return { ok: false, error: `YAML parse error: ${e instanceof Error ? e.message : String(e)}` };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `YAML parse error: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 
-  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
-    return { ok: false, error: 'HushSpec document must be a YAML mapping' };
+  const result = validateForParse(doc);
+  if (!result.valid) {
+    return {
+      ok: false,
+      error: result.errors[0]?.message ?? 'invalid HushSpec document',
+    };
   }
 
-  const obj = doc as Record<string, unknown>;
-
-  // Check for unknown top-level fields
-  for (const key of Object.keys(obj)) {
-    if (!KNOWN_TOP_LEVEL_KEYS.has(key)) {
-      return { ok: false, error: `unknown top-level field: ${key}` };
-    }
-  }
-
-  // Check hushspec field is present
-  if (!('hushspec' in obj) || typeof obj.hushspec !== 'string') {
-    return { ok: false, error: 'missing or invalid "hushspec" version field' };
-  }
-
-  // Check for unknown rule keys
-  if (obj.rules && typeof obj.rules === 'object' && !Array.isArray(obj.rules)) {
-    for (const key of Object.keys(obj.rules as Record<string, unknown>)) {
-      if (!KNOWN_RULE_KEYS.has(key)) {
-        return { ok: false, error: `unknown rule: ${key}` };
-      }
-    }
-  }
-
-  // Check for unknown extension keys
-  if (obj.extensions && typeof obj.extensions === 'object' && !Array.isArray(obj.extensions)) {
-    for (const key of Object.keys(obj.extensions as Record<string, unknown>)) {
-      if (!KNOWN_EXTENSION_KEYS.has(key)) {
-        return { ok: false, error: `unknown extension: ${key}` };
-      }
-    }
-  }
-
-  return { ok: true, value: obj as unknown as HushSpec };
+  return { ok: true, value: doc as HushSpec };
 }
 
 /**

@@ -22,7 +22,10 @@ Upon reaching v1.0.0, backward compatibility is guaranteed within each major ver
 
 ### Extension Module Versioning
 
-Each extension (`posture`, `origins`, `detection`) maintains its own independent version track. A core version bump does not imply an extension version change, and vice versa. Extensions follow the same v0.x/v1.0+ stability rules independently.
+In HushSpec v0.1.0, extensions do not declare separate per-document version
+fields. The companion extension specs ship with the same repository release as
+the core spec. A future major version may add explicit extension versioning if
+it becomes necessary.
 
 ## Current Version
 

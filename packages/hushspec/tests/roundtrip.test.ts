@@ -39,6 +39,7 @@ extensions:
         capabilities:
           - file_access
           - egress
+    transitions: []
   detection:
     prompt_injection:
       enabled: true

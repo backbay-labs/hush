@@ -14,150 +14,845 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+type UnknownRecord = Record<string, unknown>;
+
+interface ValidationContext {
+  errors: ValidationError[];
+  warnings: string[];
+  checkSupportedVersion: boolean;
+  includeWarnings: boolean;
+}
+
+const TOP_LEVEL_KEYS = new Set([
+  'hushspec', 'name', 'description', 'extends', 'merge_strategy', 'rules', 'extensions',
+]);
+
+const RULE_KEYS = new Set([
+  'forbidden_paths', 'path_allowlist', 'egress', 'secret_patterns',
+  'patch_integrity', 'shell_commands', 'tool_access', 'computer_use',
+  'remote_desktop_channels', 'input_injection',
+]);
+
+const EXTENSION_KEYS = new Set(['posture', 'origins', 'detection']);
+
+const FORBIDDEN_PATH_KEYS = new Set(['enabled', 'patterns', 'exceptions']);
+const PATH_ALLOWLIST_KEYS = new Set(['enabled', 'read', 'write', 'patch']);
+const EGRESS_KEYS = new Set(['enabled', 'allow', 'block', 'default']);
+const SECRET_PATTERNS_KEYS = new Set(['enabled', 'patterns', 'skip_paths']);
+const SECRET_PATTERN_KEYS = new Set(['name', 'pattern', 'severity', 'description']);
+const PATCH_INTEGRITY_KEYS = new Set([
+  'enabled', 'max_additions', 'max_deletions', 'forbidden_patterns',
+  'require_balance', 'max_imbalance_ratio',
+]);
+const SHELL_COMMAND_KEYS = new Set(['enabled', 'forbidden_patterns']);
+const TOOL_ACCESS_KEYS = new Set([
+  'enabled', 'allow', 'block', 'require_confirmation', 'default', 'max_args_size',
+]);
+const COMPUTER_USE_KEYS = new Set(['enabled', 'mode', 'allowed_actions']);
+const REMOTE_DESKTOP_KEYS = new Set([
+  'enabled', 'clipboard', 'file_transfer', 'audio', 'drive_mapping',
+]);
+const INPUT_INJECTION_KEYS = new Set(['enabled', 'allowed_types', 'require_postcondition_probe']);
+
+const POSTURE_KEYS = new Set(['initial', 'states', 'transitions']);
+const POSTURE_STATE_KEYS = new Set(['description', 'capabilities', 'budgets']);
+const POSTURE_TRANSITION_KEYS = new Set(['from', 'to', 'on', 'after']);
+
+const ORIGINS_KEYS = new Set(['default_behavior', 'profiles']);
+const ORIGIN_PROFILE_KEYS = new Set([
+  'id', 'match', 'posture', 'tool_access', 'egress', 'data', 'budgets', 'bridge', 'explanation',
+]);
+const ORIGIN_MATCH_KEYS = new Set([
+  'provider', 'tenant_id', 'space_id', 'space_type', 'visibility', 'external_participants',
+  'tags', 'sensitivity', 'actor_role',
+]);
+const ORIGIN_DATA_KEYS = new Set([
+  'allow_external_sharing', 'redact_before_send', 'block_sensitive_outputs',
+]);
+const ORIGIN_BUDGET_KEYS = new Set(['tool_calls', 'egress_calls', 'shell_commands']);
+const BRIDGE_POLICY_KEYS = new Set(['allow_cross_origin', 'allowed_targets', 'require_approval']);
+const BRIDGE_TARGET_KEYS = new Set(['provider', 'space_type', 'tags', 'visibility']);
+
+const DETECTION_KEYS = new Set(['prompt_injection', 'jailbreak', 'threat_intel']);
+const PROMPT_INJECTION_KEYS = new Set(['enabled', 'warn_at_or_above', 'block_at_or_above', 'max_scan_bytes']);
+const JAILBREAK_KEYS = new Set(['enabled', 'block_threshold', 'warn_threshold', 'max_input_bytes']);
+const THREAT_INTEL_KEYS = new Set(['enabled', 'pattern_db', 'similarity_threshold', 'top_k']);
+
+const DEFAULT_ACTIONS = new Set(['allow', 'block']);
+const SEVERITIES = new Set(['critical', 'error', 'warn']);
+const COMPUTER_USE_MODES = new Set(['observe', 'guardrail', 'fail_closed']);
+const TRANSITION_TRIGGERS = new Set([
+  'user_approval', 'user_denial', 'critical_violation', 'any_violation',
+  'timeout', 'budget_exhausted', 'pattern_match',
+]);
+const ORIGIN_DEFAULT_BEHAVIORS = new Set(['deny', 'minimal_profile']);
+const DETECTION_LEVELS = new Set(['safe', 'suspicious', 'high', 'critical']);
+const DURATION_PATTERN = /^\d+[smhd]$/;
+
+const CAPABILITY_NAMES = new Set([
+  'file_access', 'file_write', 'egress', 'shell', 'tool_call', 'patch', 'custom',
+]);
+const BUDGET_NAMES = new Set([
+  'file_writes', 'egress_calls', 'shell_commands', 'tool_calls', 'patches', 'custom_calls',
+]);
+
 /**
  * Validate a parsed HushSpec document for structural correctness.
  *
- * Checks version support, duplicate pattern names, and extension
- * constraints. Returns errors and warnings.
+ * Checks fail-closed schema constraints plus cross-field validation and warnings.
  */
 export function validate(spec: HushSpec): ValidationResult {
-  const errors: ValidationError[] = [];
-  const warnings: string[] = [];
+  return validateDocument(spec as unknown, {
+    checkSupportedVersion: true,
+    includeWarnings: true,
+  });
+}
 
-  // Version check
-  if (!isSupported(spec.hushspec)) {
-    errors.push({
-      code: 'unsupported_version',
-      message: `unsupported hushspec version: ${spec.hushspec}`,
+export function validateForParse(spec: unknown): ValidationResult {
+  return validateDocument(spec, {
+    checkSupportedVersion: false,
+    includeWarnings: false,
+  });
+}
+
+function validateDocument(
+  spec: unknown,
+  options: Pick<ValidationContext, 'checkSupportedVersion' | 'includeWarnings'>,
+): ValidationResult {
+  const ctx: ValidationContext = {
+    errors: [],
+    warnings: [],
+    ...options,
+  };
+
+  if (!isRecord(spec)) {
+    addError(ctx, 'invalid_document', 'HushSpec document must be a YAML mapping');
+    return {
+      valid: false,
+      errors: ctx.errors,
+      warnings: ctx.warnings,
+    };
+  }
+
+  validateTopLevel(spec, ctx);
+
+  return {
+    valid: ctx.errors.length === 0,
+    errors: ctx.errors,
+    warnings: ctx.warnings,
+  };
+}
+
+function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
+  rejectUnknownKeys(obj, TOP_LEVEL_KEYS, ctx, 'unknown_top_level_field', key => `unknown top-level field: ${key}`);
+
+  const hushspec = obj.hushspec;
+  if (typeof hushspec !== 'string') {
+    addError(ctx, 'missing_version', 'missing or invalid "hushspec" version field');
+  } else if (ctx.checkSupportedVersion && !isSupported(hushspec)) {
+    addError(ctx, 'unsupported_version', `unsupported hushspec version: ${hushspec}`);
+  }
+
+  validateOptionalString(obj, 'name', ctx, 'name');
+  validateOptionalString(obj, 'description', ctx, 'description');
+  validateOptionalString(obj, 'extends', ctx, 'extends');
+  validateOptionalEnum(obj, 'merge_strategy', ctx, 'merge_strategy', ['replace', 'merge', 'deep_merge']);
+
+  if ('rules' in obj) {
+    if (!isRecord(obj.rules)) {
+      addError(ctx, 'invalid_rules', 'rules must be an object');
+    } else {
+      validateRules(obj.rules, ctx);
+    }
+  } else if (ctx.includeWarnings) {
+    ctx.warnings.push('no rules section present');
+  }
+
+  if ('extensions' in obj) {
+    if (!isRecord(obj.extensions)) {
+      addError(ctx, 'invalid_extensions', 'extensions must be an object');
+    } else {
+      validateExtensions(obj.extensions, ctx);
+    }
+  }
+}
+
+function validateRules(obj: UnknownRecord, ctx: ValidationContext): void {
+  rejectUnknownKeys(obj, RULE_KEYS, ctx, 'unknown_rule', key => `unknown rule: ${key}`);
+
+  let configuredRules = 0;
+
+  configuredRules += validateOptionalRuleObject(obj, 'forbidden_paths', ctx, validateForbiddenPathsRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'path_allowlist', ctx, validatePathAllowlistRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'egress', ctx, validateEgressRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'secret_patterns', ctx, validateSecretPatternsRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'patch_integrity', ctx, validatePatchIntegrityRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'shell_commands', ctx, validateShellCommandsRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'tool_access', ctx, validateToolAccessRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'computer_use', ctx, validateComputerUseRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'remote_desktop_channels', ctx, validateRemoteDesktopRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'input_injection', ctx, validateInputInjectionRule, 'rules');
+
+  if (configuredRules === 0 && ctx.includeWarnings) {
+    ctx.warnings.push('no rules configured');
+  }
+}
+
+function validateForbiddenPathsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, FORBIDDEN_PATH_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'patterns', ctx, `${path}.patterns`);
+  validateOptionalStringArray(obj, 'exceptions', ctx, `${path}.exceptions`);
+}
+
+function validatePathAllowlistRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, PATH_ALLOWLIST_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'read', ctx, `${path}.read`);
+  validateOptionalStringArray(obj, 'write', ctx, `${path}.write`);
+  validateOptionalStringArray(obj, 'patch', ctx, `${path}.patch`);
+}
+
+function validateEgressRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, EGRESS_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
+  validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
+  validateOptionalEnum(obj, 'default', ctx, `${path}.default`, DEFAULT_ACTIONS);
+}
+
+function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, SECRET_PATTERNS_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'skip_paths', ctx, `${path}.skip_paths`);
+
+  if (!('patterns' in obj)) return;
+  if (!Array.isArray(obj.patterns)) {
+    addError(ctx, 'invalid_patterns', `${path}.patterns must be an array`);
+    return;
+  }
+
+  const seen = new Set<string>();
+  obj.patterns.forEach((pattern, index) => {
+    const itemPath = `${path}.patterns[${index}]`;
+    if (!isRecord(pattern)) {
+      addError(ctx, 'invalid_pattern', `${itemPath} must be an object`);
+      return;
+    }
+    rejectUnknownKeys(pattern, SECRET_PATTERN_KEYS, ctx, 'unknown_field', key => `unknown field at ${itemPath}: ${key}`);
+    const name = validateRequiredString(pattern, 'name', ctx, `${itemPath}.name`);
+    const regex = validateRequiredString(pattern, 'pattern', ctx, `${itemPath}.pattern`);
+    validateRequiredEnum(pattern, 'severity', ctx, `${itemPath}.severity`, SEVERITIES);
+    validateOptionalString(pattern, 'description', ctx, `${itemPath}.description`);
+
+    if (name) {
+      if (seen.has(name)) {
+        addError(ctx, 'duplicate_pattern_name', `duplicate secret pattern name: ${name}`);
+      }
+      seen.add(name);
+    }
+    if (regex) {
+      validateRegex(regex, ctx, `${itemPath}.pattern`);
+    }
+  });
+}
+
+function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, PATCH_INTEGRITY_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalInteger(obj, 'max_additions', ctx, `${path}.max_additions`, { min: 0 });
+  validateOptionalInteger(obj, 'max_deletions', ctx, `${path}.max_deletions`, { min: 0 });
+  validateOptionalBoolean(obj, 'require_balance', ctx, `${path}.require_balance`);
+
+  if ('forbidden_patterns' in obj) {
+    const patterns = validateOptionalStringArray(obj, 'forbidden_patterns', ctx, `${path}.forbidden_patterns`);
+    patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.forbidden_patterns[${index}]`));
+  }
+
+  validateOptionalNumber(obj, 'max_imbalance_ratio', ctx, `${path}.max_imbalance_ratio`, { minExclusive: 0 });
+}
+
+function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, SHELL_COMMAND_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+
+  if ('forbidden_patterns' in obj) {
+    const patterns = validateOptionalStringArray(obj, 'forbidden_patterns', ctx, `${path}.forbidden_patterns`);
+    patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.forbidden_patterns[${index}]`));
+  }
+}
+
+function validateToolAccessRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, TOOL_ACCESS_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
+  validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
+  validateOptionalStringArray(obj, 'require_confirmation', ctx, `${path}.require_confirmation`);
+  validateOptionalEnum(obj, 'default', ctx, `${path}.default`, DEFAULT_ACTIONS);
+  validateOptionalInteger(obj, 'max_args_size', ctx, `${path}.max_args_size`, { min: 1 });
+}
+
+function validateComputerUseRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, COMPUTER_USE_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalEnum(obj, 'mode', ctx, `${path}.mode`, COMPUTER_USE_MODES);
+  validateOptionalStringArray(obj, 'allowed_actions', ctx, `${path}.allowed_actions`);
+}
+
+function validateRemoteDesktopRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, REMOTE_DESKTOP_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalBoolean(obj, 'clipboard', ctx, `${path}.clipboard`);
+  validateOptionalBoolean(obj, 'file_transfer', ctx, `${path}.file_transfer`);
+  validateOptionalBoolean(obj, 'audio', ctx, `${path}.audio`);
+  validateOptionalBoolean(obj, 'drive_mapping', ctx, `${path}.drive_mapping`);
+}
+
+function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, INPUT_INJECTION_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'allowed_types', ctx, `${path}.allowed_types`);
+  validateOptionalBoolean(obj, 'require_postcondition_probe', ctx, `${path}.require_postcondition_probe`);
+}
+
+function validateExtensions(obj: UnknownRecord, ctx: ValidationContext): void {
+  rejectUnknownKeys(obj, EXTENSION_KEYS, ctx, 'unknown_extension', key => `unknown extension: ${key}`);
+
+  validateOptionalRuleObject(obj, 'posture', ctx, validatePostureExtension, 'extensions');
+  const postureStateNames = getPostureStateNames(obj.posture);
+  validateOptionalRuleObject(
+    obj,
+    'origins',
+    ctx,
+    (value, innerCtx, path) => validateOriginsExtension(value, innerCtx, path, postureStateNames),
+    'extensions',
+  );
+  validateOptionalRuleObject(obj, 'detection', ctx, validateDetectionExtension, 'extensions');
+}
+
+function validatePostureExtension(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, POSTURE_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+
+  const initial = validateRequiredString(obj, 'initial', ctx, `${path}.initial`);
+  const states = validateRequiredRecord(obj, 'states', ctx, `${path}.states`);
+  const transitions = validateRequiredArray(obj, 'transitions', ctx, `${path}.transitions`);
+
+  const stateNames = new Set<string>();
+  if (states) {
+    const stateKeys = Object.keys(states);
+    if (stateKeys.length === 0) {
+      addError(ctx, 'empty_states', `${path}.states must define at least one state`);
+    }
+    for (const stateName of stateKeys) {
+      stateNames.add(stateName);
+      const state = states[stateName];
+      const statePath = `${path}.states.${stateName}`;
+      if (!isRecord(state)) {
+        addError(ctx, 'invalid_state', `${statePath} must be an object`);
+        continue;
+      }
+      rejectUnknownKeys(state, POSTURE_STATE_KEYS, ctx, 'unknown_field', key => `unknown field at ${statePath}: ${key}`);
+      validateOptionalString(state, 'description', ctx, `${statePath}.description`);
+
+      const capabilities = validateOptionalStringArray(state, 'capabilities', ctx, `${statePath}.capabilities`);
+      capabilities?.forEach(capability => {
+        if (ctx.includeWarnings && !CAPABILITY_NAMES.has(capability)) {
+          ctx.warnings.push(`${statePath}.capabilities includes unknown capability '${capability}'`);
+        }
+      });
+
+      if ('budgets' in state) {
+        if (!isRecord(state.budgets)) {
+          addError(ctx, 'invalid_budgets', `${statePath}.budgets must be an object`);
+        } else {
+          for (const [budgetKey, budgetValue] of Object.entries(state.budgets)) {
+            validateIntegerValue(budgetValue, ctx, `${statePath}.budgets.${budgetKey}`, { min: 0 });
+            if (ctx.includeWarnings && !BUDGET_NAMES.has(budgetKey)) {
+              ctx.warnings.push(`${statePath}.budgets uses unknown budget key '${budgetKey}'`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (initial && states && !stateNames.has(initial)) {
+    addError(ctx, 'invalid_posture_initial', `posture.initial '${initial}' does not reference a defined state`);
+  }
+
+  if (transitions) {
+    transitions.forEach((transition, index) => {
+      const transitionPath = `${path}.transitions[${index}]`;
+      if (!isRecord(transition)) {
+        addError(ctx, 'invalid_transition', `${transitionPath} must be an object`);
+        return;
+      }
+
+      rejectUnknownKeys(transition, POSTURE_TRANSITION_KEYS, ctx, 'unknown_field', key => `unknown field at ${transitionPath}: ${key}`);
+
+      const from = validateRequiredString(transition, 'from', ctx, `${transitionPath}.from`);
+      const to = validateRequiredString(transition, 'to', ctx, `${transitionPath}.to`);
+      const on = validateRequiredEnum(transition, 'on', ctx, `${transitionPath}.on`, TRANSITION_TRIGGERS);
+      const after = validateOptionalString(transition, 'after', ctx, `${transitionPath}.after`);
+
+      if (from && from !== '*' && !stateNames.has(from)) {
+        addError(ctx, 'invalid_transition_from', `posture.transitions[${index}].from '${from}' does not reference a defined state`);
+      }
+      if (to === '*') {
+        addError(ctx, 'invalid_transition_to', `posture.transitions[${index}].to cannot be '*'`);
+      } else if (to && !stateNames.has(to)) {
+        addError(ctx, 'invalid_transition_to', `posture.transitions[${index}].to '${to}' does not reference a defined state`);
+      }
+      if (on === 'timeout') {
+        if (!after) {
+          addError(ctx, 'missing_timeout_after', `posture.transitions[${index}]: timeout trigger requires 'after' field`);
+        } else if (!DURATION_PATTERN.test(after)) {
+          addError(ctx, 'invalid_duration', `${transitionPath}.after must match ^\\d+[smhd]$`);
+        }
+      } else if (after && !DURATION_PATTERN.test(after)) {
+        addError(ctx, 'invalid_duration', `${transitionPath}.after must match ^\\d+[smhd]$`);
+      }
     });
   }
+}
 
-  // Rules validation
-  if (spec.rules) {
-    // Secret pattern name uniqueness
-    if (spec.rules.secret_patterns?.patterns) {
-      const seen = new Set<string>();
-      for (const p of spec.rules.secret_patterns.patterns) {
-        if (seen.has(p.name)) {
-          errors.push({
-            code: 'duplicate_pattern_name',
-            message: `duplicate secret pattern name: ${p.name}`,
-          });
-        }
-        seen.add(p.name);
-      }
-    }
+function validateOriginsExtension(
+  obj: UnknownRecord,
+  ctx: ValidationContext,
+  path: string,
+  postureStates: Set<string> | undefined,
+): void {
+  rejectUnknownKeys(obj, ORIGINS_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalEnum(obj, 'default_behavior', ctx, `${path}.default_behavior`, ORIGIN_DEFAULT_BEHAVIORS);
 
-    // Check if any rules are configured
-    const ruleKeys = Object.keys(spec.rules);
-    if (ruleKeys.length === 0) {
-      warnings.push('no rules configured');
-    }
-  } else {
-    warnings.push('no rules section present');
+  if (!('profiles' in obj)) return;
+  if (!Array.isArray(obj.profiles)) {
+    addError(ctx, 'invalid_profiles', `${path}.profiles must be an array`);
+    return;
   }
 
-  // Extensions validation
-  if (spec.extensions) {
-    // Posture validation
-    if (spec.extensions.posture) {
-      const posture = spec.extensions.posture;
-      const stateNames = new Set(Object.keys(posture.states ?? {}));
+  const profileIds = new Set<string>();
+  obj.profiles.forEach((profile, index) => {
+    const profilePath = `${path}.profiles[${index}]`;
+    if (!isRecord(profile)) {
+      addError(ctx, 'invalid_profile', `${profilePath} must be an object`);
+      return;
+    }
 
-      if (!stateNames.has(posture.initial)) {
-        errors.push({
-          code: 'invalid_posture_initial',
-          message: `posture.initial '${posture.initial}' does not reference a defined state`,
-        });
+    rejectUnknownKeys(profile, ORIGIN_PROFILE_KEYS, ctx, 'unknown_field', key => `unknown field at ${profilePath}: ${key}`);
+    const id = validateRequiredString(profile, 'id', ctx, `${profilePath}.id`);
+    if (id) {
+      if (profileIds.has(id)) {
+        addError(ctx, 'duplicate_origin_profile_id', `duplicate origin profile id: '${id}'`);
       }
+      profileIds.add(id);
+    }
 
-      for (const [i, t] of (posture.transitions ?? []).entries()) {
-        if (t.from !== '*' && !stateNames.has(t.from)) {
-          errors.push({
-            code: 'invalid_transition_from',
-            message: `posture.transitions[${i}].from '${t.from}' does not reference a defined state`,
-          });
-        }
-        if (!stateNames.has(t.to)) {
-          errors.push({
-            code: 'invalid_transition_to',
-            message: `posture.transitions[${i}].to '${t.to}' does not reference a defined state`,
-          });
-        }
-        if (t.to === '*') {
-          errors.push({
-            code: 'invalid_transition_to',
-            message: `posture.transitions[${i}].to cannot be '*'`,
-          });
-        }
-        if (t.on === 'timeout' && !t.after) {
-          errors.push({
-            code: 'missing_timeout_after',
-            message: `posture.transitions[${i}]: timeout trigger requires 'after' field`,
-          });
-        }
+    if ('match' in profile) {
+      if (!isRecord(profile.match)) {
+        addError(ctx, 'invalid_match', `${profilePath}.match must be an object`);
+      } else {
+        rejectUnknownKeys(profile.match, ORIGIN_MATCH_KEYS, ctx, 'unknown_field', key => `unknown field at ${profilePath}.match: ${key}`);
+        validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
+        validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
+        validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
+        validateOptionalString(profile.match, 'space_type', ctx, `${profilePath}.match.space_type`);
+        validateOptionalString(profile.match, 'visibility', ctx, `${profilePath}.match.visibility`);
+        validateOptionalBoolean(profile.match, 'external_participants', ctx, `${profilePath}.match.external_participants`);
+        validateOptionalStringArray(profile.match, 'tags', ctx, `${profilePath}.match.tags`);
+        validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
+        validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
       }
+    }
 
-      // Validate budgets are non-negative
-      for (const [stateName, state] of Object.entries(posture.states ?? {})) {
-        for (const [key, value] of Object.entries(state.budgets ?? {})) {
-          if (value < 0) {
-            errors.push({
-              code: 'negative_budget',
-              message: `posture.states.${stateName}.budgets.${key} must be non-negative, got ${value}`,
+    const posture = validateOptionalString(profile, 'posture', ctx, `${profilePath}.posture`);
+    if (posture) {
+      if (!postureStates) {
+        addError(ctx, 'invalid_origin_posture', `${profilePath}.posture requires extensions.posture to be defined`);
+      } else if (!postureStates.has(posture)) {
+        addError(ctx, 'invalid_origin_posture', `${profilePath}.posture '${posture}' does not reference a defined posture state`);
+      }
+    }
+
+    validateOptionalRuleObject(profile, 'tool_access', ctx, validateToolAccessRule, profilePath);
+    validateOptionalRuleObject(profile, 'egress', ctx, validateEgressRule, profilePath);
+
+    if ('data' in profile) {
+      if (!isRecord(profile.data)) {
+        addError(ctx, 'invalid_data_policy', `${profilePath}.data must be an object`);
+      } else {
+        rejectUnknownKeys(profile.data, ORIGIN_DATA_KEYS, ctx, 'unknown_field', key => `unknown field at ${profilePath}.data: ${key}`);
+        validateOptionalBoolean(profile.data, 'allow_external_sharing', ctx, `${profilePath}.data.allow_external_sharing`);
+        validateOptionalBoolean(profile.data, 'redact_before_send', ctx, `${profilePath}.data.redact_before_send`);
+        validateOptionalBoolean(profile.data, 'block_sensitive_outputs', ctx, `${profilePath}.data.block_sensitive_outputs`);
+      }
+    }
+
+    if ('budgets' in profile) {
+      if (!isRecord(profile.budgets)) {
+        addError(ctx, 'invalid_origin_budgets', `${profilePath}.budgets must be an object`);
+      } else {
+        rejectUnknownKeys(profile.budgets, ORIGIN_BUDGET_KEYS, ctx, 'unknown_field', key => `unknown field at ${profilePath}.budgets: ${key}`);
+        validateOptionalInteger(profile.budgets, 'tool_calls', ctx, `${profilePath}.budgets.tool_calls`, { min: 0 });
+        validateOptionalInteger(profile.budgets, 'egress_calls', ctx, `${profilePath}.budgets.egress_calls`, { min: 0 });
+        validateOptionalInteger(profile.budgets, 'shell_commands', ctx, `${profilePath}.budgets.shell_commands`, { min: 0 });
+      }
+    }
+
+    if ('bridge' in profile) {
+      if (!isRecord(profile.bridge)) {
+        addError(ctx, 'invalid_bridge_policy', `${profilePath}.bridge must be an object`);
+      } else {
+        rejectUnknownKeys(profile.bridge, BRIDGE_POLICY_KEYS, ctx, 'unknown_field', key => `unknown field at ${profilePath}.bridge: ${key}`);
+        validateOptionalBoolean(profile.bridge, 'allow_cross_origin', ctx, `${profilePath}.bridge.allow_cross_origin`);
+        validateOptionalBoolean(profile.bridge, 'require_approval', ctx, `${profilePath}.bridge.require_approval`);
+
+        if ('allowed_targets' in profile.bridge) {
+          if (!Array.isArray(profile.bridge.allowed_targets)) {
+            addError(ctx, 'invalid_bridge_targets', `${profilePath}.bridge.allowed_targets must be an array`);
+          } else {
+            profile.bridge.allowed_targets.forEach((target, targetIndex) => {
+              const targetPath = `${profilePath}.bridge.allowed_targets[${targetIndex}]`;
+              if (!isRecord(target)) {
+                addError(ctx, 'invalid_bridge_target', `${targetPath} must be an object`);
+                return;
+              }
+              rejectUnknownKeys(target, BRIDGE_TARGET_KEYS, ctx, 'unknown_field', key => `unknown field at ${targetPath}: ${key}`);
+              validateOptionalString(target, 'provider', ctx, `${targetPath}.provider`);
+              validateOptionalString(target, 'space_type', ctx, `${targetPath}.space_type`);
+              validateOptionalStringArray(target, 'tags', ctx, `${targetPath}.tags`);
+              validateOptionalString(target, 'visibility', ctx, `${targetPath}.visibility`);
             });
           }
         }
       }
     }
 
-    // Origins validation
-    if (spec.extensions.origins?.profiles) {
-      const seenIds = new Set<string>();
-      for (const profile of spec.extensions.origins.profiles) {
-        if (seenIds.has(profile.id)) {
-          errors.push({
-            code: 'duplicate_origin_profile_id',
-            message: `duplicate origin profile id: '${profile.id}'`,
-          });
-        }
-        seenIds.add(profile.id);
-      }
-    }
+    validateOptionalString(profile, 'explanation', ctx, `${profilePath}.explanation`);
+  });
+}
 
-    // Detection validation
-    if (spec.extensions.detection) {
-      const det = spec.extensions.detection;
-      if (det.prompt_injection) {
-        const levels: Record<string, number> = { safe: 0, suspicious: 1, high: 2, critical: 3 };
-        const warnLevel = levels[det.prompt_injection.warn_at_or_above ?? 'suspicious'] ?? 1;
-        const blockLevel = levels[det.prompt_injection.block_at_or_above ?? 'high'] ?? 2;
-        if (blockLevel < warnLevel) {
-          warnings.push('detection.prompt_injection: block_at_or_above is less strict than warn_at_or_above');
-        }
-      }
-      if (det.jailbreak) {
-        const blockT = det.jailbreak.block_threshold ?? 70;
-        const warnT = det.jailbreak.warn_threshold ?? 30;
-        if (blockT < warnT) {
-          warnings.push('detection.jailbreak: block_threshold is lower than warn_threshold');
-        }
-      }
-      if (det.threat_intel) {
-        const sim = det.threat_intel.similarity_threshold ?? 0.85;
-        if (sim < 0 || sim > 1) {
-          errors.push({
-            code: 'invalid_similarity_threshold',
-            message: 'detection.threat_intel.similarity_threshold must be between 0.0 and 1.0',
-          });
-        }
+function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, DETECTION_KEYS, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+
+  validateOptionalRuleObject(obj, 'prompt_injection', ctx, (section, sectionCtx, sectionPath) => {
+    rejectUnknownKeys(section, PROMPT_INJECTION_KEYS, sectionCtx, 'unknown_field', key => `unknown field at ${sectionPath}: ${key}`);
+    validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
+    const warn = validateOptionalEnum(section, 'warn_at_or_above', sectionCtx, `${sectionPath}.warn_at_or_above`, DETECTION_LEVELS);
+    const block = validateOptionalEnum(section, 'block_at_or_above', sectionCtx, `${sectionPath}.block_at_or_above`, DETECTION_LEVELS);
+    validateOptionalInteger(section, 'max_scan_bytes', sectionCtx, `${sectionPath}.max_scan_bytes`, { min: 1 });
+
+    if (sectionCtx.includeWarnings && warn && block) {
+      const order: Record<string, number> = { safe: 0, suspicious: 1, high: 2, critical: 3 };
+      if (order[block] < order[warn]) {
+        sectionCtx.warnings.push('detection.prompt_injection: block_at_or_above is less strict than warn_at_or_above');
       }
     }
+  });
+
+  validateOptionalRuleObject(obj, 'jailbreak', ctx, (section, sectionCtx, sectionPath) => {
+    rejectUnknownKeys(section, JAILBREAK_KEYS, sectionCtx, 'unknown_field', key => `unknown field at ${sectionPath}: ${key}`);
+    validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
+    const block = validateOptionalInteger(section, 'block_threshold', sectionCtx, `${sectionPath}.block_threshold`, { min: 0, max: 100 });
+    const warn = validateOptionalInteger(section, 'warn_threshold', sectionCtx, `${sectionPath}.warn_threshold`, { min: 0, max: 100 });
+    validateOptionalInteger(section, 'max_input_bytes', sectionCtx, `${sectionPath}.max_input_bytes`, { min: 1 });
+
+    if (sectionCtx.includeWarnings && block !== undefined && warn !== undefined && block < warn) {
+      sectionCtx.warnings.push('detection.jailbreak: block_threshold is lower than warn_threshold');
+    }
+  });
+
+  validateOptionalRuleObject(obj, 'threat_intel', ctx, (section, sectionCtx, sectionPath) => {
+    rejectUnknownKeys(section, THREAT_INTEL_KEYS, sectionCtx, 'unknown_field', key => `unknown field at ${sectionPath}: ${key}`);
+    validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
+    validateOptionalString(section, 'pattern_db', sectionCtx, `${sectionPath}.pattern_db`);
+    validateOptionalNumber(section, 'similarity_threshold', sectionCtx, `${sectionPath}.similarity_threshold`, { min: 0, max: 1 });
+    validateOptionalInteger(section, 'top_k', sectionCtx, `${sectionPath}.top_k`, { min: 1 });
+  });
+}
+
+function validateOptionalRuleObject(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  validator: (value: UnknownRecord, ctx: ValidationContext, path: string) => void,
+  basePath?: string,
+): number {
+  if (!(key in obj)) return 0;
+  const value = obj[key];
+  const path = basePath ? `${basePath}.${key}` : key;
+  if (!isRecord(value)) {
+    addError(ctx, 'invalid_object', `${path} must be an object`);
+    return 1;
+  }
+  validator(value, ctx, path);
+  return 1;
+}
+
+function validateRequiredRecord(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): UnknownRecord | undefined {
+  if (!(key in obj)) {
+    addError(ctx, 'missing_field', `${path} is required`);
+    return undefined;
+  }
+  const value = obj[key];
+  if (!isRecord(value)) {
+    addError(ctx, 'invalid_object', `${path} must be an object`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateRequiredArray(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): unknown[] | undefined {
+  if (!(key in obj)) {
+    addError(ctx, 'missing_field', `${path} is required`);
+    return undefined;
+  }
+  const value = obj[key];
+  if (!Array.isArray(value)) {
+    addError(ctx, 'invalid_array', `${path} must be an array`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateRequiredString(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): string | undefined {
+  if (!(key in obj)) {
+    addError(ctx, 'missing_field', `${path} is required`);
+    return undefined;
+  }
+  return validateStringValue(obj[key], ctx, path);
+}
+
+function validateRequiredEnum(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+  allowed: Iterable<string>,
+): string | undefined {
+  if (!(key in obj)) {
+    addError(ctx, 'missing_field', `${path} is required`);
+    return undefined;
+  }
+  return validateEnumValue(obj[key], ctx, path, allowed);
+}
+
+function validateOptionalString(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): string | undefined {
+  if (!(key in obj)) return undefined;
+  return validateStringValue(obj[key], ctx, path);
+}
+
+function validateOptionalBoolean(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): boolean | undefined {
+  if (!(key in obj)) return undefined;
+  const value = obj[key];
+  if (typeof value !== 'boolean') {
+    addError(ctx, 'invalid_type', `${path} must be a boolean`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateOptionalEnum(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+  allowed: Iterable<string>,
+): string | undefined {
+  if (!(key in obj)) return undefined;
+  return validateEnumValue(obj[key], ctx, path, allowed);
+}
+
+function validateOptionalInteger(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+  bounds: NumberBounds = {},
+): number | undefined {
+  if (!(key in obj)) return undefined;
+  return validateIntegerValue(obj[key], ctx, path, bounds);
+}
+
+function validateOptionalNumber(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+  bounds: NumberBounds = {},
+): number | undefined {
+  if (!(key in obj)) return undefined;
+  return validateNumberValue(obj[key], ctx, path, bounds);
+}
+
+function validateOptionalStringArray(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): string[] | undefined {
+  if (!(key in obj)) return undefined;
+  const value = obj[key];
+  if (!Array.isArray(value)) {
+    addError(ctx, 'invalid_array', `${path} must be an array`);
+    return undefined;
   }
 
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
-  };
+  const items: string[] = [];
+  value.forEach((item, index) => {
+    const itemPath = `${path}[${index}]`;
+    const stringValue = validateStringValue(item, ctx, itemPath);
+    if (stringValue !== undefined) {
+      items.push(stringValue);
+    }
+  });
+  return items;
+}
+
+interface NumberBounds {
+  min?: number;
+  max?: number;
+  minExclusive?: number;
+}
+
+function validateStringValue(value: unknown, ctx: ValidationContext, path: string): string | undefined {
+  if (typeof value !== 'string') {
+    addError(ctx, 'invalid_type', `${path} must be a string`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateEnumValue(
+  value: unknown,
+  ctx: ValidationContext,
+  path: string,
+  allowed: Iterable<string>,
+): string | undefined {
+  if (typeof value !== 'string') {
+    addError(ctx, 'invalid_type', `${path} must be a string`);
+    return undefined;
+  }
+
+  const set = allowed instanceof Set ? allowed : new Set(allowed);
+  if (!set.has(value)) {
+    addError(ctx, 'invalid_enum', `${path} must be one of: ${Array.from(set).join(', ')}`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateIntegerValue(
+  value: unknown,
+  ctx: ValidationContext,
+  path: string,
+  bounds: NumberBounds = {},
+): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    addError(ctx, 'invalid_type', `${path} must be an integer`);
+    return undefined;
+  }
+  return validateBounds(value, ctx, path, bounds);
+}
+
+function validateNumberValue(
+  value: unknown,
+  ctx: ValidationContext,
+  path: string,
+  bounds: NumberBounds = {},
+): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    addError(ctx, 'invalid_type', `${path} must be a number`);
+    return undefined;
+  }
+  return validateBounds(value, ctx, path, bounds);
+}
+
+function validateBounds(
+  value: number,
+  ctx: ValidationContext,
+  path: string,
+  bounds: NumberBounds,
+): number | undefined {
+  if (bounds.min !== undefined && value < bounds.min) {
+    addError(ctx, 'out_of_range', `${path} must be >= ${bounds.min}`);
+    return undefined;
+  }
+  if (bounds.max !== undefined && value > bounds.max) {
+    addError(ctx, 'out_of_range', `${path} must be <= ${bounds.max}`);
+    return undefined;
+  }
+  if (bounds.minExclusive !== undefined && value <= bounds.minExclusive) {
+    addError(ctx, 'out_of_range', `${path} must be > ${bounds.minExclusive}`);
+    return undefined;
+  }
+  return value;
+}
+
+function validateRegex(pattern: string, ctx: ValidationContext, path: string): void {
+  try {
+    // Validate syntax only; semantics remain engine-specific.
+    // eslint-disable-next-line no-new
+    new RegExp(pattern);
+  } catch (error) {
+    addError(
+      ctx,
+      'invalid_regex',
+      `${path} must be a valid regular expression: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function rejectUnknownKeys(
+  obj: UnknownRecord,
+  allowed: Set<string>,
+  ctx: ValidationContext,
+  code: string,
+  messageForKey: (key: string) => string,
+): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.has(key)) {
+      addError(ctx, code, messageForKey(key));
+    }
+  }
+}
+
+function getPostureStateNames(value: unknown): Set<string> | undefined {
+  if (!isRecord(value) || !isRecord(value.states)) {
+    return undefined;
+  }
+  return new Set(Object.keys(value.states));
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function addError(ctx: ValidationContext, code: string, message: string): void {
+  ctx.errors.push({ code, message });
 }

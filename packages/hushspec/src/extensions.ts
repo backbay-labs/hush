@@ -15,7 +15,7 @@ export interface Extensions {
 export interface PostureExtension {
   initial: string;
   states: Record<string, PostureState>;
-  transitions?: PostureTransition[];
+  transitions: PostureTransition[];
 }
 
 /** A single posture state with its allowed capabilities and budgets. */

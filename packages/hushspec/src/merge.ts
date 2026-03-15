@@ -1,6 +1,14 @@
 import type { HushSpec, MergeStrategy } from './schema.js';
 import type { Rules } from './rules.js';
-import type { Extensions, OriginsExtension } from './extensions.js';
+import type {
+  DetectionExtension,
+  Extensions,
+  JailbreakDetection,
+  OriginsExtension,
+  PostureExtension,
+  PromptInjectionDetection,
+  ThreatIntelDetection,
+} from './extensions.js';
 
 /**
  * Merge a base HushSpec with a child according to the child's merge strategy.
@@ -15,12 +23,13 @@ export function merge(base: HushSpec, child: HushSpec): HushSpec {
     case 'replace':
       return { ...child };
     case 'merge':
+      return mergeWithStrategy(base, child, false);
     case 'deep_merge':
-      return mergeShallow(base, child);
+      return mergeWithStrategy(base, child, true);
   }
 }
 
-function mergeShallow(base: HushSpec, child: HushSpec): HushSpec {
+function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): HushSpec {
   const baseRules = base.rules ?? {};
   const childRules = child.rules;
 
@@ -49,23 +58,63 @@ function mergeShallow(base: HushSpec, child: HushSpec): HushSpec {
     extends: child.extends,
     merge_strategy: child.merge_strategy,
     rules: mergedRules,
-    extensions: mergeExtensions(base.extensions, child.extensions),
+    extensions: deep
+      ? mergeExtensionsDeep(base.extensions, child.extensions)
+      : mergeExtensionsMerge(base.extensions, child.extensions),
   };
 }
 
-function mergeExtensions(
+function mergeExtensionsMerge(
   base: Extensions | undefined,
   child: Extensions | undefined,
 ): Extensions | undefined {
-  if (child) {
-    const baseExt = base ?? {};
-    return {
-      posture: child.posture ?? baseExt.posture,
-      origins: mergeOrigins(baseExt.origins, child.origins),
-      detection: child.detection ?? baseExt.detection,
-    };
+  if (!child) {
+    return base ? { ...base } : undefined;
   }
-  return base ? { ...base } : undefined;
+  if (!base) {
+    return { ...child };
+  }
+
+  return {
+    posture: child.posture ?? base.posture,
+    origins: child.origins ?? base.origins,
+    detection: child.detection ?? base.detection,
+  };
+}
+
+function mergeExtensionsDeep(
+  base: Extensions | undefined,
+  child: Extensions | undefined,
+): Extensions | undefined {
+  if (!child) {
+    return base ? { ...base } : undefined;
+  }
+  if (!base) {
+    return { ...child };
+  }
+
+  return {
+    posture: mergePosture(base.posture, child.posture),
+    origins: mergeOrigins(base.origins, child.origins),
+    detection: mergeDetection(base.detection, child.detection),
+  };
+}
+
+function mergePosture(
+  base: PostureExtension | undefined,
+  child: PostureExtension | undefined,
+): PostureExtension | undefined {
+  if (!child) return base;
+  if (!base) return child;
+
+  return {
+    initial: child.initial,
+    states: {
+      ...base.states,
+      ...child.states,
+    },
+    transitions: child.transitions,
+  };
 }
 
 function mergeOrigins(
@@ -87,5 +136,31 @@ function mergeOrigins(
   return {
     default_behavior: child.default_behavior ?? base.default_behavior,
     profiles: mergedProfiles,
+  };
+}
+
+function mergeDetection(
+  base: DetectionExtension | undefined,
+  child: DetectionExtension | undefined,
+): DetectionExtension | undefined {
+  if (!child) return base;
+  if (!base) return child;
+
+  return {
+    prompt_injection: mergeObject(base.prompt_injection, child.prompt_injection),
+    jailbreak: mergeObject(base.jailbreak, child.jailbreak),
+    threat_intel: mergeObject(base.threat_intel, child.threat_intel),
+  };
+}
+
+function mergeObject<T extends PromptInjectionDetection | JailbreakDetection | ThreatIntelDetection>(
+  base: T | undefined,
+  child: T | undefined,
+): T | undefined {
+  if (!child) return base;
+  if (!base) return child;
+  return {
+    ...base,
+    ...child,
   };
 }

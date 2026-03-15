@@ -31,7 +31,6 @@ pub struct PostureExtension {
     /// Named security states with capabilities and budgets.
     pub states: BTreeMap<String, PostureState>,
     /// Rules governing transitions between states.
-    #[serde(default)]
     pub transitions: Vec<PostureTransition>,
 }
 
@@ -92,8 +91,8 @@ pub enum TransitionTrigger {
 #[serde(deny_unknown_fields)]
 pub struct OriginsExtension {
     /// Behavior when no origin profile matches.
-    #[serde(default)]
-    pub default_behavior: OriginDefaultBehavior,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_behavior: Option<OriginDefaultBehavior>,
     /// Ordered list of origin profiles; first match wins.
     #[serde(default)]
     pub profiles: Vec<OriginProfile>,
@@ -259,18 +258,18 @@ pub struct DetectionExtension {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PromptInjectionDetection {
-    /// Whether prompt injection detection is active. Defaults to `true`.
-    #[serde(default = "crate::rules::default_true")]
-    pub enabled: bool,
+    /// Whether prompt injection detection is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Detection level at or above which a warning is emitted.
-    #[serde(default = "default_suspicious")]
-    pub warn_at_or_above: DetectionLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warn_at_or_above: Option<DetectionLevel>,
     /// Detection level at or above which the action is blocked.
-    #[serde(default = "default_high")]
-    pub block_at_or_above: DetectionLevel,
-    /// Maximum input bytes to scan. Defaults to 200,000.
-    #[serde(default = "default_scan_bytes")]
-    pub max_scan_bytes: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_at_or_above: Option<DetectionLevel>,
+    /// Maximum input bytes to scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_scan_bytes: Option<usize>,
 }
 
 /// Ordered severity level for detection results.
@@ -291,57 +290,34 @@ pub enum DetectionLevel {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JailbreakDetection {
-    /// Whether jailbreak detection is active. Defaults to `true`.
-    #[serde(default = "crate::rules::default_true")]
-    pub enabled: bool,
-    /// Score at or above which the action is blocked. Defaults to 70.
-    #[serde(default = "default_block_threshold")]
-    pub block_threshold: u32,
-    /// Score at or above which a warning is emitted. Defaults to 30.
-    #[serde(default = "default_warn_threshold")]
-    pub warn_threshold: u32,
-    /// Maximum input bytes to scan. Defaults to 200,000.
-    #[serde(default = "default_scan_bytes")]
-    pub max_input_bytes: usize,
+    /// Whether jailbreak detection is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Score at or above which the action is blocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_threshold: Option<u32>,
+    /// Score at or above which a warning is emitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warn_threshold: Option<u32>,
+    /// Maximum input bytes to scan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_input_bytes: Option<usize>,
 }
 
 /// Threat intelligence screening configuration.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThreatIntelDetection {
-    /// Whether threat intel screening is active. Defaults to `true`.
-    #[serde(default = "crate::rules::default_true")]
-    pub enabled: bool,
+    /// Whether threat intel screening is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
     /// Path to the pattern database, or `builtin:` prefix for embedded patterns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_db: Option<String>,
-    /// Cosine similarity threshold for matching. Defaults to 0.85.
-    #[serde(default = "default_similarity_threshold")]
-    pub similarity_threshold: f64,
-    /// Number of top matches to return. Defaults to 5.
-    #[serde(default = "default_top_k")]
-    pub top_k: usize,
-}
-
-// Default helpers
-pub(crate) fn default_suspicious() -> DetectionLevel {
-    DetectionLevel::Suspicious
-}
-pub(crate) fn default_high() -> DetectionLevel {
-    DetectionLevel::High
-}
-pub(crate) fn default_scan_bytes() -> usize {
-    200_000
-}
-pub(crate) fn default_block_threshold() -> u32 {
-    70
-}
-pub(crate) fn default_warn_threshold() -> u32 {
-    30
-}
-pub(crate) fn default_similarity_threshold() -> f64 {
-    0.85
-}
-pub(crate) fn default_top_k() -> usize {
-    5
+    /// Cosine similarity threshold for matching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity_threshold: Option<f64>,
+    /// Number of top matches to return.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<usize>,
 }

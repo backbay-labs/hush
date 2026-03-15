@@ -39,7 +39,7 @@ extensions:
   });
 
   it('rejects invalid initial state', () => {
-    const spec = parseOrThrow(`
+    const result = parse(`
 hushspec: "0.1.0"
 extensions:
   posture:
@@ -47,14 +47,13 @@ extensions:
     states:
       valid:
         capabilities: []
+    transitions: []
 `);
-    const result = validate(spec);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('invalid_posture_initial');
+    expect(result.ok).toBe(false);
   });
 
   it('rejects timeout without after', () => {
-    const spec = parseOrThrow(`
+    const result = parse(`
 hushspec: "0.1.0"
 extensions:
   posture:
@@ -69,9 +68,7 @@ extensions:
         to: b
         on: timeout
 `);
-    const result = validate(spec);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('missing_timeout_after');
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -80,6 +77,12 @@ describe('origins extension', () => {
     const spec = parseOrThrow(`
 hushspec: "0.1.0"
 extensions:
+  posture:
+    initial: elevated
+    states:
+      elevated:
+        capabilities: [tool_call]
+    transitions: []
   origins:
     default_behavior: deny
     profiles:
@@ -103,7 +106,7 @@ extensions:
   });
 
   it('rejects duplicate profile ids', () => {
-    const spec = parseOrThrow(`
+    const result = parse(`
 hushspec: "0.1.0"
 extensions:
   origins:
@@ -115,9 +118,19 @@ extensions:
         match:
           provider: teams
 `);
-    const result = validate(spec);
-    expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('duplicate_origin_profile_id');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects posture references without posture states', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: incident-room
+        posture: elevated
+`);
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -158,15 +171,25 @@ extensions:
   });
 
   it('rejects out-of-range similarity', () => {
-    const spec = parseOrThrow(`
+    const result = parse(`
 hushspec: "0.1.0"
 extensions:
   detection:
     threat_intel:
       similarity_threshold: 1.5
 `);
-    const result = validate(spec);
-    expect(result.valid).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects zero top_k', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      top_k: 0
+`);
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -183,7 +206,7 @@ extensions:
 });
 
 describe('extension merge', () => {
-  it('child posture overrides base', () => {
+  it('deep_merge preserves base posture states by name', () => {
     const base = parseOrThrow(`
 hushspec: "0.1.0"
 extensions:
@@ -192,6 +215,7 @@ extensions:
     states:
       a:
         capabilities: [file_access]
+    transitions: []
 `);
     const child = parseOrThrow(`
 hushspec: "0.1.0"
@@ -201,12 +225,15 @@ extensions:
     states:
       b:
         capabilities: [egress]
+    transitions: []
 `);
     const merged = merge(base, child);
     expect(merged.extensions?.posture?.initial).toBe('b');
+    expect(merged.extensions?.posture?.states.a?.capabilities).toEqual(['file_access']);
+    expect(merged.extensions?.posture?.states.b?.capabilities).toEqual(['egress']);
   });
 
-  it('merges origin profiles by id', () => {
+  it('deep_merge merges origin profiles by id and preserves default_behavior', () => {
     const base = parseOrThrow(`
 hushspec: "0.1.0"
 extensions:
@@ -228,8 +255,56 @@ extensions:
 `);
     const merged = merge(base, child);
     expect(merged.extensions?.origins?.profiles).toHaveLength(2);
+    expect(merged.extensions?.origins?.default_behavior).toBe('deny');
     const existing = merged.extensions?.origins?.profiles?.find(p => p.id === 'existing');
     expect(existing?.explanation).toBe('overridden');
+  });
+
+  it('merge strategy replaces the child extension block', () => {
+    const base = parseOrThrow(`
+hushspec: "0.1.0"
+extensions:
+  origins:
+    default_behavior: minimal_profile
+    profiles:
+      - id: base
+        explanation: base
+`);
+    const child = parseOrThrow(`
+hushspec: "0.1.0"
+merge_strategy: merge
+extensions:
+  origins:
+    profiles:
+      - id: child
+        explanation: child
+`);
+    const merged = merge(base, child);
+    expect(merged.extensions?.origins?.default_behavior).toBeUndefined();
+    expect(merged.extensions?.origins?.profiles).toEqual([{ id: 'child', explanation: 'child' }]);
+  });
+
+  it('deep_merge merges detection subsections and preserves base fields', () => {
+    const base = parseOrThrow(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    prompt_injection:
+      enabled: true
+    jailbreak:
+      warn_threshold: 20
+`);
+    const child = parseOrThrow(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    jailbreak:
+      block_threshold: 90
+`);
+    const merged = merge(base, child);
+    expect(merged.extensions?.detection?.prompt_injection?.enabled).toBe(true);
+    expect(merged.extensions?.detection?.jailbreak?.block_threshold).toBe(90);
+    expect(merged.extensions?.detection?.jailbreak?.warn_threshold).toBe(20);
   });
 
   it('base extensions preserved when child has none', () => {
@@ -261,6 +336,7 @@ extensions:
     states:
       std:
         capabilities: [egress]
+    transitions: []
   detection:
     prompt_injection:
       block_at_or_above: high

@@ -1,6 +1,12 @@
 hushspec: "0.1.0"
 name: multi-origin-profiles
 extensions:
+  posture:
+    initial: elevated
+    states:
+      elevated:
+        capabilities: [tool_call]
+    transitions: []
   origins:
     default_behavior: deny
     profiles:

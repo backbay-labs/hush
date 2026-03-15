@@ -2,22 +2,24 @@
 
 ## Installation
 
+The Rust crate and TypeScript package are not published yet. For now, consume
+the reference implementations directly from a local checkout of this repo.
+
 ### Rust
 
-```bash
-cargo add hushspec
+Add a path dependency, or point Cargo at the Git repository:
+
+```toml
+[dependencies]
+hushspec = { path = "../hush/crates/hushspec" }
 ```
 
 ### TypeScript / Node.js
 
-```bash
-npm install @hushspec/core
-```
-
-### Python
+Install the package from a local checkout:
 
 ```bash
-pip install hushspec
+npm install ../hush/packages/hushspec
 ```
 
 ## Parsing a Document
@@ -25,48 +27,63 @@ pip install hushspec
 ### Rust
 
 ```rust
-use hushspec::HushSpecDocument;
+use hushspec::HushSpec;
 
 let yaml = std::fs::read_to_string("policy.yaml")?;
-let doc = HushSpecDocument::from_yaml(&yaml)?;
+let spec = HushSpec::parse(&yaml)?;
 
-println!("Policy: {}", doc.name.unwrap_or_default());
-println!("Version: {}", doc.hushspec);
+println!("Policy: {}", spec.name.as_deref().unwrap_or_default());
+println!("Version: {}", spec.hushspec);
 ```
 
 ### TypeScript
 
 ```typescript
-import { parseHushSpec } from "@hushspec/core";
+import { readFile } from 'node:fs/promises';
+import { parseOrThrow } from '@hushspec/core';
 
-const yaml = await fs.readFile("policy.yaml", "utf-8");
-const doc = parseHushSpec(yaml);
+const yaml = await readFile('policy.yaml', 'utf-8');
+const spec = parseOrThrow(yaml);
 
-console.log(`Policy: ${doc.name}`);
-console.log(`Version: ${doc.hushspec}`);
-```
-
-### Python
-
-```python
-from hushspec import parse
-
-with open("policy.yaml") as f:
-    doc = parse(f.read())
-
-print(f"Policy: {doc.name}")
-print(f"Version: {doc.hushspec}")
+console.log(`Policy: ${spec.name ?? ''}`);
+console.log(`Version: ${spec.hushspec}`);
 ```
 
 ## Validating a Document
 
-All conformant parsers reject documents with unknown fields, missing `hushspec` version, or invalid field types. If `from_yaml` / `parseHushSpec` / `parse` returns successfully, the document is structurally valid.
+`parse` / `parseOrThrow` rejects malformed YAML, unknown fields, wrong types,
+and other fail-closed schema violations. `validate` adds version checks,
+cross-field validation, and warnings.
+
+### Rust
 
 ```rust
-// Rust: invalid documents produce errors, not silent misconfiguration
-match HushSpecDocument::from_yaml(&yaml) {
-    Ok(doc) => println!("Valid"),
-    Err(e) => eprintln!("Rejected: {e}"),
+let spec = HushSpec::parse(&yaml)?;
+let result = hushspec::validate(&spec);
+
+if result.is_valid() {
+    println!("Valid");
+} else {
+    for error in result.errors {
+        eprintln!("Rejected: {error}");
+    }
+}
+```
+
+### TypeScript
+
+```typescript
+import { parseOrThrow, validate } from '@hushspec/core';
+
+const spec = parseOrThrow(yaml);
+const result = validate(spec);
+
+if (result.valid) {
+  console.log('Valid');
+} else {
+  for (const error of result.errors) {
+    console.error(`Rejected: ${error.message}`);
+  }
 }
 ```
 

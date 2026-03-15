@@ -97,6 +97,36 @@ rules:
 }
 
 #[test]
+fn validate_invalid_regex_pattern() {
+    let yaml = r#"
+hushspec: "0.1.0"
+rules:
+  secret_patterns:
+    patterns:
+      - name: bad
+        pattern: "["
+        severity: critical
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+}
+
+#[test]
+fn validate_invalid_detection_top_k() {
+    let yaml = r#"
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      top_k: 0
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+}
+
+#[test]
 fn roundtrip_yaml() {
     let yaml = r#"
 hushspec: "0.1.0"

@@ -13,6 +13,7 @@ dist/
 *.dylib
 *.dll
 *.wasm
+docs/book/
 
 # IDE
 .idea/

@@ -33,10 +33,12 @@ Implementations supporting v1.x MUST accept any valid v1.y document where y <= x
 
 ## Extension Module Versioning
 
-Each extension module (`posture`, `origins`, `detection`) maintains its own independent version track. Extension versions are declared within the extension object in the document (e.g., `extensions.posture.version: "0.1.0"`).
+In HushSpec v0.1.0, extension modules (`posture`, `origins`, `detection`) do
+not declare separate version fields inside documents. The companion extension
+specifications ship with the same release as the core spec.
 
-- A core HushSpec version bump does not imply any extension version change.
-- An extension version bump does not require a core HushSpec version change.
-- Extension modules follow the same v0.x/v1.0+ stability rules described above, applied independently.
-
-This independence allows extensions to evolve at their own pace. A stable core specification (v1.x) may coexist with experimental extensions (v0.x) without contradiction.
+- A HushSpec document declares only the core `hushspec` version.
+- Companion extension specs are versioned by repository release, not by
+  per-document `version` fields.
+- A future major version MAY introduce explicit extension versioning if it is
+  needed for interoperability.

@@ -11,29 +11,27 @@ HushSpec defines a declarative format for expressing security rules at the tool 
 A minimal HushSpec document:
 
 ```yaml
-schema_version: "1.0.0"
+hushspec: "0.1.0"
 name: production-agent
 description: Security rules for a production coding agent
 
-guards:
+rules:
   forbidden_paths:
-    enabled: true
-    paths:
-      - /etc/shadow
-      - /etc/passwd
+    patterns:
+      - "/etc/shadow"
+      - "/etc/passwd"
       - "~/.ssh/*"
 
-  egress_allowlist:
-    enabled: true
-    allowed_domains:
-      - api.github.com
-      - registry.npmjs.org
+  egress:
+    allow:
+      - "api.github.com"
+      - "registry.npmjs.org"
+    default: block
 
-  shell_command:
-    enabled: true
-    blocked_commands:
-      - rm -rf /
-      - curl | sh
+  shell_commands:
+    forbidden_patterns:
+      - 'rm\\s+-rf\\s+/'
+      - 'curl\\s+\\|\\s+sh'
 ```
 
 ## Repo Structure
@@ -50,16 +48,20 @@ docs/           Documentation
 
 ## Getting Started
 
+The Rust crate and TypeScript package are not published yet. Today, the
+reference implementations are consumed directly from this repository.
+
 ### Rust
 
-```bash
-cargo add hushspec
+```toml
+[dependencies]
+hushspec = { git = "https://github.com/backbay-labs/hush" }
 ```
 
 ```rust
 use hushspec::HushSpec;
 
-let spec = HushSpec::parse(yaml_str)?;
+let spec = HushSpec::parse(&yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
 ```
@@ -67,7 +69,7 @@ assert!(result.is_valid());
 ### TypeScript / JavaScript
 
 ```bash
-npm install @hushspec/core
+npm install /path/to/hush/packages/hushspec
 ```
 
 ```typescript

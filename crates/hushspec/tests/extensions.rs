@@ -94,6 +94,12 @@ fn parse_origins_extension() {
     let yaml = r#"
 hushspec: "0.1.0"
 extensions:
+  posture:
+    initial: elevated
+    states:
+      elevated:
+        capabilities: [tool_call]
+    transitions: []
   origins:
     default_behavior: deny
     profiles:
@@ -235,7 +241,9 @@ extensions:
         .posture
         .as_ref()
         .unwrap();
-    assert_eq!(posture.initial, "b"); // child overrides
+    assert_eq!(posture.initial, "b");
+    assert!(posture.states.contains_key("a"));
+    assert!(posture.states.contains_key("b"));
 }
 
 #[test]
@@ -279,6 +287,10 @@ extensions:
         .as_ref()
         .unwrap();
     assert_eq!(origins.profiles.len(), 2);
+    assert_eq!(
+        origins.default_behavior,
+        Some(hushspec::extensions::OriginDefaultBehavior::Deny)
+    );
     // existing overridden
     let existing = origins
         .profiles
@@ -288,6 +300,95 @@ extensions:
     assert_eq!(existing.explanation.as_deref(), Some("overridden"));
     // new appended
     assert!(origins.profiles.iter().any(|p| p.id == "new-profile"));
+}
+
+#[test]
+fn merge_strategy_replaces_extension_block() {
+    let base = HushSpec::parse(
+        r#"
+hushspec: "0.1.0"
+extensions:
+  origins:
+    default_behavior: minimal_profile
+    profiles:
+      - id: base
+        explanation: base profile
+"#,
+    )
+    .unwrap();
+    let child = HushSpec::parse(
+        r#"
+hushspec: "0.1.0"
+merge_strategy: merge
+extensions:
+  origins:
+    profiles:
+      - id: child
+        explanation: child profile
+"#,
+    )
+    .unwrap();
+
+    let merged = merge(&base, &child);
+    let origins = merged
+        .extensions
+        .as_ref()
+        .unwrap()
+        .origins
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(origins.default_behavior, None);
+    assert_eq!(origins.profiles.len(), 1);
+    assert_eq!(origins.profiles[0].id, "child");
+}
+
+#[test]
+fn deep_merge_detection_preserves_base_fields() {
+    let base = HushSpec::parse(
+        r#"
+hushspec: "0.1.0"
+extensions:
+  detection:
+    prompt_injection:
+      enabled: true
+    jailbreak:
+      warn_threshold: 20
+"#,
+    )
+    .unwrap();
+    let child = HushSpec::parse(
+        r#"
+hushspec: "0.1.0"
+extensions:
+  detection:
+    jailbreak:
+      block_threshold: 90
+"#,
+    )
+    .unwrap();
+
+    let merged = merge(&base, &child);
+    let detection = merged
+        .extensions
+        .as_ref()
+        .unwrap()
+        .detection
+        .as_ref()
+        .unwrap();
+
+    assert_eq!(
+        detection.prompt_injection.as_ref().unwrap().enabled,
+        Some(true)
+    );
+    assert_eq!(
+        detection.jailbreak.as_ref().unwrap().block_threshold,
+        Some(90)
+    );
+    assert_eq!(
+        detection.jailbreak.as_ref().unwrap().warn_threshold,
+        Some(20)
+    );
 }
 
 #[test]
