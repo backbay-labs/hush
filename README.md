@@ -1,55 +1,115 @@
-# HushSpec
+<p align="center">
+  <img src="assets/hero.png" alt="HushSpec" width="720" />
+</p>
 
-A portable, open specification for AI agent security rules.
+<p align="center">
+  <strong>Portable, open specification for AI agent security rules</strong>
+</p>
 
-## What is HushSpec?
+<p align="center">
+  <a href="./spec/hushspec-core.md">Spec</a> &middot;
+  <a href="./docs/src/introduction.md">Docs</a> &middot;
+  <a href="./rulesets/">Rulesets</a> &middot;
+  <a href="./schemas/">JSON Schema</a>
+</p>
 
-HushSpec defines a declarative format for expressing security rules at the tool boundary of AI agent runtimes. It specifies **what** constraints an agent operates under -- forbidden paths, allowed egress domains, shell command restrictions, secret leak detection, and more -- without prescribing **how** those rules are enforced. Any compliant engine can consume a HushSpec document and enforce it, making security policies portable across runtimes, frameworks, and languages.
+---
+
+HushSpec defines a declarative format for expressing security rules at the tool boundary of AI agent runtimes. It specifies **what** constraints an agent operates under — forbidden paths, egress domains, tool access, secret detection, and more — without prescribing **how** those rules are enforced. Any compliant engine can consume a HushSpec document and enforce it, making security policies portable across runtimes, frameworks, and languages.
+
+**Status:** v0.1.0 (draft). The spec is under active development; breaking changes may occur before v1.0.
 
 ## Quick Example
-
-A minimal HushSpec document:
 
 ```yaml
 hushspec: "0.1.0"
 name: production-agent
-description: Security rules for a production coding agent
 
 rules:
   forbidden_paths:
     patterns:
+      - "**/.ssh/**"
+      - "**/.aws/**"
       - "/etc/shadow"
-      - "/etc/passwd"
-      - "~/.ssh/*"
 
   egress:
     allow:
+      - "api.openai.com"
+      - "*.anthropic.com"
       - "api.github.com"
-      - "registry.npmjs.org"
     default: block
+
+  tool_access:
+    block: [shell_exec, run_command]
+    require_confirmation: [file_write, git_push]
+    default: allow
+
+  secret_patterns:
+    patterns:
+      - name: aws_key
+        pattern: "AKIA[0-9A-Z]{16}"
+        severity: critical
+    skip_paths: ["**/test/**"]
 
   shell_commands:
     forbidden_patterns:
-      - 'rm\\s+-rf\\s+/'
-      - 'curl\\s+\\|\\s+sh'
+      - "rm\\s+-rf\\s+/"
+      - "curl.*\\|.*bash"
 ```
 
-## Repo Structure
+## 10 Core Rules
 
+| Rule | Purpose |
+|------|---------|
+| `forbidden_paths` | Block access to sensitive filesystem paths |
+| `path_allowlist` | Allowlist-based read/write/patch access |
+| `egress` | Network egress control by domain |
+| `secret_patterns` | Detect secrets in file content |
+| `patch_integrity` | Validate diff safety (size limits, forbidden patterns) |
+| `shell_commands` | Block dangerous shell commands |
+| `tool_access` | Control tool/MCP invocations |
+| `computer_use` | Control CUA actions |
+| `remote_desktop_channels` | Control remote desktop side channels |
+| `input_injection` | Control input injection capabilities |
+
+## Extensions
+
+HushSpec supports optional extension modules for advanced features:
+
+| Extension | Purpose |
+|-----------|---------|
+| **Posture** | Declarative state machine for capabilities and budgets |
+| **Origins** | Origin-aware policy projection (Slack, GitHub, email, etc.) |
+| **Detection** | Threshold config for prompt injection, jailbreak, threat intel |
+
+```yaml
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard: { capabilities: [file_access, egress] }
+      restricted: { capabilities: [file_access] }
+    transitions:
+      - { from: "*", to: restricted, on: critical_violation }
+  detection:
+    prompt_injection:
+      block_at_or_above: high
 ```
-spec/           Specification prose (versioned)
-schemas/        JSON Schema definitions
-crates/         Rust reference implementation
-packages/       TypeScript reference implementation
-rulesets/       Example and built-in rulesets
-fixtures/       Test fixtures for conformance testing
-docs/           Documentation
-```
+
+## Built-in Rulesets
+
+Ready-to-use policies in [`rulesets/`](./rulesets/):
+
+| Ruleset | Description |
+|---------|-------------|
+| `default` | Balanced security for AI agent execution |
+| `strict` | Maximum security, minimal permissions |
+| `permissive` | Development-friendly, relaxed limits |
+| `ai-agent` | Optimized for AI coding assistants |
+| `cicd` | CI/CD pipeline security |
+| `remote-desktop` | Computer use agent sessions |
 
 ## Getting Started
-
-The Rust crate and TypeScript package are not published yet. Today, the
-reference implementations are consumed directly from this repository.
 
 ### Rust
 
@@ -61,16 +121,12 @@ hushspec = { git = "https://github.com/backbay-labs/hush" }
 ```rust
 use hushspec::HushSpec;
 
-let spec = HushSpec::parse(&yaml_str)?;
+let spec = HushSpec::parse(yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
 ```
 
-### TypeScript / JavaScript
-
-```bash
-npm install /path/to/hush/packages/hushspec
-```
+### TypeScript
 
 ```typescript
 import { parseOrThrow, validate } from '@hushspec/core';
@@ -80,10 +136,43 @@ const result = validate(spec);
 console.log(result.valid); // true
 ```
 
+### Using with Clawdstrike
+
+HushSpec documents load natively in [Clawdstrike](https://github.com/backbay-labs/clawdstrike):
+
+```rust
+// Auto-detects HushSpec vs Clawdstrike-native format
+let policy = clawdstrike::Policy::from_yaml_auto(yaml)?;
+```
+
+```bash
+# Convert between formats
+hush policy migrate policy.yaml --to hushspec
+```
+
+## Repo Structure
+
+```
+spec/           Normative specification (core + 3 extensions)
+schemas/        JSON Schema definitions (draft 2020-12)
+crates/         Rust reference crate (hushspec)
+packages/       TypeScript reference package (@hushspec/core)
+rulesets/       6 built-in security rulesets
+fixtures/       31 conformance test fixtures
+docs/           mdBook documentation site
+```
+
+## Design Principles
+
+- **Fail-closed** — Unknown fields are rejected; invalid documents produce errors, not silent misconfiguration
+- **Stateless** — Core rules are pure declarations with no runtime state
+- **Engine-neutral** — No detection algorithms, receipt formats, or plugin systems in the spec
+- **Extensible** — Optional modules for posture, origins, and detection without bloating the core
+
 ## Specification
 
-The full specification lives in the [`spec/`](./spec) directory. JSON Schema definitions for validating HushSpec documents are in [`schemas/`](./schemas).
+The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for programmatic validation are in [`schemas/`](./schemas/). Full documentation is in [`docs/`](./docs/src/introduction.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](./LICENSE) for details.
+Apache-2.0. See [LICENSE](./LICENSE).
