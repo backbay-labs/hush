@@ -279,17 +279,21 @@ func evaluateToolAccessRule(
 		)
 	}
 
-	switch rule.Default {
-	case DefaultActionAllow:
-		return allowResult(
-			prefixedRule(prefix, "default"),
-			"tool matched default allow",
-			originProfileID, posture,
-		)
-	default: // DefaultActionBlock or empty
+	def := rule.Default
+	if def == "" {
+		def = DefaultActionAllow
+	}
+	switch def {
+	case DefaultActionBlock:
 		return denyResult(
 			prefixedRule(prefix, "default"),
 			"tool matched default block",
+			originProfileID, posture,
+		)
+	default: // DefaultActionAllow
+		return allowResult(
+			prefixedRule(prefix, "default"),
+			"tool matched default allow",
 			originProfileID, posture,
 		)
 	}
@@ -386,14 +390,22 @@ func evaluatePatchIntegrity(
 	}
 
 	stats := computePatchStats(content)
-	if stats.additions > rule.MaxAdditions {
+	maxAdd := rule.MaxAdditions
+	if maxAdd == 0 {
+		maxAdd = 1000
+	}
+	maxDel := rule.MaxDeletions
+	if maxDel == 0 {
+		maxDel = 500
+	}
+	if stats.additions > maxAdd {
 		return denyResult(
 			"rules.patch_integrity.max_additions",
 			"patch additions exceeded max_additions",
 			originProfileID, posture,
 		)
 	}
-	if stats.deletions > rule.MaxDeletions {
+	if stats.deletions > maxDel {
 		return denyResult(
 			"rules.patch_integrity.max_deletions",
 			"patch deletions exceeded max_deletions",

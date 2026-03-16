@@ -414,7 +414,7 @@ function evaluateEgressRule(
     );
   }
 
-  const defaultAction = rule.default ?? 'allow';
+  const defaultAction = rule.default ?? 'block';
   if (defaultAction === 'allow') {
     return allowResult(
       prefixedRule(prefix, 'default'),
