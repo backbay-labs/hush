@@ -1,0 +1,11 @@
+hushspec: "0.1.0"
+extends: base
+merge_strategy: merge
+extensions:
+  origins:
+    profiles:
+      - id: slack-internal
+        match:
+          provider: slack
+          visibility: internal
+          external_participants: true

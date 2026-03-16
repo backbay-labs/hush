@@ -124,6 +124,32 @@ extensions:
         assert isinstance(err, str)
         assert "unknown extension" in err
 
+    def test_reject_unknown_nested_field(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  egress:
+    default: block
+    extra_field: true
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "unknown field at rules.egress" in err
+
+    def test_reject_invalid_bool_type(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  egress:
+    enabled: "yes"
+    default: block
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "rules.egress.enabled must be a boolean" in err
+
     def test_missing_hushspec_version(self):
         yaml = """
 name: test
@@ -167,7 +193,7 @@ hushspec: "99.0.0"
         assert not result.is_valid
         assert any("unsupported" in str(e) for e in result.errors)
 
-    def test_validate_duplicate_secret_pattern_names(self):
+    def test_parse_rejects_duplicate_secret_pattern_names(self):
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -180,12 +206,12 @@ rules:
         pattern: "ASIA[0-9A-Z]{16}"
         severity: critical
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
-        assert any("duplicate" in str(e) for e in result.errors)
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "duplicate secret pattern name" in err
 
-    def test_validate_invalid_regex_pattern(self):
+    def test_parse_rejects_invalid_regex_pattern(self):
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -195,12 +221,12 @@ rules:
         pattern: "["
         severity: critical
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
-        assert any("regular expression" in str(e) for e in result.errors)
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "valid regular expression" in err
 
-    def test_validate_invalid_detection_top_k(self):
+    def test_parse_rejects_invalid_detection_top_k(self):
         yaml = """
 hushspec: "0.1.0"
 extensions:
@@ -208,9 +234,10 @@ extensions:
     threat_intel:
       top_k: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "top_k must be >= 1" in err
 
     def test_validate_no_rules_warning(self):
         yaml = """
@@ -238,9 +265,9 @@ rules:
   tool_access:
     max_args_size: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_args_size must be >= 1" in err
 
     def test_validate_imbalance_ratio_zero(self):
         yaml = """
@@ -249,9 +276,9 @@ rules:
   patch_integrity:
     max_imbalance_ratio: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_imbalance_ratio must be > 0" in err
 
 
 class TestMerge:
@@ -267,6 +294,7 @@ rules:
         child = parse_or_raise("""
 hushspec: "0.1.0"
 name: child
+extends: base
 merge_strategy: replace
 rules:
   tool_access:
@@ -275,6 +303,7 @@ rules:
 """)
         merged = merge(base, child)
         assert merged.name == "child"
+        assert merged.extends is None
         assert merged.rules is not None
         assert merged.rules.egress is None
         assert merged.rules.tool_access is not None
@@ -291,6 +320,7 @@ rules:
 """)
         child = parse_or_raise("""
 hushspec: "0.1.0"
+extends: base
 merge_strategy: merge
 rules:
   egress:
@@ -298,6 +328,7 @@ rules:
     default: allow
 """)
         merged = merge(base, child)
+        assert merged.extends is None
         rules = merged.rules
         assert rules is not None
         # egress replaced by child
@@ -318,12 +349,14 @@ rules:
 """)
         child = parse_or_raise("""
 hushspec: "0.1.0"
+extends: base
 rules:
   egress:
     allow: ["b.com"]
     default: allow
 """)
         merged = merge(base, child)
+        assert merged.extends is None
         rules = merged.rules
         assert rules is not None
         # deep_merge is default: child egress overrides base egress

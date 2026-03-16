@@ -1,0 +1,14 @@
+hushspec: "0.1.0"
+extends: base
+extensions:
+  origins:
+    profiles:
+      - id: slack-internal
+        match:
+          provider: slack
+          visibility: internal
+          external_participants: true
+      - id: jira-private
+        match:
+          provider: jira
+          visibility: private

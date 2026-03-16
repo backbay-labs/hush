@@ -25,6 +25,8 @@ HushSpec defines a declarative format for expressing security rules at the tool 
 
 **Status:** v0.1.0 (draft). The spec is under active development; breaking changes may occur before v1.0.
 
+The Rust crate, TypeScript package, and Python package are not published to crates.io, npm, or PyPI yet. Consume them from this repository for now.
+
 ## Quick Example
 
 ```yaml
@@ -124,9 +126,11 @@ Ready-to-use policies in [`rulesets/`](./rulesets/):
 hushspec = { git = "https://github.com/backbay-labs/hush" }
 ```
 
+<!-- smoke: readme-rust -->
 ```rust
 use hushspec::HushSpec;
 
+let yaml_str = "hushspec: \"0.1.0\"\nname: example\n";
 let spec = HushSpec::parse(yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
@@ -134,9 +138,15 @@ assert!(result.is_valid());
 
 ### TypeScript
 
+```bash
+npm install ../hush/packages/hushspec
+```
+
+<!-- smoke: readme-typescript -->
 ```typescript
 import { parseOrThrow, validate } from '@hushspec/core';
 
+const yamlString = 'hushspec: "0.1.0"\nname: example\n';
 const spec = parseOrThrow(yamlString);
 const result = validate(spec);
 console.log(result.valid); // true
@@ -145,23 +155,38 @@ console.log(result.valid); // true
 ### Python
 
 ```bash
-pip install hushspec  # or from source: pip install ./packages/python
+pip install ./packages/python
 ```
 
+<!-- smoke: readme-python -->
 ```python
 from hushspec import parse_or_raise, validate
 
+yaml_string = 'hushspec: "0.1.0"\nname: example\n'
 spec = parse_or_raise(yaml_string)
 result = validate(spec)
-assert result.is_valid()
+assert result.is_valid
 ```
 
 ### Go
 
-```go
-import "github.com/backbay-labs/hush/packages/go/hushspec"
+```bash
+go get github.com/backbay-labs/hush/packages/go@main
+```
 
+<!-- smoke: readme-go -->
+```go
+import (
+    "fmt"
+
+    "github.com/backbay-labs/hush/packages/go/hushspec"
+)
+
+yamlString := "hushspec: \"0.1.0\"\nname: example\n"
 spec, err := hushspec.Parse(yamlString)
+if err != nil {
+    panic(err)
+}
 result := hushspec.Validate(spec)
 fmt.Println(result.IsValid())
 ```

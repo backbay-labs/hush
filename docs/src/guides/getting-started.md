@@ -26,6 +26,7 @@ npm install ../hush/packages/hushspec
 
 ### Rust
 
+<!-- smoke: guide-rust-parse -->
 ```rust
 use hushspec::HushSpec;
 
@@ -38,6 +39,7 @@ println!("Version: {}", spec.hushspec);
 
 ### TypeScript
 
+<!-- smoke: guide-typescript-parse -->
 ```typescript
 import { readFile } from 'node:fs/promises';
 import { parseOrThrow } from '@hushspec/core';
@@ -57,7 +59,11 @@ cross-field validation, and warnings.
 
 ### Rust
 
+<!-- smoke: guide-rust-validate -->
 ```rust
+use hushspec::HushSpec;
+
+let yaml = std::fs::read_to_string("policy.yaml")?;
 let spec = HushSpec::parse(&yaml)?;
 let result = hushspec::validate(&spec);
 
@@ -72,9 +78,12 @@ if result.is_valid() {
 
 ### TypeScript
 
+<!-- smoke: guide-typescript-validate -->
 ```typescript
+import { readFile } from 'node:fs/promises';
 import { parseOrThrow, validate } from '@hushspec/core';
 
+const yaml = await readFile('policy.yaml', 'utf-8');
 const spec = parseOrThrow(yaml);
 const result = validate(spec);
 

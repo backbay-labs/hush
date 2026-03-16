@@ -1,0 +1,7 @@
+hushspec: "0.1.0"
+extends: base
+merge_strategy: merge
+extensions:
+  detection:
+    prompt_injection:
+      max_scan_bytes: 500000

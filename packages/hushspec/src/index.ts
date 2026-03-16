@@ -39,4 +39,5 @@ export type {
 export { parse, parseOrThrow } from './parse.js';
 export { validate, type ValidationResult, type ValidationError } from './validate.js';
 export { merge } from './merge.js';
+export { resolve, resolveFromFile, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
 export { HUSHSPEC_VERSION, SUPPORTED_VERSIONS, isSupported } from './version.js';

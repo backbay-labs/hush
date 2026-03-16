@@ -1,0 +1,8 @@
+hushspec: "0.1.0"
+extends: base
+extensions:
+  detection:
+    prompt_injection:
+      max_scan_bytes: 500000
+    threat_intel:
+      top_k: 10

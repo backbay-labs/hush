@@ -1,0 +1,237 @@
+{
+  "objects": {
+    "TOP_LEVEL_KEYS": [
+      "hushspec",
+      "name",
+      "description",
+      "extends",
+      "merge_strategy",
+      "rules",
+      "extensions"
+    ],
+    "RULE_KEYS": [
+      "forbidden_paths",
+      "path_allowlist",
+      "egress",
+      "secret_patterns",
+      "patch_integrity",
+      "shell_commands",
+      "tool_access",
+      "computer_use",
+      "remote_desktop_channels",
+      "input_injection"
+    ],
+    "EXTENSION_KEYS": [
+      "posture",
+      "origins",
+      "detection"
+    ],
+    "FORBIDDEN_PATH_KEYS": [
+      "enabled",
+      "patterns",
+      "exceptions"
+    ],
+    "PATH_ALLOWLIST_KEYS": [
+      "enabled",
+      "read",
+      "write",
+      "patch"
+    ],
+    "EGRESS_KEYS": [
+      "enabled",
+      "allow",
+      "block",
+      "default"
+    ],
+    "SECRET_PATTERNS_KEYS": [
+      "enabled",
+      "patterns",
+      "skip_paths"
+    ],
+    "SECRET_PATTERN_KEYS": [
+      "name",
+      "pattern",
+      "severity",
+      "description"
+    ],
+    "PATCH_INTEGRITY_KEYS": [
+      "enabled",
+      "max_additions",
+      "max_deletions",
+      "forbidden_patterns",
+      "require_balance",
+      "max_imbalance_ratio"
+    ],
+    "SHELL_COMMAND_KEYS": [
+      "enabled",
+      "forbidden_patterns"
+    ],
+    "TOOL_ACCESS_KEYS": [
+      "enabled",
+      "allow",
+      "block",
+      "require_confirmation",
+      "default",
+      "max_args_size"
+    ],
+    "COMPUTER_USE_KEYS": [
+      "enabled",
+      "mode",
+      "allowed_actions"
+    ],
+    "REMOTE_DESKTOP_KEYS": [
+      "enabled",
+      "clipboard",
+      "file_transfer",
+      "audio",
+      "drive_mapping"
+    ],
+    "INPUT_INJECTION_KEYS": [
+      "enabled",
+      "allowed_types",
+      "require_postcondition_probe"
+    ],
+    "POSTURE_KEYS": [
+      "initial",
+      "states",
+      "transitions"
+    ],
+    "POSTURE_STATE_KEYS": [
+      "description",
+      "capabilities",
+      "budgets"
+    ],
+    "POSTURE_TRANSITION_KEYS": [
+      "from",
+      "to",
+      "on",
+      "after"
+    ],
+    "ORIGINS_KEYS": [
+      "default_behavior",
+      "profiles"
+    ],
+    "ORIGIN_PROFILE_KEYS": [
+      "id",
+      "match",
+      "posture",
+      "tool_access",
+      "egress",
+      "data",
+      "budgets",
+      "bridge",
+      "explanation"
+    ],
+    "ORIGIN_MATCH_KEYS": [
+      "provider",
+      "tenant_id",
+      "space_id",
+      "space_type",
+      "visibility",
+      "external_participants",
+      "tags",
+      "sensitivity",
+      "actor_role"
+    ],
+    "ORIGIN_DATA_KEYS": [
+      "allow_external_sharing",
+      "redact_before_send",
+      "block_sensitive_outputs"
+    ],
+    "ORIGIN_BUDGET_KEYS": [
+      "tool_calls",
+      "egress_calls",
+      "shell_commands"
+    ],
+    "BRIDGE_POLICY_KEYS": [
+      "allow_cross_origin",
+      "allowed_targets",
+      "require_approval"
+    ],
+    "BRIDGE_TARGET_KEYS": [
+      "provider",
+      "space_type",
+      "tags",
+      "visibility"
+    ],
+    "DETECTION_KEYS": [
+      "prompt_injection",
+      "jailbreak",
+      "threat_intel"
+    ],
+    "PROMPT_INJECTION_KEYS": [
+      "enabled",
+      "warn_at_or_above",
+      "block_at_or_above",
+      "max_scan_bytes"
+    ],
+    "JAILBREAK_KEYS": [
+      "enabled",
+      "block_threshold",
+      "warn_threshold",
+      "max_input_bytes"
+    ],
+    "THREAT_INTEL_KEYS": [
+      "enabled",
+      "pattern_db",
+      "similarity_threshold",
+      "top_k"
+    ]
+  },
+  "enums": {
+    "MERGE_STRATEGIES": [
+      "replace",
+      "merge",
+      "deep_merge"
+    ],
+    "DEFAULT_ACTIONS": [
+      "allow",
+      "block"
+    ],
+    "SEVERITIES": [
+      "critical",
+      "error",
+      "warn"
+    ],
+    "COMPUTER_USE_MODES": [
+      "observe",
+      "guardrail",
+      "fail_closed"
+    ],
+    "TRANSITION_TRIGGERS": [
+      "user_approval",
+      "user_denial",
+      "critical_violation",
+      "any_violation",
+      "timeout",
+      "budget_exhausted",
+      "pattern_match"
+    ],
+    "ORIGIN_DEFAULT_BEHAVIORS": [
+      "deny",
+      "minimal_profile"
+    ],
+    "ORIGIN_SPACE_TYPES": [
+      "channel",
+      "group",
+      "dm",
+      "thread",
+      "issue",
+      "ticket",
+      "pull_request",
+      "email_thread"
+    ],
+    "ORIGIN_VISIBILITIES": [
+      "private",
+      "internal",
+      "public",
+      "external_shared"
+    ],
+    "DETECTION_LEVELS": [
+      "safe",
+      "suspicious",
+      "high",
+      "critical"
+    ]
+  }
+}

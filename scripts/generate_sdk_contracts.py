@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""Generate shared SDK contract artifacts from the JSON Schema sources."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent.parent
+SCHEMAS_DIR = ROOT / "schemas"
+OUTPUT_JSON = ROOT / "generated" / "sdk-contract.json"
+OUTPUT_TS = ROOT / "packages" / "hushspec" / "src" / "generated" / "contract.ts"
+OUTPUT_PY = ROOT / "packages" / "python" / "hushspec" / "generated_contract.py"
+OUTPUT_GO = ROOT / "packages" / "go" / "hushspec" / "generated_contract.go"
+OUTPUT_RS = ROOT / "crates" / "hushspec" / "src" / "generated_contract.rs"
+
+
+def load_schema(filename: str) -> dict:
+    return json.loads((SCHEMAS_DIR / filename).read_text())
+
+
+CORE = load_schema("hushspec-core.v0.schema.json")
+POSTURE = load_schema("hushspec-posture.v0.schema.json")
+ORIGINS = load_schema("hushspec-origins.v0.schema.json")
+DETECTION = load_schema("hushspec-detection.v0.schema.json")
+
+
+def top_props(schema: dict) -> list[str]:
+    return list(schema["properties"].keys())
+
+
+def def_props(schema: dict, name: str) -> list[str]:
+    return list(schema["$defs"][name]["properties"].keys())
+
+
+def enum_values(schema: dict, name: str | None, prop: str) -> list[str]:
+    source = schema if name is None else schema["$defs"][name]
+    data = source["properties"][prop]
+    if "enum" in data:
+        return list(data["enum"])
+    ref = data["$ref"]
+    ref_name = ref.split("/")[-1]
+    return list(schema["$defs"][ref_name]["enum"])
+
+
+CONTRACT = {
+    "objects": {
+        "TOP_LEVEL_KEYS": top_props(CORE),
+        "RULE_KEYS": def_props(CORE, "Rules"),
+        "EXTENSION_KEYS": def_props(CORE, "Extensions"),
+        "FORBIDDEN_PATH_KEYS": def_props(CORE, "ForbiddenPaths"),
+        "PATH_ALLOWLIST_KEYS": def_props(CORE, "PathAllowlist"),
+        "EGRESS_KEYS": def_props(CORE, "Egress"),
+        "SECRET_PATTERNS_KEYS": def_props(CORE, "SecretPatterns"),
+        "SECRET_PATTERN_KEYS": def_props(CORE, "SecretPattern"),
+        "PATCH_INTEGRITY_KEYS": def_props(CORE, "PatchIntegrity"),
+        "SHELL_COMMAND_KEYS": def_props(CORE, "ShellCommands"),
+        "TOOL_ACCESS_KEYS": def_props(CORE, "ToolAccess"),
+        "COMPUTER_USE_KEYS": def_props(CORE, "ComputerUse"),
+        "REMOTE_DESKTOP_KEYS": def_props(CORE, "RemoteDesktopChannels"),
+        "INPUT_INJECTION_KEYS": def_props(CORE, "InputInjection"),
+        "POSTURE_KEYS": top_props(POSTURE),
+        "POSTURE_STATE_KEYS": def_props(POSTURE, "PostureState"),
+        "POSTURE_TRANSITION_KEYS": def_props(POSTURE, "PostureTransition"),
+        "ORIGINS_KEYS": top_props(ORIGINS),
+        "ORIGIN_PROFILE_KEYS": def_props(ORIGINS, "OriginProfile"),
+        "ORIGIN_MATCH_KEYS": def_props(ORIGINS, "OriginMatch"),
+        "ORIGIN_DATA_KEYS": def_props(ORIGINS, "DataPolicy"),
+        "ORIGIN_BUDGET_KEYS": def_props(ORIGINS, "OriginBudgets"),
+        "BRIDGE_POLICY_KEYS": def_props(ORIGINS, "BridgePolicy"),
+        "BRIDGE_TARGET_KEYS": def_props(ORIGINS, "BridgeTarget"),
+        "DETECTION_KEYS": top_props(DETECTION),
+        "PROMPT_INJECTION_KEYS": def_props(DETECTION, "PromptInjectionDetection"),
+        "JAILBREAK_KEYS": def_props(DETECTION, "JailbreakDetection"),
+        "THREAT_INTEL_KEYS": def_props(DETECTION, "ThreatIntelDetection"),
+    },
+    "enums": {
+        "MERGE_STRATEGIES": enum_values(CORE, None, "merge_strategy"),
+        "DEFAULT_ACTIONS": enum_values(CORE, "Egress", "default"),
+        "SEVERITIES": enum_values(CORE, "SecretPattern", "severity"),
+        "COMPUTER_USE_MODES": enum_values(CORE, "ComputerUse", "mode"),
+        "TRANSITION_TRIGGERS": enum_values(POSTURE, "PostureTransition", "on"),
+        "ORIGIN_DEFAULT_BEHAVIORS": enum_values(ORIGINS, None, "default_behavior"),
+        "ORIGIN_SPACE_TYPES": enum_values(ORIGINS, "OriginMatch", "space_type"),
+        "ORIGIN_VISIBILITIES": enum_values(ORIGINS, "OriginMatch", "visibility"),
+        "DETECTION_LEVELS": list(DETECTION["$defs"]["Level"]["enum"]),
+    },
+}
+
+
+TS_TYPE_NAMES = {
+    "MERGE_STRATEGIES": "MergeStrategyValue",
+    "DEFAULT_ACTIONS": "DefaultActionValue",
+    "SEVERITIES": "SeverityValue",
+    "COMPUTER_USE_MODES": "ComputerUseModeValue",
+    "TRANSITION_TRIGGERS": "TransitionTriggerValue",
+    "ORIGIN_DEFAULT_BEHAVIORS": "OriginDefaultBehaviorValue",
+    "ORIGIN_SPACE_TYPES": "OriginSpaceTypeValue",
+    "ORIGIN_VISIBILITIES": "OriginVisibilityValue",
+    "DETECTION_LEVELS": "DetectionLevelValue",
+}
+
+
+GO_TYPED_ENUMS = {
+    "MERGE_STRATEGIES": "MergeStrategy",
+    "DEFAULT_ACTIONS": "DefaultAction",
+    "COMPUTER_USE_MODES": "ComputerUseMode",
+    "TRANSITION_TRIGGERS": "TransitionTrigger",
+    "ORIGIN_DEFAULT_BEHAVIORS": "OriginDefaultBehavior",
+    "DETECTION_LEVELS": "DetectionLevel",
+}
+
+
+def render_ts() -> str:
+    lines = [
+        "// Code generated by scripts/generate_sdk_contracts.py. DO NOT EDIT.",
+        "",
+    ]
+
+    for name, values in CONTRACT["objects"].items():
+        rendered = ", ".join(f"'{value}'" for value in values)
+        lines.extend(
+            [
+                f"export const {name} = [{rendered}] as const;",
+                f"export const {name}_SET: ReadonlySet<string> = new Set({name});",
+                "",
+            ]
+        )
+
+    for name, values in CONTRACT["enums"].items():
+        rendered = ", ".join(f"'{value}'" for value in values)
+        type_name = TS_TYPE_NAMES[name]
+        lines.extend(
+            [
+                f"export const {name} = [{rendered}] as const;",
+                f"export type {type_name} = (typeof {name})[number];",
+                f"export const {name}_SET: ReadonlySet<string> = new Set({name});",
+                "",
+            ]
+        )
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_python() -> str:
+    lines = [
+        '"""Code generated by scripts/generate_sdk_contracts.py. DO NOT EDIT."""',
+        "",
+    ]
+
+    for bucket in ("objects", "enums"):
+        for name, values in CONTRACT[bucket].items():
+            rendered = ", ".join(repr(value) for value in values)
+            lines.append(f"{name} = frozenset(({rendered}))")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_go() -> str:
+    lines = [
+        "// Code generated by scripts/generate_sdk_contracts.py. DO NOT EDIT.",
+        "",
+        "package hushspec",
+        "",
+    ]
+
+    for name, values in CONTRACT["objects"].items():
+        lines.append(f"var {go_name(name)} = map[string]struct{{}}{{")
+        for value in values:
+            lines.append(f'\t"{value}": {{}},')
+        lines.extend(["}", ""])
+
+    for name, values in CONTRACT["enums"].items():
+        if name in GO_TYPED_ENUMS:
+            type_name = GO_TYPED_ENUMS[name]
+            lines.append(f"var {go_name(name)} = map[{type_name}]struct{{}}{{")
+            for value in values:
+                lines.append(f'\t{type_name}("{value}"): {{}},')
+        else:
+            lines.append(f"var {go_name(name)} = map[string]struct{{}}{{")
+            for value in values:
+                lines.append(f'\t"{value}": {{}},')
+        lines.extend(["}", ""])
+
+    content = "\n".join(lines).rstrip() + "\n"
+    gofmt = shutil.which("gofmt")
+    if gofmt is None:
+        return content
+
+    result = subprocess.run(
+        [gofmt],
+        input=content,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def render_rust() -> str:
+    lines = [
+        "// Code generated by scripts/generate_sdk_contracts.py. DO NOT EDIT.",
+        "#![allow(dead_code)]",
+        "",
+    ]
+
+    for bucket in ("objects", "enums"):
+        for name, values in CONTRACT[bucket].items():
+            rendered = ", ".join(f'"{value}"' for value in values)
+            lines.append(f"pub const {name}: &[&str] = &[{rendered}];")
+        lines.append("")
+
+    content = "\n".join(lines).rstrip() + "\n"
+    rustfmt = shutil.which("rustfmt")
+    if rustfmt is None:
+        return content
+
+    result = subprocess.run(
+        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        input=content,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def go_name(name: str) -> str:
+    return "".join(part.capitalize() for part in name.lower().split("_"))
+
+
+def write_or_check(path: Path, content: str, check: bool) -> list[str]:
+    current = path.read_text() if path.exists() else None
+    if current == content:
+        return []
+    if check:
+        return [str(path.relative_to(ROOT))]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    return []
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true", help="fail if generated files are out of date")
+    args = parser.parse_args()
+
+    stale: list[str] = []
+    stale.extend(
+        write_or_check(OUTPUT_JSON, json.dumps(CONTRACT, indent=2) + "\n", args.check)
+    )
+    stale.extend(write_or_check(OUTPUT_TS, render_ts(), args.check))
+    stale.extend(write_or_check(OUTPUT_PY, render_python(), args.check))
+    stale.extend(write_or_check(OUTPUT_GO, render_go(), args.check))
+    stale.extend(write_or_check(OUTPUT_RS, render_rust(), args.check))
+
+    if stale:
+        print("Generated files are out of date:", file=sys.stderr)
+        for path in stale:
+            print(f"  {path}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

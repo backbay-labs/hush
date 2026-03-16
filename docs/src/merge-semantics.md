@@ -2,6 +2,8 @@
 
 HushSpec supports policy inheritance via the `extends` field. When a child policy extends a base, the `merge_strategy` controls how they combine.
 
+The merge result is a resolved document, so `extends` is consumed during resolution and omitted from the merged output.
+
 ## Strategies
 
 ### `deep_merge` (default)

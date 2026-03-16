@@ -21,7 +21,7 @@ export function merge(base: HushSpec, child: HushSpec): HushSpec {
 
   switch (strategy) {
     case 'replace':
-      return { ...child };
+      return { ...child, extends: undefined };
     case 'merge':
       return mergeWithStrategy(base, child, false);
     case 'deep_merge':
@@ -55,7 +55,7 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
     hushspec: child.hushspec,
     name: child.name ?? base.name,
     description: child.description ?? base.description,
-    extends: child.extends,
+    extends: undefined,
     merge_strategy: child.merge_strategy,
     rules: mergedRules,
     extensions: deep

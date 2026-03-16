@@ -2,6 +2,9 @@
 
 HushSpec defines four conformance levels. Each level subsumes all requirements of the levels below it.
 
+For the current per-SDK status on `main`, see the
+[SDK Conformance Matrix](sdk-conformance.md).
+
 ## Level 0: Parser
 
 A Level 0 implementation can:
@@ -40,8 +43,8 @@ This level is required for any tool that supports policy composition.
 A Level 3 implementation additionally:
 
 - Accepts an action (type + context) and a resolved HushSpec document
-- Produces a correct `allow`, `warn`, or `deny` decision per the rule semantics
+- Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision
 - Implements decision precedence (`deny` > `warn` > `allow`)
-- Passes the HushSpec conformance test vectors (published separately)
+- Passes the published evaluator fixtures, which are themselves versioned and schema-validated
 
 This is the full engine level. Clawdstrike is a Level 3 implementation.

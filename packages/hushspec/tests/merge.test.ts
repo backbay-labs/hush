@@ -15,6 +15,7 @@ rules:
     const child = parseOrThrow(`
 hushspec: "0.1.0"
 name: child
+extends: base
 merge_strategy: replace
 rules:
   tool_access:
@@ -23,6 +24,7 @@ rules:
 `);
     const merged = merge(base, child);
     expect(merged.name).toBe('child');
+    expect(merged.extends).toBeUndefined();
     expect(merged.rules?.egress).toBeUndefined();
     expect(merged.rules?.tool_access?.block).toEqual(['shell_exec']);
   });
@@ -39,6 +41,7 @@ rules:
 `);
     const child = parseOrThrow(`
 hushspec: "0.1.0"
+extends: base
 merge_strategy: merge
 rules:
   egress:
@@ -46,6 +49,7 @@ rules:
     default: allow
 `);
     const merged = merge(base, child);
+    expect(merged.extends).toBeUndefined();
     expect(merged.rules?.egress?.allow).toEqual(['b.com']);
     expect(merged.rules?.forbidden_paths?.patterns).toEqual(['**/.ssh/**']);
   });
@@ -62,12 +66,14 @@ rules:
 `);
     const child = parseOrThrow(`
 hushspec: "0.1.0"
+extends: base
 rules:
   egress:
     allow: ["b.com"]
     default: allow
 `);
     const merged = merge(base, child);
+    expect(merged.extends).toBeUndefined();
     expect(merged.rules?.egress?.allow).toEqual(['b.com']);
     expect(merged.rules?.forbidden_paths?.patterns).toEqual(['**/.ssh/**']);
   });

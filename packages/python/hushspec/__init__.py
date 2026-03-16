@@ -22,6 +22,7 @@ from hushspec.extensions import (
 )
 from hushspec.merge import merge
 from hushspec.parse import parse, parse_or_raise
+from hushspec.resolve import LoadedSpec, resolve, resolve_file, resolve_or_raise
 from hushspec.rules import (
     ComputerUseMode,
     ComputerUseRule,
@@ -93,6 +94,10 @@ __all__ = [
     "ValidationError",
     # Merge
     "merge",
+    "resolve",
+    "resolve_file",
+    "resolve_or_raise",
+    "LoadedSpec",
     # Version
     "HUSHSPEC_VERSION",
     "SUPPORTED_VERSIONS",

@@ -1,0 +1,29 @@
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [file_access]
+    transitions: []
+  origins:
+    default_behavior: deny
+    profiles:
+      - id: slack-internal
+        match:
+          provider: slack
+          visibility: internal
+          external_participants: true
+      - id: github-public
+        match:
+          provider: github
+          visibility: public
+        egress:
+          allow: ["api.github.com"]
+          default: block
+      - id: jira-private
+        match:
+          provider: jira
+          visibility: private

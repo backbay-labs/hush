@@ -1,3 +1,10 @@
+import type {
+  DetectionLevelValue,
+  OriginDefaultBehaviorValue,
+  OriginSpaceTypeValue,
+  OriginVisibilityValue,
+  TransitionTriggerValue,
+} from './generated/contract.js';
 import type { EgressRule, ToolAccessRule } from './rules.js';
 
 // --- Extensions container ---
@@ -34,14 +41,7 @@ export interface PostureTransition {
 }
 
 /** Event that triggers a posture state transition. */
-export type TransitionTrigger =
-  | 'user_approval'
-  | 'user_denial'
-  | 'critical_violation'
-  | 'any_violation'
-  | 'timeout'
-  | 'budget_exhausted'
-  | 'pattern_match';
+export type TransitionTrigger = TransitionTriggerValue;
 
 // --- Origins Extension ---
 
@@ -52,7 +52,7 @@ export interface OriginsExtension {
 }
 
 /** Behavior when no origin profile matches an incoming message. */
-export type OriginDefaultBehavior = 'deny' | 'minimal_profile';
+export type OriginDefaultBehavior = OriginDefaultBehaviorValue;
 
 /** A named origin profile binding match criteria to security rules. */
 export interface OriginProfile {
@@ -72,8 +72,8 @@ export interface OriginMatch {
   provider?: string;
   tenant_id?: string;
   space_id?: string;
-  space_type?: string;
-  visibility?: string;
+  space_type?: OriginSpaceTypeValue;
+  visibility?: OriginVisibilityValue;
   external_participants?: boolean;
   tags?: string[];
   sensitivity?: string;
@@ -104,9 +104,9 @@ export interface BridgePolicy {
 /** Criteria identifying a valid bridge destination. */
 export interface BridgeTarget {
   provider?: string;
-  space_type?: string;
+  space_type?: OriginSpaceTypeValue;
   tags?: string[];
-  visibility?: string;
+  visibility?: OriginVisibilityValue;
 }
 
 // --- Detection Extension ---
@@ -127,7 +127,7 @@ export interface PromptInjectionDetection {
 }
 
 /** Severity level for detection verdicts. */
-export type DetectionLevel = 'safe' | 'suspicious' | 'high' | 'critical';
+export type DetectionLevel = DetectionLevelValue;
 
 /** Jailbreak detection score thresholds and input limits. */
 export interface JailbreakDetection {

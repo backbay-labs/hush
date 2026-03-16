@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json",
+  "title": "HushSpec Evaluator Fixture v0",
+  "description": "Schema for versioned evaluator fixtures used by the HushSpec reference evaluator and conformance testkit.",
+  "type": "object",
+  "required": ["hushspec_test", "description", "policy", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "hushspec_test": {
+      "type": "string",
+      "pattern": "^0\\.\\d+\\.\\d+$",
+      "description": "Fixture format version."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy": {
+      "type": "object",
+      "required": ["hushspec"],
+      "description": "Embedded HushSpec document. Full policy validation is performed separately by the SDK.",
+      "additionalProperties": true
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/EvaluationCase"
+      }
+    }
+  },
+  "$defs": {
+    "EvaluationCase": {
+      "type": "object",
+      "required": ["description", "action", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "$ref": "#/$defs/Action"
+        },
+        "expect": {
+          "$ref": "#/$defs/ExpectedResult"
+        }
+      }
+    },
+    "Action": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "file_read",
+            "file_write",
+            "patch_apply",
+            "shell_command",
+            "tool_call",
+            "egress",
+            "computer_use"
+          ]
+        },
+        "target": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "args_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "origin": {
+          "$ref": "#/$defs/Origin"
+        },
+        "posture": {
+          "$ref": "#/$defs/PostureInput"
+        }
+      }
+    },
+    "Origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string" },
+        "tenant_id": { "type": "string" },
+        "space_id": { "type": "string" },
+        "space_type": { "type": "string" },
+        "visibility": { "type": "string" },
+        "external_participants": { "type": "boolean" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sensitivity": { "type": "string" },
+        "actor_role": { "type": "string" }
+      }
+    },
+    "PostureInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "current": { "type": "string" },
+        "signal": { "type": "string" }
+      }
+    },
+    "ExpectedResult": {
+      "type": "object",
+      "required": ["decision"],
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": ["allow", "warn", "deny"]
+        },
+        "matched_rule": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "origin_profile": {
+          "type": "string"
+        },
+        "posture": {
+          "$ref": "#/$defs/PostureResult"
+        }
+      }
+    },
+    "PostureResult": {
+      "type": "object",
+      "required": ["current", "next"],
+      "additionalProperties": false,
+      "properties": {
+        "current": { "type": "string" },
+        "next": { "type": "string" }
+      }
+    }
+  }
+}

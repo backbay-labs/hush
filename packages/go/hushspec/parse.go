@@ -2,24 +2,22 @@ package hushspec
 
 import (
 	"fmt"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Parse parses a YAML string into a HushSpec document.
 //
-// It validates that the document is well-formed YAML and that the required
-// "hushspec" version field is present. Structural validation (version
-// support, cross-field constraints, etc.) is performed separately by
-// [Validate].
-//
-// Limitation: gopkg.in/yaml.v3 does not natively reject unknown fields
-// the way encoding/json's DisallowUnknownFields does. Unknown YAML keys
-// are silently ignored during unmarshalling. Use [Validate] for stricter
-// checking of the parsed result.
+// It validates that the document is well-formed YAML, rejects unknown fields,
+// and requires the top-level "hushspec" version field to be present.
+// Cross-field validation (supported versions, range checks, etc.) is
+// performed separately by [Validate].
 func Parse(yamlStr string) (*HushSpec, error) {
 	var spec HushSpec
-	err := yaml.Unmarshal([]byte(yamlStr), &spec)
+	decoder := yaml.NewDecoder(strings.NewReader(yamlStr))
+	decoder.KnownFields(true)
+	err := decoder.Decode(&spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HushSpec YAML: %w", err)
 	}

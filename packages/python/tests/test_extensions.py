@@ -7,6 +7,7 @@ from hushspec import (
     HushSpec,
     OriginDefaultBehavior,
     merge,
+    parse,
     parse_or_raise,
     validate,
 )
@@ -74,9 +75,9 @@ extensions:
         capabilities: []
     transitions: []
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "posture.initial" in err
 
     def test_validate_posture_timeout_requires_after(self):
         yaml = """
@@ -94,9 +95,9 @@ extensions:
         to: b
         on: timeout
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "timeout trigger requires 'after' field" in err
 
     def test_validate_posture_negative_budget(self):
         yaml = """
@@ -111,9 +112,9 @@ extensions:
           tool_calls: -5
     transitions: []
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "tool_calls must be >= 0" in err
 
     def test_validate_posture_empty_states(self):
         yaml = """
@@ -124,9 +125,9 @@ extensions:
     states: {}
     transitions: []
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "states must define at least one state" in err
 
     def test_validate_posture_transition_to_wildcard(self):
         yaml = """
@@ -142,9 +143,9 @@ extensions:
         to: "*"
         on: user_approval
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "to cannot be '*'" in err
 
     def test_validate_posture_transition_from_undefined(self):
         yaml = """
@@ -162,9 +163,9 @@ extensions:
         to: b
         on: user_approval
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "does not reference a defined state" in err
 
     def test_validate_posture_unknown_capability_warning(self):
         yaml = """
@@ -239,9 +240,9 @@ extensions:
         match:
           provider: teams
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "duplicate origin profile id" in err
 
     def test_validate_origins_posture_without_extension(self):
         yaml = """
@@ -252,9 +253,9 @@ extensions:
       - id: test
         posture: elevated
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "requires extensions.posture" in err
 
     def test_validate_origins_posture_undefined_state(self):
         yaml = """
@@ -271,9 +272,9 @@ extensions:
       - id: test
         posture: nonexistent
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "does not reference a defined posture state" in err
 
 
 class TestDetection:
@@ -322,9 +323,9 @@ extensions:
     threat_intel:
       similarity_threshold: 1.5
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "similarity_threshold must be <= 1" in err
 
     def test_validate_detection_prompt_injection_threshold_warning(self):
         yaml = """
@@ -348,9 +349,9 @@ extensions:
     jailbreak:
       block_threshold: 101
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "block_threshold must be <= 100" in err
 
     def test_validate_jailbreak_max_input_bytes_zero(self):
         yaml = """
@@ -360,9 +361,9 @@ extensions:
     jailbreak:
       max_input_bytes: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_input_bytes must be >= 1" in err
 
     def test_validate_prompt_injection_max_scan_bytes_zero(self):
         yaml = """
@@ -372,9 +373,9 @@ extensions:
     prompt_injection:
       max_scan_bytes: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_scan_bytes must be >= 1" in err
 
     def test_validate_threat_intel_top_k_zero(self):
         yaml = """
@@ -384,9 +385,9 @@ extensions:
     threat_intel:
       top_k: 0
 """
-        spec = parse_or_raise(yaml)
-        result = validate(spec)
-        assert not result.is_valid
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "top_k must be >= 1" in err
 
 
 class TestMergeExtensions:

@@ -3,10 +3,7 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(
-    name = "hushspec-testkit",
-    about = "HushSpec conformance test runner"
-)]
+#[command(name = "hushspec-testkit", about = "HushSpec conformance test runner")]
 struct Cli {
     /// Path to the fixtures directory
     #[arg(short, long, default_value = "fixtures")]

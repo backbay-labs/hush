@@ -15,14 +15,20 @@ cases:
     action:
       type: computer_use
       target: "remote.session.connect"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.computer_use.allowed_actions
   - description: "warn on unlisted action (guardrail mode)"
     action:
       type: computer_use
       target: "remote.file_transfer"
-    expect: warn
+    expect:
+      decision: warn
+      matched_rule: rules.computer_use.mode
   - description: "allow input injection"
     action:
       type: computer_use
       target: "input.inject"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.computer_use.allowed_actions

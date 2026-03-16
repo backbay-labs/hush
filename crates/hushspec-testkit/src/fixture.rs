@@ -33,11 +33,16 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("core/valid", FixtureCategory::ValidCore),
         ("core/invalid", FixtureCategory::InvalidCore),
         ("core/evaluation", FixtureCategory::Evaluation),
-        ("core/merge", FixtureCategory::MergeBase), // will be categorized further
+        ("core/merge", FixtureCategory::MergeBase), // categorized further below
+        ("posture/evaluation", FixtureCategory::Evaluation),
+        ("posture/merge", FixtureCategory::MergeBase),
         ("posture/valid", FixtureCategory::PostureValid),
         ("posture/invalid", FixtureCategory::PostureInvalid),
+        ("origins/evaluation", FixtureCategory::Evaluation),
+        ("origins/merge", FixtureCategory::MergeBase),
         ("origins/valid", FixtureCategory::OriginsValid),
         ("origins/invalid", FixtureCategory::OriginsInvalid),
+        ("detection/merge", FixtureCategory::MergeBase),
         ("detection/valid", FixtureCategory::DetectionValid),
         ("detection/invalid", FixtureCategory::DetectionInvalid),
     ];
@@ -51,14 +56,11 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path
-                    .extension()
-                    .map_or(false, |e| e == "yaml" || e == "yml")
-                {
+                if path.extension().is_some_and(|e| e == "yaml" || e == "yml") {
                     let content = std::fs::read_to_string(&path).unwrap_or_default();
                     let mut cat = *category;
 
-                    // Categorize merge fixtures more specifically
+                    // Categorize merge fixtures more specifically.
                     if *category == FixtureCategory::MergeBase {
                         let filename = path.file_stem().unwrap_or_default().to_string_lossy();
                         if filename.starts_with("child-") {

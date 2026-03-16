@@ -1,0 +1,16 @@
+hushspec: "0.1.0"
+extends: base
+merge_strategy: merge
+extensions:
+  posture:
+    initial: restricted
+    states:
+      restricted:
+        capabilities: [tool_call]
+      locked:
+        capabilities: []
+    transitions:
+      - from: restricted
+        to: locked
+        on: timeout
+        after: 30m

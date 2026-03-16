@@ -17,6 +17,7 @@ rules:
         r#"
 hushspec: "0.1.0"
 name: child
+extends: base
 merge_strategy: replace
 rules:
   tool_access:
@@ -27,6 +28,7 @@ rules:
     .unwrap();
     let merged = merge(&base, &child);
     assert_eq!(merged.name.as_deref(), Some("child"));
+    assert!(merged.extends.is_none());
     assert!(merged.rules.as_ref().unwrap().egress.is_none());
     assert!(merged.rules.as_ref().unwrap().tool_access.is_some());
 }
@@ -48,6 +50,7 @@ rules:
     let child = HushSpec::parse(
         r#"
 hushspec: "0.1.0"
+extends: base
 merge_strategy: merge
 rules:
   egress:
@@ -57,6 +60,7 @@ rules:
     )
     .unwrap();
     let merged = merge(&base, &child);
+    assert!(merged.extends.is_none());
     let rules = merged.rules.as_ref().unwrap();
     // egress replaced by child
     assert_eq!(rules.egress.as_ref().unwrap().allow, vec!["b.com"]);
@@ -81,6 +85,7 @@ rules:
     let child = HushSpec::parse(
         r#"
 hushspec: "0.1.0"
+extends: base
 rules:
   egress:
     allow: ["b.com"]
@@ -89,6 +94,7 @@ rules:
     )
     .unwrap();
     let merged = merge(&base, &child);
+    assert!(merged.extends.is_none());
     let rules = merged.rules.as_ref().unwrap();
     // deep_merge is default: child egress overrides base egress
     assert_eq!(rules.egress.as_ref().unwrap().allow, vec!["b.com"]);

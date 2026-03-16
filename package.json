@@ -7,6 +7,12 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "generate:contracts": "python3 scripts/generate_sdk_contracts.py",
+    "generate:contracts:check": "python3 scripts/generate_sdk_contracts.py --check",
+    "generate:models": "python3 scripts/generate_sdk_models.py",
+    "generate:models:check": "python3 scripts/generate_sdk_models.py --check",
+    "test:snippets": "python3 scripts/smoke_snippets.py",
+    "test:roundtrip": "python3 scripts/check_cross_sdk_roundtrip.py"
   }
 }

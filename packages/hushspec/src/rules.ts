@@ -1,3 +1,9 @@
+import type {
+  ComputerUseModeValue,
+  DefaultActionValue,
+  SeverityValue,
+} from './generated/contract.js';
+
 /** Container for all security rule configurations. */
 export interface Rules {
   forbidden_paths?: ForbiddenPathsRule;
@@ -77,7 +83,7 @@ export interface ToolAccessRule {
 }
 
 /** Operating mode for computer-use actions. */
-export type ComputerUseMode = 'observe' | 'guardrail' | 'fail_closed';
+export type ComputerUseMode = ComputerUseModeValue;
 
 /** Control computer-use agent actions for remote desktop sessions. */
 export interface ComputerUseRule {
@@ -103,7 +109,7 @@ export interface InputInjectionRule {
 }
 
 /** Severity level for secret pattern matches. */
-export type Severity = 'critical' | 'error' | 'warn';
+export type Severity = SeverityValue;
 
 /** Default action when no explicit allow/block rule matches. */
-export type DefaultAction = 'allow' | 'block';
+export type DefaultAction = DefaultActionValue;

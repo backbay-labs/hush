@@ -20,24 +20,34 @@ cases:
     action:
       type: tool_call
       target: "read_file"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
   - description: "deny blocked tool"
     action:
       type: tool_call
       target: "shell_exec"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
   - description: "deny unlisted tool (default block)"
     action:
       type: tool_call
       target: "deploy_production"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.default
   - description: "require confirmation for flagged tool"
     action:
       type: tool_call
       target: "file_write"
-    expect: warn
+    expect:
+      decision: warn
+      matched_rule: rules.tool_access.require_confirmation
   - description: "block takes precedence over allow"
     action:
       type: tool_call
       target: "run_command"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block

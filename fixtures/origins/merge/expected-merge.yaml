@@ -1,0 +1,18 @@
+hushspec: "0.1.0"
+merge_strategy: merge
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [file_access]
+    transitions: []
+  origins:
+    profiles:
+      - id: slack-internal
+        match:
+          provider: slack
+          visibility: internal
+          external_participants: true

@@ -1,0 +1,69 @@
+hushspec_test: "0.1.0"
+description: "Origin profile matching precedence"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: block
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+        restricted:
+          capabilities: []
+      transitions: []
+    origins:
+      default_behavior: minimal_profile
+      profiles:
+        - id: exact-channel
+          match:
+            provider: slack
+            space_id: C123
+            visibility: internal
+          posture: standard
+          tool_access:
+            allow: [github_search]
+            default: block
+        - id: external-shared
+          match:
+            provider: slack
+            external_participants: true
+            visibility: external_shared
+          posture: restricted
+          tool_access:
+            block: [github_search]
+            default: block
+cases:
+  - description: "exact space_id profile wins over broader external profile"
+    action:
+      type: tool_call
+      target: github_search
+      origin:
+        provider: slack
+        space_id: C123
+        visibility: internal
+        external_participants: true
+    expect:
+      decision: allow
+      matched_rule: extensions.origins.profiles.exact-channel.tool_access.allow
+      origin_profile: exact-channel
+      posture:
+        current: standard
+        next: standard
+  - description: "external shared channel falls back to restricted profile"
+    action:
+      type: tool_call
+      target: github_search
+      origin:
+        provider: slack
+        visibility: external_shared
+        external_participants: true
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.restricted.capabilities
+      origin_profile: external-shared
+      posture:
+        current: restricted
+        next: restricted

@@ -10,7 +10,11 @@ use crate::schema::{HushSpec, MergeStrategy};
 pub fn merge(base: &HushSpec, child: &HushSpec) -> HushSpec {
     let strategy = child.merge_strategy.unwrap_or_default();
     match strategy {
-        MergeStrategy::Replace => child.clone(),
+        MergeStrategy::Replace => {
+            let mut result = child.clone();
+            result.extends = None;
+            result
+        }
         MergeStrategy::Merge => merge_with_strategy(base, child, false),
         MergeStrategy::DeepMerge => merge_with_strategy(base, child, true),
     }
@@ -24,7 +28,7 @@ fn merge_with_strategy(base: &HushSpec, child: &HushSpec, deep: bool) -> HushSpe
             .description
             .clone()
             .or_else(|| base.description.clone()),
-        extends: child.extends.clone(),
+        extends: None,
         merge_strategy: child.merge_strategy,
         rules: merge_rules(&base.rules, &child.rules),
         extensions: if deep {

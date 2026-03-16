@@ -16,24 +16,34 @@ cases:
     action:
       type: egress
       target: "api.openai.com"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
   - description: "allow wildcard match"
     action:
       type: egress
       target: "api.anthropic.com"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
   - description: "deny unlisted domain (default block)"
     action:
       type: egress
       target: "unknown-api.com"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
   - description: "deny explicitly blocked domain"
     action:
       type: egress
       target: "phishing.evil.com"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block
   - description: "block takes precedence over allow"
     action:
       type: egress
       target: "api.evil.com"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block

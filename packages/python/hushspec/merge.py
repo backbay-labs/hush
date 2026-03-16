@@ -29,7 +29,9 @@ def merge(base: HushSpec, child: HushSpec) -> HushSpec:
     """Merge a base HushSpec with a child according to the child's merge strategy."""
     strategy = child.merge_strategy or MergeStrategy.DEEP_MERGE
     if strategy == MergeStrategy.REPLACE:
-        return copy.deepcopy(child)
+        result = copy.deepcopy(child)
+        result.extends = None
+        return result
     deep = strategy == MergeStrategy.DEEP_MERGE
     return _merge_with_strategy(base, child, deep)
 
@@ -39,7 +41,7 @@ def _merge_with_strategy(base: HushSpec, child: HushSpec, deep: bool) -> HushSpe
         hushspec=child.hushspec,
         name=child.name if child.name is not None else base.name,
         description=child.description if child.description is not None else base.description,
-        extends=child.extends,
+        extends=None,
         merge_strategy=child.merge_strategy,
         rules=_merge_rules(base.rules, child.rules),
         extensions=(

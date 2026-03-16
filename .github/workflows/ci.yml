@@ -10,6 +10,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  generated-sources:
+    name: Generated Sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check generated SDK contracts
+        run: python3 scripts/generate_sdk_contracts.py --check
+
+      - name: Check generated SDK models
+        run: python3 scripts/generate_sdk_models.py --check
+
   rust:
     name: Rust
     runs-on: ubuntu-latest
@@ -79,18 +103,126 @@ jobs:
 
       - run: cd packages/go && go vet ./...
 
-  conformance:
-    name: Conformance
+  shared-fixtures:
+    name: Shared Fixtures (${{ matrix.sdk }})
     runs-on: ubuntu-latest
-    needs: rust
+    strategy:
+      matrix:
+        sdk: [rust, typescript, python, go]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.sdk == 'rust'
+
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.sdk == 'rust'
+
+      - uses: actions/setup-node@v4
+        if: matrix.sdk == 'typescript'
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        if: matrix.sdk == 'python'
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        if: matrix.sdk == 'go'
+        with:
+          go-version: '1.22'
+
+      - name: Install Node dependencies
+        if: matrix.sdk == 'typescript'
+        run: npm ci
+
+      - name: Install Python package
+        if: matrix.sdk == 'python'
+        run: pip install -e "packages/python[dev]"
+
+      - name: Rust shared fixtures
+        if: matrix.sdk == 'rust'
+        run: cargo run -p hushspec-testkit -- --fixtures fixtures
+
+      - name: TypeScript shared fixtures
+        if: matrix.sdk == 'typescript'
+        run: cd packages/hushspec && npx vitest run tests/shared-fixtures.test.ts
+
+      - name: Python shared fixtures
+        if: matrix.sdk == 'python'
+        run: pytest packages/python/tests/test_shared_fixtures.py -v
+
+      - name: Go shared fixtures
+        if: matrix.sdk == 'go'
+        run: cd packages/go && go test ./... -run TestSharedFixtures -v
+
+  smoke-snippets:
+    name: Smoke Snippets
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-      - run: cargo run -p hushspec-testkit -- --fixtures fixtures
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript package
+        run: npm run build
+
+      - name: Install Python package
+        run: pip install -e "packages/python[dev]"
+
+      - name: Run markdown smoke snippets
+        run: python3 scripts/smoke_snippets.py
+
+  cross-sdk-roundtrip:
+    name: Cross-SDK Roundtrip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript package
+        run: npm run build
+
+      - name: Install Python package
+        run: pip install -e "packages/python[dev]"
+
+      - name: Check cross-SDK roundtrip equivalence
+        run: python3 scripts/check_cross_sdk_roundtrip.py
 
   docs:
     name: Docs

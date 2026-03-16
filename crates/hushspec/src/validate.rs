@@ -242,6 +242,30 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                 )));
             }
 
+            if let Some(match_rules) = &profile.match_rules {
+                if let Some(space_type) = &match_rules.space_type
+                    && !contains_allowed_value(
+                        space_type,
+                        crate::generated_contract::ORIGIN_SPACE_TYPES,
+                    )
+                {
+                    errors.push(ValidationError::Custom(format!(
+                        "origins.profiles[{index}].match.space_type '{space_type}' is not valid"
+                    )));
+                }
+
+                if let Some(visibility) = &match_rules.visibility
+                    && !contains_allowed_value(
+                        visibility,
+                        crate::generated_contract::ORIGIN_VISIBILITIES,
+                    )
+                {
+                    errors.push(ValidationError::Custom(format!(
+                        "origins.profiles[{index}].match.visibility '{visibility}' is not valid"
+                    )));
+                }
+            }
+
             if let Some(posture_state) = &profile.posture {
                 match &posture_states {
                     Some(states) if states.contains(posture_state.as_str()) => {}
@@ -252,6 +276,32 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                     None => errors.push(ValidationError::Custom(format!(
                         "origins.profiles[{index}].posture requires extensions.posture to be defined"
                     ))),
+                }
+            }
+
+            if let Some(bridge) = &profile.bridge {
+                for (target_index, target) in bridge.allowed_targets.iter().enumerate() {
+                    if let Some(space_type) = &target.space_type
+                        && !contains_allowed_value(
+                            space_type,
+                            crate::generated_contract::ORIGIN_SPACE_TYPES,
+                        )
+                    {
+                        errors.push(ValidationError::Custom(format!(
+                            "origins.profiles[{index}].bridge.allowed_targets[{target_index}].space_type '{space_type}' is not valid"
+                        )));
+                    }
+
+                    if let Some(visibility) = &target.visibility
+                        && !contains_allowed_value(
+                            visibility,
+                            crate::generated_contract::ORIGIN_VISIBILITIES,
+                        )
+                    {
+                        errors.push(ValidationError::Custom(format!(
+                            "origins.profiles[{index}].bridge.allowed_targets[{target_index}].visibility '{visibility}' is not valid"
+                        )));
+                    }
                 }
             }
         }
@@ -344,4 +394,8 @@ fn is_valid_duration(value: &str) -> bool {
     ) && value[..value.len() - 1]
         .bytes()
         .all(|byte| byte.is_ascii_digit())
+}
+
+fn contains_allowed_value(value: &str, allowed: &[&str]) -> bool {
+    allowed.contains(&value)
 }

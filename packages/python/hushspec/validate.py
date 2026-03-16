@@ -30,6 +30,12 @@ _BUDGET_NAMES = frozenset(
 
 # Duration pattern: digits followed by s/m/h/d
 _DURATION_PATTERN = re.compile(r"^\d+[smhd]$")
+_DETECTION_LEVEL_ORDER = {
+    DetectionLevel.SAFE: 0,
+    DetectionLevel.SUSPICIOUS: 1,
+    DetectionLevel.HIGH: 2,
+    DetectionLevel.CRITICAL: 3,
+}
 
 
 @dataclass
@@ -328,7 +334,7 @@ def _validate_detection(
 
         warn_level = pi.warn_at_or_above or DetectionLevel.SUSPICIOUS
         block_level = pi.block_at_or_above or DetectionLevel.HIGH
-        if block_level < warn_level:
+        if _DETECTION_LEVEL_ORDER[block_level] < _DETECTION_LEVEL_ORDER[warn_level]:
             warnings.append(
                 "detection.prompt_injection: block_at_or_above is less strict than warn_at_or_above"
             )

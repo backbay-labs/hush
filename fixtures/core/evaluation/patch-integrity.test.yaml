@@ -7,8 +7,8 @@ policy:
       max_additions: 100
       max_deletions: 50
       forbidden_patterns:
-        - "(?i)disable[\\s_-]?security"
-        - "(?i)rm\\s+-rf"
+        - "[Dd]isable[\\s_-]?[Ss]ecurity"
+        - "[Rr][Mm]\\s+-rf"
       require_balance: true
       max_imbalance_ratio: 5.0
 cases:
@@ -17,10 +17,13 @@ cases:
       type: patch_apply
       target: "/src/config.rs"
       content: "@@ -1 +1 @@\n-// security check\n+// disable security"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.patch_integrity.forbidden_patterns[0]
   - description: "allow clean patch"
     action:
       type: patch_apply
       target: "/src/main.rs"
       content: "@@ -1,3 +1,5 @@\n fn main() {\n+    println!(\"hello\");\n+    println!(\"world\");\n }"
-    expect: allow
+    expect:
+      decision: allow

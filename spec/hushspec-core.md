@@ -250,11 +250,12 @@ When `extends` is present, the base document is resolved first, then the child d
 ### 4.1 Strategies
 
 **`deep_merge` (default):**
-Recursively merge objects. For each field in the child document:
-- If the field is an object and the corresponding base field is also an object, merge recursively.
-- If the field is an array, the child array entirely replaces the base array. Arrays are NOT appended.
-- If the field is a scalar, the child value replaces the base value.
-- Fields present in the base but absent in the child are preserved.
+For core `rules`, `deep_merge` is a rule-block merge in HushSpec v0:
+- If the child defines a rule block (for example `rules.egress`), that entire child rule block replaces the base rule block.
+- Rule blocks absent in the child are preserved from the base.
+- Arrays are never appended.
+
+For `extensions`, `deep_merge` delegates to the companion extension specifications, which MAY define field-level merge behavior within an extension block.
 
 **`merge`:**
 Shallow merge at the `rules` level. If the child defines a rule block (e.g., `rules.egress`), the entire child rule block replaces the base rule block. Fields within the rule block are not individually merged. Top-level fields (`name`, `description`, etc.) follow scalar replacement.
@@ -268,6 +269,8 @@ Merge is performed pairwise from the root of the inheritance chain to the leaf:
 1. Resolve the `extends` chain to produce an ordered list: `[root, ..., parent, child]`.
 2. Start with the root document.
 3. Apply each subsequent document using the `merge_strategy` declared in that document.
+
+The merged result is a resolved HushSpec document. The `extends` field is consumed during resolution and MUST NOT be present in the merged output.
 
 ### 4.3 Engine-Specific Helpers
 

@@ -16,24 +16,33 @@ cases:
     action:
       type: file_read
       target: "/home/user/.ssh/id_rsa"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
   - description: "deny access to AWS credentials"
     action:
       type: file_read
       target: "/home/user/.aws/credentials"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
   - description: "deny access to /etc/passwd"
     action:
       type: file_read
       target: "/etc/passwd"
-    expect: deny
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
   - description: "allow SSH config exception"
     action:
       type: file_read
       target: "/home/user/.ssh/config"
-    expect: allow
+    expect:
+      decision: allow
+      matched_rule: rules.forbidden_paths.exceptions
   - description: "allow normal file"
     action:
       type: file_read
       target: "/home/user/src/main.rs"
-    expect: allow
+    expect:
+      decision: allow

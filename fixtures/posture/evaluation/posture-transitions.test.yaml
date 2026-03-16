@@ -1,0 +1,70 @@
+hushspec_test: "0.1.0"
+description: "Posture transition-driven enforcement"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      allow: [read_file]
+      require_confirmation: [file_write]
+      default: block
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+          budgets:
+            tool_calls: 10
+        restricted:
+          capabilities: [tool_call]
+          budgets:
+            tool_calls: 1
+        locked:
+          capabilities: []
+      transitions:
+        - from: standard
+          to: restricted
+          on: any_violation
+        - from: restricted
+          to: locked
+          on: critical_violation
+cases:
+  - description: "standard posture allows ordinary tool use"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: standard
+        signal: none
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
+      posture:
+        current: standard
+        next: standard
+  - description: "restricted posture still warns on confirmation-gated tools"
+    action:
+      type: tool_call
+      target: file_write
+      posture:
+        current: restricted
+        signal: any_violation
+    expect:
+      decision: warn
+      matched_rule: rules.tool_access.require_confirmation
+      posture:
+        current: restricted
+        next: restricted
+  - description: "locked posture denies further tool access"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: locked
+        signal: critical_violation
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+      posture:
+        current: locked
+        next: locked

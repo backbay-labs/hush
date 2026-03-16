@@ -1,0 +1,15 @@
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [file_access]
+      restricted:
+        capabilities: [file_access]
+        budgets:
+          tool_calls: 2
+    transitions:
+      - from: standard
+        to: restricted
+        on: any_violation

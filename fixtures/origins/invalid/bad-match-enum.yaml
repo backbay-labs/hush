@@ -1,0 +1,16 @@
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+    transitions: []
+  origins:
+    profiles:
+      - id: bad-space-type
+        match:
+          provider: slack
+          space_type: workspace
+          visibility: semi_public
+        posture: standard

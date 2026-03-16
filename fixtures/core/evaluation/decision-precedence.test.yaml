@@ -1,0 +1,42 @@
+hushspec_test: "0.1.0"
+description: "Decision precedence across allow, warn, and deny outcomes"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      allow:
+        - github_search
+        - file_write
+      block:
+        - shell_exec
+      require_confirmation:
+        - file_write
+      default: block
+    egress:
+      allow:
+        - "*.example.com"
+      block:
+        - "api.example.com"
+      default: allow
+cases:
+  - description: "deny beats allow when both block and allow match"
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block
+  - description: "warn beats allow for confirmation-gated tools"
+    action:
+      type: tool_call
+      target: file_write
+    expect:
+      decision: warn
+      matched_rule: rules.tool_access.require_confirmation
+  - description: "plain allow remains allow when no stricter rule matches"
+    action:
+      type: tool_call
+      target: github_search
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
