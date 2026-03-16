@@ -17,8 +17,8 @@ pub fn run(args: KeygenArgs) -> i32 {
         return 1;
     }
 
-    let private_key_path = args.output_dir.join("hushspec.key");
-    let public_key_path = args.output_dir.join("hushspec.pub");
+    let private_key_path = args.output_dir.join("h2h.key");
+    let public_key_path = args.output_dir.join("h2h.pub");
 
     // Check if files already exist
     if private_key_path.exists() {
@@ -75,19 +75,11 @@ pub fn run(args: KeygenArgs) -> i32 {
     println!("{}", "Next steps:".bold());
     println!(
         "  1. Sign a policy:   {}",
-        format!(
-            "hushspec sign policy.yaml --key {}",
-            private_key_path.display()
-        )
-        .dimmed()
+        format!("h2h sign policy.yaml --key {}", private_key_path.display()).dimmed()
     );
     println!(
         "  2. Verify it:       {}",
-        format!(
-            "hushspec verify policy.yaml --key {}",
-            public_key_path.display()
-        )
-        .dimmed()
+        format!("h2h verify policy.yaml --key {}", public_key_path.display()).dimmed()
     );
 
     0

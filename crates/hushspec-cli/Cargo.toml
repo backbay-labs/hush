@@ -6,7 +6,7 @@ license.workspace = true
 description = "CLI tool for validating, testing, and scaffolding HushSpec policies"
 
 [[bin]]
-name = "hushspec"
+name = "h2h"
 path = "src/main.rs"
 
 [dependencies]

@@ -16,7 +16,8 @@ hush/
 ├── schemas/           # JSON Schema definitions for HushSpec documents
 ├── crates/            # Rust reference implementation
 │   ├── hushspec/      # Core library: parsing, validation, types
-│   └── hushspec-testkit/  # Test utilities and fixture runners
+│   ├── hushspec-testkit/  # Test utilities and fixture runners
+│   └── hushspec-cli/      # h2h CLI binary
 ├── packages/          # Language SDKs
 │   ├── hushspec/      # TypeScript (@hushspec/core)
 │   ├── python/        # Python (hushspec)
@@ -84,6 +85,33 @@ cd packages/go && go test ./...
 cd packages/go && go vet ./...
 ```
 
+### h2h CLI
+
+```bash
+# Validate policy files
+h2h validate rulesets/default.yaml
+
+# Lint for best practices
+h2h lint rulesets/default.yaml
+
+# Run evaluation test suites
+h2h test --fixtures fixtures/core/evaluation
+
+# Scaffold a new policy project
+h2h init --preset default
+
+# Compare two policies
+h2h diff old.yaml new.yaml
+
+# Format policy files canonically
+h2h fmt policy.yaml
+
+# Sign / verify / keygen
+h2h keygen
+h2h sign policy.yaml --key h2h.key
+h2h verify policy.yaml --key h2h.pub
+```
+
 ### Conformance Testkit
 
 ```bash
@@ -107,6 +135,7 @@ cargo run -p hushspec-testkit -- --fixtures fixtures
 - `schemas/` -- JSON Schema files for validating HushSpec YAML/JSON documents
 - `crates/hushspec/src/lib.rs` -- Rust library entry point
 - `crates/hushspec-testkit/src/lib.rs` -- Test kit entry point
+- `crates/hushspec-cli/src/main.rs` -- h2h CLI entry point
 - `packages/hushspec/src/index.ts` -- TypeScript library entry point
 - `packages/python/hushspec/__init__.py` -- Python library entry point
 - `packages/go/hushspec/` -- Go library entry point

@@ -14,15 +14,15 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn hushspec() -> Command {
-    let mut cmd = Command::cargo_bin("hushspec").unwrap();
+fn h2h() -> Command {
+    let mut cmd = Command::cargo_bin("h2h").unwrap();
     cmd.current_dir(workspace_root());
     cmd
 }
 
 #[test]
 fn validate_valid_rulesets() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("rulesets/default.yaml")
         .arg("rulesets/strict.yaml")
@@ -38,7 +38,7 @@ fn validate_valid_rulesets() {
 
 #[test]
 fn validate_valid_fixture() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("fixtures/core/valid/minimal.yaml")
         .assert()
@@ -48,7 +48,7 @@ fn validate_valid_fixture() {
 
 #[test]
 fn validate_invalid_fixture_exits_1() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("fixtures/core/invalid/missing-version.yaml")
         .assert()
@@ -59,7 +59,7 @@ fn validate_invalid_fixture_exits_1() {
 
 #[test]
 fn validate_duplicate_patterns() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("fixtures/core/invalid/duplicate-pattern-names.yaml")
         .assert()
@@ -69,7 +69,7 @@ fn validate_duplicate_patterns() {
 
 #[test]
 fn validate_missing_file_exits_2() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("this-file-does-not-exist.yaml")
         .assert()
@@ -78,7 +78,7 @@ fn validate_missing_file_exits_2() {
 
 #[test]
 fn validate_json_output() {
-    let output = hushspec()
+    let output = h2h()
         .arg("validate")
         .arg("--format")
         .arg("json")
@@ -99,7 +99,7 @@ fn validate_json_output() {
 
 #[test]
 fn validate_json_output_invalid() {
-    let output = hushspec()
+    let output = h2h()
         .arg("validate")
         .arg("--format")
         .arg("json")
@@ -121,7 +121,7 @@ fn validate_json_output_invalid() {
 
 #[test]
 fn validate_json_output_multiple_files_is_valid_json_array() {
-    let output = hushspec()
+    let output = h2h()
         .arg("validate")
         .arg("--format")
         .arg("json")
@@ -165,7 +165,7 @@ rules:
     )
     .unwrap();
 
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("--strict")
         .arg(child_path.to_str().unwrap())
@@ -177,7 +177,7 @@ rules:
 
 #[test]
 fn test_egress_fixtures() {
-    hushspec()
+    h2h()
         .arg("test")
         .arg("fixtures/core/evaluation/egress.test.yaml")
         .assert()
@@ -187,7 +187,7 @@ fn test_egress_fixtures() {
 
 #[test]
 fn test_fixtures_directory() {
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--fixtures")
         .arg("fixtures/core/evaluation")
@@ -198,7 +198,7 @@ fn test_fixtures_directory() {
 
 #[test]
 fn test_tap_output() {
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--format")
         .arg("tap")
@@ -212,7 +212,7 @@ fn test_tap_output() {
 
 #[test]
 fn test_json_output() {
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--format")
         .arg("json")
@@ -226,7 +226,7 @@ fn test_json_output() {
 #[test]
 fn init_creates_policy_and_tests() {
     let tmp = TempDir::new().unwrap();
-    hushspec()
+    h2h()
         .arg("init")
         .arg("--preset")
         .arg("default")
@@ -242,14 +242,14 @@ fn init_creates_policy_and_tests() {
     assert!(test_file.exists(), "policy.test.yaml should be created");
 
     // Validate the generated policy
-    hushspec()
+    h2h()
         .arg("validate")
         .arg(policy.to_str().unwrap())
         .assert()
         .success();
 
     // Run the generated tests
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--fixtures")
         .arg(tmp.path().join(".hushspec/tests").to_str().unwrap())
@@ -261,7 +261,7 @@ fn init_creates_policy_and_tests() {
 #[test]
 fn init_strict_preset() {
     let tmp = TempDir::new().unwrap();
-    hushspec()
+    h2h()
         .arg("init")
         .arg("--preset")
         .arg("strict")
@@ -277,7 +277,7 @@ fn init_strict_preset() {
     );
 
     // Validate and test
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--fixtures")
         .arg(tmp.path().join(".hushspec/tests").to_str().unwrap())
@@ -288,7 +288,7 @@ fn init_strict_preset() {
 #[test]
 fn init_permissive_preset() {
     let tmp = TempDir::new().unwrap();
-    hushspec()
+    h2h()
         .arg("init")
         .arg("--preset")
         .arg("permissive")
@@ -304,7 +304,7 @@ fn init_permissive_preset() {
     );
 
     // Run tests
-    hushspec()
+    h2h()
         .arg("test")
         .arg("--fixtures")
         .arg(tmp.path().join(".hushspec/tests").to_str().unwrap())
@@ -316,7 +316,7 @@ fn init_permissive_preset() {
 fn init_fails_if_already_exists() {
     let tmp = TempDir::new().unwrap();
     // First init
-    hushspec()
+    h2h()
         .arg("init")
         .arg("--dir")
         .arg(tmp.path().to_str().unwrap())
@@ -324,7 +324,7 @@ fn init_fails_if_already_exists() {
         .success();
 
     // Second init should fail
-    hushspec()
+    h2h()
         .arg("init")
         .arg("--dir")
         .arg(tmp.path().to_str().unwrap())
@@ -364,7 +364,7 @@ rules:
     )
     .unwrap();
 
-    hushspec()
+    h2h()
         .arg("lint")
         .arg(policy_path.to_str().unwrap())
         .assert()
@@ -404,7 +404,7 @@ rules:
     )
     .unwrap();
 
-    let output = hushspec()
+    let output = h2h()
         .arg("lint")
         .arg("--format")
         .arg("json")
@@ -440,7 +440,7 @@ rules:
 fn lint_clean_policy_exits_0() {
     // The default ruleset should lint cleanly (no errors/warnings that cause nonzero)
     // Note: it may produce info-level findings which are fine
-    hushspec()
+    h2h()
         .arg("lint")
         .arg("rulesets/default.yaml")
         .assert()
@@ -466,14 +466,14 @@ rules:
     .unwrap();
 
     // Without --fail-on-warnings, should exit 0 (warnings are not failures)
-    hushspec()
+    h2h()
         .arg("lint")
         .arg(policy_path.to_str().unwrap())
         .assert()
         .success();
 
     // With --fail-on-warnings, should exit 1
-    hushspec()
+    h2h()
         .arg("lint")
         .arg("--fail-on-warnings")
         .arg(policy_path.to_str().unwrap())
@@ -485,7 +485,7 @@ rules:
 fn keygen_writes_private_key_with_restrictive_permissions() {
     let tmp = TempDir::new().unwrap();
 
-    hushspec()
+    h2h()
         .arg("keygen")
         .arg("--output-dir")
         .arg(tmp.path().to_str().unwrap())
@@ -493,8 +493,8 @@ fn keygen_writes_private_key_with_restrictive_permissions() {
         .success()
         .stdout(predicate::str::contains("Created"));
 
-    let private_key = tmp.path().join("hushspec.key");
-    let public_key = tmp.path().join("hushspec.pub");
+    let private_key = tmp.path().join("h2h.key");
+    let public_key = tmp.path().join("h2h.pub");
     assert!(private_key.exists(), "private key should exist");
     assert!(public_key.exists(), "public key should exist");
 
@@ -552,7 +552,7 @@ rules:
     )
     .unwrap();
 
-    hushspec()
+    h2h()
         .arg("diff")
         .arg(old_path.to_str().unwrap())
         .arg(new_path.to_str().unwrap())
@@ -595,7 +595,7 @@ rules:
     )
     .unwrap();
 
-    let output = hushspec()
+    let output = h2h()
         .arg("diff")
         .arg("--format")
         .arg("json")
@@ -653,7 +653,7 @@ rules:
     )
     .unwrap();
 
-    hushspec()
+    h2h()
         .arg("diff")
         .arg(old_path.to_str().unwrap())
         .arg(new_path.to_str().unwrap())
@@ -681,14 +681,14 @@ rules:
     fs::write(&policy_path, content).unwrap();
 
     // First, format it
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg(policy_path.to_str().unwrap())
         .assert()
         .success();
 
     // Now check -- should exit 0
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg("--check")
         .arg(policy_path.to_str().unwrap())
@@ -720,7 +720,7 @@ rules:
     fs::write(&policy_path, content).unwrap();
 
     // Check should exit 1 because the file needs reformatting
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg("--check")
         .arg(policy_path.to_str().unwrap())
@@ -752,7 +752,7 @@ rules:
 "#;
     fs::write(&policy_path, content).unwrap();
 
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg("--diff")
         .arg(policy_path.to_str().unwrap())
@@ -790,14 +790,14 @@ rules:
     fs::write(&policy_path, content).unwrap();
 
     // Format in place
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg(policy_path.to_str().unwrap())
         .assert()
         .success();
 
     // Now check should pass
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg("--check")
         .arg(policy_path.to_str().unwrap())
@@ -842,7 +842,7 @@ rules:
     )
     .unwrap();
 
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg(policy_path.to_str().unwrap())
         .assert()
@@ -876,7 +876,7 @@ rules:
 "#;
     fs::write(&policy_path, content).unwrap();
 
-    hushspec()
+    h2h()
         .arg("fmt")
         .arg(policy_path.to_str().unwrap())
         .assert()
@@ -896,7 +896,7 @@ fn panic_activate_creates_sentinel() {
     let tmp = TempDir::new().unwrap();
     let sentinel = tmp.path().join(".hushspec_panic");
 
-    hushspec()
+    h2h()
         .arg("panic")
         .arg("activate")
         .arg("--sentinel")
@@ -917,7 +917,7 @@ fn panic_deactivate_removes_sentinel() {
     fs::write(&sentinel, "").unwrap();
     assert!(sentinel.exists());
 
-    hushspec()
+    h2h()
         .arg("panic")
         .arg("deactivate")
         .arg("--sentinel")
@@ -934,7 +934,7 @@ fn panic_deactivate_already_inactive() {
     let tmp = TempDir::new().unwrap();
     let sentinel = tmp.path().join(".hushspec_panic");
 
-    hushspec()
+    h2h()
         .arg("panic")
         .arg("deactivate")
         .arg("--sentinel")
@@ -950,7 +950,7 @@ fn panic_status_active() {
     let sentinel = tmp.path().join(".hushspec_panic");
     fs::write(&sentinel, "").unwrap();
 
-    hushspec()
+    h2h()
         .arg("panic")
         .arg("status")
         .arg("--sentinel")
@@ -965,7 +965,7 @@ fn panic_status_inactive() {
     let tmp = TempDir::new().unwrap();
     let sentinel = tmp.path().join(".hushspec_panic");
 
-    hushspec()
+    h2h()
         .arg("panic")
         .arg("status")
         .arg("--sentinel")
@@ -977,7 +977,7 @@ fn panic_status_inactive() {
 
 #[test]
 fn validate_panic_policy() {
-    hushspec()
+    h2h()
         .arg("validate")
         .arg("rulesets/panic.yaml")
         .assert()

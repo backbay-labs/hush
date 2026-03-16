@@ -14,10 +14,11 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "hushspec",
-    about = "HushSpec policy toolkit",
+    name = "h2h",
+    about = "hush to hush — because your agent's permissions shouldn't be shouted about",
     version,
-    propagate_version = true
+    propagate_version = true,
+    after_help = "psst... keep it down out there"
 )]
 struct Cli {
     #[command(subcommand)]

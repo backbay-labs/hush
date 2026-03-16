@@ -197,39 +197,39 @@ guard.enforce({"type": "tool_call", "target": "bash"})  # raises HushSpecDenied 
 
 ## CLI Tool
 
-The `hushspec` CLI covers the common policy workflow: validate, test, lint, diff, format, initialize, sign, verify, and trigger panic mode.
+The `h2h` CLI covers the common policy workflow: validate, test, lint, diff, format, initialize, sign, verify, and trigger panic mode.
 
 ```bash
 # Validate a policy against the HushSpec schema
-hushspec validate policy.yaml
+h2h validate policy.yaml
 
 # Run evaluation test suites
-hushspec test --fixtures ./tests/
+h2h test --fixtures ./tests/
 
 # Static analysis and linting
-hushspec lint policy.yaml
+h2h lint policy.yaml
 
 # Compare two policies and show effective decision changes
-hushspec diff old.yaml new.yaml
+h2h diff old.yaml new.yaml
 
 # Format policy files canonically
-hushspec fmt policy.yaml
+h2h fmt policy.yaml
 
 # Scaffold a new policy project
-hushspec init --preset default
+h2h init --preset default
 
 # Sign a policy with Ed25519
-hushspec sign policy.yaml --key hushspec.key
+h2h sign policy.yaml --key h2h.key
 
 # Verify a policy signature
-hushspec verify policy.yaml --key hushspec.pub
+h2h verify policy.yaml --key h2h.pub
 
 # Generate a new Ed25519 keypair
-hushspec keygen --output hushspec
+h2h keygen
 
 # Emergency override (deny-all kill switch)
-hushspec panic activate --sentinel /tmp/hushspec.panic
-hushspec panic deactivate --sentinel /tmp/hushspec.panic
+h2h panic activate --sentinel /tmp/hushspec.panic
+h2h panic deactivate --sentinel /tmp/hushspec.panic
 ```
 
 Build from source:
@@ -321,13 +321,13 @@ Policies can be signed with Ed25519 keys and verified at load time. The CLI prov
 
 ```bash
 # Generate a keypair
-hushspec keygen --output mykey
+h2h keygen --output-dir mykeys
 
 # Sign a policy (creates policy.yaml.sig)
-hushspec sign policy.yaml --key mykey.key
+h2h sign policy.yaml --key mykeys/h2h.key
 
 # Verify the signature
-hushspec verify policy.yaml --key mykey.pub
+h2h verify policy.yaml --key mykeys/h2h.pub
 ```
 
 </details>
@@ -339,10 +339,10 @@ Panic mode is a deny-all kill switch that can be activated immediately without r
 
 ```bash
 # Activate panic mode
-hushspec panic activate --sentinel /tmp/hushspec.panic
+h2h panic activate --sentinel /tmp/hushspec.panic
 
 # Deactivate
-hushspec panic deactivate --sentinel /tmp/hushspec.panic
+h2h panic deactivate --sentinel /tmp/hushspec.panic
 ```
 
 ```typescript
