@@ -56,6 +56,7 @@ impl DetectorRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(RegexInjectionDetector::new()));
+        registry.register(Box::new(RegexJailbreakDetector::new()));
         registry.register(Box::new(RegexExfiltrationDetector::new()));
         registry
     }
@@ -78,7 +79,7 @@ struct DetectionPattern {
     weight: f64,
 }
 
-/// Regex-based prompt injection and jailbreak detector.
+/// Regex-based prompt injection detector.
 ///
 /// Patterns are compiled once at construction time.
 pub struct RegexInjectionDetector {
@@ -121,14 +122,6 @@ impl RegexInjectionDetector {
                 regex: Regex::new(r"(?i)(pretend|imagine|act\s+as\s+if|suppose)\s+(you|that|we)")
                     .expect("pretend_mode regex"),
                 weight: 0.2,
-            },
-            DetectionPattern {
-                name: "jailbreak_dan".to_string(),
-                regex: Regex::new(
-                    r"(?i)(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)",
-                )
-                .expect("jailbreak_dan regex"),
-                weight: 0.5,
             },
             DetectionPattern {
                 name: "delimiter_injection".to_string(),
@@ -189,7 +182,78 @@ impl Detector for RegexInjectionDetector {
         } else {
             let names: Vec<&str> = matched_patterns.iter().map(|p| p.name.as_str()).collect();
             Some(format!(
-                "matched {} injection/jailbreak pattern(s): {}",
+                "matched {} injection pattern(s): {}",
+                matched_patterns.len(),
+                names.join(", ")
+            ))
+        };
+
+        DetectionResult {
+            detector_name: self.name().to_string(),
+            category: self.category(),
+            score,
+            matched_patterns,
+            explanation,
+        }
+    }
+}
+
+/// Regex-based jailbreak detector.
+pub struct RegexJailbreakDetector {
+    patterns: Vec<DetectionPattern>,
+}
+
+impl RegexJailbreakDetector {
+    pub fn new() -> Self {
+        let patterns = vec![DetectionPattern {
+            name: "jailbreak_dan".to_string(),
+            regex: Regex::new(r"(?i)(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)")
+                .expect("jailbreak_dan regex"),
+            weight: 0.5,
+        }];
+
+        Self { patterns }
+    }
+}
+
+impl Default for RegexJailbreakDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Detector for RegexJailbreakDetector {
+    fn name(&self) -> &str {
+        "regex_jailbreak"
+    }
+
+    fn category(&self) -> DetectionCategory {
+        DetectionCategory::Jailbreak
+    }
+
+    fn detect(&self, input: &str) -> DetectionResult {
+        let mut matched_patterns = Vec::new();
+        let mut total_weight = 0.0;
+
+        for pattern in &self.patterns {
+            if let Some(m) = pattern.regex.find(input) {
+                total_weight += pattern.weight;
+                matched_patterns.push(MatchedPattern {
+                    name: pattern.name.clone(),
+                    weight: pattern.weight,
+                    matched_text: Some(m.as_str().to_string()),
+                });
+            }
+        }
+
+        let score = total_weight.min(1.0);
+
+        let explanation = if matched_patterns.is_empty() {
+            None
+        } else {
+            let names: Vec<&str> = matched_patterns.iter().map(|p| p.name.as_str()).collect();
+            Some(format!(
+                "matched {} jailbreak pattern(s): {}",
                 matched_patterns.len(),
                 names.join(", ")
             ))
@@ -407,7 +471,13 @@ mod tests {
     #[test]
     fn injection_detector_compiles_all_patterns() {
         let detector = RegexInjectionDetector::new();
-        assert_eq!(detector.patterns.len(), 8);
+        assert_eq!(detector.patterns.len(), 7);
+    }
+
+    #[test]
+    fn jailbreak_detector_compiles_all_patterns() {
+        let detector = RegexJailbreakDetector::new();
+        assert_eq!(detector.patterns.len(), 1);
     }
 
     #[test]

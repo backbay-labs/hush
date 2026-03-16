@@ -34,6 +34,7 @@ export class DetectorRegistry {
   static withDefaults(): DetectorRegistry {
     const registry = new DetectorRegistry();
     registry.register(new RegexInjectionDetector());
+    registry.register(new RegexJailbreakDetector());
     registry.register(new RegexExfiltrationDetector());
     return registry;
   }
@@ -47,7 +48,6 @@ interface DetectionPattern {
   name: string;
   regex: RegExp;
   weight: number;
-  category: DetectionCategory;
 }
 
 export class RegexInjectionDetector implements Detector {
@@ -62,49 +62,36 @@ export class RegexInjectionDetector implements Detector {
         name: 'ignore_instructions',
         regex: /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)/i,
         weight: 0.4,
-        category: 'prompt_injection',
       },
       {
         name: 'new_instructions',
         regex: /(new|updated|revised)\s+instructions?\s*:/i,
         weight: 0.3,
-        category: 'prompt_injection',
       },
       {
         name: 'system_prompt_extract',
         regex: /(reveal|show|display|print|output)\s+(your|the)\s+(system\s+)?(prompt|instructions|rules)/i,
         weight: 0.4,
-        category: 'prompt_injection',
       },
       {
         name: 'role_override',
         regex: /you\s+are\s+now\s+(a|an|the)\s+/i,
         weight: 0.3,
-        category: 'prompt_injection',
       },
       {
         name: 'pretend_mode',
         regex: /(pretend|imagine|act\s+as\s+if|suppose)\s+(you|that|we)/i,
         weight: 0.2,
-        category: 'prompt_injection',
-      },
-      {
-        name: 'jailbreak_dan',
-        regex: /(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)/i,
-        weight: 0.5,
-        category: 'jailbreak',
       },
       {
         name: 'delimiter_injection',
         regex: /(---+|===+|```)\s*(system|assistant|user)\s*[:\n]/i,
         weight: 0.4,
-        category: 'prompt_injection',
       },
       {
         name: 'encoding_evasion',
         regex: /(base64|rot13|hex|url.?encod|unicode)\s*(decod|encod|convert)/i,
         weight: 0.1,
-        category: 'prompt_injection',
       },
     ];
   }
@@ -130,7 +117,56 @@ export class RegexInjectionDetector implements Detector {
     const explanation =
       matchedPatterns.length === 0
         ? undefined
-        : `matched ${matchedPatterns.length} injection/jailbreak pattern(s): ${matchedPatterns.map((p) => p.name).join(', ')}`;
+        : `matched ${matchedPatterns.length} injection pattern(s): ${matchedPatterns.map((p) => p.name).join(', ')}`;
+
+    return {
+      detector_name: this.name,
+      category: this.category,
+      score,
+      matched_patterns: matchedPatterns,
+      explanation,
+    };
+  }
+}
+
+export class RegexJailbreakDetector implements Detector {
+  readonly name = 'regex_jailbreak';
+  readonly category: DetectionCategory = 'jailbreak';
+
+  private patterns: DetectionPattern[];
+
+  constructor() {
+    this.patterns = [
+      {
+        name: 'jailbreak_dan',
+        regex: /(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)/i,
+        weight: 0.5,
+      },
+    ];
+  }
+
+  detect(input: string): DetectionResult {
+    const matchedPatterns: MatchedPattern[] = [];
+    let totalWeight = 0;
+
+    for (const pattern of this.patterns) {
+      const m = pattern.regex.exec(input);
+      if (m) {
+        totalWeight += pattern.weight;
+        matchedPatterns.push({
+          name: pattern.name,
+          weight: pattern.weight,
+          matched_text: m[0],
+        });
+      }
+    }
+
+    const score = Math.min(totalWeight, 1.0);
+
+    const explanation =
+      matchedPatterns.length === 0
+        ? undefined
+        : `matched ${matchedPatterns.length} jailbreak pattern(s): ${matchedPatterns.map((p) => p.name).join(', ')}`;
 
     return {
       detector_name: this.name,
@@ -154,31 +190,26 @@ export class RegexExfiltrationDetector implements Detector {
         name: 'ssn',
         regex: /\b\d{3}-\d{2}-\d{4}\b/,
         weight: 0.8,
-        category: 'data_exfiltration',
       },
       {
         name: 'credit_card',
         regex: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b/,
         weight: 0.8,
-        category: 'data_exfiltration',
       },
       {
         name: 'email_address',
         regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
         weight: 0.3,
-        category: 'data_exfiltration',
       },
       {
         name: 'api_key_pattern',
         regex: /(api[_\-]?key|secret[_\-]?key|access[_\-]?token)\s*[:=]\s*\S+/i,
         weight: 0.6,
-        category: 'data_exfiltration',
       },
       {
         name: 'private_key',
         regex: /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----/,
         weight: 0.9,
-        category: 'data_exfiltration',
       },
     ];
   }

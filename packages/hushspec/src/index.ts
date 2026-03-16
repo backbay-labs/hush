@@ -73,6 +73,7 @@ export {
   evaluateWithDetection,
   DetectorRegistry,
   RegexInjectionDetector,
+  RegexJailbreakDetector,
   RegexExfiltrationDetector,
   DEFAULT_DETECTION_CONFIG,
   type DetectionCategory,

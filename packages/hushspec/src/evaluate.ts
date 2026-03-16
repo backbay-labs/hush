@@ -3,8 +3,10 @@ import type {
   ComputerUseRule,
   EgressRule,
   ForbiddenPathsRule,
+  InputInjectionRule,
   PatchIntegrityRule,
   PathAllowlistRule,
+  RemoteDesktopChannelsRule,
   SecretPatternsRule,
   ShellCommandsRule,
   ToolAccessRule,
@@ -93,6 +95,26 @@ function denyResult(
   posture: PostureResult | undefined,
 ): EvaluationResult {
   return { decision: 'deny', matched_rule: matchedRule, reason, origin_profile: originProfile, posture };
+}
+
+function decisionRank(decision: Decision): number {
+  switch (decision) {
+    case 'allow': return 1;
+    case 'warn': return 2;
+    case 'deny': return 3;
+  }
+}
+
+function moreRestrictiveResult(left: EvaluationResult, right: EvaluationResult): EvaluationResult {
+  const leftRank = decisionRank(left.decision);
+  const rightRank = decisionRank(right.decision);
+  if (rightRank > leftRank) {
+    return right;
+  }
+  if (leftRank > rightRank) {
+    return left;
+  }
+  return right.matched_rule != null ? right : left;
 }
 
 function globMatches(pattern: string, target: string): boolean {
@@ -616,6 +638,93 @@ function evaluateComputerUseRule(
   }
 }
 
+function evaluateRemoteDesktopChannelsRule(
+  rule: RemoteDesktopChannelsRule,
+  target: string,
+  posture: PostureResult | undefined,
+  originProfileId: string | undefined,
+): EvaluationResult | undefined {
+  if (rule.enabled === false) {
+    return undefined;
+  }
+
+  let field: string;
+  let allowed: boolean | undefined;
+  switch (target) {
+    case 'remote.clipboard':
+      field = 'clipboard';
+      allowed = rule.clipboard;
+      break;
+    case 'remote.file_transfer':
+      field = 'file_transfer';
+      allowed = rule.file_transfer;
+      break;
+    case 'remote.audio':
+      field = 'audio';
+      allowed = rule.audio;
+      break;
+    case 'remote.drive_mapping':
+      field = 'drive_mapping';
+      allowed = rule.drive_mapping;
+      break;
+    default:
+      return undefined;
+  }
+
+  if (allowed) {
+    return allowResult(
+      `rules.remote_desktop_channels.${field}`,
+      `remote desktop channel '${field}' is enabled`,
+      originProfileId,
+      posture,
+    );
+  }
+
+  return denyResult(
+    `rules.remote_desktop_channels.${field}`,
+    `remote desktop channel '${field}' is disabled`,
+    originProfileId,
+    posture,
+  );
+}
+
+function evaluateInputInjectionRule(
+  rule: InputInjectionRule,
+  target: string,
+  posture: PostureResult | undefined,
+  originProfileId: string | undefined,
+): EvaluationResult {
+  if (rule.enabled === false) {
+    return allowResult(undefined, undefined, originProfileId, posture);
+  }
+
+  const allowedTypes = rule.allowed_types ?? [];
+  if (allowedTypes.length === 0) {
+    return denyResult(
+      'rules.input_injection.allowed_types',
+      'input injection is not allowed when allowed_types is empty',
+      originProfileId,
+      posture,
+    );
+  }
+
+  if (allowedTypes.includes(target)) {
+    return allowResult(
+      'rules.input_injection.allowed_types',
+      'input injection type is explicitly allowed',
+      originProfileId,
+      posture,
+    );
+  }
+
+  return denyResult(
+    'rules.input_injection.allowed_types',
+    'input injection type is not allowed',
+    originProfileId,
+    posture,
+  );
+}
+
 function evaluateForbiddenPaths(
   rule: ForbiddenPathsRule,
   target: string,
@@ -986,10 +1095,47 @@ function evaluateComputerUse(
   posture: PostureResult | undefined,
   originProfileId: string | undefined,
 ): EvaluationResult {
-  const computerRule = spec.rules?.computer_use;
-  if (computerRule) {
-    return evaluateComputerUseRule(
-      computerRule,
+  const target = action.target ?? '';
+  const computerUseResult = spec.rules?.computer_use != null
+    ? evaluateComputerUseRule(
+      spec.rules.computer_use,
+      target,
+      posture,
+      originProfileId,
+    )
+    : undefined;
+  const remoteDesktopResult = spec.rules?.remote_desktop_channels != null
+    ? evaluateRemoteDesktopChannelsRule(
+      spec.rules.remote_desktop_channels,
+      target,
+      posture,
+      originProfileId,
+    )
+    : undefined;
+
+  if (computerUseResult != null && remoteDesktopResult != null) {
+    return moreRestrictiveResult(computerUseResult, remoteDesktopResult);
+  }
+  if (computerUseResult != null) {
+    return computerUseResult;
+  }
+  if (remoteDesktopResult != null) {
+    return remoteDesktopResult;
+  }
+
+  return allowResult(undefined, undefined, originProfileId, posture);
+}
+
+function evaluateInputInjection(
+  spec: HushSpec,
+  action: EvaluationAction,
+  posture: PostureResult | undefined,
+  originProfileId: string | undefined,
+): EvaluationResult {
+  const inputInjectionRule = spec.rules?.input_injection;
+  if (inputInjectionRule) {
+    return evaluateInputInjectionRule(
+      inputInjectionRule,
       action.target ?? '',
       posture,
       originProfileId,
@@ -1084,6 +1230,8 @@ export function evaluate(spec: HushSpec, action: EvaluationAction): EvaluationRe
       return evaluateShellCommand(spec, action, posture, originProfileId);
     case 'computer_use':
       return evaluateComputerUse(spec, action, posture, originProfileId);
+    case 'input_inject':
+      return evaluateInputInjection(spec, action, posture, originProfileId);
     default:
       return {
         decision: 'allow',

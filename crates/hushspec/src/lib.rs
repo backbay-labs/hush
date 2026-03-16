@@ -21,7 +21,7 @@ pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_co
 pub use detection::{
     DetectionCategory, DetectionConfig, DetectionResult, Detector, DetectorRegistry,
     EvaluationWithDetection, MatchedPattern, RegexExfiltrationDetector, RegexInjectionDetector,
-    evaluate_with_detection,
+    RegexJailbreakDetector, evaluate_with_detection,
 };
 pub use evaluate::{
     Decision, EvaluationAction, EvaluationResult, OriginContext, PostureContext, PostureResult,

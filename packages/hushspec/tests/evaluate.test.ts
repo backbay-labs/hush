@@ -105,4 +105,54 @@ describe('evaluate', () => {
     expect(result.decision).toBe('deny');
     expect(result.matched_rule).toBe('rules.path_allowlist');
   });
+
+  it('denies input injection types that are not explicitly allowed', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'input-injection',
+      rules: {
+        input_injection: {
+          enabled: true,
+          allowed_types: ['clipboard'],
+        },
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'input_inject',
+      target: 'keystroke',
+    });
+
+    expect(result.decision).toBe('deny');
+    expect(result.matched_rule).toBe('rules.input_injection.allowed_types');
+  });
+
+  it('applies remote desktop channel blocks during computer-use evaluation', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'remote-desktop-channels',
+      rules: {
+        computer_use: {
+          enabled: true,
+          mode: 'observe',
+          allowed_actions: [],
+        },
+        remote_desktop_channels: {
+          enabled: true,
+          clipboard: false,
+          file_transfer: true,
+          audio: true,
+          drive_mapping: true,
+        },
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'computer_use',
+      target: 'remote.clipboard',
+    });
+
+    expect(result.decision).toBe('deny');
+    expect(result.matched_rule).toBe('rules.remote_desktop_channels.clipboard');
+  });
 });

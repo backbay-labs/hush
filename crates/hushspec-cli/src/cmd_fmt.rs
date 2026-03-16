@@ -1,6 +1,7 @@
 use clap::ValueEnum;
 use colored::Colorize;
 use hushspec::HushSpec;
+use hushspec::schema::MergeStrategy;
 use std::path::PathBuf;
 
 #[derive(clap::Args)]
@@ -230,10 +231,7 @@ fn format_spec(spec: &HushSpec) -> String {
 
     // merge_strategy
     if let Some(ms) = &spec.merge_strategy {
-        let ms_str = serde_yaml::to_string(ms)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        let ms_str = format_merge_strategy(ms);
         out.push_str(&format!("merge_strategy: {ms_str}\n"));
     }
 
@@ -383,10 +381,7 @@ fn format_secret_patterns(r: &hushspec::SecretPatternsRule, out: &mut String) {
         for p in &r.patterns {
             out.push_str(&format!("      - name: {}\n", yaml_scalar(&p.name)));
             out.push_str(&format!("        pattern: {}\n", yaml_scalar(&p.pattern)));
-            let sev = serde_yaml::to_string(&p.severity)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+            let sev = format_severity(&p.severity);
             out.push_str(&format!("        severity: {sev}\n"));
             if let Some(desc) = &p.description {
                 out.push_str(&format!("        description: {}\n", yaml_scalar(desc)));
@@ -440,10 +435,7 @@ fn format_computer_use(r: &hushspec::ComputerUseRule, out: &mut String) {
     } else {
         out.push_str("    enabled: true\n");
     }
-    let mode = serde_yaml::to_string(&r.mode)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let mode = format_computer_use_mode(&r.mode);
     out.push_str(&format!("    mode: {mode}\n"));
     format_sorted_string_list("allowed_actions", &r.allowed_actions, 4, out);
 }
@@ -553,6 +545,30 @@ fn format_f64(v: f64) -> String {
     }
 }
 
+fn format_merge_strategy(strategy: &MergeStrategy) -> &'static str {
+    match strategy {
+        MergeStrategy::Replace => "replace",
+        MergeStrategy::Merge => "merge",
+        MergeStrategy::DeepMerge => "deep_merge",
+    }
+}
+
+fn format_severity(severity: &hushspec::Severity) -> &'static str {
+    match severity {
+        hushspec::Severity::Critical => "critical",
+        hushspec::Severity::Error => "error",
+        hushspec::Severity::Warn => "warn",
+    }
+}
+
+fn format_computer_use_mode(mode: &hushspec::ComputerUseMode) -> &'static str {
+    match mode {
+        hushspec::ComputerUseMode::Observe => "observe",
+        hushspec::ComputerUseMode::Guardrail => "guardrail",
+        hushspec::ComputerUseMode::FailClosed => "fail_closed",
+    }
+}
+
 fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
     let mut diff_output = String::new();
     diff_output.push_str(&format!("--- {} (original)\n", path.display()));
@@ -592,6 +608,7 @@ fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> Stri
 mod tests {
     use super::format_spec;
     use hushspec::HushSpec;
+    use hushspec::schema::MergeStrategy;
 
     #[test]
     fn format_spec_preserves_newlines_and_tabs_in_scalars() {
@@ -611,5 +628,62 @@ mod tests {
 
         assert_eq!(reparsed.name.as_deref(), Some("line1\nline2\tend"));
         assert_eq!(reparsed.description.as_deref(), Some("tab\tvalue"));
+    }
+
+    #[test]
+    fn format_spec_serializes_enums_without_document_markers() {
+        let spec = HushSpec {
+            hushspec: "0.1.0".to_string(),
+            name: Some("enum-check".to_string()),
+            description: None,
+            extends: None,
+            merge_strategy: Some(MergeStrategy::DeepMerge),
+            rules: Some(hushspec::Rules {
+                secret_patterns: Some(hushspec::SecretPatternsRule {
+                    enabled: true,
+                    patterns: vec![hushspec::SecretPattern {
+                        name: "token".to_string(),
+                        pattern: "token".to_string(),
+                        severity: hushspec::Severity::Critical,
+                        description: None,
+                    }],
+                    skip_paths: vec![],
+                }),
+                computer_use: Some(hushspec::ComputerUseRule {
+                    enabled: true,
+                    mode: hushspec::ComputerUseMode::Guardrail,
+                    allowed_actions: vec![],
+                }),
+                ..Default::default()
+            }),
+            extensions: None,
+            metadata: None,
+        };
+
+        let formatted = format_spec(&spec);
+        assert!(!formatted.contains("---\n"));
+        assert!(formatted.contains("merge_strategy: deep_merge\n"));
+        assert!(formatted.contains("severity: critical\n"));
+        assert!(formatted.contains("mode: guardrail\n"));
+
+        let reparsed = HushSpec::parse(&formatted).expect("formatted YAML should parse");
+        assert_eq!(reparsed.merge_strategy, Some(MergeStrategy::DeepMerge));
+        assert_eq!(
+            reparsed
+                .rules
+                .as_ref()
+                .and_then(|rules| rules.secret_patterns.as_ref())
+                .and_then(|rule| rule.patterns.first())
+                .map(|pattern| pattern.severity),
+            Some(hushspec::Severity::Critical)
+        );
+        assert_eq!(
+            reparsed
+                .rules
+                .as_ref()
+                .and_then(|rules| rules.computer_use.as_ref())
+                .map(|rule| rule.mode),
+            Some(hushspec::ComputerUseMode::Guardrail)
+        );
     }
 }
