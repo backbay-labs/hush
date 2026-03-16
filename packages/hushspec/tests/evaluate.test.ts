@@ -127,6 +127,24 @@ describe('evaluate', () => {
     expect(result.matched_rule).toBe('rules.input_injection.allowed_types');
   });
 
+  it('treats input injection as disabled unless enabled is true', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'input-injection-default-disabled',
+      rules: {
+        input_injection: {},
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'input_inject',
+      target: 'keystroke',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect(result.matched_rule).toBeUndefined();
+  });
+
   it('applies remote desktop channel blocks during computer-use evaluation', () => {
     const spec: HushSpec = {
       hushspec: '0.1.0',
@@ -154,6 +172,62 @@ describe('evaluate', () => {
 
     expect(result.decision).toBe('deny');
     expect(result.matched_rule).toBe('rules.remote_desktop_channels.clipboard');
+  });
+
+  it('treats computer use as disabled unless enabled is true', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'computer-use-default-disabled',
+      rules: {
+        computer_use: {},
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'computer_use',
+      target: 'remote.session.connect',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect(result.matched_rule).toBeUndefined();
+  });
+
+  it('treats remote desktop channels as disabled unless enabled is true', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'remote-desktop-default-disabled',
+      rules: {
+        remote_desktop_channels: {},
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'computer_use',
+      target: 'remote.clipboard',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect(result.matched_rule).toBeUndefined();
+  });
+
+  it('defaults remote audio to allow when the channel rule is enabled', () => {
+    const spec: HushSpec = {
+      hushspec: '0.1.0',
+      name: 'remote-audio-default-allow',
+      rules: {
+        remote_desktop_channels: {
+          enabled: true,
+        },
+      },
+    };
+
+    const result = evaluate(spec, {
+      type: 'computer_use',
+      target: 'remote.audio',
+    });
+
+    expect(result.decision).toBe('allow');
+    expect(result.matched_rule).toBe('rules.remote_desktop_channels.audio');
   });
 
   it('enforces RE2-style inline flags at runtime', () => {

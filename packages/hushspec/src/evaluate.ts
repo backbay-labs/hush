@@ -614,7 +614,7 @@ function evaluateComputerUseRule(
   posture: PostureResult | undefined,
   originProfileId: string | undefined,
 ): EvaluationResult {
-  if (rule.enabled === false) {
+  if (rule.enabled !== true) {
     return allowResult(undefined, undefined, originProfileId, posture);
   }
 
@@ -660,28 +660,28 @@ function evaluateRemoteDesktopChannelsRule(
   posture: PostureResult | undefined,
   originProfileId: string | undefined,
 ): EvaluationResult | undefined {
-  if (rule.enabled === false) {
+  if (rule.enabled !== true) {
     return undefined;
   }
 
   let field: string;
-  let allowed: boolean | undefined;
+  let allowed: boolean;
   switch (target) {
     case 'remote.clipboard':
       field = 'clipboard';
-      allowed = rule.clipboard;
+      allowed = rule.clipboard ?? false;
       break;
     case 'remote.file_transfer':
       field = 'file_transfer';
-      allowed = rule.file_transfer;
+      allowed = rule.file_transfer ?? false;
       break;
     case 'remote.audio':
       field = 'audio';
-      allowed = rule.audio;
+      allowed = rule.audio ?? true;
       break;
     case 'remote.drive_mapping':
       field = 'drive_mapping';
-      allowed = rule.drive_mapping;
+      allowed = rule.drive_mapping ?? false;
       break;
     default:
       return undefined;
@@ -710,7 +710,7 @@ function evaluateInputInjectionRule(
   posture: PostureResult | undefined,
   originProfileId: string | undefined,
 ): EvaluationResult {
-  if (rule.enabled === false) {
+  if (rule.enabled !== true) {
     return allowResult(undefined, undefined, originProfileId, posture);
   }
 
