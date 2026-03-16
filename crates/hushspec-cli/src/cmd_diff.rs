@@ -462,7 +462,14 @@ fn extract_regex_literal(pattern: &str) -> String {
                     }
                 }
             }
-            '(' | ')' | '?' | '+' | '*' | '{' | '}' | '|' | '^' | '$' => {
+            '{' => {
+                for inner in chars.by_ref() {
+                    if inner == '}' {
+                        break;
+                    }
+                }
+            }
+            '(' | ')' | '?' | '+' | '*' | '}' | '|' | '^' | '$' => {
                 // Skip metacharacters
             }
             '.' => {
@@ -645,7 +652,7 @@ fn floor_char_boundary(s: &str, max_len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_decision_cell, truncate_str};
+    use super::{extract_regex_literal, format_decision_cell, truncate_str};
 
     fn strip_ansi(value: &str) -> String {
         let mut stripped = String::new();
@@ -678,5 +685,11 @@ mod tests {
     fn format_decision_cell_preserves_column_width_without_counting_ansi() {
         let colored = format_decision_cell("allow");
         assert_eq!(strip_ansi(&colored), "allow    ");
+    }
+
+    #[test]
+    fn extract_regex_literal_skips_quantifier_arguments() {
+        let literal = extract_regex_literal(r"AKIA[0-9A-Z]{16}");
+        assert_eq!(literal, "AKIA0");
     }
 }

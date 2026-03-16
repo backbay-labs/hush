@@ -482,6 +482,32 @@ rules:
 }
 
 #[test]
+fn keygen_writes_private_key_with_restrictive_permissions() {
+    let tmp = TempDir::new().unwrap();
+
+    hushspec()
+        .arg("keygen")
+        .arg("--output-dir")
+        .arg(tmp.path().to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created"));
+
+    let private_key = tmp.path().join("hushspec.key");
+    let public_key = tmp.path().join("hushspec.pub");
+    assert!(private_key.exists(), "private key should exist");
+    assert!(public_key.exists(), "public key should exist");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = fs::metadata(&private_key).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "private key should be created with 0600");
+    }
+}
+
+#[test]
 fn diff_detects_decision_changes() {
     let tmp = TempDir::new().unwrap();
 

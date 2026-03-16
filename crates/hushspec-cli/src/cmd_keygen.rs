@@ -1,4 +1,5 @@
 use colored::Colorize;
+use std::io::Write;
 use std::path::PathBuf;
 
 #[derive(clap::Args)]
@@ -40,25 +41,10 @@ pub fn run(args: KeygenArgs) -> i32 {
     // Generate keypair
     let (signing_key, verifying_key) = hushspec::signing::generate_keypair();
 
-    // Write private key
     let private_pem = hushspec::signing::format_private_key_pem(&signing_key);
-    if let Err(e) = std::fs::write(&private_key_path, &private_pem) {
+    if let Err(e) = write_private_key(&private_key_path, &private_pem) {
         eprintln!("{} Failed to write private key: {e}", "ERROR".red());
         return 1;
-    }
-
-    // Set restrictive permissions on private key (Unix only)
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Err(e) =
-            std::fs::set_permissions(&private_key_path, std::fs::Permissions::from_mode(0o600))
-        {
-            eprintln!(
-                "{} Failed to set permissions on private key: {e}",
-                "WARN".yellow()
-            );
-        }
     }
 
     // Write public key
@@ -105,4 +91,26 @@ pub fn run(args: KeygenArgs) -> i32 {
     );
 
     0
+}
+
+fn write_private_key(path: &PathBuf, contents: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)
+    }
 }
