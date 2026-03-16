@@ -1,0 +1,130 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Packages to publish (comma-separated: rust,npm,pypi or "all")'
+        required: true
+        default: 'all'
+      dry_run:
+        description: 'Dry run (no actual publish)'
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Gate: run full CI first ──────────────────────────────────────────
+  ci:
+    name: CI Gate
+    uses: ./.github/workflows/ci.yml
+
+  # ── Rust: publish hushspec then hushspec-cli to crates.io ──────────
+  rust:
+    name: Publish Rust crates
+    needs: ci
+    runs-on: ubuntu-latest
+    if: >-
+      contains(github.event.inputs.packages, 'rust') ||
+      contains(github.event.inputs.packages, 'all')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish hushspec (library)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            cargo publish -p hushspec --dry-run
+          else
+            cargo publish -p hushspec
+          fi
+
+      - name: Wait for crates.io index update
+        if: github.event.inputs.dry_run != 'true'
+        run: sleep 30
+
+      - name: Publish hushspec-cli (h2h binary)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            cargo publish -p hushspec-cli --dry-run
+          else
+            cargo publish -p hushspec-cli
+          fi
+
+  # ── npm: publish @hushspec/core ────────────────────────────────────
+  npm:
+    name: Publish npm package
+    needs: ci
+    runs-on: ubuntu-latest
+    if: >-
+      contains(github.event.inputs.packages, 'npm') ||
+      contains(github.event.inputs.packages, 'all')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish @hushspec/core
+        working-directory: packages/hushspec
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            npm publish --access public --dry-run
+          else
+            npm publish --access public
+          fi
+
+  # ── PyPI: publish hushspec ─────────────────────────────────────────
+  pypi:
+    name: Publish Python package
+    needs: ci
+    runs-on: ubuntu-latest
+    if: >-
+      contains(github.event.inputs.packages, 'pypi') ||
+      contains(github.event.inputs.packages, 'all')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build sdist and wheel
+        working-directory: packages/python
+        run: python -m build
+
+      - name: Publish to PyPI
+        working-directory: packages/python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            twine check dist/*
+            echo "Dry run — skipping upload"
+          else
+            twine upload dist/*
+          fi
