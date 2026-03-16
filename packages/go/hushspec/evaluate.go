@@ -457,23 +457,27 @@ func evaluateComputerUseRule(
 		}
 	}
 
-	switch rule.Mode {
+	mode := rule.Mode
+	if mode == "" {
+		mode = ComputerUseModeGuardrail
+	}
+	switch mode {
 	case ComputerUseModeObserve:
 		return allowResult(
 			"rules.computer_use.mode",
 			"observe mode does not block unlisted actions",
 			originProfileID, posture,
 		)
-	case ComputerUseModeGuardrail:
-		return warnResult(
-			"rules.computer_use.mode",
-			"guardrail mode warns on unlisted actions",
-			originProfileID, posture,
-		)
-	default: // ComputerUseModeFailClosed or empty
+	case ComputerUseModeFailClosed:
 		return denyResult(
 			"rules.computer_use.mode",
 			"fail_closed mode denies unlisted actions",
+			originProfileID, posture,
+		)
+	default: // guardrail
+		return warnResult(
+			"rules.computer_use.mode",
+			"guardrail mode warns on unlisted actions",
 			originProfileID, posture,
 		)
 	}

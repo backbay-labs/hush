@@ -581,7 +581,7 @@ function evaluateComputerUseRule(
     );
   }
 
-  const mode = rule.mode ?? 'fail_closed';
+  const mode = rule.mode ?? 'guardrail';
   switch (mode) {
     case 'observe':
       return allowResult(
@@ -645,7 +645,7 @@ function evaluatePathAllowlist(
   posture: PostureResult | undefined,
   originProfileId: string | undefined,
 ): EvaluationResult | undefined {
-  if (rule.enabled === false) {
+  if (rule.enabled !== true) {
     return undefined;
   }
 
