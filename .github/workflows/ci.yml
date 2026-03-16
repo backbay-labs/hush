@@ -144,7 +144,7 @@ jobs:
 
       - name: Rust shared fixtures
         if: matrix.sdk == 'rust'
-        run: cargo run -p hushspec-testkit -- --fixtures fixtures
+        run: cargo run --bin hushspec-testkit -- --fixtures fixtures
 
       - name: TypeScript shared fixtures
         if: matrix.sdk == 'typescript'
