@@ -78,27 +78,101 @@ fn validate_missing_file_exits_2() {
 
 #[test]
 fn validate_json_output() {
-    hushspec()
+    let output = hushspec()
         .arg("validate")
         .arg("--format")
         .arg("json")
         .arg("rulesets/default.yaml")
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"valid\":true"));
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(output).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(parsed.is_array(), "JSON output should be an array");
+    let arr = parsed.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["valid"], true);
 }
 
 #[test]
 fn validate_json_output_invalid() {
-    hushspec()
+    let output = hushspec()
         .arg("validate")
         .arg("--format")
         .arg("json")
         .arg("fixtures/core/invalid/missing-version.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("\"valid\":false"))
-        .stdout(predicate::str::contains("\"code\":\"E001\""));
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(output).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(parsed.is_array(), "JSON output should be an array");
+    let arr = parsed.as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["valid"], false);
+    assert_eq!(arr[0]["errors"][0]["code"], "E001");
+}
+
+#[test]
+fn validate_json_output_multiple_files_is_valid_json_array() {
+    let output = hushspec()
+        .arg("validate")
+        .arg("--format")
+        .arg("json")
+        .arg("rulesets/default.yaml")
+        .arg("fixtures/core/invalid/missing-version.yaml")
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(output).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let arr = parsed.as_array().expect("JSON output should be an array");
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["valid"], true);
+    assert_eq!(arr[1]["valid"], false);
+}
+
+#[test]
+fn validate_strict_checks_full_extends_resolution() {
+    let tmp = TempDir::new().unwrap();
+    let base_path = tmp.path().join("base.yaml");
+    let child_path = tmp.path().join("child.yaml");
+
+    fs::write(
+        &base_path,
+        r#"name: invalid-base
+rules:
+  egress:
+    default: block
+"#,
+    )
+    .unwrap();
+    fs::write(
+        &child_path,
+        format!(
+            "hushspec: \"0.1.0\"\nextends: {}\n",
+            base_path.file_name().unwrap().to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    hushspec()
+        .arg("validate")
+        .arg("--strict")
+        .arg(child_path.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("error[E010]"))
+        .stdout(predicate::str::contains("extends resolution failed"));
 }
 
 #[test]
@@ -659,7 +733,8 @@ rules:
         .assert()
         .success()
         .stdout(predicate::str::contains("---"))
-        .stdout(predicate::str::contains("+++"));
+        .stdout(predicate::str::contains("+++"))
+        .stdout(predicate::str::contains("@@"));
 
     // File should not be modified (--diff is read-only)
     let after = fs::read_to_string(&policy_path).unwrap();

@@ -1,6 +1,6 @@
 use clap::ValueEnum;
 use colored::Colorize;
-use hushspec::{HushSpec, validate};
+use hushspec::{HushSpec, resolve_from_path_with_builtins, validate};
 use std::path::PathBuf;
 
 #[derive(clap::Args)]
@@ -135,12 +135,10 @@ pub fn run(args: ValidateArgs) -> i32 {
         });
     }
 
-    if matches!(args.format, OutputFormat::Json) {
-        for result in &results {
-            if let Ok(json) = serde_json::to_string(result) {
-                println!("{json}");
-            }
-        }
+    if matches!(args.format, OutputFormat::Json)
+        && let Ok(json) = serde_json::to_string_pretty(&results)
+    {
+        println!("{json}");
     }
 
     if any_not_found {
@@ -185,19 +183,13 @@ fn validate_content(
     }
 
     // Layer 3: strict extends resolution
-    if strict && let Some(extends) = &spec.extends {
-        let base_dir = path.parent().unwrap_or(std::path::Path::new("."));
-        let extends_path = base_dir.join(extends);
-        if !extends_path.exists() {
-            errors.push(ErrorEntry {
-                code: "E010".into(),
-                message: format!(
-                    "extends reference not found: {} (resolved to {})",
-                    extends,
-                    extends_path.display()
-                ),
-            });
-        }
+    if strict
+        && let Err(error) = resolve_from_path_with_builtins(path)
+    {
+        errors.push(ErrorEntry {
+            code: "E010".into(),
+            message: format!("extends resolution failed: {error}"),
+        });
     }
 
     (errors.is_empty(), errors, warnings)

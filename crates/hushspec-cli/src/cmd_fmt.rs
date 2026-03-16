@@ -2,6 +2,7 @@ use clap::ValueEnum;
 use colored::Colorize;
 use hushspec::HushSpec;
 use hushspec::schema::MergeStrategy;
+use similar::TextDiff;
 use std::path::PathBuf;
 
 #[derive(clap::Args)]
@@ -579,38 +580,13 @@ fn format_computer_use_mode(mode: &hushspec::ComputerUseMode) -> &'static str {
 }
 
 fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
-    let mut diff_output = String::new();
-    diff_output.push_str(&format!("--- {} (original)\n", path.display()));
-    diff_output.push_str(&format!("+++ {} (formatted)\n", path.display()));
-
-    let old_lines: Vec<&str> = original.lines().collect();
-    let new_lines: Vec<&str> = formatted.lines().collect();
-
-    // Simple line-by-line diff
-    let max_len = old_lines.len().max(new_lines.len());
-    for i in 0..max_len {
-        let old_line = old_lines.get(i).copied();
-        let new_line = new_lines.get(i).copied();
-
-        match (old_line, new_line) {
-            (Some(o), Some(n)) if o == n => {
-                diff_output.push_str(&format!(" {o}\n"));
-            }
-            (Some(o), Some(n)) => {
-                diff_output.push_str(&format!("-{o}\n"));
-                diff_output.push_str(&format!("+{n}\n"));
-            }
-            (Some(o), None) => {
-                diff_output.push_str(&format!("-{o}\n"));
-            }
-            (None, Some(n)) => {
-                diff_output.push_str(&format!("+{n}\n"));
-            }
-            (None, None) => {}
-        }
-    }
-
-    diff_output
+    TextDiff::from_lines(original, formatted)
+        .unified_diff()
+        .header(
+            &format!("{} (original)", path.display()),
+            &format!("{} (formatted)", path.display()),
+        )
+        .to_string()
 }
 
 #[cfg(test)]
