@@ -100,6 +100,25 @@ extensions:
 	}
 }
 
+func TestParseDefaultsEgressEnabledToTrueWhenOmitted(t *testing.T) {
+	spec, err := Parse(`
+hushspec: "0.1.0"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spec.Rules == nil || spec.Rules.Egress == nil {
+		t.Fatal("expected egress rule to parse")
+	}
+	if !spec.Rules.Egress.Enabled {
+		t.Fatal("expected omitted egress.enabled to default to true")
+	}
+}
+
 func TestValidateDuplicatePatternNames(t *testing.T) {
 	spec := &HushSpec{
 		HushSpecVersion: "0.1.0",

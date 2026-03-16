@@ -661,6 +661,43 @@ rules:
 }
 
 #[test]
+fn fmt_preserves_governance_metadata() {
+    let tmp = TempDir::new().unwrap();
+    let policy_path = tmp.path().join("metadata.yaml");
+
+    let content = r#"hushspec: "0.1.0"
+name: metadata-test
+metadata:
+  author: "security@example.com"
+  approved_by: "ciso@example.com"
+  classification: internal
+  lifecycle_state: deployed
+  policy_version: 7
+rules:
+  egress:
+    allow:
+      - "api.github.com"
+    block: []
+    default: block
+"#;
+    fs::write(&policy_path, content).unwrap();
+
+    hushspec()
+        .arg("fmt")
+        .arg(policy_path.to_str().unwrap())
+        .assert()
+        .success();
+
+    let formatted = fs::read_to_string(&policy_path).unwrap();
+    assert!(formatted.contains("metadata:\n"));
+    assert!(formatted.contains("author: security@example.com"));
+    assert!(formatted.contains("approved_by: ciso@example.com"));
+    assert!(formatted.contains("classification: internal"));
+    assert!(formatted.contains("lifecycle_state: deployed"));
+    assert!(formatted.contains("policy_version: 7"));
+}
+
+#[test]
 fn panic_activate_creates_sentinel() {
     let tmp = TempDir::new().unwrap();
     let sentinel = tmp.path().join(".hushspec_panic");

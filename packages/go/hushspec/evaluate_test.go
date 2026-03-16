@@ -12,9 +12,9 @@ import (
 )
 
 type evaluatorTestFixture struct {
-	HushSpecTest string                    `yaml:"hushspec_test"`
-	Description  string                    `yaml:"description"`
-	Policy       map[string]any            `yaml:"policy"`
+	HushSpecTest string                     `yaml:"hushspec_test"`
+	Description  string                     `yaml:"description"`
+	Policy       map[string]any             `yaml:"policy"`
 	Cases        []evaluatorTestFixtureCase `yaml:"cases"`
 }
 
@@ -183,6 +183,29 @@ func TestPatchStats(t *testing.T) {
 	}
 	if stats.deletions != 0 {
 		t.Errorf("expected 0 deletions, got %d", stats.deletions)
+	}
+}
+
+func TestEvaluateEgressDisabledAllowsAction(t *testing.T) {
+	spec, err := Parse(`
+hushspec: "0.1.0"
+rules:
+  egress:
+    enabled: false
+    allow: []
+    block: []
+    default: block
+`)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+
+	result := Evaluate(spec, &EvaluationAction{Type: "egress", Target: "blocked.example.com"})
+	if result.Decision != DecisionAllow {
+		t.Fatalf("expected disabled egress rule to allow, got %q (%s)", result.Decision, result.Reason)
+	}
+	if result.MatchedRule != "" {
+		t.Fatalf("expected no matched rule for disabled egress, got %q", result.MatchedRule)
 	}
 }
 

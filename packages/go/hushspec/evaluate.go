@@ -306,6 +306,10 @@ func evaluateEgressRule(
 	posture *PostureResult,
 	originProfileID string,
 ) EvaluationResult {
+	if !rule.Enabled {
+		return allowResult("", "", originProfileID, posture)
+	}
+
 	if findFirstMatch(target, rule.Block) >= 0 {
 		return denyResult(
 			prefixedRule(prefix, "block"),

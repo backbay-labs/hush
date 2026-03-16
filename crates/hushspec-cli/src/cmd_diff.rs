@@ -406,6 +406,29 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        let cutoff = floor_char_boundary(s, max_len.saturating_sub(3));
+        format!("{}...", &s[..cutoff])
+    }
+}
+
+fn floor_char_boundary(s: &str, max_len: usize) -> usize {
+    let mut boundary = max_len.min(s.len());
+    while boundary > 0 && !s.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    boundary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_str;
+
+    #[test]
+    fn truncate_str_respects_utf8_boundaries() {
+        let value = "deploy-🚀-target";
+        let truncated = truncate_str(value, 11);
+
+        assert_eq!(truncated, "deploy-...");
+        assert!(truncated.is_char_boundary(truncated.len()));
     }
 }

@@ -257,6 +257,19 @@ fn format_spec(spec: &HushSpec) -> String {
         }
     }
 
+    // metadata
+    if let Some(metadata) = &spec.metadata {
+        out.push_str("metadata:\n");
+        if let Ok(yaml) = serde_yaml::to_string(metadata) {
+            for line in yaml.lines() {
+                if line == "---" {
+                    continue;
+                }
+                out.push_str(&format!("  {line}\n"));
+            }
+        }
+    }
+
     out
 }
 
