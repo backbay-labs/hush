@@ -232,9 +232,9 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
     };
 
     let tz = timezone.unwrap_or("UTC");
-    let offset_hours = parse_timezone_offset(tz);
+    let offset_minutes = parse_timezone_offset(tz);
 
-    let adjusted = utc_now + chrono::Duration::hours(offset_hours as i64);
+    let adjusted = utc_now + chrono::Duration::minutes(offset_minutes as i64);
     let hour = adjusted.hour() as u8;
     let minute = adjusted.minute() as u8;
     let day_of_week = adjusted.weekday().num_days_from_monday();
@@ -242,11 +242,11 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
     Some((hour, minute, day_of_week))
 }
 
-/// Parse a timezone identifier into an offset in hours from UTC.
+/// Parse a timezone identifier into an offset in minutes from UTC.
 ///
 /// Supports:
 /// - `"UTC"` -> 0
-/// - `"+05:00"` / `"-05:00"` -> +5 / -5
+/// - `"+05:00"` / `"-05:30"` -> +300 / -330
 /// - Common IANA names mapped to approximate fixed offsets.
 ///
 /// For full IANA timezone support with DST, use the `chrono-tz` crate.
@@ -254,18 +254,18 @@ fn parse_timezone_offset(tz: &str) -> i32 {
     match tz {
         "UTC" | "utc" | "Etc/UTC" | "Etc/GMT" | "GMT" => 0,
         // US timezones (standard time -- DST not handled)
-        "America/New_York" | "US/Eastern" | "EST" => -5,
-        "America/Chicago" | "US/Central" | "CST" => -6,
-        "America/Denver" | "US/Mountain" | "MST" => -7,
-        "America/Los_Angeles" | "US/Pacific" | "PST" => -8,
+        "America/New_York" | "US/Eastern" | "EST" => -5 * 60,
+        "America/Chicago" | "US/Central" | "CST" => -6 * 60,
+        "America/Denver" | "US/Mountain" | "MST" => -7 * 60,
+        "America/Los_Angeles" | "US/Pacific" | "PST" => -8 * 60,
         // Europe
         "Europe/London" | "GB" => 0,
-        "Europe/Paris" | "Europe/Berlin" | "CET" => 1,
-        "Europe/Helsinki" | "EET" => 2,
+        "Europe/Paris" | "Europe/Berlin" | "CET" => 60,
+        "Europe/Helsinki" | "EET" => 120,
         // Asia
-        "Asia/Tokyo" | "Japan" | "JST" => 9,
-        "Asia/Shanghai" | "Asia/Hong_Kong" | "PRC" => 8,
-        "Asia/Kolkata" | "Asia/Calcutta" | "IST" => 5, // 5:30 truncated
+        "Asia/Tokyo" | "Japan" | "JST" => 9 * 60,
+        "Asia/Shanghai" | "Asia/Hong_Kong" | "PRC" => 8 * 60,
+        "Asia/Kolkata" | "Asia/Calcutta" | "IST" => 5 * 60 + 30,
         // Numeric offset
         _ => {
             if let Some(rest) = tz.strip_prefix('+') {
@@ -280,10 +280,12 @@ fn parse_timezone_offset(tz: &str) -> i32 {
 }
 
 fn parse_offset_value(s: &str) -> i32 {
-    if let Some((hours, _minutes)) = s.split_once(':') {
-        hours.parse::<i32>().unwrap_or(0)
+    if let Some((hours, minutes)) = s.split_once(':') {
+        let hours = hours.parse::<i32>().unwrap_or(0);
+        let minutes = minutes.parse::<i32>().unwrap_or(0);
+        hours.saturating_mul(60).saturating_add(minutes)
     } else {
-        s.parse::<i32>().unwrap_or(0)
+        s.parse::<i32>().unwrap_or(0).saturating_mul(60)
     }
 }
 
@@ -636,6 +638,38 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+        };
+        assert!(evaluate_condition(&cond, &ctx));
+    }
+
+    #[test]
+    fn time_window_honors_fractional_named_timezone_offsets() {
+        // 04:00 UTC is 09:30 in Asia/Kolkata.
+        let ctx = ctx_with_time("2026-01-14T04:00:00Z");
+        let cond = Condition {
+            time_window: Some(TimeWindowCondition {
+                start: "09:30".to_string(),
+                end: "10:00".to_string(),
+                timezone: Some("Asia/Kolkata".to_string()),
+                days: vec![],
+            }),
+            ..Default::default()
+        };
+        assert!(evaluate_condition(&cond, &ctx));
+    }
+
+    #[test]
+    fn time_window_honors_fractional_numeric_timezone_offsets() {
+        // 04:00 UTC is 09:30 at +05:30.
+        let ctx = ctx_with_time("2026-01-14T04:00:00Z");
+        let cond = Condition {
+            time_window: Some(TimeWindowCondition {
+                start: "09:30".to_string(),
+                end: "10:00".to_string(),
+                timezone: Some("+05:30".to_string()),
+                days: vec![],
+            }),
+            ..Default::default()
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
