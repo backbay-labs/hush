@@ -25,6 +25,43 @@ from hushspec.rules import (
 )
 from hushspec.schema import HushSpec
 
+PANIC_POLICY_YAML = """hushspec: "0.1.0"
+name: "__hushspec_panic__"
+description: "Emergency deny-all policy. Activated by panic mode."
+
+rules:
+  forbidden_paths:
+    enabled: true
+    patterns:
+      - "**"
+    exceptions: []
+
+  egress:
+    enabled: true
+    allow: []
+    block:
+      - "*"
+    default: block
+
+  shell_commands:
+    enabled: true
+    forbidden_patterns:
+      - ".*"
+
+  tool_access:
+    enabled: true
+    allow: []
+    block:
+      - "*"
+    require_confirmation: []
+    default: block
+
+  computer_use:
+    enabled: true
+    mode: fail_closed
+    allowed_actions: []
+"""
+
 
 
 class Decision(str, Enum):
@@ -918,22 +955,9 @@ def is_panic_active() -> bool:
 
 
 def panic_policy() -> HushSpec:
-    import os
-
     from hushspec.parse import parse_or_raise
 
-    directory = os.getcwd()
-    for _ in range(10):
-        candidate = os.path.join(directory, "rulesets", "panic.yaml")
-        if os.path.isfile(candidate):
-            with open(candidate) as f:
-                return parse_or_raise(f.read())
-        parent = os.path.dirname(directory)
-        if parent == directory:
-            break
-        directory = parent
-
-    raise FileNotFoundError("Could not find rulesets/panic.yaml")
+    return parse_or_raise(PANIC_POLICY_YAML)
 
 
 def check_panic_sentinel(path: str) -> bool:

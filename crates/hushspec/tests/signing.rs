@@ -83,6 +83,22 @@ fn verify_fails_with_tampered_content() {
 }
 
 #[test]
+fn verify_fails_with_tampered_metadata() {
+    let (sk, vk) = generate_keypair();
+    let content = b"content";
+    let mut sig = sign_policy(content, &sk, "trusted-key", Some("alice@example.com"));
+    sig.key_id = "forged-key".to_string();
+    sig.signer = Some("mallory@example.com".to_string());
+    sig.signed_at = "2099-01-01T00:00:00Z".to_string();
+
+    let outcome = verify_policy(content, &sig, &vk);
+    assert!(
+        matches!(outcome, VerificationOutcome::Invalid { .. }),
+        "expected Invalid when signature metadata is tampered, got {outcome:?}"
+    );
+}
+
+#[test]
 fn verify_rejects_bad_algorithm() {
     let (sk, vk) = generate_keypair();
     let content = b"content";

@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   evaluate,
   activatePanic,
@@ -10,11 +13,15 @@ import { parseOrThrow } from '../src/parse.js';
 import type { HushSpec } from '../src/schema.js';
 
 describe('panic mode', () => {
+  let originalCwd: string;
+
   beforeEach(() => {
+    originalCwd = process.cwd();
     deactivatePanic();
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     deactivatePanic();
   });
 
@@ -83,6 +90,16 @@ describe('panic mode', () => {
     expect(spec.rules!.tool_access).toBeDefined();
     expect(spec.rules!.shell_commands).toBeDefined();
     expect(spec.rules!.computer_use).toBeDefined();
+  });
+
+  it('panicPolicy does not depend on the current working directory', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'hushspec-panic-'));
+    process.chdir(tmpDir);
+
+    const spec = panicPolicy();
+    expect(spec.name).toBe('__hushspec_panic__');
+
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('panic policy denies file reads', () => {

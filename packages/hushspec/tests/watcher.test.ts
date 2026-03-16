@@ -350,6 +350,39 @@ describe('PolicyPoller', () => {
     expect(() => poller!.current()).toThrow('Policy is stale');
   });
 
+  it('ignores out-of-order reload completions', async () => {
+    let loadCount = 0;
+    const changes: string[] = [];
+
+    poller = new PolicyPoller({
+      intervalMs: 40,
+      loader: async () => {
+        loadCount++;
+        if (loadCount === 1) return VALID_POLICY;
+        if (loadCount === 2) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return VALID_POLICY.replace('test-policy', 'older-policy');
+        }
+        if (loadCount === 3) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return UPDATED_POLICY;
+        }
+        throw new Error('done');
+      },
+      onChange: (spec) => {
+        changes.push(spec.name ?? 'unnamed');
+      },
+      onError: () => {},
+    });
+
+    await poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    poller.stop();
+
+    expect(changes).toContain('updated-policy');
+    expect(poller.current()?.name).toBe('updated-policy');
+  });
+
   it('throws on initial load if loader fails and no fallback', async () => {
     poller = new PolicyPoller({
       loader: async () => {
@@ -528,6 +561,15 @@ describe('HttpProvider', () => {
 
     provider = new HttpProvider('https://example.com/policy.yaml');
     await expect(provider.load()).rejects.toThrow('returned status 404');
+  });
+
+  it('rejects insecure HTTP URLs', async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    provider = new HttpProvider('http://127.0.0.1/policy.yaml');
+    await expect(provider.load()).rejects.toThrow('only HTTPS URLs are allowed');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('current() returns null before load', () => {

@@ -24,7 +24,7 @@
     },
     "signature": {
       "type": "string",
-      "description": "Base64-encoded Ed25519 signature of the content_hash bytes."
+      "description": "Base64-encoded Ed25519 signature of the canonical signature envelope, including content_hash, signed_at, key_id, and signer when present."
     },
     "signed_at": {
       "type": "string",

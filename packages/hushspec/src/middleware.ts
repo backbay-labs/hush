@@ -16,10 +16,16 @@ export class HushGuard {
   private onWarn: WarnHandler;
   private observableEvaluator: ObservableEvaluator | null = null;
   private policyHash: string | null = null;
+  private provider: PolicyProvider | null = null;
 
-  constructor(policy: HushSpec, options?: { onWarn?: WarnHandler; observer?: EvaluationObserver }) {
+  constructor(policy: HushSpec, options?: {
+    onWarn?: WarnHandler;
+    observer?: EvaluationObserver;
+    provider?: PolicyProvider;
+  }) {
     this.policy = policy;
     this.onWarn = options?.onWarn ?? (() => false);
+    this.provider = options?.provider ?? null;
     if (options?.observer) {
       this.observableEvaluator = new ObservableEvaluator();
       this.observableEvaluator.addObserver(options.observer);
@@ -50,16 +56,20 @@ export class HushGuard {
     options?: { onWarn?: WarnHandler },
   ): Promise<HushGuard> {
     const spec = await provider.load();
-    const guard = new HushGuard(spec, options);
+    const guard = new HushGuard(spec, { ...options, provider });
     provider.watch((newSpec) => guard.swapPolicy(newSpec));
     return guard;
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
-    if (this.observableEvaluator) {
-      return this.observableEvaluator.evaluate(this.policy, action);
+    const policy = this.activePolicyResult();
+    if ('decision' in policy) {
+      return policy;
     }
-    return evaluate(this.policy, action);
+    if (this.observableEvaluator) {
+      return this.observableEvaluator.evaluate(policy, action);
+    }
+    return evaluate(policy, action);
   }
 
   check(action: EvaluationAction): boolean {
@@ -113,6 +123,32 @@ export class HushGuard {
         this.policyHash,
         previousHash ?? undefined,
       );
+    }
+  }
+
+  private activePolicyResult(): HushSpec | EvaluationResult {
+    if (this.provider == null) {
+      return this.policy;
+    }
+
+    try {
+      const current = this.provider.current();
+      if (current == null) {
+        return {
+          decision: 'deny',
+          matched_rule: '__hushspec_policy_provider__',
+          reason: 'policy provider has not loaded a policy yet',
+        };
+      }
+      this.policy = current;
+      return current;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        decision: 'deny',
+        matched_rule: '__hushspec_policy_provider__',
+        reason: `policy provider unavailable: ${message}`,
+      };
     }
   }
 }

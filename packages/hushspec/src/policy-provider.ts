@@ -3,6 +3,8 @@ import type { HushSpec } from './schema.js';
 import { PolicyWatcher, type WatcherOptions } from './watcher.js';
 import { PolicyPoller, type PollerOptions } from './poller.js';
 import { parse } from './parse.js';
+import { computePolicyHash } from './receipt.js';
+import { createHttpLoader } from './http-loader.js';
 
 export interface PolicyProvider {
   load(): Promise<HushSpec>;
@@ -64,37 +66,44 @@ export class FileProvider implements PolicyProvider {
 export class HttpProvider implements PolicyProvider {
   private url: string;
   private intervalMs: number;
-  private authHeader?: string;
   private maxStaleMs: number;
   private poller: PolicyPoller | null = null;
   private currentSpec: HushSpec | null = null;
+  private readonly httpLoader: ReturnType<typeof createHttpLoader>;
 
   constructor(url: string, options?: {
     intervalMs?: number;
     authHeader?: string;
     maxStaleMs?: number;
+    timeoutMs?: number;
+    maxSize?: number;
+    cacheDir?: string;
   }) {
     this.url = url;
     this.intervalMs = options?.intervalMs ?? 60_000;
-    this.authHeader = options?.authHeader;
     this.maxStaleMs = options?.maxStaleMs ?? Infinity;
+    this.httpLoader = createHttpLoader({
+      authHeader: options?.authHeader,
+      timeoutMs: options?.timeoutMs,
+      maxSize: options?.maxSize,
+      cacheDir: options?.cacheDir,
+    });
   }
 
   async load(): Promise<HushSpec> {
-    const content = await this.fetchContent();
-    const result = parse(content);
-    if (!result.ok) {
-      throw new Error(`Failed to parse HushSpec from ${this.url}: ${result.error}`);
-    }
-    this.currentSpec = result.value;
-    return result.value;
+    const spec = await this.loadRemoteSpec();
+    this.currentSpec = spec;
+    return spec;
   }
 
   watch(onChange: (spec: HushSpec) => void, onError?: (error: Error) => void): void {
     this.stop();
 
     const pollerOptions: PollerOptions = {
-      loader: () => this.fetchContent(),
+      loader: async () => {
+        const spec = await this.loadRemoteSpec();
+        return { spec, fingerprint: computePolicyHash(spec) };
+      },
       intervalMs: this.intervalMs,
       onChange: (spec: HushSpec) => {
         this.currentSpec = spec;
@@ -128,18 +137,8 @@ export class HttpProvider implements PolicyProvider {
     return this.currentSpec;
   }
 
-  private async fetchContent(): Promise<string> {
-    const headers: Record<string, string> = {};
-    if (this.authHeader) {
-      headers['Authorization'] = this.authHeader;
-    }
-
-    const response = await fetch(this.url, { headers });
-    if (!response.ok) {
-      throw new Error(
-        `HTTP request to '${this.url}' returned status ${response.status}`,
-      );
-    }
-    return response.text();
+  private async loadRemoteSpec(): Promise<HushSpec> {
+    const loaded = await this.httpLoader(this.url);
+    return loaded.spec;
   }
 }

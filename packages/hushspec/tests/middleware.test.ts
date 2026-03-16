@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { HushGuard, HushSpecDenied } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
+import type { PolicyProvider } from '../src/policy-provider.js';
 
 
 // ---------------------------------------------------------------------------
@@ -163,6 +164,28 @@ describe('HushGuard', () => {
       const newPolicy = parseOrThrow(ALLOW_ALL_POLICY);
       guard.swapPolicy(newPolicy);
       expect(guard.check({ type: 'tool_call', target: 'dangerous_tool' })).toBe(true);
+    });
+  });
+
+  describe('fromProvider', () => {
+    it('fails closed when the provider reports the policy as unavailable', async () => {
+      const provider: PolicyProvider = {
+        async load() {
+          return parseOrThrow(ALLOW_ALL_POLICY);
+        },
+        watch() {},
+        stop() {},
+        current() {
+          throw new Error('Policy is stale: last successful load exceeded maxStaleMs');
+        },
+      };
+
+      const guard = await HushGuard.fromProvider(provider);
+      const result = guard.evaluate({ type: 'tool_call', target: 'any_tool' });
+
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('__hushspec_policy_provider__');
+      expect(result.reason).toContain('Policy is stale');
     });
   });
 

@@ -2,8 +2,13 @@ import { createHash } from 'node:crypto';
 import { parse } from './parse.js';
 import type { HushSpec } from './schema.js';
 
+export interface PolicySnapshot {
+  spec: HushSpec;
+  fingerprint?: string;
+}
+
 export interface PollerOptions {
-  loader: () => Promise<string>;
+  loader: () => Promise<string | PolicySnapshot>;
   intervalMs?: number;
   onChange: (spec: HushSpec) => void;
   onError?: (error: Error) => void;
@@ -17,6 +22,8 @@ export class PolicyPoller {
   private currentSpec: HushSpec | null = null;
   private lastSuccessfulLoad: number = 0;
   private contentHash: string | null = null;
+  private nextLoadId: number = 0;
+  private latestAppliedLoadId: number = 0;
 
   constructor(options: PollerOptions) {
     this.options = options;
@@ -66,39 +73,62 @@ export class PolicyPoller {
   }
 
   private async doLoad(throwOnError: boolean): Promise<HushSpec> {
-    let content: string;
+    const loadId = ++this.nextLoadId;
+    let loaded: string | PolicySnapshot;
     try {
-      content = await this.options.loader();
+      loaded = await this.options.loader();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       if (throwOnError && this.currentSpec == null) {
         throw error;
       }
-      this.options.onError?.(error);
-      return this.currentSpec!;
-    }
-
-    const hash = createHash('sha256').update(content).digest('hex');
-    if (hash === this.contentHash) {
-      this.lastSuccessfulLoad = Date.now();
-      return this.currentSpec!;
-    }
-
-    const result = parse(content);
-    if (!result.ok) {
-      const error = new Error(`Failed to parse policy: ${result.error}`);
-      if (throwOnError && this.currentSpec == null) {
-        throw error;
+      if (loadId < this.latestAppliedLoadId) {
+        return this.currentSpec!;
       }
       this.options.onError?.(error);
       return this.currentSpec!;
     }
 
-    this.currentSpec = result.value;
+    let spec: HushSpec;
+    let fingerprintSource: string;
+
+    if (typeof loaded === 'string') {
+      fingerprintSource = loaded;
+      const result = parse(loaded);
+      if (!result.ok) {
+        const error = new Error(`Failed to parse policy: ${result.error}`);
+        if (throwOnError && this.currentSpec == null) {
+          throw error;
+        }
+        if (loadId < this.latestAppliedLoadId) {
+          return this.currentSpec!;
+        }
+        this.options.onError?.(error);
+        return this.currentSpec!;
+      }
+      spec = result.value;
+    } else {
+      spec = loaded.spec;
+      fingerprintSource = loaded.fingerprint ?? JSON.stringify(loaded.spec);
+    }
+
+    if (loadId < this.latestAppliedLoadId) {
+      return this.currentSpec ?? spec;
+    }
+
+    const hash = createHash('sha256').update(fingerprintSource).digest('hex');
+    if (hash === this.contentHash) {
+      this.latestAppliedLoadId = loadId;
+      this.lastSuccessfulLoad = Date.now();
+      return this.currentSpec!;
+    }
+
+    this.latestAppliedLoadId = loadId;
+    this.currentSpec = spec;
     this.contentHash = hash;
     this.lastSuccessfulLoad = Date.now();
-    this.options.onChange(result.value);
+    this.options.onChange(spec);
 
-    return result.value;
+    return spec;
   }
 }

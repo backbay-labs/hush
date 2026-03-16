@@ -14,6 +14,7 @@ import type {
   OriginProfile,
   PostureExtension,
 } from './extensions.js';
+import { parseOrThrow } from './parse.js';
 
 export type Decision = 'allow' | 'warn' | 'deny';
 
@@ -888,6 +889,42 @@ function evaluateComputerUse(
 }
 
 let panicActive = false;
+const PANIC_POLICY_YAML = `hushspec: "0.1.0"
+name: "__hushspec_panic__"
+description: "Emergency deny-all policy. Activated by panic mode."
+
+rules:
+  forbidden_paths:
+    enabled: true
+    patterns:
+      - "**"
+    exceptions: []
+
+  egress:
+    enabled: true
+    allow: []
+    block:
+      - "*"
+    default: block
+
+  shell_commands:
+    enabled: true
+    forbidden_patterns:
+      - ".*"
+
+  tool_access:
+    enabled: true
+    allow: []
+    block:
+      - "*"
+    require_confirmation: []
+    default: block
+
+  computer_use:
+    enabled: true
+    mode: fail_closed
+    allowed_actions: []
+`;
 
 export function activatePanic(): void {
   panicActive = true;
@@ -902,24 +939,7 @@ export function isPanicActive(): boolean {
 }
 
 export function panicPolicy(): HushSpec {
-  const { readFileSync } = require('node:fs');
-  const { join, dirname } = require('node:path');
-
-  let dir = process.cwd();
-  for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, 'rulesets', 'panic.yaml');
-    try {
-      const content = readFileSync(candidate, 'utf8');
-      const YAML = require('yaml');
-      return YAML.parse(content) as HushSpec;
-    } catch {
-      // not found here, continue searching upward
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error('Could not find rulesets/panic.yaml');
+  return parseOrThrow(PANIC_POLICY_YAML);
 }
 
 export function evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {

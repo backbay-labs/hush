@@ -217,6 +217,7 @@ pub mod http {
         let timeout = std::time::Duration::from_millis(config.timeout_ms);
         let client = reqwest::blocking::Client::builder()
             .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(!config.verify_tls)
             .build()
             .map_err(|e| ResolveError::Http {

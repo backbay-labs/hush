@@ -28,6 +28,17 @@ pub const FORMAT_VERSION: &str = "0.1.0";
 /// The signature algorithm identifier.
 pub const ALGORITHM: &str = "ed25519";
 
+#[derive(Serialize)]
+struct SignedEnvelope<'a> {
+    format_version: &'a str,
+    algorithm: &'a str,
+    content_hash: &'a str,
+    signed_at: &'a str,
+    key_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signer: Option<&'a str>,
+}
+
 /// A detached policy signature, serializable to/from JSON `.sig` files.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -95,10 +106,9 @@ pub fn sign_policy(
     signer: Option<&str>,
 ) -> PolicySignature {
     let hash = content_hash(content);
-    let hash_bytes = hash.as_bytes();
-    let sig = signing_key.sign(hash_bytes);
-
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let payload = signed_payload(&hash, &now, key_id, signer);
+    let sig = signing_key.sign(&payload);
 
     PolicySignature {
         format_version: FORMAT_VERSION.to_string(),
@@ -166,8 +176,13 @@ pub fn verify_policy(
         }
     };
 
-    let hash_bytes = signature.content_hash.as_bytes();
-    match verifying_key.verify(hash_bytes, &ed_sig) {
+    let payload = signed_payload(
+        &signature.content_hash,
+        &signature.signed_at,
+        &signature.key_id,
+        signature.signer.as_deref(),
+    );
+    match verifying_key.verify(&payload, &ed_sig) {
         Ok(()) => VerificationOutcome::Valid {
             key_id: signature.key_id.clone(),
             signed_at: signature.signed_at.clone(),
@@ -177,6 +192,23 @@ pub fn verify_policy(
             reason: format!("Ed25519 signature verification failed: {e}"),
         },
     }
+}
+
+fn signed_payload(
+    content_hash: &str,
+    signed_at: &str,
+    key_id: &str,
+    signer: Option<&str>,
+) -> Vec<u8> {
+    serde_json::to_vec(&SignedEnvelope {
+        format_version: FORMAT_VERSION,
+        algorithm: ALGORITHM,
+        content_hash,
+        signed_at,
+        key_id,
+        signer,
+    })
+    .expect("signed envelope serialization should not fail")
 }
 
 /// Load a detached signature from a `.sig` JSON file.

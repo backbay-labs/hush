@@ -93,6 +93,38 @@ function writeCache(cacheDir: string, url: string, etag: string, body: string): 
   }
 }
 
+async function readResponseText(
+  response: Response,
+  reference: string,
+  maxSize: number,
+): Promise<string> {
+  if (response.body == null) {
+    const body = await response.text();
+    if (Buffer.byteLength(body) > maxSize) {
+      throw new Error(`response from '${reference}' exceeds maximum size of ${maxSize} bytes`);
+    }
+    return body;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let body = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    totalBytes += value.byteLength;
+    if (totalBytes > maxSize) {
+      throw new Error(`response from '${reference}' exceeds maximum size of ${maxSize} bytes`);
+    }
+    body += decoder.decode(value, { stream: true });
+  }
+
+  body += decoder.decode();
+  return body;
+}
+
 export function createHttpLoader(
   config?: HttpLoaderConfig,
 ): (reference: string, from?: string) => Promise<LoadedSpec> {
@@ -139,6 +171,7 @@ export function createHttpLoader(
       response = await fetch(reference, {
         headers,
         signal: controller.signal,
+        redirect: 'error',
       });
     } catch (err) {
       throw new Error(`HTTP request to '${reference}' failed: ${err}`);
@@ -158,19 +191,14 @@ export function createHttpLoader(
       throw new Error(`HTTP request to '${reference}' returned status ${response.status}`);
     }
 
-    const body = await response.text();
-    if (body.length > maxSize) {
-      throw new Error(
-        `response from '${reference}' exceeds maximum size of ${maxSize} bytes`,
-      );
-    }
+    const body = await readResponseText(response, reference, maxSize);
 
     const result = parse(body);
     if (!result.ok) {
       throw new Error(`failed to parse HushSpec at ${reference}: ${result.error}`);
     }
 
-    const etag = response.headers.get('etag');
+    const etag = response.headers?.get?.('etag') ?? null;
     if (etag && cacheDir) {
       writeCache(cacheDir, reference, etag, body);
     }

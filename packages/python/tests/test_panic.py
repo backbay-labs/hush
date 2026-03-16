@@ -88,6 +88,17 @@ class TestPanicPolicy:
         assert spec.hushspec == "0.1.0"
         assert spec.rules is not None
 
+    def test_panic_policy_does_not_depend_on_cwd(self):
+        original = os.getcwd()
+        tmpdir = tempfile.mkdtemp(prefix="hushspec-panic-")
+        try:
+            os.chdir(tmpdir)
+            spec = panic_policy()
+            assert spec.name == "__hushspec_panic__"
+        finally:
+            os.chdir(original)
+            os.rmdir(tmpdir)
+
     def test_panic_policy_denies_file_reads(self):
         spec = panic_policy()
         result = evaluate(spec, EvaluationAction(type="file_read", target="/etc/passwd"))
