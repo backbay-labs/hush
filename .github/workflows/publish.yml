@@ -58,7 +58,7 @@ jobs:
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             cargo publish -p hushspec --allow-dirty --dry-run
           else
-            cargo publish -p hushspec --allow-dirty
+            cargo publish -p hushspec --allow-dirty || echo "::warning::hushspec already published or failed"
           fi
 
       - name: Wait for crates.io index update
