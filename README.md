@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/backbay-labs/hush/actions"><img src="https://github.com/backbay-labs/hush/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/backbay-labs/hush/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/spec-v0.1.0-orange.svg" alt="Spec Version">
+  <img src="https://img.shields.io/badge/spec-v0.1.1--alpha-orange.svg" alt="Spec Version">
   <a href="https://crates.io/crates/hushspec"><img src="https://img.shields.io/crates/v/hushspec.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/@hushspec/core"><img src="https://img.shields.io/npm/v/@hushspec/core.svg" alt="npm"></a>
   <a href="https://pypi.org/project/hushspec/"><img src="https://img.shields.io/pypi/v/hushspec.svg" alt="PyPI"></a>
@@ -26,7 +26,7 @@
 
 HushSpec is an open policy format for AI agent security rules. It defines **what** an agent may do at runtime, including filesystem access, network egress, tool usage, secret detection, and more, without prescribing **how** those controls must be enforced. That separation makes policies portable across runtimes, frameworks, and languages.
 
-**Status:** v0.1.0 (draft). The spec is still evolving, and breaking changes may occur before v1.0.
+**v0.1.1-alpha** — The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published and functional. Parse, validate, evaluate, merge, resolve, detect, sign, and audit your way through 10 rule types and 3 extension modules. The API surface is stabilizing but not yet frozen — expect refinements before v1.0.
 
 ## Quick Example
 
