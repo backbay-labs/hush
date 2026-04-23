@@ -109,6 +109,8 @@ STRUCTS = [
             field("computer_use", "ComputerUseRule"),
             field("remote_desktop_channels", "RemoteDesktopChannelsRule"),
             field("input_injection", "InputInjectionRule"),
+            field("browser_automation", "BrowserAutomationRule"),
+            field("code_execution", "CodeExecutionRule"),
         ],
     },
     {
@@ -207,6 +209,28 @@ STRUCTS = [
             field("enabled", "bool", default=False),
             field("allowed_types", list_of("string"), default=[], emit_empty=False),
             field("require_postcondition_probe", "bool", default=False),
+        ],
+    },
+    {
+        "name": "BrowserAutomationRule",
+        "fields": [
+            field("enabled", "bool", default=False),
+            field("allowed_domains", list_of("string"), default=[], emit_empty=False),
+            field("blocked_domains", list_of("string"), default=[], emit_empty=False),
+            field("allowed_verbs", list_of("string"), default=[], emit_empty=False),
+            field("credential_detection", "bool", default=True),
+            field("extra_credential_patterns", list_of("string"), default=[], emit_empty=False),
+        ],
+    },
+    {
+        "name": "CodeExecutionRule",
+        "fields": [
+            field("enabled", "bool", default=False),
+            field("language_allowlist", list_of("string"), default=[], emit_empty=False),
+            field("module_denylist", list_of("string"), default=[], emit_empty=False),
+            field("network_access", "bool", default=False),
+            field("max_execution_time_ms", "count", go_pointer=True),
+            field("max_scan_bytes", "count", go_pointer=True),
         ],
     },
     {

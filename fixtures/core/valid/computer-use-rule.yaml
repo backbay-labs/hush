@@ -1,0 +1,10 @@
+hushspec: "0.1.0"
+name: computer-use-rule
+description: Enables computer_use with a restricted allowlist in fail-closed mode
+rules:
+  computer_use:
+    enabled: true
+    mode: fail_closed
+    allowed_actions:
+      - remote.session.connect
+      - input.inject

@@ -1,0 +1,14 @@
+hushspec: "0.1.0"
+name: browser-automation-rule
+description: Enables browser_automation with a domain allowlist and credential detection
+rules:
+  browser_automation:
+    enabled: true
+    allowed_domains:
+      - "*.example.com"
+    blocked_domains:
+      - "evil.com"
+    allowed_verbs:
+      - navigate
+      - screenshot
+    credential_detection: true

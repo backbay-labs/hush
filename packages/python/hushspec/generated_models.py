@@ -112,6 +112,8 @@ class Rules:
     computer_use: ComputerUseRule | None = None
     remote_desktop_channels: RemoteDesktopChannelsRule | None = None
     input_injection: InputInjectionRule | None = None
+    browser_automation: BrowserAutomationRule | None = None
+    code_execution: CodeExecutionRule | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> Rules:
@@ -126,6 +128,8 @@ class Rules:
             computer_use=(ComputerUseRule.from_dict(data.get('computer_use')) if data.get('computer_use') is not None else None),
             remote_desktop_channels=(RemoteDesktopChannelsRule.from_dict(data.get('remote_desktop_channels')) if data.get('remote_desktop_channels') is not None else None),
             input_injection=(InputInjectionRule.from_dict(data.get('input_injection')) if data.get('input_injection') is not None else None),
+            browser_automation=(BrowserAutomationRule.from_dict(data.get('browser_automation')) if data.get('browser_automation') is not None else None),
+            code_execution=(CodeExecutionRule.from_dict(data.get('code_execution')) if data.get('code_execution') is not None else None),
         )
 
     def to_dict(self) -> dict:
@@ -150,6 +154,10 @@ class Rules:
             data['remote_desktop_channels'] = self.remote_desktop_channels.to_dict()
         if self.input_injection is not None:
             data['input_injection'] = self.input_injection.to_dict()
+        if self.browser_automation is not None:
+            data['browser_automation'] = self.browser_automation.to_dict()
+        if self.code_execution is not None:
+            data['code_execution'] = self.code_execution.to_dict()
         return data
 
 @dataclass
@@ -429,6 +437,74 @@ class InputInjectionRule:
         if self.allowed_types:
             data['allowed_types'] = [item for item in self.allowed_types]
         data['require_postcondition_probe'] = self.require_postcondition_probe
+        return data
+
+@dataclass
+class BrowserAutomationRule:
+    enabled: bool = False
+    allowed_domains: list[str] = field(default_factory=list)
+    blocked_domains: list[str] = field(default_factory=list)
+    allowed_verbs: list[str] = field(default_factory=list)
+    credential_detection: bool = True
+    extra_credential_patterns: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> BrowserAutomationRule:
+        return cls(
+            enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            allowed_domains=[item for item in data.get('allowed_domains') or []],
+            blocked_domains=[item for item in data.get('blocked_domains') or []],
+            allowed_verbs=[item for item in data.get('allowed_verbs') or []],
+            credential_detection=(data.get('credential_detection') if data.get('credential_detection') is not None else True),
+            extra_credential_patterns=[item for item in data.get('extra_credential_patterns') or []],
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['enabled'] = self.enabled
+        if self.allowed_domains:
+            data['allowed_domains'] = [item for item in self.allowed_domains]
+        if self.blocked_domains:
+            data['blocked_domains'] = [item for item in self.blocked_domains]
+        if self.allowed_verbs:
+            data['allowed_verbs'] = [item for item in self.allowed_verbs]
+        data['credential_detection'] = self.credential_detection
+        if self.extra_credential_patterns:
+            data['extra_credential_patterns'] = [item for item in self.extra_credential_patterns]
+        return data
+
+@dataclass
+class CodeExecutionRule:
+    enabled: bool = False
+    language_allowlist: list[str] = field(default_factory=list)
+    module_denylist: list[str] = field(default_factory=list)
+    network_access: bool = False
+    max_execution_time_ms: int | None = None
+    max_scan_bytes: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CodeExecutionRule:
+        return cls(
+            enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            language_allowlist=[item for item in data.get('language_allowlist') or []],
+            module_denylist=[item for item in data.get('module_denylist') or []],
+            network_access=(data.get('network_access') if data.get('network_access') is not None else False),
+            max_execution_time_ms=(data.get('max_execution_time_ms') if data.get('max_execution_time_ms') is not None else None),
+            max_scan_bytes=(data.get('max_scan_bytes') if data.get('max_scan_bytes') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['enabled'] = self.enabled
+        if self.language_allowlist:
+            data['language_allowlist'] = [item for item in self.language_allowlist]
+        if self.module_denylist:
+            data['module_denylist'] = [item for item in self.module_denylist]
+        data['network_access'] = self.network_access
+        if self.max_execution_time_ms is not None:
+            data['max_execution_time_ms'] = self.max_execution_time_ms
+        if self.max_scan_bytes is not None:
+            data['max_scan_bytes'] = self.max_scan_bytes
         return data
 
 @dataclass

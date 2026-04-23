@@ -1,0 +1,10 @@
+hushspec: "0.1.0"
+name: input-injection-rule
+description: Enables input_injection restricted to keyboard and mouse with postcondition probe
+rules:
+  input_injection:
+    enabled: true
+    allowed_types:
+      - keyboard
+      - mouse
+    require_postcondition_probe: true

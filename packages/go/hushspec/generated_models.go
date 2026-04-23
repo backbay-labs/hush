@@ -103,6 +103,8 @@ type Rules struct {
 	ComputerUse           *ComputerUseRule           `yaml:"computer_use,omitempty" json:"computer_use,omitempty"`
 	RemoteDesktopChannels *RemoteDesktopChannelsRule `yaml:"remote_desktop_channels,omitempty" json:"remote_desktop_channels,omitempty"`
 	InputInjection        *InputInjectionRule        `yaml:"input_injection,omitempty" json:"input_injection,omitempty"`
+	BrowserAutomation     *BrowserAutomationRule     `yaml:"browser_automation,omitempty" json:"browser_automation,omitempty"`
+	CodeExecution         *CodeExecutionRule         `yaml:"code_execution,omitempty" json:"code_execution,omitempty"`
 }
 
 type ForbiddenPathsRule struct {
@@ -179,6 +181,24 @@ type InputInjectionRule struct {
 	Enabled                   bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 	AllowedTypes              []string `yaml:"allowed_types,omitempty" json:"allowed_types,omitempty"`
 	RequirePostconditionProbe bool     `yaml:"require_postcondition_probe,omitempty" json:"require_postcondition_probe,omitempty"`
+}
+
+type BrowserAutomationRule struct {
+	Enabled                 bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	AllowedDomains          []string `yaml:"allowed_domains,omitempty" json:"allowed_domains,omitempty"`
+	BlockedDomains          []string `yaml:"blocked_domains,omitempty" json:"blocked_domains,omitempty"`
+	AllowedVerbs            []string `yaml:"allowed_verbs,omitempty" json:"allowed_verbs,omitempty"`
+	CredentialDetection     bool     `yaml:"credential_detection,omitempty" json:"credential_detection,omitempty"`
+	ExtraCredentialPatterns []string `yaml:"extra_credential_patterns,omitempty" json:"extra_credential_patterns,omitempty"`
+}
+
+type CodeExecutionRule struct {
+	Enabled            bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	LanguageAllowlist  []string `yaml:"language_allowlist,omitempty" json:"language_allowlist,omitempty"`
+	ModuleDenylist     []string `yaml:"module_denylist,omitempty" json:"module_denylist,omitempty"`
+	NetworkAccess      bool     `yaml:"network_access,omitempty" json:"network_access,omitempty"`
+	MaxExecutionTimeMs *int     `yaml:"max_execution_time_ms,omitempty" json:"max_execution_time_ms,omitempty"`
+	MaxScanBytes       *int     `yaml:"max_scan_bytes,omitempty" json:"max_scan_bytes,omitempty"`
 }
 
 type Extensions struct {

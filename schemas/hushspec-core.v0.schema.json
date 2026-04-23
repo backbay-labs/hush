@@ -73,6 +73,12 @@
         },
         "input_injection": {
           "$ref": "#/$defs/InputInjection"
+        },
+        "browser_automation": {
+          "$ref": "#/$defs/BrowserAutomation"
+        },
+        "code_execution": {
+          "$ref": "#/$defs/CodeExecution"
         }
       }
     },
@@ -417,6 +423,98 @@
           "type": "boolean",
           "default": false,
           "description": "Whether postcondition verification is required after input injection."
+        }
+      }
+    },
+    "BrowserAutomation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Fine-grained controls for browser-automation tool calls: domain allowlist, verb allowlist, and credential detection in type actions.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this rule is active."
+        },
+        "allowed_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Hosts the agent may navigate to. Supports exact match and *.suffix wildcards."
+        },
+        "blocked_domains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Hosts that are always denied (evaluated before the allowlist)."
+        },
+        "allowed_verbs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Verbs (actions) the agent may issue. Empty means any verb."
+        },
+        "credential_detection": {
+          "type": "boolean",
+          "default": true,
+          "description": "Check type/input action values for credential-shaped secrets."
+        },
+        "extra_credential_patterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra credential regex patterns layered on top of the built-in detectors."
+        }
+      }
+    },
+    "CodeExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Restrictions for sandboxed interpreter actions: language allowlist, dangerous module denylist, network gating, and execution-time bounds.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this rule is active."
+        },
+        "language_allowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Allowed interpreter languages (e.g. python, javascript). Empty means any language."
+        },
+        "module_denylist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Module names whose imports or uses in the code body are denied (word-boundary literal matches)."
+        },
+        "network_access": {
+          "type": "boolean",
+          "default": false,
+          "description": "Permit code-execution calls that request network access."
+        },
+        "max_execution_time_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum execution time in milliseconds."
+        },
+        "max_scan_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum bytes of code to scan for module detection."
         }
       }
     },

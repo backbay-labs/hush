@@ -1,0 +1,13 @@
+hushspec: "0.1.0"
+name: code-execution-rule
+description: Enables code_execution with a language allowlist and no network access
+rules:
+  code_execution:
+    enabled: true
+    language_allowlist:
+      - python
+    module_denylist:
+      - subprocess
+      - socket
+    network_access: false
+    max_execution_time_ms: 5000

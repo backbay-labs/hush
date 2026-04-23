@@ -75,6 +75,14 @@ fn merge_rules(base: &Option<Rules>, child: &Option<Rules>) -> Option<Rules> {
                     .input_injection
                     .clone()
                     .or(base_rules.input_injection),
+                browser_automation: child_rules
+                    .browser_automation
+                    .clone()
+                    .or(base_rules.browser_automation),
+                code_execution: child_rules
+                    .code_execution
+                    .clone()
+                    .or(base_rules.code_execution),
             })
         }
         (Some(base_rules), None) => Some(base_rules.clone()),

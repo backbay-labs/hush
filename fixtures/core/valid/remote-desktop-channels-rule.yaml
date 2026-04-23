@@ -1,0 +1,10 @@
+hushspec: "0.1.0"
+name: remote-desktop-channels-rule
+description: Enables remote_desktop_channels with clipboard and file transfer disabled
+rules:
+  remote_desktop_channels:
+    enabled: true
+    clipboard: false
+    file_transfer: false
+    audio: true
+    drive_mapping: false

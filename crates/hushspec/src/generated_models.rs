@@ -127,6 +127,10 @@ pub struct Rules {
     pub remote_desktop_channels: Option<RemoteDesktopChannelsRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_injection: Option<InputInjectionRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_automation: Option<BrowserAutomationRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_execution: Option<CodeExecutionRule>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -265,6 +269,40 @@ pub struct InputInjectionRule {
     pub allowed_types: Vec<String>,
     #[serde(default)]
     pub require_postcondition_probe: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BrowserAutomationRule {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+    #[serde(default)]
+    pub blocked_domains: Vec<String>,
+    #[serde(default)]
+    pub allowed_verbs: Vec<String>,
+    #[serde(default = "default_true")]
+    pub credential_detection: bool,
+    #[serde(default)]
+    pub extra_credential_patterns: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodeExecutionRule {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub language_allowlist: Vec<String>,
+    #[serde(default)]
+    pub module_denylist: Vec<String>,
+    #[serde(default)]
+    pub network_access: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_execution_time_ms: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_scan_bytes: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
