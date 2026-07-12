@@ -30,7 +30,7 @@ h2h test --fixtures ./tests/
 h2h eval policy.yaml --type egress --target api.example.com
 h2h eval policy.yaml --type tool_call --target deploy --explain
 h2h explain policy.yaml --type file_write --target /app/.env
-h2h eval builtin:strict --action-json '{"type": "shell_command", "target": "rm -rf /"}'
+h2h eval builtin:ai-agent --action-json '{"type": "shell_command", "target": "rm -rf /"}'
 
 # Compare two policies and show decision changes
 h2h diff old.yaml new.yaml
