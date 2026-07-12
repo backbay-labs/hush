@@ -468,6 +468,38 @@ fn explain_subcommand_forces_trace() {
 }
 
 #[test]
+fn eval_explain_rule_trace_has_no_trailing_whitespace() {
+    // A target that clears forbidden_paths without matching (and is then
+    // decided by path_allowlist) leaves the forbidden_paths trace line with
+    // matched_rule: None and evaluated: true -- the exact shape that used
+    // to leave a stray trailing space at end-of-line in the rendered trace.
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EXPLAIN_POLICY);
+    let assert = h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "file_write",
+            "--target",
+            "/app/config.yaml",
+            "--explain",
+        ])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("forbidden_paths"))
+        .stdout(predicate::str::contains("Decision: ALLOW"));
+
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout
+            .lines()
+            .all(|line| !line.ends_with(' ') && !line.ends_with('\t')),
+        "stdout contains a line with trailing whitespace:\n{stdout:?}"
+    );
+}
+
+#[test]
 fn explain_shows_extends_line() {
     let dir = TempDir::new().unwrap();
     write_file(

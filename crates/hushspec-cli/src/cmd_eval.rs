@@ -332,6 +332,11 @@ fn outcome_label(outcome: RuleOutcome) -> String {
 /// Rule consultation order per action type, verified against the dispatch
 /// in crates/hushspec/src/evaluate.rs. computer_use and input_inject omit
 /// "posture capabilities" because required_capability() returns None for them.
+/// file_read, file_write, and patch_apply all route through the shared
+/// evaluate_path_guards() helper, so all three must list every path-guard
+/// stage it can resolve on -- including the forbidden_paths exceptions
+/// allow, which runs before file_write/patch_apply fall through to their
+/// own rule block.
 fn precedence_note(action_type: &str) -> Option<&'static str> {
     match action_type {
         "tool_call" => Some(
@@ -342,10 +347,10 @@ fn precedence_note(action_type: &str) -> Option<&'static str> {
             "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions",
         ),
         "file_write" => Some(
-            "panic > posture capabilities > forbidden_paths > path_allowlist > secret_patterns",
+            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions > secret_patterns",
         ),
         "patch_apply" => Some(
-            "panic > posture capabilities > forbidden_paths > path_allowlist > patch_integrity",
+            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions > patch_integrity",
         ),
         "shell_command" => {
             Some("panic > posture capabilities > forbidden_patterns (first match denies)")
@@ -382,13 +387,14 @@ fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
             None if !entry.evaluated => "(not evaluated)".to_string(),
             None => String::new(),
         };
-        println!(
+        let line = format!(
             "  {}. {:<18} {} {}",
             index + 1,
             entry.rule_block,
             outcome_label(entry.outcome),
             matched
         );
+        println!("{}", line.trim_end());
         if let Some(reason) = &entry.reason {
             println!("       {}", reason.dimmed());
         }
@@ -498,10 +504,27 @@ mod tests {
                 .unwrap()
                 .contains("block > allow > default")
         );
+        // file_read, file_write, and patch_apply all route through
+        // evaluate_path_guards(), which can resolve the decision via a
+        // forbidden_paths.exceptions allow before either the file_write or
+        // patch_apply evaluator gets a chance to consult its own rule
+        // block. All three notes must mention that stage, in the order the
+        // evaluator actually consults it (after path_allowlist, before the
+        // action-specific block).
+        assert!(
+            precedence_note("file_read")
+                .unwrap()
+                .contains("path_allowlist > forbidden_paths exceptions")
+        );
         assert!(
             precedence_note("file_write")
                 .unwrap()
-                .contains("secret_patterns")
+                .contains("path_allowlist > forbidden_paths exceptions > secret_patterns")
+        );
+        assert!(
+            precedence_note("patch_apply")
+                .unwrap()
+                .contains("path_allowlist > forbidden_paths exceptions > patch_integrity")
         );
         assert!(precedence_note("frobnicate").is_none());
     }
