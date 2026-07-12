@@ -36,6 +36,8 @@ enum Commands {
     Test(cmd_test::TestArgs),
     /// Evaluate a single action against a policy
     Eval(cmd_eval::EvalArgs),
+    /// Explain a single-action decision with a rule-by-rule trace
+    Explain(cmd_eval::EvalArgs),
     /// Scaffold a new policy project
     Init(cmd_init::InitArgs),
     /// Run static analysis checks on policy files
@@ -62,6 +64,7 @@ fn main() {
         Commands::Validate(args) => cmd_validate::run(args),
         Commands::Test(args) => cmd_test::run(args),
         Commands::Eval(args) => cmd_eval::run(args),
+        Commands::Explain(args) => cmd_eval::run_explain(args),
         Commands::Init(args) => cmd_init::run(args),
         Commands::Lint(args) => cmd_lint::run(args),
         Commands::Diff(args) => cmd_diff::run(args),

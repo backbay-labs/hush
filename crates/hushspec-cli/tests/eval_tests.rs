@@ -421,3 +421,70 @@ fn eval_action_json_rejects_unknown_fields() {
         .code(2)
         .stderr(predicate::str::contains("invalid action"));
 }
+
+const EXPLAIN_POLICY: &str = r#"hushspec: "0.1.0"
+name: "explain-fixture"
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.env"
+  path_allowlist:
+    enabled: true
+    read:
+      - "**"
+    write:
+      - "**"
+"#;
+
+#[test]
+fn eval_explain_renders_rule_trace() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EXPLAIN_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "file_write", "--target", "/app/.env", "--explain"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Policy: explain-fixture"))
+        .stdout(predicate::str::contains("Rule trace:"))
+        .stdout(predicate::str::contains("forbidden_paths"))
+        .stdout(predicate::str::contains("short-circuited by prior deny"))
+        .stdout(predicate::str::contains("Precedence:"))
+        .stdout(predicate::str::contains("Decision: DENY"));
+}
+
+#[test]
+fn explain_subcommand_forces_trace() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EXPLAIN_POLICY);
+    h2h()
+        .arg("explain")
+        .arg(&policy)
+        .args(["--type", "file_write", "--target", "/app/.env"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("Rule trace:"));
+}
+
+#[test]
+fn explain_shows_extends_line() {
+    let dir = TempDir::new().unwrap();
+    write_file(
+        &dir,
+        "base.yaml",
+        "hushspec: \"0.1.0\"\nrules:\n  egress:\n    default: block\n",
+    );
+    let child = write_file(
+        &dir,
+        "child.yaml",
+        "hushspec: \"0.1.0\"\nextends: ./base.yaml\nrules:\n  egress:\n    allow:\n      - \"api.github.com\"\n",
+    );
+    h2h()
+        .arg("explain")
+        .arg(&child)
+        .args(["--type", "egress", "--target", "api.github.com"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("extends: ./base.yaml (resolved)"));
+}

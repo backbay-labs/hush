@@ -1,4 +1,5 @@
 use colored::Colorize;
+use hushspec::receipt::RuleOutcome;
 use hushspec::{
     AuditConfig, Decision, DecisionReceipt, EvaluationAction, HushSpec, evaluate_audited, validate,
 };
@@ -69,11 +70,15 @@ pub struct EvalArgs {
     /// Full action as a YAML or JSON file; "-" reads stdin
     #[arg(long, value_name = "PATH")]
     action_file: Option<String>,
+
+    /// Render the rule-by-rule trace (text output only)
+    #[arg(long)]
+    explain: bool,
 }
 
 pub fn run(args: EvalArgs) -> i32 {
-    let spec = match load_policy(&args.policy) {
-        Ok(spec) => spec,
+    let policy = match load_policy(&args.policy) {
+        Ok(policy) => policy,
         Err(message) => {
             eprintln!("{} {message}", "error:".red());
             return 2;
@@ -96,41 +101,76 @@ pub fn run(args: EvalArgs) -> i32 {
         );
     }
 
-    let receipt = evaluate_audited(&spec, &action, &AuditConfig::default());
-    print_compact(&receipt);
+    let receipt = evaluate_audited(&policy.spec, &action, &AuditConfig::default());
+
+    if args.explain {
+        print_explain(&receipt, &policy);
+    } else {
+        print_compact(&receipt);
+    }
     decision_exit_code(receipt.decision)
+}
+
+/// `h2h explain` — identical to `h2h eval` with trace rendering forced on.
+pub fn run_explain(mut args: EvalArgs) -> i32 {
+    args.explain = true;
+    run(args)
+}
+
+/// A resolved, validated policy plus display metadata.
+struct LoadedPolicy {
+    spec: HushSpec,
+    extends: Option<String>,
+    source: String,
 }
 
 /// Load a policy from a builtin reference or a filesystem path, resolve
 /// its extends chain, and validate the resolved document.
-fn load_policy(reference: &str) -> Result<HushSpec, String> {
-    let resolved = if let Some(yaml) = hushspec::load_builtin(reference) {
+fn load_policy(reference: &str) -> Result<LoadedPolicy, String> {
+    if let Some(yaml) = hushspec::load_builtin(reference) {
         let unresolved = HushSpec::parse(yaml)
             .map_err(|e| format!("failed to parse builtin '{reference}': {e}"))?;
+        let extends = unresolved.extends.clone();
         let source = if reference.starts_with("builtin:") {
             reference.to_string()
         } else {
             format!("builtin:{reference}")
         };
         let loader = hushspec::create_composite_loader();
-        hushspec::resolve_with_loader(&unresolved, Some(&source), &loader)
-            .map_err(|e| format!("failed to resolve '{reference}': {e}"))?
-    } else {
-        let path = std::path::Path::new(reference);
-        if !path.exists() {
-            return Err(format!("file not found: {reference}"));
-        }
-        hushspec::resolve_from_path_with_builtins(path)
-            .map_err(|e| format!("failed to resolve {reference}: {e}"))?
-    };
+        let spec = hushspec::resolve_with_loader(&unresolved, Some(&source), &loader)
+            .map_err(|e| format!("failed to resolve '{reference}': {e}"))?;
+        return validated(LoadedPolicy {
+            spec,
+            extends,
+            source,
+        });
+    }
 
-    let validation = validate(&resolved);
+    let path = std::path::Path::new(reference);
+    if !path.exists() {
+        return Err(format!("file not found: {reference}"));
+    }
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {reference}: {e}"))?;
+    let unresolved =
+        HushSpec::parse(&content).map_err(|e| format!("failed to parse {reference}: {e}"))?;
+    let extends = unresolved.extends.clone();
+    let spec = hushspec::resolve_from_path_with_builtins(path)
+        .map_err(|e| format!("failed to resolve {reference}: {e}"))?;
+    validated(LoadedPolicy {
+        spec,
+        extends,
+        source: reference.to_string(),
+    })
+}
+
+fn validated(policy: LoadedPolicy) -> Result<LoadedPolicy, String> {
+    let validation = validate(&policy.spec);
     if !validation.is_valid() {
         let errors: Vec<String> = validation.errors.iter().map(|e| e.to_string()).collect();
         return Err(format!("policy failed validation: {}", errors.join(", ")));
     }
-
-    Ok(resolved)
+    Ok(policy)
 }
 
 fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
@@ -269,9 +309,113 @@ fn print_compact(receipt: &DecisionReceipt) {
     }
 }
 
+fn outcome_text(outcome: RuleOutcome) -> &'static str {
+    match outcome {
+        RuleOutcome::Allow => "ALLOW",
+        RuleOutcome::Warn => "WARN",
+        RuleOutcome::Deny => "DENY",
+        RuleOutcome::Skip => "SKIP",
+    }
+}
+
+/// Pad before coloring so ANSI escapes do not break column alignment.
+fn outcome_label(outcome: RuleOutcome) -> String {
+    let padded = format!("{:<6}", outcome_text(outcome));
+    match outcome {
+        RuleOutcome::Allow => padded.green().to_string(),
+        RuleOutcome::Warn => padded.yellow().to_string(),
+        RuleOutcome::Deny => padded.red().to_string(),
+        RuleOutcome::Skip => padded.dimmed().to_string(),
+    }
+}
+
+/// Rule consultation order per action type, verified against the dispatch
+/// in crates/hushspec/src/evaluate.rs. computer_use and input_inject omit
+/// "posture capabilities" because required_capability() returns None for them.
+fn precedence_note(action_type: &str) -> Option<&'static str> {
+    match action_type {
+        "tool_call" => Some(
+            "panic > posture capabilities > max_args_size > block > require_confirmation > allow > default",
+        ),
+        "egress" => Some("panic > posture capabilities > block > allow > default"),
+        "file_read" => Some(
+            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions",
+        ),
+        "file_write" => Some(
+            "panic > posture capabilities > forbidden_paths > path_allowlist > secret_patterns",
+        ),
+        "patch_apply" => Some(
+            "panic > posture capabilities > forbidden_paths > path_allowlist > patch_integrity",
+        ),
+        "shell_command" => {
+            Some("panic > posture capabilities > forbidden_patterns (first match denies)")
+        }
+        "computer_use" => Some(
+            "panic > computer_use combined with remote_desktop_channels (more restrictive outcome wins)",
+        ),
+        "input_inject" => Some("panic > allowed_types allowlist (empty list denies all)"),
+        _ => None,
+    }
+}
+
+fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
+    let name = receipt.policy.name.as_deref().unwrap_or("(unnamed)");
+    println!("Policy: {} ({})", name.bold(), receipt.policy.version);
+    println!("  source:  {}", policy.source);
+    println!("  sha256:  {}", receipt.policy.content_hash);
+    if let Some(extends) = &policy.extends {
+        println!("  extends: {extends} (resolved)");
+    }
+    println!();
+
+    let action = match &receipt.action.target {
+        Some(target) => format!("{} -> {}", receipt.action.action_type, target),
+        None => receipt.action.action_type.clone(),
+    };
+    println!("Action: {action}");
+    println!();
+
+    println!("Rule trace:");
+    for (index, entry) in receipt.rule_trace.iter().enumerate() {
+        let matched = match &entry.matched_rule {
+            Some(rule) => rule.clone(),
+            None if !entry.evaluated => "(not evaluated)".to_string(),
+            None => String::new(),
+        };
+        println!(
+            "  {}. {:<18} {} {}",
+            index + 1,
+            entry.rule_block,
+            outcome_label(entry.outcome),
+            matched
+        );
+        if let Some(reason) = &entry.reason {
+            println!("       {}", reason.dimmed());
+        }
+    }
+    if let Some(note) = precedence_note(&receipt.action.action_type) {
+        println!("Precedence: {note}");
+    }
+    println!();
+
+    println!("Decision: {}", decision_label(receipt.decision));
+    if let Some(rule) = &receipt.matched_rule {
+        println!("  rule:    {rule}");
+    }
+    if let Some(reason) = &receipt.reason {
+        println!("  reason:  {reason}");
+    }
+    if let Some(profile) = &receipt.origin_profile {
+        println!("  origin:  {profile}");
+    }
+    if let Some(posture) = &receipt.posture {
+        println!("  posture: {} -> {}", posture.current, posture.next);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decision_exit_code, parse_action_document, parse_origin_pairs};
+    use super::{decision_exit_code, parse_action_document, parse_origin_pairs, precedence_note};
     use hushspec::Decision;
 
     #[test]
@@ -345,5 +489,20 @@ mod tests {
     fn parse_action_document_rejects_unknown_fields() {
         let error = parse_action_document(r#"{"type": "egress", "bogus": 1}"#).unwrap_err();
         assert!(error.contains("invalid action"));
+    }
+
+    #[test]
+    fn precedence_note_covers_reference_action_types() {
+        assert!(
+            precedence_note("egress")
+                .unwrap()
+                .contains("block > allow > default")
+        );
+        assert!(
+            precedence_note("file_write")
+                .unwrap()
+                .contains("secret_patterns")
+        );
+        assert!(precedence_note("frobnicate").is_none());
     }
 }
