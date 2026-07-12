@@ -39,6 +39,19 @@ pub struct EvalArgs {
     /// Serialized tool-argument size in bytes
     #[arg(long, value_name = "N")]
     args_size: Option<usize>,
+
+    /// Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id,
+    /// space_id, space_type, visibility, external_participants, tags, sensitivity, actor_role
+    #[arg(long = "origin", value_name = "KEY=VALUE")]
+    origin: Vec<String>,
+
+    /// Current posture state (defaults to the policy's posture "initial" state)
+    #[arg(long, value_name = "STATE")]
+    posture: Option<String>,
+
+    /// Posture transition signal
+    #[arg(long, value_name = "SIGNAL")]
+    signal: Option<String>,
 }
 
 pub fn run(args: EvalArgs) -> i32 {
@@ -113,13 +126,62 @@ fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
         (None, None) => None,
     };
 
+    let origin = if args.origin.is_empty() {
+        None
+    } else {
+        Some(parse_origin_pairs(&args.origin)?)
+    };
+
+    let posture = if args.posture.is_none() && args.signal.is_none() {
+        None
+    } else {
+        Some(hushspec::PostureContext {
+            current: args.posture.clone(),
+            signal: args.signal.clone(),
+        })
+    };
+
     Ok(EvaluationAction {
         action_type: args.action_type.clone(),
         target: args.target.clone(),
         content,
+        origin,
+        posture,
         args_size: args.args_size,
-        ..Default::default()
     })
+}
+
+/// Build a typed OriginContext from repeated KEY=VALUE flags. Coerces
+/// external_participants to bool and tags to a comma-separated list; the
+/// deny_unknown_fields deserialization rejects unknown keys (fail-closed).
+fn parse_origin_pairs(pairs: &[String]) -> Result<hushspec::OriginContext, String> {
+    let mut map = serde_json::Map::new();
+    for pair in pairs {
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| format!("invalid --origin '{pair}': expected KEY=VALUE"))?;
+        let json_value = match key {
+            "external_participants" => serde_json::Value::Bool(
+                value
+                    .parse::<bool>()
+                    .map_err(|_| format!("invalid --origin '{pair}': expected true or false"))?,
+            ),
+            "tags" => serde_json::Value::Array(
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|tag| !tag.is_empty())
+                    .map(|tag| serde_json::Value::String(tag.to_string()))
+                    .collect(),
+            ),
+            _ => serde_json::Value::String(value.to_string()),
+        };
+        if map.insert(key.to_string(), json_value).is_some() {
+            return Err(format!("duplicate --origin key '{key}'"));
+        }
+    }
+    serde_json::from_value(serde_json::Value::Object(map))
+        .map_err(|e| format!("invalid origin context: {e}"))
 }
 
 fn decision_exit_code(decision: Decision) -> i32 {
@@ -160,7 +222,7 @@ fn print_compact(receipt: &DecisionReceipt) {
 
 #[cfg(test)]
 mod tests {
-    use super::decision_exit_code;
+    use super::{decision_exit_code, parse_origin_pairs};
     use hushspec::Decision;
 
     #[test]
@@ -168,5 +230,49 @@ mod tests {
         assert_eq!(decision_exit_code(Decision::Allow), 0);
         assert_eq!(decision_exit_code(Decision::Deny), 1);
         assert_eq!(decision_exit_code(Decision::Warn), 4);
+    }
+
+    #[test]
+    fn parse_origin_pairs_builds_typed_context() {
+        let pairs = vec![
+            "provider=slack".to_string(),
+            "visibility=public".to_string(),
+            "external_participants=true".to_string(),
+            "tags=prod, external".to_string(),
+        ];
+        let origin = parse_origin_pairs(&pairs).unwrap();
+        assert_eq!(origin.provider.as_deref(), Some("slack"));
+        assert_eq!(origin.visibility.as_deref(), Some("public"));
+        assert_eq!(origin.external_participants, Some(true));
+        assert_eq!(
+            origin.tags,
+            vec!["prod".to_string(), "external".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_origin_pairs_rejects_missing_equals() {
+        let error = parse_origin_pairs(&["visibility".to_string()]).unwrap_err();
+        assert!(error.contains("expected KEY=VALUE"));
+    }
+
+    #[test]
+    fn parse_origin_pairs_rejects_unknown_key() {
+        let error = parse_origin_pairs(&["nope=1".to_string()]).unwrap_err();
+        assert!(error.contains("invalid origin context"));
+    }
+
+    #[test]
+    fn parse_origin_pairs_rejects_duplicate_key() {
+        let error =
+            parse_origin_pairs(&["provider=slack".to_string(), "provider=teams".to_string()])
+                .unwrap_err();
+        assert!(error.contains("duplicate --origin key"));
+    }
+
+    #[test]
+    fn parse_origin_pairs_rejects_bad_bool() {
+        let error = parse_origin_pairs(&["external_participants=maybe".to_string()]).unwrap_err();
+        assert!(error.contains("expected true or false"));
     }
 }

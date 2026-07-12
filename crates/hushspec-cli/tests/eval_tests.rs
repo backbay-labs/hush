@@ -251,3 +251,99 @@ fn eval_content_conflicts_with_content_file() {
         .assert()
         .code(2);
 }
+
+const ORIGINS_POLICY: &str = r#"hushspec: "0.1.0"
+name: "origins-fixture"
+rules:
+  egress:
+    allow:
+      - "api.github.com"
+    default: block
+extensions:
+  origins:
+    profiles:
+      - id: "public-channel"
+        match:
+          visibility: "public"
+        egress:
+          block:
+            - "api.github.com"
+          default: block
+"#;
+
+const POSTURE_POLICY: &str = r#"hushspec: "0.1.0"
+name: "posture-fixture"
+extensions:
+  posture:
+    initial: "normal"
+    states:
+      normal:
+        capabilities:
+          - "egress"
+      lockdown:
+        capabilities: []
+    transitions:
+      - from: "normal"
+        to: "lockdown"
+        on: "critical_violation"
+"#;
+
+#[test]
+fn eval_origin_flags_select_profile() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", ORIGINS_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "egress", "--target", "api.github.com"])
+        .args(["--origin", "visibility=public"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("origin:  public-channel"))
+        .stdout(predicate::str::contains(
+            "extensions.origins.profiles.public-channel.egress.block",
+        ));
+}
+
+#[test]
+fn eval_without_origin_uses_base_rules() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", ORIGINS_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "egress", "--target", "api.github.com"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("rules.egress.allow"));
+}
+
+#[test]
+fn eval_posture_state_denies_missing_capability() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", POSTURE_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "egress", "--target", "example.com"])
+        .args(["--posture", "lockdown"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "extensions.posture.states.lockdown.capabilities",
+        ));
+}
+
+#[test]
+fn eval_posture_signal_reports_transition() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", POSTURE_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "egress", "--target", "example.com"])
+        .args(["--signal", "critical_violation"])
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("posture: normal -> lockdown"));
+}
