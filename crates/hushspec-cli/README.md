@@ -26,6 +26,12 @@ h2h lint --fail-on-warnings policy.yaml
 h2h test policy.test.yaml
 h2h test --fixtures ./tests/
 
+# Evaluate one action and trace the decision
+h2h eval policy.yaml --type egress --target api.example.com
+h2h eval policy.yaml --type tool_call --target deploy --explain
+h2h explain policy.yaml --type file_write --target /app/.env
+h2h eval builtin:strict --action-json '{"type": "shell_command", "target": "rm -rf /"}'
+
 # Compare two policies and show decision changes
 h2h diff old.yaml new.yaml
 
@@ -62,6 +68,12 @@ h2h lint --format json policy.yaml
 h2h test --format tap tests/
 h2h diff --format json old.yaml new.yaml
 ```
+
+`h2h eval` and `h2h explain` map the decision to the exit code — `0` allow,
+`1` deny, `4` warn, `2` input/usage error — and additionally support
+`--format receipt`, which emits a full `hushspec-receipt.v0` document.
+`--format json` emits a deterministic report (no receipt id, timestamp, or
+duration) whose fields are stable-additive across releases.
 
 ## Getting Started
 

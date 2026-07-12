@@ -97,6 +97,10 @@ h2h lint rulesets/default.yaml
 # Run evaluation test suites
 h2h test --fixtures fixtures/core/evaluation
 
+# One-shot action evaluation with decision trace
+h2h eval rulesets/default.yaml --type egress --target api.example.com
+h2h explain rulesets/default.yaml --type egress --target api.example.com
+
 # Scaffold a new policy project
 h2h init --preset default
 

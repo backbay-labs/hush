@@ -214,7 +214,7 @@ guard.enforce({"type": "tool_call", "target": "bash"})  # raises HushSpecDenied 
 
 ## CLI Tool
 
-The `h2h` CLI covers the common policy workflow: validate, test, lint, diff, format, initialize, sign, verify, and trigger panic mode.
+The `h2h` CLI covers the common policy workflow: validate, test, evaluate and explain single actions, lint, diff, format, initialize, sign, verify, and trigger panic mode.
 
 ```bash
 # Validate a policy against the HushSpec schema
@@ -222,6 +222,10 @@ h2h validate policy.yaml
 
 # Run evaluation test suites
 h2h test --fixtures ./tests/
+
+# Evaluate one action and explain the decision
+h2h eval policy.yaml --type egress --target api.example.com
+h2h explain policy.yaml --type egress --target api.example.com
 
 # Static analysis and linting
 h2h lint policy.yaml
