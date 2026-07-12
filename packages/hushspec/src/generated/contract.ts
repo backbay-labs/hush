@@ -3,7 +3,7 @@
 export const TOP_LEVEL_KEYS = ['hushspec', 'name', 'description', 'extends', 'merge_strategy', 'rules', 'extensions', 'metadata'] as const;
 export const TOP_LEVEL_KEYS_SET: ReadonlySet<string> = new Set(TOP_LEVEL_KEYS);
 
-export const RULE_KEYS = ['forbidden_paths', 'path_allowlist', 'egress', 'secret_patterns', 'patch_integrity', 'shell_commands', 'tool_access', 'computer_use', 'remote_desktop_channels', 'input_injection'] as const;
+export const RULE_KEYS = ['forbidden_paths', 'path_allowlist', 'egress', 'secret_patterns', 'patch_integrity', 'shell_commands', 'tool_access', 'computer_use', 'remote_desktop_channels', 'input_injection', 'browser_automation', 'code_execution'] as const;
 export const RULE_KEYS_SET: ReadonlySet<string> = new Set(RULE_KEYS);
 
 export const EXTENSION_KEYS = ['posture', 'origins', 'detection'] as const;

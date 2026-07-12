@@ -22,6 +22,8 @@ pub const RULE_KEYS: &[&str] = &[
     "computer_use",
     "remote_desktop_channels",
     "input_injection",
+    "browser_automation",
+    "code_execution",
 ];
 pub const EXTENSION_KEYS: &[&str] = &["posture", "origins", "detection"];
 pub const GOVERNANCE_METADATA_KEYS: &[&str] = &[

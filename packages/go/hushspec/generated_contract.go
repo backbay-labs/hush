@@ -24,6 +24,8 @@ var RuleKeys = map[string]struct{}{
 	"computer_use":            {},
 	"remote_desktop_channels": {},
 	"input_injection":         {},
+	"browser_automation":      {},
+	"code_execution":          {},
 }
 
 var ExtensionKeys = map[string]struct{}{
