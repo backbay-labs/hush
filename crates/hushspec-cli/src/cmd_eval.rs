@@ -27,6 +27,18 @@ pub struct EvalArgs {
     /// Action target (path, domain, tool name, command, channel)
     #[arg(long, value_name = "TARGET")]
     target: Option<String>,
+
+    /// Action content (file body, patch text)
+    #[arg(long, value_name = "STRING", conflicts_with = "content_file")]
+    content: Option<String>,
+
+    /// Read action content from a file
+    #[arg(long, value_name = "PATH")]
+    content_file: Option<std::path::PathBuf>,
+
+    /// Serialized tool-argument size in bytes
+    #[arg(long, value_name = "N")]
+    args_size: Option<usize>,
 }
 
 pub fn run(args: EvalArgs) -> i32 {
@@ -38,7 +50,13 @@ pub fn run(args: EvalArgs) -> i32 {
         }
     };
 
-    let action = build_action(&args);
+    let action = match build_action(&args) {
+        Ok(action) => action,
+        Err(message) => {
+            eprintln!("{} {message}", "error:".red());
+            return 2;
+        }
+    };
 
     if !KNOWN_ACTION_TYPES.contains(&action.action_type.as_str()) {
         eprintln!(
@@ -85,12 +103,23 @@ fn load_policy(reference: &str) -> Result<HushSpec, String> {
     Ok(resolved)
 }
 
-fn build_action(args: &EvalArgs) -> EvaluationAction {
-    EvaluationAction {
+fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
+    let content = match (&args.content, &args.content_file) {
+        (Some(content), _) => Some(content.clone()),
+        (None, Some(path)) => Some(
+            std::fs::read_to_string(path)
+                .map_err(|e| format!("failed to read content file {}: {e}", path.display()))?,
+        ),
+        (None, None) => None,
+    };
+
+    Ok(EvaluationAction {
         action_type: args.action_type.clone(),
         target: args.target.clone(),
+        content,
+        args_size: args.args_size,
         ..Default::default()
-    }
+    })
 }
 
 fn decision_exit_code(decision: Decision) -> i32 {

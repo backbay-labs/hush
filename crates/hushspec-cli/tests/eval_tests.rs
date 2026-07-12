@@ -159,3 +159,95 @@ fn eval_unknown_action_type_allows_with_stderr_note() {
         .stdout(predicate::str::contains("ALLOW"))
         .stderr(predicate::str::contains("not a reference action type"));
 }
+
+const CONTENT_POLICY: &str = r#"hushspec: "0.1.0"
+name: "content-fixture"
+rules:
+  secret_patterns:
+    patterns:
+      - name: "aws-key"
+        pattern: "AKIA[0-9A-Z]{16}"
+        severity: critical
+  tool_access:
+    max_args_size: 64
+    default: allow
+"#;
+
+#[test]
+fn eval_content_flag_triggers_secret_patterns() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", CONTENT_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "file_write",
+            "--target",
+            "/tmp/creds.txt",
+            "--content",
+            "key = AKIAABCDEFGHIJKLMNOP",
+        ])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "rules.secret_patterns.patterns.aws-key",
+        ));
+}
+
+#[test]
+fn eval_content_file_flag_reads_content() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", CONTENT_POLICY);
+    let body = write_file(&dir, "body.txt", "key = AKIAABCDEFGHIJKLMNOP");
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "file_write", "--target", "/tmp/creds.txt"])
+        .arg("--content-file")
+        .arg(&body)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "rules.secret_patterns.patterns.aws-key",
+        ));
+}
+
+#[test]
+fn eval_args_size_triggers_max_args_size() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", CONTENT_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "tool_call",
+            "--target",
+            "search",
+            "--args-size",
+            "65",
+        ])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("rules.tool_access.max_args_size"));
+}
+
+#[test]
+fn eval_content_conflicts_with_content_file() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", CONTENT_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "file_write",
+            "--content",
+            "x",
+            "--content-file",
+            "body.txt",
+        ])
+        .assert()
+        .code(2);
+}
