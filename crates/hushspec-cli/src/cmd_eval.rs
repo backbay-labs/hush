@@ -21,37 +21,54 @@ pub struct EvalArgs {
 
     /// Action type (file_read, file_write, patch_apply, shell_command,
     /// tool_call, egress, computer_use, input_inject)
-    #[arg(long = "type", value_name = "TYPE")]
-    action_type: String,
+    #[arg(
+        long = "type",
+        value_name = "TYPE",
+        required_unless_present_any = ["action_json", "action_file"],
+        conflicts_with_all = ["action_json", "action_file"]
+    )]
+    action_type: Option<String>,
 
     /// Action target (path, domain, tool name, command, channel)
-    #[arg(long, value_name = "TARGET")]
+    #[arg(long, value_name = "TARGET", conflicts_with_all = ["action_json", "action_file"])]
     target: Option<String>,
 
     /// Action content (file body, patch text)
-    #[arg(long, value_name = "STRING", conflicts_with = "content_file")]
+    #[arg(
+        long,
+        value_name = "STRING",
+        conflicts_with_all = ["content_file", "action_json", "action_file"]
+    )]
     content: Option<String>,
 
     /// Read action content from a file
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["action_json", "action_file"])]
     content_file: Option<std::path::PathBuf>,
 
     /// Serialized tool-argument size in bytes
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", conflicts_with_all = ["action_json", "action_file"])]
     args_size: Option<usize>,
 
     /// Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id,
     /// space_id, space_type, visibility, external_participants, tags, sensitivity, actor_role
-    #[arg(long = "origin", value_name = "KEY=VALUE")]
+    #[arg(long = "origin", value_name = "KEY=VALUE", conflicts_with_all = ["action_json", "action_file"])]
     origin: Vec<String>,
 
     /// Current posture state (defaults to the policy's posture "initial" state)
-    #[arg(long, value_name = "STATE")]
+    #[arg(long, value_name = "STATE", conflicts_with_all = ["action_json", "action_file"])]
     posture: Option<String>,
 
     /// Posture transition signal
-    #[arg(long, value_name = "SIGNAL")]
+    #[arg(long, value_name = "SIGNAL", conflicts_with_all = ["action_json", "action_file"])]
     signal: Option<String>,
+
+    /// Full action as an inline JSON object
+    #[arg(long, value_name = "JSON", conflicts_with = "action_file")]
+    action_json: Option<String>,
+
+    /// Full action as a YAML or JSON file; "-" reads stdin
+    #[arg(long, value_name = "PATH")]
+    action_file: Option<String>,
 }
 
 pub fn run(args: EvalArgs) -> i32 {
@@ -117,6 +134,29 @@ fn load_policy(reference: &str) -> Result<HushSpec, String> {
 }
 
 fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
+    if let Some(json) = &args.action_json {
+        return parse_action_document(json);
+    }
+    if let Some(source) = &args.action_file {
+        let text = if source == "-" {
+            use std::io::Read;
+            let mut buffer = String::new();
+            std::io::stdin()
+                .read_to_string(&mut buffer)
+                .map_err(|e| format!("failed to read action from stdin: {e}"))?;
+            buffer
+        } else {
+            std::fs::read_to_string(source)
+                .map_err(|e| format!("failed to read action file {source}: {e}"))?
+        };
+        return parse_action_document(&text);
+    }
+
+    let action_type = args
+        .action_type
+        .clone()
+        .ok_or_else(|| "missing --type".to_string())?;
+
     let content = match (&args.content, &args.content_file) {
         (Some(content), _) => Some(content.clone()),
         (None, Some(path)) => Some(
@@ -142,13 +182,22 @@ fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
     };
 
     Ok(EvaluationAction {
-        action_type: args.action_type.clone(),
+        action_type,
         target: args.target.clone(),
         content,
         origin,
         posture,
         args_size: args.args_size,
     })
+}
+
+/// Parse a full action document (YAML or JSON) via the same two-step
+/// path cmd_test.rs uses for fixture actions; deny_unknown_fields on
+/// EvaluationAction rejects unknown keys (fail-closed).
+fn parse_action_document(text: &str) -> Result<EvaluationAction, String> {
+    let value: serde_json::Value =
+        serde_yaml::from_str(text).map_err(|e| format!("invalid action document: {e}"))?;
+    serde_json::from_value(value).map_err(|e| format!("invalid action: {e}"))
 }
 
 /// Build a typed OriginContext from repeated KEY=VALUE flags. Coerces
@@ -222,7 +271,7 @@ fn print_compact(receipt: &DecisionReceipt) {
 
 #[cfg(test)]
 mod tests {
-    use super::{decision_exit_code, parse_origin_pairs};
+    use super::{decision_exit_code, parse_action_document, parse_origin_pairs};
     use hushspec::Decision;
 
     #[test]
@@ -274,5 +323,27 @@ mod tests {
     fn parse_origin_pairs_rejects_bad_bool() {
         let error = parse_origin_pairs(&["external_participants=maybe".to_string()]).unwrap_err();
         assert!(error.contains("expected true or false"));
+    }
+
+    #[test]
+    fn parse_action_document_accepts_yaml() {
+        let action = parse_action_document("type: egress\ntarget: api.github.com\n").unwrap();
+        assert_eq!(action.action_type, "egress");
+        assert_eq!(action.target.as_deref(), Some("api.github.com"));
+    }
+
+    #[test]
+    fn parse_action_document_accepts_json() {
+        let action =
+            parse_action_document(r#"{"type": "tool_call", "target": "deploy", "args_size": 12}"#)
+                .unwrap();
+        assert_eq!(action.action_type, "tool_call");
+        assert_eq!(action.args_size, Some(12));
+    }
+
+    #[test]
+    fn parse_action_document_rejects_unknown_fields() {
+        let error = parse_action_document(r#"{"type": "egress", "bogus": 1}"#).unwrap_err();
+        assert!(error.contains("invalid action"));
     }
 }

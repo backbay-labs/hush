@@ -347,3 +347,77 @@ fn eval_posture_signal_reports_transition() {
         .code(0)
         .stdout(predicate::str::contains("posture: normal -> lockdown"));
 }
+
+#[test]
+fn eval_action_json_evaluates() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--action-json",
+            r#"{"type": "tool_call", "target": "deploy"}"#,
+        ])
+        .assert()
+        .code(4)
+        .stdout(predicate::str::contains("WARN"));
+}
+
+#[test]
+fn eval_action_file_evaluates() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    let action = write_file(
+        &dir,
+        "action.yaml",
+        "type: egress\ntarget: api.github.com\n",
+    );
+    let mut cmd = h2h();
+    cmd.arg("eval")
+        .arg(&policy)
+        .arg("--action-file")
+        .arg(&action);
+    cmd.assert()
+        .code(0)
+        .stdout(predicate::str::contains("ALLOW"));
+}
+
+#[test]
+fn eval_action_from_stdin() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--action-file", "-"])
+        .write_stdin("type: egress\ntarget: evil.example.com\n")
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("DENY"));
+}
+
+#[test]
+fn eval_action_json_conflicts_with_field_flags() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--action-json", r#"{"type": "egress"}"#, "--type", "egress"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn eval_action_json_rejects_unknown_fields() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--action-json", r#"{"type": "egress", "bogus": 1}"#])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("invalid action"));
+}
