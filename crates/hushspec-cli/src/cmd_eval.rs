@@ -15,6 +15,13 @@ const KNOWN_ACTION_TYPES: &[&str] = &[
     "input_inject",
 ];
 
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum EvalOutputFormat {
+    Text,
+    Json,
+    Receipt,
+}
+
 #[derive(clap::Args)]
 pub struct EvalArgs {
     /// Policy YAML file, or a builtin reference (e.g. "builtin:default")
@@ -74,6 +81,10 @@ pub struct EvalArgs {
     /// Render the rule-by-rule trace (text output only)
     #[arg(long)]
     explain: bool,
+
+    /// Output format
+    #[arg(short, long, default_value = "text")]
+    format: EvalOutputFormat,
 }
 
 pub fn run(args: EvalArgs) -> i32 {
@@ -103,10 +114,24 @@ pub fn run(args: EvalArgs) -> i32 {
 
     let receipt = evaluate_audited(&policy.spec, &action, &AuditConfig::default());
 
-    if args.explain {
-        print_explain(&receipt, &policy);
-    } else {
-        print_compact(&receipt);
+    match args.format {
+        EvalOutputFormat::Text => {
+            if args.explain {
+                print_explain(&receipt, &policy);
+            } else {
+                print_compact(&receipt);
+            }
+        }
+        EvalOutputFormat::Json => {
+            if let Ok(json) = serde_json::to_string_pretty(&EvalReport::from(&receipt)) {
+                println!("{json}");
+            }
+        }
+        EvalOutputFormat::Receipt => {
+            if let Ok(json) = serde_json::to_string_pretty(&receipt) {
+                println!("{json}");
+            }
+        }
     }
     decision_exit_code(receipt.decision)
 }
@@ -416,6 +441,40 @@ fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
     }
     if let Some(posture) = &receipt.posture {
         println!("  posture: {} -> {}", posture.current, posture.next);
+    }
+}
+
+/// Deterministic machine report: the receipt minus its non-deterministic
+/// fields (receipt_id, timestamp, hushspec_version, evaluation_duration_us).
+/// Identical inputs produce byte-identical output.
+#[derive(serde::Serialize)]
+struct EvalReport<'a> {
+    policy: &'a hushspec::receipt::PolicySummary,
+    action: &'a hushspec::receipt::ActionSummary,
+    decision: Decision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_rule: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    origin_profile: Option<&'a String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    posture: Option<&'a hushspec::PostureResult>,
+    rule_trace: &'a [hushspec::receipt::RuleEvaluation],
+}
+
+impl<'a> From<&'a DecisionReceipt> for EvalReport<'a> {
+    fn from(receipt: &'a DecisionReceipt) -> Self {
+        Self {
+            policy: &receipt.policy,
+            action: &receipt.action,
+            decision: receipt.decision,
+            matched_rule: receipt.matched_rule.as_ref(),
+            reason: receipt.reason.as_ref(),
+            origin_profile: receipt.origin_profile.as_ref(),
+            posture: receipt.posture.as_ref(),
+            rule_trace: &receipt.rule_trace,
+        }
     }
 }
 

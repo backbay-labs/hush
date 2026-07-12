@@ -520,3 +520,69 @@ fn explain_shows_extends_line() {
         .code(0)
         .stdout(predicate::str::contains("extends: ./base.yaml (resolved)"));
 }
+
+#[test]
+fn eval_format_json_emits_deterministic_report() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    let output = h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "egress",
+            "--target",
+            "evil.example.com",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["decision"], "deny");
+    assert_eq!(report["matched_rule"], "rules.egress.default");
+    assert_eq!(report["action"]["type"], "egress");
+    assert_eq!(report["policy"]["content_hash"].as_str().unwrap().len(), 64);
+    assert!(!report["rule_trace"].as_array().unwrap().is_empty());
+    assert!(report.get("receipt_id").is_none());
+    assert!(report.get("timestamp").is_none());
+}
+
+#[test]
+fn eval_format_receipt_conforms_to_receipt_schema() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    let output = h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "egress",
+            "--target",
+            "evil.example.com",
+            "--format",
+            "receipt",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let receipt: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(receipt["receipt_id"].is_string());
+
+    let schema_text =
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+            .unwrap();
+    let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
+    let compiled = jsonschema::JSONSchema::compile(&schema).unwrap();
+    assert!(
+        compiled.is_valid(&receipt),
+        "receipt output must conform to hushspec-receipt.v0"
+    );
+}
