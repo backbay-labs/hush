@@ -1,9 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { HushGuard, HushSpecDenied, matchesRulePathPrefix } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
 import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
+import { activatePanic, deactivatePanic } from '../src/evaluate.js';
+import type { EvaluationResult } from '../src/evaluate.js';
 
 
 // ---------------------------------------------------------------------------
@@ -40,6 +42,20 @@ rules:
   forbidden_paths:
     patterns:
       - "**/.ssh/**"
+`;
+
+const SECRET_POLICY = `
+hushspec: "0.1.0"
+name: secrets
+rules:
+  secret_patterns:
+    patterns:
+      - name: aws_access_key
+        pattern: "AKIA[0-9A-Z]{16}"
+        severity: critical
+      - name: github_token
+        pattern: "gh[ps]_[A-Za-z0-9]{36}"
+        severity: critical
 `;
 
 // ---------------------------------------------------------------------------
@@ -392,5 +408,195 @@ describe('enforcement config validation', () => {
       },
     });
     expect(guard).toBeInstanceOf(HushGuard);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Monitor mode gate
+// ---------------------------------------------------------------------------
+
+describe('monitor mode gate', () => {
+  const noopObserver = { onEvent: () => {} };
+
+  it('deny proceeds under monitor with would_block outcome', () => {
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      observer: noopObserver,
+      enforcement: { mode: 'monitor' },
+    });
+    const action = { type: 'tool_call', target: 'dangerous_tool' };
+    const outcome = guard.gate(action);
+    expect(outcome.proceed).toBe(true);
+    expect(outcome.result.decision).toBe('deny');
+    expect(outcome.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+    expect(guard.check(action)).toBe(true);
+    expect(() => guard.enforce(action)).not.toThrow();
+  });
+
+  it('warn proceeds under monitor without invoking onWarn', () => {
+    let warnCalled = false;
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      observer: noopObserver,
+      onWarn: () => {
+        warnCalled = true;
+        return false;
+      },
+      enforcement: { mode: 'monitor' },
+    });
+    const outcome = guard.gate({ type: 'tool_call', target: 'risky_tool' });
+    expect(outcome.proceed).toBe(true);
+    expect(outcome.result.decision).toBe('warn');
+    expect(outcome.enforcement.outcome).toBe('would_block');
+    expect(warnCalled).toBe(false);
+  });
+
+  it('allow is allowed under monitor', () => {
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      observer: noopObserver,
+      enforcement: { mode: 'monitor' },
+    });
+    const outcome = guard.gate({ type: 'tool_call', target: 'safe_tool' });
+    expect(outcome.proceed).toBe(true);
+    expect(outcome.enforcement).toEqual({ mode: 'monitor', outcome: 'allowed' });
+  });
+
+  it('gate under enforce blocks deny and confirms warn', () => {
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, { onWarn: () => true });
+    expect(guard.gate({ type: 'tool_call', target: 'dangerous_tool' })).toMatchObject({
+      proceed: false,
+      enforcement: { mode: 'enforce', outcome: 'blocked' },
+    });
+    expect(guard.gate({ type: 'tool_call', target: 'risky_tool' })).toMatchObject({
+      proceed: true,
+      enforcement: { mode: 'enforce', outcome: 'confirmed' },
+    });
+  });
+
+  it('escalates specific rules to enforce while the guard monitors', () => {
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      observer: noopObserver,
+      enforcement: { mode: 'monitor', overrides: { 'rules.tool_access': 'enforce' } },
+    });
+    expect(() => guard.enforce({ type: 'tool_call', target: 'dangerous_tool' })).toThrow(
+      HushSpecDenied,
+    );
+    expect(guard.check({ type: 'egress', target: 'evil.com' })).toBe(true);
+  });
+
+  it('de-escalates specific rules to monitor while the guard enforces', () => {
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      observer: noopObserver,
+      enforcement: { overrides: { 'rules.shell_commands': 'monitor' } },
+    });
+    expect(guard.check({ type: 'shell_command', target: 'rm -rf /' })).toBe(true);
+    expect(() => guard.enforce({ type: 'tool_call', target: 'dangerous_tool' })).toThrow(
+      HushSpecDenied,
+    );
+  });
+
+  it('longest override prefix wins', () => {
+    const guard = HushGuard.fromYaml(SECRET_POLICY, {
+      observer: noopObserver,
+      enforcement: {
+        overrides: {
+          'rules.secret_patterns': 'monitor',
+          'rules.secret_patterns.patterns.aws_access_key': 'enforce',
+        },
+      },
+    });
+    expect(
+      guard.check({
+        type: 'file_write',
+        target: '/tmp/app.txt',
+        content: 'token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+      }),
+    ).toBe(true);
+    expect(() =>
+      guard.enforce({
+        type: 'file_write',
+        target: '/tmp/app.txt',
+        content: 'key=AKIAABCDEFGHIJKLMNOP',
+      }),
+    ).toThrow(HushSpecDenied);
+  });
+});
+
+describe('panic supremacy over monitor', () => {
+  afterEach(() => {
+    deactivatePanic();
+  });
+
+  it('monitor guard blocks while panic is active', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      observer: { onEvent: () => {} },
+      enforcement: { mode: 'monitor' },
+    });
+    activatePanic();
+    const outcome = guard.gate({ type: 'tool_call', target: 'any_tool' });
+    expect(outcome.proceed).toBe(false);
+    expect(outcome.enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
+    expect(() => guard.enforce({ type: 'tool_call', target: 'any_tool' })).toThrow(
+      HushSpecDenied,
+    );
+  });
+
+  it('stale provider under monitor proceeds, but blocks when panic is active', async () => {
+    const provider: PolicyProvider = {
+      async load() {
+        return parseOrThrow(ALLOW_ALL_POLICY);
+      },
+      watch() {},
+      stop() {},
+      current() {
+        throw new Error('Policy is stale');
+      },
+    };
+    const guard = await HushGuard.fromProvider(provider, {
+      observer: { onEvent: () => {} },
+      enforcement: { mode: 'monitor' },
+    });
+
+    const outcome = guard.gate({ type: 'tool_call', target: 'any_tool' });
+    expect(outcome.proceed).toBe(true);
+    expect(outcome.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+    expect(outcome.result.matched_rule).toBe('__hushspec_policy_provider__');
+
+    activatePanic();
+    expect(guard.gate({ type: 'tool_call', target: 'any_tool' }).proceed).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Controller directive: detection.ts matched_rule normalization
+//
+// packages/hushspec/src/detection.ts emits the bare literal matched_rule:
+// 'detection' (not a hierarchical rule path). effectiveMode() must normalize
+// it to 'extensions.detection' before prefix matching, or an override keyed
+// 'extensions.detection' would silently never match. gate() only accepts an
+// EvaluationAction (evaluateWithDetection() is not wired into the enforcement
+// path in this task), so there is no organic way to produce a result with
+// matched_rule 'detection' through the public API; this test reaches into
+// the private effectiveMode() resolver directly to exercise the
+// normalization in isolation, exactly as the brief specifies its signature:
+// `private effectiveMode(result: EvaluationResult): EnforcementMode`.
+// ---------------------------------------------------------------------------
+
+describe('detection matched_rule normalization', () => {
+  const noopObserver = { onEvent: () => {} };
+
+  it('resolves a bare "detection" matched_rule against an extensions.detection override', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      observer: noopObserver,
+      enforcement: {
+        overrides: { 'extensions.detection': 'monitor' },
+      },
+    });
+    const detectionResult: EvaluationResult = {
+      decision: 'deny',
+      matched_rule: 'detection',
+      reason: 'content exceeded detection threshold',
+    };
+    type GuardInternals = { effectiveMode(result: EvaluationResult): EnforcementMode };
+    const mode = (guard as unknown as GuardInternals).effectiveMode(detectionResult);
+    expect(mode).toBe('monitor');
   });
 });

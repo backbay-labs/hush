@@ -1,13 +1,13 @@
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
-import { evaluate } from './evaluate.js';
+import { evaluate, isPanicActive } from './evaluate.js';
 import { parse } from './parse.js';
 import { readFileSync } from 'node:fs';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
 import { computePolicyHash } from './receipt.js';
-import type { EnforcementMode } from './receipt.js';
+import type { DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
 import { RULE_KEYS_SET } from './generated/contract.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
@@ -17,6 +17,12 @@ export interface EnforcementConfig {
   mode?: EnforcementMode;
   /** Rule-path prefix -> mode. Longest matching prefix wins over `mode`. */
   overrides?: Record<string, EnforcementMode>;
+}
+
+export interface GateOutcome {
+  result: EvaluationResult;
+  proceed: boolean;
+  enforcement: EnforcementSummary;
 }
 
 export interface HushGuardOptions {
@@ -133,20 +139,115 @@ export class HushGuard {
   }
 
   check(action: EvaluationAction): boolean {
-    const result = this.evaluate(action);
-    if (result.decision === 'allow') return true;
-    if (result.decision === 'warn') return this.onWarn(result, action);
-    return false;
+    return this.gate(action).proceed;
   }
 
   enforce(action: EvaluationAction): void {
-    const result = this.evaluate(action);
-    if (result.decision === 'deny') {
-      throw new HushSpecDenied(result);
+    const outcome = this.gate(action);
+    if (!outcome.proceed) {
+      throw new HushSpecDenied(outcome.result);
     }
-    if (result.decision === 'warn' && !this.onWarn(result, action)) {
-      throw new HushSpecDenied(result);
+  }
+
+  /**
+   * Evaluate an action, resolve the effective enforcement mode, record the
+   * outcome, and report whether execution may proceed. The single
+   * enforcement path: check() and enforce() delegate here.
+   */
+  gate(action: EvaluationAction): GateOutcome {
+    const policy = this.activePolicyResult();
+    if ('decision' in policy) {
+      // Provider-failure deny: no policy exists, so no receipt or event.
+      const mode = this.effectiveMode(policy);
+      if (mode === 'monitor') {
+        return { result: policy, proceed: true, enforcement: { mode, outcome: 'would_block' } };
+      }
+      return { result: policy, proceed: false, enforcement: { mode, outcome: 'blocked' } };
     }
+
+    const { result, durationUs, receipt } = this.runEvaluation(policy, action);
+    const mode = this.effectiveMode(result);
+    let proceed: boolean;
+    let outcome: EnforcementSummary['outcome'];
+    switch (result.decision) {
+      case 'allow':
+        proceed = true;
+        outcome = 'allowed';
+        break;
+      case 'warn':
+        if (mode === 'monitor') {
+          proceed = true;
+          outcome = 'would_block';
+        } else if (this.onWarn(result, action)) {
+          proceed = true;
+          outcome = 'confirmed';
+        } else {
+          proceed = false;
+          outcome = 'blocked';
+        }
+        break;
+      case 'deny':
+        proceed = mode === 'monitor';
+        outcome = proceed ? 'would_block' : 'blocked';
+        break;
+    }
+
+    const enforcement: EnforcementSummary = { mode, outcome };
+    this.record(action, result, durationUs, enforcement, receipt);
+    return { result, proceed, enforcement };
+  }
+
+  private effectiveMode(result: EvaluationResult): EnforcementMode {
+    if (isPanicActive() || result.matched_rule === '__hushspec_panic__') {
+      return 'enforce';
+    }
+    let matched = result.matched_rule;
+    // detection.ts emits the bare literal 'detection' as matched_rule rather
+    // than a hierarchical rule path (see packages/hushspec/src/detection.ts),
+    // so an override keyed 'extensions.detection' would otherwise silently
+    // never match. Normalize before prefix matching.
+    if (matched === 'detection') {
+      matched = 'extensions.detection';
+    }
+    if (matched != null) {
+      let bestKey: string | undefined;
+      let bestMode: EnforcementMode | undefined;
+      for (const [key, mode] of Object.entries(this.enforcementOverrides)) {
+        if (matchesRulePathPrefix(matched, key) && (bestKey == null || key.length > bestKey.length)) {
+          bestKey = key;
+          bestMode = mode;
+        }
+      }
+      if (bestMode != null) return bestMode;
+    }
+    return this.enforcementMode;
+  }
+
+  private runEvaluation(policy: HushSpec, action: EvaluationAction): {
+    result: EvaluationResult;
+    durationUs: number;
+    receipt?: DecisionReceipt;
+  } {
+    const start = performance.now();
+    const result = evaluate(policy, action);
+    const durationUs = Math.round((performance.now() - start) * 1000);
+    return { result, durationUs };
+  }
+
+  private record(
+    action: EvaluationAction,
+    result: EvaluationResult,
+    durationUs: number,
+    enforcement: EnforcementSummary,
+    receipt?: DecisionReceipt,
+  ): void {
+    this.observableEvaluator?.notifyEvaluationCompleted(
+      action,
+      result,
+      durationUs,
+      enforcement,
+      receipt,
+    );
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {
