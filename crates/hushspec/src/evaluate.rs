@@ -1166,16 +1166,24 @@ fn select_origin_profile<'a>(
         .and_then(|extensions| extensions.origins.as_ref())
         .map(|origins| origins.profiles.as_slice())?;
 
-    profiles
-        .iter()
-        .filter_map(|profile| {
-            profile
-                .match_rules
-                .as_ref()
-                .and_then(|rules| match_origin(rules, origin).map(|score| (score, profile)))
-        })
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, profile)| profile)
+    // First-match-wins on ties: only replace `best` when a later profile
+    // strictly outscores it. `Iterator::max_by_key` would keep the *last*
+    // maximal element instead, which disagrees with the TS/Python/Go
+    // evaluators and can flip the allow/deny decision when two profiles
+    // tie on match score. Cross-SDK parity requires the first-listed
+    // tied profile to win here.
+    let mut best: Option<(u32, &OriginProfile)> = None;
+    for (score, profile) in profiles.iter().filter_map(|profile| {
+        profile
+            .match_rules
+            .as_ref()
+            .and_then(|rules| match_origin(rules, origin).map(|score| (score, profile)))
+    }) {
+        if best.is_none_or(|(best_score, _)| score > best_score) {
+            best = Some((score, profile));
+        }
+    }
+    best.map(|(_, profile)| profile)
 }
 
 fn match_origin(rules: &crate::extensions::OriginMatch, origin: &OriginContext) -> Option<u32> {

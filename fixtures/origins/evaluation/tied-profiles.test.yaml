@@ -1,0 +1,74 @@
+hushspec_test: "0.1.0"
+description: "Origin profile tie-break: first-listed profile wins when match scores are equal"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: block
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+      transitions: []
+    origins:
+      default_behavior: minimal_profile
+      profiles:
+        - id: contoso-allow-first
+          match:
+            provider: teams
+            tenant_id: contoso
+          tool_access:
+            allow: [ticket_search]
+            default: block
+        - id: contoso-block-second
+          match:
+            provider: teams
+            tenant_id: contoso
+          tool_access:
+            block: [ticket_search]
+            default: block
+        - id: confidential-block-first
+          match:
+            space_type: channel
+            sensitivity: confidential
+          tool_access:
+            block: [ticket_search]
+            default: block
+        - id: confidential-allow-second
+          match:
+            space_type: channel
+            sensitivity: confidential
+          tool_access:
+            allow: [ticket_search]
+            default: block
+cases:
+  - description: "tied score (provider+tenant_id, both score 10): first-listed profile (allow) wins over identically-scored later profile (block)"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: teams
+        tenant_id: contoso
+    expect:
+      decision: allow
+      matched_rule: extensions.origins.profiles.contoso-allow-first.tool_access.allow
+      origin_profile: contoso-allow-first
+      posture:
+        current: standard
+        next: standard
+  - description: "tied score (space_type+sensitivity, both score 8), order reversed: first-listed profile (block) wins even though it sorts after the allow profile alphabetically"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        space_type: channel
+        sensitivity: confidential
+    expect:
+      decision: deny
+      matched_rule: extensions.origins.profiles.confidential-block-first.tool_access.block
+      origin_profile: confidential-block-first
+      posture:
+        current: standard
+        next: standard
