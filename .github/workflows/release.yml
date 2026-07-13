@@ -28,7 +28,7 @@ jobs:
       - name: Validate tag format
         shell: bash
         run: |
-          [[ "$TAG" =~ ^v[0-9] ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
@@ -104,6 +104,7 @@ jobs:
         run: |
           bash scripts/render_formula.sh "$TAG" SHA256SUMS > h2h.rb
           gh repo clone backbay-labs/homebrew-tap tap
+          gh auth setup-git
           cd tap
           git checkout -b "h2h-${TAG}"
           mkdir -p Formula && cp ../h2h.rb Formula/h2h.rb
