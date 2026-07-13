@@ -40,8 +40,10 @@ fn main() {
 
     if cli.out == "-" {
         println!("{json}");
+    } else if let Err(error) = std::fs::write(&cli.out, format!("{json}\n")) {
+        eprintln!("error: failed to write {}: {error}", cli.out);
+        std::process::exit(2);
     } else {
-        std::fs::write(&cli.out, format!("{json}\n")).expect("write bundle file");
         eprintln!("wrote {} cases to {}", bundle.case_count(), cli.out);
     }
 }

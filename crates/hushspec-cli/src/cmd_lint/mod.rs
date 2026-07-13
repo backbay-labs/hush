@@ -166,6 +166,11 @@ pub fn run(args: LintArgs) -> i32 {
             // surprising side effect for a lint `--fix` that's supposed to be
             // limited to the specific findings it resolved.
             if !fixed_codes.is_empty() {
+                // Findings that still describe the on-disk file (used if a
+                // `--fix` write fails, so the report never claims a file was
+                // fixed that was never actually written).
+                let pre_fix_findings = findings.clone();
+
                 // Re-lint against the fixed model so the report (and the exit
                 // code below) reflects only what's actually left.
                 findings = run_all_checks(&spec, &path.display().to_string());
@@ -185,6 +190,10 @@ pub fn run(args: LintArgs) -> i32 {
                     if let Err(e) = std::fs::write(path, &formatted) {
                         eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
                         any_write_error = true;
+                        // The on-disk file is unchanged, so report its actual
+                        // (pre-fix) findings and no applied fixes.
+                        findings = pre_fix_findings;
+                        fixed_codes = Vec::new();
                     } else if matches!(args.format, LintOutputFormat::Text) {
                         println!(
                             "{} {} ({} fix(es) applied: {})",

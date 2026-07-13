@@ -514,23 +514,22 @@ fn handle_divergence(
     outcome: &mut DifftestOutcome,
     emitted: &mut std::collections::BTreeSet<String>,
 ) -> Result<(), DiffError> {
-    let (group_id, action_id) = divergence
-        .case_key
-        .split_once('/')
-        .ok_or_else(|| DiffError::Config(format!("bad case key {}", divergence.case_key)))?;
-    let group = bundle
-        .groups
-        .iter()
-        .find(|group| group.id == group_id)
-        .ok_or_else(|| DiffError::Config(format!("unknown group {group_id}")))?;
-    let case = group
-        .actions
-        .iter()
-        .find(|case| case.id == action_id)
-        .ok_or_else(|| DiffError::Config(format!("unknown action {action_id}")))?;
+    // A divergence whose case_key is not a real bundle case (PhantomCase, or a
+    // malformed key from a misbehaving harness) cannot be minimized. Record it
+    // as-is rather than aborting the whole run and discarding the real
+    // divergences already collected in this chunk.
+    let resolved = divergence.case_key.split_once('/').and_then(|(gid, aid)| {
+        let group = bundle.groups.iter().find(|group| group.id == gid)?;
+        let case = group.actions.iter().find(|case| case.id == aid)?;
+        Some((group, case))
+    });
+    let Some((group, case)) = resolved else {
+        outcome.divergences.push(divergence);
+        return Ok(());
+    };
 
     let mut oracle = InProcessEvaluator;
-    let minimized = crate::minimize::minimize_case(
+    let minimized = match crate::minimize::minimize_case(
         &group.policy,
         &case.action,
         &mut oracle,
@@ -539,7 +538,15 @@ fn handle_divergence(
             ignore_reason: config.ignore_reason,
         },
         &crate::minimize::MinimizeConfig::default(),
-    )?;
+    ) {
+        Ok(minimized) => minimized,
+        // Minimization could not reproduce/shrink (e.g. a flaky harness that
+        // agrees once the case is isolated). Keep the original divergence.
+        Err(_) => {
+            outcome.divergences.push(divergence);
+            return Ok(());
+        }
+    };
 
     if let Some(dir) = &config.emit_fixtures_dir {
         let probe = CaseBundle::single_case(minimized.policy.clone(), minimized.action.clone());

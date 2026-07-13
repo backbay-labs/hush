@@ -9,7 +9,7 @@ tag="$1"; sums="$2"
 version="${tag#v}"
 sha() {
   local result
-  result="$(grep "h2h-${tag}-$1.tar.gz" "$sums" | cut -d' ' -f1 || true)"
+  result="$(grep -F "h2h-${tag}-$1.tar.gz" "$sums" | cut -d' ' -f1 || true)"
   [ -n "$result" ] || { echo "error: no checksum line for $1" >&2; exit 1; }
   printf '%s' "$result"
 }
