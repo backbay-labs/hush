@@ -331,6 +331,34 @@ class TestEnforcementConfigValidation:
         )
         assert isinstance(guard, HushGuard)
 
+    def test_rejects_typo_in_extension_segment(self):
+        with pytest.raises(
+            ValueError, match="unknown extension in enforcement override 'extensions.postur'"
+        ):
+            HushGuard.from_yaml(
+                ALLOW_ALL_POLICY,
+                observer=_NoopObserver(),
+                enforcement=EnforcementConfig(
+                    mode="monitor", overrides={"extensions.postur": "enforce"}
+                ),
+            )
+
+    def test_accepts_deep_extension_override_segment(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(overrides={"extensions.posture.states": "monitor"}),
+        )
+        assert isinstance(guard, HushGuard)
+
+    def test_accepts_extensions_detection_as_override_key(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(overrides={"extensions.detection": "monitor"}),
+        )
+        assert isinstance(guard, HushGuard)
+
 
 # Monitor mode gate
 

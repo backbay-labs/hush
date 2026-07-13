@@ -9,7 +9,7 @@ import { ObservableEvaluator } from './observer.js';
 import type { AuditConfig, DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
 import { computePolicyHash, DEFAULT_AUDIT_CONFIG, evaluateAudited } from './receipt.js';
 import type { ReceiptSink } from './sinks.js';
-import { RULE_KEYS_SET } from './generated/contract.js';
+import { EXTENSION_KEYS_SET, RULE_KEYS_SET } from './generated/contract.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
 
@@ -64,7 +64,17 @@ function validateEnforcementConfig(config: EnforcementConfig, observable: boolea
           `unknown rule in enforcement override '${key}': '${segment}' is not a core rule`,
         );
       }
-    } else if (!key.startsWith('extensions.')) {
+    } else if (key.startsWith('extensions.')) {
+      const segment = key.split('.')[1] ?? '';
+      // Only the top extension segment (posture/origins/detection) is validated
+      // here; deeper segments are policy-dependent and hot-swappable, mirroring
+      // how 'rules.' overrides only validate their top segment.
+      if (!EXTENSION_KEYS_SET.has(segment)) {
+        throw new Error(
+          `unknown extension in enforcement override '${key}': '${segment}' is not a core extension`,
+        );
+      }
+    } else {
       throw new Error(
         `enforcement override keys must start with 'rules.' or 'extensions.': '${key}'`,
       );

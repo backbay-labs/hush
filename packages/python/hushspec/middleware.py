@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional, TYPE_CHECKING
 
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, evaluate, is_panic_active
-from hushspec.generated_contract import RULE_KEYS
+from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
 
@@ -56,7 +56,17 @@ def _validate_enforcement_config(config: EnforcementConfig, observable: bool) ->
                 raise ValueError(
                     f"unknown rule in enforcement override {key!r}: {segment!r} is not a core rule"
                 )
-        elif not key.startswith("extensions."):
+        elif key.startswith("extensions."):
+            parts = key.split(".")
+            segment = parts[1] if len(parts) > 1 else ""
+            # Only the top extension segment (posture/origins/detection) is validated
+            # here; deeper segments are policy-dependent and hot-swappable, mirroring
+            # how "rules." overrides only validate their top segment.
+            if segment not in EXTENSION_KEYS:
+                raise ValueError(
+                    f"unknown extension in enforcement override {key!r}: {segment!r} is not a core extension"
+                )
+        else:
             raise ValueError(
                 f"enforcement override keys must start with 'rules.' or 'extensions.': {key!r}"
             )

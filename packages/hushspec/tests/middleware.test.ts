@@ -411,6 +411,31 @@ describe('enforcement config validation', () => {
     });
     expect(guard).toBeInstanceOf(HushGuard);
   });
+
+  it('rejects a typo in the extension segment of an override key', () => {
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        observer: noopObserver,
+        enforcement: { mode: 'monitor', overrides: { 'extensions.postur': 'enforce' } },
+      }),
+    ).toThrow("unknown extension in enforcement override 'extensions.postur'");
+  });
+
+  it('accepts a deep extension override segment', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      observer: noopObserver,
+      enforcement: { overrides: { 'extensions.posture.states': 'monitor' } },
+    });
+    expect(guard).toBeInstanceOf(HushGuard);
+  });
+
+  it('accepts extensions.detection as an override key', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      observer: noopObserver,
+      enforcement: { overrides: { 'extensions.detection': 'monitor' } },
+    });
+    expect(guard).toBeInstanceOf(HushGuard);
+  });
 });
 
 // ---------------------------------------------------------------------------
