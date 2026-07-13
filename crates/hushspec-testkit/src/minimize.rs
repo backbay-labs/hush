@@ -60,13 +60,33 @@ pub fn minimize_case(
         let failing_report = failing.evaluate_bundle(&bundle)?;
         let divergences = compare_reports(&oracle_report, &failing_report, options);
 
-        let Some(first) = divergences.first() else {
-            break; // no smaller candidate diverges: fixpoint
+        // Phantom divergences are harness-fabricated case keys that were
+        // never part of the bundle this round evaluated. The oracle always
+        // answers exactly the candidate keys `candidates_bundle` generated
+        // (one per entry in `candidates`), so a key it never produced isn't
+        // a shrinkable candidate at all: `candidate_index` applied to an
+        // arbitrary phantom key can parse to an out-of-range index (or,
+        // worse, a coincidentally in-range index for an unrelated
+        // candidate never shown to diverge). Skip phantoms when picking the
+        // shrink target -- only a real (non-phantom) divergence is
+        // guaranteed by `compare_reports`'s contract to map back to a
+        // candidate that actually diverged.
+        let Some(first) = divergences
+            .iter()
+            .find(|divergence| divergence.kind != DivergenceKind::PhantomCase)
+        else {
+            break; // no real (non-phantom) divergence this round: fixpoint
         };
         let index = candidate_index(&first.case_key)
             .ok_or_else(|| DiffError::Config(format!("bad candidate key {}", first.case_key)))?;
+        let Some((next_policy, next_action)) = candidates.get(index).cloned() else {
+            return Err(DiffError::Config(format!(
+                "candidate key {} out of range ({} candidates this round)",
+                first.case_key,
+                candidates.len()
+            )));
+        };
         kind = first.kind;
-        let (next_policy, next_action) = candidates[index].clone();
         current_policy = next_policy;
         current_action = next_action;
     }
@@ -404,5 +424,136 @@ mod tests {
             &MinimizeConfig::default(),
         );
         assert!(matches!(result, Err(DiffError::Config(_))));
+    }
+
+    /// Always answers "allow" for every real case in whatever bundle it's
+    /// given, regardless of content -- deliberately dumb so it can stand in
+    /// as an oracle that a byzantine `failing` counterpart trivially agrees
+    /// with on every real key.
+    struct AlwaysAllowEvaluator {
+        sdk: &'static str,
+    }
+
+    impl CaseEvaluator for AlwaysAllowEvaluator {
+        fn sdk_name(&self) -> &str {
+            self.sdk
+        }
+
+        fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+            let mut results = BTreeMap::new();
+            for group in &bundle.groups {
+                for case in &group.actions {
+                    results.insert(
+                        format!("{}/{}", group.id, case.id),
+                        CaseVerdict::Ok {
+                            result: NormalizedResult {
+                                decision: "allow".to_string(),
+                                matched_rule: None,
+                                reason: None,
+                                origin_profile: None,
+                                posture: None,
+                            },
+                        },
+                    );
+                }
+            }
+            Ok(SdkReport {
+                sdk: self.sdk.to_string(),
+                results,
+            })
+        }
+    }
+
+    /// Byzantine harness stub: answers every real case in the bundle exactly
+    /// like `AlwaysAllowEvaluator` (so there is never an ordinary verdict
+    /// disagreement), but also fabricates an extra case key -- "g9999/a9999"
+    /// -- that no bundle in this test ever actually contains. Regression
+    /// stub for the minimizer's shrink-loop guard: `candidate_index` applied
+    /// to this key parses to a huge-but-valid `usize`, which must not be
+    /// used to index the (much smaller) `candidates` vec.
+    struct PhantomInventingEvaluator {
+        sdk: &'static str,
+    }
+
+    impl CaseEvaluator for PhantomInventingEvaluator {
+        fn sdk_name(&self) -> &str {
+            self.sdk
+        }
+
+        fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+            let mut results = BTreeMap::new();
+            for group in &bundle.groups {
+                for case in &group.actions {
+                    results.insert(
+                        format!("{}/{}", group.id, case.id),
+                        CaseVerdict::Ok {
+                            result: NormalizedResult {
+                                decision: "allow".to_string(),
+                                matched_rule: None,
+                                reason: None,
+                                origin_profile: None,
+                                posture: None,
+                            },
+                        },
+                    );
+                }
+            }
+            results.insert(
+                "g9999/a9999".to_string(),
+                CaseVerdict::Ok {
+                    result: NormalizedResult {
+                        decision: "deny".to_string(),
+                        matched_rule: None,
+                        reason: None,
+                        origin_profile: None,
+                        posture: None,
+                    },
+                },
+            );
+            Ok(SdkReport {
+                sdk: self.sdk.to_string(),
+                results,
+            })
+        }
+    }
+
+    /// A harness that fabricates an out-of-range case key must never crash
+    /// the minimizer. Before the fix, the only divergence `compare_reports`
+    /// found each round was the phantom "g9999/a9999" key (every real key
+    /// agrees with the oracle), so the old `divergences.first()` +
+    /// `candidates[index]` selection would parse "g9999" into index 9998
+    /// and index-out-of-bounds panic against a candidates vec with only a
+    /// handful of entries. This test completing at all (whether Ok or Err)
+    /// proves the panic is gone.
+    #[test]
+    fn minimizer_survives_a_phantom_case_key_without_panicking() {
+        let policy = serde_json::json!({
+            "hushspec": "0.1.0",
+            "name": "phantom_test_policy",
+            "rules": {
+                "tool_access": { "allow": ["read_file"] }
+            }
+        });
+        let action = serde_json::json!({
+            "type": "tool_call",
+            "target": "read_file"
+        });
+
+        let mut oracle = AlwaysAllowEvaluator { sdk: "rust" };
+        let mut failing = PhantomInventingEvaluator { sdk: "byzantine" };
+
+        let result = minimize_case(
+            &policy,
+            &action,
+            &mut oracle,
+            &mut failing,
+            &CompareOptions::default(),
+            &MinimizeConfig::default(),
+        );
+        match result {
+            Ok(minimized) => assert_eq!(minimized.kind, DivergenceKind::PhantomCase),
+            Err(DiffError::Config(_)) => {}
+            Err(other) => panic!("unexpected error variant: {other:?}"),
+        }
     }
 }
