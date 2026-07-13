@@ -23,3 +23,4 @@ colored = "2"
 jsonschema = { version = "0.18", features = ["draft202012"] }
 thiserror = "2"
 proptest = "1"
+tempfile = "3"

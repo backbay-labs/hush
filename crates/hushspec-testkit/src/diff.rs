@@ -244,6 +244,101 @@ fn verdict_divergence(
     }
 }
 
+/// Runs an SDK harness as `command... <bundle.json>` and parses its stdout
+/// report. Fail-closed: spawn failures, non-zero exits, and malformed
+/// reports are hard errors, never skipped SDKs.
+pub struct SubprocessEvaluator {
+    pub sdk: String,
+    pub command: Vec<String>,
+    pub cwd: Option<std::path::PathBuf>,
+}
+
+impl CaseEvaluator for SubprocessEvaluator {
+    fn sdk_name(&self) -> &str {
+        &self.sdk
+    }
+
+    fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+        let dir = tempfile::tempdir()?;
+        let bundle_path = dir.path().join("bundle.json");
+        let json = bundle
+            .to_json()
+            .map_err(|error| DiffError::Config(error.to_string()))?;
+        std::fs::write(&bundle_path, json)?;
+
+        let (program, args) = self
+            .command
+            .split_first()
+            .ok_or_else(|| DiffError::Config(format!("{}: empty harness command", self.sdk)))?;
+        let mut command = std::process::Command::new(program);
+        command.args(args).arg(&bundle_path);
+        if let Some(cwd) = &self.cwd {
+            command.current_dir(cwd);
+        }
+        let output = command.output().map_err(|error| DiffError::HarnessFailed {
+            sdk: self.sdk.clone(),
+            status: "spawn failed".to_string(),
+            stderr: error.to_string(),
+        })?;
+        if !output.status.success() {
+            return Err(DiffError::HarnessFailed {
+                sdk: self.sdk.clone(),
+                status: output.status.to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            });
+        }
+        let report: SdkReport =
+            serde_json::from_slice(&output.stdout).map_err(|error| DiffError::InvalidReport {
+                sdk: self.sdk.clone(),
+                message: error.to_string(),
+            })?;
+        if report.sdk != self.sdk {
+            return Err(DiffError::InvalidReport {
+                sdk: self.sdk.clone(),
+                message: format!("report claims sdk '{}'", report.sdk),
+            });
+        }
+        Ok(report)
+    }
+}
+
+/// Harness commands for the three ported SDKs (Tasks 8-10 provide the scripts).
+pub fn default_subprocess_evaluators(repo_root: &std::path::Path) -> Vec<SubprocessEvaluator> {
+    vec![
+        SubprocessEvaluator {
+            sdk: "typescript".to_string(),
+            command: vec![
+                "node".to_string(),
+                repo_root
+                    .join("scripts/diffeval_ts.mjs")
+                    .display()
+                    .to_string(),
+            ],
+            cwd: None,
+        },
+        SubprocessEvaluator {
+            sdk: "python".to_string(),
+            command: vec![
+                "python3".to_string(),
+                repo_root
+                    .join("scripts/diffeval_python.py")
+                    .display()
+                    .to_string(),
+            ],
+            cwd: None,
+        },
+        SubprocessEvaluator {
+            sdk: "go".to_string(),
+            command: vec![
+                "go".to_string(),
+                "run".to_string(),
+                "./cmd/hushspec-diffeval".to_string(),
+            ],
+            cwd: Some(repo_root.join("packages/go")),
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,5 +546,66 @@ mod tests {
             ignore_reason: true,
         };
         assert!(compare_reports(&oracle, &observed, &options).is_empty());
+    }
+
+    #[cfg(unix)]
+    fn stub_harness(dir: &std::path::Path, body: &str) -> Vec<String> {
+        let script = dir.join("stub.sh");
+        std::fs::write(&script, body).expect("write stub");
+        vec!["sh".to_string(), script.display().to_string()]
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn subprocess_evaluator_parses_a_valid_report() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let body = "#!/bin/sh\necho '{\"sdk\":\"stub\",\"results\":{\"g0001/a0001\":{\"status\":\"ok\",\"result\":{\"decision\":\"allow\"}}}}'\n";
+        let mut evaluator = SubprocessEvaluator {
+            sdk: "stub".to_string(),
+            command: stub_harness(dir.path(), body),
+            cwd: None,
+        };
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.1.0"}),
+            serde_json::json!({"type": "tool_call"}),
+        );
+        let report = evaluator
+            .evaluate_bundle(&bundle)
+            .expect("stub report parses");
+        assert_eq!(report.sdk, "stub");
+        assert_eq!(report.results.len(), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn subprocess_evaluator_fails_closed_on_nonzero_exit() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut evaluator = SubprocessEvaluator {
+            sdk: "stub".to_string(),
+            command: stub_harness(dir.path(), "#!/bin/sh\necho boom >&2\nexit 3\n"),
+            cwd: None,
+        };
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.1.0"}),
+            serde_json::json!({"type": "tool_call"}),
+        );
+        match evaluator.evaluate_bundle(&bundle) {
+            Err(DiffError::HarnessFailed { sdk, stderr, .. }) => {
+                assert_eq!(sdk, "stub");
+                assert!(stderr.contains("boom"));
+            }
+            other => panic!("expected HarnessFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_evaluators_cover_the_three_ported_sdks() {
+        let evaluators = default_subprocess_evaluators(std::path::Path::new("/repo"));
+        let names: Vec<&str> = evaluators.iter().map(|e| e.sdk.as_str()).collect();
+        assert_eq!(names, vec!["typescript", "python", "go"]);
+        assert_eq!(
+            evaluators[2].cwd.as_deref(),
+            Some(std::path::Path::new("/repo/packages/go"))
+        );
     }
 }
