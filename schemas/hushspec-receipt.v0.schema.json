@@ -71,6 +71,14 @@
       "default": null,
       "description": "Posture state information, including current state and next state after any signal-triggered transition."
     },
+    "enforcement": {
+      "oneOf": [
+        { "$ref": "#/$defs/EnforcementSummary" },
+        { "type": "null" }
+      ],
+      "default": null,
+      "description": "How the runtime applied this decision, when the evaluation was performed by an enforcement point (e.g. HushGuard). Null/absent for pure evaluations. The 'decision' field always records the evaluated policy decision; this object records what the runtime did with it."
+    },
     "evaluation_duration_us": {
       "type": "integer",
       "minimum": 0,
@@ -166,6 +174,24 @@
         "next": {
           "type": "string",
           "description": "The posture state after any signal-triggered transition. Same as current if no transition occurred."
+        }
+      }
+    },
+    "EnforcementSummary": {
+      "type": "object",
+      "required": ["mode", "outcome"],
+      "additionalProperties": false,
+      "description": "Runtime enforcement disposition for a single decision.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["enforce", "monitor"],
+          "description": "Effective enforcement mode after per-rule overrides and panic resolution."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["allowed", "confirmed", "blocked", "would_block"],
+          "description": "What happened at the tool boundary: allowed (action proceeded), confirmed (warn approved via confirmation handler), blocked (execution prevented), would_block (monitor mode let a warn/deny proceed)."
         }
       }
     }

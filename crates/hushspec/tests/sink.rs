@@ -35,6 +35,7 @@ fn make_receipt(decision: Decision) -> DecisionReceipt {
         },
         origin_profile: None,
         posture: None,
+        enforcement: None,
         evaluation_duration_us: 42,
     }
 }

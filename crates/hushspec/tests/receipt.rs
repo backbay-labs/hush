@@ -1,4 +1,6 @@
-use hushspec::receipt::{RuleOutcome, compute_policy_hash};
+use hushspec::receipt::{
+    EnforcementMode, EnforcementOutcome, EnforcementSummary, RuleOutcome, compute_policy_hash,
+};
 use hushspec::{
     AuditConfig, Decision, DecisionReceipt, EvaluationAction, HushSpec, evaluate, evaluate_audited,
 };
@@ -606,4 +608,53 @@ fn posture_propagated_from_evaluation() {
     let receipt = evaluate_audited(&spec, &action, &default_audit_config());
 
     assert_eq!(receipt.posture, standard.posture);
+}
+
+// --- Enforcement summary ---
+
+#[test]
+fn receipt_round_trips_with_enforcement_summary() {
+    let spec = simple_spec();
+    let action = EvaluationAction {
+        action_type: "tool_call".to_string(),
+        target: Some("dangerous_tool".to_string()),
+        ..Default::default()
+    };
+    let mut receipt = evaluate_audited(&spec, &action, &default_audit_config());
+    assert!(
+        receipt.enforcement.is_none(),
+        "evaluate_audited must never set enforcement"
+    );
+
+    receipt.enforcement = Some(EnforcementSummary {
+        mode: EnforcementMode::Monitor,
+        outcome: EnforcementOutcome::WouldBlock,
+    });
+
+    let json = serde_json::to_string(&receipt).unwrap();
+    assert!(json.contains("\"mode\":\"monitor\""));
+    assert!(json.contains("\"outcome\":\"would_block\""));
+
+    let parsed: DecisionReceipt = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, receipt);
+}
+
+#[test]
+fn receipt_without_enforcement_field_still_parses() {
+    let spec = simple_spec();
+    let action = EvaluationAction {
+        action_type: "tool_call".to_string(),
+        target: Some("safe_tool".to_string()),
+        ..Default::default()
+    };
+    let receipt = evaluate_audited(&spec, &action, &default_audit_config());
+
+    let json = serde_json::to_string(&receipt).unwrap();
+    assert!(
+        !json.contains("enforcement"),
+        "absent enforcement must not be serialized"
+    );
+
+    let parsed: DecisionReceipt = serde_json::from_str(&json).unwrap();
+    assert!(parsed.enforcement.is_none());
 }
