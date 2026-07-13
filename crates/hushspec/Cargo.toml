@@ -27,6 +27,11 @@ rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"
+criterion = "0.5"
+
+[[bench]]
+name = "evaluation"
+harness = false
 
 [features]
 default = ["std"]
