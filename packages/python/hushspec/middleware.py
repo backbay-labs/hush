@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, TYPE_CHECKING
 
-from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, evaluate
+from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, evaluate, is_panic_active
 from hushspec.generated_contract import RULE_KEYS
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
 
 if TYPE_CHECKING:
     from hushspec.observer import EvaluationObserver
+    from hushspec.receipt import DecisionReceipt, EnforcementSummary
 
 WarnHandler = Callable[[EvaluationResult, EvaluationAction], bool]
 
@@ -21,6 +23,13 @@ _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 class EnforcementConfig:
     mode: str = "enforce"                                     # 'enforce' | 'monitor'
     overrides: dict[str, str] = field(default_factory=dict)   # rule-path prefix -> mode
+
+
+@dataclass
+class GateOutcome:
+    result: EvaluationResult
+    proceed: bool
+    enforcement: "EnforcementSummary"
 
 
 def matches_rule_path_prefix(matched_rule: str, key: str) -> bool:
@@ -119,19 +128,81 @@ class HushGuard:
         return evaluate(self._policy, action)
 
     def check(self, action: EvaluationAction) -> bool:
-        result = self.evaluate(action)
-        if result.decision == Decision.ALLOW:
-            return True
-        if result.decision == Decision.WARN:
-            return self._on_warn(result, action)
-        return False
+        return self.gate(action).proceed
 
     def enforce(self, action: EvaluationAction) -> None:
-        result = self.evaluate(action)
-        if result.decision == Decision.DENY:
-            raise HushSpecDenied(result)
-        if result.decision == Decision.WARN and not self._on_warn(result, action):
-            raise HushSpecDenied(result)
+        outcome = self.gate(action)
+        if not outcome.proceed:
+            raise HushSpecDenied(outcome.result)
+
+    def gate(self, action: EvaluationAction) -> GateOutcome:
+        """Evaluate, resolve the effective enforcement mode, record the
+        outcome, and report whether execution may proceed. The single
+        enforcement path: check() and enforce() delegate here."""
+        from hushspec.receipt import EnforcementSummary
+
+        result, duration_us, receipt = self._run_evaluation(action)
+        mode = self._effective_mode(result)
+        if result.decision == Decision.ALLOW:
+            proceed, outcome = True, "allowed"
+        elif result.decision == Decision.WARN:
+            if mode == "monitor":
+                proceed, outcome = True, "would_block"
+            elif self._on_warn(result, action):
+                proceed, outcome = True, "confirmed"
+            else:
+                proceed, outcome = False, "blocked"
+        else:
+            proceed = mode == "monitor"
+            outcome = "would_block" if proceed else "blocked"
+
+        enforcement = EnforcementSummary(mode=mode, outcome=outcome)
+        self._record(action, result, duration_us, enforcement, receipt)
+        return GateOutcome(result=result, proceed=proceed, enforcement=enforcement)
+
+    def _effective_mode(self, result: EvaluationResult) -> str:
+        if is_panic_active() or result.matched_rule == "__hushspec_panic__":
+            return "enforce"
+        matched = result.matched_rule
+        # detection.py emits the bare literal matched_rule "detection" (see
+        # hushspec/detection.py) rather than a hierarchical rule path, so an
+        # override keyed "extensions.detection" would otherwise silently
+        # never match. Normalize before prefix matching (mirrors TS
+        # middleware.ts's effectiveMode normalization).
+        if matched == "detection":
+            matched = "extensions.detection"
+        if matched is not None:
+            best_key: Optional[str] = None
+            best_mode: Optional[str] = None
+            for key, mode in self._enforcement_overrides.items():
+                if matches_rule_path_prefix(matched, key) and (
+                    best_key is None or len(key) > len(best_key)
+                ):
+                    best_key, best_mode = key, mode
+            if best_mode is not None:
+                return best_mode
+        return self._enforcement_mode
+
+    def _run_evaluation(
+        self, action: EvaluationAction
+    ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
+        start_ns = time.perf_counter_ns()
+        result = evaluate(self._policy, action)
+        duration_us = (time.perf_counter_ns() - start_ns) // 1000
+        return result, duration_us, None
+
+    def _record(
+        self,
+        action: EvaluationAction,
+        result: EvaluationResult,
+        duration_us: int,
+        enforcement: "EnforcementSummary",
+        receipt: Optional["DecisionReceipt"],
+    ) -> None:
+        if self._observable_evaluator is not None:
+            self._observable_evaluator.notify_evaluation_completed(
+                action, result, duration_us, enforcement=enforcement, receipt=receipt
+            )
 
     @staticmethod
     def map_tool_call(

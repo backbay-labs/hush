@@ -1,7 +1,13 @@
 import pytest
 
 from hushspec import HushGuard, HushSpecDenied
-from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult
+from hushspec.evaluate import (
+    Decision,
+    EvaluationAction,
+    EvaluationResult,
+    activate_panic,
+    deactivate_panic,
+)
 from hushspec.middleware import HushGuard as HushGuardDirect
 from hushspec.adapters.langchain import hush_tool
 from hushspec.middleware import EnforcementConfig, matches_rule_path_prefix
@@ -42,6 +48,20 @@ rules:
   forbidden_paths:
     patterns:
       - "**/.ssh/**"
+"""
+
+SECRET_POLICY = """
+hushspec: "0.1.0"
+name: secrets
+rules:
+  secret_patterns:
+    patterns:
+      - name: aws_access_key
+        pattern: "AKIA[0-9A-Z]{16}"
+        severity: critical
+      - name: github_token
+        pattern: "gh[ps]_[A-Za-z0-9]{36}"
+        severity: critical
 """
 
 
@@ -309,3 +329,165 @@ class TestEnforcementConfigValidation:
             ),
         )
         assert isinstance(guard, HushGuard)
+
+
+# Monitor mode gate
+
+
+class TestMonitorModeGate:
+    def test_deny_proceeds_under_monitor_with_would_block(self):
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        action = EvaluationAction(type="tool_call", target="dangerous_tool")
+        outcome = guard.gate(action)
+        assert outcome.proceed is True
+        assert outcome.result.decision == Decision.DENY
+        assert outcome.enforcement.mode == "monitor"
+        assert outcome.enforcement.outcome == "would_block"
+        assert guard.check(action) is True
+        guard.enforce(action)  # must not raise
+
+    def test_warn_proceeds_under_monitor_without_invoking_on_warn(self):
+        warn_called = False
+
+        def on_warn(result, action):
+            nonlocal warn_called
+            warn_called = True
+            return False
+
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            on_warn=on_warn,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        outcome = guard.gate(EvaluationAction(type="tool_call", target="risky_tool"))
+        assert outcome.proceed is True
+        assert outcome.result.decision == Decision.WARN
+        assert outcome.enforcement.outcome == "would_block"
+        assert warn_called is False
+
+    def test_allow_is_allowed_under_monitor(self):
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        outcome = guard.gate(EvaluationAction(type="tool_call", target="safe_tool"))
+        assert outcome.proceed is True
+        assert outcome.enforcement.mode == "monitor"
+        assert outcome.enforcement.outcome == "allowed"
+
+    def test_gate_under_enforce_blocks_deny_and_confirms_warn(self):
+        guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=lambda r, a: True)
+        blocked = guard.gate(EvaluationAction(type="tool_call", target="dangerous_tool"))
+        assert blocked.proceed is False
+        assert blocked.enforcement.mode == "enforce"
+        assert blocked.enforcement.outcome == "blocked"
+        confirmed = guard.gate(EvaluationAction(type="tool_call", target="risky_tool"))
+        assert confirmed.proceed is True
+        assert confirmed.enforcement.outcome == "confirmed"
+
+    def test_escalates_specific_rules_to_enforce_while_guard_monitors(self):
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(
+                mode="monitor", overrides={"rules.tool_access": "enforce"}
+            ),
+        )
+        with pytest.raises(HushSpecDenied):
+            guard.enforce(EvaluationAction(type="tool_call", target="dangerous_tool"))
+        assert guard.check(EvaluationAction(type="egress", target="evil.com")) is True
+
+    def test_deescalates_specific_rules_to_monitor_while_guard_enforces(self):
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(overrides={"rules.shell_commands": "monitor"}),
+        )
+        assert guard.check(EvaluationAction(type="shell_command", target="rm -rf /")) is True
+        with pytest.raises(HushSpecDenied):
+            guard.enforce(EvaluationAction(type="tool_call", target="dangerous_tool"))
+
+    def test_longest_override_prefix_wins(self):
+        guard = HushGuard.from_yaml(
+            SECRET_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(
+                overrides={
+                    "rules.secret_patterns": "monitor",
+                    "rules.secret_patterns.patterns.aws_access_key": "enforce",
+                }
+            ),
+        )
+        github_write = EvaluationAction(
+            type="file_write",
+            target="/tmp/app.txt",
+            content="token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        )
+        assert guard.check(github_write) is True
+        aws_write = EvaluationAction(
+            type="file_write",
+            target="/tmp/app.txt",
+            content="key=AKIAABCDEFGHIJKLMNOP",
+        )
+        with pytest.raises(HushSpecDenied):
+            guard.enforce(aws_write)
+
+
+class TestPanicSupremacy:
+    def teardown_method(self):
+        deactivate_panic()
+
+    def test_monitor_guard_blocks_while_panic_active(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        activate_panic()
+        action = EvaluationAction(type="tool_call", target="any_tool")
+        outcome = guard.gate(action)
+        assert outcome.proceed is False
+        assert outcome.enforcement.mode == "enforce"
+        assert outcome.enforcement.outcome == "blocked"
+        with pytest.raises(HushSpecDenied):
+            guard.enforce(action)
+
+
+# ---------------------------------------------------------------------------
+# Controller directive: detection.py matched_rule normalization
+#
+# packages/python/hushspec/detection.py:413 emits the bare literal
+# matched_rule "detection" (not a hierarchical rule path). _effective_mode()
+# must normalize it to "extensions.detection" before prefix matching, or an
+# override keyed "extensions.detection" would silently never match. gate()
+# only accepts an EvaluationAction (evaluate_with_detection() is not wired
+# into the enforcement path in this task), so there is no organic way to
+# produce a result with matched_rule "detection" through the public API;
+# this test calls the "private" (underscore-prefixed, not access-controlled
+# in Python) _effective_mode() resolver directly to exercise the
+# normalization in isolation, mirroring
+# packages/hushspec/tests/middleware.test.ts's "detection matched_rule
+# normalization" describe block.
+# ---------------------------------------------------------------------------
+
+
+class TestDetectionMatchedRuleNormalization:
+    def test_resolves_bare_detection_matched_rule_against_extensions_override(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(overrides={"extensions.detection": "monitor"}),
+        )
+        detection_result = EvaluationResult(
+            decision=Decision.DENY,
+            matched_rule="detection",
+            reason="content exceeded detection threshold",
+        )
+        mode = guard._effective_mode(detection_result)
+        assert mode == "monitor"
