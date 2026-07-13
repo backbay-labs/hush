@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build artifacts for"
+        required: true
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest, cross: false }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest, cross: true }
+          - { target: x86_64-apple-darwin,       os: macos-13,      cross: false }
+          - { target: aarch64-apple-darwin,      os: macos-14,      cross: false }
+          - { target: x86_64-pc-windows-msvc,    os: windows-latest, cross: false }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+      - name: Build
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build -p hushspec-cli --release --locked --target ${{ matrix.target }}
+          else
+            cargo build -p hushspec-cli --release --locked --target ${{ matrix.target }}
+          fi
+      - name: Package
+        shell: bash
+        run: |
+          bin="h2h"; [ "${{ runner.os }}" = "Windows" ] && bin="h2h.exe"
+          stage="h2h-${TAG}-${{ matrix.target }}"
+          mkdir "$stage"
+          cp "target/${{ matrix.target }}/release/${bin}" LICENSE README.md "$stage/"
+          tar -czf "${stage}.tar.gz" "$stage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: h2h-${{ matrix.target }}
+          path: h2h-*.tar.gz
+          retention-days: 3
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Checksums
+        run: sha256sum h2h-*.tar.gz > SHA256SUMS
+      - uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "h2h-*.tar.gz"
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" h2h-*.tar.gz SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
