@@ -7,8 +7,66 @@ import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
 import { computePolicyHash } from './receipt.js';
+import type { EnforcementMode } from './receipt.js';
+import { RULE_KEYS_SET } from './generated/contract.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
+
+export interface EnforcementConfig {
+  /** Guard-level mode. Default: 'enforce' (existing behavior). */
+  mode?: EnforcementMode;
+  /** Rule-path prefix -> mode. Longest matching prefix wins over `mode`. */
+  overrides?: Record<string, EnforcementMode>;
+}
+
+export interface HushGuardOptions {
+  onWarn?: WarnHandler;
+  observer?: EvaluationObserver;
+  provider?: PolicyProvider;
+  enforcement?: EnforcementConfig;
+}
+
+const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
+
+/**
+ * True when `matchedRule` equals `key` or continues past it at a segment
+ * boundary ('.' or '['). Exported for direct unit testing.
+ */
+export function matchesRulePathPrefix(matchedRule: string, key: string): boolean {
+  if (matchedRule === key) return true;
+  return matchedRule.startsWith(key + '.') || matchedRule.startsWith(key + '[');
+}
+
+function validateEnforcementConfig(config: EnforcementConfig, observable: boolean): void {
+  const mode = config.mode ?? 'enforce';
+  if (!ENFORCEMENT_MODES.has(mode)) {
+    throw new Error(`invalid enforcement mode: ${String(config.mode)}`);
+  }
+  let monitorReachable = mode === 'monitor';
+  for (const [key, value] of Object.entries(config.overrides ?? {})) {
+    if (!ENFORCEMENT_MODES.has(value)) {
+      throw new Error(`invalid enforcement mode for override '${key}': ${String(value)}`);
+    }
+    if (value === 'monitor') monitorReachable = true;
+    if (key.startsWith('rules.')) {
+      const segment = key.split('.')[1] ?? '';
+      if (!RULE_KEYS_SET.has(segment)) {
+        throw new Error(
+          `unknown rule in enforcement override '${key}': '${segment}' is not a core rule`,
+        );
+      }
+    } else if (!key.startsWith('extensions.')) {
+      throw new Error(
+        `enforcement override keys must start with 'rules.' or 'extensions.': '${key}'`,
+      );
+    }
+  }
+  if (monitorReachable && !observable) {
+    throw new Error(
+      'monitor mode requires an observer or a receipt sink: shadow decisions would be unobservable',
+    );
+  }
+}
 
 /** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
 export class HushGuard {
@@ -17,12 +75,14 @@ export class HushGuard {
   private observableEvaluator: ObservableEvaluator | null = null;
   private policyHash: string | null = null;
   private provider: PolicyProvider | null = null;
+  private enforcementMode: EnforcementMode = 'enforce';
+  private enforcementOverrides: Record<string, EnforcementMode> = {};
 
-  constructor(policy: HushSpec, options?: {
-    onWarn?: WarnHandler;
-    observer?: EvaluationObserver;
-    provider?: PolicyProvider;
-  }) {
+  constructor(policy: HushSpec, options?: HushGuardOptions) {
+    const enforcementConfig = options?.enforcement ?? {};
+    validateEnforcementConfig(enforcementConfig, options?.observer != null);
+    this.enforcementMode = enforcementConfig.mode ?? 'enforce';
+    this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.policy = policy;
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
@@ -34,7 +94,7 @@ export class HushGuard {
     }
   }
 
-  static fromFile(path: string, options?: { onWarn?: WarnHandler }): HushGuard {
+  static fromFile(path: string, options?: HushGuardOptions): HushGuard {
     const content = readFileSync(path, 'utf8');
     const result = parse(content);
     if (!result.ok) {
@@ -43,7 +103,7 @@ export class HushGuard {
     return new HushGuard(result.value, options);
   }
 
-  static fromYaml(yaml: string, options?: { onWarn?: WarnHandler }): HushGuard {
+  static fromYaml(yaml: string, options?: HushGuardOptions): HushGuard {
     const result = parse(yaml);
     if (!result.ok) {
       throw new Error(`Failed to parse policy: ${result.error}`);
@@ -53,7 +113,7 @@ export class HushGuard {
 
   static async fromProvider(
     provider: PolicyProvider,
-    options?: { onWarn?: WarnHandler },
+    options?: HushGuardOptions,
   ): Promise<HushGuard> {
     const spec = await provider.load();
     const guard = new HushGuard(spec, { ...options, provider });

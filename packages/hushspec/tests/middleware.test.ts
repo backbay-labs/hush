@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { HushGuard, HushSpecDenied } from '../src/middleware.js';
+import { HushGuard, HushSpecDenied, matchesRulePathPrefix } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
 import type { PolicyProvider } from '../src/policy-provider.js';
+import type { EnforcementMode } from '../src/receipt.js';
 
 
 // ---------------------------------------------------------------------------
@@ -325,5 +326,71 @@ describe('createSecureToolHandler', () => {
 
     const result = handler('safe_tool', {});
     expect(result.decision).toBe('allow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Enforcement mode: config validation and prefix matching
+// ---------------------------------------------------------------------------
+
+describe('matchesRulePathPrefix', () => {
+  it('matches exact keys and segment boundaries only', () => {
+    expect(matchesRulePathPrefix('rules.tool_access', 'rules.tool_access')).toBe(true);
+    expect(matchesRulePathPrefix('rules.tool_access.block', 'rules.tool_access')).toBe(true);
+    expect(
+      matchesRulePathPrefix(
+        'rules.shell_commands.forbidden_patterns[0]',
+        'rules.shell_commands.forbidden_patterns',
+      ),
+    ).toBe(true);
+    expect(matchesRulePathPrefix('rules.tool_access_x', 'rules.tool_access')).toBe(false);
+    expect(matchesRulePathPrefix('rules.egress.block', 'rules.egres')).toBe(false);
+  });
+});
+
+describe('enforcement config validation', () => {
+  const noopObserver = { onEvent: () => {} };
+
+  it('rejects monitor mode without an observer or sink', () => {
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, { enforcement: { mode: 'monitor' } }),
+    ).toThrow('monitor mode requires an observer or a receipt sink');
+  });
+
+  it('rejects unknown rule names in override keys', () => {
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        observer: noopObserver,
+        enforcement: { mode: 'monitor', overrides: { 'rules.egres': 'enforce' } },
+      }),
+    ).toThrow("unknown rule in enforcement override 'rules.egres'");
+  });
+
+  it('rejects override keys outside rules. and extensions.', () => {
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        observer: noopObserver,
+        enforcement: { overrides: { tool_access: 'monitor' } },
+      }),
+    ).toThrow("enforcement override keys must start with 'rules.' or 'extensions.'");
+  });
+
+  it('rejects invalid mode values', () => {
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        enforcement: { mode: 'audit' as EnforcementMode },
+      }),
+    ).toThrow('invalid enforcement mode: audit');
+  });
+
+  it('accepts a valid monitor config with an observer', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      observer: noopObserver,
+      enforcement: {
+        mode: 'monitor',
+        overrides: { 'rules.egress': 'enforce', 'extensions.posture': 'monitor' },
+      },
+    });
+    expect(guard).toBeInstanceOf(HushGuard);
   });
 });
