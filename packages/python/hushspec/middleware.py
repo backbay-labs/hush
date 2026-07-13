@@ -12,7 +12,8 @@ from hushspec.schema import HushSpec
 
 if TYPE_CHECKING:
     from hushspec.observer import EvaluationObserver
-    from hushspec.receipt import DecisionReceipt, EnforcementSummary
+    from hushspec.receipt import AuditConfig, DecisionReceipt, EnforcementSummary
+    from hushspec.sinks import ReceiptSink
 
 WarnHandler = Callable[[EvaluationResult, EvaluationAction], bool]
 
@@ -82,11 +83,18 @@ class HushGuard:
         on_warn: Optional[WarnHandler] = None,
         observer: Optional["EvaluationObserver"] = None,
         enforcement: Optional[EnforcementConfig] = None,
+        sink: Optional["ReceiptSink"] = None,
+        audit: Optional["AuditConfig"] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
-        _validate_enforcement_config(config, observer is not None)
+        _validate_enforcement_config(config, observer is not None or sink is not None)
         self._enforcement_mode = config.mode
         self._enforcement_overrides = dict(config.overrides)
+        self._sink = sink
+        if audit is None:
+            from hushspec.receipt import AuditConfig
+            audit = AuditConfig()
+        self._audit = audit
         self._policy = policy
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
@@ -106,10 +114,14 @@ class HushGuard:
         on_warn: Optional[WarnHandler] = None,
         observer: Optional["EvaluationObserver"] = None,
         enforcement: Optional[EnforcementConfig] = None,
+        sink: Optional["ReceiptSink"] = None,
+        audit: Optional["AuditConfig"] = None,
     ) -> HushGuard:
         with open(path) as f:
             spec = parse_or_raise(f.read())
-        return cls(spec, on_warn, observer=observer, enforcement=enforcement)
+        return cls(
+            spec, on_warn, observer=observer, enforcement=enforcement, sink=sink, audit=audit
+        )
 
     @classmethod
     def from_yaml(
@@ -118,11 +130,27 @@ class HushGuard:
         on_warn: Optional[WarnHandler] = None,
         observer: Optional["EvaluationObserver"] = None,
         enforcement: Optional[EnforcementConfig] = None,
+        sink: Optional["ReceiptSink"] = None,
+        audit: Optional["AuditConfig"] = None,
     ) -> HushGuard:
         spec = parse_or_raise(yaml_str)
-        return cls(spec, on_warn, observer=observer, enforcement=enforcement)
+        return cls(
+            spec, on_warn, observer=observer, enforcement=enforcement, sink=sink, audit=audit
+        )
 
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
+        if self._sink is not None:
+            result, duration_us, receipt = self._run_evaluation(action)
+            if receipt is not None:
+                try:
+                    self._sink.send(receipt)
+                except Exception:
+                    pass  # sinks must not break evaluation
+            if self._observable_evaluator is not None:
+                self._observable_evaluator.notify_evaluation_completed(
+                    action, result, duration_us, receipt=receipt
+                )
+            return result
         if self._observable_evaluator is not None:
             return self._observable_evaluator.evaluate(self._policy, action)
         return evaluate(self._policy, action)
@@ -186,6 +214,18 @@ class HushGuard:
     def _run_evaluation(
         self, action: EvaluationAction
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
+        if self._sink is not None:
+            from hushspec.receipt import evaluate_audited
+
+            receipt = evaluate_audited(self._policy, action, self._audit)
+            result = EvaluationResult(
+                decision=receipt.decision,
+                matched_rule=receipt.matched_rule,
+                reason=receipt.reason,
+                origin_profile=receipt.origin_profile,
+                posture=receipt.posture,
+            )
+            return result, receipt.evaluation_duration_us, receipt
         start_ns = time.perf_counter_ns()
         result = evaluate(self._policy, action)
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
@@ -199,6 +239,13 @@ class HushGuard:
         enforcement: "EnforcementSummary",
         receipt: Optional["DecisionReceipt"],
     ) -> None:
+        if receipt is not None:
+            receipt.enforcement = enforcement
+            if self._sink is not None:
+                try:
+                    self._sink.send(receipt)
+                except Exception:
+                    pass  # sinks must not break enforcement
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, enforcement=enforcement, receipt=receipt

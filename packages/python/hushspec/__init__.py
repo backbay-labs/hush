@@ -16,6 +16,7 @@ from hushspec.receipt import (
     ActionSummary,
     AuditConfig,
     DecisionReceipt,
+    EnforcementSummary,
     PolicySummary,
     RuleEvaluation,
     compute_policy_hash,
@@ -42,7 +43,13 @@ from hushspec.extensions import (
     TransitionTrigger,
 )
 from hushspec.merge import merge
-from hushspec.middleware import HushGuard, HushSpecDenied
+from hushspec.middleware import (
+    EnforcementConfig,
+    GateOutcome,
+    HushGuard,
+    HushSpecDenied,
+    matches_rule_path_prefix,
+)
 from hushspec.observer import (
     ConsoleObserver,
     EvaluationObserver,
@@ -185,6 +192,10 @@ __all__ = [
     "NullSink",
     "HushGuard",
     "HushSpecDenied",
+    "EnforcementConfig",
+    "EnforcementSummary",
+    "GateOutcome",
+    "matches_rule_path_prefix",
     "EvaluationObserver",
     "ObservableEvaluator",
     "JsonLineObserver",

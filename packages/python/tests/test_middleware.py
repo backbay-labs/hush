@@ -12,6 +12,7 @@ from hushspec.middleware import HushGuard as HushGuardDirect
 from hushspec.adapters.langchain import hush_tool
 from hushspec.middleware import EnforcementConfig, matches_rule_path_prefix
 from hushspec.observer import EvaluationObserver
+from hushspec.sinks import ReceiptSink
 from hushspec.parse import parse_or_raise
 
 
@@ -491,3 +492,75 @@ class TestDetectionMatchedRuleNormalization:
         )
         mode = guard._effective_mode(detection_result)
         assert mode == "monitor"
+
+
+# Receipt sink integration
+
+
+class _CaptureSink(ReceiptSink):
+    def __init__(self):
+        self.receipts = []
+
+    def send(self, receipt):
+        self.receipts.append(receipt)
+
+
+class _ExplodingSink(ReceiptSink):
+    def send(self, receipt):
+        raise RuntimeError("sink down")
+
+
+class TestReceiptSinkIntegration:
+    def test_gate_sends_tagged_receipt_to_sink(self):
+        sink = _CaptureSink()
+        guard = HushGuard.from_yaml(
+            DENY_SHELL_POLICY,
+            enforcement=EnforcementConfig(mode="monitor"),
+            sink=sink,
+        )
+        outcome = guard.gate(EvaluationAction(type="tool_call", target="dangerous_tool"))
+        assert outcome.proceed is True
+        assert len(sink.receipts) == 1
+        receipt = sink.receipts[0]
+        assert receipt.decision == Decision.DENY
+        assert receipt.enforcement is not None
+        assert receipt.enforcement.mode == "monitor"
+        assert receipt.enforcement.outcome == "would_block"
+        assert len(receipt.policy.content_hash) == 64
+
+    def test_evaluate_sends_untagged_receipt(self):
+        sink = _CaptureSink()
+        guard = HushGuard.from_yaml(DENY_SHELL_POLICY, sink=sink)
+        result = guard.evaluate(EvaluationAction(type="tool_call", target="dangerous_tool"))
+        assert result.decision == Decision.DENY
+        assert len(sink.receipts) == 1
+        assert sink.receipts[0].enforcement is None
+
+    def test_throwing_sink_never_breaks_enforcement(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            enforcement=EnforcementConfig(mode="monitor"),
+            sink=_ExplodingSink(),
+        )
+        assert guard.check(EvaluationAction(type="tool_call", target="any_tool")) is True
+
+    def test_monitor_with_sink_only_is_accepted(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            enforcement=EnforcementConfig(mode="monitor"),
+            sink=_CaptureSink(),
+        )
+        assert isinstance(guard, HushGuard)
+
+    def test_enforcement_api_importable_from_top_level(self):
+        from hushspec import (
+            EnforcementConfig as EC,
+            EnforcementSummary,
+            GateOutcome,
+            matches_rule_path_prefix as mrpp,
+        )
+
+        assert EC is EnforcementConfig
+        assert callable(mrpp)
+        assert EnforcementSummary is not None
+        assert GateOutcome is not None
