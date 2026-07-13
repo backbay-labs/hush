@@ -79,6 +79,17 @@ pub fn random_seed() -> u64 {
     RandomState::new().build_hasher().finish()
 }
 
+/// Stable, toolchain-independent seed derivation (e.g. from a commit SHA).
+pub fn seed_from_string(text: &str) -> u64 {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(text.as_bytes());
+    u64::from_be_bytes(
+        digest[..8]
+            .try_into()
+            .expect("sha256 yields at least 8 bytes"),
+    )
+}
+
 fn seeded_runner(seed: u64) -> TestRunner {
     let mut bytes = [0u8; 32];
     for (index, chunk) in bytes.chunks_mut(8).enumerate() {
@@ -814,5 +825,11 @@ mod tests {
                 assert!(!action.action_type.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn seed_from_string_is_deterministic() {
+        assert_eq!(seed_from_string("abc"), seed_from_string("abc"));
+        assert_ne!(seed_from_string("abc"), seed_from_string("abd"));
     }
 }
