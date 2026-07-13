@@ -26,6 +26,10 @@ clap = { version = "4", features = ["derive"] }
 colored = "2"
 jsonschema = { version = "0.18", features = ["draft202012"] }
 thiserror = "2"
-proptest = "1"
+# Exact-pinned: Cargo.lock is gitignored, so a semver-range dependency here
+# could resolve a newer proptest whose RNG->value mapping differs across CI
+# checkouts, silently breaking --seed / --seed-from-string reproducibility
+# for hushspec-difftest. Bump deliberately, not automatically.
+proptest = "=1.11.0"
 tempfile = "3"
 sha2 = "0.10"
