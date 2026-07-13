@@ -360,7 +360,13 @@ struct ExpectedEvaluation {
     posture: Option<PostureResult>,
 }
 
-fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(), String> {
+/// Validate a value against the evaluator-test fixture schema.
+///
+/// `pub(crate)` so `emit::build_regression_fixture` can refuse to emit a
+/// fixture that would fail this exact check -- the same schema, the same
+/// compiled `JSONSchema`, no reimplementation drift between "what the runner
+/// accepts" and "what the emitter promises is valid".
+pub(crate) fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(), String> {
     match evaluator_schema().validate(value) {
         Ok(()) => Ok(()),
         Err(errors) => {
