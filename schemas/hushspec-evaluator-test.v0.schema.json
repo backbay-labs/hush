@@ -62,7 +62,8 @@
             "shell_command",
             "tool_call",
             "egress",
-            "computer_use"
+            "computer_use",
+            "input_inject"
           ]
         },
         "target": {

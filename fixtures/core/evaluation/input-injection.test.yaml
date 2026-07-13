@@ -1,0 +1,24 @@
+hushspec_test: "0.1.0"
+description: "Input injection gate evaluation"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    input_injection:
+      enabled: true
+      allowed_types:
+        - keyboard_text
+cases:
+  - description: "allow listed injection type"
+    action:
+      type: input_inject
+      target: keyboard_text
+    expect:
+      decision: allow
+      matched_rule: rules.input_injection.allowed_types
+  - description: "deny unlisted injection type"
+    action:
+      type: input_inject
+      target: mouse_click
+    expect:
+      decision: deny
+      matched_rule: rules.input_injection.allowed_types
