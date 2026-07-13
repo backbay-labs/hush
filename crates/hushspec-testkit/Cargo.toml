@@ -9,6 +9,10 @@ description = "Conformance test runner for HushSpec implementations"
 name = "hushspec-testkit"
 path = "src/main.rs"
 
+[[bin]]
+name = "hushspec-gen"
+path = "src/bin/hushspec-gen.rs"
+
 [dependencies]
 hushspec = { version = "0.1", path = "../hushspec" }
 serde = { version = "1", features = ["derive"] }
