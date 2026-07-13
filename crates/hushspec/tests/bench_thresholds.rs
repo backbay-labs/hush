@@ -40,10 +40,9 @@ fn median_iteration_us(mut f: impl FnMut()) -> f64 {
 #[test]
 #[ignore = "release-mode benchmark gate; run explicitly in the CI bench-thresholds job"]
 fn receipt_overhead_within_budget() {
-    assert!(
-        cfg!(not(debug_assertions)),
-        "bench_thresholds must run with --release (debug timings are meaningless)"
-    );
+    if cfg!(debug_assertions) {
+        panic!("bench_thresholds must run with --release (debug timings are meaningless)");
+    }
 
     let spec = HushSpec::parse(DEFAULT_POLICY).expect("default ruleset parses");
     let action: EvaluationAction = serde_json::from_value(serde_json::json!({
