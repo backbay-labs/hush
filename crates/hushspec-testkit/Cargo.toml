@@ -13,6 +13,10 @@ path = "src/main.rs"
 name = "hushspec-gen"
 path = "src/bin/hushspec-gen.rs"
 
+[[bin]]
+name = "hushspec-difftest"
+path = "src/bin/hushspec-difftest.rs"
+
 [dependencies]
 hushspec = { version = "0.1", path = "../hushspec" }
 serde = { version = "1", features = ["derive"] }
