@@ -6,11 +6,16 @@
 
 ## Installation
 
-```bash
-cargo install hushspec-cli
-```
+| Method | Command |
+|---|---|
+| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
+| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
+| Cargo (from source) | `cargo install hushspec-cli` |
+| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-This installs the `h2h` binary.
+> Homebrew, npm, and prebuilt binaries become available starting with the first tagged `v0.x` release, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+
+All methods install the `h2h` binary.
 
 ## Commands
 
@@ -21,6 +26,10 @@ h2h validate policy.yaml
 # Static analysis and linting
 h2h lint policy.yaml
 h2h lint --fail-on-warnings policy.yaml
+
+# Lint and auto-fix decision-neutral issues
+h2h lint policy.yaml --fix
+h2h lint policy.yaml --fix --dry-run   # preview changes without writing
 
 # Run evaluation test suites
 h2h test policy.test.yaml
