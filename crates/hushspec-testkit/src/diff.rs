@@ -599,6 +599,69 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn subprocess_evaluator_fails_closed_on_spawn_failure() {
+        let mut evaluator = SubprocessEvaluator {
+            sdk: "stub".to_string(),
+            command: vec!["/definitely-does-not-exist-xyz".to_string()],
+            cwd: None,
+        };
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.1.0"}),
+            serde_json::json!({"type": "tool_call"}),
+        );
+        match evaluator.evaluate_bundle(&bundle) {
+            Err(DiffError::HarnessFailed { status, .. }) => {
+                assert_eq!(status, "spawn failed");
+            }
+            other => panic!("expected HarnessFailed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn subprocess_evaluator_fails_closed_on_unparseable_stdout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut evaluator = SubprocessEvaluator {
+            sdk: "stub".to_string(),
+            command: stub_harness(dir.path(), "#!/bin/sh\necho 'not json at all'\n"),
+            cwd: None,
+        };
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.1.0"}),
+            serde_json::json!({"type": "tool_call"}),
+        );
+        match evaluator.evaluate_bundle(&bundle) {
+            Err(DiffError::InvalidReport { .. }) => {}
+            other => panic!("expected InvalidReport, got {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn subprocess_evaluator_fails_closed_on_sdk_mismatch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut evaluator = SubprocessEvaluator {
+            sdk: "stub".to_string(),
+            command: stub_harness(
+                dir.path(),
+                "#!/bin/sh\necho '{\"sdk\":\"wrong-sdk\",\"results\":{}}'\n",
+            ),
+            cwd: None,
+        };
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.1.0"}),
+            serde_json::json!({"type": "tool_call"}),
+        );
+        match evaluator.evaluate_bundle(&bundle) {
+            Err(DiffError::InvalidReport { message, .. }) => {
+                assert!(message.contains("wrong-sdk"));
+            }
+            other => panic!("expected InvalidReport, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn default_evaluators_cover_the_three_ported_sdks() {
         let evaluators = default_subprocess_evaluators(std::path::Path::new("/repo"));
         let names: Vec<&str> = evaluators.iter().map(|e| e.sdk.as_str()).collect();
