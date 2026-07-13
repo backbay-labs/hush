@@ -123,13 +123,13 @@ pub fn run(args: EvalArgs) -> i32 {
             }
         }
         EvalOutputFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(&EvalReport::from(&receipt)) {
-                println!("{json}");
+            if let Err(code) = print_json_report(&EvalReport::from(&receipt)) {
+                return code;
             }
         }
         EvalOutputFormat::Receipt => {
-            if let Ok(json) = serde_json::to_string_pretty(&receipt) {
-                println!("{json}");
+            if let Err(code) = print_json_report(&receipt) {
+                return code;
             }
         }
     }
@@ -296,6 +296,26 @@ fn parse_origin_pairs(pairs: &[String]) -> Result<hushspec::OriginContext, Strin
     }
     serde_json::from_value(serde_json::Value::Object(map))
         .map_err(|e| format!("invalid origin context: {e}"))
+}
+
+/// Serialize `value` as pretty JSON and print it to stdout. `to_string_pretty`
+/// cannot fail for any type this CLI currently serializes (no NaN/infinite
+/// floats, no non-string map keys), so the error arm is unreachable today.
+/// It exists so that if a future field ever does fail to serialize, the CLI
+/// fails closed — an error on stderr and the input-usage exit code — rather
+/// than silently printing nothing while the caller still exits with a
+/// decision code.
+fn print_json_report<T: serde::Serialize>(value: &T) -> Result<(), i32> {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("{} failed to serialize output: {e}", "error:".red());
+            Err(2)
+        }
+    }
 }
 
 fn decision_exit_code(decision: Decision) -> i32 {
@@ -480,7 +500,10 @@ impl<'a> From<&'a DecisionReceipt> for EvalReport<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{decision_exit_code, parse_action_document, parse_origin_pairs, precedence_note};
+    use super::{
+        decision_exit_code, parse_action_document, parse_origin_pairs, precedence_note,
+        print_json_report,
+    };
     use hushspec::Decision;
 
     #[test]
@@ -488,6 +511,29 @@ mod tests {
         assert_eq!(decision_exit_code(Decision::Allow), 0);
         assert_eq!(decision_exit_code(Decision::Deny), 1);
         assert_eq!(decision_exit_code(Decision::Warn), 4);
+    }
+
+    #[test]
+    fn print_json_report_fails_closed_on_serialize_error() {
+        // No real HushSpec type can fail serde_json serialization today, so
+        // this stands in for the theoretical future field that can: the
+        // point under test is that print_json_report never lets a
+        // serialization error pass silently — it must report exit code 2
+        // (the input-usage code), matching every other error path in this
+        // module, instead of returning Ok with nothing printed.
+        struct AlwaysFailsToSerialize;
+
+        impl serde::Serialize for AlwaysFailsToSerialize {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                use serde::ser::Error;
+                Err(S::Error::custom("boom"))
+            }
+        }
+
+        assert_eq!(print_json_report(&AlwaysFailsToSerialize), Err(2));
     }
 
     #[test]
