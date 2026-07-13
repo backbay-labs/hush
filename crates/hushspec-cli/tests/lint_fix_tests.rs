@@ -5,6 +5,11 @@
 //!   a `change_type` of "unchanged" or one of "tightened"/"relaxed"/
 //!   "escalated"/"demoted" -- there is no top-level `"changes"` wrapper).
 //! - Idempotence: running `--fix` a second time is a byte-for-byte no-op.
+//! - The shipped corpus (below) happens to be fully clean today, so its loop
+//!   alone never actually exercises a fix -- every `--fix` call in it is a
+//!   no-op and the assertions that follow check nothing.
+//!   `fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied`
+//!   covers that gap using a fixture with a genuine fixable duplicate.
 use assert_cmd::Command;
 
 #[test]
@@ -21,43 +26,85 @@ fn fix_is_decision_neutral_and_idempotent_for_all_shipped_policies() {
             .args(["lint", copy.to_str().unwrap(), "--fix"])
             .assert(); // exit code may be nonzero if semantic findings remain -- that's fine
 
-        // Neutrality: every probe's decision is unchanged.
-        let diff = Command::cargo_bin("h2h")
-            .unwrap()
-            .args([
-                "diff",
-                entry.to_str().unwrap(),
-                copy.to_str().unwrap(),
-                "--format",
-                "json",
-            ])
-            .output()
-            .unwrap();
-        let v: serde_json::Value = serde_json::from_slice(&diff.stdout).unwrap();
-        let probes = v.as_array().expect("diff --format json is a flat array");
-        assert!(
-            !probes.is_empty(),
-            "{name}: expected diff to probe something"
-        );
-        let real_changes: Vec<&serde_json::Value> = probes
-            .iter()
-            .filter(|p| p["change_type"] != "unchanged")
-            .collect();
-        assert!(
-            real_changes.is_empty(),
-            "{name} changed {} decision(s): {:#?}",
-            real_changes.len(),
-            real_changes
-        );
-
-        // Idempotence: second --fix is a byte-for-byte no-op.
-        let once = std::fs::read(&copy).unwrap();
-        let _ = Command::cargo_bin("h2h")
-            .unwrap()
-            .args(["lint", copy.to_str().unwrap(), "--fix"])
-            .assert();
-        assert_eq!(once, std::fs::read(&copy).unwrap(), "{name} not idempotent");
+        assert_neutral_and_idempotent(&name, &entry, &copy);
     }
+}
+
+/// Regression guard for the gap noted in the module docs: reuses the exact
+/// duplicate-pattern fixture from `dry_run_never_writes_and_previews_what_fix_would_do`
+/// (a policy with a byte-identical repeated `forbidden_paths` entry) so the
+/// same corpus-style flow -- fix, then assert diff-neutrality, then assert
+/// idempotence -- runs at least once against a policy that actually changes
+/// under `--fix`, rather than only against the always-clean shipped corpus.
+#[test]
+fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let original = dir.path().join("dupe-original.yaml");
+    std::fs::write(
+        &original,
+        "hushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n",
+    )
+    .unwrap();
+    let copy = dir.path().join("dupe-fixed.yaml");
+    std::fs::copy(&original, &copy).unwrap();
+    let before = std::fs::read(&copy).unwrap();
+
+    let _ = Command::cargo_bin("h2h")
+        .unwrap()
+        .args(["lint", copy.to_str().unwrap(), "--fix"])
+        .assert();
+    assert_ne!(
+        before,
+        std::fs::read(&copy).unwrap(),
+        "fixture should actually change under --fix, otherwise this test is as \
+         vacuous as the corpus loop it's meant to backstop"
+    );
+
+    assert_neutral_and_idempotent("dupe.yaml", &original, &copy);
+}
+
+/// Shared by both tests above: `fixed` has already been through `--fix` once.
+/// Asserts that doing so did not change any probe's decision relative to
+/// `original` (per `h2h diff --format json`, a flat array of probes -- no
+/// top-level `"changes"` wrapper), then asserts a second `--fix` on `fixed`
+/// is a byte-for-byte no-op.
+fn assert_neutral_and_idempotent(name: &str, original: &std::path::Path, fixed: &std::path::Path) {
+    let diff = Command::cargo_bin("h2h")
+        .unwrap()
+        .args([
+            "diff",
+            original.to_str().unwrap(),
+            fixed.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&diff.stdout).unwrap();
+    let probes = v.as_array().expect("diff --format json is a flat array");
+    assert!(
+        !probes.is_empty(),
+        "{name}: expected diff to probe something"
+    );
+    let real_changes: Vec<&serde_json::Value> = probes
+        .iter()
+        .filter(|p| p["change_type"] != "unchanged")
+        .collect();
+    assert!(
+        real_changes.is_empty(),
+        "{name} changed {} decision(s): {:#?}",
+        real_changes.len(),
+        real_changes
+    );
+
+    // Idempotence: second --fix is a byte-for-byte no-op.
+    let once = std::fs::read(fixed).unwrap();
+    let _ = Command::cargo_bin("h2h")
+        .unwrap()
+        .args(["lint", fixed.to_str().unwrap(), "--fix"])
+        .assert();
+    assert_eq!(once, std::fs::read(fixed).unwrap(), "{name} not idempotent");
 }
 
 #[test]
