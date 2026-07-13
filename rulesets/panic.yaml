@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 hushspec: "0.1.0"
 name: "__hushspec_panic__"
 description: "Emergency deny-all policy. Activated by panic mode."

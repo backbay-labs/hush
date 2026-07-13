@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 # Compliance: NIST SP 800-53 Rev 5 (AC, AU, CM, SC)
 #
 # DISCLAIMER: Starting point only. Engage a 3PAO and customize for your

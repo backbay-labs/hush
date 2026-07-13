@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 # Compliance: AICPA Trust Services Criteria (SOC2 Type II)
 # Maps to: CC6.1, CC6.3, CC7.1, CC7.2, CC8.1
 #

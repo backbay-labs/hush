@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 # Compliance: HIPAA Security Rule (45 CFR 164.312), Privacy Rule (45 CFR 164.502)
 #
 # DISCLAIMER: Starting point only. Organizations MUST customize and have this
