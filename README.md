@@ -92,7 +92,7 @@ All four SDKs implement the full HushSpec pipeline, from parse and validate thro
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first tagged `v0.x` release, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
 
 All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 

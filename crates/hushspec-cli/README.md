@@ -13,7 +13,7 @@
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first tagged `v0.x` release, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
 
 All methods install the `h2h` binary.
 
@@ -29,7 +29,7 @@ h2h lint --fail-on-warnings policy.yaml
 
 # Lint and auto-fix decision-neutral issues
 h2h lint policy.yaml --fix
-h2h lint policy.yaml --fix --dry-run   # preview changes without writing
+h2h lint policy.yaml --dry-run   # preview fixes without writing
 
 # Run evaluation test suites
 h2h test policy.test.yaml

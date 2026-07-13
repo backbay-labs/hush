@@ -11,7 +11,7 @@
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first tagged `v0.x` release, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
 
 This installs the `h2h` command.
 
