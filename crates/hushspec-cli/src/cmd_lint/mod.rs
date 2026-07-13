@@ -170,8 +170,16 @@ pub fn run(args: LintArgs) -> i32 {
                 // code below) reflects only what's actually left.
                 findings = run_all_checks(&spec, &path.display().to_string());
 
-                let formatted =
-                    crate::cmd_fmt::normalize_trailing_newline(&crate::cmd_fmt::format_spec(&spec));
+                // `spec` was mutated in place by `apply_fixes`, so this canonicalizes
+                // the in-memory model directly rather than routing through
+                // `format_canonical` -- but the original file's modeline (if any)
+                // must still be preserved, so it's split from `content` and rejoined
+                // the same way `format_canonical` would.
+                let (modeline, _) = crate::cmd_fmt::split_modeline(&content);
+                let canonical = crate::cmd_fmt::format_spec(&spec);
+                let formatted = crate::cmd_fmt::normalize_trailing_newline(
+                    &crate::cmd_fmt::rejoin_modeline(modeline, &canonical),
+                );
 
                 if args.fix {
                     if let Err(e) = std::fs::write(path, &formatted) {

@@ -64,6 +64,44 @@ fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
     assert_neutral_and_idempotent("dupe.yaml", &original, &copy);
 }
 
+/// `h2h fmt`'s canonical writer preserves a leading yaml-language-server
+/// modeline (see `cmd_fmt::split_modeline`/`format_canonical`), but `--fix`
+/// writes through `format_spec` directly on an already-mutated in-memory
+/// `HushSpec` rather than through `format_canonical` -- so this exercises the
+/// separate rejoin wired into `cmd_lint::run` for that path. Uses the same
+/// genuine-duplicate fixture as the neutrality test above so the file
+/// actually changes under `--fix`, not just a no-op pass.
+#[test]
+fn fix_preserves_leading_modeline() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("modeline.yaml");
+    let modeline =
+        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+    std::fs::write(
+        &policy,
+        format!(
+            "{modeline}\nhushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
+        ),
+    )
+    .unwrap();
+
+    let _ = Command::cargo_bin("h2h")
+        .unwrap()
+        .args(["lint", policy.to_str().unwrap(), "--fix"])
+        .assert();
+
+    let fixed = std::fs::read_to_string(&policy).unwrap();
+    assert_eq!(
+        fixed.matches("**/.ssh/**").count(),
+        1,
+        "fixture must actually be fixed, otherwise the modeline assertion below is vacuous: {fixed}"
+    );
+    assert!(
+        fixed.starts_with(&format!("{modeline}\n")),
+        "modeline must survive --fix rewriting the file:\n{fixed}"
+    );
+}
+
 /// Shared by both tests above: `fixed` has already been through `--fix` once.
 /// Asserts that doing so did not change any probe's decision relative to
 /// `original` (per `h2h diff --format json`, a flat array of probes -- no

@@ -110,9 +110,9 @@ pub fn run(args: FmtArgs) -> i32 {
             }
         };
 
-        // Parse to validate it's valid YAML
-        let spec = match HushSpec::parse(&original) {
-            Ok(s) => s,
+        // Parse and canonically format in one step (also validates it's valid YAML).
+        let formatted = match format_canonical(&original) {
+            Ok(f) => f,
             Err(e) => {
                 match args.format {
                     FmtOutputFormat::Text => {
@@ -129,8 +129,6 @@ pub fn run(args: FmtArgs) -> i32 {
                 continue;
             }
         };
-
-        let formatted = format_spec(&spec);
 
         // Normalize: ensure both end with single newline for comparison
         let original_normalized = normalize_trailing_newline(&original);
@@ -210,6 +208,42 @@ pub fn run(args: FmtArgs) -> i32 {
 pub(crate) fn normalize_trailing_newline(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
     format!("{trimmed}\n")
+}
+
+/// Split a leading yaml-language-server modeline (first line only) from the body.
+///
+/// Only this exact leading-comment form is special-cased; general comment
+/// preservation elsewhere in the document is out of scope -- the serde
+/// round-trip through `format_spec` has no way to carry arbitrary comments,
+/// and the modeline is the one editors rely on for schema-driven completion.
+pub(crate) fn split_modeline(input: &str) -> (Option<&str>, &str) {
+    if let Some(first) = input.lines().next()
+        && first.trim_start().starts_with("# yaml-language-server:")
+    {
+        let body = &input[first.len()..];
+        return (Some(first), body.strip_prefix('\n').unwrap_or(body));
+    }
+    (None, input)
+}
+
+/// Rejoin a modeline previously extracted by [`split_modeline`] with freshly
+/// canonicalized body text. Shared by `format_canonical` (the `h2h fmt` path)
+/// and `cmd_lint`'s `--fix`/`--dry-run` path, which canonicalizes an
+/// already-parsed-and-mutated `HushSpec` directly rather than routing through
+/// `format_canonical`.
+pub(crate) fn rejoin_modeline(modeline: Option<&str>, canonical: &str) -> String {
+    match modeline {
+        Some(m) => format!("{m}\n{canonical}"),
+        None => canonical.to_string(),
+    }
+}
+
+/// Parse `input` and render it as canonical HushSpec YAML, preserving a
+/// leading yaml-language-server modeline if present.
+pub(crate) fn format_canonical(input: &str) -> Result<String, String> {
+    let (modeline, body) = split_modeline(input);
+    let spec = HushSpec::parse(body).map_err(|e| e.to_string())?;
+    Ok(rejoin_modeline(modeline, &format_spec(&spec)))
 }
 
 /// Format a HushSpec document into canonical YAML
@@ -665,9 +699,32 @@ pub(crate) fn compute_diff(original: &str, formatted: &str, path: &std::path::Pa
 
 #[cfg(test)]
 mod tests {
-    use super::{format_spec, yaml_scalar};
+    use super::{format_canonical, format_spec, yaml_scalar};
     use hushspec::HushSpec;
     use hushspec::schema::MergeStrategy;
+
+    const MODELINE: &str =
+        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+
+    #[test]
+    fn fmt_preserves_leading_modeline() {
+        let input = format!("{MODELINE}\nhushspec: \"0.1.0\"\nname: t\n");
+        let out = format_canonical(&input).unwrap();
+        assert!(
+            out.starts_with(&format!("{MODELINE}\n")),
+            "modeline stripped:\n{out}"
+        );
+        // Idempotent with the modeline present:
+        assert_eq!(format_canonical(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn fmt_without_modeline_is_unchanged_behavior() {
+        let input = "hushspec: \"0.1.0\"\nname: t\n";
+        let out = format_canonical(input).unwrap();
+        assert!(!out.contains("yaml-language-server"));
+        assert_eq!(format_canonical(&out).unwrap(), out);
+    }
 
     #[test]
     fn format_spec_preserves_newlines_and_tabs_in_scalars() {
