@@ -42,10 +42,14 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          # No --locked here: this workspace intentionally does not commit
+          # Cargo.lock (.gitignore), so a locked build would fail before
+          # producing artifacts. `cargo install cross --locked` above is
+          # unaffected — it uses cross's own published lockfile.
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build -p hushspec-cli --release --locked --target ${{ matrix.target }}
+            cross build -p hushspec-cli --release --target ${{ matrix.target }}
           else
-            cargo build -p hushspec-cli --release --locked --target ${{ matrix.target }}
+            cargo build -p hushspec-cli --release --target ${{ matrix.target }}
           fi
       - name: Package
         shell: bash
