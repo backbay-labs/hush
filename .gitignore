@@ -15,6 +15,10 @@ dist/
 *.wasm
 docs/book/
 
+# Generated npm packages (scripts/gen_npm_cli.mjs release output; not a
+# workspace member -- keep out of both git and npm's workspace globs)
+/out/
+
 # IDE
 .idea/
 .vscode/

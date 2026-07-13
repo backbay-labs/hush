@@ -114,3 +114,27 @@ jobs:
           git push origin "h2h-${TAG}"
           gh pr create --repo backbay-labs/homebrew-tap \
             --title "h2h ${TAG}" --body "Automated formula update for ${TAG}."
+
+  npm-cli:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+      - name: Generate packages
+        run: node scripts/gen_npm_cli.mjs "$TAG" . out/
+      - name: Publish (platform packages, then meta)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for d in out/cli-*; do (cd "$d" && npm publish --access public --provenance); done
+          (cd out/cli && npm publish --access public --provenance)
