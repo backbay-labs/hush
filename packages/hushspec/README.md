@@ -53,6 +53,32 @@ if (result.decision === 'deny') {
 guard.enforce({ type: 'egress', target: 'api.openai.com' });
 ```
 
+### Shadow / monitor mode
+
+Roll out a policy without blocking anything: monitor mode evaluates every
+action, records what *would* have been denied, and never throws. Escalate
+individual rules to `enforce` as confidence grows.
+
+```ts
+import { HushGuard, FileReceiptSink } from '@hushspec/core';
+
+const guard = HushGuard.fromFile('./policy.yaml', {
+  enforcement: {
+    mode: 'monitor',
+    overrides: { 'rules.secret_patterns': 'enforce' }, // already trusted: block for real
+  },
+  sink: new FileReceiptSink('./receipts.jsonl'), // required: monitor must be observable
+});
+
+const outcome = guard.gate({ type: 'shell_command', target: 'rm -rf /' });
+// outcome.proceed        -> true (monitor never blocks)
+// outcome.result.decision -> 'deny' (the evaluated decision)
+// outcome.enforcement    -> { mode: 'monitor', outcome: 'would_block' }
+```
+
+Receipts written by the sink carry `enforcement: { mode, outcome }` alongside
+the evaluated `decision`. Panic mode always blocks, even under monitor.
+
 ## Features
 
 ### Evaluation
