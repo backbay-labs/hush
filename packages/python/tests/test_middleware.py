@@ -4,6 +4,8 @@ from hushspec import HushGuard, HushSpecDenied
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult
 from hushspec.middleware import HushGuard as HushGuardDirect
 from hushspec.adapters.langchain import hush_tool
+from hushspec.middleware import EnforcementConfig, matches_rule_path_prefix
+from hushspec.observer import EvaluationObserver
 from hushspec.parse import parse_or_raise
 
 
@@ -245,3 +247,65 @@ class TestExports:
 
         assert HG is HushGuardDirect
         assert HSD is HushSpecDenied
+
+
+# Enforcement mode: config validation and prefix matching
+
+
+class _NoopObserver(EvaluationObserver):
+    def on_event(self, event):
+        pass
+
+
+class TestMatchesRulePathPrefix:
+    def test_matches_exact_keys_and_segment_boundaries_only(self):
+        assert matches_rule_path_prefix("rules.tool_access", "rules.tool_access") is True
+        assert matches_rule_path_prefix("rules.tool_access.block", "rules.tool_access") is True
+        assert (
+            matches_rule_path_prefix(
+                "rules.shell_commands.forbidden_patterns[0]",
+                "rules.shell_commands.forbidden_patterns",
+            )
+            is True
+        )
+        assert matches_rule_path_prefix("rules.tool_access_x", "rules.tool_access") is False
+        assert matches_rule_path_prefix("rules.egress.block", "rules.egres") is False
+
+
+class TestEnforcementConfigValidation:
+    def test_rejects_monitor_mode_without_observer_or_sink(self):
+        with pytest.raises(ValueError, match="monitor mode requires an observer or a receipt sink"):
+            HushGuard.from_yaml(ALLOW_ALL_POLICY, enforcement=EnforcementConfig(mode="monitor"))
+
+    def test_rejects_unknown_rule_names_in_override_keys(self):
+        with pytest.raises(ValueError, match="unknown rule in enforcement override 'rules.egres'"):
+            HushGuard.from_yaml(
+                ALLOW_ALL_POLICY,
+                observer=_NoopObserver(),
+                enforcement=EnforcementConfig(
+                    mode="monitor", overrides={"rules.egres": "enforce"}
+                ),
+            )
+
+    def test_rejects_override_keys_outside_rules_and_extensions(self):
+        with pytest.raises(ValueError, match="must start with 'rules.' or 'extensions.'"):
+            HushGuard.from_yaml(
+                ALLOW_ALL_POLICY,
+                observer=_NoopObserver(),
+                enforcement=EnforcementConfig(overrides={"tool_access": "monitor"}),
+            )
+
+    def test_rejects_invalid_mode_values(self):
+        with pytest.raises(ValueError, match="invalid enforcement mode: 'audit'"):
+            HushGuard.from_yaml(ALLOW_ALL_POLICY, enforcement=EnforcementConfig(mode="audit"))
+
+    def test_accepts_valid_monitor_config_with_observer(self):
+        guard = HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            observer=_NoopObserver(),
+            enforcement=EnforcementConfig(
+                mode="monitor",
+                overrides={"rules.egress": "enforce", "extensions.posture": "monitor"},
+            ),
+        )
+        assert isinstance(guard, HushGuard)
