@@ -195,12 +195,18 @@ export class HushGuard {
   gate(action: EvaluationAction): GateOutcome {
     const policy = this.activePolicyResult();
     if ('decision' in policy) {
-      // Provider-failure deny: no policy exists, so no receipt or event.
+      // Provider-failure deny: no loaded policy, so no receipt can be built,
+      // but the decision must still be audited — a monitored provider outage
+      // must never proceed silently. record() emits the observer event even
+      // with an undefined receipt (a sink-only guard has nothing to send).
       const mode = this.effectiveMode(policy);
-      if (mode === 'monitor') {
-        return { result: policy, proceed: true, enforcement: { mode, outcome: 'would_block' } };
-      }
-      return { result: policy, proceed: false, enforcement: { mode, outcome: 'blocked' } };
+      const proceed = mode === 'monitor';
+      const enforcement: EnforcementSummary = {
+        mode,
+        outcome: proceed ? 'would_block' : 'blocked',
+      };
+      this.record(action, policy, 0, enforcement, undefined);
+      return { result: policy, proceed, enforcement };
     }
 
     const { result, durationUs, receipt } = this.runEvaluation(policy, action);

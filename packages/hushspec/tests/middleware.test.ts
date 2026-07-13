@@ -577,8 +577,9 @@ describe('panic supremacy over monitor', () => {
         throw new Error('Policy is stale');
       },
     };
+    const events: ObserverEvent[] = [];
     const guard = await HushGuard.fromProvider(provider, {
-      observer: { onEvent: () => {} },
+      observer: { onEvent: (e) => events.push(e) },
       enforcement: { mode: 'monitor' },
     });
 
@@ -586,6 +587,15 @@ describe('panic supremacy over monitor', () => {
     expect(outcome.proceed).toBe(true);
     expect(outcome.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
     expect(outcome.result.matched_rule).toBe('__hushspec_policy_provider__');
+
+    // A monitored would-block must never proceed silently: the provider-failure
+    // path emits an audit event even though no receipt can be built.
+    const completed = events.filter((e) => e.type === 'evaluation.completed');
+    expect(completed).toHaveLength(1);
+    expect((completed[0] as EvaluationCompletedEvent).enforcement).toEqual({
+      mode: 'monitor',
+      outcome: 'would_block',
+    });
 
     activatePanic();
     expect(guard.gate({ type: 'tool_call', target: 'any_tool' }).proceed).toBe(false);
