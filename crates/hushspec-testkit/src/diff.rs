@@ -152,6 +152,98 @@ fn evaluate_action(spec: &HushSpec, action: &serde_json::Value) -> CaseVerdict {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DivergenceKind {
+    Acceptance,
+    Decision,
+    MatchedRule,
+    Reason,
+    OriginProfile,
+    Posture,
+    MissingCase,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Divergence {
+    pub case_key: String,
+    pub sdk: String,
+    pub kind: DivergenceKind,
+    pub oracle: CaseVerdict,
+    pub observed: CaseVerdict,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompareOptions {
+    pub ignore_reason: bool,
+}
+
+/// Compare an SDK report against the Rust oracle. First difference wins per
+/// case; iteration follows the oracle's sorted key order.
+pub fn compare_reports(
+    oracle: &SdkReport,
+    observed: &SdkReport,
+    options: &CompareOptions,
+) -> Vec<Divergence> {
+    let mut divergences = Vec::new();
+    for (key, oracle_verdict) in &oracle.results {
+        let Some(observed_verdict) = observed.results.get(key) else {
+            divergences.push(Divergence {
+                case_key: key.clone(),
+                sdk: observed.sdk.clone(),
+                kind: DivergenceKind::MissingCase,
+                oracle: oracle_verdict.clone(),
+                observed: CaseVerdict::Error {
+                    message: "case missing from harness report".to_string(),
+                },
+            });
+            continue;
+        };
+        if let Some(kind) = verdict_divergence(oracle_verdict, observed_verdict, options) {
+            divergences.push(Divergence {
+                case_key: key.clone(),
+                sdk: observed.sdk.clone(),
+                kind,
+                oracle: oracle_verdict.clone(),
+                observed: observed_verdict.clone(),
+            });
+        }
+    }
+    divergences
+}
+
+fn verdict_divergence(
+    oracle: &CaseVerdict,
+    observed: &CaseVerdict,
+    options: &CompareOptions,
+) -> Option<DivergenceKind> {
+    match (oracle, observed) {
+        (CaseVerdict::Ok { result: left }, CaseVerdict::Ok { result: right }) => {
+            if left.decision != right.decision {
+                return Some(DivergenceKind::Decision);
+            }
+            if left.matched_rule != right.matched_rule {
+                return Some(DivergenceKind::MatchedRule);
+            }
+            if !options.ignore_reason && left.reason != right.reason {
+                return Some(DivergenceKind::Reason);
+            }
+            if left.origin_profile != right.origin_profile {
+                return Some(DivergenceKind::OriginProfile);
+            }
+            if left.posture != right.posture {
+                return Some(DivergenceKind::Posture);
+            }
+            None
+        }
+        (CaseVerdict::Rejected { phase: left, .. }, CaseVerdict::Rejected { phase: right, .. }) => {
+            (left != right).then_some(DivergenceKind::Acceptance)
+        }
+        (CaseVerdict::Error { .. }, CaseVerdict::Error { .. }) => None,
+        _ => Some(DivergenceKind::Acceptance),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +339,117 @@ mod tests {
             json,
             r#"{"status":"rejected","phase":"validate","message":"bad"}"#
         );
+    }
+
+    fn ok_verdict(decision: &str, matched_rule: Option<&str>, reason: Option<&str>) -> CaseVerdict {
+        CaseVerdict::Ok {
+            result: NormalizedResult {
+                decision: decision.to_string(),
+                matched_rule: matched_rule.map(str::to_string),
+                reason: reason.map(str::to_string),
+                origin_profile: None,
+                posture: None,
+            },
+        }
+    }
+
+    fn report_of(sdk: &str, entries: &[(&str, CaseVerdict)]) -> SdkReport {
+        SdkReport {
+            sdk: sdk.to_string(),
+            results: entries
+                .iter()
+                .map(|(key, verdict)| ((*key).to_string(), verdict.clone()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn identical_reports_produce_no_divergence() {
+        let oracle = report_of("rust", &[("g0001/a0001", ok_verdict("allow", None, None))]);
+        let observed = report_of("go", &[("g0001/a0001", ok_verdict("allow", None, None))]);
+        assert!(compare_reports(&oracle, &observed, &CompareOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn detects_every_divergence_kind() {
+        let oracle = report_of(
+            "rust",
+            &[
+                (
+                    "k1",
+                    ok_verdict("deny", Some("rules.egress.block"), Some("r")),
+                ),
+                (
+                    "k2",
+                    ok_verdict("allow", Some("rules.tool_access.allow"), None),
+                ),
+                ("k3", ok_verdict("allow", None, Some("left reason"))),
+                ("k4", ok_verdict("allow", None, None)),
+                (
+                    "k5",
+                    CaseVerdict::Rejected {
+                        phase: "parse".to_string(),
+                        message: "m".to_string(),
+                    },
+                ),
+                ("k6", ok_verdict("allow", None, None)),
+            ],
+        );
+        let observed = report_of(
+            "go",
+            &[
+                (
+                    "k1",
+                    ok_verdict("allow", Some("rules.egress.block"), Some("r")),
+                ),
+                (
+                    "k2",
+                    ok_verdict("allow", Some("rules.tool_access.default"), None),
+                ),
+                ("k3", ok_verdict("allow", None, Some("right reason"))),
+                (
+                    "k4",
+                    CaseVerdict::Rejected {
+                        phase: "validate".to_string(),
+                        message: "m".to_string(),
+                    },
+                ),
+                (
+                    "k5",
+                    CaseVerdict::Rejected {
+                        phase: "validate".to_string(),
+                        message: "m".to_string(),
+                    },
+                ),
+                // k6 missing entirely
+            ],
+        );
+        let divergences = compare_reports(&oracle, &observed, &CompareOptions::default());
+        let kinds: Vec<(String, DivergenceKind)> = divergences
+            .iter()
+            .map(|divergence| (divergence.case_key.clone(), divergence.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("k1".to_string(), DivergenceKind::Decision),
+                ("k2".to_string(), DivergenceKind::MatchedRule),
+                ("k3".to_string(), DivergenceKind::Reason),
+                ("k4".to_string(), DivergenceKind::Acceptance),
+                ("k5".to_string(), DivergenceKind::Acceptance),
+                ("k6".to_string(), DivergenceKind::MissingCase),
+            ]
+        );
+        assert!(divergences.iter().all(|divergence| divergence.sdk == "go"));
+    }
+
+    #[test]
+    fn ignore_reason_suppresses_reason_only_divergence() {
+        let oracle = report_of("rust", &[("k", ok_verdict("allow", None, Some("a")))]);
+        let observed = report_of("py", &[("k", ok_verdict("allow", None, Some("b")))]);
+        let options = CompareOptions {
+            ignore_reason: true,
+        };
+        assert!(compare_reports(&oracle, &observed, &options).is_empty());
     }
 }
