@@ -1,0 +1,58 @@
+name: Nightly Fuzz
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  differential-deep:
+    name: Differential Deep Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build TypeScript package
+        run: npm run build
+
+      - name: Install Python package
+        run: pip install -e "packages/python[dev]"
+
+      - name: Deep differential fuzz (random seed, minimized fixture candidates)
+        run: |
+          cargo run --release -p hushspec-testkit --bin hushspec-difftest -- \
+            --chunks 100 --max-seconds 1500 \
+            --groups 250 --actions-per-group 4 \
+            --minimize \
+            --emit-fixtures target/difftest/fixture-candidates \
+            --report target/difftest/report.json
+
+      - name: Upload run artifacts (bundles, report, fixture candidates)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-difftest
+          path: target/difftest/
