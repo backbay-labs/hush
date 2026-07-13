@@ -44,7 +44,15 @@ export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';
 export { evaluate, activatePanic, deactivatePanic, isPanicActive, panicPolicy, type EvaluationAction, type EvaluationResult, type Decision, type OriginContext, type PostureContext, type PostureResult } from './evaluate.js';
 export { evaluateCondition, evaluateWithContext, type Condition, type TimeWindowCondition, type RuntimeContext } from './conditions.js';
-export { HushGuard, HushSpecDenied, type WarnHandler } from './middleware.js';
+export {
+  HushGuard,
+  HushSpecDenied,
+  matchesRulePathPrefix,
+  type WarnHandler,
+  type EnforcementConfig,
+  type GateOutcome,
+  type HushGuardOptions,
+} from './middleware.js';
 export { mapClaudeToolToAction, createSecureToolHandler } from './adapters/anthropic.js';
 export { mapOpenAIToolCall, createOpenAIGuard } from './adapters/openai.js';
 export { mapMCPToolCall, extractDomain, createMCPGuard } from './adapters/mcp.js';
@@ -57,6 +65,9 @@ export {
   type ActionSummary,
   type RuleEvaluation,
   type RuleOutcome,
+  type EnforcementMode,
+  type EnforcementOutcome,
+  type EnforcementSummary,
   type PolicySummary,
   type AuditConfig,
 } from './receipt.js';

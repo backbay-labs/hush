@@ -6,8 +6,9 @@ import { readFileSync } from 'node:fs';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
-import { computePolicyHash } from './receipt.js';
-import type { DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
+import type { AuditConfig, DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
+import { computePolicyHash, DEFAULT_AUDIT_CONFIG, evaluateAudited } from './receipt.js';
+import type { ReceiptSink } from './sinks.js';
 import { RULE_KEYS_SET } from './generated/contract.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
@@ -30,6 +31,8 @@ export interface HushGuardOptions {
   observer?: EvaluationObserver;
   provider?: PolicyProvider;
   enforcement?: EnforcementConfig;
+  sink?: ReceiptSink;
+  audit?: AuditConfig;
 }
 
 const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
@@ -83,12 +86,19 @@ export class HushGuard {
   private provider: PolicyProvider | null = null;
   private enforcementMode: EnforcementMode = 'enforce';
   private enforcementOverrides: Record<string, EnforcementMode> = {};
+  private sink: ReceiptSink | null = null;
+  private audit: AuditConfig = DEFAULT_AUDIT_CONFIG;
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
-    validateEnforcementConfig(enforcementConfig, options?.observer != null);
+    validateEnforcementConfig(
+      enforcementConfig,
+      options?.observer != null || options?.sink != null,
+    );
     this.enforcementMode = enforcementConfig.mode ?? 'enforce';
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
+    this.sink = options?.sink ?? null;
+    this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
     this.policy = policy;
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
@@ -131,6 +141,24 @@ export class HushGuard {
     const policy = this.activePolicyResult();
     if ('decision' in policy) {
       return policy;
+    }
+    if (this.sink) {
+      const { result, durationUs, receipt } = this.runEvaluation(policy, action);
+      if (receipt) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break evaluation */
+        }
+      }
+      this.observableEvaluator?.notifyEvaluationCompleted(
+        action,
+        result,
+        durationUs,
+        undefined,
+        receipt,
+      );
+      return result;
     }
     if (this.observableEvaluator) {
       return this.observableEvaluator.evaluate(policy, action);
@@ -228,6 +256,20 @@ export class HushGuard {
     durationUs: number;
     receipt?: DecisionReceipt;
   } {
+    if (this.sink) {
+      const receipt = evaluateAudited(policy, action, this.audit);
+      return {
+        result: {
+          decision: receipt.decision,
+          matched_rule: receipt.matched_rule,
+          reason: receipt.reason,
+          origin_profile: receipt.origin_profile,
+          posture: receipt.posture,
+        },
+        durationUs: receipt.evaluation_duration_us,
+        receipt,
+      };
+    }
     const start = performance.now();
     const result = evaluate(policy, action);
     const durationUs = Math.round((performance.now() - start) * 1000);
@@ -241,6 +283,16 @@ export class HushGuard {
     enforcement: EnforcementSummary,
     receipt?: DecisionReceipt,
   ): void {
+    if (receipt) {
+      receipt.enforcement = enforcement;
+      if (this.sink) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break enforcement */
+        }
+      }
+    }
     this.observableEvaluator?.notifyEvaluationCompleted(
       action,
       result,

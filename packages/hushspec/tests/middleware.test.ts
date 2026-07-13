@@ -5,6 +5,8 @@ import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/
 import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
 import { activatePanic, deactivatePanic } from '../src/evaluate.js';
+import type { DecisionReceipt } from '../src/receipt.js';
+import type { ObserverEvent, EvaluationCompletedEvent } from '../src/observer.js';
 import type { EvaluationResult } from '../src/evaluate.js';
 
 
@@ -598,5 +600,67 @@ describe('detection matched_rule normalization', () => {
     type GuardInternals = { effectiveMode(result: EvaluationResult): EnforcementMode };
     const mode = (guard as unknown as GuardInternals).effectiveMode(detectionResult);
     expect(mode).toBe('monitor');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Receipt sink integration
+// ---------------------------------------------------------------------------
+
+describe('receipt sink integration', () => {
+  it('gate() sends a tagged receipt to the sink', () => {
+    const receipts: DecisionReceipt[] = [];
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      enforcement: { mode: 'monitor' },
+      sink: { send: (r) => receipts.push(r) },
+    });
+    const outcome = guard.gate({ type: 'tool_call', target: 'dangerous_tool' });
+    expect(outcome.proceed).toBe(true);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].decision).toBe('deny');
+    expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+    expect(receipts[0].policy.content_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('evaluate() sends an untagged receipt', () => {
+    const receipts: DecisionReceipt[] = [];
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      sink: { send: (r) => receipts.push(r) },
+    });
+    const result = guard.evaluate({ type: 'tool_call', target: 'dangerous_tool' });
+    expect(result.decision).toBe('deny');
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].enforcement).toBeUndefined();
+  });
+
+  it('a throwing sink never breaks enforcement', () => {
+    const guard = HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+      enforcement: { mode: 'monitor' },
+      sink: {
+        send: () => {
+          throw new Error('sink down');
+        },
+      },
+    });
+    expect(guard.check({ type: 'tool_call', target: 'any_tool' })).toBe(true);
+  });
+
+  it('gated actions emit one tagged observer event', () => {
+    const events: ObserverEvent[] = [];
+    const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+      enforcement: { mode: 'monitor' },
+      observer: { onEvent: (e) => events.push(e) },
+    });
+    guard.check({ type: 'tool_call', target: 'dangerous_tool' });
+    const completed = events.filter(
+      (e) => e.type === 'evaluation.completed',
+    ) as EvaluationCompletedEvent[];
+    expect(completed).toHaveLength(1);
+    expect(completed[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+  });
+
+  it('exports the enforcement API from the package root', async () => {
+    const pkg = await import('../src/index.js');
+    expect(typeof pkg.matchesRulePathPrefix).toBe('function');
   });
 });
