@@ -709,10 +709,8 @@ fn has_nested_quantifiers(pattern: &str) -> bool {
                 }
                 has_inner_quantifier = false;
             }
-            b'+' | b'*' => {
-                if depth > 0 {
-                    has_inner_quantifier = true;
-                }
+            b'+' | b'*' if depth > 0 => {
+                has_inner_quantifier = true;
             }
             _ => {}
         }
