@@ -87,3 +87,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" h2h-*.tar.gz SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Regenerate checksums locally
+        run: sha256sum h2h-*.tar.gz > SHA256SUMS
+      - name: Render and PR formula
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          bash scripts/render_formula.sh "$TAG" SHA256SUMS > h2h.rb
+          gh repo clone backbay-labs/homebrew-tap tap
+          cd tap
+          git checkout -b "h2h-${TAG}"
+          mkdir -p Formula && cp ../h2h.rb Formula/h2h.rb
+          git add Formula/h2h.rb
+          git -c user.name=hushspec-release -c user.email=noreply@backbay-labs.dev \
+            commit -m "h2h ${TAG}"
+          git push origin "h2h-${TAG}"
+          gh pr create --repo backbay-labs/homebrew-tap \
+            --title "h2h ${TAG}" --body "Automated formula update for ${TAG}."
