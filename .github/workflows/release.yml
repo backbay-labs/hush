@@ -18,13 +18,17 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest, cross: false }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest, cross: true }
-          - { target: x86_64-apple-darwin,       os: macos-13,      cross: false }
-          - { target: aarch64-apple-darwin,      os: macos-14,      cross: false }
-          - { target: x86_64-pc-windows-msvc,    os: windows-latest, cross: false }
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest,   cross: false }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-latest,   cross: true }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel,  cross: false }
+          - { target: aarch64-apple-darwin,      os: macos-14,        cross: false }
+          - { target: x86_64-pc-windows-msvc,    os: windows-latest,  cross: false }
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Validate tag format
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9] ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
@@ -70,9 +74,15 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: sha256sum h2h-*.tar.gz > SHA256SUMS
-      - uses: actions/attest-build-provenance@v1
+      - uses: actions/attest-build-provenance@v2
         with:
           subject-path: "h2h-*.tar.gz"
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
