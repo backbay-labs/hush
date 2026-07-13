@@ -71,19 +71,24 @@ fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
 /// separate rejoin wired into `cmd_lint::run` for that path. Uses the same
 /// genuine-duplicate fixture as the neutrality test above so the file
 /// actually changes under `--fix`, not just a no-op pass.
+///
+/// Also runs the fixture through the same `assert_neutral_and_idempotent`
+/// helper the other fix tests use, so the modeline path gets the same
+/// decision-neutrality and second-`--fix`-is-a-no-op guarantees as every
+/// other fixture, rather than only checking the modeline survives once.
 #[test]
 fn fix_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();
-    let policy = dir.path().join("modeline.yaml");
     let modeline =
         "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
-    std::fs::write(
-        &policy,
-        format!(
-            "{modeline}\nhushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
-        ),
-    )
-    .unwrap();
+    let content = format!(
+        "{modeline}\nhushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
+    );
+
+    let original = dir.path().join("modeline-original.yaml");
+    std::fs::write(&original, &content).unwrap();
+    let policy = dir.path().join("modeline.yaml");
+    std::fs::copy(&original, &policy).unwrap();
 
     let _ = Command::cargo_bin("h2h")
         .unwrap()
@@ -99,6 +104,53 @@ fn fix_preserves_leading_modeline() {
     assert!(
         fixed.starts_with(&format!("{modeline}\n")),
         "modeline must survive --fix rewriting the file:\n{fixed}"
+    );
+
+    // Decision-neutral relative to the pre-fix original, and a second --fix
+    // (still with the modeline present) is byte-for-byte identical.
+    assert_neutral_and_idempotent("modeline.yaml", &original, &policy);
+}
+
+/// `--dry-run` computes its preview diff from the same modeline-preserving
+/// rejoin as `--fix` (see `fix_preserves_leading_modeline` above), but must
+/// never write. The fixture's `hushspec` value is deliberately single-quoted
+/// (valid YAML, non-canonical) so the canonical rewrite differs starting on
+/// line 2 -- close enough to the leading modeline that the unified diff's
+/// default 3-line context window includes line 1 as unchanged context,
+/// making "the preview leaves the modeline alone" directly observable in
+/// stdout instead of merely assumed.
+#[test]
+fn dry_run_preserves_leading_modeline() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("modeline-dry-run.yaml");
+    let modeline =
+        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+    std::fs::write(
+        &policy,
+        format!(
+            "{modeline}\nhushspec: '0.1.0'\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
+        ),
+    )
+    .unwrap();
+    let before = std::fs::read(&policy).unwrap();
+
+    let dry_run = Command::cargo_bin("h2h")
+        .unwrap()
+        .args(["lint", policy.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        before,
+        std::fs::read(&policy).unwrap(),
+        "--dry-run must never write"
+    );
+
+    let dry_run_stdout = String::from_utf8(dry_run.stdout).unwrap();
+    assert!(
+        dry_run_stdout.contains(&format!("\n {modeline}\n")),
+        "dry-run preview must show the modeline as unchanged context (a \
+         leading-space diff line), not touch it: {dry_run_stdout}"
     );
 }
 

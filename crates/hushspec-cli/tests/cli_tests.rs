@@ -891,6 +891,41 @@ rules:
     assert!(formatted.contains("policy_version: 7"));
 }
 
+/// Regression test: `format_canonical` used to parse the modeline-stripped
+/// body rather than the original input, shifting any parse-error line number
+/// down by one whenever a leading yaml-language-server modeline was present.
+/// `h2h lint` parses the original file content directly and is unaffected,
+/// so it's the oracle here: both commands must report the same line for the
+/// same invalid document.
+#[test]
+fn fmt_parse_error_reports_same_line_as_lint_with_modeline() {
+    let tmp = TempDir::new().unwrap();
+    let policy_path = tmp.path().join("bad-modeline.yaml");
+
+    // `bogus_field` is an unknown field on line 5 -- deny_unknown_fields
+    // rejects it at parse time with a "line 5" position in the error.
+    let content = r#"# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+hushspec: "0.1.0"
+name: t
+description: d
+bogus_field: true
+"#;
+    fs::write(&policy_path, content).unwrap();
+
+    h2h()
+        .arg("fmt")
+        .arg(policy_path.to_str().unwrap())
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("line 5"));
+
+    h2h()
+        .arg("lint")
+        .arg(policy_path.to_str().unwrap())
+        .assert()
+        .stderr(predicate::str::contains("line 5"));
+}
+
 #[test]
 fn panic_activate_creates_sentinel() {
     let tmp = TempDir::new().unwrap();

@@ -240,9 +240,16 @@ pub(crate) fn rejoin_modeline(modeline: Option<&str>, canonical: &str) -> String
 
 /// Parse `input` and render it as canonical HushSpec YAML, preserving a
 /// leading yaml-language-server modeline if present.
+///
+/// Parses the ORIGINAL `input`, not the modeline-stripped body: the modeline
+/// is a parse-inert YAML comment, so `HushSpec::parse` ignores it either way,
+/// but parsing the stripped body would shift any parse-error line number
+/// down by one line relative to `h2h lint` (which parses the original file
+/// content directly). `split_modeline` is used here only to pull the
+/// modeline text back out for `rejoin_modeline`.
 pub(crate) fn format_canonical(input: &str) -> Result<String, String> {
-    let (modeline, body) = split_modeline(input);
-    let spec = HushSpec::parse(body).map_err(|e| e.to_string())?;
+    let (modeline, _) = split_modeline(input);
+    let spec = HushSpec::parse(input).map_err(|e| e.to_string())?;
     Ok(rejoin_modeline(modeline, &format_spec(&spec)))
 }
 
