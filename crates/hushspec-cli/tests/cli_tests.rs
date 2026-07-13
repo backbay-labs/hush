@@ -929,12 +929,10 @@ rules:
     assert!(formatted.contains("policy_version: 7"));
 }
 
-/// Regression test: `format_canonical` used to parse the modeline-stripped
-/// body rather than the original input, shifting any parse-error line number
-/// down by one whenever a leading yaml-language-server modeline was present.
-/// `h2h lint` parses the original file content directly and is unaffected,
-/// so it's the oracle here: both commands must report the same line for the
-/// same invalid document.
+/// `h2h fmt` and `h2h lint` must report the same parse-error line for the
+/// same invalid document, including when a leading yaml-language-server
+/// modeline is present: both count lines against the original file content,
+/// not a modeline-stripped body.
 #[test]
 fn fmt_parse_error_reports_same_line_as_lint_with_modeline() {
     let tmp = TempDir::new().unwrap();

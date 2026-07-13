@@ -81,7 +81,7 @@ function generatePlatformPackage(p) {
   const pkgDir = path.join(outDir, `cli-${p.suffix}`);
   mkdirSync(pkgDir, { recursive: true });
 
-  // Task 2's Package step stages the binary inside a wrapper dir:
+  // Release tarballs stage the binary inside a wrapper dir:
   // h2h-<tag>-<target>/{h2h(.exe),LICENSE,README.md}. Extract to a scratch
   // dir and copy just the binary up, rather than relying on tar flag
   // behavior (e.g. --strip-components) that differs subtly across the GNU

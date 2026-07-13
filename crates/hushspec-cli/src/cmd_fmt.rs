@@ -212,10 +212,9 @@ pub(crate) fn normalize_trailing_newline(s: &str) -> String {
 
 /// Split a leading yaml-language-server modeline (first line only) from the body.
 ///
-/// Only this exact leading-comment form is special-cased; general comment
-/// preservation elsewhere in the document is out of scope -- the serde
-/// round-trip through `format_spec` has no way to carry arbitrary comments,
-/// and the modeline is the one editors rely on for schema-driven completion.
+/// Only this exact leading-comment form is preserved; the serde round-trip
+/// through `format_spec` cannot carry arbitrary comments, and the modeline is
+/// the one editors rely on for schema-driven completion.
 pub(crate) fn split_modeline(input: &str) -> (Option<&str>, &str) {
     if let Some(first) = input.lines().next()
         && first.trim_start().starts_with("# yaml-language-server:")

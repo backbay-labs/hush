@@ -488,21 +488,16 @@ class TestPanicSupremacy:
             guard.enforce(action)
 
 
-# ---------------------------------------------------------------------------
-# Controller directive: detection.py matched_rule normalization
+# detection matched_rule normalization
 #
-# packages/python/hushspec/detection.py:413 emits the bare literal
-# matched_rule "detection" (not a hierarchical rule path). _effective_mode()
-# must normalize it to "extensions.detection" before prefix matching, or an
-# override keyed "extensions.detection" would silently never match. gate()
-# only accepts an EvaluationAction (evaluate_with_detection() is not wired
-# into the enforcement path in this task), so there is no organic way to
-# produce a result with matched_rule "detection" through the public API;
-# this test calls the "private" (underscore-prefixed, not access-controlled
-# in Python) _effective_mode() resolver directly to exercise the
-# normalization in isolation, mirroring
-# packages/hushspec/tests/middleware.test.ts's "detection matched_rule
-# normalization" describe block.
+# detection.py emits the bare literal matched_rule "detection" (not a
+# hierarchical rule path). _effective_mode() must normalize it to
+# "extensions.detection" before prefix matching, or an override keyed
+# "extensions.detection" would silently never match. gate() only accepts an
+# EvaluationAction (evaluate_with_detection() is not wired into the
+# enforcement path), so no public call produces a result with matched_rule
+# "detection"; this test calls the underscore-prefixed _effective_mode()
+# resolver directly.
 # ---------------------------------------------------------------------------
 
 

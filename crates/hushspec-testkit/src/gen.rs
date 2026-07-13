@@ -146,8 +146,8 @@ fn glob_pattern_strategy() -> impl Strategy<Value = String> {
 }
 
 /// Regexes guaranteed to compile and behave identically in Rust `regex`,
-/// JS `RegExp`, Python `re`, and Go `regexp` (see design spec: no \d/\w/\s,
-/// no lookaround, no backreferences, no flags).
+/// JS `RegExp`, Python `re`, and Go `regexp`: no `\d`/`\w`/`\s`, no
+/// lookaround, no backreferences, no flags.
 fn safe_regex_strategy() -> impl Strategy<Value = String> {
     let literal = || string_regex("[a-z]{2,8}").expect("valid generator regex");
     prop_oneof![
@@ -394,7 +394,7 @@ fn rules_strategy() -> impl Strategy<Value = Rules> {
                 computer_use,
                 remote_desktop_channels,
                 input_injection,
-                // Phase-gated blocks: no evaluation semantics yet (see design spec).
+                // Phase-gated blocks: no evaluation semantics yet.
                 browser_automation: None,
                 code_execution: None,
             },

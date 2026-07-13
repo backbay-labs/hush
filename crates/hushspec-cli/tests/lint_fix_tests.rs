@@ -69,13 +69,10 @@ fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
 /// writes through `format_spec` directly on an already-mutated in-memory
 /// `HushSpec` rather than through `format_canonical` -- so this exercises the
 /// separate rejoin wired into `cmd_lint::run` for that path. Uses the same
-/// genuine-duplicate fixture as the neutrality test above so the file
-/// actually changes under `--fix`, not just a no-op pass.
-///
-/// Also runs the fixture through the same `assert_neutral_and_idempotent`
-/// helper the other fix tests use, so the modeline path gets the same
-/// decision-neutrality and second-`--fix`-is-a-no-op guarantees as every
-/// other fixture, rather than only checking the modeline survives once.
+/// Uses a genuine-duplicate fixture so `--fix` actually rewrites the file
+/// rather than passing as a no-op, then asserts decision-neutrality and
+/// second-`--fix`-is-a-no-op via `assert_neutral_and_idempotent` on top of
+/// the leading modeline surviving the rewrite.
 #[test]
 fn fix_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();

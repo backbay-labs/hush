@@ -596,11 +596,9 @@ fn eval_format_receipt_conforms_to_receipt_schema() {
 
 #[test]
 fn eval_format_receipt_schema_rejects_invalid_timestamp() {
-    // Red-verification for the should_validate_formats(true) fix above: proves
-    // the schema actually asserts `format: date-time` on `timestamp` rather than
-    // treating it as a non-asserting annotation. If format validation is ever
-    // silently disabled again (e.g. by an options change or a draft bump), this
-    // test must fail.
+    // The receipt schema must assert `format: date-time` on `timestamp`
+    // rather than treating it as a non-asserting annotation; this fails if
+    // format validation is silently disabled (an options change or draft bump).
     let dir = TempDir::new().unwrap();
     let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
     let output = h2h()

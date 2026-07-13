@@ -592,20 +592,15 @@ describe('panic supremacy over monitor', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Controller directive: detection.ts matched_rule normalization
+// detection matched_rule normalization
 //
-// packages/hushspec/src/detection.ts emits the bare literal matched_rule:
-// 'detection' (not a hierarchical rule path). effectiveMode() must normalize
-// it to 'extensions.detection' before prefix matching, or an override keyed
+// detection.ts emits the bare literal matched_rule 'detection' (not a
+// hierarchical rule path). effectiveMode() must normalize it to
+// 'extensions.detection' before prefix matching, or an override keyed
 // 'extensions.detection' would silently never match. gate() only accepts an
 // EvaluationAction (evaluateWithDetection() is not wired into the enforcement
-// path in this task), so there is no organic way to produce a result with
-// matched_rule 'detection' through the public API; this test reaches into
-// the private effectiveMode() resolver directly to exercise the
-// normalization in isolation, exactly as the brief specifies its signature:
-// `private effectiveMode(result: EvaluationResult): EnforcementMode`.
-// ---------------------------------------------------------------------------
+// path), so no public call produces a result with matched_rule 'detection';
+// this test exercises the private effectiveMode() resolver directly.
 
 describe('detection matched_rule normalization', () => {
   const noopObserver = { onEvent: () => {} };
