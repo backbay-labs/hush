@@ -207,13 +207,13 @@ pub fn run(args: FmtArgs) -> i32 {
     }
 }
 
-fn normalize_trailing_newline(s: &str) -> String {
+pub(crate) fn normalize_trailing_newline(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
     format!("{trimmed}\n")
 }
 
 /// Format a HushSpec document into canonical YAML
-fn format_spec(spec: &HushSpec) -> String {
+pub(crate) fn format_spec(spec: &HushSpec) -> String {
     let mut out = String::new();
 
     // hushspec (always first, always quoted)
@@ -653,7 +653,7 @@ fn format_computer_use_mode(mode: &hushspec::ComputerUseMode) -> &'static str {
     }
 }
 
-fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
+pub(crate) fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
     TextDiff::from_lines(original, formatted)
         .unified_diff()
         .header(
