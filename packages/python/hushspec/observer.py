@@ -5,6 +5,10 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TextIO
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hushspec.receipt import DecisionReceipt, EnforcementSummary
 
 from hushspec.evaluate import EvaluationAction, EvaluationResult, evaluate
 from hushspec.schema import HushSpec
@@ -129,6 +133,27 @@ class ObservableEvaluator:
             "duration_us": duration_us,
         })
         return result
+
+    def notify_evaluation_completed(
+        self,
+        action: EvaluationAction,
+        result: EvaluationResult,
+        duration_us: int,
+        enforcement: Optional["EnforcementSummary"] = None,
+        receipt: Optional["DecisionReceipt"] = None,
+    ) -> None:
+        event: dict[str, Any] = {
+            "type": "evaluation.completed",
+            "timestamp": _iso_now(),
+            "action": action,
+            "result": result,
+            "duration_us": duration_us,
+        }
+        if enforcement is not None:
+            event["enforcement"] = enforcement
+        if receipt is not None:
+            event["receipt"] = receipt
+        self._emit(event)
 
     def notify_policy_loaded(self, name: Optional[str] = None, hash: Optional[str] = None) -> None:
         self._emit({

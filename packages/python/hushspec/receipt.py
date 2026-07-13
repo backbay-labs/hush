@@ -53,6 +53,18 @@ class AuditConfig:
 
 
 @dataclass
+class EnforcementSummary:
+    """How the runtime applied a decision.
+
+    DecisionReceipt.decision is always the evaluated policy decision;
+    this records what the enforcement point did with it.
+    """
+
+    mode: str      # 'enforce' | 'monitor'
+    outcome: str   # 'allowed' | 'confirmed' | 'blocked' | 'would_block'
+
+
+@dataclass
 class DecisionReceipt:
     receipt_id: str
     timestamp: str
@@ -66,6 +78,7 @@ class DecisionReceipt:
     reason: Optional[str] = None
     origin_profile: Optional[str] = None
     posture: Optional[PostureResult] = None
+    enforcement: Optional[EnforcementSummary] = None
 
 
 
