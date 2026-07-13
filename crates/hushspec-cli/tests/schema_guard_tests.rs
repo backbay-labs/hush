@@ -13,7 +13,14 @@ fn every_schema_meta_validates_and_id_matches_filename() {
         let doc: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
         // Draft 2020-12 meta-validation: compiling IS validating the schema itself.
-        jsonschema::JSONSchema::compile(&doc)
+        // should_validate_formats is inert here (no instance is ever validated --
+        // only the schema document's own structure is checked by compiling it),
+        // but it is set explicitly anyway for consistency with the other
+        // JSONSchema::compile call sites in this crate, all of which assert
+        // formats deliberately rather than relying on the draft's default.
+        jsonschema::JSONSchema::options()
+            .should_validate_formats(true)
+            .compile(&doc)
             .unwrap_or_else(|e| panic!("{} is not a valid schema: {e}", path.display()));
 
         let file = path.file_name().unwrap().to_string_lossy();

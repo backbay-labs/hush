@@ -580,9 +580,63 @@ fn eval_format_receipt_conforms_to_receipt_schema() {
         fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
             .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
-    let compiled = jsonschema::JSONSchema::compile(&schema).unwrap();
+    // Explicit options (rather than relying on the draft's default) so format
+    // assertions -- e.g. `timestamp`'s `format: date-time` -- are enforced
+    // regardless of which JSON Schema draft is active. Under genuine draft
+    // 2020-12 semantics `format` is annotation-only unless asserted explicitly.
+    let compiled = jsonschema::JSONSchema::options()
+        .should_validate_formats(true)
+        .compile(&schema)
+        .unwrap();
     assert!(
         compiled.is_valid(&receipt),
         "receipt output must conform to hushspec-receipt.v0"
+    );
+}
+
+#[test]
+fn eval_format_receipt_schema_rejects_invalid_timestamp() {
+    // Red-verification for the should_validate_formats(true) fix above: proves
+    // the schema actually asserts `format: date-time` on `timestamp` rather than
+    // treating it as a non-asserting annotation. If format validation is ever
+    // silently disabled again (e.g. by an options change or a draft bump), this
+    // test must fail.
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    let output = h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--type",
+            "egress",
+            "--target",
+            "evil.example.com",
+            "--format",
+            "receipt",
+        ])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+
+    let mut receipt: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(
+        receipt["timestamp"].is_string(),
+        "sanity: receipt must have a timestamp before doctoring it"
+    );
+    receipt["timestamp"] = serde_json::Value::String("not-a-date".to_string());
+
+    let schema_text =
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+            .unwrap();
+    let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
+    let compiled = jsonschema::JSONSchema::options()
+        .should_validate_formats(true)
+        .compile(&schema)
+        .unwrap();
+    assert!(
+        !compiled.is_valid(&receipt),
+        "a receipt with a malformed timestamp must fail schema validation"
     );
 }

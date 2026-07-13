@@ -380,7 +380,14 @@ fn evaluator_schema() -> &'static JSONSchema {
             "../../../schemas/hushspec-evaluator-test.v0.schema.json"
         ))
         .expect("evaluator schema should be valid JSON");
-        JSONSchema::compile(&schema_json).expect("evaluator schema should compile")
+        // The evaluator fixture schema has no `format` keyword today, but formats
+        // are asserted deliberately (rather than left at the draft's default) so
+        // that if a `format` keyword is ever added here, it is enforced instead
+        // of silently becoming a non-asserting annotation under draft 2020-12.
+        JSONSchema::options()
+            .should_validate_formats(true)
+            .compile(&schema_json)
+            .expect("evaluator schema should compile")
     })
 }
 
