@@ -17,6 +17,7 @@ export interface DecisionReceipt {
   policy: PolicySummary;
   origin_profile?: string;
   posture?: PostureResult;
+  enforcement?: EnforcementSummary;
   evaluation_duration_us: number;
 }
 
@@ -41,6 +42,19 @@ export interface PolicySummary {
   version: string;
   /** SHA-256 hex digest of the canonical JSON serialization. */
   content_hash: string;
+}
+
+export type EnforcementMode = 'enforce' | 'monitor';
+
+export type EnforcementOutcome = 'allowed' | 'confirmed' | 'blocked' | 'would_block';
+
+/**
+ * How the runtime applied a decision. `DecisionReceipt.decision` is always
+ * the evaluated policy decision; this records what the enforcement point did.
+ */
+export interface EnforcementSummary {
+  mode: EnforcementMode;
+  outcome: EnforcementOutcome;
 }
 
 export interface AuditConfig {
