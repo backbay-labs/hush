@@ -20,6 +20,7 @@
 - [Getting Started](guides/getting-started.md)
 - [Writing Your First Policy](guides/first-policy.md)
 - [Using with Clawdstrike](guides/clawdstrike.md)
+- [Editor Setup](guides/editor-setup.md)
 
 # Reference
 

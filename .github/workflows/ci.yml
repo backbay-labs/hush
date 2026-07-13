@@ -240,3 +240,8 @@ jobs:
 
       - name: Build book
         run: mdbook build docs
+
+      - name: Publish schemas at their $id URLs
+        run: |
+          mkdir -p docs/book/schemas
+          cp schemas/*.json docs/book/schemas/
