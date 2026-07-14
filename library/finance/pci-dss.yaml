@@ -35,6 +35,9 @@ rules:
       - "**/compliance-logs/**"
       # Credential stores
       - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
@@ -124,7 +127,7 @@ rules:
         description: "PIN block data -- PCI-DSS Req 3.2"
       # Infrastructure
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
         pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"

@@ -29,6 +29,9 @@ rules:
       - "**/scap/**"
       # Standard credential stores -- AC-3
       - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
@@ -96,7 +99,7 @@ rules:
   secret_patterns:
     patterns:
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
         description: "AWS access key -- AC-3 credential control"
       - name: private_key
@@ -124,7 +127,10 @@ rules:
         severity: critical
         description: "Database connection string -- AC-3"
       - name: github_token
-        pattern: "gh[ps]_[A-Za-z0-9]{36}"
+        pattern: "gh[opsur]_[A-Za-z0-9]{36}"
+        severity: critical
+      - name: github_fine_grained_pat
+        pattern: "github_pat_[0-9a-zA-Z_]{50,}"
         severity: critical
     skip_paths:
       - "**/test/**"

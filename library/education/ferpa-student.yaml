@@ -33,6 +33,9 @@ rules:
       - "**/registrar/**"
       # Credential stores
       - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
@@ -121,7 +124,7 @@ rules:
         description: "Financial aid amount -- education record under 34 CFR 99.3"
       # Infrastructure secrets
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
         pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"

@@ -12,7 +12,7 @@ rules:
   secret_patterns:
     patterns:
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
         description: "AWS access key ID"
       - name: aws_secret_key
@@ -20,15 +20,18 @@ rules:
         severity: critical
         description: "AWS secret access key"
       - name: github_token
-        pattern: "gh[ps]_[A-Za-z0-9]{36}"
+        pattern: "gh[opsur]_[A-Za-z0-9]{36}"
         severity: critical
         description: "GitHub personal access token"
+      - name: github_fine_grained_pat
+        pattern: "github_pat_[0-9a-zA-Z_]{50,}"
+        severity: critical
       - name: openai_key
-        pattern: "sk-[A-Za-z0-9]{48}"
+        pattern: "sk-(proj-)?[A-Za-z0-9_-]{20,}"
         severity: critical
         description: "OpenAI API key"
       - name: anthropic_key
-        pattern: "sk-ant-[A-Za-z0-9\\-]{95}"
+        pattern: "sk-ant-[A-Za-z0-9_\\-]{95}"
         severity: critical
         description: "Anthropic API key"
       - name: private_key

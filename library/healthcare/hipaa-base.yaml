@@ -29,6 +29,9 @@ rules:
       - "**/audit-logs/**"
       # Credential stores
       - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
@@ -142,7 +145,7 @@ rules:
         description: "US phone number -- HIPAA identifier (45 CFR 164.514(b)(2)(viii))"
       # Infrastructure secrets
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
         pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
