@@ -139,11 +139,15 @@ pub fn evaluate_audited(
         Vec::new()
     };
 
-    // The policy content hash is a single cheap hash and is required by the
-    // receipt schema (`^[0-9a-f]{64}$`), so it is always computed regardless of
-    // `config.enabled`. Only the expensive rule-trace collection is skipped
-    // when audit is disabled.
-    let policy = build_policy_summary(spec);
+    let policy = if config.enabled {
+        build_policy_summary(spec)
+    } else {
+        PolicySummary {
+            name: spec.name.clone(),
+            version: spec.hushspec.clone(),
+            content_hash: String::new(),
+        }
+    };
 
     let action_summary = ActionSummary {
         action_type: action.action_type.clone(),

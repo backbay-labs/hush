@@ -247,18 +247,9 @@ fn disabled_audit_still_returns_correct_decision() {
         receipt.evaluation_duration_us, 0,
         "duration should be 0 when audit disabled"
     );
-    assert_eq!(
-        receipt.policy.content_hash.len(),
-        64,
-        "content hash should always be a 64-char SHA-256 digest even when audit disabled"
-    );
     assert!(
-        receipt
-            .policy
-            .content_hash
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
-        "content hash should be lowercase hex"
+        receipt.policy.content_hash.is_empty(),
+        "content hash should be empty when audit disabled"
     );
 }
 

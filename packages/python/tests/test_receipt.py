@@ -108,16 +108,11 @@ class TestEvaluateAudited:
         assert receipt.rule_trace == []
         assert receipt.evaluation_duration_us == 0
 
-    def test_computes_policy_hash_even_when_disabled(self):
-        # The content hash is required by the receipt schema
-        # (^[0-9a-f]{64}$) and is a single cheap hash, so it must always be
-        # populated -- only the expensive rule trace is skipped when
-        # auditing is disabled.
+    def test_returns_empty_policy_hash_when_disabled(self):
         spec = _spec_with_tool_access()
         action = EvaluationAction(type="tool_call", target="read_file")
         receipt = evaluate_audited(spec, action, _disabled_config())
-        assert SHA256_RE.match(receipt.policy.content_hash)
-        assert receipt.policy.content_hash == compute_policy_hash(spec)
+        assert receipt.policy.content_hash == ""
 
     def test_content_redacted_when_content_present(self):
         spec = HushSpec(

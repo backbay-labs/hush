@@ -102,11 +102,14 @@ def evaluate_audited(
         else []
     )
 
-    # The policy content hash is a single cheap hash and is required by the
-    # receipt schema (`^[0-9a-f]{64}$`), so it is always computed regardless
-    # of config.enabled. Only the expensive rule-trace collection above is
-    # skipped when audit is disabled.
-    policy = _build_policy_summary(spec)
+    if config.enabled:
+        policy = _build_policy_summary(spec)
+    else:
+        policy = PolicySummary(
+            name=spec.name,
+            version=spec.hushspec,
+            content_hash="",
+        )
 
     action_summary = ActionSummary(
         type=action.type,

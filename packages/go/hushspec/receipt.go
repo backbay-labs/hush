@@ -102,11 +102,16 @@ func EvaluateAudited(spec *HushSpec, action *EvaluationAction, config *AuditConf
 		ruleTrace = []RuleEvaluation{}
 	}
 
-	// The policy content hash is a single cheap hash and is required by the
-	// receipt schema (^[0-9a-f]{64}$), so it is always computed regardless of
-	// config.Enabled. Only the expensive rule-trace collection is skipped when
-	// audit is disabled.
-	policy := buildPolicySummary(spec)
+	var policy PolicySummary
+	if config.Enabled {
+		policy = buildPolicySummary(spec)
+	} else {
+		policy = PolicySummary{
+			Name:        spec.Name,
+			Version:     spec.HushSpecVersion,
+			ContentHash: "",
+		}
+	}
 
 	actionSummary := ActionSummary{
 		Type:            action.Type,

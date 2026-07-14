@@ -727,9 +727,14 @@ mod tests {
         let mut probes = BTreeSet::new();
         extract_path_targets(&spec, &mut probes);
 
-        let action_types: BTreeSet<&str> =
-            probes.iter().map(|(action, _, _, _)| action.as_str()).collect();
-        assert!(action_types.contains("file_read"), "missing file_read probe");
+        let action_types: BTreeSet<&str> = probes
+            .iter()
+            .map(|(action, _, _, _)| action.as_str())
+            .collect();
+        assert!(
+            action_types.contains("file_read"),
+            "missing file_read probe"
+        );
         assert!(
             action_types.contains("file_write"),
             "missing file_write probe"
