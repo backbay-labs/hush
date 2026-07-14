@@ -16,6 +16,7 @@ pub struct DetectionResult {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DetectionCategory {
     PromptInjection,
     Jailbreak,
@@ -467,6 +468,22 @@ fn check_thresholds(detections: &[DetectionResult], config: &DetectionConfig) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detection_category_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&DetectionCategory::PromptInjection).unwrap(),
+            "\"prompt_injection\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DetectionCategory::Jailbreak).unwrap(),
+            "\"jailbreak\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DetectionCategory::DataExfiltration).unwrap(),
+            "\"data_exfiltration\""
+        );
+    }
 
     #[test]
     fn injection_detector_compiles_all_patterns() {

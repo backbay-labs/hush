@@ -40,6 +40,8 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
       computer_use: childRules.computer_use ?? baseRules.computer_use,
       remote_desktop_channels: childRules.remote_desktop_channels ?? baseRules.remote_desktop_channels,
       input_injection: childRules.input_injection ?? baseRules.input_injection,
+      browser_automation: childRules.browser_automation ?? baseRules.browser_automation,
+      code_execution: childRules.code_execution ?? baseRules.code_execution,
     };
   } else if (base.rules) {
     mergedRules = { ...base.rules };

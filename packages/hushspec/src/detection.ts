@@ -283,6 +283,11 @@ function checkThresholds(
       case 'data_exfiltration':
         threshold = config.exfiltration_threshold;
         break;
+      default:
+        // Unknown category (reachable via custom Detector registration):
+        // fall back to the conservative default threshold, matching the Go SDK.
+        threshold = 0.5;
+        break;
     }
     return result.score >= threshold;
   });

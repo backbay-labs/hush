@@ -100,7 +100,12 @@ func validateRules(rules *Rules, result *ValidationResult) {
 				result.addError("INVALID_SEVERITY",
 					fmt.Sprintf("secret_patterns.patterns.%s.severity %q must be critical, error, or warn", pattern.Name, pattern.Severity))
 			}
-			validateRegex(pattern.Pattern, fmt.Sprintf("secret_patterns.patterns.%s", pattern.Name), result)
+			if pattern.Pattern == "" {
+				result.addError("MISSING_PATTERN",
+					fmt.Sprintf("secret_patterns.patterns.%s is missing required field pattern", pattern.Name))
+			} else {
+				validateRegex(pattern.Pattern, fmt.Sprintf("secret_patterns.patterns.%s", pattern.Name), result)
+			}
 		}
 	}
 
@@ -260,6 +265,15 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 				fmt.Sprintf("duplicate origin profile id %q", profile.ID))
 		}
 		seen[profile.ID] = true
+
+		if profile.ToolAccess != nil && profile.ToolAccess.Default != "" && !containsTyped(profile.ToolAccess.Default, DefaultActions) {
+			result.addError("INVALID_DEFAULT_ACTION",
+				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, profile.ToolAccess.Default))
+		}
+		if profile.Egress != nil && profile.Egress.Default != "" && !containsTyped(profile.Egress.Default, DefaultActions) {
+			result.addError("INVALID_DEFAULT_ACTION",
+				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, profile.Egress.Default))
+		}
 
 		if profile.Match != nil {
 			if profile.Match.SpaceType != "" && !containsTyped(profile.Match.SpaceType, OriginSpaceTypes) {

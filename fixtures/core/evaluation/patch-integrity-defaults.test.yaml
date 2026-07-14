@@ -1,0 +1,26 @@
+hushspec_test: "0.1.0"
+description: "Patch-integrity defaults (max_imbalance_ratio=10.0) materialize when omitted, so require_balance is enforced identically across all SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    patch_integrity:
+      require_balance: true
+      # No max_additions/max_deletions/max_imbalance_ratio -- schema defaults
+      # are 1000/500/10.0. require_balance must enforce via the materialized
+      # ratio, not fall open when the ratio is omitted.
+cases:
+  - description: "balanced patch allowed (ratio 1.0 <= 10.0)"
+    action:
+      type: patch_apply
+      target: "/src/main.rs"
+      content: "@@ -1,2 +1,2 @@\n-old line one\n-old line two\n+new line one\n+new line two"
+    expect:
+      decision: allow
+  - description: "12-add / 0-del patch denied via materialized default max_imbalance_ratio (ratio 12.0 > 10.0)"
+    action:
+      type: patch_apply
+      target: "/src/main.rs"
+      content: "@@ -0,0 +1,12 @@\n+l1\n+l2\n+l3\n+l4\n+l5\n+l6\n+l7\n+l8\n+l9\n+l10\n+l11\n+l12"
+    expect:
+      decision: deny
+      matched_rule: rules.patch_integrity.max_imbalance_ratio

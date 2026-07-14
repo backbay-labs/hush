@@ -28,6 +28,8 @@ export interface EvaluationAction {
   origin?: OriginContext;
   posture?: PostureContext;
   args_size?: number;
+  /** Set on the redacted copy emitted to observers when content is stripped. */
+  content_redacted?: boolean;
 }
 
 export interface OriginContext {
@@ -125,8 +127,15 @@ function globMatches(pattern: string, target: string): boolean {
     const ch = pattern[i];
     if (ch === '*') {
       if (i + 1 < pattern.length && pattern[i + 1] === '*') {
-        regex += '.*';
-        i += 2;
+        if (i + 2 < pattern.length && pattern[i + 2] === '/') {
+          // `**/` matches zero or more leading path segments (including zero),
+          // so `**/.env` matches both `.env` and `a/b/.env`.
+          regex += '(?:.*/)?';
+          i += 3;
+        } else {
+          regex += '.*';
+          i += 2;
+        }
       } else {
         regex += '[^/]*';
         i += 1;
@@ -264,11 +273,18 @@ function postureCapabilityGuard(
   const postureExtension = spec.extensions?.posture;
   if (!postureExtension) return undefined;
 
-  const currentState = postureExtension.states[postureResult.current];
-  if (!currentState) return undefined;
-
   const capability = requiredCapability(action.type);
   if (capability == null) return undefined;
+
+  const currentState = postureExtension.states[postureResult.current];
+  if (!currentState) {
+    return denyResult(
+      `extensions.posture.states.${postureResult.current}`,
+      `unknown posture state '${postureResult.current}'`,
+      originProfileId,
+      { ...postureResult },
+    );
+  }
 
   const capabilities = currentState.capabilities ?? [];
   if (capabilities.includes(capability)) {
@@ -538,8 +554,8 @@ function evaluatePatchIntegrity(
   }
 
   const stats = patchStats(content);
-  const maxAdditions = rule.max_additions ?? Infinity;
-  const maxDeletions = rule.max_deletions ?? Infinity;
+  const maxAdditions = rule.max_additions ?? 1000;
+  const maxDeletions = rule.max_deletions ?? 500;
 
   if (stats.additions > maxAdditions) {
     return denyResult(
@@ -560,7 +576,7 @@ function evaluatePatchIntegrity(
 
   if (rule.require_balance) {
     const ratio = imbalanceRatio(stats.additions, stats.deletions);
-    const maxRatio = rule.max_imbalance_ratio ?? Infinity;
+    const maxRatio = rule.max_imbalance_ratio ?? 10.0;
     if (ratio > maxRatio) {
       return denyResult(
         'rules.patch_integrity.max_imbalance_ratio',
@@ -996,7 +1012,9 @@ function evaluateEgress(
     return allowResult(matchedRule, 'domain is explicitly allowed', originProfileId, posture);
   }
 
-  const defaultAction = baseRule?.default === 'block' || profileRule?.default === 'block'
+  const defaultAction =
+    (baseRule != null && (baseRule.default ?? 'block') === 'block')
+      || (profileRule != null && (profileRule.default ?? 'block') === 'block')
     ? 'block'
     : 'allow';
   const defaultRule = profileRule != null && profilePrefix != null

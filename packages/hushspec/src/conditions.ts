@@ -143,6 +143,11 @@ function checkTimeWindow(
 function parseHHMM(s: string): [number, number] | undefined {
   const parts = s.split(':');
   if (parts.length !== 2) return undefined;
+  // Reject any token that is not purely digits (Rust parses each part as u8;
+  // "09.9" / "09xx" must fail rather than truncate).
+  if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
+    return undefined;
+  }
   const hour = parseInt(parts[0], 10);
   const minute = parseInt(parts[1], 10);
   if (isNaN(hour) || isNaN(minute) || hour > 23 || minute > 59 || hour < 0 || minute < 0) {
@@ -164,7 +169,12 @@ function resolveCurrentTime(
   let date: Date;
 
   if (context.current_time != null) {
-    date = new Date(context.current_time);
+    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is interpreted
+    // as UTC to match Rust/Python/Go, not the host's local time.
+    const raw = context.current_time;
+    const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
+    const normalized = !hasTimezone && raw.includes('T') ? `${raw}Z` : raw;
+    date = new Date(normalized);
     if (isNaN(date.getTime())) {
       return undefined;
     }
@@ -300,6 +310,11 @@ function matchValue(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(expected)) {
     if (typeof actual === 'string') {
       return expected.some((v) => v === actual);
+    }
+    if (Array.isArray(actual)) {
+      // Array-vs-array matches iff the sets intersect (Rust computes a
+      // non-empty membership overlap, not strict equality).
+      return expected.some((v) => actual.includes(v));
     }
     return false;
   }

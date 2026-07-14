@@ -106,6 +106,12 @@ func mergeRules(base, child *Rules) {
 	if child.InputInjection != nil {
 		base.InputInjection = child.InputInjection
 	}
+	if child.BrowserAutomation != nil {
+		base.BrowserAutomation = child.BrowserAutomation
+	}
+	if child.CodeExecution != nil {
+		base.CodeExecution = child.CodeExecution
+	}
 }
 
 func mergeExtensionsShallow(base, child *Extensions) {

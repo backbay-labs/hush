@@ -1,0 +1,36 @@
+hushspec_test: "0.1.0"
+description: "An action carrying a posture state not declared in the policy is denied (fail-closed) identically across all SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      allow: [read_file]
+      default: block
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+      transitions: []
+cases:
+  - description: "known state allows the tool (baseline)"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: standard
+        signal: none
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
+  - description: "unknown posture state denies even though tool_access would allow (fail-closed)"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: ghost
+        signal: none
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.ghost

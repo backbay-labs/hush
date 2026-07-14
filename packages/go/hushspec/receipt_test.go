@@ -136,13 +136,15 @@ func TestEmptyTraceWhenDisabled(t *testing.T) {
 	}
 }
 
-func TestEmptyPolicyHashWhenDisabled(t *testing.T) {
+func TestPolicyHashComputedWhenDisabled(t *testing.T) {
 	spec := specWithToolAccess()
 	action := &EvaluationAction{Type: "tool_call", Target: "read_file"}
 	receipt := EvaluateAudited(spec, action, disabledConfig())
 
-	if receipt.Policy.ContentHash != "" {
-		t.Errorf("expected empty content_hash, got %q", receipt.Policy.ContentHash)
+	// The content hash is required by the receipt schema, so it is always
+	// computed even when audit is disabled; only the rule trace is skipped.
+	if receipt.Policy.ContentHash == "" {
+		t.Error("expected content_hash to be computed even when audit is disabled")
 	}
 }
 

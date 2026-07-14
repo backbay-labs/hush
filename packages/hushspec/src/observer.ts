@@ -129,14 +129,18 @@ export class ObservableEvaluator {
     this.observers = this.observers.filter(o => o !== observer);
   }
 
-  evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {
+  evaluate(
+    spec: HushSpec,
+    action: EvaluationAction,
+    observedAction?: EvaluationAction,
+  ): EvaluationResult {
     const start = performance.now();
     const result = evaluate(spec, action);
     const duration_us = Math.round((performance.now() - start) * 1000);
     this.emit({
       type: 'evaluation.completed',
       timestamp: new Date().toISOString(),
-      action,
+      action: observedAction ?? action,
       result,
       duration_us,
     });

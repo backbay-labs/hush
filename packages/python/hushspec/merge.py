@@ -98,6 +98,16 @@ def _merge_rules(base: Optional[Rules], child: Optional[Rules]) -> Optional[Rule
             if child.input_injection is not None
             else copy.deepcopy(base_rules.input_injection)
         ),
+        browser_automation=(
+            copy.deepcopy(child.browser_automation)
+            if child.browser_automation is not None
+            else copy.deepcopy(base_rules.browser_automation)
+        ),
+        code_execution=(
+            copy.deepcopy(child.code_execution)
+            if child.code_execution is not None
+            else copy.deepcopy(base_rules.code_execution)
+        ),
     )
 
 

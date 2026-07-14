@@ -244,6 +244,8 @@ fn apply_conditions(
                     "computer_use" => rules.computer_use = None,
                     "remote_desktop_channels" => rules.remote_desktop_channels = None,
                     "input_injection" => rules.input_injection = None,
+                    "browser_automation" => rules.browser_automation = None,
+                    "code_execution" => rules.code_execution = None,
                     _ => {} // Unknown block name -- ignore silently.
                 }
             }
@@ -1339,7 +1341,15 @@ pub fn glob_matches(pattern: &str, target: &str) -> bool {
             '*' => {
                 if matches!(chars.peek(), Some('*')) {
                     chars.next();
-                    regex.push_str(".*");
+                    // Treat `**/` as an optional run of leading path segments so
+                    // `**/.env` matches both the bare `.env` and `a/b/.env`.
+                    // A standalone `**` (not followed by `/`) stays `.*`.
+                    if matches!(chars.peek(), Some('/')) {
+                        chars.next();
+                        regex.push_str("(?:.*/)?");
+                    } else {
+                        regex.push_str(".*");
+                    }
                 } else {
                     regex.push_str("[^/]*");
                 }

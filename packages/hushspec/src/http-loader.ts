@@ -16,18 +16,56 @@ export interface HttpLoaderConfig {
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SIZE = 1_048_576; // 1 MB
 
+/**
+ * Extract the embedded IPv4 address from an IPv4-mapped (`::ffff:x`) or
+ * IPv4-translated (`::ffff:0:x`) IPv6 address, in either dotted (`::ffff:127.0.0.1`)
+ * or hextet (`::ffff:7f00:1`) form, returning it as a dotted string.
+ */
+function mappedIpv4Address(normalized: string): string | undefined {
+  let rest: string;
+  if (normalized.startsWith('::ffff:')) {
+    rest = normalized.slice('::ffff:'.length);
+  } else {
+    return undefined;
+  }
+  // IPv4-translated form ::ffff:0:a.b.c.d
+  if (rest.startsWith('0:')) {
+    rest = rest.slice(2);
+  }
+
+  if (rest.includes('.')) {
+    // Already dotted-quad IPv4.
+    return rest;
+  }
+
+  // Trailing 32 bits encoded as one or two hextets, e.g. "7f00:1" or "a9fe:a9fe".
+  const groups = rest.split(':');
+  if (groups.length === 0 || groups.length > 2) {
+    return undefined;
+  }
+  let value = 0;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) {
+      return undefined;
+    }
+    value = value * 0x10000 + parseInt(group, 16);
+  }
+  const a = (value >>> 24) & 0xff;
+  const b = (value >>> 16) & 0xff;
+  const c = (value >>> 8) & 0xff;
+  const d = value & 0xff;
+  return `${a}.${b}.${c}.${d}`;
+}
+
 function isPrivateIp(ip: string): boolean {
   const normalized = ip.toLowerCase().split('%')[0];
   if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') {
     return true;
   }
 
-  const mappedIndex = normalized.lastIndexOf(':');
-  if (mappedIndex >= 0 && normalized.includes('.')) {
-    const mappedIpv4 = normalized.slice(mappedIndex + 1);
-    if (mappedIpv4 !== normalized && isPrivateIp(mappedIpv4)) {
-      return true;
-    }
+  const mappedIpv4 = mappedIpv4Address(normalized);
+  if (mappedIpv4 != null && isPrivateIp(mappedIpv4)) {
+    return true;
   }
 
   if (normalized.includes(':')) {

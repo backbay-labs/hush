@@ -841,14 +841,20 @@ func postureCapabilityGuard(
 	}
 	postureExtension := spec.Extensions.Posture
 
-	currentState, ok := postureExtension.States[posture.Current]
-	if !ok {
-		return nil
-	}
-
 	capability := requiredCapability(action.Type)
 	if capability == "" {
 		return nil
+	}
+
+	currentState, ok := postureExtension.States[posture.Current]
+	if !ok {
+		result := denyResult(
+			fmt.Sprintf("extensions.posture.states.%s", posture.Current),
+			fmt.Sprintf("unknown posture state '%s'", posture.Current),
+			originProfileID,
+			posture,
+		)
+		return &result
 	}
 
 	for _, cap := range currentState.Capabilities {
@@ -1155,8 +1161,16 @@ func globMatches(pattern, target string) bool {
 		switch ch {
 		case '*':
 			if i+1 < len(chars) && chars[i+1] == '*' {
-				i++
-				regex.WriteString(".*")
+				if i+2 < len(chars) && chars[i+2] == '/' {
+					// "**/" matches any number of leading path segments,
+					// including zero, so "**/.env" matches both ".env" and
+					// "a/b/.env".
+					i += 2
+					regex.WriteString("(?:.*/)?")
+				} else {
+					i++
+					regex.WriteString(".*")
+				}
 			} else {
 				regex.WriteString("[^/]*")
 			}

@@ -89,6 +89,10 @@ struct JsonCaseResult {
 }
 
 pub fn run(args: TestArgs) -> i32 {
+    // A file-based `h2h panic activate` sentinel must flip the process-global
+    // panic latch before evaluation, otherwise the kill switch is a no-op here.
+    crate::cmd_panic::check_default_sentinel();
+
     let test_files = collect_test_files(&args);
 
     if test_files.is_empty() {

@@ -170,14 +170,26 @@ def _parse_hhmm(s: str) -> Optional[tuple[int, int]]:
     parts = s.split(":")
     if len(parts) != 2:
         return None
-    try:
-        hour = int(parts[0])
-        minute = int(parts[1])
-    except ValueError:
+    hour = _parse_strict_uint(parts[0])
+    minute = _parse_strict_uint(parts[1])
+    if hour is None or minute is None:
         return None
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
         return None
     return (hour, minute)
+
+
+def _parse_strict_uint(s: str) -> Optional[int]:
+    """Parse *s* as a base-10 non-negative integer of pure ASCII digits.
+
+    Unlike ``int()``, this rejects underscores, surrounding whitespace, and
+    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``),
+    matching Rust's and Go's strict numeric-string parsing
+    (``str::parse::<u8>`` / ``strconv.Atoi``).
+    """
+    if s == "" or not all("0" <= ch <= "9" for ch in s):
+        return None
+    return int(s)
 
 
 def _day_abbreviation(day: int) -> str:
@@ -326,6 +338,12 @@ def _match_value(actual: Any, expected: Any) -> bool:
         return actual is expected
 
     if isinstance(expected, (int, float)):
+        if isinstance(actual, bool):
+            # bool is a subclass of int in Python, but a boolean actual
+            # must never spuriously match a numeric expected (e.g.
+            # `user.is_admin: 1` must not match actual `True`), matching
+            # Rust/TS/Go where booleans and numbers are distinct types.
+            return False
         if isinstance(actual, (int, float)):
             return actual == expected
         return False

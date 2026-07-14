@@ -15,6 +15,8 @@ export interface Rules {
   computer_use?: ComputerUseRule;
   remote_desktop_channels?: RemoteDesktopChannelsRule;
   input_injection?: InputInjectionRule;
+  browser_automation?: BrowserAutomationRule;
+  code_execution?: CodeExecutionRule;
 }
 
 export interface ForbiddenPathsRule {
@@ -93,6 +95,24 @@ export interface InputInjectionRule {
   enabled?: boolean;
   allowed_types?: string[];
   require_postcondition_probe?: boolean;
+}
+
+export interface BrowserAutomationRule {
+  enabled?: boolean;
+  allowed_domains?: string[];
+  blocked_domains?: string[];
+  allowed_verbs?: string[];
+  credential_detection?: boolean;
+  extra_credential_patterns?: string[];
+}
+
+export interface CodeExecutionRule {
+  enabled?: boolean;
+  language_allowlist?: string[];
+  module_denylist?: string[];
+  network_access?: boolean;
+  max_execution_time_ms?: number;
+  max_scan_bytes?: number;
 }
 
 export type Severity = SeverityValue;

@@ -51,6 +51,8 @@ const RULE_ORDER: &[&str] = &[
     "computer_use",
     "remote_desktop_channels",
     "input_injection",
+    "browser_automation",
+    "code_execution",
 ];
 
 /// Lists whose entries should be sorted alphabetically
@@ -67,6 +69,12 @@ const SORTABLE_LISTS: &[&str] = &[
     "forbidden_patterns",
     "allowed_actions",
     "allowed_types",
+    "allowed_domains",
+    "blocked_domains",
+    "allowed_verbs",
+    "extra_credential_patterns",
+    "language_allowlist",
+    "module_denylist",
 ];
 
 pub fn run(args: FmtArgs) -> i32 {
@@ -180,7 +188,19 @@ pub fn run(args: FmtArgs) -> i32 {
                     }
                 }
             }
-            FmtOutputFormat::Json => {}
+            FmtOutputFormat::Json => {
+                // Persist the formatted output just like the Text arm, minus the
+                // human-readable status lines. --check and --diff stay
+                // non-writing; the JSON summary is emitted once after the loop.
+                if !args.check
+                    && !args.diff
+                    && changed
+                    && let Err(e) = std::fs::write(path, &formatted_normalized)
+                {
+                    eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
+                    any_error = true;
+                }
+            }
         }
 
         results.push(FmtResult {
@@ -376,6 +396,18 @@ fn format_rules(rules: &hushspec::Rules, out: &mut String) {
                     format_input_injection(r, out);
                 }
             }
+            "browser_automation" => {
+                if let Some(r) = &rules.browser_automation {
+                    out.push_str("  browser_automation:\n");
+                    format_browser_automation(r, out);
+                }
+            }
+            "code_execution" => {
+                if let Some(r) = &rules.code_execution {
+                    out.push_str("  code_execution:\n");
+                    format_code_execution(r, out);
+                }
+            }
             _ => {}
         }
     }
@@ -504,6 +536,44 @@ fn format_input_injection(r: &hushspec::InputInjectionRule, out: &mut String) {
         "    require_postcondition_probe: {}\n",
         r.require_postcondition_probe
     ));
+}
+
+fn format_browser_automation(r: &hushspec::BrowserAutomationRule, out: &mut String) {
+    if !r.enabled {
+        out.push_str("    enabled: false\n");
+    } else {
+        out.push_str("    enabled: true\n");
+    }
+    format_sorted_string_list("allowed_domains", &r.allowed_domains, 4, out);
+    format_sorted_string_list("blocked_domains", &r.blocked_domains, 4, out);
+    format_sorted_string_list("allowed_verbs", &r.allowed_verbs, 4, out);
+    out.push_str(&format!(
+        "    credential_detection: {}\n",
+        r.credential_detection
+    ));
+    format_sorted_string_list(
+        "extra_credential_patterns",
+        &r.extra_credential_patterns,
+        4,
+        out,
+    );
+}
+
+fn format_code_execution(r: &hushspec::CodeExecutionRule, out: &mut String) {
+    if !r.enabled {
+        out.push_str("    enabled: false\n");
+    } else {
+        out.push_str("    enabled: true\n");
+    }
+    format_sorted_string_list("language_allowlist", &r.language_allowlist, 4, out);
+    format_sorted_string_list("module_denylist", &r.module_denylist, 4, out);
+    out.push_str(&format!("    network_access: {}\n", r.network_access));
+    if let Some(max_time) = r.max_execution_time_ms {
+        out.push_str(&format!("    max_execution_time_ms: {max_time}\n"));
+    }
+    if let Some(max_bytes) = r.max_scan_bytes {
+        out.push_str(&format!("    max_scan_bytes: {max_bytes}\n"));
+    }
 }
 
 /// Format a list of strings, sorted and deduplicated
@@ -807,6 +877,58 @@ mod tests {
                 .map(|rule| rule.mode),
             Some(hushspec::ComputerUseMode::Guardrail)
         );
+    }
+
+    #[test]
+    fn format_preserves_browser_automation_and_code_execution() {
+        let input = r#"hushspec: "0.1.0"
+name: guards
+rules:
+  browser_automation:
+    enabled: true
+    allowed_domains:
+      - "*.example.com"
+    allowed_verbs:
+      - navigate
+    credential_detection: true
+  code_execution:
+    enabled: true
+    language_allowlist:
+      - python
+    module_denylist:
+      - subprocess
+      - socket
+    network_access: false
+    max_execution_time_ms: 5000
+"#;
+        let formatted = format_canonical(input).unwrap();
+        assert!(
+            formatted.contains("  browser_automation:\n"),
+            "browser_automation block dropped:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("  code_execution:\n"),
+            "code_execution block dropped:\n{formatted}"
+        );
+
+        let reparsed = HushSpec::parse(&formatted).expect("formatted YAML should parse");
+        let rules = reparsed.rules.as_ref().expect("rules preserved");
+        let ba = rules
+            .browser_automation
+            .as_ref()
+            .expect("browser_automation preserved");
+        assert!(ba.enabled);
+        assert_eq!(ba.allowed_domains, vec!["*.example.com".to_string()]);
+        assert_eq!(ba.allowed_verbs, vec!["navigate".to_string()]);
+        let ce = rules
+            .code_execution
+            .as_ref()
+            .expect("code_execution preserved");
+        assert_eq!(ce.language_allowlist, vec!["python".to_string()]);
+        assert_eq!(ce.max_execution_time_ms, Some(5000));
+
+        // Formatting must be idempotent.
+        assert_eq!(format_canonical(&formatted).unwrap(), formatted);
     }
 
     #[test]

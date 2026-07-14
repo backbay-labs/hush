@@ -454,6 +454,12 @@ func applyConditions(
 			case "input_injection":
 				rulesCopy.InputInjection = nil
 				changed = true
+			case "browser_automation":
+				rulesCopy.BrowserAutomation = nil
+				changed = true
+			case "code_execution":
+				rulesCopy.CodeExecution = nil
+				changed = true
 			}
 		}
 	}

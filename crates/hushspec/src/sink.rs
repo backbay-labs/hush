@@ -35,8 +35,9 @@ impl ReceiptSink for FileReceiptSink {
             .create(true)
             .append(true)
             .open(&self.path)?;
-        let json = serde_json::to_string(receipt)?;
-        writeln!(file, "{}", json)?;
+        let mut record = serde_json::to_string(receipt)?;
+        record.push('\n');
+        file.write_all(record.as_bytes())?;
         Ok(())
     }
 }

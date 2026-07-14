@@ -112,7 +112,9 @@ class HushGuard:
         if observer is not None:
             from hushspec.observer import ObservableEvaluator
             from hushspec.receipt import compute_policy_hash
-            self._observable_evaluator = ObservableEvaluator()
+            self._observable_evaluator = ObservableEvaluator(
+                redact_content=self._audit.redact_content
+            )
             self._observable_evaluator.add_observer(observer)
             self._policy_hash = compute_policy_hash(policy)
             self._observable_evaluator.notify_policy_loaded(policy.name, self._policy_hash)

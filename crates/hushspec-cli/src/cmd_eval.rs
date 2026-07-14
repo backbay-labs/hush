@@ -88,6 +88,10 @@ pub struct EvalArgs {
 }
 
 pub fn run(args: EvalArgs) -> i32 {
+    // A file-based `h2h panic activate` sentinel must flip the process-global
+    // panic latch before evaluation, otherwise the kill switch is a no-op here.
+    crate::cmd_panic::check_default_sentinel();
+
     let policy = match load_policy(&args.policy) {
         Ok(policy) => policy,
         Err(message) => {

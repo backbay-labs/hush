@@ -1,0 +1,34 @@
+hushspec_test: "0.1.0"
+description: "Egress with an omitted `default` materializes to `block` (fail-closed) identically across all SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - "api.good.com"
+      block:
+        - "*.evil.com"
+      # No `default:` field -- the schema default is `block`; every SDK must
+      # materialize it so an unlisted domain is denied, not allowed.
+cases:
+  - description: "allowlisted domain is allowed"
+    action:
+      type: egress
+      target: "api.good.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "unlisted domain denied via materialized default block (fail-closed)"
+    action:
+      type: egress
+      target: "unknown-api.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "explicitly blocked domain denied"
+    action:
+      type: egress
+      target: "api.evil.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block

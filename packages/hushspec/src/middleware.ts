@@ -162,7 +162,7 @@ export class HushGuard {
         }
       }
       this.observableEvaluator?.notifyEvaluationCompleted(
-        action,
+        this.observerAction(action),
         result,
         durationUs,
         undefined,
@@ -171,7 +171,7 @@ export class HushGuard {
       return result;
     }
     if (this.observableEvaluator) {
-      return this.observableEvaluator.evaluate(policy, action);
+      return this.observableEvaluator.evaluate(policy, action, this.observerAction(action));
     }
     return evaluate(policy, action);
   }
@@ -310,12 +310,25 @@ export class HushGuard {
       }
     }
     this.observableEvaluator?.notifyEvaluationCompleted(
-      action,
+      this.observerAction(action),
       result,
       durationUs,
       enforcement,
       receipt,
     );
+  }
+
+  /**
+   * Redact an action for observer emission the same way the receipt redacts it:
+   * when `redact_content` is enabled and content is present, strip the content
+   * and set the redacted flag so raw content never leaks into the observer stream.
+   */
+  private observerAction(action: EvaluationAction): EvaluationAction {
+    if (this.audit.redact_content && action.content != null) {
+      const { content: _content, ...rest } = action;
+      return { ...rest, content_redacted: true };
+    }
+    return action;
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {

@@ -182,9 +182,12 @@ def _deny_result(
 def glob_matches(pattern: str, target: str) -> bool:
     """Convert a HushSpec glob pattern to regex and test against *target*.
 
-    ``*``  matches any character except ``/``.
-    ``**`` matches any character (including ``/``).
-    ``?``  matches a single character.
+    ``*``   matches any character except ``/``.
+    ``**``  matches any character (including ``/``).
+    ``**/`` matches zero or more leading path segments, so ``**/x`` matches
+            both the bare ``x`` and ``a/b/x``. A standalone ``**`` (not
+            followed by ``/``) stays the ``.*`` behavior above.
+    ``?``   matches a single character.
     All other regex meta-characters are escaped.
     """
     regex = "^"
@@ -193,6 +196,10 @@ def glob_matches(pattern: str, target: str) -> bool:
         ch = pattern[i]
         if ch == "*":
             if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                if i + 2 < len(pattern) and pattern[i + 2] == "/":
+                    regex += "(?:.*/)?"
+                    i += 3
+                    continue
                 regex += ".*"
                 i += 2
                 continue
@@ -449,13 +456,21 @@ def posture_capability_guard(
     if spec.extensions is None or spec.extensions.posture is None:
         return None
     posture_ext = spec.extensions.posture
-    current_state = posture_ext.states.get(posture.current)
-    if current_state is None:
-        return None
 
     capability = required_capability(action.type)
     if capability is None:
         return None
+
+    current_state = posture_ext.states.get(posture.current)
+    if current_state is None:
+        # Fail-closed: a posture referencing an undefined state must deny,
+        # not fall through as if no guard applied.
+        return _deny_result(
+            matched_rule=f"extensions.posture.states.{posture.current}",
+            reason=f"unknown posture state '{posture.current}'",
+            origin_profile=origin_profile_id,
+            posture=PostureResult(current=posture.current, next=posture.next),
+        )
 
     if capability in current_state.capabilities:
         return None

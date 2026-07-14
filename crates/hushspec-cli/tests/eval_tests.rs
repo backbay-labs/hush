@@ -70,6 +70,27 @@ fn eval_deny_exits_1() {
 }
 
 #[test]
+fn eval_denies_when_panic_sentinel_present() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    // A `.hushspec_panic` sentinel in the working directory is the file-based
+    // kill switch. `h2h eval` must consult it and deny an action that would
+    // otherwise be allowed (egress to an allowlisted host).
+    fs::write(dir.path().join(".hushspec_panic"), "").unwrap();
+
+    Command::cargo_bin("h2h")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "egress", "--target", "api.github.com"])
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("DENY"))
+        .stdout(predicate::str::contains("__hushspec_panic__"));
+}
+
+#[test]
 fn eval_warn_exits_4() {
     let dir = TempDir::new().unwrap();
     let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);

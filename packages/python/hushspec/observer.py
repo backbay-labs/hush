@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import time
@@ -112,8 +113,9 @@ class MetricsCollector(EvaluationObserver):
 
 class ObservableEvaluator:
 
-    def __init__(self) -> None:
+    def __init__(self, redact_content: bool = True) -> None:
         self._observers: list[EvaluationObserver] = []
+        self._redact_content = redact_content
 
     def add_observer(self, observer: EvaluationObserver) -> None:
         self._observers.append(observer)
@@ -128,7 +130,7 @@ class ObservableEvaluator:
         self._emit({
             "type": "evaluation.completed",
             "timestamp": _iso_now(),
-            "action": action,
+            "action": self._redact(action),
             "result": result,
             "duration_us": duration_us,
         })
@@ -145,7 +147,7 @@ class ObservableEvaluator:
         event: dict[str, Any] = {
             "type": "evaluation.completed",
             "timestamp": _iso_now(),
-            "action": action,
+            "action": self._redact(action),
             "result": result,
             "duration_us": duration_us,
         }
@@ -154,6 +156,18 @@ class ObservableEvaluator:
         if receipt is not None:
             event["receipt"] = receipt
         self._emit(event)
+
+    def _redact(self, action: EvaluationAction) -> EvaluationAction:
+        """Return *action* with ``content`` stripped for observer emission.
+
+        Evaluation itself (``evaluate()`` above) always runs against the
+        real, unredacted action -- this only affects what gets embedded in
+        observer events, mirroring how a redacted receipt's ActionSummary
+        never carries raw content, just a ``content_redacted`` flag.
+        """
+        if self._redact_content and action.content is not None:
+            return dataclasses.replace(action, content=None)
+        return action
 
     def notify_policy_loaded(self, name: Optional[str] = None, hash: Optional[str] = None) -> None:
         self._emit({
