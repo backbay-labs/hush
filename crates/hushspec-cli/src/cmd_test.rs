@@ -21,6 +21,11 @@ pub struct TestArgs {
     #[arg(long)]
     fixtures: Option<PathBuf>,
 
+    /// Panic sentinel file to consult before evaluating; if it exists the
+    /// process denies all actions (default: .hushspec_panic)
+    #[arg(long, value_name = "PATH")]
+    sentinel: Option<PathBuf>,
+
     /// Output format
     #[arg(short, long, default_value = "text")]
     format: TestOutputFormat,
@@ -92,7 +97,7 @@ struct JsonCaseResult {
 pub fn run(args: TestArgs) -> i32 {
     // A file-based `h2h panic activate` sentinel must flip the process-global
     // panic latch before evaluation, otherwise the kill switch is a no-op here.
-    crate::cmd_panic::check_default_sentinel();
+    crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
 
     let test_files = collect_test_files(&args);
 

@@ -844,3 +844,79 @@ describe('receipt sink integration', () => {
     expect(typeof pkg.matchesRulePathPrefix).toBe('function');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sink-only guard on provider failure (no observer)
+//
+// Regression test: HushGuard.gate()'s provider-failure branch used to call
+// record(action, policy, 0, enforcement, undefined) with an undefined
+// receipt. record() only forwards to the sink `if (receipt)`, so a guard
+// configured with a `sink` but no `observer` (monitor mode accepts either,
+// per validateEnforcementConfig) produced ZERO audit output on a provider
+// outage -- violating "a monitored block is never silent". gate() now builds
+// a minimal receipt (buildFailureReceipt) whenever a sink is configured, so
+// the sink always gets a record here too.
+// ---------------------------------------------------------------------------
+
+describe('sink-only guard on provider failure', () => {
+  it('records to the sink under monitor mode when the provider throws and there is no observer', async () => {
+    const provider: PolicyProvider = {
+      async load() {
+        return parseOrThrow(ALLOW_ALL_POLICY);
+      },
+      watch() {},
+      stop() {},
+      current() {
+        throw new Error('provider unavailable');
+      },
+    };
+
+    const receipts: DecisionReceipt[] = [];
+    const guard = await HushGuard.fromProvider(provider, {
+      sink: { send: (r) => receipts.push(r) },
+      enforcement: { mode: 'monitor' },
+    });
+
+    const outcome = guard.gate({ type: 'tool_call', target: 'any_tool' });
+
+    expect(outcome.proceed).toBe(true);
+    expect(outcome.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+    expect(outcome.result.matched_rule).toBe('__hushspec_policy_provider__');
+
+    // Before the fix this was 0: the sink must receive a record even though
+    // no real policy evaluation ran.
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].decision).toBe('deny');
+    expect(receipts[0].matched_rule).toBe('__hushspec_policy_provider__');
+    expect(receipts[0].reason).toContain('provider unavailable');
+    expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
+    expect(receipts[0].rule_trace).toEqual([]);
+    expect(receipts[0].policy.name).toBe('allow-all');
+  });
+
+  it('also records to the sink under the default enforce mode when the provider throws', async () => {
+    const provider: PolicyProvider = {
+      async load() {
+        return parseOrThrow(ALLOW_ALL_POLICY);
+      },
+      watch() {},
+      stop() {},
+      current() {
+        throw new Error('provider unavailable');
+      },
+    };
+
+    const receipts: DecisionReceipt[] = [];
+    const guard = await HushGuard.fromProvider(provider, {
+      sink: { send: (r) => receipts.push(r) },
+    });
+
+    const outcome = guard.gate({ type: 'tool_call', target: 'any_tool' });
+
+    expect(outcome.proceed).toBe(false);
+    expect(outcome.enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].decision).toBe('deny');
+    expect(receipts[0].enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
+  });
+});

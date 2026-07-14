@@ -1,14 +1,17 @@
 use clap::{Args, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) const DEFAULT_SENTINEL: &str = ".hushspec_panic";
 
-/// Consult the default panic sentinel file, flipping the process-global panic
-/// latch if it is present. Evaluating subcommands (`eval`, `test`, `diff`) call
-/// this before evaluation so a file-based `h2h panic activate` actually takes
-/// effect for them rather than being a no-op.
-pub(crate) fn check_default_sentinel() {
-    hushspec::panic::check_panic_sentinel(DEFAULT_SENTINEL);
+/// Consult a panic sentinel file, flipping the process-global panic latch if it
+/// is present. Evaluating subcommands (`eval`, `test`, `diff`) call this before
+/// evaluation so a file-based `h2h panic activate` actually takes effect for
+/// them rather than being a no-op. `sentinel` lets `--sentinel` target the same
+/// file the operator activated; `None` falls back to [`DEFAULT_SENTINEL`] -- the
+/// exact path `h2h panic` uses when its own flag is omitted.
+pub(crate) fn check_sentinel(sentinel: Option<&Path>) {
+    let path = sentinel.unwrap_or_else(|| Path::new(DEFAULT_SENTINEL));
+    hushspec::panic::check_panic_sentinel(path);
 }
 
 #[derive(Args)]
@@ -60,7 +63,11 @@ pub fn run(args: PanicArgs) -> i32 {
         }
         PanicAction::Deactivate { sentinel } => {
             let path = sentinel.unwrap_or_else(|| PathBuf::from(DEFAULT_SENTINEL));
-            if !path.exists() {
+            // Fail closed like the real gate (panic.rs): only treat the sentinel
+            // as absent when a stat positively proves it. An unstattable path is
+            // treated as present, so we fall through to remove_file (which
+            // reports its own error) rather than claiming "already inactive".
+            if !path.try_exists().unwrap_or(true) {
                 println!("Panic mode already inactive (sentinel file not found).");
                 return 0;
             }
@@ -80,7 +87,9 @@ pub fn run(args: PanicArgs) -> i32 {
         }
         PanicAction::Status { sentinel } => {
             let path = sentinel.unwrap_or_else(|| PathBuf::from(DEFAULT_SENTINEL));
-            if path.exists() {
+            // Fail closed like the real gate (panic.rs): a stat error must not
+            // be reported as INACTIVE.
+            if path.try_exists().unwrap_or(true) {
                 println!("ACTIVE  Sentinel file exists: {}", path.display());
                 1
             } else {

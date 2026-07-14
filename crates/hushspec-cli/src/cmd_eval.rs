@@ -79,6 +79,11 @@ pub struct EvalArgs {
     #[arg(long, value_name = "PATH")]
     action_file: Option<String>,
 
+    /// Panic sentinel file to consult before evaluating; if it exists the
+    /// process denies all actions (default: .hushspec_panic)
+    #[arg(long, value_name = "PATH")]
+    sentinel: Option<std::path::PathBuf>,
+
     /// Render the rule-by-rule trace (text output only)
     #[arg(long)]
     explain: bool,
@@ -91,7 +96,7 @@ pub struct EvalArgs {
 pub fn run(args: EvalArgs) -> i32 {
     // A file-based `h2h panic activate` sentinel must flip the process-global
     // panic latch before evaluation, otherwise the kill switch is a no-op here.
-    crate::cmd_panic::check_default_sentinel();
+    crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
 
     let policy = match load_policy(&args.policy) {
         Ok(policy) => policy,

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
 import { isPanicActive } from './evaluate.js';
@@ -11,6 +12,7 @@ import type { AuditConfig, DecisionReceipt, EnforcementMode, EnforcementSummary 
 import { computePolicyHash, DEFAULT_AUDIT_CONFIG, evaluateAudited } from './receipt.js';
 import type { ReceiptSink } from './sinks.js';
 import { EXTENSION_KEYS_SET, RULE_KEYS_SET } from './generated/contract.js';
+import { HUSHSPEC_VERSION } from './version.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
 
@@ -127,6 +129,54 @@ function applyDetection(
   receipt.reason = detected.reason;
 }
 
+/**
+ * Build a minimal receipt for the provider-failure deny/would-block branch
+ * in `gate()`, where there is no policy to run `evaluateAudited()` against --
+ * only the already-computed `result`.
+ *
+ * Without this, a guard configured with a `sink` but no `observer` (monitor
+ * mode accepts either, per `validateEnforcementConfig`) would go completely
+ * silent on a provider outage: `record()` only forwards a receipt to the
+ * sink when one is present, and the provider-failure branch used to always
+ * pass `undefined`. That violates "a monitored block is never silent" --
+ * this builds a real (if minimal) receipt whenever a sink is configured so
+ * it always gets a record.
+ *
+ * `policySpec` is the guard's last successfully loaded policy (`this.policy`)
+ * used only to populate the receipt's `PolicySummary`; it is never evaluated
+ * against `action` since the whole point of this path is that no evaluation
+ * happened.
+ */
+function buildFailureReceipt(
+  policySpec: HushSpec,
+  action: EvaluationAction,
+  result: EvaluationResult,
+  audit: AuditConfig,
+): DecisionReceipt {
+  const contentRedacted = audit.redact_content && action.content != null;
+  return {
+    receipt_id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    hushspec_version: HUSHSPEC_VERSION,
+    action: {
+      type: action.type,
+      target: action.target,
+      // `|| undefined` (rather than the boolean itself) drops the key when
+      // false, matching evaluateAudited()'s and Rust/Go's skip-if-false
+      // behavior.
+      content_redacted: contentRedacted || undefined,
+    },
+    decision: result.decision,
+    matched_rule: result.matched_rule,
+    reason: result.reason,
+    rule_trace: [],
+    policy: { name: policySpec.name, version: policySpec.hushspec },
+    origin_profile: result.origin_profile,
+    posture: result.posture,
+    evaluation_duration_us: 0,
+  };
+}
+
 /** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
 export class HushGuard {
   private policy: HushSpec;
@@ -241,17 +291,23 @@ export class HushGuard {
   gate(action: EvaluationAction): GateOutcome {
     const policy = this.activePolicyResult();
     if ('decision' in policy) {
-      // Provider-failure deny: no loaded policy, so no receipt can be built,
-      // but the decision must still be audited — a monitored provider outage
-      // must never proceed silently. record() emits the observer event even
-      // with an undefined receipt (a sink-only guard has nothing to send).
+      // Provider-failure deny: no loaded policy, so evaluateAudited() can't
+      // run -- but the decision must still be audited. A monitored provider
+      // outage must never proceed silently, so build a minimal receipt
+      // whenever a sink is configured (buildFailureReceipt) rather than
+      // passing undefined: record() only reaches the sink when a receipt is
+      // present, and a sink-only guard (sink, no observer -- monitor mode
+      // accepts either) would otherwise emit nothing at all here.
       const mode = this.effectiveMode(policy);
       const proceed = mode === 'monitor';
       const enforcement: EnforcementSummary = {
         mode,
         outcome: proceed ? 'would_block' : 'blocked',
       };
-      this.record(action, policy, 0, enforcement, undefined);
+      const receipt = this.sink
+        ? buildFailureReceipt(this.policy, action, policy, this.audit)
+        : undefined;
+      this.record(action, policy, 0, enforcement, receipt);
       return { result: policy, proceed, enforcement };
     }
 

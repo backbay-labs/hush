@@ -12,6 +12,11 @@ pub struct DiffArgs {
     /// Updated policy file (after change)
     new: PathBuf,
 
+    /// Panic sentinel file to consult before evaluating; if it exists the
+    /// process denies all actions (default: .hushspec_panic)
+    #[arg(long, value_name = "PATH")]
+    sentinel: Option<PathBuf>,
+
     /// Output format
     #[arg(short, long, default_value = "text")]
     format: DiffOutputFormat,
@@ -47,7 +52,7 @@ struct ProbeAction {
 pub fn run(args: DiffArgs) -> i32 {
     // A file-based `h2h panic activate` sentinel must flip the process-global
     // panic latch before evaluation, otherwise the kill switch is a no-op here.
-    crate::cmd_panic::check_default_sentinel();
+    crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
 
     // Load old policy
     let old_spec = match load_policy(&args.old) {
