@@ -417,6 +417,41 @@ fn validate_accepts_safe_quantifier_shapes() {
 }
 
 #[test]
+fn validate_rejects_exotic_regex_features() {
+    // Cross-SDK validation parity: these constructs are unsupported by, or
+    // behave differently across, the four SDK regex engines, so every SDK must
+    // reject them at validation time regardless of what its own engine does.
+    for pattern in [
+        // Possessive quantifiers (`regex` silently downgrades to greedy).
+        "a++", "a*+", "a?+", "a{2}+", "a{2,}+", "a{2,5}+", "(abc)++",
+        // `\Z` / `\z` end-anchors.
+        r"foo\Z", r"foo\z", // Empty character classes.
+        "[]", "[^]",
+    ] {
+        assert!(
+            !secret_pattern_is_valid(pattern),
+            "exotic pattern {pattern:?} should be rejected for cross-SDK portability"
+        );
+    }
+}
+
+#[test]
+fn validate_accepts_patterns_adjacent_to_exotic_rejections() {
+    // Guard against the exotic-feature pre-check over-rejecting: lazy
+    // quantifiers, ordinary/negated classes, `\Z`/`\z` inside a class, and
+    // literal braces must all still validate.
+    for pattern in [
+        "a+?", "a*?", "a??", "a{2,}?", "a{2}?", "[abc]", "[^abc]", "[^0-9]+", r"\bfoo\b", "foo$",
+        r"a\+\+b",
+    ] {
+        assert!(
+            secret_pattern_is_valid(pattern),
+            "portable pattern {pattern:?} should pass validation"
+        );
+    }
+}
+
+#[test]
 fn roundtrip_yaml() {
     let yaml = r#"
 hushspec: "0.1.0"

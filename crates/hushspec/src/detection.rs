@@ -300,14 +300,18 @@ impl RegexExfiltrationDetector {
     pub fn new() -> Self {
         let patterns = vec![
             DetectionPattern {
-                // Explicit ASCII non-digit boundaries instead of `\b`: Rust's
-                // `regex` and Python's `re` treat `\b` as a Unicode word
-                // boundary, so `café123-45-6789` / `中123-45-6789` were missed
-                // here while Go (RE2) and JS (ASCII `\b`) matched them. The
-                // `(?:^|[^0-9]) ... (?:[^0-9]|$)` form is RE2-safe (no
-                // backreferences/lookaround) and identical across all four SDKs.
+                // Explicit ASCII non-digit boundaries instead of `\b`, plus an
+                // ASCII `[0-9]` digit class instead of `\d`: Rust's `regex` and
+                // Python's `re` treat both `\b` and `\d` as Unicode-aware, so
+                // `café123-45-6789` was missed and fullwidth-digit runs like
+                // `１２３-４５-６７８９` were matched -- disagreeing with Go (RE2)
+                // and JS, where `\b`/`\d` are ASCII-only. The
+                // `(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)` form is
+                // RE2-safe (no backreferences/lookaround) and byte-identical
+                // across all four SDKs.
                 name: "ssn".to_string(),
-                regex: Regex::new(r"(?:^|[^0-9])\d{3}-\d{2}-\d{4}(?:[^0-9]|$)").expect("ssn regex"),
+                regex: Regex::new(r"(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)")
+                    .expect("ssn regex"),
                 weight: 0.8,
             },
             DetectionPattern {
@@ -319,9 +323,18 @@ impl RegexExfiltrationDetector {
                 weight: 0.8,
             },
             DetectionPattern {
+                // Explicit ASCII boundaries instead of `\b`: Rust's `regex` and
+                // Python's `re` treat `\b` as a Unicode word boundary, so the
+                // local part's ASCII character class disagreed with the
+                // Unicode-aware `\b` at non-ASCII edges (e.g. `café`), matching
+                // differently than Go (RE2) and JS. The consuming
+                // `(?:^|[^...]) ... (?:[^...]|$)` form is RE2-safe and
+                // byte-identical across all four SDKs.
                 name: "email_address".to_string(),
-                regex: Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-                    .expect("email_address regex"),
+                regex: Regex::new(
+                    r"(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)",
+                )
+                .expect("email_address regex"),
                 weight: 0.3,
             },
             DetectionPattern {
@@ -657,6 +670,22 @@ mod tests {
         assert!(
             !result.matched_patterns.iter().any(|p| p.name == "ssn"),
             "over-long digit run must not match ssn"
+        );
+    }
+
+    #[test]
+    fn exfiltration_fullwidth_digit_ssn_scores_zero() {
+        // Cross-SDK parity (spec §3): the ssn body uses an ASCII `[0-9]` class
+        // rather than `\d`, so fullwidth/Unicode digits no longer match in
+        // Rust's `regex` / Python's `re` (which treat `\d` as Unicode) --
+        // agreeing with Go (RE2) and JS, where `\d` is ASCII-only. A
+        // fullwidth-digit SSN (U+FF11.. with ASCII hyphens) must score 0.
+        let detector = RegexExfiltrationDetector::new();
+        let result = detector.detect("１２３-４５-６７８９");
+        assert_eq!(result.score, 0.0, "fullwidth-digit SSN must score 0");
+        assert!(
+            !result.matched_patterns.iter().any(|p| p.name == "ssn"),
+            "fullwidth-digit SSN must not match the ssn pattern"
         );
     }
 

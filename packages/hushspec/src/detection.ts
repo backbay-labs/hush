@@ -203,8 +203,11 @@ export class RegexExfiltrationDetector implements Detector {
         // "中" is `\w`, so no boundary forms before the digits) but
         // ASCII-only in Go RE2/JS `RegExp`. This keeps all four SDKs in
         // agreement -- e.g. "café123-45-6789" and "中123-45-6789" now match
-        // identically everywhere.
-        regex: /(?:^|[^0-9])\d{3}-\d{2}-\d{4}(?:[^0-9]|$)/,
+        // identically everywhere. The body also spells out [0-9] instead of
+        // \d: \d is Unicode-aware in Rust/Python (matching fullwidth digits
+        // like "１２３-４５-６７８９") but ASCII-only in Go RE2/JS, so
+        // spelling it out keeps all four SDKs ASCII-digit-only too.
+        regex: /(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)/,
         weight: 0.8,
       },
       {
@@ -214,7 +217,13 @@ export class RegexExfiltrationDetector implements Detector {
       },
       {
         name: 'email_address',
-        regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
+        // Explicit ASCII boundaries instead of \b, for the same reason as
+        // ssn above: \b is a Unicode word boundary in Rust/Python but
+        // ASCII-only in Go RE2/JS. Spelling it out as an explicit
+        // non-member-character boundary keeps the pattern text (and
+        // matching behavior) identical across all four SDKs instead of
+        // relying on each engine's own definition of "word".
+        regex: /(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)/,
         weight: 0.3,
       },
       {

@@ -279,7 +279,13 @@ class RegexExfiltrationDetector(Detector):
                 # boundaries make ASCII-vs-Unicode word-boundary semantics
                 # irrelevant and keep all four SDKs byte-identical. Must stay
                 # lookaround-free (RE2 has none) -- see is_safe_regex.
-                regex=re.compile(r"(?:^|[^0-9])\d{3}-\d{2}-\d{4}(?:[^0-9]|$)"),
+                #
+                # The body uses [0-9] rather than \d for the same reason: \d
+                # is Unicode-aware in Python's re (matching fullwidth/Arabic-
+                # indic/etc. digits), while Go RE2 and JS RegExp's \d are
+                # ASCII-only. [0-9] keeps all four SDKs agreeing that a
+                # Unicode-digit run never matches "ssn".
+                regex=re.compile(r"(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)"),
                 weight=0.8,
                 category=DetectionCategory.DATA_EXFILTRATION,
             ),
@@ -295,8 +301,15 @@ class RegexExfiltrationDetector(Detector):
             ),
             _DetectionPattern(
                 name="email_address",
+                # Same ASCII-boundary fix as "ssn"/"credit_card" above: \b is
+                # a Unicode word boundary in Python's re, so a non-ASCII
+                # letter abutting the address (e.g. "café user@example.com"
+                # with no space) could disagree with Go RE2 / JS's ASCII-only
+                # \b. Explicit (?:^|[^local-part-chars])...(?:[^domain-chars]
+                # |$) boundaries make all four SDKs byte-identical.
                 regex=re.compile(
-                    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+                    r"(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"
+                    r"\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)"
                 ),
                 weight=0.3,
                 category=DetectionCategory.DATA_EXFILTRATION,

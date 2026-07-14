@@ -274,7 +274,13 @@ def _more_restrictive_result(
 def patch_stats(content: str) -> _PatchStats:
     additions = 0
     deletions = 0
-    for line in content.splitlines():
+    # `str.splitlines()` also splits on \r, \v, \f, and the Unicode NEL/LS/PS
+    # line separators, but Rust's `.lines()` and the TS/Go SDKs only split on
+    # \n. A bare \r (no \n) inside patch content would otherwise be treated
+    # as a line break here but not in the other three SDKs, double-counting
+    # additions/deletions. Splitting on "\n" alone keeps the count identical
+    # across all four SDKs.
+    for line in content.split("\n"):
         if line.startswith("+++") or line.startswith("---"):
             continue
         if line.startswith("+"):

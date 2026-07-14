@@ -179,6 +179,17 @@ describe('RegexExfiltrationDetector', () => {
     const names = result.matched_patterns.map((p) => p.name);
     expect(names).not.toContain('ssn');
   });
+
+  // Cross-SDK parity fix (spec item S3): the ssn body now spells out [0-9]
+  // instead of \d, so fullwidth/Unicode digits -- which \d matches in Rust
+  // `regex`/Python `re` Unicode mode, but which [0-9] (and JS's always-ASCII
+  // \d) never matches -- no longer match anywhere, restoring cross-SDK
+  // agreement (matching Go/JS's pre-existing behavior).
+  it('does not match a fullwidth-digit SSN ([0-9] vs \\d parity)', () => {
+    const result = detector.detect('１２３-４５-６７８９');
+    expect(result.score).toBe(0);
+    expect(result.matched_patterns).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

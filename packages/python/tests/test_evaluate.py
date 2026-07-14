@@ -13,6 +13,7 @@ from hushspec.evaluate import (
     PostureContext,
     evaluate,
     glob_matches,
+    patch_stats,
 )
 
 FIXTURES_ROOT = Path(__file__).parent.parent.parent.parent / "fixtures"
@@ -293,6 +294,30 @@ def test_glob_does_not_match_target_with_trailing_newline():
 def test_glob_star_does_not_match_trailing_newline():
     assert glob_matches("*.internal.corp", "api.internal.corp\n") is False
     assert glob_matches("*.internal.corp", "api.internal.corp") is True
+
+
+# patch_stats line-splitting parity
+#
+# `str.splitlines()` also breaks on \r, \v, \f, and the Unicode NEL/LS/PS
+# separators, but Rust's `.lines()` and the TS/Go SDKs split only on \n. A
+# bare \r with no \n used to be treated as its own line boundary here,
+# double-counting additions/deletions relative to the other three SDKs.
+
+
+def test_patch_stats_splits_only_on_newline_not_carriage_return():
+    stats = patch_stats("+a\r+b")
+    assert stats.additions == 1
+    assert stats.deletions == 0
+
+
+def test_patch_stats_counts_additions_and_deletions_with_real_newlines():
+    # Regression guard: ordinary \n-delimited patch content (the common
+    # case) must still count correctly after switching from splitlines() to
+    # split("\n"), including skipping the +++/--- file headers.
+    content = "--- a\n+++ b\n+line one\n+line two\n-old line\n context line\n"
+    stats = patch_stats(content)
+    assert stats.additions == 2
+    assert stats.deletions == 1
 
 
 def test_glob_ascii_patterns_unchanged():

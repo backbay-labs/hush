@@ -166,6 +166,27 @@ class TestExfiltrationAsciiBoundaryFix:
         names = [p.name for p in result.matched_patterns]
         assert "credit_card" in names
 
+    def test_fullwidth_digit_ssn_scores_zero(self) -> None:
+        # After the \d -> [0-9] body fix, Unicode/fullwidth digits no longer
+        # match "ssn" (matching Go RE2 / JS, which never treated \d as
+        # Unicode in the first place). \d is Unicode-aware in Python's re
+        # (and Rust's regex crate), so a fullwidth-digit run used to score
+        # this as a hit even though it isn't an ASCII SSN.
+        fullwidth_ssn = "１２３-４５-６７８９"
+        result = self.detector.detect(fullwidth_ssn)
+        assert result.score == 0.0
+        assert result.matched_patterns == []
+
+    def test_catches_email_address_after_non_ascii_letter_with_no_separator(self) -> None:
+        # Same ASCII-boundary fix as ssn/credit_card, applied to the email
+        # pattern's \b anchors: a non-ASCII letter directly abutting the
+        # address (no whitespace) used to suppress the match under Python's
+        # Unicode-aware \b, since both the letter and the following ASCII
+        # char are \w and so form no boundary.
+        result = self.detector.detect("caféa@b.com")
+        names = [p.name for p in result.matched_patterns]
+        assert "email_address" in names
+
     def test_ssn_and_credit_card_patterns_are_re2_safe(self) -> None:
         # The repo-wide regex-safety gate (is_safe_regex, exercised for
         # policy-authored patterns in test_regex_safety.py) must also accept

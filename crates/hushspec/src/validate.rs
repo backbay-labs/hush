@@ -403,7 +403,21 @@ fn validate_detection(
 }
 
 fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) {
-    // RE2-feature check first: the `regex` crate rejects non-RE2 features
+    // Portability pre-check first: reject constructs that are unsupported by, or
+    // behave differently across, the four SDK regex engines (possessive
+    // quantifiers, `\Z`/`\z` end-anchors, empty character classes) so a pattern
+    // validates identically everywhere, regardless of what any single engine
+    // does with them.
+    if let Some(message) = disallowed_regex_feature(pattern) {
+        errors.push(ValidationError::InvalidRegex {
+            field: path.to_string(),
+            pattern: pattern.to_string(),
+            message: message.to_string(),
+        });
+        return;
+    }
+
+    // RE2-feature check second: the `regex` crate rejects non-RE2 features
     // (backreferences, lookaround, ...) at compile time.
     if let Err(error) = Regex::new(pattern) {
         errors.push(ValidationError::InvalidRegex {
@@ -426,6 +440,100 @@ fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) 
                 .to_string(),
         });
     }
+}
+
+/// Shared rejection message for possessive quantifiers.
+const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable \
+     across the HushSpec SDK regex engines";
+
+/// Portability pre-check: reject regex constructs that are unsupported by, or
+/// behave differently across, the four SDK engines so a pattern validates
+/// identically everywhere. Scanning outside character classes and honoring
+/// `\`-escapes, it rejects:
+///   * possessive quantifiers `*+`, `++`, `?+` and possessive braces `{n}+`,
+///     `{n,}+`, `{n,m}+` (Rust's `regex` silently downgrades possessive to
+///     greedy; JavaScript `RegExp` and Go RE2 reject them at compile time),
+///   * `\Z` and `\z` end-anchors (Rust/Python/Go accept them with differing
+///     semantics; JavaScript reads `\Z`/`\z` as a literal letter -- users
+///     anchor with `$`),
+///   * empty character classes `[]` and `[^]` (JavaScript accepts them; the
+///     others reject them).
+///
+/// Must stay byte-identical to the TypeScript, Python, and Go implementations.
+fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    let mut in_class = false;
+    let mut i = 0;
+    while i < n {
+        let c = chars[i];
+        if c == '\\' {
+            // `\Z` / `\z` are end-anchors only outside a character class; inside
+            // one they are an escaped literal letter, so ignore them there.
+            if !in_class && i + 1 < n && matches!(chars[i + 1], 'Z' | 'z') {
+                return Some(
+                    "\\Z and \\z end-anchors are not portable across the HushSpec SDK regex \
+                     engines; anchor with $",
+                );
+            }
+            i += 2; // skip the escaped char
+            continue;
+        }
+        if in_class {
+            if c == ']' {
+                in_class = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '[' => {
+                // Empty class `[]` or negated-empty `[^]` (JS matches
+                // none/any; the other engines reject the bare form).
+                let mut j = i + 1;
+                if j < n && chars[j] == '^' {
+                    j += 1;
+                }
+                if j < n && chars[j] == ']' {
+                    return Some(
+                        "empty character classes [] and [^] are not portable across the \
+                         HushSpec SDK regex engines",
+                    );
+                }
+                in_class = true;
+                i += 1;
+            }
+            '*' | '+' | '?' => {
+                // A quantifier immediately followed by `+` is possessive.
+                if i + 1 < n && chars[i + 1] == '+' {
+                    return Some(POSSESSIVE_MESSAGE);
+                }
+                i += 1;
+            }
+            '{' => {
+                // Treat `{...}` as a quantifier only when it parses as one; a
+                // literal `{` is scanned through. A quantifier brace followed by
+                // `+` is possessive (`{n}+`, `{n,}+`, `{n,m}+`).
+                let mut j = i + 1;
+                while j < n && chars[j] != '}' {
+                    j += 1;
+                }
+                if j < n {
+                    let inner: String = chars[i + 1..j].iter().collect();
+                    if brace_kind(&inner) != QuantKind::None {
+                        if j + 1 < n && chars[j + 1] == '+' {
+                            return Some(POSSESSIVE_MESSAGE);
+                        }
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 #[derive(PartialEq, Eq)]

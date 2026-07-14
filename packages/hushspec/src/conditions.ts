@@ -284,39 +284,53 @@ function resolveContextValue(
   }
 }
 
+/**
+ * Typed scalar equality with no cross-type coercion -- mirrors Rust's
+ * `values_equal` (crates/hushspec/src/conditions.rs). A number is never
+ * equal to a boolean or a string even if JS's `==` would agree (`1 == true`),
+ * because `===` (used below) already enforces matching types.
+ */
+function valuesEqual(actual: unknown, expected: unknown): boolean {
+  if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
+    return actual === expected;
+  }
+  return false;
+}
+
+/**
+ * Mirrors Rust's `matches_scalar_or_membership`: if `actual` is an array,
+ * true iff any element equals `expected` (membership); otherwise a direct
+ * scalar comparison.
+ */
+function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(actual)) {
+    return actual.some((item) => valuesEqual(item, expected));
+  }
+  return valuesEqual(actual, expected);
+}
+
+/**
+ * Mirrors Rust's `match_value`. Missing/null context fields fail closed. A
+ * scalar `expected` (string/bool/number) matches via
+ * `matchesScalarOrMembership`, which covers both scalar-vs-scalar equality
+ * and scalar-vs-array membership (in either direction: a number/bool/string
+ * `expected` matches an `actual` array containing it, and vice versa). An
+ * array `expected` matches iff `actual` equals or contains at least one of
+ * its elements -- checking every candidate via `matchesScalarOrMembership`
+ * against `actual` also covers array-vs-array as a set intersection (true
+ * iff any expected element is present in the actual array).
+ */
 function matchValue(actual: unknown, expected: unknown): boolean {
   if (actual == null) {
     return false;
   }
 
-  if (typeof expected === 'string') {
-    if (typeof actual === 'string') {
-      return actual === expected;
-    }
-    if (Array.isArray(actual)) {
-      return actual.some((v) => v === expected);
-    }
-    return false;
-  }
-
-  if (typeof expected === 'boolean') {
-    return actual === expected;
-  }
-
-  if (typeof expected === 'number') {
-    return actual === expected;
+  if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
+    return matchesScalarOrMembership(actual, expected);
   }
 
   if (Array.isArray(expected)) {
-    if (typeof actual === 'string') {
-      return expected.some((v) => v === actual);
-    }
-    if (Array.isArray(actual)) {
-      // Array-vs-array matches iff the sets intersect (Rust computes a
-      // non-empty membership overlap, not strict equality).
-      return expected.some((v) => actual.includes(v));
-    }
-    return false;
+    return expected.some((candidate) => matchesScalarOrMembership(actual, candidate));
   }
 
   return false;

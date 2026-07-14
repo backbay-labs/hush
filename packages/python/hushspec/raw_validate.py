@@ -46,7 +46,35 @@ from hushspec.generated_contract import (
     TRANSITION_TRIGGERS,
 )
 
-DURATION_PATTERN = re.compile(r"^\d+[smhd]$")
+DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
+
+# BrowserAutomation / CodeExecution field sets, mirroring the
+# ``$defs.BrowserAutomation`` / ``$defs.CodeExecution`` definitions in
+# schemas/hushspec-core.v0.schema.json. These are declared locally (rather
+# than in generated_contract.py, alongside the other *_KEYS constants)
+# because scripts/generate_sdk_contracts.py does not yet emit per-block key
+# sets for these two rule blocks -- hand-adding them to the generated file
+# would desync it from `generate_sdk_contracts.py --check`, which CI runs.
+BROWSER_AUTOMATION_KEYS = frozenset(
+    (
+        "enabled",
+        "allowed_domains",
+        "blocked_domains",
+        "allowed_verbs",
+        "credential_detection",
+        "extra_credential_patterns",
+    )
+)
+CODE_EXECUTION_KEYS = frozenset(
+    (
+        "enabled",
+        "language_allowlist",
+        "module_denylist",
+        "network_access",
+        "max_execution_time_ms",
+        "max_scan_bytes",
+    )
+)
 
 
 def validate_raw_document(doc: Any) -> list[str]:
@@ -103,6 +131,8 @@ def _validate_rules(obj: dict[str, Any], errors: list[str]) -> None:
         obj, "remote_desktop_channels", errors, "rules", _validate_remote_desktop_channels
     )
     _validate_optional_object(obj, "input_injection", errors, "rules", _validate_input_injection)
+    _validate_optional_object(obj, "browser_automation", errors, "rules", _validate_browser_automation)
+    _validate_optional_object(obj, "code_execution", errors, "rules", _validate_code_execution)
 
 
 def _validate_forbidden_paths(obj: dict[str, Any], errors: list[str], path: str) -> None:
@@ -229,6 +259,34 @@ def _validate_input_injection(obj: dict[str, Any], errors: list[str], path: str)
     _validate_optional_bool(
         obj, "require_postcondition_probe", errors, f"{path}.require_postcondition_probe"
     )
+
+
+def _validate_browser_automation(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    _reject_unknown_keys(obj, BROWSER_AUTOMATION_KEYS, errors, path)
+    _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
+    _validate_optional_string_array(obj, "allowed_domains", errors, f"{path}.allowed_domains")
+    _validate_optional_string_array(obj, "blocked_domains", errors, f"{path}.blocked_domains")
+    _validate_optional_string_array(obj, "allowed_verbs", errors, f"{path}.allowed_verbs")
+    _validate_optional_bool(obj, "credential_detection", errors, f"{path}.credential_detection")
+
+    patterns = _validate_optional_string_array(
+        obj, "extra_credential_patterns", errors, f"{path}.extra_credential_patterns"
+    )
+    if patterns is not None:
+        for index, pattern in enumerate(patterns):
+            _validate_regex(pattern, errors, f"{path}.extra_credential_patterns[{index}]")
+
+
+def _validate_code_execution(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    _reject_unknown_keys(obj, CODE_EXECUTION_KEYS, errors, path)
+    _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
+    _validate_optional_string_array(obj, "language_allowlist", errors, f"{path}.language_allowlist")
+    _validate_optional_string_array(obj, "module_denylist", errors, f"{path}.module_denylist")
+    _validate_optional_bool(obj, "network_access", errors, f"{path}.network_access")
+    _validate_optional_int(
+        obj, "max_execution_time_ms", errors, f"{path}.max_execution_time_ms", min_value=0
+    )
+    _validate_optional_int(obj, "max_scan_bytes", errors, f"{path}.max_scan_bytes", min_value=1)
 
 
 def _validate_governance_metadata(obj: dict[str, Any], errors: list[str]) -> None:
@@ -725,9 +783,12 @@ def _validate_number_value(
 
 
 # Pattern that detects regex features outside the RE2 subset.
-# See hushspec/validate.py for full documentation.
+# See hushspec/validate.py for full documentation. Kept identical to that
+# module's `_RE2_DISALLOWED`, including the possessive-brace ({n}+/{n,}+/
+# {n,m}+), \Z/\z anchor, and empty-character-class ([], [^]) additions.
 _RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
+    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\{[0-9]*,?[0-9]*\}\+"
+    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<|\\Z|\\z|\[\]|\[\^\]"
 )
 
 

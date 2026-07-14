@@ -13,6 +13,7 @@ from hushspec.receipt import (
     DecisionReceipt,
     evaluate_audited,
     compute_policy_hash,
+    receipt_to_dict,
 )
 from hushspec.generated_models import (
     EgressRule,
@@ -179,6 +180,71 @@ class TestComputePolicyHash:
         spec1 = _minimal_spec()
         spec2 = HushSpec(hushspec="0.1.0", name="different-policy")
         assert compute_policy_hash(spec1) != compute_policy_hash(spec2)
+
+
+def _assert_no_null_values(value, path: str = "$") -> None:
+    """Recursively assert no dict key in *value* holds ``None``.
+
+    Rust/Go/TS omit an absent optional field entirely rather than emitting
+    an explicit JSON ``null``; ``receipt_to_dict`` must match that shape.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            assert item is not None, f"{path}.{key} is null; expected the key to be omitted"
+            _assert_no_null_values(item, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _assert_no_null_values(item, f"{path}[{index}]")
+
+
+class TestReceiptToDict:
+    def test_allow_receipt_has_no_null_keys(self):
+        # A minimal spec with no rules, no posture extension, and no origin
+        # produces an ALLOW decision where matched_rule, reason,
+        # origin_profile, posture, and enforcement are all None -- and the
+        # tool_access rule_trace entry also carries a None matched_rule.
+        # None of these should survive as an explicit JSON "null".
+        spec = _minimal_spec()
+        action = EvaluationAction(type="tool_call", target="anything")
+        receipt = evaluate_audited(spec, action, _enabled_config())
+        assert receipt.decision == Decision.ALLOW
+        assert receipt.matched_rule is None
+        assert receipt.posture is None
+        assert receipt.enforcement is None
+
+        data = receipt_to_dict(receipt)
+        _assert_no_null_values(data)
+
+        # Spot-check: the keys are omitted entirely, not present-with-null.
+        assert "matched_rule" not in data
+        assert "reason" not in data
+        assert "origin_profile" not in data
+        assert "posture" not in data
+        assert "enforcement" not in data
+        assert "matched_rule" not in data["rule_trace"][0]
+        assert data["rule_trace"][0]["reason"] == "no tool_access rule configured"
+        # policy.name IS set here (_minimal_spec has name="test-policy"), so
+        # it stays; content_hash is non-empty (audit enabled), so it stays.
+        assert data["policy"]["name"] == "test-policy"
+
+    def test_receipt_with_unset_policy_name_omits_it(self):
+        spec = HushSpec(hushspec="0.1.0")  # no `name` set
+        action = EvaluationAction(type="tool_call", target="anything")
+        receipt = evaluate_audited(spec, action, _enabled_config())
+        assert receipt.policy.name is None
+
+        data = receipt_to_dict(receipt)
+        _assert_no_null_values(data)
+        assert "name" not in data["policy"]
+
+    def test_falsy_but_present_values_are_kept(self):
+        # None-dropping must not remove falsy-but-meaningful values: a
+        # `False` `evaluated` flag or empty string/list must survive.
+        spec = _minimal_spec()
+        action = EvaluationAction(type="tool_call", target="anything")
+        receipt = evaluate_audited(spec, action, _enabled_config())
+        data = receipt_to_dict(receipt)
+        assert data["rule_trace"][0]["evaluated"] is False
 
 
 class TestRuleTraceActionTypes:

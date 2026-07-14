@@ -71,6 +71,14 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	}
 	applyParseDefaults(&spec, &presence)
 
+	// Raw-document checks catch structural issues the typed decode swallows
+	// (non-integer floats truncated into int fields, empty/invalid enum
+	// sentinels, a posture missing its required transitions key), keeping Go's
+	// accept/reject decision identical to the other SDKs.
+	if issues := validateRawDocument(yamlStr); len(issues) > 0 {
+		return nil, fmt.Errorf("invalid HushSpec document: %s", strings.Join(issues, "; "))
+	}
+
 	return &spec, nil
 }
 

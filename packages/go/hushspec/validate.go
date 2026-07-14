@@ -418,12 +418,20 @@ func validateOptionalNonNegativeInt(value *int, code, msg string, result *Valida
 	}
 }
 
-// validateRegex rejects ReDoS-unsafe patterns. Go's regexp is RE2-only, so the
-// RE2-feature check comes for free at compile time; the nested-quantifier check
-// then rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2 tolerates
-// but the backtracking SDK engines (JS RegExp, Python re) do not, keeping the
-// safety contract identical across all four SDKs.
+// validateRegex rejects ReDoS-unsafe and non-portable patterns. A portability
+// pre-check runs first, rejecting constructs that are unsupported by, or behave
+// differently across, the four SDK regex engines (possessive quantifiers,
+// \Z/\z end-anchors, empty character classes). Go's regexp is RE2-only, so the
+// RE2-feature check then comes for free at compile time; the nested-quantifier
+// check finally rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2
+// tolerates but the backtracking SDK engines (JS RegExp, Python re) do not,
+// keeping the safety contract identical across all four SDKs.
 func validateRegex(pattern, path string, result *ValidationResult) {
+	if message, bad := disallowedRegexFeature(pattern); bad {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s must be a valid regular expression: %s", path, message))
+		return
+	}
 	if _, err := regexp.Compile(pattern); err != nil {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
@@ -433,6 +441,90 @@ func validateRegex(pattern, path string, result *ValidationResult) {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
 	}
+}
+
+// possessiveRegexMessage is the shared rejection message for possessive
+// quantifiers.
+const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines"
+
+// disallowedRegexFeature is a portability pre-check: it rejects regex
+// constructs that are unsupported by, or behave differently across, the four
+// SDK engines so a pattern validates identically everywhere. Scanning outside
+// character classes and honoring \-escapes, it rejects:
+//   - possessive quantifiers *+, ++, ?+ and possessive braces {n}+, {n,}+,
+//     {n,m}+ (Rust's `regex` silently downgrades possessive to greedy; JS
+//     RegExp and Go RE2 reject them at compile time),
+//   - \Z and \z end-anchors (Rust/Python/Go accept them with differing
+//     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
+//   - empty character classes [] and [^] (JS accepts them; the others reject).
+//
+// Must stay byte-identical to the Rust, TypeScript, and Python implementations.
+func disallowedRegexFeature(pattern string) (string, bool) {
+	chars := []rune(pattern)
+	n := len(chars)
+	inClass := false
+	i := 0
+	for i < n {
+		c := chars[i]
+		if c == '\\' {
+			// \Z / \z are end-anchors only outside a character class; inside
+			// one they are an escaped literal letter, so ignore them there.
+			if !inClass && i+1 < n && (chars[i+1] == 'Z' || chars[i+1] == 'z') {
+				return "\\Z and \\z end-anchors are not portable across the HushSpec SDK regex engines; anchor with $", true
+			}
+			i += 2 // skip the escaped char
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			// Empty class [] or negated-empty [^] (JS matches none/any; the
+			// other engines reject the bare form).
+			j := i + 1
+			if j < n && chars[j] == '^' {
+				j++
+			}
+			if j < n && chars[j] == ']' {
+				return "empty character classes [] and [^] are not portable across the HushSpec SDK regex engines", true
+			}
+			inClass = true
+			i++
+		case '*', '+', '?':
+			// A quantifier immediately followed by + is possessive.
+			if i+1 < n && chars[i+1] == '+' {
+				return possessiveRegexMessage, true
+			}
+			i++
+		case '{':
+			// Treat {...} as a quantifier only when it parses as one; a literal
+			// { is scanned through. A quantifier brace followed by + is
+			// possessive ({n}+, {n,}+, {n,m}+).
+			j := i + 1
+			for j < n && chars[j] != '}' {
+				j++
+			}
+			if j < n {
+				inner := string(chars[i+1 : j])
+				if braceKind(inner) != quantNone {
+					if j+1 < n && chars[j+1] == '+' {
+						return possessiveRegexMessage, true
+					}
+					i = j + 1
+					continue
+				}
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return "", false
 }
 
 type quantKind int

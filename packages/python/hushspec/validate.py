@@ -18,7 +18,7 @@ _BUDGET_NAMES = frozenset(
     {"file_writes", "egress_calls", "shell_commands", "tool_calls", "patches", "custom_calls"}
 )
 
-_DURATION_PATTERN = re.compile(r"^\d+[smhd]$")
+_DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
 _DETECTION_LEVEL_ORDER = {
     DetectionLevel.SAFE: 0,
     DetectionLevel.SUSPICIOUS: 1,
@@ -385,13 +385,24 @@ def _validate_detection(
 # - Lookahead: (?=...), (?!...)
 # - Lookbehind: (?<=...), (?<!...)
 # - Atomic groups: (?>...)
-# - Possessive quantifiers: *+, ++, ?+
+# - Possessive quantifiers: *+, ++, ?+, and possessive braces {n}+/{n,}+/{n,m}+
+#   (Python's `re` (3.11+) actually *compiles* these as real possessive
+#   quantifiers rather than erroring, unlike a syntax error in JS/Go, so they
+#   must be rejected here explicitly to keep validation accept/reject parity
+#   across all four SDKs)
 # - Conditional patterns: (?(...)...|...)
 # - Recursive patterns: (?R), (?1), (?2), ...
 # - Named backreferences: (?P=name)
 # - Subroutine calls: \g<name>
+# - \Z / \z end-of-string anchors (engine semantics differ across SDKs;
+#   users anchor with $ instead)
+# - Empty character classes [] and [^] (JS accepts these; Rust/Python/Go do
+#   not, so they are rejected here for parity and defense in depth even
+#   though Python's `re.compile` already rejects them via its own
+#   leading-bracket-is-literal rule)
 _RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
+    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\{[0-9]*,?[0-9]*\}\+"
+    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<|\\Z|\\z|\[\]|\[\^\]"
 )
 
 
@@ -400,10 +411,11 @@ def is_safe_regex(pattern: str) -> bool:
 
     Returns ``True`` only if the pattern is safe on every HushSpec engine.
     Returns ``False`` if the pattern contains backreferences, lookaround,
-    atomic groups, possessive quantifiers, or other non-RE2 features, OR a
-    nested unbounded quantifier (e.g. ``(a+)+``) that catastrophically
-    backtracks on the backtracking engines (JavaScript ``RegExp``, Python
-    ``re``).
+    atomic groups, possessive quantifiers (including possessive braces like
+    ``{2,}+``), ``\\Z``/``\\z`` anchors, empty character classes (``[]``,
+    ``[^]``), or other non-RE2 features, OR a nested unbounded quantifier
+    (e.g. ``(a+)+``) that catastrophically backtracks on the backtracking
+    engines (JavaScript ``RegExp``, Python ``re``).
     """
     # RE2-feature check first.
     if _RE2_DISALLOWED.search(pattern) is not None:

@@ -337,43 +337,62 @@ func mapGet(m map[string]interface{}, key string) interface{} {
 	return m[key]
 }
 
-func matchValueGo(actual, expected interface{}) bool {
-	if actual == nil {
-		return false
-	}
-
+// valuesEqual mirrors Rust's values_equal: scalar-to-scalar equality only.
+// String is exact, bool is exact (bool is NOT numeric), and numbers compare
+// with int/float treated consistently (like JS/TS, which has a single numeric
+// type). Any other actual shape, or a type mismatch, is not equal.
+func valuesEqual(actual, expected interface{}) bool {
 	switch ev := expected.(type) {
 	case string:
-		switch av := actual.(type) {
-		case string:
-			return av == ev
-		case []interface{}:
-			// Scalar expected vs array actual: membership check
-			for _, item := range av {
-				if s, ok := item.(string); ok && s == ev {
-					return true
-				}
-			}
-			return false
-		default:
-			return false
-		}
+		av, ok := actual.(string)
+		return ok && av == ev
 	case bool:
-		ab, ok := actual.(bool)
-		return ok && ab == ev
+		av, ok := actual.(bool)
+		return ok && av == ev
 	case int:
 		return matchNumber(actual, float64(ev))
 	case int64:
 		return matchNumber(actual, float64(ev))
 	case float64:
 		return matchNumber(actual, ev)
+	default:
+		return false
+	}
+}
+
+// matchesScalarOrMembership mirrors Rust's matches_scalar_or_membership: when
+// the actual value is an array, the expected scalar must equal one of its
+// elements (membership); otherwise it is a plain scalar comparison.
+func matchesScalarOrMembership(actual, expected interface{}) bool {
+	if arr, ok := actual.([]interface{}); ok {
+		for _, item := range arr {
+			if valuesEqual(item, expected) {
+				return true
+			}
+		}
+		return false
+	}
+	return valuesEqual(actual, expected)
+}
+
+// matchValueGo mirrors Rust's match_value. A missing context field (nil actual)
+// fails closed. A scalar expected value matches a scalar or is a member of an
+// actual array. An expected array matches when ANY of its candidates matches
+// the actual value, so expected-array vs actual-array succeeds on a non-empty
+// intersection and expected-array vs actual-scalar succeeds on membership --
+// for string, number, and bool candidates alike.
+func matchValueGo(actual, expected interface{}) bool {
+	if actual == nil {
+		return false
+	}
+
+	switch ev := expected.(type) {
+	case string, bool, int, int64, float64:
+		return matchesScalarOrMembership(actual, expected)
 	case []interface{}:
-		// Array of expected values: actual must be one of them (OR).
-		if as, ok := actual.(string); ok {
-			for _, item := range ev {
-				if s, ok := item.(string); ok && s == as {
-					return true
-				}
+		for _, candidate := range ev {
+			if matchesScalarOrMembership(actual, candidate) {
+				return true
 			}
 		}
 		return false

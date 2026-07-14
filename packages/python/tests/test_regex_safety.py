@@ -69,6 +69,43 @@ class TestIsSafeRegex:
     def test_rejects_subroutine_call(self):
         assert is_safe_regex("\\g<name>") is False
 
+    # Possessive braces, \Z/\z anchors, and empty character classes.
+    #
+    # Plain possessive quantifiers (*+, ++, ?+) were already rejected above.
+    # Python's `re` (3.11+) actually *compiles* `a{2,}+` as a real possessive
+    # quantifier rather than erroring like JS/Go do at compile time, so the
+    # brace form needs the same explicit rejection. \Z/\z anchor semantics
+    # differ across engines (and JS treats them as literal letters), and
+    # empty classes [] / [^] are accepted by JS but not the other three
+    # SDKs -- all must be rejected identically everywhere.
+
+    def test_rejects_possessive_brace_exact(self):
+        assert is_safe_regex("a{2}+") is False
+
+    def test_rejects_possessive_brace_unbounded(self):
+        assert is_safe_regex("a{2,}+") is False
+
+    def test_rejects_possessive_brace_range(self):
+        assert is_safe_regex("a{2,5}+") is False
+
+    def test_accepts_bounded_brace_quantifier_without_possessive_marker(self):
+        # Regression guard: a plain (non-possessive) brace quantifier must
+        # still be accepted.
+        assert is_safe_regex("a{2,5}") is True
+        assert is_safe_regex("AKIA[0-9A-Z]{16}") is True
+
+    def test_rejects_end_anchor_Z(self):
+        assert is_safe_regex("foo\\Z") is False
+
+    def test_rejects_end_anchor_z(self):
+        assert is_safe_regex("foo\\z") is False
+
+    def test_rejects_empty_character_class(self):
+        assert is_safe_regex("[]") is False
+
+    def test_rejects_empty_negated_character_class(self):
+        assert is_safe_regex("[^]") is False
+
 
 
 # Nested-quantifier (catastrophic backtracking / ReDoS) heuristic
@@ -155,6 +192,45 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert "RE2" in err
+
+    def test_rejects_possessive_brace_in_shell_commands(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    forbidden_patterns:
+      - "a{2,}+"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "RE2" in err
+
+    def test_rejects_end_anchor_in_secret_patterns(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  secret_patterns:
+    patterns:
+      - name: bad
+        pattern: "foo\\\\Z"
+        severity: critical
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "RE2" in err
+
+    def test_rejects_empty_character_class_in_patch_integrity(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: 10.0
+    forbidden_patterns:
+      - "[]"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "valid regular expression" in err
 
     def test_rejects_lookbehind_in_patch_integrity(self):
         yaml = """

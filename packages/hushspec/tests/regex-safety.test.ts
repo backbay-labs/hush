@@ -81,6 +81,64 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('a?+')).toBe(false);
   });
 
+  // Cross-SDK parity fix (spec item S2): possessive *brace* quantifiers were
+  // the one shape the existing possessive check missed (`*+`/`++`/`?+` were
+  // already rejected above, but `{n}+`/`{n,}+`/`{n,m}+` slipped through).
+  it('rejects possessive brace quantifier {n}+', () => {
+    expect(isSafeRegex('a{2}+')).toBe(false);
+  });
+
+  it('rejects possessive brace quantifier {n,}+', () => {
+    expect(isSafeRegex('a{2,}+')).toBe(false);
+  });
+
+  it('rejects possessive brace quantifier {n,m}+', () => {
+    expect(isSafeRegex('a{2,3}+')).toBe(false);
+  });
+
+  it('accepts a lazy brace quantifier {n,m}? (not possessive)', () => {
+    expect(isSafeRegex('a{2,3}?')).toBe(true);
+  });
+
+  it('accepts a literal brace followed by an unrelated + quantifier (a{b}+)', () => {
+    // `{b}` isn't digit-shaped, so it's literal text, not a quantifier; the
+    // `+` genuinely quantifies the literal `}` (one-or-more), which is not
+    // possessive syntax at all.
+    expect(isSafeRegex('a{b}+')).toBe(true);
+  });
+
+  it('does not misread a brace-and-plus inside a character class as possessive ([a{2}+])', () => {
+    expect(isSafeRegex('[a{2}+]')).toBe(true);
+  });
+
+  // Cross-SDK parity fix (spec item S2): \Z and \z end-of-string anchors
+  // have differing semantics across Rust/Python/Go and are treated as
+  // literal letters by JavaScript RegExp; reject both so policies anchor
+  // with $ instead.
+  it('rejects \\Z end-of-string anchor', () => {
+    expect(isSafeRegex('foo\\Z')).toBe(false);
+  });
+
+  it('rejects \\z end-of-string anchor', () => {
+    expect(isSafeRegex('foo\\z')).toBe(false);
+  });
+
+  // Cross-SDK parity fix (spec item S2): empty character classes compile
+  // successfully in JavaScript ([] matches nothing, [^] matches any
+  // character including newline) but are a compile error in Rust/Python/Go;
+  // reject both so validation agrees everywhere.
+  it('rejects empty character class []', () => {
+    expect(isSafeRegex('a[]b')).toBe(false);
+  });
+
+  it('rejects negated empty character class [^]', () => {
+    expect(isSafeRegex('a[^]b')).toBe(false);
+  });
+
+  it('accepts a non-empty character class starting with an escaped ] ([\\]abc])', () => {
+    expect(isSafeRegex('[\\]abc]')).toBe(true);
+  });
+
   it('rejects conditional patterns', () => {
     expect(isSafeRegex('(?(1)yes|no)')).toBe(false);
   });
@@ -347,20 +405,30 @@ describe('built-in ruleset patterns are RE2-safe', () => {
 //
 // The ssn/credit_card patterns in RegexExfiltrationDetector (src/detection.ts)
 // replaced `\b` digit-run boundaries with explicit ASCII non-digit boundaries
-// for cross-SDK parity (see detection-wiring spec §3). These are built-in
-// patterns (not parsed from policy YAML), but must still stay within the
-// RE2 subset like every other pattern in the repo.
+// for cross-SDK parity (see detection-wiring spec §3). The ssn pattern's body
+// also uses `[0-9]` instead of `\d` (spec item S3), and email_address
+// replaced its `\b` word boundaries with explicit ASCII boundaries the same
+// way. These are built-in patterns (not parsed from policy YAML), but must
+// still stay within the RE2 subset like every other pattern in the repo.
 // ---------------------------------------------------------------------------
 
 describe('detection engine boundary patterns are RE2-safe', () => {
   it('exfiltration ssn pattern is RE2-safe', () => {
-    expect(isSafeRegex('(?:^|[^0-9])\\d{3}-\\d{2}-\\d{4}(?:[^0-9]|$)')).toBe(true);
+    expect(isSafeRegex('(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)')).toBe(true);
   });
 
   it('exfiltration credit_card pattern is RE2-safe', () => {
     expect(
       isSafeRegex(
         '(?:^|[^0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?:[^0-9]|$)',
+      ),
+    ).toBe(true);
+  });
+
+  it('exfiltration email_address pattern is RE2-safe', () => {
+    expect(
+      isSafeRegex(
+        '(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)',
       ),
     ).toBe(true);
   });

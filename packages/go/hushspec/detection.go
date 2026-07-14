@@ -263,17 +263,19 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	return &RegexExfiltrationDetector{
 		patterns: []detectionPattern{
 			{
-				// Explicit ASCII non-digit boundaries instead of \b: Go RE2's
-				// \b is already ASCII-only, but Rust `regex` and Python `re`
-				// treat \b as a Unicode word boundary, so a run of digits
-				// preceded/followed by a non-ASCII letter (e.g. "café123-45-
-				// -6789") matched here but not there. The explicit
-				// (?:^|[^0-9]) / (?:[^0-9]|$) boundaries make the ASCII-vs-
+				// Explicit ASCII non-digit boundaries instead of \b AND an
+				// explicit [0-9] body instead of \d: Go RE2's \b and \d are
+				// already ASCII-only, but Rust `regex` and Python `re` treat
+				// \b as a Unicode word boundary and \d as a Unicode digit
+				// class, so a run of digits preceded/followed by a non-ASCII
+				// letter (e.g. "café123-45-6789") or a fullwidth-digit SSN
+				// matched there but not here. The explicit (?:^|[^0-9]) /
+				// (?:[^0-9]|$) boundaries and [0-9] body make the ASCII-vs-
 				// Unicode distinction irrelevant -- only "is this an ASCII
 				// digit" matters -- so all four SDKs agree. Must stay
 				// byte-for-byte identical to the Rust/TS/Python patterns.
 				name:     "ssn",
-				regex:    regexp.MustCompile(`(?:^|[^0-9])\d{3}-\d{2}-\d{4}(?:[^0-9]|$)`),
+				regex:    regexp.MustCompile(`(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)`),
 				weight:   0.8,
 				category: DetectionCategoryDataExfil,
 			},
@@ -285,8 +287,15 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 				category: DetectionCategoryDataExfil,
 			},
 			{
+				// Explicit ASCII boundaries instead of \b: Rust `regex` and
+				// Python `re` treat \b as a Unicode word boundary while Go RE2
+				// and JS RegExp treat it as ASCII, so an address adjacent to a
+				// non-ASCII letter diverged. The explicit
+				// (?:^|[^A-Za-z0-9._%+-]) / (?:[^A-Za-z0-9.-]|$) boundaries make
+				// all four agree. Must stay byte-for-byte identical to the
+				// Rust/TS/Python patterns.
 				name:     "email_address",
-				regex:    regexp.MustCompile(`\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b`),
+				regex:    regexp.MustCompile(`(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)`),
 				weight:   0.3,
 				category: DetectionCategoryDataExfil,
 			},

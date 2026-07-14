@@ -38,8 +38,12 @@ type OriginContext struct {
 }
 
 type PostureContext struct {
-	Current string `json:"current,omitempty" yaml:"current,omitempty"`
-	Signal  string `json:"signal,omitempty" yaml:"signal,omitempty"`
+	// Current is a pointer so an explicitly-supplied empty string ("") is
+	// distinguishable from an absent field, mirroring Rust's Option<String>.
+	// An empty/unknown current state is an unknown posture state (fail-closed
+	// deny), while an absent field falls back to the posture's initial state.
+	Current *string `json:"current,omitempty" yaml:"current,omitempty"`
+	Signal  string  `json:"signal,omitempty" yaml:"signal,omitempty"`
 }
 
 type EvaluationResult struct {
@@ -884,14 +888,22 @@ func resolvePosture(
 	}
 	postureExtension := spec.Extensions.Posture
 
+	// Mirror Rust's resolve_posture priority: the matched profile's posture
+	// wins, then the action context's current (a present-but-empty "" is a real
+	// value, not a fallback trigger), then the posture extension's initial
+	// state. Using an explicit `set` flag rather than emptiness keeps an
+	// explicit empty current from silently falling through to `initial`.
 	current := ""
+	set := false
 	if matchedProfile != nil && matchedProfile.Posture != nil {
 		current = *matchedProfile.Posture
+		set = true
 	}
-	if current == "" && postureCtx != nil && postureCtx.Current != "" {
-		current = postureCtx.Current
+	if !set && postureCtx != nil && postureCtx.Current != nil {
+		current = *postureCtx.Current
+		set = true
 	}
-	if current == "" {
+	if !set {
 		current = postureExtension.Initial
 	}
 
@@ -1024,6 +1036,14 @@ func matchOrigin(rules *OriginMatch, origin *OriginContext) int {
 		score += 4
 	}
 
+	// NOTE: a match rule with all fields absent legitimately matches every
+	// origin with score 0 (Rust/TS/Python return Some(0) here), so we must NOT
+	// treat score 0 as "no match". The D4 divergence -- a present-but-empty
+	// match field like `provider: ""`, which the reference SDKs treat as a real
+	// (unsatisfiable) constraint -- is instead rejected at parse
+	// (validateRawDocument), because the generated Go model collapses an empty
+	// string and an absent field into the same "" and cannot distinguish them
+	// here at evaluation time.
 	return score
 }
 

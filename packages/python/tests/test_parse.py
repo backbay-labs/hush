@@ -5,8 +5,12 @@ from hushspec import (
     HushSpec,
     MergeStrategy,
     PatchIntegrityRule,
+    PostureExtension,
+    PostureState,
+    PostureTransition,
     Rules,
     ThreatIntelDetection,
+    TransitionTrigger,
     merge,
     parse,
     parse_or_raise,
@@ -476,3 +480,240 @@ rules:
         assert spec2.rules.egress is not None
         assert spec.rules.egress.allow == spec2.rules.egress.allow
         assert spec.rules.egress.default == spec2.rules.egress.default
+
+
+
+# Phase-gated guards: browser_automation / code_execution raw validation
+#
+# raw_validate.py previously had no validator for these two rule blocks (only
+# RULE_KEYS listed them as known top-level keys), so malformed content --
+# wrong-typed fields, out-of-range bounds, unsafe regex in
+# extra_credential_patterns -- sailed through parse()'s pre-check and landed
+# untype-checked in the dataclass via from_dict(). These mirror the checks
+# already applied to every other rule block.
+
+
+class TestBrowserAutomationValidation:
+    def test_rejects_wrong_typed_enabled(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: "yes"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "rules.browser_automation.enabled must be a boolean" in err
+
+    def test_rejects_unknown_field(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: true
+    bogus_field: true
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "unknown field at rules.browser_automation" in err
+
+    def test_rejects_non_array_allowed_domains(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    allowed_domains: "example.com"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "rules.browser_automation.allowed_domains must be an array" in err
+
+    def test_rejects_unsafe_regex_in_extra_credential_patterns(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: true
+    extra_credential_patterns:
+      - "(a+)+"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "RE2" in err
+
+    def test_accepts_valid_browser_automation_rule(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: true
+    allowed_domains: ["example.com"]
+    blocked_domains: []
+    allowed_verbs: ["click", "type"]
+    credential_detection: true
+    extra_credential_patterns:
+      - "sk-[A-Za-z0-9]{20,}"
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+        assert isinstance(spec, HushSpec)
+        assert spec.rules is not None
+        assert spec.rules.browser_automation is not None
+        assert spec.rules.browser_automation.allowed_domains == ["example.com"]
+
+
+class TestCodeExecutionValidation:
+    def test_rejects_wrong_typed_enabled(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: "yes"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "rules.code_execution.enabled must be a boolean" in err
+
+    def test_rejects_unknown_field(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: true
+    bogus_field: true
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "unknown field at rules.code_execution" in err
+
+    def test_rejects_zero_max_scan_bytes(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: true
+    max_scan_bytes: 0
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "rules.code_execution.max_scan_bytes must be >= 1" in err
+
+    def test_rejects_negative_max_execution_time_ms(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: true
+    max_execution_time_ms: -1
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "rules.code_execution.max_execution_time_ms must be >= 0" in err
+
+    def test_accepts_valid_code_execution_rule(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: true
+    language_allowlist: ["python"]
+    module_denylist: ["os", "subprocess"]
+    network_access: false
+    max_execution_time_ms: 5000
+    max_scan_bytes: 65536
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+        assert isinstance(spec, HushSpec)
+        assert spec.rules is not None
+        assert spec.rules.code_execution is not None
+        assert spec.rules.code_execution.module_denylist == ["os", "subprocess"]
+
+
+
+# D11: posture transition duration must be ASCII-digit only
+#
+# `^\d+[smhd]$` used Python's Unicode-aware \d, so a fullwidth or
+# Arabic-indic digit run (e.g. "４s", "٤s") was wrongly accepted as a valid
+# duration -- TS (JS \d is ASCII-only) and Go (RE2 \d is ASCII-only by
+# default) already rejected these. [0-9] makes Python agree.
+
+
+class TestDurationAsciiOnly:
+    def test_rejects_fullwidth_digit_duration_via_parse(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: normal
+    states:
+      normal: {}
+    transitions:
+      - from: normal
+        to: normal
+        on: timeout
+        after: "４s"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "must match" in err
+
+    def test_rejects_arabic_indic_digit_duration_via_parse(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: normal
+    states:
+      normal: {}
+    transitions:
+      - from: normal
+        to: normal
+        on: timeout
+        after: "٤s"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "must match" in err
+
+    def test_accepts_ascii_digit_duration_via_parse(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: normal
+    states:
+      normal: {}
+    transitions:
+      - from: normal
+        to: normal
+        on: timeout
+        after: "4s"
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+
+    def test_rejects_fullwidth_digit_duration_via_validate_direct(self):
+        # Exercises validate.py's own _DURATION_PATTERN directly, independent
+        # of raw_validate.py's pre-check in parse() -- e.g. a HushSpec built
+        # programmatically rather than parsed from YAML.
+        spec = HushSpec(
+            hushspec="0.1.0",
+            extensions=Extensions(
+                posture=PostureExtension(
+                    initial="normal",
+                    states={"normal": PostureState()},
+                    transitions=[
+                        PostureTransition(
+                            from_state="normal",
+                            to="normal",
+                            on=TransitionTrigger.TIMEOUT,
+                            after="４s",
+                        ),
+                    ],
+                )
+            ),
+        )
+        result = validate(spec)
+        assert not result.is_valid
+        assert any("must match" in str(e) for e in result.errors)
