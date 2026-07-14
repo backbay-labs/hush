@@ -62,11 +62,21 @@ rules:
         pattern: "github_pat_[0-9a-zA-Z_]{50,}"
         severity: critical
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
     skip_paths:
       - "**/test/**"
       - "**/tests/**"
+
+  shell_commands:
+    forbidden_patterns:
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "curl.*\\|.*sh"
+      - "wget.*\\|.*bash"
+      - "(?i)mkfs"
+      - "(?i)dd[ \\t\\n\\r\\f]+if="
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
+      - "(?i)>[ \\t\\n\\r\\f]*/dev/sd"
 
   tool_access:
     allow:

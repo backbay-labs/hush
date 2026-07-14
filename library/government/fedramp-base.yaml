@@ -103,27 +103,27 @@ rules:
         severity: critical
         description: "AWS access key -- AC-3 credential control"
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
         description: "Private key -- SC-28 protection of information at rest"
       - name: piv_card_pattern
-        pattern: "(?i)(piv|cac)[\\s_-]?(card|cert|credential)\\s*[:=]\\s*[A-Za-z0-9]+"
+        pattern: "(?i)(piv|cac)[ \\t\\n\\r\\f_-]?(card|cert|credential)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9]+"
         severity: critical
         description: "PIV/CAC credential reference -- AC-3"
       - name: generic_api_key
-        pattern: "(?i)(api[_\\-]?key|apikey)\\s*[:=]\\s*[A-Za-z0-9]{32,}"
+        pattern: "(?i)(api[_\\-]?key|apikey)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9]{32,}"
         severity: error
         description: "API key -- AC-3 credential control"
       - name: ssn
-        pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+        pattern: "\\b[0-9]{3}-[0-9]{2}-[0-9]{4}\\b"
         severity: critical
         description: "Social Security Number -- CUI PII"
       - name: cui_marking
-        pattern: "(?i)(CUI|CONTROLLED|FOUO|NOFORN|ORCON|REL\\s+TO)"
+        pattern: "(?i)(CUI|CONTROLLED|FOUO|NOFORN|ORCON|REL[ \\t\\n\\r\\f]+TO)"
         severity: error
         description: "CUI marking detected in content -- requires handling per 32 CFR 2002"
       - name: connection_string
-        pattern: "(?i)(postgres|mysql|mongodb|redis)://[^\\s\"']{10,}"
+        pattern: "(?i)(postgres|mysql|mongodb|redis)://[^ \\t\\n\\r\\f\"']{10,}"
         severity: critical
         description: "Database connection string -- AC-3"
       - name: github_token
@@ -144,22 +144,22 @@ rules:
     require_balance: true
     max_imbalance_ratio: 3.0
     forbidden_patterns:
-      - "(?i)disable[\\s_\\-]?(security|auth|ssl|tls|fips|audit)"
-      - "(?i)skip[\\s_\\-]?(verify|validation|check)"
-      - "(?i)rm\\s+-rf\\s+/"
-      - "(?i)chmod\\s+777"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls|fips|audit)"
+      - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check)"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
       - "(?i)(cui|classified|fouo|noforn)"
 
   # --- CM-7: Least Functionality ---
   shell_commands:
     forbidden_patterns:
-      - "(?i)rm\\s+-rf\\s+/"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "curl.*\\|.*sh"
       - "wget.*\\|.*bash"
-      - "(?i)scp\\s"
-      - "(?i)nc\\s+-"
+      - "(?i)scp[ \\t\\n\\r\\f]"
+      - "(?i)nc[ \\t\\n\\r\\f]+-"
       - "(?i)base64.*\\|.*curl"
-      - "(?i)chmod\\s+777"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
 
   # --- AC-6: Least Privilege ---
   tool_access:

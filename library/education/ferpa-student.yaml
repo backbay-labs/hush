@@ -99,27 +99,27 @@ rules:
     patterns:
       # 34 CFR 99.3 -- student PII
       - name: student_id
-        pattern: "(?i)(student[\\s_-]?(id|number|num|no))\\s*:?\\s*[A-Z0-9]{5,15}"
+        pattern: "(?i)(student[ \\t\\n\\r\\f_-]?(id|number|num|no))[ \\t\\n\\r\\f]*:?[ \\t\\n\\r\\f]*[A-Z0-9]{5,15}"
         severity: critical
         description: "Student ID number -- 34 CFR 99.3 PII from education records"
       - name: ssn
-        pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"
+        pattern: "\\b[0-9]{3}-[0-9]{2}-[0-9]{4}\\b"
         severity: critical
         description: "Social Security Number -- 34 CFR 99.3 PII"
       - name: student_name_pattern
-        pattern: "(?i)(student[\\s_-]?(name|nm))\\s*:?\\s*[A-Z][a-z]+\\s+[A-Z][a-z]+"
+        pattern: "(?i)(student[ \\t\\n\\r\\f_-]?(name|nm))[ \\t\\n\\r\\f]*:?[ \\t\\n\\r\\f]*[A-Z][a-z]+[ \\t\\n\\r\\f]+[A-Z][a-z]+"
         severity: critical
         description: "Student name field -- 34 CFR 99.3 PII"
       - name: grade_record
-        pattern: "(?i)(grade|gpa|score)\\s*[:=]\\s*[0-9A-F][.+-]?"
+        pattern: "(?i)(grade|gpa|score)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[0-9A-F][.+-]?"
         severity: error
         description: "Grade or GPA value -- education record under 34 CFR 99.3"
       - name: date_of_birth
-        pattern: "(?i)(dob|date[\\s_-]?of[\\s_-]?birth)\\s*:?\\s*\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}"
+        pattern: "(?i)(dob|date[ \\t\\n\\r\\f_-]?of[ \\t\\n\\r\\f_-]?birth)[ \\t\\n\\r\\f]*:?[ \\t\\n\\r\\f]*[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}"
         severity: critical
         description: "Date of birth -- 34 CFR 99.3 PII"
       - name: financial_aid_amount
-        pattern: "(?i)(financial[\\s_-]?aid|scholarship|grant|loan)\\s*[:=]\\s*\\$?[0-9,.]+"
+        pattern: "(?i)(financial[ \\t\\n\\r\\f_-]?aid|scholarship|grant|loan)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*\\$?[0-9,.]+"
         severity: error
         description: "Financial aid amount -- education record under 34 CFR 99.3"
       # Infrastructure secrets
@@ -127,10 +127,10 @@ rules:
         pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
       - name: generic_api_key
-        pattern: "(?i)(api[_\\-]?key|apikey)\\s*[:=]\\s*[A-Za-z0-9]{32,}"
+        pattern: "(?i)(api[_\\-]?key|apikey)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9]{32,}"
         severity: error
     skip_paths:
       - "**/test/**"
@@ -144,18 +144,18 @@ rules:
     require_balance: false
     max_imbalance_ratio: 8.0
     forbidden_patterns:
-      - "(?i)disable[\\s_\\-]?(security|auth|ssl|tls)"
-      - "(?i)skip[\\s_\\-]?(verify|validation|check)"
-      - "(?i)rm\\s+-rf\\s+/"
-      - "(?i)chmod\\s+777"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls)"
+      - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check)"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
       - "(?i)(student_id|student_name|enrollment|transcript)"
 
   shell_commands:
     forbidden_patterns:
-      - "(?i)rm\\s+-rf\\s+/"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "curl.*\\|.*sh"
       - "wget.*\\|.*bash"
-      - "(?i)scp\\s"
+      - "(?i)scp[ \\t\\n\\r\\f]"
 
   # --- 34 CFR 99.31: Tool access ---
   tool_access:

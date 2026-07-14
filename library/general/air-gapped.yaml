@@ -30,6 +30,9 @@ rules:
   forbidden_paths:
     patterns:
       - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
@@ -51,10 +54,10 @@ rules:
         pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
       - name: generic_api_key
-        pattern: "(?i)(api[_\\-]?key|apikey)\\s*[:=]\\s*[A-Za-z0-9]{32,}"
+        pattern: "(?i)(api[_\\-]?key|apikey)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9]{32,}"
         severity: error
     skip_paths: []
 

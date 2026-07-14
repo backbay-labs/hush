@@ -114,15 +114,15 @@ rules:
         description: "Discover card number -- PCI-DSS Req 3.4"
       # Requirement 3.2 -- sensitive authentication data (SAD)
       - name: cvv_pattern
-        pattern: "(?i)(cvv|cvc|cvv2|cvc2|cid)\\s*[:=]?\\s*\\d{3,4}"
+        pattern: "(?i)(cvv|cvc|cvv2|cvc2|cid)[ \\t\\n\\r\\f]*[:=]?[ \\t\\n\\r\\f]*[0-9]{3,4}"
         severity: critical
         description: "Card verification value -- PCI-DSS Req 3.2 (SAD must not be stored)"
       - name: track_data
-        pattern: "%B\\d{13,19}\\^[A-Z\\s/]+\\^\\d{4}"
+        pattern: "%B[0-9]{13,19}\\^[A-Z \\t\\n\\r\\f/]+\\^[0-9]{4}"
         severity: critical
         description: "Magnetic stripe track data -- PCI-DSS Req 3.2"
       - name: pin_block
-        pattern: "(?i)(pin[\\s_-]?block)\\s*[:=]\\s*[0-9A-Fa-f]{16}"
+        pattern: "(?i)(pin[ \\t\\n\\r\\f_-]?block)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[0-9A-Fa-f]{16}"
         severity: critical
         description: "PIN block data -- PCI-DSS Req 3.2"
       # Infrastructure
@@ -130,13 +130,13 @@ rules:
         pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
       - name: generic_api_key
-        pattern: "(?i)(api[_\\-]?key|apikey)\\s*[:=]\\s*[A-Za-z0-9]{32,}"
+        pattern: "(?i)(api[_\\-]?key|apikey)[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9]{32,}"
         severity: error
       - name: connection_string
-        pattern: "(?i)(postgres|mysql|mongodb|redis)://[^\\s\"']{10,}"
+        pattern: "(?i)(postgres|mysql|mongodb|redis)://[^ \\t\\n\\r\\f\"']{10,}"
         severity: critical
     skip_paths:
       - "**/test/**"
@@ -150,20 +150,20 @@ rules:
     require_balance: true
     max_imbalance_ratio: 5.0
     forbidden_patterns:
-      - "(?i)disable[\\s_\\-]?(security|auth|ssl|tls|encryption|audit)"
-      - "(?i)skip[\\s_\\-]?(verify|validation|check)"
-      - "(?i)rm\\s+-rf\\s+/"
-      - "(?i)chmod\\s+777"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls|encryption|audit)"
+      - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check)"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
       - "(?i)(card_number|pan|cvv|track_data|pin_block)"
 
   # --- Requirement 10.2: Audit trail ---
   shell_commands:
     forbidden_patterns:
-      - "(?i)rm\\s+-rf\\s+/"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "curl.*\\|.*sh"
       - "wget.*\\|.*bash"
-      - "(?i)scp\\s"
-      - "(?i)nc\\s+-"
+      - "(?i)scp[ \\t\\n\\r\\f]"
+      - "(?i)nc[ \\t\\n\\r\\f]+-"
       - "(?i)base64.*\\|.*curl"
 
   # --- Requirement 7.1: Restrict access ---
