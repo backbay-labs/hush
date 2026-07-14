@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -84,6 +85,20 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 	}
 }
 
+// isNonFiniteFloat reports whether x is NaN or +/-Infinity. YAML's `.nan`,
+// `.inf`, and `-.inf` scalars decode to these values, and every float-typed
+// config field must reject them here, before any range check runs: NaN
+// fails every `<= 0` / `< lo || > hi` bounds check (comparisons against NaN
+// are always false), so an unchecked NaN silently passes validation and
+// then makes downstream comparisons like `ratio > max_imbalance_ratio` fail
+// open. It also can't reach encoding/json, which errors on NaN/Infinity and
+// would otherwise silently blank out a receipt's content_hash. Must stay in
+// lockstep with the Rust `!x.is_finite()`, TypeScript `!Number.isFinite(x)`,
+// and Python `not math.isfinite(x)` checks.
+func isNonFiniteFloat(x float64) bool {
+	return math.IsNaN(x) || math.IsInf(x, 0)
+}
+
 func validateRules(rules *Rules, result *ValidationResult) {
 	if rules.SecretPatterns != nil {
 		seen := make(map[string]bool)
@@ -145,8 +160,13 @@ func validateRules(rules *Rules, result *ValidationResult) {
 		if rules.PatchIntegrity.MaxDeletions < 0 {
 			result.addError("NEGATIVE_LIMIT", "patch_integrity max_deletions must be non-negative")
 		}
-		if rules.PatchIntegrity.MaxImbalanceRatio != nil && *rules.PatchIntegrity.MaxImbalanceRatio <= 0 {
-			result.addError("INVALID_RATIO", "patch_integrity max_imbalance_ratio must be > 0")
+		if rules.PatchIntegrity.MaxImbalanceRatio != nil {
+			ratio := *rules.PatchIntegrity.MaxImbalanceRatio
+			if isNonFiniteFloat(ratio) {
+				result.addError("NON_FINITE_FLOAT", "rules.patch_integrity.max_imbalance_ratio must be a finite number, got NaN or Infinity")
+			} else if ratio <= 0 {
+				result.addError("INVALID_RATIO", "patch_integrity max_imbalance_ratio must be > 0")
+			}
 		}
 		for index, pattern := range rules.PatchIntegrity.ForbiddenPatterns {
 			validateRegex(pattern, fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index), result)
@@ -377,7 +397,11 @@ func validateDetection(detection *DetectionExtension, result *ValidationResult) 
 	if detection.ThreatIntel != nil {
 		threatIntel := detection.ThreatIntel
 		if threatIntel.SimilarityThreshold != nil {
-			if *threatIntel.SimilarityThreshold < 0.0 || *threatIntel.SimilarityThreshold > 1.0 {
+			threshold := *threatIntel.SimilarityThreshold
+			if isNonFiniteFloat(threshold) {
+				result.addError("NON_FINITE_FLOAT",
+					"detection.threat_intel.similarity_threshold must be a finite number, got NaN or Infinity")
+			} else if threshold < 0.0 || threshold > 1.0 {
 				result.addError("THRESHOLD_OUT_OF_RANGE",
 					"detection.threat_intel.similarity_threshold must be between 0.0 and 1.0")
 			}

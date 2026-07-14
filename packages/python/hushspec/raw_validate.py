@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Callable
 
@@ -708,6 +709,9 @@ def _validate_number_value(
         errors.append(f"{path} must be a number")
         return None
     value = float(value)
+    if not math.isfinite(value):
+        errors.append(f"{path} must be a finite number")
+        return None
     if min_value is not None and value < min_value:
         errors.append(f"{path} must be >= {min_value}")
         return None

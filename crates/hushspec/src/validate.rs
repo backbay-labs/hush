@@ -95,7 +95,15 @@ fn validate_rules(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>
     }
 
     if let Some(patch_integrity) = &rules.patch_integrity {
-        if patch_integrity.max_imbalance_ratio <= 0.0 {
+        if !patch_integrity.max_imbalance_ratio.is_finite() {
+            // Reject NaN/±Inf first (fail-closed): a non-finite ratio slips past
+            // the `<= 0` check below (every NaN comparison is false) and then
+            // makes `require_balance` fail OPEN, since `ratio > NaN` is always
+            // false.
+            errors.push(ValidationError::Custom(
+                "rules.patch_integrity.max_imbalance_ratio must be a finite number".to_string(),
+            ));
+        } else if patch_integrity.max_imbalance_ratio <= 0.0 {
             errors.push(ValidationError::Custom(
                 "rules.patch_integrity.max_imbalance_ratio must be > 0".to_string(),
             ));
@@ -368,13 +376,22 @@ fn validate_detection(
         }
 
         if let Some(threat_intel) = &detection.threat_intel {
-            if let Some(similarity_threshold) = threat_intel.similarity_threshold
-                && !(0.0..=1.0).contains(&similarity_threshold)
-            {
-                errors.push(ValidationError::Custom(
-                    "detection.threat_intel.similarity_threshold must be between 0.0 and 1.0"
-                        .to_string(),
-                ));
+            if let Some(similarity_threshold) = threat_intel.similarity_threshold {
+                if !similarity_threshold.is_finite() {
+                    // Reject NaN/±Inf first (fail-closed): a non-finite value
+                    // only lands in the range branch by accident of NaN
+                    // comparison semantics, and ±Inf would otherwise report a
+                    // misleading "between 0.0 and 1.0" error.
+                    errors.push(ValidationError::Custom(
+                        "detection.threat_intel.similarity_threshold must be a finite number"
+                            .to_string(),
+                    ));
+                } else if !(0.0..=1.0).contains(&similarity_threshold) {
+                    errors.push(ValidationError::Custom(
+                        "detection.threat_intel.similarity_threshold must be between 0.0 and 1.0"
+                            .to_string(),
+                    ));
+                }
             }
             if matches!(threat_intel.top_k, Some(0)) {
                 errors.push(ValidationError::Custom(

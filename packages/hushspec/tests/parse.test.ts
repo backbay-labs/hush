@@ -162,4 +162,57 @@ rules:
     const result = validate(spec);
     expect(result.warnings).toContain('no rules section present');
   });
+
+  // Spec item A (wave-3): NaN fails every `<= 0`/`> 0` bounds check (NaN
+  // comparisons are always false), which would otherwise let
+  // `max_imbalance_ratio: .nan` slip past the `minExclusive: 0` range check
+  // and then make `require_balance` fail OPEN at evaluation time (`ratio >
+  // NaN` is always false too). Reject non-finite floats before/along with
+  // the range check so this can never reach evaluation.
+  describe('rejects non-finite floats', () => {
+    it('rejects max_imbalance_ratio: .nan', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: .nan
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects max_imbalance_ratio: .inf', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: .inf
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects max_imbalance_ratio: -.inf', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: -.inf
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects extensions.detection.threat_intel.similarity_threshold: .nan', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      enabled: true
+      similarity_threshold: .nan
+`);
+      expect(result.ok).toBe(false);
+    });
+  });
 });

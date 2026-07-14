@@ -211,7 +211,11 @@ def glob_matches(pattern: str, target: str) -> bool:
         else:
             regex += ch
         i += 1
-    regex += "$"
+    # \Z (not $): Python's `$` also matches just before a trailing "\n", so
+    # a glob like "internal.corp" would wrongly match "internal.corp\n". \Z
+    # is a true end-of-string anchor with no newline exception, matching
+    # Rust `regex`/Go RE2/JS non-multiline `$` end-of-text semantics.
+    regex += r"\Z"
     try:
         return re.search(regex, target) is not None
     except re.error:

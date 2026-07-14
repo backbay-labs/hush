@@ -1,6 +1,9 @@
 package hushspec
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestParseMinimalValid(t *testing.T) {
 	spec, err := Parse(`
@@ -222,6 +225,65 @@ func TestValidateInvalidPostureInitial(t *testing.T) {
 	result := Validate(spec)
 	if result.IsValid() {
 		t.Fatal("expected invalid posture initial to fail validation")
+	}
+}
+
+// TestValidateRejectsNonFiniteMaxImbalanceRatio locks in the shared
+// wave-3 fix (spec item A): every float-typed config field must reject NaN
+// and +/-Infinity at validation time. Before this fix, `.nan` failed every
+// `<= 0` bounds check (NaN comparisons are always false), so it silently
+// passed validation and then made `require_balance` fail OPEN at evaluation
+// time (`ratio > NaN` is also always false) -- and, separately, made
+// json.Marshal error on the NaN when hashing the policy for a receipt,
+// silently dropping content_hash. Rejecting it here closes both holes.
+func TestValidateRejectsNonFiniteMaxImbalanceRatio(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{"nan", ".nan"},
+		{"positive infinity", ".inf"},
+		{"negative infinity", "-.inf"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec, err := Parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: ` + tc.yaml + `
+`)
+			if err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if spec.Rules == nil || spec.Rules.PatchIntegrity == nil || spec.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
+				t.Fatal("expected max_imbalance_ratio to parse")
+			}
+			result := Validate(spec)
+			if result.IsValid() {
+				t.Fatalf("expected max_imbalance_ratio: %s to fail validation", tc.yaml)
+			}
+		})
+	}
+}
+
+// TestValidateRejectsNonFiniteSimilarityThreshold mirrors the
+// max_imbalance_ratio test above for extensions.detection.threat_intel.
+// similarity_threshold, the other float-typed config field the shared
+// wave-3 fix names explicitly.
+func TestValidateRejectsNonFiniteSimilarityThreshold(t *testing.T) {
+	nan := math.NaN()
+	spec := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Extensions: &Extensions{
+			Detection: &DetectionExtension{
+				ThreatIntel: &ThreatIntelDetection{SimilarityThreshold: &nan},
+			},
+		},
+	}
+	result := Validate(spec)
+	if result.IsValid() {
+		t.Fatal("expected similarity_threshold: NaN to fail validation")
 	}
 }
 

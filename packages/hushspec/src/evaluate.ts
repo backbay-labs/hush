@@ -154,7 +154,13 @@ function globMatches(pattern: string, target: string): boolean {
   regex += '$';
 
   try {
-    return new RegExp(regex).test(target);
+    // 'u' flag: makes `?` -> `.` code-point-aware so a single `?` matches one
+    // full Unicode code point (e.g. an astral emoji) rather than one UTF-16
+    // code unit. Every construct this translator emits (the escaped literals
+    // `\. \+ \( \) \{ \} \[ \] \^ \$ \| \\`, plus `(?:.*/)?`, `[^/]*`, `.*`,
+    // `^`, `$`, and literal source characters) is valid under `u`, so this is
+    // a pure widening of `?` with no effect on existing ASCII glob behavior.
+    return new RegExp(regex, 'u').test(target);
   } catch {
     return false;
   }

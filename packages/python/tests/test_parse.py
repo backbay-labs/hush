@@ -1,7 +1,12 @@
 from hushspec import (
     DefaultAction,
+    DetectionExtension,
+    Extensions,
     HushSpec,
     MergeStrategy,
+    PatchIntegrityRule,
+    Rules,
+    ThreatIntelDetection,
     merge,
     parse,
     parse_or_raise,
@@ -277,6 +282,77 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert "max_imbalance_ratio must be > 0" in err
+
+    def test_validate_imbalance_ratio_nan_rejected(self):
+        # YAML `.nan` fails every `<= 0` / `> 0` bounds check (NaN comparisons
+        # are always false), so without an explicit isfinite check this used
+        # to pass validation and then make `require_balance` fail OPEN
+        # (`ratio > NaN` is also always false).
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: .nan
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_imbalance_ratio" in err
+        assert "finite" in err
+
+    def test_validate_imbalance_ratio_infinity_rejected(self):
+        # +Infinity is a distinct silent-pass bug from NaN: this field has no
+        # upper bound (only `min_exclusive=0`), and `Infinity <= 0` is False,
+        # so +Infinity used to slip through validation entirely.
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: .inf
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "max_imbalance_ratio" in err
+        assert "finite" in err
+
+    def test_validate_similarity_threshold_nan_rejected(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      similarity_threshold: .nan
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "similarity_threshold" in err
+        assert "finite" in err
+
+    def test_validate_direct_rejects_nan_imbalance_ratio(self):
+        # Exercises validate.py's own isfinite check directly, independent of
+        # raw_validate.py's pre-check in parse() -- e.g. a HushSpec built
+        # programmatically rather than parsed from YAML.
+        spec = HushSpec(
+            hushspec="0.1.0",
+            rules=Rules(
+                patch_integrity=PatchIntegrityRule(max_imbalance_ratio=float("nan"))
+            ),
+        )
+        result = validate(spec)
+        assert not result.is_valid
+        assert any("finite" in str(e) for e in result.errors)
+
+    def test_validate_direct_rejects_infinite_similarity_threshold(self):
+        spec = HushSpec(
+            hushspec="0.1.0",
+            extensions=Extensions(
+                detection=DetectionExtension(
+                    threat_intel=ThreatIntelDetection(similarity_threshold=float("inf"))
+                )
+            ),
+        )
+        result = validate(spec)
+        assert not result.is_valid
+        assert any("finite" in str(e) for e in result.errors)
 
 
 class TestMerge:

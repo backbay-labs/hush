@@ -84,44 +84,51 @@ func NewRegexInjectionDetector() *RegexInjectionDetector {
 	return &RegexInjectionDetector{
 		patterns: []detectionPattern{
 			{
+				// Character classes below are explicit ASCII ([ \t\n\r\f],
+				// [0-9], [A-Za-z0-9_]) instead of \s/\d/\w: those shorthands
+				// are Unicode-aware in Rust `regex` & Python `re` but
+				// ASCII-only in Go RE2 & JS RegExp, so a pattern using \s+
+				// let Rust/Python match NBSP-obfuscated injection content
+				// that Go/JS missed. Must stay byte-for-byte identical to
+				// the Rust/TS/Python patterns.
 				name:     "ignore_instructions",
-				regex:    regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)`),
+				regex:    regexp.MustCompile(`(?i)ignore[ \t\n\r\f]+(all[ \t\n\r\f]+)?(previous|prior|above)[ \t\n\r\f]+(instructions|rules|prompts)`),
 				weight:   0.4,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "new_instructions",
-				regex:    regexp.MustCompile(`(?i)(new|updated|revised)\s+instructions?\s*:`),
+				regex:    regexp.MustCompile(`(?i)(new|updated|revised)[ \t\n\r\f]+instructions?[ \t\n\r\f]*:`),
 				weight:   0.3,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "system_prompt_extract",
-				regex:    regexp.MustCompile(`(?i)(reveal|show|display|print|output)\s+(your|the)\s+(system\s+)?(prompt|instructions|rules)`),
+				regex:    regexp.MustCompile(`(?i)(reveal|show|display|print|output)[ \t\n\r\f]+(your|the)[ \t\n\r\f]+(system[ \t\n\r\f]+)?(prompt|instructions|rules)`),
 				weight:   0.4,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "role_override",
-				regex:    regexp.MustCompile(`(?i)you\s+are\s+now\s+(a|an|the)\s+`),
+				regex:    regexp.MustCompile(`(?i)you[ \t\n\r\f]+are[ \t\n\r\f]+now[ \t\n\r\f]+(a|an|the)[ \t\n\r\f]+`),
 				weight:   0.3,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "pretend_mode",
-				regex:    regexp.MustCompile(`(?i)(pretend|imagine|act\s+as\s+if|suppose)\s+(you|that|we)`),
+				regex:    regexp.MustCompile(`(?i)(pretend|imagine|act[ \t\n\r\f]+as[ \t\n\r\f]+if|suppose)[ \t\n\r\f]+(you|that|we)`),
 				weight:   0.2,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "delimiter_injection",
-				regex:    regexp.MustCompile(`(?i)(---+|===+|` + "```" + `)\s*(system|assistant|user)\s*[:\n]`),
+				regex:    regexp.MustCompile(`(?i)(---+|===+|` + "```" + `)[ \t\n\r\f]*(system|assistant|user)[ \t\n\r\f]*[:\n]`),
 				weight:   0.4,
 				category: DetectionCategoryPromptInjection,
 			},
 			{
 				name:     "encoding_evasion",
-				regex:    regexp.MustCompile(`(?i)(base64|rot13|hex|url.?encod|unicode)\s*(decod|encod|convert)`),
+				regex:    regexp.MustCompile(`(?i)(base64|rot13|hex|url.?encod|unicode)[ \t\n\r\f]*(decod|encod|convert)`),
 				weight:   0.1,
 				category: DetectionCategoryPromptInjection,
 			},
@@ -187,8 +194,10 @@ func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	return &RegexJailbreakDetector{
 		patterns: []detectionPattern{
 			{
+				// See the ignore_instructions comment above: explicit ASCII
+				// class instead of \s for cross-SDK parity.
 				name:     "jailbreak_dan",
-				regex:    regexp.MustCompile(`(?i)(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)`),
+				regex:    regexp.MustCompile(`(?i)(DAN|do[ \t\n\r\f]+anything[ \t\n\r\f]+now|developer[ \t\n\r\f]+mode|jailbreak)`),
 				weight:   0.5,
 				category: DetectionCategoryJailbreak,
 			},
@@ -282,14 +291,16 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 				category: DetectionCategoryDataExfil,
 			},
 			{
+				// See the ignore_instructions comment above: explicit ASCII
+				// classes instead of \s/\S for cross-SDK parity.
 				name:     "api_key_pattern",
-				regex:    regexp.MustCompile(`(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token)\s*[:=]\s*\S+`),
+				regex:    regexp.MustCompile(`(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token)[ \t\n\r\f]*[:=][ \t\n\r\f]*[^ \t\n\r\f]+`),
 				weight:   0.6,
 				category: DetectionCategoryDataExfil,
 			},
 			{
 				name:     "private_key",
-				regex:    regexp.MustCompile(`-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----`),
+				regex:    regexp.MustCompile(`-----BEGIN[ \t\n\r\f]+(RSA[ \t\n\r\f]+)?PRIVATE[ \t\n\r\f]+KEY-----`),
 				weight:   0.9,
 				category: DetectionCategoryDataExfil,
 			},

@@ -61,37 +61,43 @@ export class RegexInjectionDetector implements Detector {
     this.patterns = [
       {
         name: 'ignore_instructions',
-        regex: /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions|rules|prompts)/i,
+        // Character classes spelled out explicitly ([ \t\n\r\f] / [0-9] /
+        // [A-Za-z0-9_]) instead of \s/\d/\w: those shorthands are
+        // Unicode-aware in Rust `regex`/Python `re` but ASCII-only in Go
+        // RE2/JS `RegExp`, which made Go/JS miss NBSP-obfuscated injection
+        // content that Rust/Python caught. Spelling them out keeps all four
+        // SDKs consistently ASCII-whitespace-only, restoring cross-SDK parity.
+        regex: /ignore[ \t\n\r\f]+(all[ \t\n\r\f]+)?(previous|prior|above)[ \t\n\r\f]+(instructions|rules|prompts)/i,
         weight: 0.4,
       },
       {
         name: 'new_instructions',
-        regex: /(new|updated|revised)\s+instructions?\s*:/i,
+        regex: /(new|updated|revised)[ \t\n\r\f]+instructions?[ \t\n\r\f]*:/i,
         weight: 0.3,
       },
       {
         name: 'system_prompt_extract',
-        regex: /(reveal|show|display|print|output)\s+(your|the)\s+(system\s+)?(prompt|instructions|rules)/i,
+        regex: /(reveal|show|display|print|output)[ \t\n\r\f]+(your|the)[ \t\n\r\f]+(system[ \t\n\r\f]+)?(prompt|instructions|rules)/i,
         weight: 0.4,
       },
       {
         name: 'role_override',
-        regex: /you\s+are\s+now\s+(a|an|the)\s+/i,
+        regex: /you[ \t\n\r\f]+are[ \t\n\r\f]+now[ \t\n\r\f]+(a|an|the)[ \t\n\r\f]+/i,
         weight: 0.3,
       },
       {
         name: 'pretend_mode',
-        regex: /(pretend|imagine|act\s+as\s+if|suppose)\s+(you|that|we)/i,
+        regex: /(pretend|imagine|act[ \t\n\r\f]+as[ \t\n\r\f]+if|suppose)[ \t\n\r\f]+(you|that|we)/i,
         weight: 0.2,
       },
       {
         name: 'delimiter_injection',
-        regex: /(---+|===+|```)\s*(system|assistant|user)\s*[:\n]/i,
+        regex: /(---+|===+|```)[ \t\n\r\f]*(system|assistant|user)[ \t\n\r\f]*[:\n]/i,
         weight: 0.4,
       },
       {
         name: 'encoding_evasion',
-        regex: /(base64|rot13|hex|url.?encod|unicode)\s*(decod|encod|convert)/i,
+        regex: /(base64|rot13|hex|url.?encod|unicode)[ \t\n\r\f]*(decod|encod|convert)/i,
         weight: 0.1,
       },
     ];
@@ -140,7 +146,10 @@ export class RegexJailbreakDetector implements Detector {
     this.patterns = [
       {
         name: 'jailbreak_dan',
-        regex: /(DAN|do\s+anything\s+now|developer\s+mode|jailbreak)/i,
+        // See RegexInjectionDetector for why \s is spelled out as
+        // [ \t\n\r\f] here (Go RE2 / JS RegExp vs. Rust regex / Python re
+        // Unicode-vs-ASCII parity).
+        regex: /(DAN|do[ \t\n\r\f]+anything[ \t\n\r\f]+now|developer[ \t\n\r\f]+mode|jailbreak)/i,
         weight: 0.5,
       },
     ];
@@ -210,12 +219,13 @@ export class RegexExfiltrationDetector implements Detector {
       },
       {
         name: 'api_key_pattern',
-        regex: /(api[_\-]?key|secret[_\-]?key|access[_\-]?token)\s*[:=]\s*\S+/i,
+        // \s -> [ \t\n\r\f], \S -> [^ \t\n\r\f]: see RegexInjectionDetector.
+        regex: /(api[_\-]?key|secret[_\-]?key|access[_\-]?token)[ \t\n\r\f]*[:=][ \t\n\r\f]*[^ \t\n\r\f]+/i,
         weight: 0.6,
       },
       {
         name: 'private_key',
-        regex: /-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----/,
+        regex: /-----BEGIN[ \t\n\r\f]+(RSA[ \t\n\r\f]+)?PRIVATE[ \t\n\r\f]+KEY-----/,
         weight: 0.9,
       },
     ];

@@ -127,6 +127,64 @@ extensions:
 }
 
 #[test]
+fn validate_rejects_non_finite_max_imbalance_ratio() {
+    // A NaN ratio otherwise passes validation (every `<= 0` comparison against
+    // NaN is false) and then makes `require_balance` fail OPEN. Fail-closed:
+    // reject non-finite floats at validation time.
+    let yaml = r#"
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: .nan
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(
+        spec.rules
+            .as_ref()
+            .unwrap()
+            .patch_integrity
+            .as_ref()
+            .unwrap()
+            .max_imbalance_ratio
+            .is_nan()
+    );
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("max_imbalance_ratio")),
+        "expected a max_imbalance_ratio error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn validate_rejects_non_finite_similarity_threshold() {
+    // ±Inf must be rejected as a finite-number error rather than reported as an
+    // out-of-range value; NaN/Inf are rejected for every f64 config field.
+    let yaml = r#"
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      similarity_threshold: .inf
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("similarity_threshold")),
+        "expected a similarity_threshold error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn validate_valid_regex_patterns_pass() {
     let yaml = r#"
 hushspec: "0.1.0"

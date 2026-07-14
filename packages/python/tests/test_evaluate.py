@@ -12,6 +12,7 @@ from hushspec.evaluate import (
     OriginContext,
     PostureContext,
     evaluate,
+    glob_matches,
 )
 
 FIXTURES_ROOT = Path(__file__).parent.parent.parent.parent / "fixtures"
@@ -273,3 +274,35 @@ rules:
 
     assert result.decision == Decision.DENY
     assert result.matched_rule == "rules.remote_desktop_channels.clipboard"
+
+
+# glob_matches end-of-text anchoring
+#
+# Python's `re.search(r'...$', target)` treats `$` as "end of string OR just
+# before a trailing \n", so a glob like "internal.corp" used to wrongly match
+# "internal.corp\n". The translator now anchors with \Z (true end-of-string,
+# no newline exception) instead of `$`, matching Rust `regex` / Go RE2 / JS
+# non-multiline `$` end-of-text semantics.
+
+
+def test_glob_does_not_match_target_with_trailing_newline():
+    assert glob_matches("internal.corp", "internal.corp\n") is False
+    assert glob_matches("internal.corp", "internal.corp") is True
+
+
+def test_glob_star_does_not_match_trailing_newline():
+    assert glob_matches("*.internal.corp", "api.internal.corp\n") is False
+    assert glob_matches("*.internal.corp", "api.internal.corp") is True
+
+
+def test_glob_ascii_patterns_unchanged():
+    assert glob_matches("*.example.com", "api.example.com") is True
+    assert glob_matches("*.example.com", "example.com") is False
+    assert glob_matches("*.example.com", "api.example.com.evil.net") is False
+    assert glob_matches("**/secrets/**", "a/b/secrets/c") is True
+    assert glob_matches("**/x", "x") is True
+    assert glob_matches("**/x", "a/b/x") is True
+    assert glob_matches("a?b", "acb") is True
+    assert glob_matches("a?b", "ab") is False
+    assert glob_matches("literal$", "literal$") is True
+    assert glob_matches("literal$", "literal") is False

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -106,7 +107,14 @@ def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
             )
 
     if rules.patch_integrity is not None:
-        if rules.patch_integrity.max_imbalance_ratio <= 0.0:
+        if not math.isfinite(rules.patch_integrity.max_imbalance_ratio):
+            errors.append(
+                ValidationError(
+                    "invalid_ratio",
+                    "rules.patch_integrity.max_imbalance_ratio must be a finite number",
+                )
+            )
+        elif rules.patch_integrity.max_imbalance_ratio <= 0.0:
             errors.append(
                 ValidationError(
                     "invalid_ratio",
@@ -341,7 +349,14 @@ def _validate_detection(
         ti = detection.threat_intel
 
         if ti.similarity_threshold is not None:
-            if not (0.0 <= ti.similarity_threshold <= 1.0):
+            if not math.isfinite(ti.similarity_threshold):
+                errors.append(
+                    ValidationError(
+                        "out_of_range",
+                        "detection.threat_intel.similarity_threshold must be a finite number",
+                    )
+                )
+            elif not (0.0 <= ti.similarity_threshold <= 1.0):
                 errors.append(
                     ValidationError(
                         "out_of_range",
