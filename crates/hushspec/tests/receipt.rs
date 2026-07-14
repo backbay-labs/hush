@@ -704,7 +704,9 @@ fn receipt_with_audit_enabled_has_content_hash_and_is_schema_valid() {
         .expect("content_hash must be present and a string when audit is enabled");
     assert_eq!(content_hash.len(), 64, "content_hash must be 64 hex chars");
     assert!(
-        content_hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        content_hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
         "content_hash must be lowercase hex: {content_hash}"
     );
 

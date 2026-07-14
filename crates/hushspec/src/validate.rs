@@ -497,8 +497,14 @@ fn classify_quantifier(chars: &[char], pos: usize) -> (QuantKind, usize) {
         return (QuantKind::None, 0);
     }
     match chars[pos] {
-        '*' | '+' => (QuantKind::Unbounded, 1 + usize::from(marker_follows(chars, pos + 1))),
-        '?' => (QuantKind::Bounded, 1 + usize::from(marker_follows(chars, pos + 1))),
+        '*' | '+' => (
+            QuantKind::Unbounded,
+            1 + usize::from(marker_follows(chars, pos + 1)),
+        ),
+        '?' => (
+            QuantKind::Bounded,
+            1 + usize::from(marker_follows(chars, pos + 1)),
+        ),
         '{' => {
             let mut j = pos + 1;
             while j < chars.len() && chars[j] != '}' {
@@ -510,7 +516,10 @@ fn classify_quantifier(chars: &[char], pos: usize) -> (QuantKind, usize) {
             let inner: String = chars[pos + 1..j].iter().collect();
             match brace_kind(&inner) {
                 QuantKind::None => (QuantKind::None, 0),
-                kind => (kind, (j - pos + 1) + usize::from(marker_follows(chars, j + 1))),
+                kind => (
+                    kind,
+                    (j - pos + 1) + usize::from(marker_follows(chars, j + 1)),
+                ),
             }
         }
         _ => (QuantKind::None, 0),
