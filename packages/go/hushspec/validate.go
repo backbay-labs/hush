@@ -3,6 +3,7 @@ package hushspec
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -393,13 +394,187 @@ func validateOptionalNonNegativeInt(value *int, code, msg string, result *Valida
 	}
 }
 
-// validateRegex rejects non-RE2 patterns. Go's regexp is RE2-only, so any
-// pattern that compiles is inherently ReDoS-safe.
+// validateRegex rejects ReDoS-unsafe patterns. Go's regexp is RE2-only, so the
+// RE2-feature check comes for free at compile time; the nested-quantifier check
+// then rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2 tolerates
+// but the backtracking SDK engines (JS RegExp, Python re) do not, keeping the
+// safety contract identical across all four SDKs.
 func validateRegex(pattern, path string, result *ValidationResult) {
 	if _, err := regexp.Compile(pattern); err != nil {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
+		return
 	}
+	if hasNestedQuantifier(pattern) {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
+	}
+}
+
+type quantKind int
+
+const (
+	quantNone quantKind = iota
+	quantBounded
+	quantUnbounded
+)
+
+// hasNestedQuantifier is a fail-closed over-approximation that flags nested
+// unbounded quantifiers such as (a+)+, ([0-9]+)*, or ((ab)+)+. It scans
+// ( ... ) group nesting -- ignoring escaped parens and character-class contents
+// -- and returns true when a group whose body contains an unbounded quantifier
+// (*, +, {n,}) is itself immediately followed by an unbounded quantifier.
+// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. Must stay identical
+// to the Rust, TypeScript, and Python implementations.
+func hasNestedQuantifier(pattern string) bool {
+	chars := []rune(pattern)
+	n := len(chars)
+	// Per open group: whether its body has seen an unbounded quantifier.
+	stack := []bool{}
+	inClass := false
+	i := 0
+	for i < n {
+		c := chars[i]
+		if c == '\\' {
+			// Escaped char (e.g. \(, \), \[, \+) -- skip both.
+			i += 2
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+			i++
+		case '(':
+			stack = append(stack, false)
+			i++
+		case ')':
+			closedUnbounded := false
+			if len(stack) > 0 {
+				closedUnbounded = stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+			}
+			kind, qlen := classifyQuantifier(chars, i+1)
+			if kind == quantUnbounded {
+				if closedUnbounded {
+					return true
+				}
+				// The just-closed group is unbounded-quantified, so it is an
+				// unbounded quantifier within the parent group's body.
+				if len(stack) > 0 {
+					stack[len(stack)-1] = true
+				}
+				i += 1 + qlen
+			} else {
+				i++
+			}
+		default:
+			kind, qlen := classifyQuantifier(chars, i)
+			switch kind {
+			case quantUnbounded:
+				if len(stack) > 0 {
+					stack[len(stack)-1] = true
+				}
+				i += qlen
+			case quantBounded:
+				i += qlen
+			default:
+				i++
+			}
+		}
+	}
+	return false
+}
+
+// classifyQuantifier classifies the quantifier token starting at pos, returning
+// its kind and the number of chars it spans (including any trailing
+// lazy/possessive marker).
+func classifyQuantifier(chars []rune, pos int) (quantKind, int) {
+	if pos >= len(chars) {
+		return quantNone, 0
+	}
+	switch chars[pos] {
+	case '*', '+':
+		if markerFollows(chars, pos+1) {
+			return quantUnbounded, 2
+		}
+		return quantUnbounded, 1
+	case '?':
+		if markerFollows(chars, pos+1) {
+			return quantBounded, 2
+		}
+		return quantBounded, 1
+	case '{':
+		j := pos + 1
+		for j < len(chars) && chars[j] != '}' {
+			j++
+		}
+		if j >= len(chars) {
+			return quantNone, 0 // unterminated '{' -> literal
+		}
+		kind := braceKind(string(chars[pos+1 : j]))
+		if kind == quantNone {
+			return quantNone, 0
+		}
+		length := j - pos + 1
+		if markerFollows(chars, j+1) {
+			length++
+		}
+		return kind, length
+	default:
+		return quantNone, 0
+	}
+}
+
+func markerFollows(chars []rune, pos int) bool {
+	return pos < len(chars) && (chars[pos] == '?' || chars[pos] == '+')
+}
+
+func isASCIIDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// braceKind classifies {...} content: {n,} is unbounded, {n} and {n,m} are
+// bounded, anything else is a literal brace (not a quantifier).
+func braceKind(inner string) quantKind {
+	if len(inner) == 0 {
+		return quantNone
+	}
+	commas := strings.Count(inner, ",")
+	if commas == 0 {
+		if isASCIIDigits(inner) {
+			return quantBounded
+		}
+		return quantNone
+	}
+	if commas == 1 {
+		parts := strings.SplitN(inner, ",", 2)
+		lo, hi := parts[0], parts[1]
+		loOk := lo == "" || isASCIIDigits(lo)
+		hiOk := hi == "" || isASCIIDigits(hi)
+		if !loOk || !hiOk || (lo == "" && hi == "") {
+			return quantNone
+		}
+		if hi == "" {
+			return quantUnbounded
+		}
+		return quantBounded
+	}
+	return quantNone
 }
 
 func isKnownCapability(value string) bool {

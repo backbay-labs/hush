@@ -381,13 +381,134 @@ _RE2_DISALLOWED = re.compile(
 
 
 def is_safe_regex(pattern: str) -> bool:
-    """Check whether a regex pattern is safe for evaluation (RE2-compatible).
+    """Check whether a regex pattern is safe for evaluation across all SDKs.
 
-    Returns ``True`` if the pattern uses only RE2-compatible features.
+    Returns ``True`` only if the pattern is safe on every HushSpec engine.
     Returns ``False`` if the pattern contains backreferences, lookaround,
-    atomic groups, possessive quantifiers, or other non-RE2 features.
+    atomic groups, possessive quantifiers, or other non-RE2 features, OR a
+    nested unbounded quantifier (e.g. ``(a+)+``) that catastrophically
+    backtracks on the backtracking engines (JavaScript ``RegExp``, Python
+    ``re``).
     """
-    return _RE2_DISALLOWED.search(pattern) is None
+    # RE2-feature check first.
+    if _RE2_DISALLOWED.search(pattern) is not None:
+        return False
+    # Nested-quantifier check second.
+    return not _has_nested_quantifier(pattern)
+
+
+def _has_nested_quantifier(pattern: str) -> bool:
+    """Flag nested unbounded quantifiers such as ``(a+)+``, ``([0-9]+)*``, or
+    ``((ab)+)+``.
+
+    Fail-closed over-approximation: scans ``(``...``)`` group nesting -- ignoring
+    escaped parens and character-class contents -- and returns ``True`` when a
+    group whose body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) is
+    itself immediately followed by an unbounded quantifier. Bounded quantifiers
+    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. Must stay identical to the
+    Rust, TypeScript, and Go implementations.
+    """
+    chars = list(pattern)
+    n = len(chars)
+    # Per open group: whether its body has seen an unbounded quantifier.
+    stack: list[bool] = []
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            # Escaped char (e.g. ``\(``, ``\)``, ``\[``, ``\+``) -- skip both.
+            i += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            in_class = True
+            i += 1
+            continue
+        if c == "(":
+            stack.append(False)
+            i += 1
+            continue
+        if c == ")":
+            closed_unbounded = stack.pop() if stack else False
+            kind, qlen = _classify_quantifier(chars, i + 1)
+            if kind == "unbounded":
+                if closed_unbounded:
+                    return True
+                # The just-closed group is unbounded-quantified, so it is an
+                # unbounded quantifier within the parent group's body.
+                if stack:
+                    stack[-1] = True
+                i += 1 + qlen
+            else:
+                i += 1
+            continue
+        kind, qlen = _classify_quantifier(chars, i)
+        if kind == "unbounded":
+            if stack:
+                stack[-1] = True
+            i += qlen
+        elif kind == "bounded":
+            i += qlen
+        else:
+            i += 1
+    return False
+
+
+def _classify_quantifier(chars: list[str], pos: int) -> tuple[str, int]:
+    """Classify the quantifier token starting at ``pos``; return its kind
+    (``"none"``/``"bounded"``/``"unbounded"``) and the number of chars it spans
+    (including any trailing lazy/possessive marker)."""
+    if pos >= len(chars):
+        return ("none", 0)
+    c = chars[pos]
+    if c in ("*", "+"):
+        return ("unbounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "?":
+        return ("bounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "{":
+        j = pos + 1
+        while j < len(chars) and chars[j] != "}":
+            j += 1
+        if j >= len(chars):
+            return ("none", 0)  # unterminated '{' -> literal
+        inner = "".join(chars[pos + 1 : j])
+        kind = _brace_kind(inner)
+        if kind == "none":
+            return ("none", 0)
+        length = (j - pos + 1) + (1 if _marker_follows(chars, j + 1) else 0)
+        return (kind, length)
+    return ("none", 0)
+
+
+def _marker_follows(chars: list[str], pos: int) -> bool:
+    return pos < len(chars) and chars[pos] in ("?", "+")
+
+
+def _is_ascii_digits(value: str) -> bool:
+    return len(value) > 0 and all("0" <= ch <= "9" for ch in value)
+
+
+def _brace_kind(inner: str) -> str:
+    """Classify ``{...}`` content: ``{n,}`` is unbounded, ``{n}`` and ``{n,m}``
+    are bounded, anything else is a literal brace (not a quantifier)."""
+    if not inner:
+        return "none"
+    commas = inner.count(",")
+    if commas == 0:
+        return "bounded" if _is_ascii_digits(inner) else "none"
+    if commas == 1:
+        lo, hi = inner.split(",")
+        lo_ok = lo == "" or _is_ascii_digits(lo)
+        hi_ok = hi == "" or _is_ascii_digits(hi)
+        if not lo_ok or not hi_ok or (lo == "" and hi == ""):
+            return "none"
+        return "unbounded" if hi == "" else "bounded"
+    return "none"
 
 
 def _validate_regex(pattern: str, path: str, errors: list[ValidationError]) -> None:

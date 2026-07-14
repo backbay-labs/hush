@@ -95,6 +95,36 @@ describe('isSafeRegex', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Nested-quantifier (catastrophic backtracking / ReDoS) heuristic
+// ---------------------------------------------------------------------------
+
+describe('isSafeRegex nested-quantifier heuristic', () => {
+  const REJECT = ['(a+)+', '(a*)*', '(a+)*', '([0-9]+)*', '(\\d+)+', '(a+)+$'];
+  const ACCEPT = [
+    '(abc)+',
+    'a+',
+    '\\d{3}-\\d{2}-\\d{4}',
+    '(?:foo|bar)+',
+    '(a{1,3}){1,3}',
+    'sk-(proj-)?[A-Za-z0-9_-]{20,}',
+    '(AKIA|ASIA)[0-9A-Z]{16}',
+    'github_pat_[0-9a-zA-Z_]{50,}',
+  ];
+
+  for (const pattern of REJECT) {
+    it(`rejects nested unbounded quantifier: ${pattern}`, () => {
+      expect(isSafeRegex(pattern)).toBe(false);
+    });
+  }
+
+  for (const pattern of ACCEPT) {
+    it(`accepts safe quantifier shape: ${pattern}`, () => {
+      expect(isSafeRegex(pattern)).toBe(true);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Regex validation in parse/validate pipeline
 // ---------------------------------------------------------------------------
 

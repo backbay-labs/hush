@@ -176,6 +176,49 @@ func TestBuiltInRulesetsPassValidation(t *testing.T) {
 	}
 }
 
+// secretPatternValidates builds a minimal spec carrying a single secret pattern
+// and reports whether it passes validation.
+func secretPatternValidates(pattern string) bool {
+	spec := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Rules: &Rules{
+			SecretPatterns: &SecretPatternsRule{
+				Enabled:  true,
+				Patterns: []SecretPattern{{Name: "probe", Pattern: pattern, Severity: SeverityCritical}},
+			},
+		},
+	}
+	return Validate(spec).IsValid()
+}
+
+func TestRejectsNestedUnboundedQuantifiers(t *testing.T) {
+	// Nested/exponential quantifier shapes: RE2-legal but catastrophic on the
+	// backtracking SDK engines (JS RegExp, Python re).
+	for _, pattern := range []string{"(a+)+", "(a*)*", "(a+)*", "([0-9]+)*", `(\d+)+`, "(a+)+$"} {
+		if secretPatternValidates(pattern) {
+			t.Errorf("nested-quantifier pattern %q should be rejected as ReDoS-unsafe", pattern)
+		}
+	}
+}
+
+func TestAcceptsSafeQuantifierShapes(t *testing.T) {
+	// Grouped alternations, optional groups, and bounded quantifiers are safe.
+	for _, pattern := range []string{
+		"(abc)+",
+		"a+",
+		`\d{3}-\d{2}-\d{4}`,
+		"(?:foo|bar)+",
+		"(a{1,3}){1,3}",
+		"sk-(proj-)?[A-Za-z0-9_-]{20,}",
+		"(AKIA|ASIA)[0-9A-Z]{16}",
+		"github_pat_[0-9a-zA-Z_]{50,}",
+	} {
+		if !secretPatternValidates(pattern) {
+			t.Errorf("safe pattern %q should pass validation", pattern)
+		}
+	}
+}
+
 func floatPtr(f float64) *float64 {
 	return &f
 }

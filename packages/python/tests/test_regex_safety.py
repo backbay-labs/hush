@@ -71,6 +71,33 @@ class TestIsSafeRegex:
 
 
 
+# Nested-quantifier (catastrophic backtracking / ReDoS) heuristic
+
+
+
+class TestNestedQuantifierHeuristic:
+    REJECT = ["(a+)+", "(a*)*", "(a+)*", "([0-9]+)*", r"(\d+)+", "(a+)+$"]
+    ACCEPT = [
+        "(abc)+",
+        "a+",
+        r"\d{3}-\d{2}-\d{4}",
+        "(?:foo|bar)+",
+        "(a{1,3}){1,3}",
+        "sk-(proj-)?[A-Za-z0-9_-]{20,}",
+        "(AKIA|ASIA)[0-9A-Z]{16}",
+        "github_pat_[0-9a-zA-Z_]{50,}",
+    ]
+
+    def test_rejects_nested_unbounded_quantifiers(self):
+        for pattern in self.REJECT:
+            assert is_safe_regex(pattern) is False, f"{pattern!r} should be rejected"
+
+    def test_accepts_safe_quantifier_shapes(self):
+        for pattern in self.ACCEPT:
+            assert is_safe_regex(pattern) is True, f"{pattern!r} should be accepted"
+
+
+
 # Regex validation in parse/validate pipeline
 
 

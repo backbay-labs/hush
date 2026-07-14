@@ -315,6 +315,49 @@ fn validate_builtin_rulesets_pass() {
     }
 }
 
+/// Build a minimal spec carrying a single secret pattern and report whether it
+/// passes validation. Patterns are embedded as single-quoted YAML scalars so
+/// backslashes stay literal; none of the probes contain a single quote.
+fn secret_pattern_is_valid(pattern: &str) -> bool {
+    let yaml = format!(
+        "hushspec: \"0.1.0\"\nrules:\n  secret_patterns:\n    patterns:\n      - name: probe\n        pattern: '{pattern}'\n        severity: critical\n"
+    );
+    let spec = HushSpec::parse(&yaml).expect("probe spec should parse");
+    validate(&spec).is_valid()
+}
+
+#[test]
+fn validate_rejects_nested_unbounded_quantifiers() {
+    // Nested/exponential quantifier shapes: RE2-legal but catastrophic on the
+    // backtracking SDK engines (JS RegExp, Python re).
+    for pattern in ["(a+)+", "(a*)*", "(a+)*", "([0-9]+)*", r"(\d+)+", "(a+)+$"] {
+        assert!(
+            !secret_pattern_is_valid(pattern),
+            "nested-quantifier pattern {pattern:?} should be rejected as ReDoS-unsafe"
+        );
+    }
+}
+
+#[test]
+fn validate_accepts_safe_quantifier_shapes() {
+    // Grouped alternations, optional groups, and bounded quantifiers are safe.
+    for pattern in [
+        "(abc)+",
+        "a+",
+        r"\d{3}-\d{2}-\d{4}",
+        "(?:foo|bar)+",
+        "(a{1,3}){1,3}",
+        "sk-(proj-)?[A-Za-z0-9_-]{20,}",
+        "(AKIA|ASIA)[0-9A-Z]{16}",
+        "github_pat_[0-9a-zA-Z_]{50,}",
+    ] {
+        assert!(
+            secret_pattern_is_valid(pattern),
+            "safe pattern {pattern:?} should pass validation"
+        );
+    }
+}
+
 #[test]
 fn roundtrip_yaml() {
     let yaml = r#"

@@ -734,11 +734,113 @@ def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
         errors.append(f"{path} must be a valid regular expression: {exc}")
         return
 
-    if _RE2_DISALLOWED.search(pattern):
+    # RE2-feature check first, then the nested-quantifier (ReDoS) heuristic.
+    if _RE2_DISALLOWED.search(pattern) or _has_nested_quantifier(pattern):
         errors.append(
             f"{path}: pattern uses features not in the RE2 subset "
             "(backreferences, lookaround, etc.) which may cause ReDoS"
         )
+
+
+# Nested-quantifier (catastrophic backtracking / ReDoS) heuristic.
+# Kept identical to hushspec/validate.py and the other SDKs: reject a group whose
+# body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) when the group is
+# itself immediately followed by an unbounded quantifier (e.g. ``(a+)+``).
+# Escaped parens and character-class contents are ignored; bounded quantifiers
+# (``(a{1,3}){1,3}``, ``(abc)+``) are accepted.
+def _has_nested_quantifier(pattern: str) -> bool:
+    chars = list(pattern)
+    n = len(chars)
+    stack: list[bool] = []
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            i += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            in_class = True
+            i += 1
+            continue
+        if c == "(":
+            stack.append(False)
+            i += 1
+            continue
+        if c == ")":
+            closed_unbounded = stack.pop() if stack else False
+            kind, qlen = _classify_quantifier(chars, i + 1)
+            if kind == "unbounded":
+                if closed_unbounded:
+                    return True
+                if stack:
+                    stack[-1] = True
+                i += 1 + qlen
+            else:
+                i += 1
+            continue
+        kind, qlen = _classify_quantifier(chars, i)
+        if kind == "unbounded":
+            if stack:
+                stack[-1] = True
+            i += qlen
+        elif kind == "bounded":
+            i += qlen
+        else:
+            i += 1
+    return False
+
+
+def _classify_quantifier(chars: list[str], pos: int) -> tuple[str, int]:
+    if pos >= len(chars):
+        return ("none", 0)
+    c = chars[pos]
+    if c in ("*", "+"):
+        return ("unbounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "?":
+        return ("bounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "{":
+        j = pos + 1
+        while j < len(chars) and chars[j] != "}":
+            j += 1
+        if j >= len(chars):
+            return ("none", 0)
+        inner = "".join(chars[pos + 1 : j])
+        kind = _brace_kind(inner)
+        if kind == "none":
+            return ("none", 0)
+        length = (j - pos + 1) + (1 if _marker_follows(chars, j + 1) else 0)
+        return (kind, length)
+    return ("none", 0)
+
+
+def _marker_follows(chars: list[str], pos: int) -> bool:
+    return pos < len(chars) and chars[pos] in ("?", "+")
+
+
+def _is_ascii_digits(value: str) -> bool:
+    return len(value) > 0 and all("0" <= ch <= "9" for ch in value)
+
+
+def _brace_kind(inner: str) -> str:
+    if not inner:
+        return "none"
+    commas = inner.count(",")
+    if commas == 0:
+        return "bounded" if _is_ascii_digits(inner) else "none"
+    if commas == 1:
+        lo, hi = inner.split(",")
+        lo_ok = lo == "" or _is_ascii_digits(lo)
+        hi_ok = hi == "" or _is_ascii_digits(hi)
+        if not lo_ok or not hi_ok or (lo == "" and hi == ""):
+            return "none"
+        return "unbounded" if hi == "" else "bounded"
+    return "none"
 
 
 def _reject_unknown_keys(
