@@ -24,7 +24,8 @@ export interface DecisionReceipt {
 export interface ActionSummary {
   type: string;
   target?: string;
-  content_redacted: boolean;
+  /** True when action content was present but omitted for privacy. Omitted (not `false`) when there was nothing to redact. */
+  content_redacted?: boolean;
 }
 
 export type RuleOutcome = 'allow' | 'warn' | 'deny' | 'skip';
@@ -40,8 +41,12 @@ export interface RuleEvaluation {
 export interface PolicySummary {
   name?: string;
   version: string;
-  /** SHA-256 hex digest of the canonical JSON serialization. */
-  content_hash: string;
+  /**
+   * SHA-256 hex digest of the canonical JSON serialization. Omitted when
+   * audit is disabled -- the zero-overhead disabled-audit fast path never
+   * computes a hash, so the field is absent rather than an empty string.
+   */
+  content_hash?: string;
 }
 
 export type EnforcementMode = 'enforce' | 'monitor';
@@ -92,13 +97,15 @@ export function evaluateAudited(
     : {
         name: spec.name,
         version: spec.hushspec,
-        content_hash: '',
       };
 
+  const contentRedacted = config.redact_content && action.content != null;
   const actionSummary: ActionSummary = {
     type: action.type,
     target: action.target,
-    content_redacted: config.redact_content && action.content != null,
+    // `|| undefined` (rather than the boolean itself) so JSON.stringify
+    // drops the key when false, matching Rust/Go's skip-if-false behavior.
+    content_redacted: contentRedacted || undefined,
   };
 
   return {

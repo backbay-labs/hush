@@ -5,7 +5,7 @@ import sys
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
-from hushspec.receipt import DecisionReceipt
+from hushspec.receipt import DecisionReceipt, receipt_to_dict
 
 
 
@@ -25,9 +25,7 @@ class FileReceiptSink(ReceiptSink):
         self._path = path
 
     def send(self, receipt: DecisionReceipt) -> None:
-        import dataclasses
-
-        data = dataclasses.asdict(receipt)
+        data = receipt_to_dict(receipt)
         if hasattr(data.get("decision"), "value"):
             data["decision"] = data["decision"].value
         line = json.dumps(data, default=_json_default)
@@ -38,9 +36,7 @@ class FileReceiptSink(ReceiptSink):
 class StderrReceiptSink(ReceiptSink):
 
     def send(self, receipt: DecisionReceipt) -> None:
-        import dataclasses
-
-        data = dataclasses.asdict(receipt)
+        data = receipt_to_dict(receipt)
         if hasattr(data.get("decision"), "value"):
             data["decision"] = data["decision"].value
         line = json.dumps(data, indent=2, default=_json_default)

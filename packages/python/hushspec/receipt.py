@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -131,6 +131,30 @@ def evaluate_audited(
         posture=result.posture,
         evaluation_duration_us=duration_us,
     )
+
+
+def receipt_to_dict(receipt: DecisionReceipt) -> dict:
+    """Convert a receipt to a JSON-ready ``dict`` for sinks and observers.
+
+    This is the single place receipts get flattened for serialization, so
+    that ``FileReceiptSink``, ``StderrReceiptSink``, and the observer's
+    ``JsonLineObserver`` all emit byte-consistent JSON. Two fields are
+    dropped when they carry their "nothing to report" value, mirroring the
+    other three HushSpec SDKs (Rust/Go skip-serialize the same way):
+
+    - ``policy.content_hash`` is omitted when empty -- the zero-overhead
+      disabled-audit fast path never computes a hash, and an empty string
+      would violate the receipt schema's ``^[0-9a-f]{64}$`` pattern.
+    - ``action.content_redacted`` is omitted when ``False``.
+    """
+    data = asdict(receipt)
+    policy = data.get("policy")
+    if isinstance(policy, dict) and not policy.get("content_hash"):
+        policy.pop("content_hash", None)
+    action = data.get("action")
+    if isinstance(action, dict) and not action.get("content_redacted"):
+        action.pop("content_redacted", None)
+    return data
 
 
 def compute_policy_hash(spec: HushSpec) -> str:

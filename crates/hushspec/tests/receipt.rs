@@ -658,3 +658,91 @@ fn receipt_without_enforcement_field_still_parses() {
     let parsed: DecisionReceipt = serde_json::from_str(&json).unwrap();
     assert!(parsed.enforcement.is_none());
 }
+
+// --- Schema conformance: enabled vs. disabled audit ---
+//
+// The disabled-audit fast path never computes a policy content hash (that's
+// the whole point of "zero overhead"), so `PolicySummary.content_hash` must
+// be *absent* from the serialized receipt rather than present as an empty
+// string -- an empty string would violate the schema's
+// `^[0-9a-f]{64}$` pattern. These tests pin both shapes against the actual
+// published schema so drift between the Rust struct's `serde` attributes and
+// `schemas/hushspec-receipt.v0.schema.json` is caught here rather than only
+// in the CLI's `h2h eval --format receipt` conformance test.
+
+fn compiled_receipt_schema() -> jsonschema::JSONSchema {
+    let schema_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../schemas/hushspec-receipt.v0.schema.json"
+    );
+    let schema_text = std::fs::read_to_string(schema_path)
+        .unwrap_or_else(|e| panic!("failed to read {schema_path}: {e}"));
+    let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
+    // Explicit options (rather than relying on the draft's default) so format
+    // assertions -- e.g. `timestamp`'s `format: date-time` -- are enforced,
+    // mirroring the equivalent check in hushspec-cli/tests/eval_tests.rs.
+    jsonschema::JSONSchema::options()
+        .should_validate_formats(true)
+        .compile(&schema)
+        .unwrap_or_else(|e| panic!("receipt schema failed to compile: {e}"))
+}
+
+#[test]
+fn receipt_with_audit_enabled_has_content_hash_and_is_schema_valid() {
+    let spec = simple_spec();
+    let action = EvaluationAction {
+        action_type: "tool_call".to_string(),
+        target: Some("safe_tool".to_string()),
+        ..Default::default()
+    };
+
+    let receipt = evaluate_audited(&spec, &action, &default_audit_config());
+    let json = serde_json::to_value(&receipt).unwrap();
+
+    let content_hash = json["policy"]["content_hash"]
+        .as_str()
+        .expect("content_hash must be present and a string when audit is enabled");
+    assert_eq!(content_hash.len(), 64, "content_hash must be 64 hex chars");
+    assert!(
+        content_hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+        "content_hash must be lowercase hex: {content_hash}"
+    );
+
+    let schema = compiled_receipt_schema();
+    let result = schema.validate(&json);
+    if let Err(errors) = result {
+        let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+        panic!("enabled-audit receipt failed schema validation: {messages:?}\n{json:#}");
+    }
+}
+
+#[test]
+fn receipt_with_audit_disabled_omits_content_hash_and_is_schema_valid() {
+    let spec = simple_spec();
+    let action = EvaluationAction {
+        action_type: "tool_call".to_string(),
+        target: Some("safe_tool".to_string()),
+        ..Default::default()
+    };
+
+    let config = AuditConfig {
+        enabled: false,
+        include_rule_trace: false,
+        redact_content: true,
+    };
+    let receipt = evaluate_audited(&spec, &action, &config);
+    let json = serde_json::to_value(&receipt).unwrap();
+
+    assert!(
+        json["policy"].get("content_hash").is_none(),
+        "content_hash must be absent (not an empty string) when audit is disabled, got: {}",
+        json["policy"]
+    );
+
+    let schema = compiled_receipt_schema();
+    let result = schema.validate(&json);
+    if let Err(errors) = result {
+        let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+        panic!("disabled-audit receipt failed schema validation: {messages:?}\n{json:#}");
+    }
+}

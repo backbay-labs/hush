@@ -68,7 +68,11 @@ pub struct PolicySummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub version: String,
-    /// SHA-256 hex digest of the canonical JSON serialization.
+    /// SHA-256 hex digest of the canonical JSON serialization. Omitted from
+    /// serialized output when audit is disabled (the zero-overhead
+    /// disabled-audit fast path never computes a hash); the in-memory value
+    /// is `""` in that case, matching the other three SDKs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
 }
 

@@ -116,12 +116,16 @@ describe('evaluateAudited', () => {
     expect(receipt.evaluation_duration_us).toBe(0);
   });
 
-  it('returns empty policy hash when config disabled', () => {
+  it('omits policy content_hash when config disabled', () => {
     const spec = specWithToolAccess();
     const action: EvaluationAction = { type: 'tool_call', target: 'read_file' };
     const receipt = evaluateAudited(spec, action, disabledConfig());
 
-    expect(receipt.policy.content_hash).toBe('');
+    // Absent, not an empty string -- an empty string would violate the
+    // receipt schema's `^[0-9a-f]{64}$` pattern on content_hash.
+    expect(receipt.policy.content_hash).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(receipt.policy, 'content_hash')).toBe(false);
+    expect(JSON.stringify(receipt.policy)).not.toContain('content_hash');
   });
 
   it('sets content_redacted when content present and redact enabled', () => {
@@ -149,7 +153,9 @@ describe('evaluateAudited', () => {
     const action: EvaluationAction = { type: 'tool_call', target: 'test' };
     const receipt = evaluateAudited(spec, action, enabledConfig());
 
-    expect(receipt.action.content_redacted).toBe(false);
+    // Omitted, not `false` -- matches Rust/Go, which skip-serialize false.
+    expect(receipt.action.content_redacted).toBeUndefined();
+    expect(JSON.stringify(receipt.action)).not.toContain('content_redacted');
   });
 
   it('has non-negative evaluation_duration_us when enabled', () => {

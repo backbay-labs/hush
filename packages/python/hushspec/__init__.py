@@ -21,6 +21,7 @@ from hushspec.receipt import (
     RuleEvaluation,
     compute_policy_hash,
     evaluate_audited,
+    receipt_to_dict,
 )
 from hushspec.extensions import (
     BridgePolicy,
@@ -178,6 +179,7 @@ __all__ = [
     "check_panic_sentinel",
     "evaluate_audited",
     "compute_policy_hash",
+    "receipt_to_dict",
     "DecisionReceipt",
     "ActionSummary",
     "RuleEvaluation",

@@ -141,7 +141,7 @@
     },
     "PolicySummary": {
       "type": "object",
-      "required": ["version", "content_hash"],
+      "required": ["version"],
       "additionalProperties": false,
       "description": "Identity and integrity summary of the policy document used during evaluation.",
       "properties": {
@@ -157,7 +157,7 @@
         "content_hash": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
-          "description": "SHA-256 hex digest of the canonical JSON serialization of the resolved policy document."
+          "description": "SHA-256 hex digest of the canonical JSON serialization of the resolved policy document. Omitted entirely when the evaluation ran with audit disabled -- the zero-overhead disabled-audit fast path never computes a hash, so the field is absent rather than an empty string."
         }
       }
     },

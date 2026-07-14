@@ -28,6 +28,7 @@ rand = { version = "0.8", optional = true }
 [dev-dependencies]
 pretty_assertions = "1"
 criterion = "0.5"
+jsonschema = { version = "0.18", features = ["draft202012"] }
 
 [[bench]]
 name = "evaluation"

@@ -886,6 +886,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "ed25519-dalek",
+ "jsonschema",
  "pretty_assertions",
  "rand 0.8.7",
  "regex",

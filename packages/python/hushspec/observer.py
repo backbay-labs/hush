@@ -213,6 +213,15 @@ class ObservableEvaluator:
 def _json_default(obj: Any) -> Any:
     import dataclasses
     import enum
+
+    from hushspec.receipt import DecisionReceipt, receipt_to_dict
+
+    if isinstance(obj, DecisionReceipt):
+        # Route through the shared helper (rather than a plain asdict) so a
+        # receipt embedded in an observer event serializes identically to
+        # one sent through a ReceiptSink: content_hash/content_redacted
+        # dropped when empty/false instead of emitted as "" / false.
+        return receipt_to_dict(obj)
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return dataclasses.asdict(obj)
     if isinstance(obj, enum.Enum):

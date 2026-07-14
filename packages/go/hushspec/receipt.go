@@ -58,9 +58,13 @@ type RuleEvaluation struct {
 }
 
 type PolicySummary struct {
-	Name        string `json:"name,omitempty"`
-	Version     string `json:"version"`
-	ContentHash string `json:"content_hash"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version"`
+	// ContentHash is the SHA-256 hex digest of the canonical JSON
+	// serialization of the resolved policy document. Omitted when audit is
+	// disabled -- the zero-overhead disabled-audit fast path never computes
+	// a hash, so the field is absent rather than an empty string.
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // AuditConfig controls receipt verbosity. When Enabled is false, the receipt
