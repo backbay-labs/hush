@@ -1,7 +1,8 @@
 use clap::ValueEnum;
 use colored::Colorize;
 use hushspec::{
-    Decision, EvaluationAction, EvaluationResult, HushSpec, PostureResult, evaluate, validate,
+    Decision, EvaluationAction, EvaluationResult, HushSpec, PostureResult, evaluate_with_detection,
+    validate,
 };
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -294,7 +295,7 @@ fn run_fixture_file(path: &Path, external_policy: Option<&HushSpec>) -> FixtureR
     // Run each case
     let mut case_results = Vec::new();
     for case in &fixture.cases {
-        let actual = evaluate(&spec, &case.action);
+        let actual = evaluate_with_detection(&spec, &case.action).evaluation;
         let mismatch = compare_expected(&case.expect, &actual);
 
         case_results.push(CaseResult {

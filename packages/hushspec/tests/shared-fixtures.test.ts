@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { merge } from '../src/merge.js';
 import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
-import { evaluate } from '../src/evaluate.js';
+import { evaluateWithDetection } from '../src/detection.js';
 import type { EvaluationAction } from '../src/evaluate.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -51,6 +51,7 @@ const evaluationDirs = [
   'core/evaluation',
   'posture/evaluation',
   'origins/evaluation',
+  'detection/evaluation',
 ];
 
 const mergeDirs = [
@@ -128,7 +129,7 @@ describe('shared fixture corpus', () => {
       for (const testCase of raw.cases) {
         it(`evaluates [${path.relative(fixturesRoot, fixturePath)}] ${testCase.description}`, () => {
           const action = testCase.action as unknown as EvaluationAction;
-          const result = evaluate(spec, action);
+          const result = evaluateWithDetection(spec, action).evaluation;
 
           expect(result.decision).toBe(testCase.expect.decision);
 

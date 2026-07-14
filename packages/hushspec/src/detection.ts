@@ -1,6 +1,7 @@
 import type { HushSpec } from './schema.js';
 import { evaluate } from './evaluate.js';
 import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js';
+import type { DetectionLevel } from './extensions.js';
 
 export type DetectionCategory = 'prompt_injection' | 'jailbreak' | 'data_exfiltration';
 
@@ -188,12 +189,18 @@ export class RegexExfiltrationDetector implements Detector {
     this.patterns = [
       {
         name: 'ssn',
-        regex: /\b\d{3}-\d{2}-\d{4}\b/,
+        // Explicit ASCII non-digit boundary instead of `\b`: `\b` is
+        // Unicode-aware in Rust `regex`/Python `re` (a letter like "é" or
+        // "中" is `\w`, so no boundary forms before the digits) but
+        // ASCII-only in Go RE2/JS `RegExp`. This keeps all four SDKs in
+        // agreement -- e.g. "café123-45-6789" and "中123-45-6789" now match
+        // identically everywhere.
+        regex: /(?:^|[^0-9])\d{3}-\d{2}-\d{4}(?:[^0-9]|$)/,
         weight: 0.8,
       },
       {
         name: 'credit_card',
-        regex: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b/,
+        regex: /(?:^|[^0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?:[^0-9]|$)/,
         weight: 0.8,
       },
       {
@@ -247,99 +254,146 @@ export class RegexExfiltrationDetector implements Detector {
   }
 }
 
-export interface DetectionConfig {
-  enabled: boolean;
-  prompt_injection_threshold: number;
-  jailbreak_threshold: number;
-  exfiltration_threshold: number;
-}
-
-export const DEFAULT_DETECTION_CONFIG: DetectionConfig = {
-  enabled: true,
-  prompt_injection_threshold: 0.5,
-  jailbreak_threshold: 0.5,
-  exfiltration_threshold: 0.5,
-};
-
 export interface EvaluationWithDetection {
   evaluation: EvaluationResult;
   detections: DetectionResult[];
-  detection_decision?: Decision;
+  detectionDecision?: Decision;
 }
 
-function checkThresholds(
-  detections: DetectionResult[],
-  config: DetectionConfig,
-): Decision | undefined {
-  const exceeded = detections.some((result) => {
-    let threshold: number;
-    switch (result.category) {
-      case 'prompt_injection':
-        threshold = config.prompt_injection_threshold;
-        break;
-      case 'jailbreak':
-        threshold = config.jailbreak_threshold;
-        break;
-      case 'data_exfiltration':
-        threshold = config.exfiltration_threshold;
-        break;
-      default:
-        // Unknown category (reachable via custom Detector registration):
-        // fall back to the conservative default threshold, matching the Go SDK.
-        threshold = 0.5;
-        break;
-    }
-    return result.score >= threshold;
-  });
+const LEVEL_FLOORS: Record<DetectionLevel, number> = {
+  safe: 0.0,
+  suspicious: 0.25,
+  high: 0.5,
+  critical: 0.75,
+};
 
-  return exceeded ? 'deny' : undefined;
+const DECISION_RANK: Record<Decision, number> = { allow: 0, warn: 1, deny: 2 };
+
+function decisionRank(decision: Decision | undefined): number {
+  return decision == null ? -1 : DECISION_RANK[decision];
+}
+
+/** `deny > warn > allow`; `undefined` (no detector contribution) ranks lowest. */
+function stricterDecision(base: Decision, candidate: Decision | undefined): Decision {
+  return candidate != null && decisionRank(candidate) > decisionRank(base) ? candidate : base;
 }
 
 /**
- * Detection deny overrides policy allow/warn but never weakens a policy deny.
+ * Truncate `input` to at most `maxBytes` UTF-8 bytes without splitting a
+ * multi-byte character. JS strings are UTF-16, but `max_scan_bytes` /
+ * `max_input_bytes` are byte counts shared with the Rust/Python/Go SDKs
+ * (whose native string types are UTF-8 byte sequences), so the limit is
+ * applied against the UTF-8 encoding rather than `string.length`.
+ */
+function truncateUtf8(input: string, maxBytes: number): string {
+  const bytes = Buffer.from(input, 'utf8');
+  if (bytes.length <= maxBytes) {
+    return input;
+  }
+  let end = maxBytes;
+  // Back off while the next byte is a UTF-8 continuation byte (`10xxxxxx`),
+  // so the cut point never splits a multi-byte character.
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) {
+    end -= 1;
+  }
+  return bytes.toString('utf8', 0, end);
+}
+
+// Singletons: the spec-driven path only ever drives these two built-in
+// detectors (see evaluateWithDetection's threat_intel note below), so there
+// is no need to pay DetectorRegistry.withDefaults()'s per-call allocation.
+const INJECTION_DETECTOR = new RegexInjectionDetector();
+const JAILBREAK_DETECTOR = new RegexJailbreakDetector();
+
+/**
+ * Spec-driven detection entry point.
+ *
+ * `base = evaluate(spec, action)`, then the detectors configured under
+ * `spec.extensions.detection` are run against `action.content` and folded
+ * into `base` with a strictest-of merge (`deny > warn > allow`): detection
+ * can escalate a policy allow/warn, but a policy deny is never weakened or
+ * relabeled, and a tie (e.g. policy warn + detection warn) keeps the
+ * policy's own `matched_rule`.
+ *
+ * Exact no-op -- returns `{ evaluation: base, detections: [], detectionDecision:
+ * undefined }` -- when there is no `detection` extension or `action.content`
+ * is empty/absent, so every existing (non-detection) evaluation fixture and
+ * policy is unaffected.
  */
 export function evaluateWithDetection(
   spec: HushSpec,
   action: EvaluationAction,
-  registry: DetectorRegistry,
-  config: DetectionConfig = DEFAULT_DETECTION_CONFIG,
 ): EvaluationWithDetection {
-  const evaluation = evaluate(spec, action);
+  const base = evaluate(spec, action);
 
-  if (!config.enabled) {
-    return {
-      evaluation,
-      detections: [],
-      detection_decision: undefined,
-    };
+  const det = spec.extensions?.detection;
+  if (det == null) {
+    return { evaluation: base, detections: [], detectionDecision: undefined };
   }
 
   const content = action.content ?? '';
   if (content.length === 0) {
-    return {
-      evaluation,
-      detections: [],
-      detection_decision: undefined,
-    };
+    return { evaluation: base, detections: [], detectionDecision: undefined };
   }
 
-  const detections = registry.detectAll(content);
-  const detectionDecision = checkThresholds(detections, config);
+  const detections: DetectionResult[] = [];
+  let detectionDecision: Decision | undefined;
+  let escalationCategory: DetectionCategory | undefined;
 
-  const finalEval: EvaluationResult =
-    detectionDecision === 'deny' && evaluation.decision !== 'deny'
-      ? {
-          decision: 'deny',
-          matched_rule: 'detection',
-          reason: 'content exceeded detection threshold',
-          origin_profile: evaluation.origin_profile,
-          posture: evaluation.posture,
-        }
-      : evaluation;
+  const promptInjection = det.prompt_injection;
+  if (promptInjection != null && promptInjection.enabled !== false) {
+    const scan = truncateUtf8(content, promptInjection.max_scan_bytes ?? 200_000);
+    const result = INJECTION_DETECTOR.detect(scan);
+    detections.push(result);
+
+    const blockFloor = LEVEL_FLOORS[promptInjection.block_at_or_above ?? 'high'];
+    const warnFloor = LEVEL_FLOORS[promptInjection.warn_at_or_above ?? 'suspicious'];
+    const contribution: Decision | undefined =
+      result.score >= blockFloor ? 'deny' : result.score >= warnFloor ? 'warn' : undefined;
+
+    if (contribution != null && decisionRank(contribution) > decisionRank(detectionDecision)) {
+      detectionDecision = contribution;
+      escalationCategory = 'prompt_injection';
+    }
+  }
+
+  const jailbreak = det.jailbreak;
+  if (jailbreak != null && jailbreak.enabled !== false) {
+    const scan = truncateUtf8(content, jailbreak.max_input_bytes ?? 200_000);
+    const result = JAILBREAK_DETECTOR.detect(scan);
+    detections.push(result);
+
+    // Compare directly against the 0-100 thresholds -- no rounding.
+    const scaled = result.score * 100.0;
+    const blockThreshold = jailbreak.block_threshold ?? 80;
+    const warnThreshold = jailbreak.warn_threshold ?? 50;
+    const contribution: Decision | undefined =
+      scaled >= blockThreshold ? 'deny' : scaled >= warnThreshold ? 'warn' : undefined;
+
+    if (contribution != null && decisionRank(contribution) > decisionRank(detectionDecision)) {
+      detectionDecision = contribution;
+      escalationCategory = 'jailbreak';
+    }
+  }
+
+  // threat_intel is NOT auto-wired: the built-in engine has only regex
+  // detectors, no pattern-db / similarity model to satisfy it. Serving it
+  // requires a custom Detector registered through DetectorRegistry.
+
+  const finalDecision = stricterDecision(base.decision, detectionDecision);
+  if (finalDecision === base.decision) {
+    return { evaluation: base, detections, detectionDecision };
+  }
 
   return {
-    evaluation: finalEval,
+    evaluation: {
+      decision: finalDecision,
+      matched_rule: 'detection',
+      reason: `content flagged by ${escalationCategory} detection`,
+      origin_profile: base.origin_profile,
+      posture: base.posture,
+    },
     detections,
-    detection_decision: detectionDecision,
+    detectionDecision,
   };
 }

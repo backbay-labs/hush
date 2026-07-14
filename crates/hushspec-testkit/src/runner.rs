@@ -1,5 +1,7 @@
 use crate::fixture::{FixtureCategory, TestFixture};
-use hushspec::{Decision, EvaluationAction, HushSpec, PostureResult, evaluate, merge};
+use hushspec::{
+    Decision, EvaluationAction, HushSpec, PostureResult, evaluate_with_detection, merge,
+};
 use jsonschema::JSONSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -179,7 +181,7 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
             }
 
             for (index, case) in doc.cases.iter().enumerate() {
-                let actual = evaluate(&spec, &case.action);
+                let actual = evaluate_with_detection(&spec, &case.action).evaluation;
                 if let Some(message) = compare_expected(&case.expect, &actual) {
                     return TestResult {
                         fixture_path: path,

@@ -42,6 +42,7 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("origins/merge", FixtureCategory::MergeBase),
         ("origins/valid", FixtureCategory::OriginsValid),
         ("origins/invalid", FixtureCategory::OriginsInvalid),
+        ("detection/evaluation", FixtureCategory::Evaluation),
         ("detection/merge", FixtureCategory::MergeBase),
         ("detection/valid", FixtureCategory::DetectionValid),
         ("detection/invalid", FixtureCategory::DetectionInvalid),

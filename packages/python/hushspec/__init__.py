@@ -69,13 +69,13 @@ from hushspec.sinks import (
 )
 from hushspec.detection import (
     DetectionCategory,
-    DetectionConfig,
     DetectionResult,
     DetectorRegistry,
     EvaluationWithDetection,
     MatchedPattern,
     RegexExfiltrationDetector,
     RegexInjectionDetector,
+    RegexJailbreakDetector,
     evaluate_with_detection,
 )
 from hushspec.conditions import (
@@ -204,13 +204,13 @@ __all__ = [
     "ConsoleObserver",
     "MetricsCollector",
     "DetectionCategory",
-    "DetectionConfig",
     "DetectionResult",
     "DetectorRegistry",
     "EvaluationWithDetection",
     "MatchedPattern",
     "RegexExfiltrationDetector",
     "RegexInjectionDetector",
+    "RegexJailbreakDetector",
     "evaluate_with_detection",
     "HUSHSPEC_VERSION",
     "SUPPORTED_VERSIONS",

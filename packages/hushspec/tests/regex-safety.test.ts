@@ -341,3 +341,27 @@ describe('built-in ruleset patterns are RE2-safe', () => {
 
   // permissive.yaml and remote-desktop.yaml have no regex patterns to validate.
 });
+
+// ---------------------------------------------------------------------------
+// Detection engine: exfiltration boundary patterns are RE2-safe
+//
+// The ssn/credit_card patterns in RegexExfiltrationDetector (src/detection.ts)
+// replaced `\b` digit-run boundaries with explicit ASCII non-digit boundaries
+// for cross-SDK parity (see detection-wiring spec §3). These are built-in
+// patterns (not parsed from policy YAML), but must still stay within the
+// RE2 subset like every other pattern in the repo.
+// ---------------------------------------------------------------------------
+
+describe('detection engine boundary patterns are RE2-safe', () => {
+  it('exfiltration ssn pattern is RE2-safe', () => {
+    expect(isSafeRegex('(?:^|[^0-9])\\d{3}-\\d{2}-\\d{4}(?:[^0-9]|$)')).toBe(true);
+  });
+
+  it('exfiltration credit_card pattern is RE2-safe', () => {
+    expect(
+      isSafeRegex(
+        '(?:^|[^0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?:[^0-9]|$)',
+      ),
+    ).toBe(true);
+  });
+});

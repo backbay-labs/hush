@@ -110,16 +110,19 @@ receipt = evaluate_audited(spec, action, {
 
 ### Detection Pipeline
 
-Plug prompt injection, jailbreak, and exfiltration checks into the evaluation flow.
+Content detection is spec-driven: add a `detection:` block under `extensions:` in
+the policy (`prompt_injection` and/or `jailbreak`) and `evaluate_with_detection`
+folds the built-in regex detectors' verdict into the evaluation automatically.
+It's an exact no-op for policies without a `detection:` extension.
 
 ```python
-from hushspec import evaluate_with_detection, DetectorRegistry
+from hushspec import evaluate_with_detection
 
-registry = DetectorRegistry.with_defaults()
-result = evaluate_with_detection(spec, action, registry, {
-    "enabled": True,
-    "prompt_injection_threshold": 0.5,
-})
+result = evaluate_with_detection(spec, action)
+# result.evaluation: the final EvaluationResult (matched_rule == "detection"
+#   when content flagged by a detector escalated the decision)
+# result.detections: the DetectionResult produced by each detector that ran
+# result.detection_decision: None | "warn" | "deny"
 ```
 
 ### Receipt Sinks

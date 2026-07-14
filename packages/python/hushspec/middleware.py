@@ -5,7 +5,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, TYPE_CHECKING
 
-from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, evaluate, is_panic_active
+from hushspec.detection import evaluate_with_detection
+from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
@@ -75,6 +76,41 @@ def _validate_enforcement_config(config: EnforcementConfig, observable: bool) ->
             "monitor mode requires an observer or a receipt sink: "
             "shadow decisions would be unobservable"
         )
+
+
+def _apply_detection(
+    receipt: "DecisionReceipt", spec: HushSpec, action: EvaluationAction
+) -> None:
+    """Fold a policy's ``detection:`` extension into an already-built receipt.
+
+    Mirrors the Rust reference ``apply_detection``
+    (crates/hushspec-cli/src/cmd_eval.rs): ``evaluate_audited`` builds the
+    receipt from the core rules only, so when content detection escalates the
+    decision this reconciles the receipt -- overwriting decision/matched_rule/
+    reason with the detected values and appending a ``detection`` rule-trace
+    entry whose outcome is the escalated decision. A no-op when the policy has
+    no detection extension, there is no content, or detection does not
+    escalate (detection never weakens a policy decision), so receipts for
+    every non-detection policy are byte-for-byte unchanged.
+    """
+    from hushspec.receipt import RuleEvaluation
+
+    detected = evaluate_with_detection(spec, action).evaluation
+    if detected.decision == receipt.decision:
+        return
+
+    receipt.rule_trace.append(
+        RuleEvaluation(
+            rule_block="detection",
+            outcome=detected.decision.value,
+            matched_rule=detected.matched_rule,
+            reason=detected.reason,
+            evaluated=True,
+        )
+    )
+    receipt.decision = detected.decision
+    receipt.matched_rule = detected.matched_rule
+    receipt.reason = detected.reason
 
 
 class HushSpecDenied(Exception):
@@ -151,21 +187,21 @@ class HushGuard:
         )
 
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
-        if self._sink is not None:
-            result, duration_us, receipt = self._run_evaluation(action)
-            if receipt is not None:
-                try:
-                    self._sink.send(receipt)
-                except Exception:
-                    pass  # sinks must not break evaluation
-            if self._observable_evaluator is not None:
-                self._observable_evaluator.notify_evaluation_completed(
-                    action, result, duration_us, receipt=receipt
-                )
-            return result
+        # Always routes through _run_evaluation() (sink or not) so this is
+        # detection-aware the same way gate()/check()/enforce() are -- a
+        # guard must not answer differently from .evaluate() than from
+        # .check() for the same action against the same policy.
+        result, duration_us, receipt = self._run_evaluation(action)
+        if receipt is not None:
+            try:
+                self._sink.send(receipt)
+            except Exception:
+                pass  # sinks must not break evaluation
         if self._observable_evaluator is not None:
-            return self._observable_evaluator.evaluate(self._policy, action)
-        return evaluate(self._policy, action)
+            self._observable_evaluator.notify_evaluation_completed(
+                action, result, duration_us, receipt=receipt
+            )
+        return result
 
     def check(self, action: EvaluationAction) -> bool:
         return self.gate(action).proceed
@@ -229,7 +265,14 @@ class HushGuard:
         if self._sink is not None:
             from hushspec.receipt import evaluate_audited
 
+            # evaluate_audited() builds the receipt from the core rules only
+            # (it never consults extensions.detection), so fold detection in
+            # afterward -- exactly as the non-sink branch below routes through
+            # evaluate_with_detection() -- and build `result` from the
+            # possibly-reconciled receipt so the enforced decision honors the
+            # policy's detection extension identically to the sink-free path.
             receipt = evaluate_audited(self._policy, action, self._audit)
+            _apply_detection(receipt, self._policy, action)
             result = EvaluationResult(
                 decision=receipt.decision,
                 matched_rule=receipt.matched_rule,
@@ -239,7 +282,10 @@ class HushGuard:
             )
             return result, receipt.evaluation_duration_us, receipt
         start_ns = time.perf_counter_ns()
-        result = evaluate(self._policy, action)
+        # evaluate_with_detection() is an exact no-op unless the policy
+        # carries an extensions.detection block, so every non-detection
+        # policy behaves identically to a plain evaluate() call here.
+        result = evaluate_with_detection(self._policy, action).evaluation
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
         return result, duration_us, None
 

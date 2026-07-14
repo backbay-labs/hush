@@ -1,6 +1,7 @@
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
-import { evaluate, isPanicActive } from './evaluate.js';
+import { isPanicActive } from './evaluate.js';
+import { evaluateWithDetection } from './detection.js';
 import { parse } from './parse.js';
 import { readFileSync } from 'node:fs';
 import type { PolicyProvider } from './policy-provider.js';
@@ -87,6 +88,45 @@ function validateEnforcementConfig(config: EnforcementConfig, observable: boolea
   }
 }
 
+/**
+ * Fold a policy's `detection:` extension into an already-computed receipt,
+ * mirroring the Rust reference (`crates/hushspec-cli/src/cmd_eval.rs`'s
+ * `apply_detection`).
+ *
+ * `evaluateAudited()` builds its receipt from the plain `evaluate()`, which
+ * does not consult the detection extension. When content detection escalates
+ * the decision (allow -> warn, or allow/warn -> deny), copy the escalated
+ * decision, matched_rule, and reason onto the receipt and append a `detection`
+ * rule-trace entry -- so a sink-backed guard applies detection identically to
+ * the receipt-free path and the emitted audit record stays self-consistent.
+ *
+ * A no-op when the policy has no detection extension, there is no content, or
+ * detection does not escalate: `receipt.decision` came from the same base
+ * `evaluate()` as `evaluateWithDetection`'s base, so they differ only on
+ * escalation, and detection never weakens a policy decision.
+ */
+function applyDetection(
+  receipt: DecisionReceipt,
+  spec: HushSpec,
+  action: EvaluationAction,
+): void {
+  const detected = evaluateWithDetection(spec, action).evaluation;
+  if (detected.decision === receipt.decision) {
+    return;
+  }
+  receipt.rule_trace.push({
+    rule_block: 'detection',
+    // Decision ('allow' | 'warn' | 'deny') is a subset of RuleOutcome.
+    outcome: detected.decision,
+    matched_rule: detected.matched_rule,
+    reason: detected.reason,
+    evaluated: true,
+  });
+  receipt.decision = detected.decision;
+  receipt.matched_rule = detected.matched_rule;
+  receipt.reason = detected.reason;
+}
+
 /** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
 export class HushGuard {
   private policy: HushSpec;
@@ -171,9 +211,15 @@ export class HushGuard {
       return result;
     }
     if (this.observableEvaluator) {
-      return this.observableEvaluator.evaluate(policy, action, this.observerAction(action));
+      // Route through runEvaluation() (not ObservableEvaluator.evaluate(),
+      // which calls the plain evaluate()) so a policy's detection extension
+      // is honored here too, then emit through the same public notification
+      // ObservableEvaluator.evaluate() would otherwise have sent.
+      const { result, durationUs } = this.runEvaluation(policy, action);
+      this.observableEvaluator.notifyEvaluationCompleted(this.observerAction(action), result, durationUs);
+      return result;
     }
-    return evaluate(policy, action);
+    return this.runEvaluation(policy, action).result;
   }
 
   check(action: EvaluationAction): boolean {
@@ -273,7 +319,14 @@ export class HushGuard {
     receipt?: DecisionReceipt;
   } {
     if (this.sink) {
+      // evaluateAudited() builds the receipt from the plain evaluate(), which
+      // does not consult the detection extension; applyDetection() folds it in
+      // (escalating decision/matched_rule/reason and appending a `detection`
+      // rule-trace entry) so a sink-backed guard honors a policy's detection
+      // extension identically to the receipt-free path below. No-op when
+      // nothing escalates, so existing receipts are unchanged.
       const receipt = evaluateAudited(policy, action, this.audit);
+      applyDetection(receipt, policy, action);
       return {
         result: {
           decision: receipt.decision,
@@ -287,7 +340,7 @@ export class HushGuard {
       };
     }
     const start = performance.now();
-    const result = evaluate(policy, action);
+    const result = evaluateWithDetection(policy, action).evaluation;
     const durationUs = Math.round((performance.now() - start) * 1000);
     return { result, durationUs };
   }

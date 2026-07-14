@@ -19,9 +19,9 @@ pub mod version;
 
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{
-    DetectionCategory, DetectionConfig, DetectionResult, Detector, DetectorRegistry,
-    EvaluationWithDetection, MatchedPattern, RegexExfiltrationDetector, RegexInjectionDetector,
-    RegexJailbreakDetector, evaluate_with_detection,
+    DetectionCategory, DetectionResult, Detector, DetectorRegistry, EvaluationWithDetection,
+    MatchedPattern, RegexExfiltrationDetector, RegexInjectionDetector, RegexJailbreakDetector,
+    evaluate_with_detection,
 };
 pub use evaluate::{
     Decision, EvaluationAction, EvaluationResult, OriginContext, PostureContext, PostureResult,

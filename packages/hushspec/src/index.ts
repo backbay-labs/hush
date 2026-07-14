@@ -86,12 +86,10 @@ export {
   RegexInjectionDetector,
   RegexJailbreakDetector,
   RegexExfiltrationDetector,
-  DEFAULT_DETECTION_CONFIG,
   type DetectionCategory,
   type DetectionResult,
   type MatchedPattern,
   type Detector,
-  type DetectionConfig,
   type EvaluationWithDetection,
 } from './detection.js';
 export { PolicyWatcher, type WatcherOptions } from './watcher.js';

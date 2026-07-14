@@ -1,7 +1,8 @@
 use colored::Colorize;
 use hushspec::receipt::RuleOutcome;
 use hushspec::{
-    AuditConfig, Decision, DecisionReceipt, EvaluationAction, HushSpec, evaluate_audited, validate,
+    AuditConfig, Decision, DecisionReceipt, EvaluationAction, HushSpec, evaluate_audited,
+    evaluate_with_detection, validate,
 };
 
 const KNOWN_ACTION_TYPES: &[&str] = &[
@@ -116,7 +117,8 @@ pub fn run(args: EvalArgs) -> i32 {
         );
     }
 
-    let receipt = evaluate_audited(&policy.spec, &action, &AuditConfig::default());
+    let mut receipt = evaluate_audited(&policy.spec, &action, &AuditConfig::default());
+    apply_detection(&mut receipt, &policy.spec, &action);
 
     match args.format {
         EvalOutputFormat::Text => {
@@ -144,6 +146,39 @@ pub fn run(args: EvalArgs) -> i32 {
 pub fn run_explain(mut args: EvalArgs) -> i32 {
     args.explain = true;
     run(args)
+}
+
+/// Fold a policy's `detection:` extension into an already-computed receipt.
+///
+/// `h2h eval`/`explain` build their receipt from `evaluate_audited`, which does
+/// not consult the detection extension. When content detection escalates the
+/// decision (allow/warn -> deny, or allow -> warn), mirror the escalated
+/// decision, matched_rule, and reason onto the receipt and append a `detection`
+/// rule-trace entry so the exit code, compact output, and explain trace all
+/// agree. A no-op when the policy has no detection extension, there is no
+/// content, or detection does not escalate -- detection never weakens a policy
+/// decision.
+fn apply_detection(receipt: &mut DecisionReceipt, spec: &HushSpec, action: &EvaluationAction) {
+    let detected = evaluate_with_detection(spec, action);
+    if detected.evaluation.decision == receipt.decision {
+        return;
+    }
+
+    let outcome = match detected.evaluation.decision {
+        Decision::Allow => RuleOutcome::Allow,
+        Decision::Warn => RuleOutcome::Warn,
+        Decision::Deny => RuleOutcome::Deny,
+    };
+    receipt.rule_trace.push(hushspec::receipt::RuleEvaluation {
+        rule_block: "detection".to_string(),
+        outcome,
+        matched_rule: detected.evaluation.matched_rule.clone(),
+        reason: detected.evaluation.reason.clone(),
+        evaluated: true,
+    });
+    receipt.decision = detected.evaluation.decision;
+    receipt.matched_rule = detected.evaluation.matched_rule;
+    receipt.reason = detected.evaluation.reason;
 }
 
 /// A resolved, validated policy plus display metadata.
