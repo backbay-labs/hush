@@ -222,6 +222,26 @@ fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
         .clone()
         .ok_or_else(|| "missing --type".to_string())?;
 
+    // Every action type except patch_apply (which acts on `content`) is
+    // meaningless without a target. In flag mode a missing --target is a
+    // mistake, and evaluating against an empty target would silently score
+    // against "" -- e.g. a `**` allowlist matches it and reports ALLOW. The
+    // --action-json/--action-file escape hatches are intentionally not
+    // constrained here: they mirror the raw EvaluationAction a host passes to
+    // evaluate(), which tolerates an absent target.
+    const TARGET_REQUIRED: &[&str] = &[
+        "file_read",
+        "file_write",
+        "shell_command",
+        "tool_call",
+        "egress",
+        "computer_use",
+        "input_inject",
+    ];
+    if TARGET_REQUIRED.contains(&action_type.as_str()) && args.target.is_none() {
+        return Err(format!("--type {action_type} requires --target"));
+    }
+
     let content = match (&args.content, &args.content_file) {
         (Some(content), _) => Some(content.clone()),
         (None, Some(path)) => Some(

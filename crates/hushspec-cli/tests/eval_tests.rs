@@ -243,6 +243,8 @@ fn eval_content_conflicts_with_content_file() {
         .args([
             "--type",
             "file_write",
+            "--target",
+            "/tmp/x",
             "--content",
             "x",
             "--content-file",
@@ -250,6 +252,33 @@ fn eval_content_conflicts_with_content_file() {
         ])
         .assert()
         .code(2);
+}
+
+#[test]
+fn eval_flag_mode_requires_target_for_target_based_types() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "file_write"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("requires --target"));
+}
+
+#[test]
+fn eval_patch_apply_allows_content_without_target() {
+    let dir = TempDir::new().unwrap();
+    let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
+    // patch_apply acts on `content`, so a target is not required.
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args(["--type", "patch_apply", "--content", "+ one line\n"])
+        .assert()
+        // Not an input error (2) -- a decision was produced without a target.
+        .code(predicate::ne(2));
 }
 
 const ORIGINS_POLICY: &str = r#"hushspec: "0.1.0"
