@@ -97,8 +97,12 @@ rules:
   shell_commands:
     forbidden_patterns:
       - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
-      - "curl.*\\|.*bash"
-      - "wget.*\\|.*bash"
+      - "curl.*\\|.*sh"
+      - "wget.*\\|.*sh"
+      - "(?i)mkfs"
+      - "(?i)dd[ \\t\\n\\r\\f]+if="
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
+      - "(?i)>[ \\t\\n\\r\\f]*/dev/sd"
 
   tool_access:
     allow: []

@@ -90,7 +90,10 @@ rules:
       - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "curl.*\\|.*sh"
       - "wget.*\\|.*bash"
+      - "(?i)mkfs"
+      - "(?i)dd[ \\t\\n\\r\\f]+if="
       - "(?i)chmod[ \\t\\n\\r\\f]+777"
+      - "(?i)>[ \\t\\n\\r\\f]*/dev/sd"
 
   tool_access:
     allow: []
