@@ -1,7 +1,9 @@
+mod fix;
+
 use clap::ValueEnum;
 use colored::Colorize;
-use hushspec::evaluate::glob_matches;
 use hushspec::{DefaultAction, HushSpec};
+use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -18,6 +20,14 @@ pub struct LintArgs {
     /// Exit 1 if any warnings are reported (not just errors)
     #[arg(long)]
     fail_on_warnings: bool,
+
+    /// Apply decision-neutral auto-fixes in place
+    #[arg(long, conflicts_with = "dry_run")]
+    fix: bool,
+
+    /// Show what --fix would change without modifying files
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -27,17 +37,46 @@ enum LintOutputFormat {
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
-struct LintFinding {
+pub(crate) struct LintFinding {
+    code: String,
+    severity: String,
+    message: String,
+    /// Machine-parseable pointer for the subset of findings that support
+    /// entry-precise auto-fixing: `rules.<block>.<field>[<idx>]`. Findings
+    /// that can't point at a single list entry fall back to the file path.
+    location: String,
+}
+
+/// JSON view of a finding: identical to `LintFinding` plus the derived
+/// `fixable` flag (additive field; text output is unaffected).
+#[derive(serde::Serialize)]
+struct FindingJson {
     code: String,
     severity: String,
     message: String,
     location: String,
+    fixable: bool,
+}
+
+impl FindingJson {
+    fn new(spec: &HushSpec, finding: &LintFinding) -> Self {
+        FindingJson {
+            code: finding.code.clone(),
+            severity: finding.severity.clone(),
+            message: finding.message.clone(),
+            location: finding.location.clone(),
+            fixable: fix::finding_is_fixable(spec, finding),
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
 struct FileLintResult {
     file: String,
-    findings: Vec<LintFinding>,
+    findings: Vec<FindingJson>,
+    /// Codes actually remediated by `--fix`/`--dry-run` for this file (additive
+    /// field; empty when neither flag was passed or nothing was fixable).
+    fixed: Vec<String>,
 }
 
 pub fn run(args: LintArgs) -> i32 {
@@ -45,6 +84,8 @@ pub fn run(args: LintArgs) -> i32 {
     let mut any_errors = false;
     let mut any_warnings = false;
     let mut any_parse_error = false;
+    let mut any_write_error = false;
+    let want_fix = args.fix || args.dry_run;
 
     for path in &args.files {
         if !path.exists() {
@@ -53,12 +94,14 @@ pub fn run(args: LintArgs) -> i32 {
             }
             all_results.push(FileLintResult {
                 file: path.display().to_string(),
-                findings: vec![LintFinding {
+                findings: vec![FindingJson {
                     code: "E000".into(),
                     severity: "error".into(),
                     message: format!("file not found: {}", path.display()),
                     location: path.display().to_string(),
+                    fixable: false,
                 }],
+                fixed: Vec::new(),
             });
             any_parse_error = true;
             continue;
@@ -72,19 +115,23 @@ pub fn run(args: LintArgs) -> i32 {
                 }
                 all_results.push(FileLintResult {
                     file: path.display().to_string(),
-                    findings: vec![LintFinding {
+                    findings: vec![FindingJson {
                         code: "E000".into(),
                         severity: "error".into(),
                         message: format!("failed to read file: {e}"),
                         location: path.display().to_string(),
+                        fixable: false,
                     }],
+                    fixed: Vec::new(),
                 });
                 any_parse_error = true;
                 continue;
             }
         };
 
-        let spec = match HushSpec::parse(&content) {
+        // Never rewrite a file that failed to parse: on a parse error we
+        // record the finding and move on without touching `--fix`/`--dry-run`.
+        let mut spec = match HushSpec::parse(&content) {
             Ok(s) => s,
             Err(e) => {
                 if matches!(args.format, LintOutputFormat::Text) {
@@ -92,19 +139,82 @@ pub fn run(args: LintArgs) -> i32 {
                 }
                 all_results.push(FileLintResult {
                     file: path.display().to_string(),
-                    findings: vec![LintFinding {
+                    findings: vec![FindingJson {
                         code: "E001".into(),
                         severity: "error".into(),
                         message: format!("YAML parse error: {e}"),
                         location: path.display().to_string(),
+                        fixable: false,
                     }],
+                    fixed: Vec::new(),
                 });
                 any_parse_error = true;
                 continue;
             }
         };
 
-        let findings = lint_spec(&spec, &path.display().to_string());
+        let mut findings = run_all_checks(&spec, &path.display().to_string());
+        let mut fixed_codes: Vec<String> = Vec::new();
+
+        if want_fix {
+            fixed_codes = fix::apply_fixes(&mut spec, &findings);
+
+            // Only touch the file when something was actually fixed. Writing
+            // unconditionally through the canonical formatter would also
+            // silently strip comments and reflow untouched-but-unsorted
+            // policies -- fine for `h2h fmt` (that's its whole job), but a
+            // surprising side effect for a lint `--fix` that's supposed to be
+            // limited to the specific findings it resolved.
+            if !fixed_codes.is_empty() {
+                // Findings that still describe the on-disk file (used if a
+                // `--fix` write fails, so the report never claims a file was
+                // fixed that was never actually written).
+                let pre_fix_findings = findings.clone();
+
+                // Re-lint against the fixed model so the report (and the exit
+                // code below) reflects only what's actually left.
+                findings = run_all_checks(&spec, &path.display().to_string());
+
+                // `spec` was mutated in place by `apply_fixes`, so this canonicalizes
+                // the in-memory model directly rather than routing through
+                // `format_canonical` -- but the original file's modeline (if any)
+                // must still be preserved, so it's split from `content` and rejoined
+                // the same way `format_canonical` would.
+                let (modeline, _) = crate::cmd_fmt::split_modeline(&content);
+                let canonical = crate::cmd_fmt::format_spec(&spec);
+                let formatted = crate::cmd_fmt::normalize_trailing_newline(
+                    &crate::cmd_fmt::rejoin_modeline(modeline, &canonical),
+                );
+
+                if args.fix {
+                    if let Err(e) = std::fs::write(path, &formatted) {
+                        eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
+                        any_write_error = true;
+                        // The on-disk file is unchanged, so report its actual
+                        // (pre-fix) findings and no applied fixes.
+                        findings = pre_fix_findings;
+                        fixed_codes = Vec::new();
+                    } else if matches!(args.format, LintOutputFormat::Text) {
+                        println!(
+                            "{} {} ({} fix(es) applied: {})",
+                            "FIXED".green(),
+                            path.display(),
+                            fixed_codes.len(),
+                            fixed_codes.join(", ")
+                        );
+                    }
+                } else if matches!(args.format, LintOutputFormat::Text) {
+                    // --dry-run: never write, just show what would change.
+                    let original_normalized = crate::cmd_fmt::normalize_trailing_newline(&content);
+                    println!(
+                        "{}",
+                        crate::cmd_fmt::compute_diff(&original_normalized, &formatted, path)
+                    );
+                }
+            } else if args.dry_run && matches!(args.format, LintOutputFormat::Text) {
+                println!("{} {} nothing to fix", "ok".green(), path.display());
+            }
+        }
 
         for f in &findings {
             match f.severity.as_str() {
@@ -120,7 +230,11 @@ pub fn run(args: LintArgs) -> i32 {
 
         all_results.push(FileLintResult {
             file: path.display().to_string(),
-            findings,
+            findings: findings
+                .iter()
+                .map(|f| FindingJson::new(&spec, f))
+                .collect(),
+            fixed: fixed_codes,
         });
     }
 
@@ -130,7 +244,9 @@ pub fn run(args: LintArgs) -> i32 {
         println!("{json}");
     }
 
-    if any_parse_error || any_errors || (any_warnings && args.fail_on_warnings) {
+    if any_write_error {
+        2
+    } else if any_parse_error || any_errors || (any_warnings && args.fail_on_warnings) {
         1
     } else {
         0
@@ -150,7 +266,9 @@ fn print_text_findings(findings: &[LintFinding], _file: &str) {
     }
 }
 
-fn lint_spec(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
+/// Run every lint check against `spec` and return the findings. Shared by the
+/// CLI's plain lint pass and by `fix::apply_fixes`'s fixpoint re-linting.
+pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     let mut findings = Vec::new();
 
     let Some(rules) = &spec.rules else {
@@ -264,48 +382,39 @@ fn check_empty_rule_blocks(rules: &hushspec::Rules, file: &str, findings: &mut V
 
 fn check_overlapping_patterns(
     rules: &hushspec::Rules,
-    file: &str,
+    _file: &str,
     findings: &mut Vec<LintFinding>,
 ) {
     if let Some(forbidden_paths) = &rules.forbidden_paths {
         find_overlapping_globs(
             &forbidden_paths.patterns,
             "rules.forbidden_paths.patterns",
-            file,
             findings,
         );
     }
 
     if let Some(egress) = &rules.egress {
-        find_overlapping_globs(&egress.allow, "rules.egress.allow", file, findings);
-        find_overlapping_globs(&egress.block, "rules.egress.block", file, findings);
+        find_overlapping_globs(&egress.allow, "rules.egress.allow", findings);
+        find_overlapping_globs(&egress.block, "rules.egress.block", findings);
     }
 
     if let Some(tool_access) = &rules.tool_access {
-        find_overlapping_globs(
-            &tool_access.allow,
-            "rules.tool_access.allow",
-            file,
-            findings,
-        );
-        find_overlapping_globs(
-            &tool_access.block,
-            "rules.tool_access.block",
-            file,
-            findings,
-        );
+        find_overlapping_globs(&tool_access.allow, "rules.tool_access.allow", findings);
+        find_overlapping_globs(&tool_access.block, "rules.tool_access.block", findings);
     }
 }
 
-fn find_overlapping_globs(
-    patterns: &[String],
-    path: &str,
-    file: &str,
-    findings: &mut Vec<LintFinding>,
-) {
+fn find_overlapping_globs(patterns: &[String], path: &str, findings: &mut Vec<LintFinding>) {
+    // Precompile once: `globs_may_overlap` is called O(n^2) times below, and
+    // recompiling each pattern's regex on every pairwise/candidate check made
+    // this quadratic in `Regex::new` calls (visibly slow on real-sized policies
+    // in debug builds). Reusing the compiled matcher keeps behavior identical
+    // while making the fixpoint re-lint in `fix::apply_fixes` practical.
+    let compiled = compile_globs(patterns);
+
     for i in 0..patterns.len() {
         for j in (i + 1)..patterns.len() {
-            if globs_may_overlap(&patterns[i], &patterns[j]) {
+            if globs_may_overlap(&patterns[i], &compiled[i], &patterns[j], &compiled[j]) {
                 findings.push(LintFinding {
                     code: "L002".into(),
                     severity: "warning".into(),
@@ -313,7 +422,12 @@ fn find_overlapping_globs(
                         "{path}[{i}] {:?} and {path}[{j}] {:?} may overlap",
                         patterns[i], patterns[j]
                     ),
-                    location: file.into(),
+                    // Points at the later entry, mirroring L008's convention of
+                    // flagging the redundant occurrence. `fix::apply_fixes` only
+                    // ever acts on this when it independently reverifies the
+                    // pair is byte-identical -- this check merely proves "may
+                    // overlap" via sampling, not general subsumption.
+                    location: format!("{path}[{j}]"),
                 });
             }
         }
@@ -321,7 +435,10 @@ fn find_overlapping_globs(
 }
 
 /// Heuristic check: do two glob patterns potentially match the same target?
-fn globs_may_overlap(a: &str, b: &str) -> bool {
+/// This proves "disjoint" is false on a sample of synthetic candidates; it is
+/// NOT a proof of subsumption in either direction, so callers must not treat
+/// a positive result as license to drop either pattern (except when `a == b`).
+fn globs_may_overlap(a: &str, ra: &Option<Regex>, b: &str, rb: &Option<Regex>) -> bool {
     if a == b {
         return true;
     }
@@ -331,12 +448,50 @@ fn globs_may_overlap(a: &str, b: &str) -> bool {
         .chain(generate_synthetic_paths(b));
 
     for path in test_paths {
-        if glob_matches(a, &path) && glob_matches(b, &path) {
+        if regex_is_match(ra, &path) && regex_is_match(rb, &path) {
             return true;
         }
     }
 
     false
+}
+
+/// Translate a HushSpec glob (`*`, `**`, literal chars) into a compiled regex.
+/// Mirrors `hushspec::evaluate::glob_matches`'s translation exactly -- kept
+/// local (rather than shared) so this lint-only performance cache can't be
+/// mistaken for a second source of truth for real policy evaluation. The
+/// `glob_translation_matches_evaluate_semantics` test below pins agreement.
+fn compile_glob(pattern: &str) -> Option<Regex> {
+    let mut regex_str = String::from("^");
+    let mut chars = pattern.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '*' => {
+                if matches!(chars.peek(), Some('*')) {
+                    chars.next();
+                    regex_str.push_str(".*");
+                } else {
+                    regex_str.push_str("[^/]*");
+                }
+            }
+            '?' => regex_str.push('.'),
+            '.' | '+' | '(' | ')' | '{' | '}' | '[' | ']' | '^' | '$' | '|' | '\\' => {
+                regex_str.push('\\');
+                regex_str.push(ch);
+            }
+            _ => regex_str.push(ch),
+        }
+    }
+    regex_str.push('$');
+    Regex::new(&regex_str).ok()
+}
+
+fn compile_globs(patterns: &[String]) -> Vec<Option<Regex>> {
+    patterns.iter().map(|p| compile_glob(p)).collect()
+}
+
+fn regex_is_match(compiled: &Option<Regex>, target: &str) -> bool {
+    compiled.as_ref().is_some_and(|r| r.is_match(target))
 }
 
 /// Generate synthetic test paths from a glob pattern by extracting literal segments
@@ -360,7 +515,11 @@ fn generate_synthetic_paths(pattern: &str) -> Vec<String> {
     paths
 }
 
-fn check_shadowed_exceptions(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {
+fn check_shadowed_exceptions(
+    rules: &hushspec::Rules,
+    _file: &str,
+    findings: &mut Vec<LintFinding>,
+) {
     let Some(forbidden_paths) = &rules.forbidden_paths else {
         return;
     };
@@ -369,13 +528,17 @@ fn check_shadowed_exceptions(rules: &hushspec::Rules, file: &str, findings: &mut
         return;
     }
 
+    // Precompile once and reuse across every exception (see `find_overlapping_globs`
+    // for why: this loop is patterns x exceptions x synthetic candidates, and
+    // recompiling per candidate was the dominant cost on real policies).
+    let compiled_patterns = compile_globs(&forbidden_paths.patterns);
+
     for (i, exception) in forbidden_paths.exceptions.iter().enumerate() {
         let synthetic = generate_synthetic_paths(exception);
         let any_blocked = synthetic.iter().any(|test_path| {
-            forbidden_paths
-                .patterns
+            compiled_patterns
                 .iter()
-                .any(|pattern| glob_matches(pattern, test_path))
+                .any(|r| regex_is_match(r, test_path))
         });
 
         if !any_blocked {
@@ -386,7 +549,7 @@ fn check_shadowed_exceptions(rules: &hushspec::Rules, file: &str, findings: &mut
                     "rules.forbidden_paths.exceptions[{i}] {:?} does not match any forbidden pattern -- exception has no effect",
                     exception
                 ),
-                location: file.into(),
+                location: format!("rules.forbidden_paths.exceptions[{i}]"),
             });
         }
     }
@@ -555,10 +718,8 @@ fn has_nested_quantifiers(pattern: &str) -> bool {
                 }
                 has_inner_quantifier = false;
             }
-            b'+' | b'*' => {
-                if depth > 0 {
-                    has_inner_quantifier = true;
-                }
+            b'+' | b'*' if depth > 0 => {
+                has_inner_quantifier = true;
             }
             _ => {}
         }
@@ -617,44 +778,31 @@ fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<
     }
 }
 
-fn check_duplicate_patterns(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {
+fn check_duplicate_patterns(rules: &hushspec::Rules, _file: &str, findings: &mut Vec<LintFinding>) {
     if let Some(forbidden_paths) = &rules.forbidden_paths {
         find_duplicates(
             &forbidden_paths.patterns,
             "rules.forbidden_paths.patterns",
-            file,
             findings,
         );
         find_duplicates(
             &forbidden_paths.exceptions,
             "rules.forbidden_paths.exceptions",
-            file,
             findings,
         );
     }
 
     if let Some(egress) = &rules.egress {
-        find_duplicates(&egress.allow, "rules.egress.allow", file, findings);
-        find_duplicates(&egress.block, "rules.egress.block", file, findings);
+        find_duplicates(&egress.allow, "rules.egress.allow", findings);
+        find_duplicates(&egress.block, "rules.egress.block", findings);
     }
 
     if let Some(tool_access) = &rules.tool_access {
-        find_duplicates(
-            &tool_access.allow,
-            "rules.tool_access.allow",
-            file,
-            findings,
-        );
-        find_duplicates(
-            &tool_access.block,
-            "rules.tool_access.block",
-            file,
-            findings,
-        );
+        find_duplicates(&tool_access.allow, "rules.tool_access.allow", findings);
+        find_duplicates(&tool_access.block, "rules.tool_access.block", findings);
         find_duplicates(
             &tool_access.require_confirmation,
             "rules.tool_access.require_confirmation",
-            file,
             findings,
         );
     }
@@ -663,13 +811,15 @@ fn check_duplicate_patterns(rules: &hushspec::Rules, file: &str, findings: &mut 
         find_duplicates(
             &shell_commands.forbidden_patterns,
             "rules.shell_commands.forbidden_patterns",
-            file,
             findings,
         );
     }
 }
 
-fn find_duplicates(list: &[String], path: &str, file: &str, findings: &mut Vec<LintFinding>) {
+/// Location is entry-precise (`{path}[{i}]`) rather than the file-level
+/// fallback other checks use: `fix::apply_fixes` relies on it to remove
+/// exactly the flagged (later) occurrence of an exact duplicate.
+fn find_duplicates(list: &[String], path: &str, findings: &mut Vec<LintFinding>) {
     let mut seen: HashSet<&str> = HashSet::new();
     for (i, entry) in list.iter().enumerate() {
         if !seen.insert(entry.as_str()) {
@@ -677,7 +827,7 @@ fn find_duplicates(list: &[String], path: &str, file: &str, findings: &mut Vec<L
                 code: "L008".into(),
                 severity: "warning".into(),
                 message: format!("{path}[{i}]: duplicate pattern {:?}", entry),
-                location: file.into(),
+                location: format!("{path}[{i}]"),
             });
         }
     }
@@ -737,6 +887,7 @@ fn check_unreachable_allow(rules: &hushspec::Rules, file: &str, findings: &mut V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hushspec::evaluate::glob_matches;
 
     #[test]
     fn test_has_nested_quantifiers() {
@@ -754,5 +905,34 @@ mod tests {
         assert!(!glob_matches("*.txt", "hello.rs"));
         assert!(glob_matches("**/.ssh/**", "/home/user/.ssh/id_rsa"));
         assert!(glob_matches("*", "anything"));
+    }
+
+    /// `compile_glob`/`regex_is_match` is a local performance cache for the
+    /// exact same glob semantics `hushspec::evaluate::glob_matches` uses.
+    /// This pins agreement so the two can't silently drift apart.
+    #[test]
+    fn glob_translation_matches_evaluate_semantics() {
+        let cases: &[(&str, &str)] = &[
+            ("*.txt", "hello.txt"),
+            ("*.txt", "hello.rs"),
+            ("**/.ssh/**", "/home/user/.ssh/id_rsa"),
+            ("*", "anything"),
+            ("*", "a/b"),
+            ("file.*", "file.secret"),
+            ("*.secret", "file.secret"),
+            ("**/.env.*", "/repo/.env.local"),
+            ("a?c", "abc"),
+            ("a?c", "ac"),
+            ("literal[with]chars", "literal[with]chars"),
+            ("**/customer-data/**", "/x/customer-data/y"),
+        ];
+        for (pattern, target) in cases {
+            let compiled = compile_glob(pattern);
+            assert_eq!(
+                regex_is_match(&compiled, target),
+                glob_matches(pattern, target),
+                "compile_glob disagreed with glob_matches for pattern {pattern:?} target {target:?}"
+            );
+        }
     }
 }

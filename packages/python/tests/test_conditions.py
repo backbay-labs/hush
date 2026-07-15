@@ -94,6 +94,69 @@ class TestContextConditions:
 
 
 
+# S1 parity: array-vs-array intersection and number/bool array membership
+#
+# Rust's `matches_scalar_or_membership`/`match_value` (crates/hushspec/src/
+# evaluate.rs) is the cross-SDK reference: expected-array vs actual-array
+# matches iff the sets intersect, and expected-array vs actual-scalar matches
+# for any scalar type (string/number/bool), not just strings.
+
+
+class TestArrayMembershipParity:
+    def test_array_vs_array_matches_on_intersection(self):
+        ctx = RuntimeContext(user={"groups": ["engineering", "ml-team"]})
+        cond = Condition(context={"user.groups": ["ml-team", "sales"]})
+        assert evaluate_condition(cond, ctx) is True
+
+    def test_array_vs_array_no_intersection_fails(self):
+        ctx = RuntimeContext(user={"groups": ["engineering", "ml-team"]})
+        cond = Condition(context={"user.groups": ["sales", "support"]})
+        assert evaluate_condition(cond, ctx) is False
+
+    def test_array_vs_array_single_shared_element_matches(self):
+        ctx = RuntimeContext(user={"groups": ["a", "b", "c"]})
+        cond = Condition(context={"user.groups": ["c", "d", "e"]})
+        assert evaluate_condition(cond, ctx) is True
+
+    def test_expected_array_matches_actual_number_scalar(self):
+        ctx = RuntimeContext(session={"action_count": 2})
+        cond = Condition(context={"session.action_count": [1, 2, 3]})
+        assert evaluate_condition(cond, ctx) is True
+        ctx_miss = RuntimeContext(session={"action_count": 99})
+        assert evaluate_condition(cond, ctx_miss) is False
+
+    def test_expected_array_matches_actual_bool_scalar(self):
+        ctx = RuntimeContext(request={"interactive": True})
+        cond = Condition(context={"request.interactive": [False, True]})
+        assert evaluate_condition(cond, ctx) is True
+        ctx_miss = RuntimeContext(request={"interactive": False})
+        cond_true_only = Condition(context={"request.interactive": [True]})
+        assert evaluate_condition(cond_true_only, ctx_miss) is False
+
+    def test_actual_array_matches_expected_number_scalar(self):
+        ctx = RuntimeContext(session={"tags": [1, 2, 3]})
+        cond = Condition(context={"session.tags": 2})
+        assert evaluate_condition(cond, ctx) is True
+
+    def test_actual_array_matches_expected_bool_scalar(self):
+        ctx = RuntimeContext(agent={"flags": [False, True]})
+        cond = Condition(context={"agent.flags": True})
+        assert evaluate_condition(cond, ctx) is True
+
+    def test_bool_is_not_numeric_expected_number_actual_bool(self):
+        # bool must never spuriously match a numeric expected, even though
+        # bool is a subclass of int in Python.
+        ctx = RuntimeContext(user={"flag": True})
+        cond = Condition(context={"user.flag": 1})
+        assert evaluate_condition(cond, ctx) is False
+
+    def test_bool_is_not_numeric_expected_bool_actual_number(self):
+        ctx = RuntimeContext(user={"flag": 1})
+        cond = Condition(context={"user.flag": True})
+        assert evaluate_condition(cond, ctx) is False
+
+
+
 # Time window conditions
 
 

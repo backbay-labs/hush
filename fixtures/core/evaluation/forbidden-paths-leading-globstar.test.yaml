@@ -1,0 +1,45 @@
+hushspec_test: "0.1.0"
+description: "A leading `**/` matches zero or more path segments, so bare repo-root files are covered identically across all SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    forbidden_paths:
+      patterns:
+        - "**/.env"
+        - "**/id_rsa*"
+        - "**/.ssh/**"
+cases:
+  - description: "bare repo-root .env denied (zero leading segments)"
+    action:
+      type: file_read
+      target: ".env"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "nested .env denied"
+    action:
+      type: file_read
+      target: "config/sub/.env"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "bare id_rsa denied"
+    action:
+      type: file_read
+      target: "id_rsa"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "nested SSH key denied"
+    action:
+      type: file_read
+      target: "home/user/.ssh/id_rsa"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "`app.env` allowed -- `**/.env` matches the segment `.env`, not any `*.env` suffix (anchoring preserved)"
+    action:
+      type: file_read
+      target: "app.env"
+    expect:
+      decision: allow

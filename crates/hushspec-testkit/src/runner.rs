@@ -1,5 +1,7 @@
 use crate::fixture::{FixtureCategory, TestFixture};
-use hushspec::{Decision, EvaluationAction, HushSpec, PostureResult, evaluate, merge};
+use hushspec::{
+    Decision, EvaluationAction, HushSpec, PostureResult, evaluate_with_detection, merge,
+};
 use jsonschema::JSONSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -179,7 +181,7 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
             }
 
             for (index, case) in doc.cases.iter().enumerate() {
-                let actual = evaluate(&spec, &case.action);
+                let actual = evaluate_with_detection(&spec, &case.action).evaluation;
                 if let Some(message) = compare_expected(&case.expect, &actual) {
                     return TestResult {
                         fixture_path: path,
@@ -360,7 +362,13 @@ struct ExpectedEvaluation {
     posture: Option<PostureResult>,
 }
 
-fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(), String> {
+/// Validate a value against the evaluator-test fixture schema.
+///
+/// `pub(crate)` so `emit::build_regression_fixture` can refuse to emit a
+/// fixture that would fail this exact check -- the same schema, the same
+/// compiled `JSONSchema`, no reimplementation drift between "what the runner
+/// accepts" and "what the emitter promises is valid".
+pub(crate) fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(), String> {
     match evaluator_schema().validate(value) {
         Ok(()) => Ok(()),
         Err(errors) => {
@@ -380,7 +388,14 @@ fn evaluator_schema() -> &'static JSONSchema {
             "../../../schemas/hushspec-evaluator-test.v0.schema.json"
         ))
         .expect("evaluator schema should be valid JSON");
-        JSONSchema::compile(&schema_json).expect("evaluator schema should compile")
+        // The evaluator fixture schema has no `format` keyword today, but formats
+        // are asserted deliberately (rather than left at the draft's default) so
+        // that if a `format` keyword is ever added here, it is enforced instead
+        // of silently becoming a non-asserting annotation under draft 2020-12.
+        JSONSchema::options()
+            .should_validate_formats(true)
+            .compile(&schema_json)
+            .expect("evaluator schema should compile")
     })
 }
 

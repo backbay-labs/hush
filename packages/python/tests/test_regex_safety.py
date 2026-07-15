@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 from hushspec import is_safe_regex, parse, parse_or_raise, validate
 
 
@@ -69,6 +71,151 @@ class TestIsSafeRegex:
     def test_rejects_subroutine_call(self):
         assert is_safe_regex("\\g<name>") is False
 
+    # Possessive braces, \Z/\z anchors, and empty character classes.
+    #
+    # Plain possessive quantifiers (*+, ++, ?+) were already rejected above.
+    # Python's `re` (3.11+) actually *compiles* `a{2,}+` as a real possessive
+    # quantifier rather than erroring like JS/Go do at compile time, so the
+    # brace form needs the same explicit rejection. \Z/\z anchor semantics
+    # differ across engines (and JS treats them as literal letters), and
+    # empty classes [] / [^] are accepted by JS but not the other three
+    # SDKs -- all must be rejected identically everywhere.
+
+    def test_rejects_possessive_brace_exact(self):
+        assert is_safe_regex("a{2}+") is False
+
+    def test_rejects_possessive_brace_unbounded(self):
+        assert is_safe_regex("a{2,}+") is False
+
+    def test_rejects_possessive_brace_range(self):
+        assert is_safe_regex("a{2,5}+") is False
+
+    def test_accepts_bounded_brace_quantifier_without_possessive_marker(self):
+        # Regression guard: a plain (non-possessive) brace quantifier must
+        # still be accepted.
+        assert is_safe_regex("a{2,5}") is True
+        assert is_safe_regex("AKIA[0-9A-Z]{16}") is True
+
+    def test_rejects_end_anchor_Z(self):
+        assert is_safe_regex("foo\\Z") is False
+
+    def test_rejects_end_anchor_z(self):
+        assert is_safe_regex("foo\\z") is False
+
+    def test_rejects_empty_character_class(self):
+        assert is_safe_regex("[]") is False
+
+    def test_rejects_empty_negated_character_class(self):
+        assert is_safe_regex("[^]") is False
+
+
+
+# S3: escape/character-class-aware portability scanner
+#
+# The old `_RE2_DISALLOWED` raw-substring checks for possessive quantifiers
+# and \Z/\z anchors over-rejected patterns where the possessive-looking
+# characters sit inside a character class, or where \Z/\z is actually an
+# escaped backslash followed by a literal Z/z. `_disallowed_regex_feature`
+# (ported from Rust's `disallowed_regex_feature` in
+# crates/hushspec/src/validate.rs) is escape-aware and character-class-aware
+# and must ACCEPT/REJECT the identical shared list across all four SDKs.
+
+
+class TestRegexPortabilityScanner:
+    REJECT = [
+        "a++",
+        "a*+",
+        "a?+",
+        "a{2}+",
+        "a{2,}+",
+        "(ab)++",
+        "\\Z",
+        "\\z",
+        "[]",
+        "[^]",
+    ]
+
+    # Previously (wrongly) rejected by the raw-substring check; must now be
+    # accepted, same as Rust/Go already did.
+    ACCEPT = [
+        "[*+]",
+        "[?+]",
+        "\\\\Z",
+        "\\\\z",
+        "[a{2}+]",
+        "a\\{2}+",
+        "\\[]",
+        "a{2,5}?",
+        "(?:abc)+",
+        "[+*]",
+    ]
+
+    def test_rejects_shared_list(self):
+        for pattern in self.REJECT:
+            assert is_safe_regex(pattern) is False, f"{pattern!r} should be rejected"
+
+    def test_accepts_shared_list(self):
+        for pattern in self.ACCEPT:
+            assert is_safe_regex(pattern) is True, f"{pattern!r} should be accepted"
+
+    def test_rejects_shared_list_via_parse(self):
+        # Exercises raw_validate.py's independent copy of the scanner -- the
+        # path parse() actually takes for user-supplied policies -- not just
+        # validate.py's is_safe_regex, to guard against the two copies
+        # drifting apart. Patterns are serialized via yaml.safe_dump so
+        # backslash-heavy patterns round-trip without manual YAML escaping.
+        #
+        # Note: we only assert overall rejection (fail-closed), not that the
+        # error text names "RE2" specifically -- lowercase `\z` is not a
+        # recognized Python `re` escape at all (unlike `\Z`), so Python's own
+        # `re.compile` rejects it with a "bad escape" error before our
+        # portability scanner or the RE2-feature check ever runs. That is a
+        # pre-existing, engine-specific quirk unrelated to this scanner; the
+        # pattern is still correctly rejected either way.
+        for pattern in self.REJECT:
+            doc = {
+                "hushspec": "0.1.0",
+                "rules": {"shell_commands": {"forbidden_patterns": [pattern]}},
+            }
+            ok, err = parse(yaml.safe_dump(doc))
+            assert ok is False, f"{pattern!r} should be rejected: {err}"
+
+    def test_accepts_shared_list_via_parse(self):
+        for pattern in self.ACCEPT:
+            doc = {
+                "hushspec": "0.1.0",
+                "rules": {"shell_commands": {"forbidden_patterns": [pattern]}},
+            }
+            ok, result = parse(yaml.safe_dump(doc))
+            assert ok is True, f"{pattern!r} should parse: {result if not ok else ''}"
+
+
+
+# Nested-quantifier (catastrophic backtracking / ReDoS) heuristic
+
+
+
+class TestNestedQuantifierHeuristic:
+    REJECT = ["(a+)+", "(a*)*", "(a+)*", "([0-9]+)*", r"(\d+)+", "(a+)+$"]
+    ACCEPT = [
+        "(abc)+",
+        "a+",
+        r"\d{3}-\d{2}-\d{4}",
+        "(?:foo|bar)+",
+        "(a{1,3}){1,3}",
+        "sk-(proj-)?[A-Za-z0-9_-]{20,}",
+        "(AKIA|ASIA)[0-9A-Z]{16}",
+        "github_pat_[0-9a-zA-Z_]{50,}",
+    ]
+
+    def test_rejects_nested_unbounded_quantifiers(self):
+        for pattern in self.REJECT:
+            assert is_safe_regex(pattern) is False, f"{pattern!r} should be rejected"
+
+    def test_accepts_safe_quantifier_shapes(self):
+        for pattern in self.ACCEPT:
+            assert is_safe_regex(pattern) is True, f"{pattern!r} should be accepted"
+
 
 
 # Regex validation in parse/validate pipeline
@@ -128,6 +275,45 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert "RE2" in err
+
+    def test_rejects_possessive_brace_in_shell_commands(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    forbidden_patterns:
+      - "a{2,}+"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "RE2" in err
+
+    def test_rejects_end_anchor_in_secret_patterns(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  secret_patterns:
+    patterns:
+      - name: bad
+        pattern: "foo\\\\Z"
+        severity: critical
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "RE2" in err
+
+    def test_rejects_empty_character_class_in_patch_integrity(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: 10.0
+    forbidden_patterns:
+      - "[]"
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "valid regular expression" in err
 
     def test_rejects_lookbehind_in_patch_integrity(self):
         yaml = """

@@ -12,6 +12,11 @@ pub struct DiffArgs {
     /// Updated policy file (after change)
     new: PathBuf,
 
+    /// Panic sentinel file to consult before evaluating; if it exists the
+    /// process denies all actions (default: .hushspec_panic)
+    #[arg(long, value_name = "PATH")]
+    sentinel: Option<PathBuf>,
+
     /// Output format
     #[arg(short, long, default_value = "text")]
     format: DiffOutputFormat,
@@ -45,6 +50,10 @@ struct ProbeAction {
 }
 
 pub fn run(args: DiffArgs) -> i32 {
+    // A file-based `h2h panic activate` sentinel must flip the process-global
+    // panic latch before evaluation, otherwise the kill switch is a no-op here.
+    crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
+
     // Load old policy
     let old_spec = match load_policy(&args.old) {
         Ok(s) => s,
@@ -208,13 +217,32 @@ fn extract_path_targets(
     let Some(rules) = &spec.rules else { return };
 
     if let Some(forbidden_paths) = &rules.forbidden_paths {
-        for pattern in &forbidden_paths.patterns {
+        // forbidden_paths applies to reads, writes, and patches alike, and
+        // path_allowlist can allow or deny each operation independently, so
+        // probe every path operation against these targets. Probing only
+        // file_read (as before) would miss an operation-specific allow->deny
+        // flip on writes or patches.
+        for pattern in forbidden_paths
+            .patterns
+            .iter()
+            .chain(&forbidden_paths.exceptions)
+        {
             let concrete = concretize_glob(pattern);
             insert_probe(probes, "file_read", &concrete, None, None);
-        }
-        for pattern in &forbidden_paths.exceptions {
-            let concrete = concretize_glob(pattern);
-            insert_probe(probes, "file_read", &concrete, None, None);
+            insert_probe(
+                probes,
+                "file_write",
+                &concrete,
+                Some("hello world".to_string()),
+                None,
+            );
+            insert_probe(
+                probes,
+                "patch_apply",
+                &concrete,
+                Some(build_patch(1, 0)),
+                None,
+            );
         }
     }
 }
@@ -652,7 +680,9 @@ fn floor_char_boundary(s: &str, max_len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_regex_literal, format_decision_cell, truncate_str};
+    use super::{extract_path_targets, extract_regex_literal, format_decision_cell, truncate_str};
+    use hushspec::HushSpec;
+    use std::collections::BTreeSet;
 
     fn strip_ansi(value: &str) -> String {
         let mut stripped = String::new();
@@ -691,5 +721,32 @@ mod tests {
     fn extract_regex_literal_skips_quantifier_arguments() {
         let literal = extract_regex_literal(r"AKIA[0-9A-Z]{16}");
         assert_eq!(literal, "AKIA0");
+    }
+
+    #[test]
+    fn extract_path_targets_probes_read_write_and_patch() {
+        let spec = HushSpec::parse(
+            "hushspec: \"0.1.0\"\nrules:\n  forbidden_paths:\n    patterns:\n      - \"secret.txt\"\n",
+        )
+        .unwrap();
+        let mut probes = BTreeSet::new();
+        extract_path_targets(&spec, &mut probes);
+
+        let action_types: BTreeSet<&str> = probes
+            .iter()
+            .map(|(action, _, _, _)| action.as_str())
+            .collect();
+        assert!(
+            action_types.contains("file_read"),
+            "missing file_read probe"
+        );
+        assert!(
+            action_types.contains("file_write"),
+            "missing file_write probe"
+        );
+        assert!(
+            action_types.contains("patch_apply"),
+            "missing patch_apply probe"
+        );
     }
 }

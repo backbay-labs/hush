@@ -11,18 +11,27 @@ import (
 
 // DecisionReceipt is an auditable record of a single policy evaluation.
 type DecisionReceipt struct {
-	ReceiptID            string            `json:"receipt_id"`
-	Timestamp            string            `json:"timestamp"`
-	HushSpecVersion      string            `json:"hushspec_version"`
-	Action               ActionSummary     `json:"action"`
-	Decision             Decision          `json:"decision"`
-	MatchedRule          string            `json:"matched_rule,omitempty"`
-	Reason               string            `json:"reason,omitempty"`
-	RuleTrace            []RuleEvaluation  `json:"rule_trace"`
-	Policy               PolicySummary     `json:"policy"`
-	OriginProfile        string            `json:"origin_profile,omitempty"`
-	Posture              *PostureResult    `json:"posture,omitempty"`
-	EvaluationDurationUs int64             `json:"evaluation_duration_us"`
+	ReceiptID            string              `json:"receipt_id"`
+	Timestamp            string              `json:"timestamp"`
+	HushSpecVersion      string              `json:"hushspec_version"`
+	Action               ActionSummary       `json:"action"`
+	Decision             Decision            `json:"decision"`
+	MatchedRule          string              `json:"matched_rule,omitempty"`
+	Reason               string              `json:"reason,omitempty"`
+	RuleTrace            []RuleEvaluation    `json:"rule_trace"`
+	Policy               PolicySummary       `json:"policy"`
+	OriginProfile        string              `json:"origin_profile,omitempty"`
+	Posture              *PostureResult      `json:"posture,omitempty"`
+	EvaluationDurationUs int64               `json:"evaluation_duration_us"`
+	Enforcement          *EnforcementSummary `json:"enforcement,omitempty"`
+}
+
+// EnforcementSummary records how the runtime applied a decision. The
+// Decision field on the receipt is always the evaluated policy decision;
+// this records what the enforcement point did with it.
+type EnforcementSummary struct {
+	Mode    string `json:"mode"`    // "enforce" | "monitor"
+	Outcome string `json:"outcome"` // "allowed" | "confirmed" | "blocked" | "would_block"
 }
 
 type ActionSummary struct {
@@ -49,9 +58,13 @@ type RuleEvaluation struct {
 }
 
 type PolicySummary struct {
-	Name        string `json:"name,omitempty"`
-	Version     string `json:"version"`
-	ContentHash string `json:"content_hash"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version"`
+	// ContentHash is the SHA-256 hex digest of the canonical JSON
+	// serialization of the resolved policy document. Omitted when audit is
+	// disabled -- the zero-overhead disabled-audit fast path never computes
+	// a hash, so the field is absent rather than an empty string.
+	ContentHash string `json:"content_hash,omitempty"`
 }
 
 // AuditConfig controls receipt verbosity. When Enabled is false, the receipt
@@ -171,7 +184,7 @@ func collectRuleTrace(
 	action *EvaluationAction,
 	result *EvaluationResult,
 ) []RuleEvaluation {
-	var trace []RuleEvaluation
+	trace := []RuleEvaluation{}
 
 	if result.Posture != nil {
 		postureDenied := result.MatchedRule != "" &&

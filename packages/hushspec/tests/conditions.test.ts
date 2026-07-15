@@ -105,6 +105,77 @@ describe('evaluateCondition', () => {
       };
       expect(evaluateCondition(cond, ctx)).toBe(true);
     });
+
+    // Cross-SDK parity fix (spec item S1): array expected vs array actual
+    // matches iff the sets intersect (Rust computes a non-empty membership
+    // overlap, not strict equality) -- mirrors
+    // crates/hushspec/src/conditions.rs `context_condition_array_or_match`
+    // combined with the array-actual path of `matches_scalar_or_membership`.
+    it('array expected vs array actual matches when the sets intersect', () => {
+      const ctx: RuntimeContext = {
+        user: { groups: ['engineering', 'ml-team'] },
+      };
+      const cond: Condition = {
+        context: { 'user.groups': ['ml-team', 'sre'] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(true);
+    });
+
+    it('array expected vs array actual does not match when the sets are disjoint', () => {
+      const ctx: RuntimeContext = {
+        user: { groups: ['engineering', 'ml-team'] },
+      };
+      const cond: Condition = {
+        context: { 'user.groups': ['sre', 'finance'] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(false);
+    });
+
+    // Cross-SDK parity fix (spec item S1): expected array vs actual scalar
+    // matches iff the scalar is a member of the expected array, for number
+    // and bool actual values too (previously TS only handled string
+    // membership here). Mirrors crates/hushspec/src/conditions.rs
+    // `context_condition_array_or_match_numbers` /
+    // `context_condition_array_or_match_booleans`.
+    it('array of expected numbers matches a scalar actual number (membership)', () => {
+      const ctx: RuntimeContext = {
+        session: { action_count: 2 },
+      };
+      const cond: Condition = {
+        context: { 'session.action_count': [1, 2, 3] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(true);
+    });
+
+    it('array of expected numbers rejects a scalar actual number outside the set', () => {
+      const ctx: RuntimeContext = {
+        session: { action_count: 9 },
+      };
+      const cond: Condition = {
+        context: { 'session.action_count': [1, 2, 3] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(false);
+    });
+
+    it('array of expected booleans matches a scalar actual boolean (membership)', () => {
+      const ctx: RuntimeContext = {
+        request: { interactive: true },
+      };
+      const cond: Condition = {
+        context: { 'request.interactive': [true] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(true);
+    });
+
+    it('array of expected booleans rejects a scalar actual boolean outside the set', () => {
+      const ctx: RuntimeContext = {
+        request: { interactive: false },
+      };
+      const cond: Condition = {
+        context: { 'request.interactive': [true] },
+      };
+      expect(evaluateCondition(cond, ctx)).toBe(false);
+    });
   });
 
   // -----------------------------------------------------------------------

@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 hushspec: "0.1.0"
 name: ai-agent
 description: Security rules optimized for AI coding assistants
@@ -58,19 +59,25 @@ rules:
   secret_patterns:
     patterns:
       - name: aws_access_key
-        pattern: "AKIA[0-9A-Z]{16}"
+        pattern: "(AKIA|ASIA)[0-9A-Z]{16}"
         severity: critical
       - name: github_token
-        pattern: "gh[ps]_[A-Za-z0-9]{36}"
+        pattern: "gh[opsur]_[A-Za-z0-9]{36}"
+        severity: critical
+      - name: github_fine_grained_pat
+        pattern: "github_pat_[0-9a-zA-Z_]{50,}"
         severity: critical
       - name: openai_key
         pattern: "sk-[A-Za-z0-9]{48}"
         severity: critical
+      - name: openai_project_key
+        pattern: "sk-proj-[A-Za-z0-9_]{20,}"
+        severity: critical
       - name: anthropic_key
-        pattern: "sk-ant-[A-Za-z0-9\\-]{95}"
+        pattern: "sk-ant-[A-Za-z0-9_\\-]{95}"
         severity: critical
       - name: private_key
-        pattern: "-----BEGIN\\s+(RSA\\s+)?PRIVATE\\s+KEY-----"
+        pattern: "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
         severity: critical
     skip_paths:
       - "**/test/**"
@@ -84,20 +91,26 @@ rules:
     require_balance: false
     max_imbalance_ratio: 20.0
     forbidden_patterns:
-      - "(?i)rm\\s+-rf\\s+/"
-      - "(?i)chmod\\s+777"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
 
   shell_commands:
     forbidden_patterns:
-      - "(?i)rm\\s+-rf\\s+/"
-      - "curl.*\\|.*bash"
-      - "wget.*\\|.*bash"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "curl.*\\|.*sh"
+      - "wget.*\\|.*sh"
+      - "(?i)mkfs"
+      - "(?i)dd[ \\t\\n\\r\\f]+if="
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
+      - "(?i)>[ \\t\\n\\r\\f]*/dev/sd"
 
   tool_access:
     allow: []
     block:
       - shell_exec
       - run_command
+      - raw_file_write
+      - raw_file_delete
     require_confirmation:
       - git_push
       - deploy

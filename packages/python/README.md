@@ -54,6 +54,34 @@ if result.decision == "deny":
 guard.enforce({"type": "egress", "target": "api.openai.com"})
 ```
 
+### Shadow / monitor mode
+
+Roll out a policy without blocking anything: monitor mode evaluates every
+action, records what *would* have been denied, and never raises. Escalate
+individual rules to `enforce` as confidence grows.
+
+```python
+from hushspec import EnforcementConfig, FileReceiptSink, HushGuard
+from hushspec.evaluate import EvaluationAction
+
+guard = HushGuard.from_file(
+    "./policy.yaml",
+    enforcement=EnforcementConfig(
+        mode="monitor",
+        overrides={"rules.secret_patterns": "enforce"},  # already trusted: block for real
+    ),
+    sink=FileReceiptSink("./receipts.jsonl"),  # required: monitor must be observable
+)
+
+outcome = guard.gate(EvaluationAction(type="shell_command", target="rm -rf /"))
+# outcome.proceed              -> True (monitor never blocks)
+# outcome.result.decision      -> Decision.DENY (the evaluated decision)
+# outcome.enforcement.outcome  -> "would_block"
+```
+
+Receipts written by the sink carry `enforcement` (mode + outcome) alongside
+the evaluated `decision`. Panic mode always blocks, even under monitor.
+
 ## Features
 
 ### Evaluation
@@ -82,16 +110,19 @@ receipt = evaluate_audited(spec, action, {
 
 ### Detection Pipeline
 
-Plug prompt injection, jailbreak, and exfiltration checks into the evaluation flow.
+Content detection is spec-driven: add a `detection:` block under `extensions:` in
+the policy (`prompt_injection` and/or `jailbreak`) and `evaluate_with_detection`
+folds the built-in regex detectors' verdict into the evaluation automatically.
+It's an exact no-op for policies without a `detection:` extension.
 
 ```python
-from hushspec import evaluate_with_detection, DetectorRegistry
+from hushspec import evaluate_with_detection
 
-registry = DetectorRegistry.with_defaults()
-result = evaluate_with_detection(spec, action, registry, {
-    "enabled": True,
-    "prompt_injection_threshold": 0.5,
-})
+result = evaluate_with_detection(spec, action)
+# result.evaluation: the final EvaluationResult (matched_rule == "detection"
+#   when content flagged by a detector escalated the decision)
+# result.detections: the DetectionResult produced by each detector that ran
+# result.detection_decision: None | "warn" | "deny"
 ```
 
 ### Receipt Sinks

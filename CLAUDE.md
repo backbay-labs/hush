@@ -97,6 +97,10 @@ h2h lint rulesets/default.yaml
 # Run evaluation test suites
 h2h test --fixtures fixtures/core/evaluation
 
+# One-shot action evaluation with decision trace
+h2h eval rulesets/default.yaml --type egress --target api.example.com
+h2h explain rulesets/default.yaml --type egress --target api.example.com
+
 # Scaffold a new policy project
 h2h init --preset default
 
@@ -117,6 +121,25 @@ h2h verify policy.yaml --key h2h.pub
 ```bash
 # Run conformance tests against fixtures
 cargo run -p hushspec-testkit -- --fixtures fixtures
+```
+
+### Differential Fuzzing & Benchmarks
+
+```bash
+# Generate a portable differential case bundle
+cargo run -p hushspec-testkit --bin hushspec-gen -- --seed 42 --groups 50 --out bundle.json
+
+# Differential fuzz across all four SDKs (requires npm run build + pip install first)
+cargo run --release -p hushspec-testkit --bin hushspec-difftest -- --seed 42 --groups 250
+
+# Replay a saved bundle artifact
+cargo run --release -p hushspec-testkit --bin hushspec-difftest -- --bundle target/difftest/bundle-42.json
+
+# Criterion benchmarks
+cargo bench -p hushspec --bench evaluation
+
+# Receipt-overhead CI gate (release mode only)
+cargo test -p hushspec --release --test bench_thresholds -- --ignored --nocapture
 ```
 
 ## Conventions

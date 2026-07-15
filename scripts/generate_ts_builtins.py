@@ -48,7 +48,7 @@ def render() -> str:
 
     for name in BUILTIN_NAMES:
         yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
-        lines.append(f"  {json.dumps(name)}: {json.dumps(yaml_content)},")
+        lines.append(f"  {json.dumps(name)}: {json.dumps(yaml_content, ensure_ascii=False)},")
 
     lines.extend(
         [
@@ -88,7 +88,7 @@ def main() -> int:
             return 1
         return 0
 
-    OUTPUT.write_text(rendered)
+    OUTPUT.write_text(rendered, newline="\n")
     return 0
 
 

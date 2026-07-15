@@ -1,7 +1,8 @@
 use clap::ValueEnum;
 use colored::Colorize;
 use hushspec::{
-    Decision, EvaluationAction, EvaluationResult, HushSpec, PostureResult, evaluate, validate,
+    Decision, EvaluationAction, EvaluationResult, HushSpec, PostureResult, evaluate_with_detection,
+    validate,
 };
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -19,6 +20,11 @@ pub struct TestArgs {
     /// Directory of test fixture files
     #[arg(long)]
     fixtures: Option<PathBuf>,
+
+    /// Panic sentinel file to consult before evaluating; if it exists the
+    /// process denies all actions (default: .hushspec_panic)
+    #[arg(long, value_name = "PATH")]
+    sentinel: Option<PathBuf>,
 
     /// Output format
     #[arg(short, long, default_value = "text")]
@@ -89,6 +95,10 @@ struct JsonCaseResult {
 }
 
 pub fn run(args: TestArgs) -> i32 {
+    // A file-based `h2h panic activate` sentinel must flip the process-global
+    // panic latch before evaluation, otherwise the kill switch is a no-op here.
+    crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
+
     let test_files = collect_test_files(&args);
 
     if test_files.is_empty() {
@@ -290,7 +300,7 @@ fn run_fixture_file(path: &Path, external_policy: Option<&HushSpec>) -> FixtureR
     // Run each case
     let mut case_results = Vec::new();
     for case in &fixture.cases {
-        let actual = evaluate(&spec, &case.action);
+        let actual = evaluate_with_detection(&spec, &case.action).evaluation;
         let mismatch = compare_expected(&case.expect, &actual);
 
         case_results.push(CaseResult {

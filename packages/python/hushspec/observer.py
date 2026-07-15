@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TextIO
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from hushspec.receipt import DecisionReceipt, EnforcementSummary
 
 from hushspec.evaluate import EvaluationAction, EvaluationResult, evaluate
 from hushspec.schema import HushSpec
@@ -108,8 +113,9 @@ class MetricsCollector(EvaluationObserver):
 
 class ObservableEvaluator:
 
-    def __init__(self) -> None:
+    def __init__(self, redact_content: bool = True) -> None:
         self._observers: list[EvaluationObserver] = []
+        self._redact_content = redact_content
 
     def add_observer(self, observer: EvaluationObserver) -> None:
         self._observers.append(observer)
@@ -124,11 +130,44 @@ class ObservableEvaluator:
         self._emit({
             "type": "evaluation.completed",
             "timestamp": _iso_now(),
-            "action": action,
+            "action": self._redact(action),
             "result": result,
             "duration_us": duration_us,
         })
         return result
+
+    def notify_evaluation_completed(
+        self,
+        action: EvaluationAction,
+        result: EvaluationResult,
+        duration_us: int,
+        enforcement: Optional["EnforcementSummary"] = None,
+        receipt: Optional["DecisionReceipt"] = None,
+    ) -> None:
+        event: dict[str, Any] = {
+            "type": "evaluation.completed",
+            "timestamp": _iso_now(),
+            "action": self._redact(action),
+            "result": result,
+            "duration_us": duration_us,
+        }
+        if enforcement is not None:
+            event["enforcement"] = enforcement
+        if receipt is not None:
+            event["receipt"] = receipt
+        self._emit(event)
+
+    def _redact(self, action: EvaluationAction) -> EvaluationAction:
+        """Return *action* with ``content`` stripped for observer emission.
+
+        Evaluation itself (``evaluate()`` above) always runs against the
+        real, unredacted action -- this only affects what gets embedded in
+        observer events, mirroring how a redacted receipt's ActionSummary
+        never carries raw content, just a ``content_redacted`` flag.
+        """
+        if self._redact_content and action.content is not None:
+            return dataclasses.replace(action, content=None)
+        return action
 
     def notify_policy_loaded(self, name: Optional[str] = None, hash: Optional[str] = None) -> None:
         self._emit({
@@ -174,6 +213,15 @@ class ObservableEvaluator:
 def _json_default(obj: Any) -> Any:
     import dataclasses
     import enum
+
+    from hushspec.receipt import DecisionReceipt, receipt_to_dict
+
+    if isinstance(obj, DecisionReceipt):
+        # Route through the shared helper (rather than a plain asdict) so a
+        # receipt embedded in an observer event serializes identically to
+        # one sent through a ReceiptSink: content_hash/content_redacted
+        # dropped when empty/false instead of emitted as "" / false.
+        return receipt_to_dict(obj)
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return dataclasses.asdict(obj)
     if isinstance(obj, enum.Enum):

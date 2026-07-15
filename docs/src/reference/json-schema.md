@@ -36,7 +36,7 @@ check-jsonschema --schemafile schemas/hushspec-core.v0.schema.json policy.yaml
 Add a `$schema` comment to your HushSpec YAML files for editor autocompletion and validation:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
 hushspec: "0.1.0"
 name: "my-policy"
 
@@ -46,7 +46,15 @@ rules:
       - "**/.ssh/**"
 ```
 
-Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will pick up the schema directive and provide autocompletion, hover documentation, and inline validation.
+`hushspec.dev` is the canonical host declared in each schema's own `$id`. Until it's
+confirmed live, fall back to the raw GitHub URL, which always resolves and tracks
+`main` directly:
+
+```
+https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
+```
+
+Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will pick up the schema directive and provide autocompletion, hover documentation, and inline validation. See the [Editor Setup](../guides/editor-setup.md) guide for the SchemaStore zero-configuration option and workspace-settings alternative.
 
 ## Schema Structure
 

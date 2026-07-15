@@ -36,6 +36,7 @@ func TestEvaluationFixtures(t *testing.T) {
 		"core/evaluation",
 		"posture/evaluation",
 		"origins/evaluation",
+		"detection/evaluation",
 	}
 
 	for _, dir := range dirs {
@@ -75,7 +76,12 @@ func TestEvaluationFixtures(t *testing.T) {
 				for i, tc := range fixture.Cases {
 					t.Run(fmt.Sprintf("case_%d_%s", i, tc.Description), func(t *testing.T) {
 						action := buildEvaluationAction(t, tc.Action)
-						result := Evaluate(spec, action)
+						// Route through EvaluateWithDetection so fixtures that declare
+						// a `detection:` extension exercise it; §1 of the detection-
+						// wiring spec makes this an exact no-op for every fixture that
+						// doesn't (i.e. every fixture outside detection/evaluation), so
+						// pre-existing coverage is unaffected.
+						result := EvaluateWithDetection(spec, action).Evaluation
 
 						if string(result.Decision) != tc.Expect.Decision {
 							t.Errorf("decision mismatch: got %q, want %q (action: %+v)",

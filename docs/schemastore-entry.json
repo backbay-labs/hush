@@ -1,0 +1,13 @@
+{
+  "name": "HushSpec",
+  "description": "Portable security rules for AI agent runtimes",
+  "url": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json",
+  "fileMatch": [
+    "hushspec.yaml",
+    "hushspec.yml",
+    ".hushspec.yaml",
+    ".hushspec.yml",
+    "*.hushspec.yaml",
+    "*.hushspec.yml"
+  ]
+}

@@ -62,6 +62,115 @@ rules:
     expect(result.ok).toBe(false);
   });
 
+  // browser_automation / code_execution are phase-gated guards whose
+  // contents used to pass through validateRules unchecked (any shape was
+  // accepted, unlike every other rules.* block). Mirrors the sibling
+  // "unknown nested rule fields" / "invalid field types" cases above.
+  it('rejects unknown field in rules.browser_automation', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: true
+    extra_field: true
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('unknown field at rules.browser_automation');
+    }
+  });
+
+  it('rejects invalid field type in rules.browser_automation', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    allowed_domains: "*.example.com"
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('rules.browser_automation.allowed_domains');
+    }
+  });
+
+  it('rejects an invalid regex in rules.browser_automation.extra_credential_patterns', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    extra_credential_patterns:
+      - "("
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('rules.browser_automation.extra_credential_patterns[0]');
+    }
+  });
+
+  it('rejects unknown field in rules.code_execution', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    enabled: true
+    extra_field: true
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('unknown field at rules.code_execution');
+    }
+  });
+
+  it('rejects invalid field type in rules.code_execution', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    network_access: "no"
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('rules.code_execution.network_access');
+    }
+  });
+
+  it('rejects rules.code_execution.max_scan_bytes below the minimum of 1', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  code_execution:
+    max_scan_bytes: 0
+`);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('rules.code_execution.max_scan_bytes');
+    }
+  });
+
+  it('accepts valid browser_automation and code_execution rules', () => {
+    const result = parse(`
+hushspec: "0.1.0"
+rules:
+  browser_automation:
+    enabled: true
+    allowed_domains:
+      - "*.example.com"
+    allowed_verbs:
+      - navigate
+    extra_credential_patterns:
+      - "sk-[A-Za-z0-9]{20,}"
+  code_execution:
+    enabled: true
+    language_allowlist:
+      - python
+    module_denylist:
+      - subprocess
+    max_execution_time_ms: 5000
+    max_scan_bytes: 65536
+`);
+    expect(result.ok).toBe(true);
+  });
+
   it('rejects invalid regex patterns', () => {
     const result = parse(`
 hushspec: "0.1.0"
@@ -161,5 +270,58 @@ rules:
     const spec = parseOrThrow('hushspec: "0.1.0"\n');
     const result = validate(spec);
     expect(result.warnings).toContain('no rules section present');
+  });
+
+  // Spec item A (wave-3): NaN fails every `<= 0`/`> 0` bounds check (NaN
+  // comparisons are always false), which would otherwise let
+  // `max_imbalance_ratio: .nan` slip past the `minExclusive: 0` range check
+  // and then make `require_balance` fail OPEN at evaluation time (`ratio >
+  // NaN` is always false too). Reject non-finite floats before/along with
+  // the range check so this can never reach evaluation.
+  describe('rejects non-finite floats', () => {
+    it('rejects max_imbalance_ratio: .nan', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: .nan
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects max_imbalance_ratio: .inf', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: .inf
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects max_imbalance_ratio: -.inf', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    require_balance: true
+    max_imbalance_ratio: -.inf
+`);
+      expect(result.ok).toBe(false);
+    });
+
+    it('rejects extensions.detection.threat_intel.similarity_threshold: .nan', () => {
+      const result = parse(`
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      enabled: true
+      similarity_threshold: .nan
+`);
+      expect(result.ok).toBe(false);
+    });
   });
 });

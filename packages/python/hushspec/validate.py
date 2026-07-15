@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -17,7 +18,7 @@ _BUDGET_NAMES = frozenset(
     {"file_writes", "egress_calls", "shell_commands", "tool_calls", "patches", "custom_calls"}
 )
 
-_DURATION_PATTERN = re.compile(r"^\d+[smhd]$")
+_DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
 _DETECTION_LEVEL_ORDER = {
     DetectionLevel.SAFE: 0,
     DetectionLevel.SUSPICIOUS: 1,
@@ -106,7 +107,14 @@ def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
             )
 
     if rules.patch_integrity is not None:
-        if rules.patch_integrity.max_imbalance_ratio <= 0.0:
+        if not math.isfinite(rules.patch_integrity.max_imbalance_ratio):
+            errors.append(
+                ValidationError(
+                    "invalid_ratio",
+                    "rules.patch_integrity.max_imbalance_ratio must be a finite number",
+                )
+            )
+        elif rules.patch_integrity.max_imbalance_ratio <= 0.0:
             errors.append(
                 ValidationError(
                     "invalid_ratio",
@@ -341,7 +349,14 @@ def _validate_detection(
         ti = detection.threat_intel
 
         if ti.similarity_threshold is not None:
-            if not (0.0 <= ti.similarity_threshold <= 1.0):
+            if not math.isfinite(ti.similarity_threshold):
+                errors.append(
+                    ValidationError(
+                        "out_of_range",
+                        "detection.threat_intel.similarity_threshold must be a finite number",
+                    )
+                )
+            elif not (0.0 <= ti.similarity_threshold <= 1.0):
                 errors.append(
                     ValidationError(
                         "out_of_range",
@@ -370,24 +385,250 @@ def _validate_detection(
 # - Lookahead: (?=...), (?!...)
 # - Lookbehind: (?<=...), (?<!...)
 # - Atomic groups: (?>...)
-# - Possessive quantifiers: *+, ++, ?+
 # - Conditional patterns: (?(...)...|...)
 # - Recursive patterns: (?R), (?1), (?2), ...
 # - Named backreferences: (?P=name)
 # - Subroutine calls: \g<name>
+#
+# Possessive quantifiers (*+, ++, ?+, and possessive braces {n}+/{n,}+/
+# {n,m}+), \Z/\z end-of-string anchors, and empty character classes ([],
+# [^]) are also disallowed for cross-SDK portability (see
+# `_disallowed_regex_feature` below), but are intentionally NOT part of this
+# substring regex: a raw substring match over-rejects those constructs when
+# they appear inside a character class (`[*+]`, `[?+]`), as an escaped
+# backslash followed by a literal Z/z rather than the real anchor (`\\Z`,
+# written in a pattern string as an escaped `\` then `Z`), etc. The
+# escape-aware, character-class-aware scanner below distinguishes these
+# cases correctly.
 _RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
+    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
+    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
 )
 
 
-def is_safe_regex(pattern: str) -> bool:
-    """Check whether a regex pattern is safe for evaluation (RE2-compatible).
+# Shared rejection message for possessive quantifiers. Must stay identical to
+# the copy in raw_validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+_POSSESSIVE_MESSAGE = (
+    "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
+    "across the HushSpec SDK regex engines"
+)
 
-    Returns ``True`` if the pattern uses only RE2-compatible features.
-    Returns ``False`` if the pattern contains backreferences, lookaround,
-    atomic groups, possessive quantifiers, or other non-RE2 features.
+
+def _disallowed_regex_feature(pattern: str) -> str | None:
+    """Portability pre-check: reject regex constructs that are unsupported by,
+    or behave differently across, the four SDK engines so a pattern validates
+    identically everywhere. Scanning outside character classes and honoring
+    ``\\``-escapes, it rejects:
+      * possessive quantifiers ``*+``, ``++``, ``?+`` and possessive braces
+        ``{n}+``, ``{n,}+``, ``{n,m}+`` (Python's `re` (3.11+) actually
+        *compiles* these as real possessive quantifiers rather than erroring
+        like JS/Go do at compile time),
+      * ``\\Z`` and ``\\z`` end-anchors (Rust/Python/Go accept them with
+        differing semantics; JavaScript reads ``\\Z``/``\\z`` as a literal
+        letter -- users anchor with ``$``),
+      * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
+        the others reject them).
+
+    Must stay byte-identical to the Rust, TypeScript, and Go implementations,
+    and to the copy of this function in raw_validate.py.
     """
-    return _RE2_DISALLOWED.search(pattern) is None
+    chars = list(pattern)
+    n = len(chars)
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            # \Z / \z are end-anchors only outside a character class; inside
+            # one they are an escaped literal letter, so ignore them there.
+            if not in_class and i + 1 < n and chars[i + 1] in ("Z", "z"):
+                return (
+                    "\\Z and \\z end-anchors are not portable across the "
+                    "HushSpec SDK regex engines; anchor with $"
+                )
+            i += 2  # skip the escaped char
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            # Empty class [] or negated-empty [^] (JS matches none/any; the
+            # other engines reject the bare form).
+            j = i + 1
+            if j < n and chars[j] == "^":
+                j += 1
+            if j < n and chars[j] == "]":
+                return (
+                    "empty character classes [] and [^] are not portable "
+                    "across the HushSpec SDK regex engines"
+                )
+            in_class = True
+            i += 1
+            continue
+        if c in ("*", "+", "?"):
+            # A quantifier immediately followed by + is possessive.
+            if i + 1 < n and chars[i + 1] == "+":
+                return _POSSESSIVE_MESSAGE
+            i += 1
+            continue
+        if c == "{":
+            # Treat {...} as a quantifier only when it parses as one; a
+            # literal { is scanned through. A quantifier brace followed by +
+            # is possessive ({n}+, {n,}+, {n,m}+).
+            j = i + 1
+            while j < n and chars[j] != "}":
+                j += 1
+            if j < n:
+                inner = "".join(chars[i + 1 : j])
+                if _brace_kind(inner) != "none":
+                    if j + 1 < n and chars[j + 1] == "+":
+                        return _POSSESSIVE_MESSAGE
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+        i += 1
+    return None
+
+
+def is_safe_regex(pattern: str) -> bool:
+    """Check whether a regex pattern is safe for evaluation across all SDKs.
+
+    Returns ``True`` only if the pattern is safe on every HushSpec engine.
+    Returns ``False`` if the pattern contains backreferences, lookaround,
+    atomic groups, possessive quantifiers (including possessive braces like
+    ``{2,}+``), ``\\Z``/``\\z`` anchors, empty character classes (``[]``,
+    ``[^]``), or other non-RE2 features, OR a nested unbounded quantifier
+    (e.g. ``(a+)+``) that catastrophically backtracks on the backtracking
+    engines (JavaScript ``RegExp``, Python ``re``).
+    """
+    # Portability pre-check first: possessive quantifiers, \Z/\z anchors, and
+    # empty character classes, via the escape/class-aware scanner.
+    if _disallowed_regex_feature(pattern) is not None:
+        return False
+    # RE2-feature check second: backreferences, lookaround, atomic groups,
+    # conditional/recursive patterns -- Python's `re` compiles these, unlike
+    # RE2, so they must be rejected explicitly via substring match.
+    if _RE2_DISALLOWED.search(pattern) is not None:
+        return False
+    # Nested-quantifier check third.
+    return not _has_nested_quantifier(pattern)
+
+
+def _has_nested_quantifier(pattern: str) -> bool:
+    """Flag nested unbounded quantifiers such as ``(a+)+``, ``([0-9]+)*``, or
+    ``((ab)+)+``.
+
+    Fail-closed over-approximation: scans ``(``...``)`` group nesting -- ignoring
+    escaped parens and character-class contents -- and returns ``True`` when a
+    group whose body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) is
+    itself immediately followed by an unbounded quantifier. Bounded quantifiers
+    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. Must stay identical to the
+    Rust, TypeScript, and Go implementations.
+    """
+    chars = list(pattern)
+    n = len(chars)
+    # Per open group: whether its body has seen an unbounded quantifier.
+    stack: list[bool] = []
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            # Escaped char (e.g. ``\(``, ``\)``, ``\[``, ``\+``) -- skip both.
+            i += 2
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            in_class = True
+            i += 1
+            continue
+        if c == "(":
+            stack.append(False)
+            i += 1
+            continue
+        if c == ")":
+            closed_unbounded = stack.pop() if stack else False
+            kind, qlen = _classify_quantifier(chars, i + 1)
+            if kind == "unbounded":
+                if closed_unbounded:
+                    return True
+                # The just-closed group is unbounded-quantified, so it is an
+                # unbounded quantifier within the parent group's body.
+                if stack:
+                    stack[-1] = True
+                i += 1 + qlen
+            else:
+                i += 1
+            continue
+        kind, qlen = _classify_quantifier(chars, i)
+        if kind == "unbounded":
+            if stack:
+                stack[-1] = True
+            i += qlen
+        elif kind == "bounded":
+            i += qlen
+        else:
+            i += 1
+    return False
+
+
+def _classify_quantifier(chars: list[str], pos: int) -> tuple[str, int]:
+    """Classify the quantifier token starting at ``pos``; return its kind
+    (``"none"``/``"bounded"``/``"unbounded"``) and the number of chars it spans
+    (including any trailing lazy/possessive marker)."""
+    if pos >= len(chars):
+        return ("none", 0)
+    c = chars[pos]
+    if c in ("*", "+"):
+        return ("unbounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "?":
+        return ("bounded", 2 if _marker_follows(chars, pos + 1) else 1)
+    if c == "{":
+        j = pos + 1
+        while j < len(chars) and chars[j] != "}":
+            j += 1
+        if j >= len(chars):
+            return ("none", 0)  # unterminated '{' -> literal
+        inner = "".join(chars[pos + 1 : j])
+        kind = _brace_kind(inner)
+        if kind == "none":
+            return ("none", 0)
+        length = (j - pos + 1) + (1 if _marker_follows(chars, j + 1) else 0)
+        return (kind, length)
+    return ("none", 0)
+
+
+def _marker_follows(chars: list[str], pos: int) -> bool:
+    return pos < len(chars) and chars[pos] in ("?", "+")
+
+
+def _is_ascii_digits(value: str) -> bool:
+    return len(value) > 0 and all("0" <= ch <= "9" for ch in value)
+
+
+def _brace_kind(inner: str) -> str:
+    """Classify ``{...}`` content: ``{n,}`` is unbounded, ``{n}`` and ``{n,m}``
+    are bounded, anything else is a literal brace (not a quantifier)."""
+    if not inner:
+        return "none"
+    commas = inner.count(",")
+    if commas == 0:
+        return "bounded" if _is_ascii_digits(inner) else "none"
+    if commas == 1:
+        lo, hi = inner.split(",")
+        lo_ok = lo == "" or _is_ascii_digits(lo)
+        hi_ok = hi == "" or _is_ascii_digits(hi)
+        if not lo_ok or not hi_ok or (lo == "" and hi == ""):
+            return "none"
+        return "unbounded" if hi == "" else "bounded"
+    return "none"
 
 
 def _validate_regex(pattern: str, path: str, errors: list[ValidationError]) -> None:

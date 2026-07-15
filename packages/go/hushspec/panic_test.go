@@ -3,6 +3,7 @@ package hushspec
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -118,5 +119,48 @@ func TestSentinelFileMissingDoesNotActivate(t *testing.T) {
 	}
 	if IsPanicActive() {
 		t.Fatal("expected panic to remain inactive when sentinel missing")
+	}
+}
+
+// TestSentinelIndeterminateErrorFailsClosed covers the critical fix: this is
+// a kill switch, so when the sentinel's existence cannot be determined (e.g.
+// a permission error on a parent directory, as opposed to a definite
+// not-found), CheckPanicSentinel must fail closed -- treat it as PRESENT and
+// activate panic -- rather than fail open. Previously any os.Stat error
+// (including EACCES) was treated as "absent".
+func TestSentinelIndeterminateErrorFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("cannot exercise a permission-denied path while running as root")
+	}
+
+	resetPanic()
+	defer resetPanic()
+
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(blocked, ".hushspec_panic")
+	if err := os.WriteFile(sentinel, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Strip all permissions from the parent directory so stat-ing the
+	// sentinel inside it fails with a permission error instead of proving
+	// the sentinel is absent.
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(blocked, 0o755) // restore so t.TempDir() cleanup can remove it
+
+	if !CheckPanicSentinel(sentinel) {
+		t.Fatal("expected CheckPanicSentinel to fail closed (return true) on an indeterminate stat error")
+	}
+	if !IsPanicActive() {
+		t.Fatal("expected panic to be active after an indeterminate sentinel check")
 	}
 }

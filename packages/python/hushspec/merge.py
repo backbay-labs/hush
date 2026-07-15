@@ -39,6 +39,14 @@ def _merge_with_strategy(base: HushSpec, child: HushSpec, deep: bool) -> HushSpe
             if deep
             else _merge_extensions_merge(base.extensions, child.extensions)
         ),
+        # Merge top-level metadata child-over-parent like every other field
+        # (mirrors Rust `child.metadata.clone().or_else(|| base.metadata..)`);
+        # previously it was dropped from the merged result entirely.
+        metadata=(
+            copy.deepcopy(child.metadata)
+            if child.metadata is not None
+            else copy.deepcopy(base.metadata)
+        ),
     )
 
 
@@ -97,6 +105,16 @@ def _merge_rules(base: Optional[Rules], child: Optional[Rules]) -> Optional[Rule
             copy.deepcopy(child.input_injection)
             if child.input_injection is not None
             else copy.deepcopy(base_rules.input_injection)
+        ),
+        browser_automation=(
+            copy.deepcopy(child.browser_automation)
+            if child.browser_automation is not None
+            else copy.deepcopy(base_rules.browser_automation)
+        ),
+        code_execution=(
+            copy.deepcopy(child.code_execution)
+            if child.code_execution is not None
+            else copy.deepcopy(base_rules.code_execution)
         ),
     )
 

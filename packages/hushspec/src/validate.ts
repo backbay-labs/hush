@@ -75,6 +75,31 @@ const BUDGET_NAMES = new Set([
   'file_writes', 'egress_calls', 'shell_commands', 'tool_calls', 'patches', 'custom_calls',
 ]);
 
+// BrowserAutomation / CodeExecution field sets, mirroring the
+// `$defs.BrowserAutomation` / `$defs.CodeExecution` definitions in
+// schemas/hushspec-core.v0.schema.json. These are declared locally (rather
+// than imported from generated/contract.ts, alongside the other *_KEYS_SET
+// constants) because scripts/generate_sdk_contracts.py does not yet emit
+// per-block key sets for these two rule blocks -- hand-adding them to the
+// generated file would desync it from `generate_sdk_contracts.py --check`,
+// which CI runs.
+const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set([
+  'enabled',
+  'allowed_domains',
+  'blocked_domains',
+  'allowed_verbs',
+  'credential_detection',
+  'extra_credential_patterns',
+]);
+const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set([
+  'enabled',
+  'language_allowlist',
+  'module_denylist',
+  'network_access',
+  'max_execution_time_ms',
+  'max_scan_bytes',
+]);
+
 export function validate(spec: HushSpec): ValidationResult {
   return validateDocument(spec as unknown, {
     checkSupportedVersion: true,
@@ -174,6 +199,8 @@ function validateRules(obj: UnknownRecord, ctx: ValidationContext): void {
   configuredRules += validateOptionalRuleObject(obj, 'computer_use', ctx, validateComputerUseRule, 'rules');
   configuredRules += validateOptionalRuleObject(obj, 'remote_desktop_channels', ctx, validateRemoteDesktopRule, 'rules');
   configuredRules += validateOptionalRuleObject(obj, 'input_injection', ctx, validateInputInjectionRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'browser_automation', ctx, validateBrowserAutomationRule, 'rules');
+  configuredRules += validateOptionalRuleObject(obj, 'code_execution', ctx, validateCodeExecutionRule, 'rules');
 
   if (configuredRules === 0 && ctx.includeWarnings) {
     ctx.warnings.push('no rules configured');
@@ -295,6 +322,30 @@ function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, 
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allowed_types', ctx, `${path}.allowed_types`);
   validateOptionalBoolean(obj, 'require_postcondition_probe', ctx, `${path}.require_postcondition_probe`);
+}
+
+function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, BROWSER_AUTOMATION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'allowed_domains', ctx, `${path}.allowed_domains`);
+  validateOptionalStringArray(obj, 'blocked_domains', ctx, `${path}.blocked_domains`);
+  validateOptionalStringArray(obj, 'allowed_verbs', ctx, `${path}.allowed_verbs`);
+  validateOptionalBoolean(obj, 'credential_detection', ctx, `${path}.credential_detection`);
+
+  if ('extra_credential_patterns' in obj) {
+    const patterns = validateOptionalStringArray(obj, 'extra_credential_patterns', ctx, `${path}.extra_credential_patterns`);
+    patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.extra_credential_patterns[${index}]`));
+  }
+}
+
+function validateCodeExecutionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, CODE_EXECUTION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
+  validateOptionalStringArray(obj, 'language_allowlist', ctx, `${path}.language_allowlist`);
+  validateOptionalStringArray(obj, 'module_denylist', ctx, `${path}.module_denylist`);
+  validateOptionalBoolean(obj, 'network_access', ctx, `${path}.network_access`);
+  validateOptionalInteger(obj, 'max_execution_time_ms', ctx, `${path}.max_execution_time_ms`, { min: 0 });
+  validateOptionalInteger(obj, 'max_scan_bytes', ctx, `${path}.max_scan_bytes`, { min: 1 });
 }
 
 function validateExtensions(obj: UnknownRecord, ctx: ValidationContext): void {
@@ -435,15 +486,35 @@ function validateOriginsExtension(
         addError(ctx, 'invalid_match', `${profilePath}.match must be an object`);
       } else {
         rejectUnknownKeys(profile.match, ORIGIN_MATCH_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${profilePath}.match: ${key}`);
-        validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
-        validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
-        validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
+        const provider = validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
+        const tenantId = validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
+        const spaceId = validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
         validateOptionalEnum(profile.match, 'space_type', ctx, `${profilePath}.match.space_type`, ORIGIN_SPACE_TYPES_SET);
         validateOptionalEnum(profile.match, 'visibility', ctx, `${profilePath}.match.visibility`, ORIGIN_VISIBILITIES_SET);
         validateOptionalBoolean(profile.match, 'external_participants', ctx, `${profilePath}.match.external_participants`);
         validateOptionalStringArray(profile.match, 'tags', ctx, `${profilePath}.match.tags`);
-        validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
-        validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
+        const sensitivity = validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
+        const actorRole = validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
+
+        // Cross-SDK parity fix (spec item S2): a present-but-empty free-text
+        // match field (e.g. `provider: ""`) is an unsatisfiable constraint
+        // that Go's plain-string model can't distinguish from an absent
+        // field; Go's raw validator already rejects it, so reject it here
+        // too to restore fail-closed accept/reject parity across the SDKs
+        // (mirrors Rust `validate_origins`). The enum fields above already
+        // reject "" as an invalid enum value, so they're excluded here.
+        const freeTextMatchFields: Array<[string, string | undefined]> = [
+          ['provider', provider],
+          ['tenant_id', tenantId],
+          ['space_id', spaceId],
+          ['sensitivity', sensitivity],
+          ['actor_role', actorRole],
+        ];
+        for (const [fieldName, value] of freeTextMatchFields) {
+          if (value === '') {
+            addError(ctx, 'empty_match_field', `${profilePath}.match.${fieldName} must not be empty`);
+          }
+        }
       }
     }
 

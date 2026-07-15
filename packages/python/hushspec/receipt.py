@@ -4,9 +4,9 @@ import hashlib
 import json
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from hushspec.evaluate import (
     Decision,
@@ -53,6 +53,18 @@ class AuditConfig:
 
 
 @dataclass
+class EnforcementSummary:
+    """How the runtime applied a decision.
+
+    DecisionReceipt.decision is always the evaluated policy decision;
+    this records what the enforcement point did with it.
+    """
+
+    mode: str      # 'enforce' | 'monitor'
+    outcome: str   # 'allowed' | 'confirmed' | 'blocked' | 'would_block'
+
+
+@dataclass
 class DecisionReceipt:
     receipt_id: str
     timestamp: str
@@ -66,6 +78,7 @@ class DecisionReceipt:
     reason: Optional[str] = None
     origin_profile: Optional[str] = None
     posture: Optional[PostureResult] = None
+    enforcement: Optional[EnforcementSummary] = None
 
 
 
@@ -118,6 +131,59 @@ def evaluate_audited(
         posture=result.posture,
         evaluation_duration_us=duration_us,
     )
+
+
+def _drop_none(value: Any) -> Any:
+    """Recursively remove dict keys whose value is exactly ``None``.
+
+    Rust/Go/TS serialize ``Option``/optional fields with a skip-if-absent
+    annotation, so a receipt's optional fields (``matched_rule``, ``reason``,
+    ``origin_profile``, ``posture``, ``enforcement``, ``policy.name``, the
+    same fields nested inside each ``rule_trace`` entry, etc.) are omitted
+    entirely rather than serialized as an explicit JSON ``null``. Python's
+    ``dataclasses.asdict`` has no such notion, so without this pass every
+    ``Optional[...] = None`` field would round-trip as ``"key": null``,
+    diverging from the other three SDKs. Only ``None`` is dropped --
+    falsy-but-present values (``False``, ``0``, ``""``, ``[]``) are left
+    untouched, matching ``skip_serializing_if = "Option::is_none"`` (never
+    "is falsy").
+    """
+    if isinstance(value, dict):
+        return {key: _drop_none(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [_drop_none(item) for item in value]
+    return value
+
+
+def receipt_to_dict(receipt: DecisionReceipt) -> dict:
+    """Convert a receipt to a JSON-ready ``dict`` for sinks and observers.
+
+    This is the single place receipts get flattened for serialization, so
+    that ``FileReceiptSink``, ``StderrReceiptSink``, and the observer's
+    ``JsonLineObserver`` all emit byte-consistent JSON. Two fields get a
+    special-cased pop for their "nothing to report" value in addition to the
+    general ``None``-dropping pass below, mirroring the other three HushSpec
+    SDKs (Rust/Go skip-serialize the same way):
+
+    - ``policy.content_hash`` is omitted when empty -- the zero-overhead
+      disabled-audit fast path never computes a hash, and an empty string
+      would violate the receipt schema's ``^[0-9a-f]{64}$`` pattern.
+    - ``action.content_redacted`` is omitted when ``False``.
+
+    Every other optional field that is ``None`` (``matched_rule``, ``reason``,
+    ``origin_profile``, ``posture``, ``enforcement``, nested ``rule_trace``
+    entries' ``matched_rule``/``reason``, etc.) is dropped recursively so
+    Python never emits an explicit JSON ``null`` where Rust/Go/TS would omit
+    the key entirely.
+    """
+    data = asdict(receipt)
+    policy = data.get("policy")
+    if isinstance(policy, dict) and not policy.get("content_hash"):
+        policy.pop("content_hash", None)
+    action = data.get("action")
+    if isinstance(action, dict) and not action.get("content_redacted"):
+        action.pop("content_redacted", None)
+    return _drop_none(data)
 
 
 def compute_policy_hash(spec: HushSpec) -> str:

@@ -170,14 +170,26 @@ def _parse_hhmm(s: str) -> Optional[tuple[int, int]]:
     parts = s.split(":")
     if len(parts) != 2:
         return None
-    try:
-        hour = int(parts[0])
-        minute = int(parts[1])
-    except ValueError:
+    hour = _parse_strict_uint(parts[0])
+    minute = _parse_strict_uint(parts[1])
+    if hour is None or minute is None:
         return None
     if hour < 0 or hour > 23 or minute < 0 or minute > 59:
         return None
     return (hour, minute)
+
+
+def _parse_strict_uint(s: str) -> Optional[int]:
+    """Parse *s* as a base-10 non-negative integer of pure ASCII digits.
+
+    Unlike ``int()``, this rejects underscores, surrounding whitespace, and
+    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``),
+    matching Rust's and Go's strict numeric-string parsing
+    (``str::parse::<u8>`` / ``strconv.Atoi``).
+    """
+    if s == "" or not all("0" <= ch <= "9" for ch in s):
+        return None
+    return int(s)
 
 
 def _day_abbreviation(day: int) -> str:
@@ -311,29 +323,81 @@ def _resolve_context_value(path: str, context: RuntimeContext) -> Any:
         return None
 
 
+# f64::EPSILON: the exact tolerance Rust's `match_value` uses when comparing
+# a float-shaped `expected` against `actual` (see `_values_equal` below).
+_F64_EPSILON = 2.220446049250313e-16
+
+
+def _values_equal(actual: Any, expected: Any) -> bool:
+    """Leaf-level scalar equality, byte-identical to Rust's `values_equal`
+    (crates/hushspec/src/evaluate.rs).
+
+    ``expected`` is always a non-array scalar (str/bool/int/float) here --
+    array unwrapping happens one level up, in ``_matches_scalar_or_membership``.
+    ``actual`` may be any JSON-ish value; it is compared structurally, never
+    unwrapped further.
+    """
+    if isinstance(expected, str):
+        return isinstance(actual, str) and actual == expected
+
+    if isinstance(expected, bool):
+        # bool is not numeric: Rust's `Value::Bool` only compares equal to
+        # another `Value::Bool` via `as_bool()`, never to a `Value::Number`.
+        return isinstance(actual, bool) and actual == expected
+
+    if isinstance(expected, int):
+        # Integer-shaped expected, mirroring `serde_json::Number::as_i64`:
+        # actual must also be integer-shaped (not bool, not float) with an
+        # equal value. A float actual (even one with an integral value, e.g.
+        # 5.0) does NOT match, exactly as Rust's `as_i64()` returns `None`
+        # for a float-shaped `serde_json::Number`.
+        if isinstance(actual, bool) or not isinstance(actual, int):
+            return False
+        return actual == expected
+
+    if isinstance(expected, float):
+        # Float-shaped expected, mirroring `serde_json::Number::as_f64`:
+        # actual may be integer- or float-shaped (both convert to f64 via
+        # `as_f64()`), compared with the same `f64::EPSILON` tolerance Rust
+        # uses.
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+            return False
+        return abs(float(actual) - float(expected)) < _F64_EPSILON
+
+    return False
+
+
+def _matches_scalar_or_membership(actual: Any, expected: Any) -> bool:
+    """Byte-identical to Rust's `matches_scalar_or_membership`: if ``actual``
+    is an array, match iff any element equals ``expected``; otherwise compare
+    the two scalars directly."""
+    if isinstance(actual, list):
+        return any(_values_equal(item, expected) for item in actual)
+    return _values_equal(actual, expected)
+
+
 def _match_value(actual: Any, expected: Any) -> bool:
+    """Byte-identical to Rust's `match_value`.
+
+    Matching rules:
+    - Missing context field (``actual is None``) -> fail-closed ``False``.
+    - Scalar expected (str/bool/int/float) vs actual scalar or array -> match
+      iff the actual scalar equals expected, or (when actual is an array) any
+      element of actual equals expected (membership).
+    - Array expected vs actual scalar or array -> match iff at least one
+      expected element matches actual under the same scalar-or-membership
+      rule; when actual is also an array, this is equivalent to a non-empty
+      set intersection between expected and actual.
+    - Anything else (object/null expected) -> ``False``.
+    """
     if actual is None:
         return False
 
-    if isinstance(expected, str):
-        if isinstance(actual, str):
-            return actual == expected
-        if isinstance(actual, list):
-            return expected in actual
-        return False
-
-    if isinstance(expected, bool):
-        return actual is expected
-
-    if isinstance(expected, (int, float)):
-        if isinstance(actual, (int, float)):
-            return actual == expected
-        return False
+    if isinstance(expected, (str, bool, int, float)):
+        return _matches_scalar_or_membership(actual, expected)
 
     if isinstance(expected, list):
-        if isinstance(actual, str):
-            return actual in expected
-        return False
+        return any(_matches_scalar_or_membership(actual, candidate) for candidate in expected)
 
     return False
 

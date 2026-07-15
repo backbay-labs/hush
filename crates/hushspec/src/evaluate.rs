@@ -244,6 +244,8 @@ fn apply_conditions(
                     "computer_use" => rules.computer_use = None,
                     "remote_desktop_channels" => rules.remote_desktop_channels = None,
                     "input_injection" => rules.input_injection = None,
+                    "browser_automation" => rules.browser_automation = None,
+                    "code_execution" => rules.code_execution = None,
                     _ => {} // Unknown block name -- ignore silently.
                 }
             }
@@ -1166,16 +1168,24 @@ fn select_origin_profile<'a>(
         .and_then(|extensions| extensions.origins.as_ref())
         .map(|origins| origins.profiles.as_slice())?;
 
-    profiles
-        .iter()
-        .filter_map(|profile| {
-            profile
-                .match_rules
-                .as_ref()
-                .and_then(|rules| match_origin(rules, origin).map(|score| (score, profile)))
-        })
-        .max_by_key(|(score, _)| *score)
-        .map(|(_, profile)| profile)
+    // First-match-wins on ties: only replace `best` when a later profile
+    // strictly outscores it. `Iterator::max_by_key` would keep the *last*
+    // maximal element instead, which disagrees with the TS/Python/Go
+    // evaluators and can flip the allow/deny decision when two profiles
+    // tie on match score. Cross-SDK parity requires the first-listed
+    // tied profile to win here.
+    let mut best: Option<(u32, &OriginProfile)> = None;
+    for (score, profile) in profiles.iter().filter_map(|profile| {
+        profile
+            .match_rules
+            .as_ref()
+            .and_then(|rules| match_origin(rules, origin).map(|score| (score, profile)))
+    }) {
+        if best.is_none_or(|(best_score, _)| score > best_score) {
+            best = Some((score, profile));
+        }
+    }
+    best.map(|(_, profile)| profile)
 }
 
 fn match_origin(rules: &crate::extensions::OriginMatch, origin: &OriginContext) -> Option<u32> {
@@ -1331,7 +1341,15 @@ pub fn glob_matches(pattern: &str, target: &str) -> bool {
             '*' => {
                 if matches!(chars.peek(), Some('*')) {
                     chars.next();
-                    regex.push_str(".*");
+                    // Treat `**/` as an optional run of leading path segments so
+                    // `**/.env` matches both the bare `.env` and `a/b/.env`.
+                    // A standalone `**` (not followed by `/`) stays `.*`.
+                    if matches!(chars.peek(), Some('/')) {
+                        chars.next();
+                        regex.push_str("(?:.*/)?");
+                    } else {
+                        regex.push_str(".*");
+                    }
                 } else {
                     regex.push_str("[^/]*");
                 }

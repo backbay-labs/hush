@@ -62,6 +62,10 @@ rules:
     enabled: true
     mode: fail_closed
     allowed_actions: []
+
+  input_injection:
+    enabled: true
+    allowed_types: []
 """
 
 
@@ -182,9 +186,12 @@ def _deny_result(
 def glob_matches(pattern: str, target: str) -> bool:
     """Convert a HushSpec glob pattern to regex and test against *target*.
 
-    ``*``  matches any character except ``/``.
-    ``**`` matches any character (including ``/``).
-    ``?``  matches a single character.
+    ``*``   matches any character except ``/``.
+    ``**``  matches any character (including ``/``).
+    ``**/`` matches zero or more leading path segments, so ``**/x`` matches
+            both the bare ``x`` and ``a/b/x``. A standalone ``**`` (not
+            followed by ``/``) stays the ``.*`` behavior above.
+    ``?``   matches a single character.
     All other regex meta-characters are escaped.
     """
     regex = "^"
@@ -193,6 +200,10 @@ def glob_matches(pattern: str, target: str) -> bool:
         ch = pattern[i]
         if ch == "*":
             if i + 1 < len(pattern) and pattern[i + 1] == "*":
+                if i + 2 < len(pattern) and pattern[i + 2] == "/":
+                    regex += "(?:.*/)?"
+                    i += 3
+                    continue
                 regex += ".*"
                 i += 2
                 continue
@@ -204,7 +215,11 @@ def glob_matches(pattern: str, target: str) -> bool:
         else:
             regex += ch
         i += 1
-    regex += "$"
+    # \Z (not $): Python's `$` also matches just before a trailing "\n", so
+    # a glob like "internal.corp" would wrongly match "internal.corp\n". \Z
+    # is a true end-of-string anchor with no newline exception, matching
+    # Rust `regex`/Go RE2/JS non-multiline `$` end-of-text semantics.
+    regex += r"\Z"
     try:
         return re.search(regex, target) is not None
     except re.error:
@@ -263,7 +278,13 @@ def _more_restrictive_result(
 def patch_stats(content: str) -> _PatchStats:
     additions = 0
     deletions = 0
-    for line in content.splitlines():
+    # `str.splitlines()` also splits on \r, \v, \f, and the Unicode NEL/LS/PS
+    # line separators, but Rust's `.lines()` and the TS/Go SDKs only split on
+    # \n. A bare \r (no \n) inside patch content would otherwise be treated
+    # as a line break here but not in the other three SDKs, double-counting
+    # additions/deletions. Splitting on "\n" alone keeps the count identical
+    # across all four SDKs.
+    for line in content.split("\n"):
         if line.startswith("+++") or line.startswith("---"):
             continue
         if line.startswith("+"):
@@ -449,13 +470,21 @@ def posture_capability_guard(
     if spec.extensions is None or spec.extensions.posture is None:
         return None
     posture_ext = spec.extensions.posture
-    current_state = posture_ext.states.get(posture.current)
-    if current_state is None:
-        return None
 
     capability = required_capability(action.type)
     if capability is None:
         return None
+
+    current_state = posture_ext.states.get(posture.current)
+    if current_state is None:
+        # Fail-closed: a posture referencing an undefined state must deny,
+        # not fall through as if no guard applied.
+        return _deny_result(
+            matched_rule=f"extensions.posture.states.{posture.current}",
+            reason=f"unknown posture state '{posture.current}'",
+            origin_profile=origin_profile_id,
+            posture=PostureResult(current=posture.current, next=posture.next),
+        )
 
     if capability in current_state.capabilities:
         return None
@@ -1328,13 +1357,31 @@ def panic_policy() -> HushSpec:
 
 
 def check_panic_sentinel(path: str) -> bool:
-    """Activate panic mode if the sentinel file at *path* exists."""
+    """Activate panic mode if the sentinel file at *path* exists.
+
+    This is a kill switch, so it **fails closed**: if the file's existence
+    cannot be determined (a permission or other I/O error from ``os.stat``),
+    the sentinel is treated as present and panic mode is activated. Only a
+    definitive "not found" (``FileNotFoundError`` / ``NotADirectoryError``)
+    counts as absent. This mirrors Rust's ``try_exists().unwrap_or(true)`` --
+    ``os.path.isfile`` was wrong here because it silently returns ``False`` on
+    any stat error, letting the kill switch fail OPEN.
+    """
     import os
 
-    exists = os.path.isfile(path)
-    if exists:
+    try:
+        os.stat(path)
+        present = True
+    except (FileNotFoundError, NotADirectoryError):
+        present = False
+    except OSError:
+        # Could not prove the sentinel is absent (e.g. PermissionError);
+        # treat it as present so the kill switch never fails open.
+        present = True
+
+    if present:
         activate_panic()
-    return exists
+    return present
 
 
 

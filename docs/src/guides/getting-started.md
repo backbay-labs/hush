@@ -2,6 +2,19 @@
 
 ## Installation
 
+### CLI
+
+| Method | Command |
+|---|---|
+| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
+| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
+| Cargo (from source) | `cargo install hushspec-cli` |
+| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
+
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+
+This installs the `h2h` command.
+
 The Rust crate and TypeScript package are not published yet. For now, consume
 the reference implementations directly from a local checkout of this repo.
 

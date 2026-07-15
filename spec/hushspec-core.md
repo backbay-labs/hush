@@ -316,6 +316,10 @@ When multiple rule blocks apply to a single action, decisions are aggregated by 
 2. **warn** is next. If no rule block denies but at least one warns, the action requires confirmation.
 3. **allow** applies only when all applicable rule blocks allow.
 
+### 6.2 Monitor (Shadow) Enforcement
+
+Engines MAY provide an explicit, operator-configured monitor mode in which decisions are evaluated and recorded but not enforced (a `deny` does not block execution). Monitor mode is engine configuration, never a property of the HushSpec document. When monitoring, engines MUST compute and record the evaluated decision unchanged, and SHOULD tag emitted receipts and events with the enforcement disposition (see the decision receipt schema's `enforcement` field). Emergency panic mode MUST always enforce, regardless of monitor configuration.
+
 ---
 
 ## 7. Validation Requirements

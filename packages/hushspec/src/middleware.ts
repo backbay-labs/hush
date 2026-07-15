@@ -1,14 +1,181 @@
+import { randomUUID } from 'node:crypto';
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
-import { evaluate } from './evaluate.js';
+import { isPanicActive } from './evaluate.js';
+import { evaluateWithDetection } from './detection.js';
 import { parse } from './parse.js';
 import { readFileSync } from 'node:fs';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
-import { computePolicyHash } from './receipt.js';
+import type { AuditConfig, DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
+import { computePolicyHash, DEFAULT_AUDIT_CONFIG, evaluateAudited } from './receipt.js';
+import type { ReceiptSink } from './sinks.js';
+import { EXTENSION_KEYS_SET, RULE_KEYS_SET } from './generated/contract.js';
+import { HUSHSPEC_VERSION } from './version.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
+
+export interface EnforcementConfig {
+  /** Guard-level mode. Default: 'enforce' (existing behavior). */
+  mode?: EnforcementMode;
+  /** Rule-path prefix -> mode. Longest matching prefix wins over `mode`. */
+  overrides?: Record<string, EnforcementMode>;
+}
+
+export interface GateOutcome {
+  result: EvaluationResult;
+  proceed: boolean;
+  enforcement: EnforcementSummary;
+}
+
+export interface HushGuardOptions {
+  onWarn?: WarnHandler;
+  observer?: EvaluationObserver;
+  provider?: PolicyProvider;
+  enforcement?: EnforcementConfig;
+  sink?: ReceiptSink;
+  audit?: AuditConfig;
+}
+
+const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
+
+/**
+ * True when `matchedRule` equals `key` or continues past it at a segment
+ * boundary ('.' or '['). Exported for direct unit testing.
+ */
+export function matchesRulePathPrefix(matchedRule: string, key: string): boolean {
+  if (matchedRule === key) return true;
+  return matchedRule.startsWith(key + '.') || matchedRule.startsWith(key + '[');
+}
+
+function validateEnforcementConfig(config: EnforcementConfig, observable: boolean): void {
+  const mode = config.mode ?? 'enforce';
+  if (!ENFORCEMENT_MODES.has(mode)) {
+    throw new Error(`invalid enforcement mode: ${String(config.mode)}`);
+  }
+  let monitorReachable = mode === 'monitor';
+  for (const [key, value] of Object.entries(config.overrides ?? {})) {
+    if (!ENFORCEMENT_MODES.has(value)) {
+      throw new Error(`invalid enforcement mode for override '${key}': ${String(value)}`);
+    }
+    if (value === 'monitor') monitorReachable = true;
+    if (key.startsWith('rules.')) {
+      const segment = key.split('.')[1] ?? '';
+      if (!RULE_KEYS_SET.has(segment)) {
+        throw new Error(
+          `unknown rule in enforcement override '${key}': '${segment}' is not a core rule`,
+        );
+      }
+    } else if (key.startsWith('extensions.')) {
+      const segment = key.split('.')[1] ?? '';
+      // Only the top extension segment (posture/origins/detection) is validated
+      // here; deeper segments are policy-dependent and hot-swappable, mirroring
+      // how 'rules.' overrides only validate their top segment.
+      if (!EXTENSION_KEYS_SET.has(segment)) {
+        throw new Error(
+          `unknown extension in enforcement override '${key}': '${segment}' is not a core extension`,
+        );
+      }
+    } else {
+      throw new Error(
+        `enforcement override keys must start with 'rules.' or 'extensions.': '${key}'`,
+      );
+    }
+  }
+  if (monitorReachable && !observable) {
+    throw new Error(
+      'monitor mode requires an observer or a receipt sink: shadow decisions would be unobservable',
+    );
+  }
+}
+
+/**
+ * Fold a policy's `detection:` extension into an already-computed receipt,
+ * mirroring the Rust reference (`crates/hushspec-cli/src/cmd_eval.rs`'s
+ * `apply_detection`).
+ *
+ * `evaluateAudited()` builds its receipt from the plain `evaluate()`, which
+ * does not consult the detection extension. When content detection escalates
+ * the decision (allow -> warn, or allow/warn -> deny), copy the escalated
+ * decision, matched_rule, and reason onto the receipt and append a `detection`
+ * rule-trace entry -- so a sink-backed guard applies detection identically to
+ * the receipt-free path and the emitted audit record stays self-consistent.
+ *
+ * A no-op when the policy has no detection extension, there is no content, or
+ * detection does not escalate: `receipt.decision` came from the same base
+ * `evaluate()` as `evaluateWithDetection`'s base, so they differ only on
+ * escalation, and detection never weakens a policy decision.
+ */
+function applyDetection(
+  receipt: DecisionReceipt,
+  spec: HushSpec,
+  action: EvaluationAction,
+): void {
+  const detected = evaluateWithDetection(spec, action).evaluation;
+  if (detected.decision === receipt.decision) {
+    return;
+  }
+  receipt.rule_trace.push({
+    rule_block: 'detection',
+    // Decision ('allow' | 'warn' | 'deny') is a subset of RuleOutcome.
+    outcome: detected.decision,
+    matched_rule: detected.matched_rule,
+    reason: detected.reason,
+    evaluated: true,
+  });
+  receipt.decision = detected.decision;
+  receipt.matched_rule = detected.matched_rule;
+  receipt.reason = detected.reason;
+}
+
+/**
+ * Build a minimal receipt for the provider-failure deny/would-block branch
+ * in `gate()`, where there is no policy to run `evaluateAudited()` against --
+ * only the already-computed `result`.
+ *
+ * Without this, a guard configured with a `sink` but no `observer` (monitor
+ * mode accepts either, per `validateEnforcementConfig`) would go completely
+ * silent on a provider outage: `record()` only forwards a receipt to the
+ * sink when one is present, and the provider-failure branch used to always
+ * pass `undefined`. That violates "a monitored block is never silent" --
+ * this builds a real (if minimal) receipt whenever a sink is configured so
+ * it always gets a record.
+ *
+ * `policySpec` is the guard's last successfully loaded policy (`this.policy`)
+ * used only to populate the receipt's `PolicySummary`; it is never evaluated
+ * against `action` since the whole point of this path is that no evaluation
+ * happened.
+ */
+function buildFailureReceipt(
+  policySpec: HushSpec,
+  action: EvaluationAction,
+  result: EvaluationResult,
+  audit: AuditConfig,
+): DecisionReceipt {
+  const contentRedacted = audit.redact_content && action.content != null;
+  return {
+    receipt_id: randomUUID(),
+    timestamp: new Date().toISOString(),
+    hushspec_version: HUSHSPEC_VERSION,
+    action: {
+      type: action.type,
+      target: action.target,
+      // `|| undefined` (rather than the boolean itself) drops the key when
+      // false, matching evaluateAudited()'s and Rust/Go's skip-if-false
+      // behavior.
+      content_redacted: contentRedacted || undefined,
+    },
+    decision: result.decision,
+    matched_rule: result.matched_rule,
+    reason: result.reason,
+    rule_trace: [],
+    policy: { name: policySpec.name, version: policySpec.hushspec },
+    origin_profile: result.origin_profile,
+    posture: result.posture,
+    evaluation_duration_us: 0,
+  };
+}
 
 /** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
 export class HushGuard {
@@ -17,12 +184,21 @@ export class HushGuard {
   private observableEvaluator: ObservableEvaluator | null = null;
   private policyHash: string | null = null;
   private provider: PolicyProvider | null = null;
+  private enforcementMode: EnforcementMode = 'enforce';
+  private enforcementOverrides: Record<string, EnforcementMode> = {};
+  private sink: ReceiptSink | null = null;
+  private audit: AuditConfig = DEFAULT_AUDIT_CONFIG;
 
-  constructor(policy: HushSpec, options?: {
-    onWarn?: WarnHandler;
-    observer?: EvaluationObserver;
-    provider?: PolicyProvider;
-  }) {
+  constructor(policy: HushSpec, options?: HushGuardOptions) {
+    const enforcementConfig = options?.enforcement ?? {};
+    validateEnforcementConfig(
+      enforcementConfig,
+      options?.observer != null || options?.sink != null,
+    );
+    this.enforcementMode = enforcementConfig.mode ?? 'enforce';
+    this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
+    this.sink = options?.sink ?? null;
+    this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
     this.policy = policy;
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
@@ -34,7 +210,7 @@ export class HushGuard {
     }
   }
 
-  static fromFile(path: string, options?: { onWarn?: WarnHandler }): HushGuard {
+  static fromFile(path: string, options?: HushGuardOptions): HushGuard {
     const content = readFileSync(path, 'utf8');
     const result = parse(content);
     if (!result.ok) {
@@ -43,7 +219,7 @@ export class HushGuard {
     return new HushGuard(result.value, options);
   }
 
-  static fromYaml(yaml: string, options?: { onWarn?: WarnHandler }): HushGuard {
+  static fromYaml(yaml: string, options?: HushGuardOptions): HushGuard {
     const result = parse(yaml);
     if (!result.ok) {
       throw new Error(`Failed to parse policy: ${result.error}`);
@@ -53,7 +229,7 @@ export class HushGuard {
 
   static async fromProvider(
     provider: PolicyProvider,
-    options?: { onWarn?: WarnHandler },
+    options?: HushGuardOptions,
   ): Promise<HushGuard> {
     const spec = await provider.load();
     const guard = new HushGuard(spec, { ...options, provider });
@@ -64,29 +240,229 @@ export class HushGuard {
   evaluate(action: EvaluationAction): EvaluationResult {
     const policy = this.activePolicyResult();
     if ('decision' in policy) {
+      // Provider-failure deny: mirrors gate()'s buildFailureReceipt handling
+      // (see its doc comment) so a sink-only guard (sink, no observer) is
+      // never silent here either. Before this, evaluate() returned the
+      // failure result directly without ever building or sending a receipt,
+      // so a fromProvider guard with a sink but no observer emitted zero
+      // receipts on a provider outage -- the exact "monitored block must
+      // never be silent" violation buildFailureReceipt was introduced to
+      // close for gate()/check()/enforce().
+      const receipt = this.sink
+        ? buildFailureReceipt(this.policy, action, policy, this.audit)
+        : undefined;
+      if (receipt && this.sink) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break evaluation */
+        }
+      }
+      this.observableEvaluator?.notifyEvaluationCompleted(
+        this.observerAction(action),
+        policy,
+        0,
+        undefined,
+        receipt,
+      );
       return policy;
     }
-    if (this.observableEvaluator) {
-      return this.observableEvaluator.evaluate(policy, action);
+    if (this.sink) {
+      const { result, durationUs, receipt } = this.runEvaluation(policy, action);
+      if (receipt) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break evaluation */
+        }
+      }
+      this.observableEvaluator?.notifyEvaluationCompleted(
+        this.observerAction(action),
+        result,
+        durationUs,
+        undefined,
+        receipt,
+      );
+      return result;
     }
-    return evaluate(policy, action);
+    if (this.observableEvaluator) {
+      // Route through runEvaluation() (not ObservableEvaluator.evaluate(),
+      // which calls the plain evaluate()) so a policy's detection extension
+      // is honored here too, then emit through the same public notification
+      // ObservableEvaluator.evaluate() would otherwise have sent.
+      const { result, durationUs } = this.runEvaluation(policy, action);
+      this.observableEvaluator.notifyEvaluationCompleted(this.observerAction(action), result, durationUs);
+      return result;
+    }
+    return this.runEvaluation(policy, action).result;
   }
 
   check(action: EvaluationAction): boolean {
-    const result = this.evaluate(action);
-    if (result.decision === 'allow') return true;
-    if (result.decision === 'warn') return this.onWarn(result, action);
-    return false;
+    return this.gate(action).proceed;
   }
 
   enforce(action: EvaluationAction): void {
-    const result = this.evaluate(action);
-    if (result.decision === 'deny') {
-      throw new HushSpecDenied(result);
+    const outcome = this.gate(action);
+    if (!outcome.proceed) {
+      throw new HushSpecDenied(outcome.result);
     }
-    if (result.decision === 'warn' && !this.onWarn(result, action)) {
-      throw new HushSpecDenied(result);
+  }
+
+  /**
+   * Evaluate an action, resolve the effective enforcement mode, record the
+   * outcome, and report whether execution may proceed. The single
+   * enforcement path: check() and enforce() delegate here.
+   */
+  gate(action: EvaluationAction): GateOutcome {
+    const policy = this.activePolicyResult();
+    if ('decision' in policy) {
+      // Provider-failure deny: no loaded policy, so evaluateAudited() can't
+      // run -- but the decision must still be audited. A monitored provider
+      // outage must never proceed silently, so build a minimal receipt
+      // whenever a sink is configured (buildFailureReceipt) rather than
+      // passing undefined: record() only reaches the sink when a receipt is
+      // present, and a sink-only guard (sink, no observer -- monitor mode
+      // accepts either) would otherwise emit nothing at all here.
+      const mode = this.effectiveMode(policy);
+      const proceed = mode === 'monitor';
+      const enforcement: EnforcementSummary = {
+        mode,
+        outcome: proceed ? 'would_block' : 'blocked',
+      };
+      const receipt = this.sink
+        ? buildFailureReceipt(this.policy, action, policy, this.audit)
+        : undefined;
+      this.record(action, policy, 0, enforcement, receipt);
+      return { result: policy, proceed, enforcement };
     }
+
+    const { result, durationUs, receipt } = this.runEvaluation(policy, action);
+    const mode = this.effectiveMode(result);
+    let proceed: boolean;
+    let outcome: EnforcementSummary['outcome'];
+    switch (result.decision) {
+      case 'allow':
+        proceed = true;
+        outcome = 'allowed';
+        break;
+      case 'warn':
+        if (mode === 'monitor') {
+          proceed = true;
+          outcome = 'would_block';
+        } else if (this.onWarn(result, action)) {
+          proceed = true;
+          outcome = 'confirmed';
+        } else {
+          proceed = false;
+          outcome = 'blocked';
+        }
+        break;
+      case 'deny':
+        proceed = mode === 'monitor';
+        outcome = proceed ? 'would_block' : 'blocked';
+        break;
+    }
+
+    const enforcement: EnforcementSummary = { mode, outcome };
+    this.record(action, result, durationUs, enforcement, receipt);
+    return { result, proceed, enforcement };
+  }
+
+  private effectiveMode(result: EvaluationResult): EnforcementMode {
+    if (isPanicActive() || result.matched_rule === '__hushspec_panic__') {
+      return 'enforce';
+    }
+    let matched = result.matched_rule;
+    // detection.ts emits the bare literal 'detection' as matched_rule rather
+    // than a hierarchical rule path (see packages/hushspec/src/detection.ts),
+    // so an override keyed 'extensions.detection' would otherwise silently
+    // never match. Normalize before prefix matching.
+    if (matched === 'detection') {
+      matched = 'extensions.detection';
+    }
+    if (matched != null) {
+      let bestKey: string | undefined;
+      let bestMode: EnforcementMode | undefined;
+      for (const [key, mode] of Object.entries(this.enforcementOverrides)) {
+        if (matchesRulePathPrefix(matched, key) && (bestKey == null || key.length > bestKey.length)) {
+          bestKey = key;
+          bestMode = mode;
+        }
+      }
+      if (bestMode != null) return bestMode;
+    }
+    return this.enforcementMode;
+  }
+
+  private runEvaluation(policy: HushSpec, action: EvaluationAction): {
+    result: EvaluationResult;
+    durationUs: number;
+    receipt?: DecisionReceipt;
+  } {
+    if (this.sink) {
+      // evaluateAudited() builds the receipt from the plain evaluate(), which
+      // does not consult the detection extension; applyDetection() folds it in
+      // (escalating decision/matched_rule/reason and appending a `detection`
+      // rule-trace entry) so a sink-backed guard honors a policy's detection
+      // extension identically to the receipt-free path below. No-op when
+      // nothing escalates, so existing receipts are unchanged.
+      const receipt = evaluateAudited(policy, action, this.audit);
+      applyDetection(receipt, policy, action);
+      return {
+        result: {
+          decision: receipt.decision,
+          matched_rule: receipt.matched_rule,
+          reason: receipt.reason,
+          origin_profile: receipt.origin_profile,
+          posture: receipt.posture,
+        },
+        durationUs: receipt.evaluation_duration_us,
+        receipt,
+      };
+    }
+    const start = performance.now();
+    const result = evaluateWithDetection(policy, action).evaluation;
+    const durationUs = Math.round((performance.now() - start) * 1000);
+    return { result, durationUs };
+  }
+
+  private record(
+    action: EvaluationAction,
+    result: EvaluationResult,
+    durationUs: number,
+    enforcement: EnforcementSummary,
+    receipt?: DecisionReceipt,
+  ): void {
+    if (receipt) {
+      receipt.enforcement = enforcement;
+      if (this.sink) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break enforcement */
+        }
+      }
+    }
+    this.observableEvaluator?.notifyEvaluationCompleted(
+      this.observerAction(action),
+      result,
+      durationUs,
+      enforcement,
+      receipt,
+    );
+  }
+
+  /**
+   * Redact an action for observer emission the same way the receipt redacts it:
+   * when `redact_content` is enabled and content is present, strip the content
+   * and set the redacted flag so raw content never leaks into the observer stream.
+   */
+  private observerAction(action: EvaluationAction): EvaluationAction {
+    if (this.audit.redact_content && action.content != null) {
+      const { content: _content, ...rest } = action;
+      return { ...rest, content_redacted: true };
+    }
+    return action;
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {

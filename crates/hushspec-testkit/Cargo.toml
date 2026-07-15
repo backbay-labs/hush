@@ -9,6 +9,14 @@ description = "Conformance test runner for HushSpec implementations"
 name = "hushspec-testkit"
 path = "src/main.rs"
 
+[[bin]]
+name = "hushspec-gen"
+path = "src/bin/hushspec-gen.rs"
+
+[[bin]]
+name = "hushspec-difftest"
+path = "src/bin/hushspec-difftest.rs"
+
 [dependencies]
 hushspec = { version = "0.1", path = "../hushspec" }
 serde = { version = "1", features = ["derive"] }
@@ -16,4 +24,12 @@ serde_yaml = "0.9"
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 colored = "2"
-jsonschema = "0.18"
+jsonschema = { version = "0.18", features = ["draft202012"] }
+thiserror = "2"
+# Exact-pinned: Cargo.lock is gitignored, so a semver-range dependency here
+# could resolve a newer proptest whose RNG->value mapping differs across CI
+# checkouts, silently breaking --seed / --seed-from-string reproducibility
+# for hushspec-difftest. Bump deliberately, not automatically.
+proptest = "=1.11.0"
+tempfile = "3"
+sha2 = "0.10"

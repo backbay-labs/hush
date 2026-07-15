@@ -51,6 +51,8 @@ const RULE_ORDER: &[&str] = &[
     "computer_use",
     "remote_desktop_channels",
     "input_injection",
+    "browser_automation",
+    "code_execution",
 ];
 
 /// Lists whose entries should be sorted alphabetically
@@ -67,6 +69,12 @@ const SORTABLE_LISTS: &[&str] = &[
     "forbidden_patterns",
     "allowed_actions",
     "allowed_types",
+    "allowed_domains",
+    "blocked_domains",
+    "allowed_verbs",
+    "extra_credential_patterns",
+    "language_allowlist",
+    "module_denylist",
 ];
 
 pub fn run(args: FmtArgs) -> i32 {
@@ -110,9 +118,9 @@ pub fn run(args: FmtArgs) -> i32 {
             }
         };
 
-        // Parse to validate it's valid YAML
-        let spec = match HushSpec::parse(&original) {
-            Ok(s) => s,
+        // Parse and canonically format in one step (also validates it's valid YAML).
+        let formatted = match format_canonical(&original) {
+            Ok(f) => f,
             Err(e) => {
                 match args.format {
                     FmtOutputFormat::Text => {
@@ -129,8 +137,6 @@ pub fn run(args: FmtArgs) -> i32 {
                 continue;
             }
         };
-
-        let formatted = format_spec(&spec);
 
         // Normalize: ensure both end with single newline for comparison
         let original_normalized = normalize_trailing_newline(&original);
@@ -182,7 +188,19 @@ pub fn run(args: FmtArgs) -> i32 {
                     }
                 }
             }
-            FmtOutputFormat::Json => {}
+            FmtOutputFormat::Json => {
+                // Persist the formatted output just like the Text arm, minus the
+                // human-readable status lines. --check and --diff stay
+                // non-writing; the JSON summary is emitted once after the loop.
+                if !args.check
+                    && !args.diff
+                    && changed
+                    && let Err(e) = std::fs::write(path, &formatted_normalized)
+                {
+                    eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
+                    any_error = true;
+                }
+            }
         }
 
         results.push(FmtResult {
@@ -207,13 +225,55 @@ pub fn run(args: FmtArgs) -> i32 {
     }
 }
 
-fn normalize_trailing_newline(s: &str) -> String {
+pub(crate) fn normalize_trailing_newline(s: &str) -> String {
     let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
     format!("{trimmed}\n")
 }
 
+/// Split a leading yaml-language-server modeline (first line only) from the body.
+///
+/// Only this exact leading-comment form is preserved; the serde round-trip
+/// through `format_spec` cannot carry arbitrary comments, and the modeline is
+/// the one editors rely on for schema-driven completion.
+pub(crate) fn split_modeline(input: &str) -> (Option<&str>, &str) {
+    if let Some(first) = input.lines().next()
+        && first.trim_start().starts_with("# yaml-language-server:")
+    {
+        let body = &input[first.len()..];
+        return (Some(first), body.strip_prefix('\n').unwrap_or(body));
+    }
+    (None, input)
+}
+
+/// Rejoin a modeline previously extracted by [`split_modeline`] with freshly
+/// canonicalized body text. Shared by `format_canonical` (the `h2h fmt` path)
+/// and `cmd_lint`'s `--fix`/`--dry-run` path, which canonicalizes an
+/// already-parsed-and-mutated `HushSpec` directly rather than routing through
+/// `format_canonical`.
+pub(crate) fn rejoin_modeline(modeline: Option<&str>, canonical: &str) -> String {
+    match modeline {
+        Some(m) => format!("{m}\n{canonical}"),
+        None => canonical.to_string(),
+    }
+}
+
+/// Parse `input` and render it as canonical HushSpec YAML, preserving a
+/// leading yaml-language-server modeline if present.
+///
+/// Parses the ORIGINAL `input`, not the modeline-stripped body: the modeline
+/// is a parse-inert YAML comment, so `HushSpec::parse` ignores it either way,
+/// but parsing the stripped body would shift any parse-error line number
+/// down by one line relative to `h2h lint` (which parses the original file
+/// content directly). `split_modeline` is used here only to pull the
+/// modeline text back out for `rejoin_modeline`.
+pub(crate) fn format_canonical(input: &str) -> Result<String, String> {
+    let (modeline, _) = split_modeline(input);
+    let spec = HushSpec::parse(input).map_err(|e| e.to_string())?;
+    Ok(rejoin_modeline(modeline, &format_spec(&spec)))
+}
+
 /// Format a HushSpec document into canonical YAML
-fn format_spec(spec: &HushSpec) -> String {
+pub(crate) fn format_spec(spec: &HushSpec) -> String {
     let mut out = String::new();
 
     // hushspec (always first, always quoted)
@@ -334,6 +394,18 @@ fn format_rules(rules: &hushspec::Rules, out: &mut String) {
                 if let Some(r) = &rules.input_injection {
                     out.push_str("  input_injection:\n");
                     format_input_injection(r, out);
+                }
+            }
+            "browser_automation" => {
+                if let Some(r) = &rules.browser_automation {
+                    out.push_str("  browser_automation:\n");
+                    format_browser_automation(r, out);
+                }
+            }
+            "code_execution" => {
+                if let Some(r) = &rules.code_execution {
+                    out.push_str("  code_execution:\n");
+                    format_code_execution(r, out);
                 }
             }
             _ => {}
@@ -464,6 +536,44 @@ fn format_input_injection(r: &hushspec::InputInjectionRule, out: &mut String) {
         "    require_postcondition_probe: {}\n",
         r.require_postcondition_probe
     ));
+}
+
+fn format_browser_automation(r: &hushspec::BrowserAutomationRule, out: &mut String) {
+    if !r.enabled {
+        out.push_str("    enabled: false\n");
+    } else {
+        out.push_str("    enabled: true\n");
+    }
+    format_sorted_string_list("allowed_domains", &r.allowed_domains, 4, out);
+    format_sorted_string_list("blocked_domains", &r.blocked_domains, 4, out);
+    format_sorted_string_list("allowed_verbs", &r.allowed_verbs, 4, out);
+    out.push_str(&format!(
+        "    credential_detection: {}\n",
+        r.credential_detection
+    ));
+    format_sorted_string_list(
+        "extra_credential_patterns",
+        &r.extra_credential_patterns,
+        4,
+        out,
+    );
+}
+
+fn format_code_execution(r: &hushspec::CodeExecutionRule, out: &mut String) {
+    if !r.enabled {
+        out.push_str("    enabled: false\n");
+    } else {
+        out.push_str("    enabled: true\n");
+    }
+    format_sorted_string_list("language_allowlist", &r.language_allowlist, 4, out);
+    format_sorted_string_list("module_denylist", &r.module_denylist, 4, out);
+    out.push_str(&format!("    network_access: {}\n", r.network_access));
+    if let Some(max_time) = r.max_execution_time_ms {
+        out.push_str(&format!("    max_execution_time_ms: {max_time}\n"));
+    }
+    if let Some(max_bytes) = r.max_scan_bytes {
+        out.push_str(&format!("    max_scan_bytes: {max_bytes}\n"));
+    }
 }
 
 /// Format a list of strings, sorted and deduplicated
@@ -653,7 +763,7 @@ fn format_computer_use_mode(mode: &hushspec::ComputerUseMode) -> &'static str {
     }
 }
 
-fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
+pub(crate) fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> String {
     TextDiff::from_lines(original, formatted)
         .unified_diff()
         .header(
@@ -665,9 +775,32 @@ fn compute_diff(original: &str, formatted: &str, path: &std::path::Path) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{format_spec, yaml_scalar};
+    use super::{format_canonical, format_spec, yaml_scalar};
     use hushspec::HushSpec;
     use hushspec::schema::MergeStrategy;
+
+    const MODELINE: &str =
+        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+
+    #[test]
+    fn fmt_preserves_leading_modeline() {
+        let input = format!("{MODELINE}\nhushspec: \"0.1.0\"\nname: t\n");
+        let out = format_canonical(&input).unwrap();
+        assert!(
+            out.starts_with(&format!("{MODELINE}\n")),
+            "modeline stripped:\n{out}"
+        );
+        // Idempotent with the modeline present:
+        assert_eq!(format_canonical(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn fmt_without_modeline_is_unchanged_behavior() {
+        let input = "hushspec: \"0.1.0\"\nname: t\n";
+        let out = format_canonical(input).unwrap();
+        assert!(!out.contains("yaml-language-server"));
+        assert_eq!(format_canonical(&out).unwrap(), out);
+    }
 
     #[test]
     fn format_spec_preserves_newlines_and_tabs_in_scalars() {
@@ -744,6 +877,58 @@ mod tests {
                 .map(|rule| rule.mode),
             Some(hushspec::ComputerUseMode::Guardrail)
         );
+    }
+
+    #[test]
+    fn format_preserves_browser_automation_and_code_execution() {
+        let input = r#"hushspec: "0.1.0"
+name: guards
+rules:
+  browser_automation:
+    enabled: true
+    allowed_domains:
+      - "*.example.com"
+    allowed_verbs:
+      - navigate
+    credential_detection: true
+  code_execution:
+    enabled: true
+    language_allowlist:
+      - python
+    module_denylist:
+      - subprocess
+      - socket
+    network_access: false
+    max_execution_time_ms: 5000
+"#;
+        let formatted = format_canonical(input).unwrap();
+        assert!(
+            formatted.contains("  browser_automation:\n"),
+            "browser_automation block dropped:\n{formatted}"
+        );
+        assert!(
+            formatted.contains("  code_execution:\n"),
+            "code_execution block dropped:\n{formatted}"
+        );
+
+        let reparsed = HushSpec::parse(&formatted).expect("formatted YAML should parse");
+        let rules = reparsed.rules.as_ref().expect("rules preserved");
+        let ba = rules
+            .browser_automation
+            .as_ref()
+            .expect("browser_automation preserved");
+        assert!(ba.enabled);
+        assert_eq!(ba.allowed_domains, vec!["*.example.com".to_string()]);
+        assert_eq!(ba.allowed_verbs, vec!["navigate".to_string()]);
+        let ce = rules
+            .code_execution
+            .as_ref()
+            .expect("code_execution preserved");
+        assert_eq!(ce.language_allowlist, vec!["python".to_string()]);
+        assert_eq!(ce.max_execution_time_ms, Some(5000));
+
+        // Formatting must be idempotent.
+        assert_eq!(format_canonical(&formatted).unwrap(), formatted);
     }
 
     #[test]

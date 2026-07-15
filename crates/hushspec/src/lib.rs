@@ -19,9 +19,9 @@ pub mod version;
 
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{
-    DetectionCategory, DetectionConfig, DetectionResult, Detector, DetectorRegistry,
-    EvaluationWithDetection, MatchedPattern, RegexExfiltrationDetector, RegexInjectionDetector,
-    RegexJailbreakDetector, evaluate_with_detection,
+    DetectionCategory, DetectionResult, Detector, DetectorRegistry, EvaluationWithDetection,
+    MatchedPattern, RegexExfiltrationDetector, RegexInjectionDetector, RegexJailbreakDetector,
+    evaluate_with_detection,
 };
 pub use evaluate::{
     Decision, EvaluationAction, EvaluationResult, OriginContext, PostureContext, PostureResult,
@@ -33,7 +33,10 @@ pub use merge::merge;
 pub use panic::{
     activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active, panic_policy,
 };
-pub use receipt::{AuditConfig, DecisionReceipt, evaluate_audited};
+pub use receipt::{
+    AuditConfig, DecisionReceipt, EnforcementMode, EnforcementOutcome, EnforcementSummary,
+    evaluate_audited,
+};
 pub use resolve::{
     BUILTIN_NAMES, LoadedSpec, ResolveError, create_composite_loader, load_builtin,
     resolve_from_path, resolve_from_path_with_builtins, resolve_with_loader,

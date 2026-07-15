@@ -269,4 +269,86 @@ rules:
     expect(result.matched_rule).toBe('rules.shell_commands.forbidden_patterns[0]');
     expect(result.reason).toContain('RE2 subset');
   });
+
+  // Spec item C for TS (wave-3): the glob translator's compiled RegExp was
+  // missing the 'u' flag, so `?` -> `.` matched a single UTF-16 code unit
+  // instead of a full Unicode code point. An astral character like an emoji
+  // is TWO UTF-16 code units (a surrogate pair), so without 'u' a single `?`
+  // only ever consumed half of it and the glob failed to match. With 'u',
+  // `.` is code-point-aware and consumes the whole character.
+  describe('glob `?` wildcard is code-point-aware', () => {
+    const globSpec = (pattern: string): HushSpec => ({
+      hushspec: '0.1.0',
+      name: 'glob-wildcard',
+      rules: {
+        tool_access: {
+          enabled: true,
+          allow: [pattern],
+          default: 'block',
+        },
+      },
+    });
+
+    it('matches a target with an astral character (emoji) in the `?` position', () => {
+      const result = evaluate(globSpec('a?b'), { type: 'tool_call', target: 'a\u{1F600}b' });
+      expect(result.decision).toBe('allow');
+      expect(result.matched_rule).toBe('rules.tool_access.allow');
+    });
+
+    it('leaves ASCII glob behavior unchanged: `?` still matches exactly one character', () => {
+      const spec = globSpec('a?b');
+      expect(evaluate(spec, { type: 'tool_call', target: 'axb' }).decision).toBe('allow');
+      // Two characters where `?` expects one must still not match.
+      expect(evaluate(spec, { type: 'tool_call', target: 'axxb' }).decision).toBe('deny');
+      // Zero characters must still not match either.
+      expect(evaluate(spec, { type: 'tool_call', target: 'ab' }).decision).toBe('deny');
+    });
+  });
+
+  // CRITICAL parity fix (v3, item CR/LS/PS): the glob translator emitted `.`
+  // for `?`/`**`, but JavaScript `.` -- even under the `u` flag -- excludes
+  // every line terminator (`\n \r` U+2028 U+2029), whereas the Rust/Python/Go
+  // reference `.` excludes only `\n`. A target with an interior `\r` therefore
+  // slipped past a `**`/`?` glob in TS ONLY, letting `forbidden_paths.patterns`
+  // / `tool_access.block` be bypassed. The translator now emits `[^\n]`, which
+  // excludes only `\n`, matching the reference engines exactly.
+  describe('glob wildcards match targets with interior line terminators', () => {
+    it('`**` matches a target with an interior CR (forbidden path is NOT bypassed)', () => {
+      const spec: HushSpec = {
+        hushspec: '0.1.0',
+        name: 'glob-interior-cr',
+        rules: {
+          forbidden_paths: { enabled: true, patterns: ['secrets/**'] },
+        },
+      };
+      const result = evaluate(spec, { type: 'file_read', target: 'secrets/x\ry' });
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('rules.forbidden_paths.patterns');
+    });
+
+    it('`?` matches an interior CR', () => {
+      const spec: HushSpec = {
+        hushspec: '0.1.0',
+        name: 'glob-question-cr',
+        rules: { tool_access: { enabled: true, allow: ['a?b'], default: 'block' } },
+      };
+      const result = evaluate(spec, { type: 'tool_call', target: 'a\rb' });
+      expect(result.decision).toBe('allow');
+      expect(result.matched_rule).toBe('rules.tool_access.allow');
+    });
+
+    it('`**` still excludes a bare `\\n` like the reference `.` does', () => {
+      // `[^\n]` (like the reference `.`) excludes `\n`, so an interior newline
+      // still breaks a `**` match -- identical to Rust/Python/Go.
+      const spec: HushSpec = {
+        hushspec: '0.1.0',
+        name: 'glob-interior-lf',
+        rules: {
+          forbidden_paths: { enabled: true, patterns: ['secrets/**'] },
+        },
+      };
+      const result = evaluate(spec, { type: 'file_read', target: 'secrets/x\ny' });
+      expect(result.decision).toBe('allow');
+    });
+  });
 });

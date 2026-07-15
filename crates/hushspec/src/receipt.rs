@@ -25,6 +25,8 @@ pub struct DecisionReceipt {
     pub origin_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posture: Option<PostureResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enforcement: Option<EnforcementSummary>,
     pub evaluation_duration_us: u64,
 }
 
@@ -66,8 +68,37 @@ pub struct PolicySummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub version: String,
-    /// SHA-256 hex digest of the canonical JSON serialization.
+    /// SHA-256 hex digest of the canonical JSON serialization. Omitted from
+    /// serialized output when audit is disabled (the zero-overhead
+    /// disabled-audit fast path never computes a hash); the in-memory value
+    /// is `""` in that case, matching the other three SDKs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub content_hash: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnforcementMode {
+    Enforce,
+    Monitor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnforcementOutcome {
+    Allowed,
+    Confirmed,
+    Blocked,
+    WouldBlock,
+}
+
+/// How the runtime applied a decision. `DecisionReceipt.decision` is always
+/// the evaluated policy decision; this records what the enforcement point did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EnforcementSummary {
+    pub mode: EnforcementMode,
+    pub outcome: EnforcementOutcome,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +173,7 @@ pub fn evaluate_audited(
         policy,
         origin_profile: result.origin_profile,
         posture: result.posture,
+        enforcement: None,
         evaluation_duration_us: duration_us,
     }
 }

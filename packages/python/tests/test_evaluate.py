@@ -12,6 +12,8 @@ from hushspec.evaluate import (
     OriginContext,
     PostureContext,
     evaluate,
+    glob_matches,
+    patch_stats,
 )
 
 FIXTURES_ROOT = Path(__file__).parent.parent.parent.parent / "fixtures"
@@ -273,3 +275,59 @@ rules:
 
     assert result.decision == Decision.DENY
     assert result.matched_rule == "rules.remote_desktop_channels.clipboard"
+
+
+# glob_matches end-of-text anchoring
+#
+# Python's `re.search(r'...$', target)` treats `$` as "end of string OR just
+# before a trailing \n", so a glob like "internal.corp" used to wrongly match
+# "internal.corp\n". The translator now anchors with \Z (true end-of-string,
+# no newline exception) instead of `$`, matching Rust `regex` / Go RE2 / JS
+# non-multiline `$` end-of-text semantics.
+
+
+def test_glob_does_not_match_target_with_trailing_newline():
+    assert glob_matches("internal.corp", "internal.corp\n") is False
+    assert glob_matches("internal.corp", "internal.corp") is True
+
+
+def test_glob_star_does_not_match_trailing_newline():
+    assert glob_matches("*.internal.corp", "api.internal.corp\n") is False
+    assert glob_matches("*.internal.corp", "api.internal.corp") is True
+
+
+# patch_stats line-splitting parity
+#
+# `str.splitlines()` also breaks on \r, \v, \f, and the Unicode NEL/LS/PS
+# separators, but Rust's `.lines()` and the TS/Go SDKs split only on \n. A
+# bare \r with no \n used to be treated as its own line boundary here,
+# double-counting additions/deletions relative to the other three SDKs.
+
+
+def test_patch_stats_splits_only_on_newline_not_carriage_return():
+    stats = patch_stats("+a\r+b")
+    assert stats.additions == 1
+    assert stats.deletions == 0
+
+
+def test_patch_stats_counts_additions_and_deletions_with_real_newlines():
+    # Regression guard: ordinary \n-delimited patch content (the common
+    # case) must still count correctly after switching from splitlines() to
+    # split("\n"), including skipping the +++/--- file headers.
+    content = "--- a\n+++ b\n+line one\n+line two\n-old line\n context line\n"
+    stats = patch_stats(content)
+    assert stats.additions == 2
+    assert stats.deletions == 1
+
+
+def test_glob_ascii_patterns_unchanged():
+    assert glob_matches("*.example.com", "api.example.com") is True
+    assert glob_matches("*.example.com", "example.com") is False
+    assert glob_matches("*.example.com", "api.example.com.evil.net") is False
+    assert glob_matches("**/secrets/**", "a/b/secrets/c") is True
+    assert glob_matches("**/x", "x") is True
+    assert glob_matches("**/x", "a/b/x") is True
+    assert glob_matches("a?b", "acb") is True
+    assert glob_matches("a?b", "ab") is False
+    assert glob_matches("literal$", "literal$") is True
+    assert glob_matches("literal$", "literal") is False

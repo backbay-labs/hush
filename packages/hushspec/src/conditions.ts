@@ -143,6 +143,11 @@ function checkTimeWindow(
 function parseHHMM(s: string): [number, number] | undefined {
   const parts = s.split(':');
   if (parts.length !== 2) return undefined;
+  // Reject any token that is not purely digits (Rust parses each part as u8;
+  // "09.9" / "09xx" must fail rather than truncate).
+  if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
+    return undefined;
+  }
   const hour = parseInt(parts[0], 10);
   const minute = parseInt(parts[1], 10);
   if (isNaN(hour) || isNaN(minute) || hour > 23 || minute > 59 || hour < 0 || minute < 0) {
@@ -164,7 +169,12 @@ function resolveCurrentTime(
   let date: Date;
 
   if (context.current_time != null) {
-    date = new Date(context.current_time);
+    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is interpreted
+    // as UTC to match Rust/Python/Go, not the host's local time.
+    const raw = context.current_time;
+    const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
+    const normalized = !hasTimezone && raw.includes('T') ? `${raw}Z` : raw;
+    date = new Date(normalized);
     if (isNaN(date.getTime())) {
       return undefined;
     }
@@ -274,34 +284,53 @@ function resolveContextValue(
   }
 }
 
+/**
+ * Typed scalar equality with no cross-type coercion -- mirrors Rust's
+ * `values_equal` (crates/hushspec/src/conditions.rs). A number is never
+ * equal to a boolean or a string even if JS's `==` would agree (`1 == true`),
+ * because `===` (used below) already enforces matching types.
+ */
+function valuesEqual(actual: unknown, expected: unknown): boolean {
+  if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
+    return actual === expected;
+  }
+  return false;
+}
+
+/**
+ * Mirrors Rust's `matches_scalar_or_membership`: if `actual` is an array,
+ * true iff any element equals `expected` (membership); otherwise a direct
+ * scalar comparison.
+ */
+function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(actual)) {
+    return actual.some((item) => valuesEqual(item, expected));
+  }
+  return valuesEqual(actual, expected);
+}
+
+/**
+ * Mirrors Rust's `match_value`. Missing/null context fields fail closed. A
+ * scalar `expected` (string/bool/number) matches via
+ * `matchesScalarOrMembership`, which covers both scalar-vs-scalar equality
+ * and scalar-vs-array membership (in either direction: a number/bool/string
+ * `expected` matches an `actual` array containing it, and vice versa). An
+ * array `expected` matches iff `actual` equals or contains at least one of
+ * its elements -- checking every candidate via `matchesScalarOrMembership`
+ * against `actual` also covers array-vs-array as a set intersection (true
+ * iff any expected element is present in the actual array).
+ */
 function matchValue(actual: unknown, expected: unknown): boolean {
   if (actual == null) {
     return false;
   }
 
-  if (typeof expected === 'string') {
-    if (typeof actual === 'string') {
-      return actual === expected;
-    }
-    if (Array.isArray(actual)) {
-      return actual.some((v) => v === expected);
-    }
-    return false;
-  }
-
-  if (typeof expected === 'boolean') {
-    return actual === expected;
-  }
-
-  if (typeof expected === 'number') {
-    return actual === expected;
+  if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
+    return matchesScalarOrMembership(actual, expected);
   }
 
   if (Array.isArray(expected)) {
-    if (typeof actual === 'string') {
-      return expected.some((v) => v === actual);
-    }
-    return false;
+    return expected.some((candidate) => matchesScalarOrMembership(actual, candidate));
   }
 
   return false;

@@ -142,6 +142,13 @@ func parseHHMM(s string) (int, int, bool) {
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
+	// Require pure ASCII digits in each component. strconv.Atoi otherwise
+	// accepts a leading sign (e.g. "+9"), which TS (^\d+$) and Python
+	// (strict-uint) reject -- so a "+"-prefixed token must fail to parse and
+	// leave the window inert, matching the other SDKs (fail-closed).
+	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
+		return 0, 0, false
+	}
 	hour, err := strconv.Atoi(parts[0])
 	if err != nil || hour < 0 || hour > 23 {
 		return 0, 0, false
@@ -337,43 +344,65 @@ func mapGet(m map[string]interface{}, key string) interface{} {
 	return m[key]
 }
 
+// valuesEqual mirrors Rust's values_equal: scalar-to-scalar equality only.
+// String is exact, bool is exact (bool is NOT numeric), and numbers preserve
+// the int-vs-float distinction Rust draws through serde_json::Number (as_i64 /
+// as_f64): an integer-shaped expected value matches ONLY an integer-typed
+// actual, while a float-shaped expected value matches an integer or float
+// actual by numeric value. Any other actual shape, or a type mismatch, is not
+// equal.
+func valuesEqual(actual, expected interface{}) bool {
+	switch ev := expected.(type) {
+	case string:
+		av, ok := actual.(string)
+		return ok && av == ev
+	case bool:
+		av, ok := actual.(bool)
+		return ok && av == ev
+	case int:
+		return matchIntNumber(actual, int64(ev))
+	case int64:
+		return matchIntNumber(actual, ev)
+	case float64:
+		return matchFloatNumber(actual, ev)
+	default:
+		return false
+	}
+}
+
+// matchesScalarOrMembership mirrors Rust's matches_scalar_or_membership: when
+// the actual value is an array, the expected scalar must equal one of its
+// elements (membership); otherwise it is a plain scalar comparison.
+func matchesScalarOrMembership(actual, expected interface{}) bool {
+	if arr, ok := actual.([]interface{}); ok {
+		for _, item := range arr {
+			if valuesEqual(item, expected) {
+				return true
+			}
+		}
+		return false
+	}
+	return valuesEqual(actual, expected)
+}
+
+// matchValueGo mirrors Rust's match_value. A missing context field (nil actual)
+// fails closed. A scalar expected value matches a scalar or is a member of an
+// actual array. An expected array matches when ANY of its candidates matches
+// the actual value, so expected-array vs actual-array succeeds on a non-empty
+// intersection and expected-array vs actual-scalar succeeds on membership --
+// for string, number, and bool candidates alike.
 func matchValueGo(actual, expected interface{}) bool {
 	if actual == nil {
 		return false
 	}
 
 	switch ev := expected.(type) {
-	case string:
-		switch av := actual.(type) {
-		case string:
-			return av == ev
-		case []interface{}:
-			// Scalar expected vs array actual: membership check
-			for _, item := range av {
-				if s, ok := item.(string); ok && s == ev {
-					return true
-				}
-			}
-			return false
-		default:
-			return false
-		}
-	case bool:
-		ab, ok := actual.(bool)
-		return ok && ab == ev
-	case int:
-		return matchNumber(actual, float64(ev))
-	case int64:
-		return matchNumber(actual, float64(ev))
-	case float64:
-		return matchNumber(actual, ev)
+	case string, bool, int, int64, float64:
+		return matchesScalarOrMembership(actual, expected)
 	case []interface{}:
-		// Array of expected values: actual must be one of them (OR).
-		if as, ok := actual.(string); ok {
-			for _, item := range ev {
-				if s, ok := item.(string); ok && s == as {
-					return true
-				}
+		for _, candidate := range ev {
+			if matchesScalarOrMembership(actual, candidate) {
+				return true
 			}
 		}
 		return false
@@ -382,7 +411,25 @@ func matchValueGo(actual, expected interface{}) bool {
 	}
 }
 
-func matchNumber(actual interface{}, expected float64) bool {
+// matchIntNumber compares an integer-shaped expected value. Mirrors Rust's
+// values_equal via serde_json::Number::as_i64: an integer expected matches
+// ONLY an integer-typed actual (int/int64) with an equal value -- a float64
+// actual such as 5.0 does NOT match, even when numerically equal.
+func matchIntNumber(actual interface{}, expected int64) bool {
+	switch av := actual.(type) {
+	case int:
+		return int64(av) == expected
+	case int64:
+		return av == expected
+	default:
+		return false
+	}
+}
+
+// matchFloatNumber compares a float-shaped expected value. Mirrors Rust's
+// values_equal via serde_json::Number::as_f64: a float expected matches an
+// int/int64/float64 actual whose numeric value is equal.
+func matchFloatNumber(actual interface{}, expected float64) bool {
 	switch av := actual.(type) {
 	case int:
 		return float64(av) == expected
@@ -453,6 +500,12 @@ func applyConditions(
 				changed = true
 			case "input_injection":
 				rulesCopy.InputInjection = nil
+				changed = true
+			case "browser_automation":
+				rulesCopy.BrowserAutomation = nil
+				changed = true
+			case "code_execution":
+				rulesCopy.CodeExecution = nil
 				changed = true
 			}
 		}

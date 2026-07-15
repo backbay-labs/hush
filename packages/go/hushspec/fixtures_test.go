@@ -29,6 +29,7 @@ var (
 		"core/evaluation",
 		"posture/evaluation",
 		"origins/evaluation",
+		"detection/evaluation",
 	}
 	mergeFixtureDirs = []string{
 		"core/merge",

@@ -1,0 +1,37 @@
+{
+  "hushspec_diff": "0.1.0",
+  "seed": 1,
+  "generated_by": "hand-written",
+  "groups": [
+    {
+      "id": "g0001",
+      "policy": {
+        "hushspec": "0.1.0",
+        "rules": {
+          "tool_access": {
+            "allow": ["read_file"],
+            "block": ["shell_exec"],
+            "default": "block"
+          }
+        }
+      },
+      "actions": [
+        { "id": "a0001", "action": { "type": "tool_call", "target": "read_file" } },
+        { "id": "a0002", "action": { "type": "tool_call", "target": "shell_exec" } }
+      ]
+    },
+    {
+      "id": "g0002",
+      "policy": {
+        "hushspec": "0.1.0",
+        "rules": {
+          "forbidden_paths": { "patterns": ["**/.ssh/**"] }
+        }
+      },
+      "actions": [
+        { "id": "a0001", "action": { "type": "file_read", "target": "/home/u/.ssh/id_rsa" } },
+        { "id": "a0002", "action": { "type": "file_read", "target": "/workspace/main.rs" } }
+      ]
+    }
+  ]
+}

@@ -14,6 +14,12 @@ type LoadedSpec struct {
 	Spec   *HushSpec
 }
 
+// maxExtendsDepth caps the length of an extends chain. Cycle detection only
+// catches an exact repeat of a prior source; a long but acyclic chain would
+// otherwise recurse without bound and overflow the stack. 32 is far above
+// any realistic composition depth (shipped policies are depth <= 2).
+const maxExtendsDepth = 32
+
 // ResolveLoader loads a HushSpec referenced by an extends field.
 // reference is the extends value; from is the source of the referencing document.
 type ResolveLoader func(reference string, from string) (*LoadedSpec, error)
@@ -22,14 +28,14 @@ type ResolveLoader func(reference string, from string) (*LoadedSpec, error)
 // and merging parent documents via the provided loader.
 func Resolve(spec *HushSpec, source string, loader ResolveLoader) (*HushSpec, error) {
 	if loader == nil {
-		loader = loadFromFilesystem
+		loader = createCompositeLoader()
 	}
 
 	stack := make([]string, 0, 4)
 	if source != "" {
 		stack = append(stack, source)
 	}
-	return resolveInner(spec, source, loader, stack)
+	return resolveInner(spec, source, loader, stack, 0)
 }
 
 // ResolveFile loads a HushSpec from disk and flattens its extends chain.
@@ -50,12 +56,51 @@ func ResolveFile(path string) (*HushSpec, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HushSpec at %s: %w", source, err)
 	}
-	return Resolve(spec, source, loadFromFilesystem)
+	return Resolve(spec, source, createCompositeLoader())
 }
 
-func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []string) (*HushSpec, error) {
+// createCompositeLoader serves `builtin:<name>` references from the embedded
+// rulesets and everything else from the filesystem (mirrors the Rust/TS
+// resolvers). A bare name with no path separators or dots is tried as a
+// builtin before falling back to the filesystem.
+func createCompositeLoader() ResolveLoader {
+	return func(reference string, from string) (*LoadedSpec, error) {
+		if strings.HasPrefix(reference, "builtin:") {
+			spec, ok := LoadBuiltin(reference)
+			if !ok {
+				return nil, fmt.Errorf("unknown builtin ruleset %q", reference)
+			}
+			return &LoadedSpec{Source: reference, Spec: spec}, nil
+		}
+
+		// Reject HTTP(S) references explicitly rather than letting them fall
+		// through to the filesystem loader (which would try to open a file
+		// literally named "https://..."). The composite loader has no network
+		// support, so mirror Rust/TS and fail with a clear error.
+		if strings.HasPrefix(reference, "https://") || strings.HasPrefix(reference, "http://") {
+			return nil, fmt.Errorf("HTTP-based policy loading is not supported by the composite loader: %q", reference)
+		}
+
+		if !strings.ContainsAny(reference, `/\.`) {
+			if spec, ok := LoadBuiltin(reference); ok {
+				return &LoadedSpec{Source: "builtin:" + reference, Spec: spec}, nil
+			}
+		}
+
+		return loadFromFilesystem(reference, from)
+	}
+}
+
+func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []string, depth int) (*HushSpec, error) {
 	if spec == nil || spec.Extends == "" {
 		return spec, nil
+	}
+
+	// Cycle detection only catches an exact repeat of a prior source; a long
+	// acyclic chain would otherwise recurse without bound. Fail closed with a
+	// clean error before doing any further loading once the cap is hit.
+	if depth >= maxExtendsDepth {
+		return nil, fmt.Errorf("extends chain exceeds maximum depth of %d", maxExtendsDepth)
 	}
 
 	loaded, err := loader(spec.Extends, source)
@@ -71,7 +116,7 @@ func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []s
 	}
 
 	nextStack := append(stack, loaded.Source)
-	parent, err := resolveInner(loaded.Spec, loaded.Source, loader, nextStack)
+	parent, err := resolveInner(loaded.Spec, loaded.Source, loader, nextStack, depth+1)
 	if err != nil {
 		return nil, err
 	}

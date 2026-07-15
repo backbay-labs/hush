@@ -1,5 +1,5 @@
 import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js';
-import type { DecisionReceipt } from './receipt.js';
+import type { DecisionReceipt, EnforcementSummary } from './receipt.js';
 import type { HushSpec } from './schema.js';
 import { evaluate } from './evaluate.js';
 import { computePolicyHash } from './receipt.js';
@@ -15,6 +15,7 @@ export interface EvaluationCompletedEvent extends EvaluationEvent {
   result: EvaluationResult;
   duration_us: number;
   receipt?: DecisionReceipt;
+  enforcement?: EnforcementSummary;
 }
 
 export interface PolicyLoadedEvent extends EvaluationEvent {
@@ -128,18 +129,40 @@ export class ObservableEvaluator {
     this.observers = this.observers.filter(o => o !== observer);
   }
 
-  evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {
+  evaluate(
+    spec: HushSpec,
+    action: EvaluationAction,
+    observedAction?: EvaluationAction,
+  ): EvaluationResult {
     const start = performance.now();
     const result = evaluate(spec, action);
     const duration_us = Math.round((performance.now() - start) * 1000);
     this.emit({
       type: 'evaluation.completed',
       timestamp: new Date().toISOString(),
-      action,
+      action: observedAction ?? action,
       result,
       duration_us,
     });
     return result;
+  }
+
+  notifyEvaluationCompleted(
+    action: EvaluationAction,
+    result: EvaluationResult,
+    durationUs: number,
+    enforcement?: EnforcementSummary,
+    receipt?: DecisionReceipt,
+  ): void {
+    this.emit({
+      type: 'evaluation.completed',
+      timestamp: new Date().toISOString(),
+      action,
+      result,
+      duration_us: durationUs,
+      enforcement,
+      receipt,
+    });
   }
 
   notifyPolicyLoaded(name?: string, hash?: string): void {

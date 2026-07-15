@@ -45,12 +45,18 @@ pub fn panic_policy() -> crate::HushSpec {
 /// If the file at `path` exists, panic mode is activated and `true` is
 /// returned.  If the file does not exist, `false` is returned (panic mode
 /// is **not** automatically deactivated -- use [`deactivate_panic`] for that).
+///
+/// This is a kill switch, so it **fails closed**: if the file's existence
+/// cannot be determined (a permission or I/O error from `try_exists`), the
+/// sentinel is treated as present and panic mode is activated.
 pub fn check_panic_sentinel(path: impl AsRef<Path>) -> bool {
-    let exists = path.as_ref().exists();
-    if exists {
+    // An `Err` from `try_exists` means we could not prove the sentinel is
+    // absent; treat that as present so a kill switch never fails open.
+    let present = path.as_ref().try_exists().unwrap_or(true);
+    if present {
         activate_panic();
     }
-    exists
+    present
 }
 
 #[cfg(test)]

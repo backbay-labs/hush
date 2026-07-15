@@ -6,11 +6,16 @@
 
 ## Installation
 
-```bash
-cargo install hushspec-cli
-```
+| Method | Command |
+|---|---|
+| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
+| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
+| Cargo (from source) | `cargo install hushspec-cli` |
+| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-This installs the `h2h` binary.
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+
+All methods install the `h2h` binary.
 
 ## Commands
 
@@ -22,9 +27,19 @@ h2h validate policy.yaml
 h2h lint policy.yaml
 h2h lint --fail-on-warnings policy.yaml
 
+# Lint and auto-fix decision-neutral issues
+h2h lint policy.yaml --fix
+h2h lint policy.yaml --dry-run   # preview fixes without writing
+
 # Run evaluation test suites
 h2h test policy.test.yaml
 h2h test --fixtures ./tests/
+
+# Evaluate one action and trace the decision
+h2h eval policy.yaml --type egress --target api.example.com
+h2h eval policy.yaml --type tool_call --target deploy --explain
+h2h explain policy.yaml --type file_write --target /app/.env
+h2h eval builtin:ai-agent --action-json '{"type": "shell_command", "target": "rm -rf /"}'
 
 # Compare two policies and show decision changes
 h2h diff old.yaml new.yaml
@@ -62,6 +77,12 @@ h2h lint --format json policy.yaml
 h2h test --format tap tests/
 h2h diff --format json old.yaml new.yaml
 ```
+
+`h2h eval` and `h2h explain` map the decision to the exit code — `0` allow,
+`1` deny, `4` warn, `2` input/usage error — and additionally support
+`--format receipt`, which emits a full `hushspec-receipt.v0` document.
+`--format json` emits a deterministic report (no receipt id, timestamp, or
+duration) whose fields are stable-additive across releases.
 
 ## Getting Started
 

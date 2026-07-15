@@ -40,6 +40,8 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
       computer_use: childRules.computer_use ?? baseRules.computer_use,
       remote_desktop_channels: childRules.remote_desktop_channels ?? baseRules.remote_desktop_channels,
       input_injection: childRules.input_injection ?? baseRules.input_injection,
+      browser_automation: childRules.browser_automation ?? baseRules.browser_automation,
+      code_execution: childRules.code_execution ?? baseRules.code_execution,
     };
   } else if (base.rules) {
     mergedRules = { ...base.rules };
@@ -55,6 +57,10 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
     extensions: deep
       ? mergeExtensionsDeep(base.extensions, child.extensions)
       : mergeExtensionsMerge(base.extensions, child.extensions),
+    // Top-level governance metadata is merged child-over-parent like every
+    // other field (matches Rust `merge_with_strategy`); the `replace` strategy
+    // above already carries the child's metadata via the spread.
+    metadata: child.metadata ?? base.metadata,
   };
 }
 

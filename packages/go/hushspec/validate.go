@@ -2,7 +2,9 @@ package hushspec
 
 import (
 	"fmt"
+	"math"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -83,6 +85,20 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 	}
 }
 
+// isNonFiniteFloat reports whether x is NaN or +/-Infinity. YAML's `.nan`,
+// `.inf`, and `-.inf` scalars decode to these values, and every float-typed
+// config field must reject them here, before any range check runs: NaN
+// fails every `<= 0` / `< lo || > hi` bounds check (comparisons against NaN
+// are always false), so an unchecked NaN silently passes validation and
+// then makes downstream comparisons like `ratio > max_imbalance_ratio` fail
+// open. It also can't reach encoding/json, which errors on NaN/Infinity and
+// would otherwise silently blank out a receipt's content_hash. Must stay in
+// lockstep with the Rust `!x.is_finite()`, TypeScript `!Number.isFinite(x)`,
+// and Python `not math.isfinite(x)` checks.
+func isNonFiniteFloat(x float64) bool {
+	return math.IsNaN(x) || math.IsInf(x, 0)
+}
+
 func validateRules(rules *Rules, result *ValidationResult) {
 	if rules.SecretPatterns != nil {
 		seen := make(map[string]bool)
@@ -100,7 +116,12 @@ func validateRules(rules *Rules, result *ValidationResult) {
 				result.addError("INVALID_SEVERITY",
 					fmt.Sprintf("secret_patterns.patterns.%s.severity %q must be critical, error, or warn", pattern.Name, pattern.Severity))
 			}
-			validateRegex(pattern.Pattern, fmt.Sprintf("secret_patterns.patterns.%s", pattern.Name), result)
+			if pattern.Pattern == "" {
+				result.addError("MISSING_PATTERN",
+					fmt.Sprintf("secret_patterns.patterns.%s is missing required field pattern", pattern.Name))
+			} else {
+				validateRegex(pattern.Pattern, fmt.Sprintf("secret_patterns.patterns.%s", pattern.Name), result)
+			}
 		}
 	}
 
@@ -139,8 +160,13 @@ func validateRules(rules *Rules, result *ValidationResult) {
 		if rules.PatchIntegrity.MaxDeletions < 0 {
 			result.addError("NEGATIVE_LIMIT", "patch_integrity max_deletions must be non-negative")
 		}
-		if rules.PatchIntegrity.MaxImbalanceRatio != nil && *rules.PatchIntegrity.MaxImbalanceRatio <= 0 {
-			result.addError("INVALID_RATIO", "patch_integrity max_imbalance_ratio must be > 0")
+		if rules.PatchIntegrity.MaxImbalanceRatio != nil {
+			ratio := *rules.PatchIntegrity.MaxImbalanceRatio
+			if isNonFiniteFloat(ratio) {
+				result.addError("NON_FINITE_FLOAT", "rules.patch_integrity.max_imbalance_ratio must be a finite number, got NaN or Infinity")
+			} else if ratio <= 0 {
+				result.addError("INVALID_RATIO", "patch_integrity max_imbalance_ratio must be > 0")
+			}
 		}
 		for index, pattern := range rules.PatchIntegrity.ForbiddenPatterns {
 			validateRegex(pattern, fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index), result)
@@ -261,6 +287,15 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 		}
 		seen[profile.ID] = true
 
+		if profile.ToolAccess != nil && profile.ToolAccess.Default != "" && !containsTyped(profile.ToolAccess.Default, DefaultActions) {
+			result.addError("INVALID_DEFAULT_ACTION",
+				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, profile.ToolAccess.Default))
+		}
+		if profile.Egress != nil && profile.Egress.Default != "" && !containsTyped(profile.Egress.Default, DefaultActions) {
+			result.addError("INVALID_DEFAULT_ACTION",
+				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, profile.Egress.Default))
+		}
+
 		if profile.Match != nil {
 			if profile.Match.SpaceType != "" && !containsTyped(profile.Match.SpaceType, OriginSpaceTypes) {
 				result.addError("INVALID_ORIGIN_SPACE_TYPE",
@@ -362,7 +397,11 @@ func validateDetection(detection *DetectionExtension, result *ValidationResult) 
 	if detection.ThreatIntel != nil {
 		threatIntel := detection.ThreatIntel
 		if threatIntel.SimilarityThreshold != nil {
-			if *threatIntel.SimilarityThreshold < 0.0 || *threatIntel.SimilarityThreshold > 1.0 {
+			threshold := *threatIntel.SimilarityThreshold
+			if isNonFiniteFloat(threshold) {
+				result.addError("NON_FINITE_FLOAT",
+					"detection.threat_intel.similarity_threshold must be a finite number, got NaN or Infinity")
+			} else if threshold < 0.0 || threshold > 1.0 {
 				result.addError("THRESHOLD_OUT_OF_RANGE",
 					"detection.threat_intel.similarity_threshold must be between 0.0 and 1.0")
 			}
@@ -379,13 +418,279 @@ func validateOptionalNonNegativeInt(value *int, code, msg string, result *Valida
 	}
 }
 
-// validateRegex rejects non-RE2 patterns. Go's regexp is RE2-only, so any
-// pattern that compiles is inherently ReDoS-safe.
+// validateRegex rejects ReDoS-unsafe and non-portable patterns. A portability
+// pre-check runs first, rejecting constructs that are unsupported by, or behave
+// differently across, the four SDK regex engines (possessive quantifiers,
+// \Z/\z end-anchors, empty character classes). Go's regexp is RE2-only, so the
+// RE2-feature check then comes for free at compile time; the nested-quantifier
+// check finally rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2
+// tolerates but the backtracking SDK engines (JS RegExp, Python re) do not,
+// keeping the safety contract identical across all four SDKs.
 func validateRegex(pattern, path string, result *ValidationResult) {
+	if message, bad := disallowedRegexFeature(pattern); bad {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s must be a valid regular expression: %s", path, message))
+		return
+	}
 	if _, err := regexp.Compile(pattern); err != nil {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
+		return
 	}
+	if hasNestedQuantifier(pattern) {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
+	}
+}
+
+// possessiveRegexMessage is the shared rejection message for possessive
+// quantifiers.
+const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines"
+
+// disallowedRegexFeature is a portability pre-check: it rejects regex
+// constructs that are unsupported by, or behave differently across, the four
+// SDK engines so a pattern validates identically everywhere. Scanning outside
+// character classes and honoring \-escapes, it rejects:
+//   - possessive quantifiers *+, ++, ?+ and possessive braces {n}+, {n,}+,
+//     {n,m}+ (Rust's `regex` silently downgrades possessive to greedy; JS
+//     RegExp and Go RE2 reject them at compile time),
+//   - \Z and \z end-anchors (Rust/Python/Go accept them with differing
+//     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
+//   - empty character classes [] and [^] (JS accepts them; the others reject).
+//
+// Must stay byte-identical to the Rust, TypeScript, and Python implementations.
+func disallowedRegexFeature(pattern string) (string, bool) {
+	chars := []rune(pattern)
+	n := len(chars)
+	inClass := false
+	i := 0
+	for i < n {
+		c := chars[i]
+		if c == '\\' {
+			// \Z / \z are end-anchors only outside a character class; inside
+			// one they are an escaped literal letter, so ignore them there.
+			if !inClass && i+1 < n && (chars[i+1] == 'Z' || chars[i+1] == 'z') {
+				return "\\Z and \\z end-anchors are not portable across the HushSpec SDK regex engines; anchor with $", true
+			}
+			i += 2 // skip the escaped char
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			// Empty class [] or negated-empty [^] (JS matches none/any; the
+			// other engines reject the bare form).
+			j := i + 1
+			if j < n && chars[j] == '^' {
+				j++
+			}
+			if j < n && chars[j] == ']' {
+				return "empty character classes [] and [^] are not portable across the HushSpec SDK regex engines", true
+			}
+			inClass = true
+			i++
+		case '*', '+', '?':
+			// A quantifier immediately followed by + is possessive.
+			if i+1 < n && chars[i+1] == '+' {
+				return possessiveRegexMessage, true
+			}
+			i++
+		case '{':
+			// Treat {...} as a quantifier only when it parses as one; a literal
+			// { is scanned through. A quantifier brace followed by + is
+			// possessive ({n}+, {n,}+, {n,m}+).
+			j := i + 1
+			for j < n && chars[j] != '}' {
+				j++
+			}
+			if j < n {
+				inner := string(chars[i+1 : j])
+				if braceKind(inner) != quantNone {
+					if j+1 < n && chars[j+1] == '+' {
+						return possessiveRegexMessage, true
+					}
+					i = j + 1
+					continue
+				}
+			}
+			i++
+		default:
+			i++
+		}
+	}
+	return "", false
+}
+
+type quantKind int
+
+const (
+	quantNone quantKind = iota
+	quantBounded
+	quantUnbounded
+)
+
+// hasNestedQuantifier is a fail-closed over-approximation that flags nested
+// unbounded quantifiers such as (a+)+, ([0-9]+)*, or ((ab)+)+. It scans
+// ( ... ) group nesting -- ignoring escaped parens and character-class contents
+// -- and returns true when a group whose body contains an unbounded quantifier
+// (*, +, {n,}) is itself immediately followed by an unbounded quantifier.
+// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. Must stay identical
+// to the Rust, TypeScript, and Python implementations.
+func hasNestedQuantifier(pattern string) bool {
+	chars := []rune(pattern)
+	n := len(chars)
+	// Per open group: whether its body has seen an unbounded quantifier.
+	stack := []bool{}
+	inClass := false
+	i := 0
+	for i < n {
+		c := chars[i]
+		if c == '\\' {
+			// Escaped char (e.g. \(, \), \[, \+) -- skip both.
+			i += 2
+			continue
+		}
+		if inClass {
+			if c == ']' {
+				inClass = false
+			}
+			i++
+			continue
+		}
+		switch c {
+		case '[':
+			inClass = true
+			i++
+		case '(':
+			stack = append(stack, false)
+			i++
+		case ')':
+			closedUnbounded := false
+			if len(stack) > 0 {
+				closedUnbounded = stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+			}
+			kind, qlen := classifyQuantifier(chars, i+1)
+			if kind == quantUnbounded {
+				if closedUnbounded {
+					return true
+				}
+				// The just-closed group is unbounded-quantified, so it is an
+				// unbounded quantifier within the parent group's body.
+				if len(stack) > 0 {
+					stack[len(stack)-1] = true
+				}
+				i += 1 + qlen
+			} else {
+				i++
+			}
+		default:
+			kind, qlen := classifyQuantifier(chars, i)
+			switch kind {
+			case quantUnbounded:
+				if len(stack) > 0 {
+					stack[len(stack)-1] = true
+				}
+				i += qlen
+			case quantBounded:
+				i += qlen
+			default:
+				i++
+			}
+		}
+	}
+	return false
+}
+
+// classifyQuantifier classifies the quantifier token starting at pos, returning
+// its kind and the number of chars it spans (including any trailing
+// lazy/possessive marker).
+func classifyQuantifier(chars []rune, pos int) (quantKind, int) {
+	if pos >= len(chars) {
+		return quantNone, 0
+	}
+	switch chars[pos] {
+	case '*', '+':
+		if markerFollows(chars, pos+1) {
+			return quantUnbounded, 2
+		}
+		return quantUnbounded, 1
+	case '?':
+		if markerFollows(chars, pos+1) {
+			return quantBounded, 2
+		}
+		return quantBounded, 1
+	case '{':
+		j := pos + 1
+		for j < len(chars) && chars[j] != '}' {
+			j++
+		}
+		if j >= len(chars) {
+			return quantNone, 0 // unterminated '{' -> literal
+		}
+		kind := braceKind(string(chars[pos+1 : j]))
+		if kind == quantNone {
+			return quantNone, 0
+		}
+		length := j - pos + 1
+		if markerFollows(chars, j+1) {
+			length++
+		}
+		return kind, length
+	default:
+		return quantNone, 0
+	}
+}
+
+func markerFollows(chars []rune, pos int) bool {
+	return pos < len(chars) && (chars[pos] == '?' || chars[pos] == '+')
+}
+
+func isASCIIDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// braceKind classifies {...} content: {n,} is unbounded, {n} and {n,m} are
+// bounded, anything else is a literal brace (not a quantifier).
+func braceKind(inner string) quantKind {
+	if len(inner) == 0 {
+		return quantNone
+	}
+	commas := strings.Count(inner, ",")
+	if commas == 0 {
+		if isASCIIDigits(inner) {
+			return quantBounded
+		}
+		return quantNone
+	}
+	if commas == 1 {
+		parts := strings.SplitN(inner, ",", 2)
+		lo, hi := parts[0], parts[1]
+		loOk := lo == "" || isASCIIDigits(lo)
+		hiOk := hi == "" || isASCIIDigits(hi)
+		if !loOk || !hiOk || (lo == "" && hi == "") {
+			return quantNone
+		}
+		if hi == "" {
+			return quantUnbounded
+		}
+		return quantBounded
+	}
+	return quantNone
 }
 
 func isKnownCapability(value string) bool {

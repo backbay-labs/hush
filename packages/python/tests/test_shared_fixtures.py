@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from hushspec import merge, parse, validate
+from hushspec.detection import evaluate_with_detection
+from hushspec.evaluate import EvaluationAction, OriginContext, PostureContext
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -28,6 +31,7 @@ EVALUATION_DIRS = [
     "core/evaluation",
     "posture/evaluation",
     "origins/evaluation",
+    "detection/evaluation",
 ]
 
 MERGE_DIRS = [
@@ -104,13 +108,60 @@ class TestSharedFixtures:
                     assert isinstance(case["action"].get("type"), str)
 
                 policy_yaml = yaml.safe_dump(raw["policy"], sort_keys=False)
-                ok, result = parse(policy_yaml)
-                assert ok, f"{fixture_path}: {result}"
-                validation = validate(result)
+                ok, spec = parse(policy_yaml)
+                assert ok, f"{fixture_path}: {spec}"
+                validation = validate(spec)
                 assert validation.is_valid, f"{fixture_path}: {validation.errors}"
+
+                # Actually run each case through the reference evaluator --
+                # not just check fixture *shape* -- via
+                # evaluate_with_detection(spec, action).evaluation rather
+                # than bare evaluate(). evaluate_with_detection() is an
+                # exact no-op when the policy has no extensions.detection
+                # block (true of every core/posture/origins fixture), so
+                # this is equivalent to evaluate() for all of them and only
+                # exercises detection for fixtures/detection/evaluation/.
+                for index, case in enumerate(raw["cases"]):
+                    action = _action_from_case(case["action"])
+                    actual = evaluate_with_detection(spec, action).evaluation
+                    expect = case["expect"]
+                    label = (
+                        f"{fixture_path}: cases[{index}] {case['description']!r}"
+                    )
+
+                    assert actual.decision.value == expect["decision"], label
+                    if "matched_rule" in expect:
+                        assert actual.matched_rule == expect["matched_rule"], label
+                    if "reason" in expect:
+                        assert actual.reason == expect["reason"], label
+                    if "origin_profile" in expect:
+                        assert actual.origin_profile == expect["origin_profile"], label
+                    if "posture" in expect:
+                        assert actual.posture is not None, label
+                        assert actual.posture.current == expect["posture"]["current"], label
+                        assert actual.posture.next == expect["posture"]["next"], label
 
 
 def parse_or_fail(path: Path):
     ok, result = parse(path.read_text())
     assert ok, f"{path}: {result}"
     return result
+
+
+def _action_from_case(raw: dict[str, Any]) -> EvaluationAction:
+    """Build an EvaluationAction from a fixture case's raw ``action`` mapping.
+
+    Field names are shared verbatim with schemas/hushspec-evaluator-test.v0
+    .schema.json's Action/Origin/PostureInput $defs, so this is a direct
+    keyword-argument passthrough per sub-object.
+    """
+    origin = OriginContext(**raw["origin"]) if raw.get("origin") is not None else None
+    posture = PostureContext(**raw["posture"]) if raw.get("posture") is not None else None
+    return EvaluationAction(
+        type=raw["type"],
+        target=raw.get("target"),
+        content=raw.get("content"),
+        args_size=raw.get("args_size"),
+        origin=origin,
+        posture=posture,
+    )

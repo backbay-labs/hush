@@ -85,11 +85,16 @@ All four SDKs implement the full HushSpec pipeline, from parse and validate thro
 
 ### CLI
 
-```bash
-cargo install hushspec-cli
-```
+| Method | Command |
+|---|---|
+| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
+| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
+| Cargo (from source) | `cargo install hushspec-cli` |
+| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-This installs the `h2h` command. See [CLI Tool](#cli-tool) below.
+> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+
+All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 
 ### Rust
 
@@ -214,7 +219,7 @@ guard.enforce({"type": "tool_call", "target": "bash"})  # raises HushSpecDenied 
 
 ## CLI Tool
 
-The `h2h` CLI covers the common policy workflow: validate, test, lint, diff, format, initialize, sign, verify, and trigger panic mode.
+The `h2h` CLI covers the common policy workflow: validate, test, evaluate and explain single actions, lint, diff, format, initialize, sign, verify, and trigger panic mode.
 
 ```bash
 # Validate a policy against the HushSpec schema
@@ -223,8 +228,15 @@ h2h validate policy.yaml
 # Run evaluation test suites
 h2h test --fixtures ./tests/
 
+# Evaluate one action and explain the decision
+h2h eval policy.yaml --type egress --target api.example.com
+h2h explain policy.yaml --type egress --target api.example.com
+
 # Static analysis and linting
 h2h lint policy.yaml
+
+# Lint and auto-fix decision-neutral issues
+h2h lint policy.yaml --fix
 
 # Compare two policies and show effective decision changes
 h2h diff old.yaml new.yaml
@@ -249,11 +261,7 @@ h2h panic activate --sentinel /tmp/hushspec.panic
 h2h panic deactivate --sentinel /tmp/hushspec.panic
 ```
 
-Install from crates.io:
-
-```bash
-cargo install hushspec-cli
-```
+See [Installation](#installation) above for install options — Homebrew, npm, Cargo, or prebuilt binaries.
 
 <details>
 <summary>Decision Receipts (Audit Trail)</summary>

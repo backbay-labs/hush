@@ -22,9 +22,11 @@ pub enum ValidationError {
     UnsupportedVersion(String),
     #[error("duplicate secret pattern name: {0}")]
     DuplicatePatternName(String),
-    /// Regex uses features outside the RE2 subset (backreferences, lookahead, etc.).
-    /// The Rust `regex` crate enforces RE2 semantics, ensuring any accepted pattern
-    /// is safe from ReDoS across all HushSpec SDKs.
+    /// Regex is rejected as ReDoS-unsafe. Either it uses features outside the RE2
+    /// subset (backreferences, lookahead, etc.) -- rejected by the `regex` crate's
+    /// RE2 semantics -- or it contains a nested unbounded quantifier (e.g. `(a+)+`)
+    /// that catastrophically backtracks on the backtracking SDK engines (JavaScript
+    /// `RegExp`, Python `re`). Any accepted pattern is safe across all HushSpec SDKs.
     #[error("{field}: invalid regex pattern {pattern:?}: {message}")]
     InvalidRegex {
         field: String,
@@ -93,7 +95,15 @@ fn validate_rules(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>
     }
 
     if let Some(patch_integrity) = &rules.patch_integrity {
-        if patch_integrity.max_imbalance_ratio <= 0.0 {
+        if !patch_integrity.max_imbalance_ratio.is_finite() {
+            // Reject NaN/±Inf first (fail-closed): a non-finite ratio slips past
+            // the `<= 0` check below (every NaN comparison is false) and then
+            // makes `require_balance` fail OPEN, since `ratio > NaN` is always
+            // false.
+            errors.push(ValidationError::Custom(
+                "rules.patch_integrity.max_imbalance_ratio must be a finite number".to_string(),
+            ));
+        } else if patch_integrity.max_imbalance_ratio <= 0.0 {
             errors.push(ValidationError::Custom(
                 "rules.patch_integrity.max_imbalance_ratio must be > 0".to_string(),
             ));
@@ -268,6 +278,27 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                         "origins.profiles[{index}].match.visibility '{visibility}' is not valid"
                     )));
                 }
+
+                // A present-but-empty free-text match field (e.g. `provider: ""`)
+                // is an unsatisfiable constraint that Go's plain-string model
+                // cannot distinguish from an absent field, so reject the empty
+                // sentinel here to keep accept/reject parity across the SDKs. The
+                // enum fields above already reject "" as an invalid enum value.
+                for (field_name, value) in [
+                    ("provider", &match_rules.provider),
+                    ("tenant_id", &match_rules.tenant_id),
+                    ("space_id", &match_rules.space_id),
+                    ("sensitivity", &match_rules.sensitivity),
+                    ("actor_role", &match_rules.actor_role),
+                ] {
+                    if let Some(value) = value
+                        && value.is_empty()
+                    {
+                        errors.push(ValidationError::Custom(format!(
+                            "origins.profiles[{index}].match.{field_name} must not be empty"
+                        )));
+                    }
+                }
             }
 
             if let Some(posture_state) = &profile.posture {
@@ -366,13 +397,22 @@ fn validate_detection(
         }
 
         if let Some(threat_intel) = &detection.threat_intel {
-            if let Some(similarity_threshold) = threat_intel.similarity_threshold
-                && !(0.0..=1.0).contains(&similarity_threshold)
-            {
-                errors.push(ValidationError::Custom(
-                    "detection.threat_intel.similarity_threshold must be between 0.0 and 1.0"
-                        .to_string(),
-                ));
+            if let Some(similarity_threshold) = threat_intel.similarity_threshold {
+                if !similarity_threshold.is_finite() {
+                    // Reject NaN/±Inf first (fail-closed): a non-finite value
+                    // only lands in the range branch by accident of NaN
+                    // comparison semantics, and ±Inf would otherwise report a
+                    // misleading "between 0.0 and 1.0" error.
+                    errors.push(ValidationError::Custom(
+                        "detection.threat_intel.similarity_threshold must be a finite number"
+                            .to_string(),
+                    ));
+                } else if !(0.0..=1.0).contains(&similarity_threshold) {
+                    errors.push(ValidationError::Custom(
+                        "detection.threat_intel.similarity_threshold must be between 0.0 and 1.0"
+                            .to_string(),
+                    ));
+                }
             }
             if matches!(threat_intel.top_k, Some(0)) {
                 errors.push(ValidationError::Custom(
@@ -384,13 +424,286 @@ fn validate_detection(
 }
 
 fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) {
+    // Portability pre-check first: reject constructs that are unsupported by, or
+    // behave differently across, the four SDK regex engines (possessive
+    // quantifiers, `\Z`/`\z` end-anchors, empty character classes) so a pattern
+    // validates identically everywhere, regardless of what any single engine
+    // does with them.
+    if let Some(message) = disallowed_regex_feature(pattern) {
+        errors.push(ValidationError::InvalidRegex {
+            field: path.to_string(),
+            pattern: pattern.to_string(),
+            message: message.to_string(),
+        });
+        return;
+    }
+
+    // RE2-feature check second: the `regex` crate rejects non-RE2 features
+    // (backreferences, lookaround, ...) at compile time.
     if let Err(error) = Regex::new(pattern) {
         errors.push(ValidationError::InvalidRegex {
             field: path.to_string(),
             pattern: pattern.to_string(),
             message: error.to_string(),
         });
+        return;
     }
+
+    // Nested-quantifier check second: RE2 tolerates shapes like `(a+)+` that
+    // catastrophically backtrack on the backtracking SDK engines, so reject them
+    // here to keep the safety contract identical across all four SDKs.
+    if has_nested_quantifier(pattern) {
+        errors.push(ValidationError::InvalidRegex {
+            field: path.to_string(),
+            pattern: pattern.to_string(),
+            message: "pattern contains a nested unbounded quantifier (e.g. (a+)+) \
+                      that can cause catastrophic backtracking (ReDoS)"
+                .to_string(),
+        });
+    }
+}
+
+/// Shared rejection message for possessive quantifiers.
+const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable \
+     across the HushSpec SDK regex engines";
+
+/// Portability pre-check: reject regex constructs that are unsupported by, or
+/// behave differently across, the four SDK engines so a pattern validates
+/// identically everywhere. Scanning outside character classes and honoring
+/// `\`-escapes, it rejects:
+///   * possessive quantifiers `*+`, `++`, `?+` and possessive braces `{n}+`,
+///     `{n,}+`, `{n,m}+` (Rust's `regex` silently downgrades possessive to
+///     greedy; JavaScript `RegExp` and Go RE2 reject them at compile time),
+///   * `\Z` and `\z` end-anchors (Rust/Python/Go accept them with differing
+///     semantics; JavaScript reads `\Z`/`\z` as a literal letter -- users
+///     anchor with `$`),
+///   * empty character classes `[]` and `[^]` (JavaScript accepts them; the
+///     others reject them).
+///
+/// Must stay byte-identical to the TypeScript, Python, and Go implementations.
+fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    let mut in_class = false;
+    let mut i = 0;
+    while i < n {
+        let c = chars[i];
+        if c == '\\' {
+            // `\Z` / `\z` are end-anchors only outside a character class; inside
+            // one they are an escaped literal letter, so ignore them there.
+            if !in_class && i + 1 < n && matches!(chars[i + 1], 'Z' | 'z') {
+                return Some(
+                    "\\Z and \\z end-anchors are not portable across the HushSpec SDK regex \
+                     engines; anchor with $",
+                );
+            }
+            i += 2; // skip the escaped char
+            continue;
+        }
+        if in_class {
+            if c == ']' {
+                in_class = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '[' => {
+                // Empty class `[]` or negated-empty `[^]` (JS matches
+                // none/any; the other engines reject the bare form).
+                let mut j = i + 1;
+                if j < n && chars[j] == '^' {
+                    j += 1;
+                }
+                if j < n && chars[j] == ']' {
+                    return Some(
+                        "empty character classes [] and [^] are not portable across the \
+                         HushSpec SDK regex engines",
+                    );
+                }
+                in_class = true;
+                i += 1;
+            }
+            '*' | '+' | '?' => {
+                // A quantifier immediately followed by `+` is possessive.
+                if i + 1 < n && chars[i + 1] == '+' {
+                    return Some(POSSESSIVE_MESSAGE);
+                }
+                i += 1;
+            }
+            '{' => {
+                // Treat `{...}` as a quantifier only when it parses as one; a
+                // literal `{` is scanned through. A quantifier brace followed by
+                // `+` is possessive (`{n}+`, `{n,}+`, `{n,m}+`).
+                let mut j = i + 1;
+                while j < n && chars[j] != '}' {
+                    j += 1;
+                }
+                if j < n {
+                    let inner: String = chars[i + 1..j].iter().collect();
+                    if brace_kind(&inner) != QuantKind::None {
+                        if j + 1 < n && chars[j + 1] == '+' {
+                            return Some(POSSESSIVE_MESSAGE);
+                        }
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+#[derive(PartialEq, Eq)]
+enum QuantKind {
+    None,
+    Bounded,
+    Unbounded,
+}
+
+/// Fail-closed over-approximation that flags nested unbounded quantifiers such
+/// as `(a+)+`, `([0-9]+)*`, or `((ab)+)+`. Scans `(`...`)` group nesting --
+/// ignoring escaped parens and character-class contents -- and rejects when a
+/// group whose body contains an unbounded quantifier (`*`, `+`, `{n,}`) is
+/// itself immediately followed by an unbounded quantifier. Bounded quantifiers
+/// (`(a{1,3}){1,3}`, `(abc)+`) are accepted. Must stay identical to the
+/// TypeScript, Python, and Go implementations.
+fn has_nested_quantifier(pattern: &str) -> bool {
+    let chars: Vec<char> = pattern.chars().collect();
+    let n = chars.len();
+    // Per open group: whether its body has seen an unbounded quantifier.
+    let mut stack: Vec<bool> = Vec::new();
+    let mut in_class = false;
+    let mut i = 0;
+    while i < n {
+        let c = chars[i];
+        if c == '\\' {
+            // Escaped char (e.g. `\(`, `\)`, `\[`, `\+`) -- skip both.
+            i += 2;
+            continue;
+        }
+        if in_class {
+            if c == ']' {
+                in_class = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            '[' => {
+                in_class = true;
+                i += 1;
+            }
+            '(' => {
+                stack.push(false);
+                i += 1;
+            }
+            ')' => {
+                let closed_unbounded = stack.pop().unwrap_or(false);
+                let (kind, qlen) = classify_quantifier(&chars, i + 1);
+                if kind == QuantKind::Unbounded {
+                    if closed_unbounded {
+                        return true;
+                    }
+                    // The just-closed group is unbounded-quantified, so it is an
+                    // unbounded quantifier within the parent group's body.
+                    if let Some(top) = stack.last_mut() {
+                        *top = true;
+                    }
+                    i += 1 + qlen;
+                } else {
+                    i += 1;
+                }
+            }
+            _ => {
+                let (kind, qlen) = classify_quantifier(&chars, i);
+                match kind {
+                    QuantKind::Unbounded => {
+                        if let Some(top) = stack.last_mut() {
+                            *top = true;
+                        }
+                        i += qlen;
+                    }
+                    QuantKind::Bounded => i += qlen,
+                    QuantKind::None => i += 1,
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Classify the quantifier token starting at `pos`, returning its kind and the
+/// number of chars it spans (including any trailing lazy/possessive marker).
+fn classify_quantifier(chars: &[char], pos: usize) -> (QuantKind, usize) {
+    if pos >= chars.len() {
+        return (QuantKind::None, 0);
+    }
+    match chars[pos] {
+        '*' | '+' => (
+            QuantKind::Unbounded,
+            1 + usize::from(marker_follows(chars, pos + 1)),
+        ),
+        '?' => (
+            QuantKind::Bounded,
+            1 + usize::from(marker_follows(chars, pos + 1)),
+        ),
+        '{' => {
+            let mut j = pos + 1;
+            while j < chars.len() && chars[j] != '}' {
+                j += 1;
+            }
+            if j >= chars.len() {
+                return (QuantKind::None, 0); // unterminated `{` -> literal
+            }
+            let inner: String = chars[pos + 1..j].iter().collect();
+            match brace_kind(&inner) {
+                QuantKind::None => (QuantKind::None, 0),
+                kind => (
+                    kind,
+                    (j - pos + 1) + usize::from(marker_follows(chars, j + 1)),
+                ),
+            }
+        }
+        _ => (QuantKind::None, 0),
+    }
+}
+
+fn marker_follows(chars: &[char], pos: usize) -> bool {
+    pos < chars.len() && (chars[pos] == '?' || chars[pos] == '+')
+}
+
+/// Classify the content between `{` and `}`: `{n,}` is unbounded, `{n}` and
+/// `{n,m}` are bounded, anything else is a literal brace (not a quantifier).
+fn brace_kind(inner: &str) -> QuantKind {
+    if inner.is_empty() {
+        return QuantKind::None;
+    }
+    let commas = inner.matches(',').count();
+    if commas == 0 {
+        return if inner.bytes().all(|b| b.is_ascii_digit()) {
+            QuantKind::Bounded
+        } else {
+            QuantKind::None
+        };
+    }
+    if commas == 1 {
+        let (lo, hi) = inner.split_once(',').unwrap();
+        let lo_ok = lo.is_empty() || lo.bytes().all(|b| b.is_ascii_digit());
+        let hi_ok = hi.is_empty() || hi.bytes().all(|b| b.is_ascii_digit());
+        if !lo_ok || !hi_ok || (lo.is_empty() && hi.is_empty()) {
+            return QuantKind::None;
+        }
+        return if hi.is_empty() {
+            QuantKind::Unbounded
+        } else {
+            QuantKind::Bounded
+        };
+    }
+    QuantKind::None
 }
 
 fn is_valid_duration(value: &str) -> bool {

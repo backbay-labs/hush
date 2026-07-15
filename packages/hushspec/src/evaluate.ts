@@ -28,6 +28,8 @@ export interface EvaluationAction {
   origin?: OriginContext;
   posture?: PostureContext;
   args_size?: number;
+  /** Set on the redacted copy emitted to observers when content is stripped. */
+  content_redacted?: boolean;
 }
 
 export interface OriginContext {
@@ -125,14 +127,22 @@ function globMatches(pattern: string, target: string): boolean {
     const ch = pattern[i];
     if (ch === '*') {
       if (i + 1 < pattern.length && pattern[i + 1] === '*') {
-        regex += '.*';
-        i += 2;
+        if (i + 2 < pattern.length && pattern[i + 2] === '/') {
+          // `**/` matches zero or more leading path segments (including zero),
+          // so `**/.env` matches both `.env` and `a/b/.env`. Uses `[^\n]`
+          // rather than `.` -- see the `u`-flag note below for why.
+          regex += '(?:[^\\n]*/)?';
+          i += 3;
+        } else {
+          regex += '[^\\n]*';
+          i += 2;
+        }
       } else {
         regex += '[^/]*';
         i += 1;
       }
     } else if (ch === '?') {
-      regex += '.';
+      regex += '[^\\n]';
       i += 1;
     } else if ('.+(){}[]^$|\\'.includes(ch)) {
       regex += '\\' + ch;
@@ -145,7 +155,21 @@ function globMatches(pattern: string, target: string): boolean {
   regex += '$';
 
   try {
-    return new RegExp(regex).test(target);
+    // `?`/`**`/`**/` emit `[^\n]` (not `.`) for cross-SDK parity: JavaScript
+    // `.` excludes EVERY line terminator (`\n`, `\r`, U+2028, U+2029) -- even
+    // under the `u` flag -- whereas the Rust/Python/Go reference engines exclude
+    // only `\n`. Emitting `.` here would fail to match a target with an interior
+    // `\r`/U+2028/U+2029 (e.g. `secrets/**` vs `secrets/x\ry`), silently letting
+    // it slip past a `forbidden_paths`/`block` glob that the other SDKs enforce.
+    // `[^\n]` excludes only `\n`, matching the reference engines exactly.
+    //
+    // 'u' flag: makes the negated classes code-point-aware so a single `?`
+    // (`[^\n]`) matches one full Unicode code point (e.g. an astral emoji)
+    // rather than one UTF-16 code unit. Every construct this translator emits
+    // (the escaped literals `\. \+ \( \) \{ \} \[ \] \^ \$ \| \\`, plus
+    // `(?:[^\n]*/)?`, `[^/]*`, `[^\n]*`, `[^\n]`, `^`, `$`, and literal source
+    // characters) is valid under `u`.
+    return new RegExp(regex, 'u').test(target);
   } catch {
     return false;
   }
@@ -264,11 +288,18 @@ function postureCapabilityGuard(
   const postureExtension = spec.extensions?.posture;
   if (!postureExtension) return undefined;
 
-  const currentState = postureExtension.states[postureResult.current];
-  if (!currentState) return undefined;
-
   const capability = requiredCapability(action.type);
   if (capability == null) return undefined;
+
+  const currentState = postureExtension.states[postureResult.current];
+  if (!currentState) {
+    return denyResult(
+      `extensions.posture.states.${postureResult.current}`,
+      `unknown posture state '${postureResult.current}'`,
+      originProfileId,
+      { ...postureResult },
+    );
+  }
 
   const capabilities = currentState.capabilities ?? [];
   if (capabilities.includes(capability)) {
@@ -538,8 +569,8 @@ function evaluatePatchIntegrity(
   }
 
   const stats = patchStats(content);
-  const maxAdditions = rule.max_additions ?? Infinity;
-  const maxDeletions = rule.max_deletions ?? Infinity;
+  const maxAdditions = rule.max_additions ?? 1000;
+  const maxDeletions = rule.max_deletions ?? 500;
 
   if (stats.additions > maxAdditions) {
     return denyResult(
@@ -560,7 +591,7 @@ function evaluatePatchIntegrity(
 
   if (rule.require_balance) {
     const ratio = imbalanceRatio(stats.additions, stats.deletions);
-    const maxRatio = rule.max_imbalance_ratio ?? Infinity;
+    const maxRatio = rule.max_imbalance_ratio ?? 10.0;
     if (ratio > maxRatio) {
       return denyResult(
         'rules.patch_integrity.max_imbalance_ratio',
@@ -996,7 +1027,9 @@ function evaluateEgress(
     return allowResult(matchedRule, 'domain is explicitly allowed', originProfileId, posture);
   }
 
-  const defaultAction = baseRule?.default === 'block' || profileRule?.default === 'block'
+  const defaultAction =
+    (baseRule != null && (baseRule.default ?? 'block') === 'block')
+      || (profileRule != null && (profileRule.default ?? 'block') === 'block')
     ? 'block'
     : 'allow';
   const defaultRule = profileRule != null && profilePrefix != null
@@ -1197,6 +1230,10 @@ rules:
     enabled: true
     mode: fail_closed
     allowed_actions: []
+
+  input_injection:
+    enabled: true
+    allowed_types: []
 `;
 
 export function activatePanic(): void {

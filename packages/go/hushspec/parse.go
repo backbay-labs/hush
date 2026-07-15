@@ -13,15 +13,17 @@ type parsePresenceSpec struct {
 			Enabled *bool `yaml:"enabled"`
 		} `yaml:"forbidden_paths"`
 		Egress *struct {
-			Enabled *bool `yaml:"enabled"`
+			Enabled *bool          `yaml:"enabled"`
+			Default *DefaultAction `yaml:"default"`
 		} `yaml:"egress"`
 		SecretPatterns *struct {
 			Enabled *bool `yaml:"enabled"`
 		} `yaml:"secret_patterns"`
 		PatchIntegrity *struct {
-			Enabled      *bool `yaml:"enabled"`
-			MaxAdditions *int  `yaml:"max_additions"`
-			MaxDeletions *int  `yaml:"max_deletions"`
+			Enabled           *bool    `yaml:"enabled"`
+			MaxAdditions      *int     `yaml:"max_additions"`
+			MaxDeletions      *int     `yaml:"max_deletions"`
+			MaxImbalanceRatio *float64 `yaml:"max_imbalance_ratio"`
 		} `yaml:"patch_integrity"`
 		ShellCommands *struct {
 			Enabled *bool `yaml:"enabled"`
@@ -29,12 +31,16 @@ type parsePresenceSpec struct {
 		ToolAccess *struct {
 			Enabled *bool `yaml:"enabled"`
 		} `yaml:"tool_access"`
+		RemoteDesktopChannels *struct {
+			Audio *bool `yaml:"audio"`
+		} `yaml:"remote_desktop_channels"`
 	} `yaml:"rules"`
 	Extensions *struct {
 		Origins *struct {
 			Profiles []struct {
 				Egress *struct {
-					Enabled *bool `yaml:"enabled"`
+					Enabled *bool          `yaml:"enabled"`
+					Default *DefaultAction `yaml:"default"`
 				} `yaml:"egress"`
 				ToolAccess *struct {
 					Enabled *bool `yaml:"enabled"`
@@ -65,6 +71,14 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	}
 	applyParseDefaults(&spec, &presence)
 
+	// Raw-document checks catch structural issues the typed decode swallows
+	// (non-integer floats truncated into int fields, empty/invalid enum
+	// sentinels, a posture missing its required transitions key), keeping Go's
+	// accept/reject decision identical to the other SDKs.
+	if issues := validateRawDocument(yamlStr); len(issues) > 0 {
+		return nil, fmt.Errorf("invalid HushSpec document: %s", strings.Join(issues, "; "))
+	}
+
 	return &spec, nil
 }
 
@@ -77,6 +91,9 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 	if spec.Rules != nil && spec.Rules.Egress != nil {
 		if presence.Rules == nil || presence.Rules.Egress == nil || presence.Rules.Egress.Enabled == nil {
 			spec.Rules.Egress.Enabled = true
+		}
+		if presence.Rules == nil || presence.Rules.Egress == nil || presence.Rules.Egress.Default == nil {
+			spec.Rules.Egress.Default = DefaultActionBlock
 		}
 	}
 	if spec.Rules != nil && spec.Rules.SecretPatterns != nil {
@@ -94,6 +111,15 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 		if presence.Rules == nil || presence.Rules.PatchIntegrity == nil || presence.Rules.PatchIntegrity.MaxDeletions == nil {
 			spec.Rules.PatchIntegrity.MaxDeletions = 500
 		}
+		if presence.Rules == nil || presence.Rules.PatchIntegrity == nil || presence.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
+			ratio := 10.0
+			spec.Rules.PatchIntegrity.MaxImbalanceRatio = &ratio
+		}
+	}
+	if spec.Rules != nil && spec.Rules.RemoteDesktopChannels != nil {
+		if presence.Rules == nil || presence.Rules.RemoteDesktopChannels == nil || presence.Rules.RemoteDesktopChannels.Audio == nil {
+			spec.Rules.RemoteDesktopChannels.Audio = true
+		}
 	}
 	if spec.Rules != nil && spec.Rules.ShellCommands != nil {
 		if presence.Rules == nil || presence.Rules.ShellCommands == nil || presence.Rules.ShellCommands.Enabled == nil {
@@ -110,6 +136,9 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 			if spec.Extensions.Origins.Profiles[index].Egress != nil {
 				if index >= len(presence.Extensions.Origins.Profiles) || presence.Extensions.Origins.Profiles[index].Egress == nil || presence.Extensions.Origins.Profiles[index].Egress.Enabled == nil {
 					spec.Extensions.Origins.Profiles[index].Egress.Enabled = true
+				}
+				if index >= len(presence.Extensions.Origins.Profiles) || presence.Extensions.Origins.Profiles[index].Egress == nil || presence.Extensions.Origins.Profiles[index].Egress.Default == nil {
+					spec.Extensions.Origins.Profiles[index].Egress.Default = DefaultActionBlock
 				}
 			}
 			if spec.Extensions.Origins.Profiles[index].ToolAccess != nil {

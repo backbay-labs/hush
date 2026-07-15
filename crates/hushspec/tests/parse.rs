@@ -127,6 +127,64 @@ extensions:
 }
 
 #[test]
+fn validate_rejects_non_finite_max_imbalance_ratio() {
+    // A NaN ratio otherwise passes validation (every `<= 0` comparison against
+    // NaN is false) and then makes `require_balance` fail OPEN. Fail-closed:
+    // reject non-finite floats at validation time.
+    let yaml = r#"
+hushspec: "0.1.0"
+rules:
+  patch_integrity:
+    max_imbalance_ratio: .nan
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(
+        spec.rules
+            .as_ref()
+            .unwrap()
+            .patch_integrity
+            .as_ref()
+            .unwrap()
+            .max_imbalance_ratio
+            .is_nan()
+    );
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("max_imbalance_ratio")),
+        "expected a max_imbalance_ratio error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn validate_rejects_non_finite_similarity_threshold() {
+    // ±Inf must be rejected as a finite-number error rather than reported as an
+    // out-of-range value; NaN/Inf are rejected for every f64 config field.
+    let yaml = r#"
+hushspec: "0.1.0"
+extensions:
+  detection:
+    threat_intel:
+      similarity_threshold: .inf
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    let result = validate(&spec);
+    assert!(!result.is_valid());
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|e| e.to_string().contains("similarity_threshold")),
+        "expected a similarity_threshold error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
 fn validate_valid_regex_patterns_pass() {
     let yaml = r#"
 hushspec: "0.1.0"
@@ -311,6 +369,84 @@ fn validate_builtin_rulesets_pass() {
             result.is_valid(),
             "ruleset {i} failed validation: {:?}",
             result.errors
+        );
+    }
+}
+
+/// Build a minimal spec carrying a single secret pattern and report whether it
+/// passes validation. Patterns are embedded as single-quoted YAML scalars so
+/// backslashes stay literal; none of the probes contain a single quote.
+fn secret_pattern_is_valid(pattern: &str) -> bool {
+    let yaml = format!(
+        "hushspec: \"0.1.0\"\nrules:\n  secret_patterns:\n    patterns:\n      - name: probe\n        pattern: '{pattern}'\n        severity: critical\n"
+    );
+    let spec = HushSpec::parse(&yaml).expect("probe spec should parse");
+    validate(&spec).is_valid()
+}
+
+#[test]
+fn validate_rejects_nested_unbounded_quantifiers() {
+    // Nested/exponential quantifier shapes: RE2-legal but catastrophic on the
+    // backtracking SDK engines (JS RegExp, Python re).
+    for pattern in ["(a+)+", "(a*)*", "(a+)*", "([0-9]+)*", r"(\d+)+", "(a+)+$"] {
+        assert!(
+            !secret_pattern_is_valid(pattern),
+            "nested-quantifier pattern {pattern:?} should be rejected as ReDoS-unsafe"
+        );
+    }
+}
+
+#[test]
+fn validate_accepts_safe_quantifier_shapes() {
+    // Grouped alternations, optional groups, and bounded quantifiers are safe.
+    for pattern in [
+        "(abc)+",
+        "a+",
+        r"\d{3}-\d{2}-\d{4}",
+        "(?:foo|bar)+",
+        "(a{1,3}){1,3}",
+        "sk-(proj-)?[A-Za-z0-9_-]{20,}",
+        "(AKIA|ASIA)[0-9A-Z]{16}",
+        "github_pat_[0-9a-zA-Z_]{50,}",
+    ] {
+        assert!(
+            secret_pattern_is_valid(pattern),
+            "safe pattern {pattern:?} should pass validation"
+        );
+    }
+}
+
+#[test]
+fn validate_rejects_exotic_regex_features() {
+    // Cross-SDK validation parity: these constructs are unsupported by, or
+    // behave differently across, the four SDK regex engines, so every SDK must
+    // reject them at validation time regardless of what its own engine does.
+    for pattern in [
+        // Possessive quantifiers (`regex` silently downgrades to greedy).
+        "a++", "a*+", "a?+", "a{2}+", "a{2,}+", "a{2,5}+", "(abc)++",
+        // `\Z` / `\z` end-anchors.
+        r"foo\Z", r"foo\z", // Empty character classes.
+        "[]", "[^]",
+    ] {
+        assert!(
+            !secret_pattern_is_valid(pattern),
+            "exotic pattern {pattern:?} should be rejected for cross-SDK portability"
+        );
+    }
+}
+
+#[test]
+fn validate_accepts_patterns_adjacent_to_exotic_rejections() {
+    // Guard against the exotic-feature pre-check over-rejecting: lazy
+    // quantifiers, ordinary/negated classes, `\Z`/`\z` inside a class, and
+    // literal braces must all still validate.
+    for pattern in [
+        "a+?", "a*?", "a??", "a{2,}?", "a{2}?", "[abc]", "[^abc]", "[^0-9]+", r"\bfoo\b", "foo$",
+        r"a\+\+b",
+    ] {
+        assert!(
+            secret_pattern_is_valid(pattern),
+            "portable pattern {pattern:?} should pass validation"
         );
     }
 }

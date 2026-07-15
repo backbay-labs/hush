@@ -16,10 +16,12 @@ from hushspec.receipt import (
     ActionSummary,
     AuditConfig,
     DecisionReceipt,
+    EnforcementSummary,
     PolicySummary,
     RuleEvaluation,
     compute_policy_hash,
     evaluate_audited,
+    receipt_to_dict,
 )
 from hushspec.extensions import (
     BridgePolicy,
@@ -42,7 +44,13 @@ from hushspec.extensions import (
     TransitionTrigger,
 )
 from hushspec.merge import merge
-from hushspec.middleware import HushGuard, HushSpecDenied
+from hushspec.middleware import (
+    EnforcementConfig,
+    GateOutcome,
+    HushGuard,
+    HushSpecDenied,
+    matches_rule_path_prefix,
+)
 from hushspec.observer import (
     ConsoleObserver,
     EvaluationObserver,
@@ -61,13 +69,13 @@ from hushspec.sinks import (
 )
 from hushspec.detection import (
     DetectionCategory,
-    DetectionConfig,
     DetectionResult,
     DetectorRegistry,
     EvaluationWithDetection,
     MatchedPattern,
     RegexExfiltrationDetector,
     RegexInjectionDetector,
+    RegexJailbreakDetector,
     evaluate_with_detection,
 )
 from hushspec.conditions import (
@@ -78,6 +86,7 @@ from hushspec.conditions import (
     evaluate_with_context,
 )
 from hushspec.parse import parse, parse_or_raise
+from hushspec.builtins import BUILTIN_NAMES, load_builtin
 from hushspec.resolve import LoadedSpec, resolve, resolve_file, resolve_or_raise
 from hushspec.rules import (
     ComputerUseMode,
@@ -151,6 +160,8 @@ __all__ = [
     "resolve",
     "resolve_file",
     "resolve_or_raise",
+    "load_builtin",
+    "BUILTIN_NAMES",
     "LoadedSpec",
     "Condition",
     "TimeWindowCondition",
@@ -171,6 +182,7 @@ __all__ = [
     "check_panic_sentinel",
     "evaluate_audited",
     "compute_policy_hash",
+    "receipt_to_dict",
     "DecisionReceipt",
     "ActionSummary",
     "RuleEvaluation",
@@ -185,19 +197,23 @@ __all__ = [
     "NullSink",
     "HushGuard",
     "HushSpecDenied",
+    "EnforcementConfig",
+    "EnforcementSummary",
+    "GateOutcome",
+    "matches_rule_path_prefix",
     "EvaluationObserver",
     "ObservableEvaluator",
     "JsonLineObserver",
     "ConsoleObserver",
     "MetricsCollector",
     "DetectionCategory",
-    "DetectionConfig",
     "DetectionResult",
     "DetectorRegistry",
     "EvaluationWithDetection",
     "MatchedPattern",
     "RegexExfiltrationDetector",
     "RegexInjectionDetector",
+    "RegexJailbreakDetector",
     "evaluate_with_detection",
     "HUSHSPEC_VERSION",
     "SUPPORTED_VERSIONS",

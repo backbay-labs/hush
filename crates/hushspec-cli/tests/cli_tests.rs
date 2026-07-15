@@ -312,6 +312,44 @@ fn init_permissive_preset() {
         .success();
 }
 
+/// Every scaffolded preset must self-associate its schema so editors get
+/// completion/validation out of the box: the policy gets the core schema
+/// modeline, the starter test gets the evaluator-test schema modeline.
+/// Covers all three presets since each has its own template constant in
+/// `cmd_init.rs` (`DEFAULT_POLICY`/`PERMISSIVE_POLICY`/`STRICT_POLICY` and
+/// their `*_TEST` counterparts) -- checking only one preset would miss a
+/// template that was never updated.
+#[test]
+fn scaffolded_files_carry_schema_modelines() {
+    const CORE_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json\n";
+    const TEST_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json\n";
+
+    for preset in ["default", "permissive", "strict"] {
+        let tmp = TempDir::new().unwrap();
+        h2h()
+            .arg("init")
+            .arg("--preset")
+            .arg(preset)
+            .arg("--dir")
+            .arg(tmp.path().to_str().unwrap())
+            .assert()
+            .success();
+
+        let policy = fs::read_to_string(tmp.path().join(".hushspec/policy.yaml")).unwrap();
+        assert!(
+            policy.starts_with(CORE_MODELINE),
+            "{preset} policy.yaml should start with the core schema modeline:\n{policy}"
+        );
+
+        let test_content =
+            fs::read_to_string(tmp.path().join(".hushspec/tests/policy.test.yaml")).unwrap();
+        assert!(
+            test_content.starts_with(TEST_MODELINE),
+            "{preset} starter test should start with the evaluator-test schema modeline:\n{test_content}"
+        );
+    }
+}
+
 #[test]
 fn init_fails_if_already_exists() {
     let tmp = TempDir::new().unwrap();
@@ -889,6 +927,39 @@ rules:
     assert!(formatted.contains("classification: internal"));
     assert!(formatted.contains("lifecycle_state: deployed"));
     assert!(formatted.contains("policy_version: 7"));
+}
+
+/// `h2h fmt` and `h2h lint` must report the same parse-error line for the
+/// same invalid document, including when a leading yaml-language-server
+/// modeline is present: both count lines against the original file content,
+/// not a modeline-stripped body.
+#[test]
+fn fmt_parse_error_reports_same_line_as_lint_with_modeline() {
+    let tmp = TempDir::new().unwrap();
+    let policy_path = tmp.path().join("bad-modeline.yaml");
+
+    // `bogus_field` is an unknown field on line 5 -- deny_unknown_fields
+    // rejects it at parse time with a "line 5" position in the error.
+    let content = r#"# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+hushspec: "0.1.0"
+name: t
+description: d
+bogus_field: true
+"#;
+    fs::write(&policy_path, content).unwrap();
+
+    h2h()
+        .arg("fmt")
+        .arg(policy_path.to_str().unwrap())
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("line 5"));
+
+    h2h()
+        .arg("lint")
+        .arg(policy_path.to_str().unwrap())
+        .assert()
+        .stderr(predicate::str::contains("line 5"));
 }
 
 #[test]
