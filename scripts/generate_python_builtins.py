@@ -47,7 +47,7 @@ def render() -> str:
 
     for name in BUILTIN_NAMES:
         yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
-        lines.append(f"    {json.dumps(name)}: {json.dumps(yaml_content)},")
+        lines.append(f"    {json.dumps(name)}: {json.dumps(yaml_content, ensure_ascii=False)},")
 
     lines.extend(
         [

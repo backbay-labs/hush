@@ -729,11 +729,17 @@ fn posture_context_strategy(harvest: &TargetHarvest) -> BoxedStrategy<Option<Pos
         return Just(None).boxed();
     }
     let states = harvest.posture_states.clone();
+    // All 7 TransitionTrigger strings (plus "none") so generated actions can fire
+    // every posture transition, widening differential-fuzz coverage.
     let signals: Vec<&'static str> = vec![
         "none",
         "user_approval",
+        "user_denial",
         "critical_violation",
+        "any_violation",
+        "timeout",
         "budget_exhausted",
+        "pattern_match",
     ];
     (
         prop::option::of(prop::sample::select(states)),

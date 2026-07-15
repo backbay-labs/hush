@@ -57,8 +57,15 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             cargo publish -p hushspec --allow-dirty --dry-run
+          elif cargo publish -p hushspec --allow-dirty 2>publish_err.log; then
+            cat publish_err.log
+          elif grep -qiE "already (uploaded|exists)" publish_err.log; then
+            cat publish_err.log
+            echo "::warning::hushspec version already on crates.io; continuing"
           else
-            cargo publish -p hushspec --allow-dirty || echo "::warning::hushspec already published or failed"
+            cat publish_err.log >&2
+            echo "::error::hushspec publish failed (not an already-published error)"
+            exit 1
           fi
 
       - name: Wait for crates.io index update
