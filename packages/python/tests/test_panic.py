@@ -115,6 +115,38 @@ class TestPanicPolicy:
         assert result.decision == Decision.DENY
 
 
+class TestPanicPolicyDriftGuard:
+    """Drift guard: PANIC_POLICY_YAML (evaluate.py) must stay in lockstep with
+    rulesets/panic.yaml. panic_policy() must deny every governed action type
+    on its own rules -- independent of the global panic-active short-circuit
+    tested above -- so a future edit that lets one of the two YAML copies
+    drift from the other is caught here rather than only in production.
+    """
+
+    GOVERNED_ACTIONS = [
+        EvaluationAction(type="file_read", target="/etc/passwd"),
+        EvaluationAction(type="egress", target="example.com"),
+        EvaluationAction(type="tool_call", target="any_tool"),
+        EvaluationAction(type="shell_command", target="rm -rf /"),
+        EvaluationAction(type="computer_use", target="click"),
+    ]
+
+    def test_denies_input_injection(self):
+        spec = panic_policy()
+        result = evaluate(
+            spec, EvaluationAction(type="input_inject", target="user_message")
+        )
+        assert result.decision == Decision.DENY
+
+    def test_denies_all_governed_action_types(self):
+        spec = panic_policy()
+        for action in self.GOVERNED_ACTIONS:
+            result = evaluate(spec, action)
+            assert result.decision == Decision.DENY, (
+                f"expected deny for {action.type}"
+            )
+
+
 class TestPanicSentinel:
     def test_sentinel_file_activates_panic(self):
         with tempfile.NamedTemporaryFile(delete=False) as f:

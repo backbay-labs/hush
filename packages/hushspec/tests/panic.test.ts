@@ -119,4 +119,32 @@ describe('panic mode', () => {
     const result = evaluate(spec, { type: 'tool_call', target: 'any_tool' });
     expect(result.decision).toBe('deny');
   });
+
+  // DRIFT-GUARD: panicPolicy() is a YAML document (rulesets/panic.yaml,
+  // mirrored as PANIC_POLICY_YAML in src/evaluate.ts), not a hardcoded
+  // decision -- unlike the global activatePanic()/isPanicActive() switch
+  // tested above, it is only as deny-all as the rule blocks it declares. It
+  // was previously missing an `input_injection` block entirely, so
+  // evaluateInputInjection() fell through to its "no rule configured" allow
+  // default and an `input_inject` action was ALLOWED under the emergency
+  // deny-all policy. Assert deny for input_inject plus one action of every
+  // other governed rule type, so a future accidental drop of any block from
+  // PANIC_POLICY_YAML (or rulesets/panic.yaml drifting out of sync with it)
+  // is caught here instead of silently reopening a hole in panic mode.
+  it('panic policy denies input injection and every other governed action type', () => {
+    const spec = panicPolicy();
+    const actions = [
+      { type: 'input_inject', target: 'chat_message' },
+      { type: 'file_read', target: '/etc/passwd' },
+      { type: 'egress', target: 'example.com' },
+      { type: 'tool_call', target: 'any_tool' },
+      { type: 'shell_command', target: 'ls -la' },
+      { type: 'computer_use', target: 'click' },
+    ];
+
+    for (const action of actions) {
+      const result = evaluate(spec, action);
+      expect(result.decision, `expected deny for action type '${action.type}'`).toBe('deny');
+    }
+  });
 });

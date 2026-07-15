@@ -1221,6 +1221,10 @@ rules:
     enabled: true
     mode: fail_closed
     allowed_actions: []
+
+  input_injection:
+    enabled: true
+    allowed_types: []
 `;
 
 export function activatePanic(): void {
