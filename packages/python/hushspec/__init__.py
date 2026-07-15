@@ -86,6 +86,7 @@ from hushspec.conditions import (
     evaluate_with_context,
 )
 from hushspec.parse import parse, parse_or_raise
+from hushspec.builtins import BUILTIN_NAMES, load_builtin
 from hushspec.resolve import LoadedSpec, resolve, resolve_file, resolve_or_raise
 from hushspec.rules import (
     ComputerUseMode,
@@ -159,6 +160,8 @@ __all__ = [
     "resolve",
     "resolve_file",
     "resolve_or_raise",
+    "load_builtin",
+    "BUILTIN_NAMES",
     "LoadedSpec",
     "Condition",
     "TimeWindowCondition",

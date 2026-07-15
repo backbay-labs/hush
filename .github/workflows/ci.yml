@@ -38,6 +38,12 @@ jobs:
       - name: Check generated TypeScript builtins
         run: python3 scripts/generate_ts_builtins.py --check
 
+      - name: Check generated Python builtins
+        run: python3 scripts/generate_python_builtins.py --check
+
+      - name: Check generated Go builtins
+        run: python3 scripts/generate_go_builtins.py --check
+
   rust:
     name: Rust
     runs-on: ubuntu-latest

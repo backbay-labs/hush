@@ -84,3 +84,34 @@ name: parent
         assert ok, result
         assert result.extends is None
         assert result.name == "parent"
+
+    def test_resolves_builtin_extends(self):
+        child = parse_or_raise(
+            'hushspec: "0.1.0"\n'
+            "name: child\n"
+            'extends: "builtin:strict"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    default: allow\n"
+        )
+        ok, resolved = resolve(child)
+        assert ok, resolved
+        # tool_access is inherited from builtin:strict (child does not define it)
+        assert resolved.rules.tool_access is not None
+        assert resolved.rules.tool_access.default.value == "block"
+        # the child's egress replaces the builtin's
+        assert resolved.rules.egress.default.value == "allow"
+
+    def test_resolves_bare_builtin_name(self):
+        child = parse_or_raise('hushspec: "0.1.0"\nname: c\nextends: strict\n')
+        ok, resolved = resolve(child)
+        assert ok, resolved
+        assert resolved.rules.tool_access.default.value == "block"
+
+    def test_unknown_builtin_extends_errors(self):
+        child = parse_or_raise(
+            'hushspec: "0.1.0"\nname: x\nextends: "builtin:nope"\n'
+        )
+        ok, err = resolve(child)
+        assert not ok
+        assert "nope" in err

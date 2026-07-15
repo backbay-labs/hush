@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from hushspec.builtins import load_builtin
 from hushspec.merge import merge
 from hushspec.parse import parse
 from hushspec.schema import HushSpec
@@ -25,7 +26,7 @@ def resolve(
     loader: Resolver | None = None,
 ) -> tuple[bool, HushSpec | str]:
     stack = [source] if source is not None else []
-    return _resolve_inner(spec, source, loader or _load_from_filesystem, stack)
+    return _resolve_inner(spec, source, loader or _create_composite_loader(), stack)
 
 
 def resolve_or_raise(
@@ -49,7 +50,7 @@ def resolve_file(path: str | Path) -> tuple[bool, HushSpec | str]:
     ok, parsed = parse(content)
     if not ok:
         return False, f"failed to parse HushSpec at {source}: {parsed}"
-    return resolve(parsed, source=source, loader=_load_from_filesystem)
+    return resolve(parsed, source=source, loader=_create_composite_loader())
 
 
 def _resolve_inner(
@@ -77,6 +78,29 @@ def _resolve_inner(
         return False, parent
 
     return True, merge(parent, spec)
+
+
+def _create_composite_loader() -> Resolver:
+    """Loader that serves `builtin:<name>` references from the embedded
+    rulesets and everything else from the filesystem (mirrors the Rust/TS
+    resolvers). A bare name with no path separators or dots is tried as a
+    builtin before falling back to the filesystem."""
+
+    def _loader(reference: str, source: str | None) -> LoadedSpec:
+        if reference.startswith("builtin:"):
+            spec = load_builtin(reference)
+            if spec is None:
+                raise ValueError(f"unknown builtin ruleset '{reference}'")
+            return LoadedSpec(source=reference, spec=spec)
+
+        if "/" not in reference and "\\" not in reference and "." not in reference:
+            spec = load_builtin(reference)
+            if spec is not None:
+                return LoadedSpec(source=f"builtin:{reference}", spec=spec)
+
+        return _load_from_filesystem(reference, source)
+
+    return _loader
 
 
 def _load_from_filesystem(reference: str, source: str | None) -> LoadedSpec:
