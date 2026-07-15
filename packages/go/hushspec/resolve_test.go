@@ -101,6 +101,29 @@ name: parent
 	}
 }
 
+func TestCompositeLoaderRejectsHTTPReferences(t *testing.T) {
+	loader := createCompositeLoader()
+	for _, ref := range []string{
+		"http://example.com/policy.yaml",
+		"https://example.com/policy.yaml",
+	} {
+		if _, err := loader(ref, ""); err == nil {
+			t.Errorf("expected the composite loader to reject %q, got no error", ref)
+		}
+	}
+
+	// Reached through the exported Resolve entry point (nil loader -> composite).
+	for _, ref := range []string{
+		"http://example.com/policy.yaml",
+		"https://example.com/policy.yaml",
+	} {
+		spec := &HushSpec{HushSpecVersion: "0.1.0", Extends: ref}
+		if _, err := Resolve(spec, "", nil); err == nil {
+			t.Errorf("expected Resolve to reject an %q extends reference, got no error", ref)
+		}
+	}
+}
+
 func writeFixtureFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {

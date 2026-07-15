@@ -278,6 +278,27 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                         "origins.profiles[{index}].match.visibility '{visibility}' is not valid"
                     )));
                 }
+
+                // A present-but-empty free-text match field (e.g. `provider: ""`)
+                // is an unsatisfiable constraint that Go's plain-string model
+                // cannot distinguish from an absent field, so reject the empty
+                // sentinel here to keep accept/reject parity across the SDKs. The
+                // enum fields above already reject "" as an invalid enum value.
+                for (field_name, value) in [
+                    ("provider", &match_rules.provider),
+                    ("tenant_id", &match_rules.tenant_id),
+                    ("space_id", &match_rules.space_id),
+                    ("sensitivity", &match_rules.sensitivity),
+                    ("actor_role", &match_rules.actor_role),
+                ] {
+                    if let Some(value) = value
+                        && value.is_empty()
+                    {
+                        errors.push(ValidationError::Custom(format!(
+                            "origins.profiles[{index}].match.{field_name} must not be empty"
+                        )));
+                    }
+                }
             }
 
             if let Some(posture_state) = &profile.posture {

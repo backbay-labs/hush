@@ -272,6 +272,116 @@ extensions:
         assert "does not reference a defined posture state" in err
 
 
+class TestOriginMatchEmptyField:
+    """S2: an origin match free-text field present with an empty string value
+    is a degenerate, unrepresentable-consistently constraint and must be
+    rejected at validation -- matching Go's raw validator, which already
+    rejects this. The enum fields space_type/visibility already reject "" as
+    an invalid enum value (unaffected by this fix)."""
+
+    def test_rejects_empty_provider(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          provider: ""
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "match.provider must not be empty" in err
+
+    def test_rejects_empty_tenant_id(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          tenant_id: ""
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "match.tenant_id must not be empty" in err
+
+    def test_rejects_empty_space_id(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          space_id: ""
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "match.space_id must not be empty" in err
+
+    def test_rejects_empty_sensitivity(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          sensitivity: ""
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "match.sensitivity must not be empty" in err
+
+    def test_rejects_empty_actor_role(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          actor_role: ""
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "match.actor_role must not be empty" in err
+
+    def test_accepts_non_empty_match_fields(self):
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match:
+          provider: slack
+          tenant_id: t1
+          space_id: s1
+          sensitivity: high
+          actor_role: admin
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+
+    def test_accepts_absent_match_fields(self):
+        # An all-absent match (no free-text fields at all) is a legitimate
+        # catch-all rule and must still parse -- this fix must not conflate
+        # an absent field with a present-but-empty one.
+        yaml = """
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: p
+        match: {}
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+
+
 class TestDetection:
     def test_parse_detection_extension(self):
         yaml = """

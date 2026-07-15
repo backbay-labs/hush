@@ -81,6 +81,24 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('a?+')).toBe(false);
   });
 
+  // Cross-SDK parity fix (spec item S3): the bare possessive check used to be
+  // a raw substring over the whole pattern (`\*\+|\+\+|\?\+`), which matched
+  // these possessive-*looking* character sequences even though they sit
+  // inside a character class as ordinary literal members, not a quantifier.
+  // hasPossessiveQuantifier is class-aware, so it never evaluates them as a
+  // quantifier candidate in the first place.
+  it('does not misread possessive-looking characters inside a class as possessive ([*+])', () => {
+    expect(isSafeRegex('[*+]')).toBe(true);
+  });
+
+  it('does not misread possessive-looking characters inside a class as possessive ([?+])', () => {
+    expect(isSafeRegex('[?+]')).toBe(true);
+  });
+
+  it('does not misread possessive-looking characters inside a class in either order ([+*])', () => {
+    expect(isSafeRegex('[+*]')).toBe(true);
+  });
+
   // Cross-SDK parity fix (spec item S2): possessive *brace* quantifiers were
   // the one shape the existing possessive check missed (`*+`/`++`/`?+` were
   // already rejected above, but `{n}+`/`{n,}+`/`{n,m}+` slipped through).
@@ -123,6 +141,25 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('foo\\z')).toBe(false);
   });
 
+  // Cross-SDK parity fix (spec item S3): the anchor check used to be a raw
+  // substring (`\\Z|\\z`) over the whole pattern, which could not distinguish
+  // the `\Z` anchor (one backslash then Z) from an escaped backslash followed
+  // by a literal Z -- the pattern text `\\Z` (two backslash characters then
+  // Z), which matches a literal `\` then a literal `Z` and is not an anchor
+  // at all. hasEndAnchorEscape consumes the escaped pair before ever
+  // reconsidering the following character, so it tells the two apart.
+  it('accepts an escaped backslash followed by a literal Z (not an anchor)', () => {
+    expect(isSafeRegex('\\\\Z')).toBe(true);
+  });
+
+  it('accepts an escaped backslash followed by a literal z (not an anchor)', () => {
+    expect(isSafeRegex('\\\\z')).toBe(true);
+  });
+
+  it('does not treat an escaped Z inside a character class as an anchor ([\\Z])', () => {
+    expect(isSafeRegex('[\\Z]')).toBe(true);
+  });
+
   // Cross-SDK parity fix (spec item S2): empty character classes compile
   // successfully in JavaScript ([] matches nothing, [^] matches any
   // character including newline) but are a compile error in Rust/Python/Go;
@@ -150,6 +187,60 @@ describe('isSafeRegex', () => {
   it('rejects subroutine calls \\g<name>', () => {
     expect(isSafeRegex('\\g<name>')).toBe(false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// S3 parity fix: shared REJECT/ACCEPT list (cross-SDK parity spec, section
+// S3)
+//
+// Rust `disallowed_regex_feature` / Go `disallowedRegexFeature` are
+// escape/class-aware char scanners. TS's RE2_DISALLOWED used to check the
+// possessive-star (`*+`/`++`/`?+`) and `\Z`/`\z` forms as raw substrings over
+// the whole pattern, which over-rejected patterns the other three SDKs
+// accept (e.g. `[*+]`, where the possessive-looking characters are ordinary
+// class members, not a quantifier). hasPossessiveQuantifier and
+// hasEndAnchorEscape now scan the same escape/class-aware way Rust/Go do.
+// This block reproduces the exact shared REJECT/ACCEPT list from the parity
+// spec verbatim, so all four SDKs are verified against the identical set.
+// ---------------------------------------------------------------------------
+
+describe('S3 shared REJECT/ACCEPT list (cross-SDK parity)', () => {
+  const REJECT = [
+    'a++',
+    'a*+',
+    'a?+',
+    'a{2}+',
+    'a{2,}+',
+    '(ab)++',
+    '\\Z',
+    '\\z',
+    '[]',
+    '[^]',
+  ];
+  const ACCEPT = [
+    '[*+]',
+    '[?+]',
+    '\\\\Z',
+    '\\\\z',
+    '[a{2}+]',
+    'a\\{2}+',
+    '\\[]',
+    'a{2,5}?',
+    '(?:abc)+',
+    '[+*]',
+  ];
+
+  for (const pattern of REJECT) {
+    it(`rejects: ${pattern}`, () => {
+      expect(isSafeRegex(pattern)).toBe(false);
+    });
+  }
+
+  for (const pattern of ACCEPT) {
+    it(`accepts: ${pattern}`, () => {
+      expect(isSafeRegex(pattern)).toBe(true);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------

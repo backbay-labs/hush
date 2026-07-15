@@ -919,4 +919,73 @@ describe('sink-only guard on provider failure', () => {
     expect(receipts[0].decision).toBe('deny');
     expect(receipts[0].enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
   });
+
+  // Regression test: the commit that introduced buildFailureReceipt fixed
+  // gate() (and therefore check()/enforce(), which delegate to it) but left
+  // evaluate()'s provider-failure branch returning the failure result
+  // directly with no receipt ever built or sent. A sink-only guard (sink, no
+  // observer -- monitor mode accepts either) called through evaluate() would
+  // therefore still emit zero records on a provider outage.
+  it('evaluate() records a receipt to the sink when the provider throws and there is no observer', async () => {
+    const provider: PolicyProvider = {
+      async load() {
+        return parseOrThrow(ALLOW_ALL_POLICY);
+      },
+      watch() {},
+      stop() {},
+      current() {
+        throw new Error('provider unavailable');
+      },
+    };
+
+    const receipts: DecisionReceipt[] = [];
+    const guard = await HushGuard.fromProvider(provider, {
+      sink: { send: (r) => receipts.push(r) },
+      enforcement: { mode: 'monitor' },
+    });
+
+    const result = guard.evaluate({ type: 'tool_call', target: 'any_tool' });
+
+    expect(result.decision).toBe('deny');
+    expect(result.matched_rule).toBe('__hushspec_policy_provider__');
+
+    // Before the fix this was 0: evaluate() must send a receipt even though
+    // no real policy evaluation ran.
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].decision).toBe('deny');
+    expect(receipts[0].matched_rule).toBe('__hushspec_policy_provider__');
+    expect(receipts[0].reason).toContain('provider unavailable');
+    // evaluate() never sets enforcement (unlike gate()) -- receipts stay untagged.
+    expect(receipts[0].enforcement).toBeUndefined();
+    expect(receipts[0].rule_trace).toEqual([]);
+    expect(receipts[0].policy.name).toBe('allow-all');
+  });
+
+  it('evaluate() without a sink does not throw when the provider throws under an observer', async () => {
+    const provider: PolicyProvider = {
+      async load() {
+        return parseOrThrow(ALLOW_ALL_POLICY);
+      },
+      watch() {},
+      stop() {},
+      current() {
+        throw new Error('provider unavailable');
+      },
+    };
+
+    const events: ObserverEvent[] = [];
+    const guard = await HushGuard.fromProvider(provider, {
+      observer: { onEvent: (e) => events.push(e) },
+      enforcement: { mode: 'monitor' },
+    });
+
+    const result = guard.evaluate({ type: 'tool_call', target: 'any_tool' });
+
+    expect(result.decision).toBe('deny');
+    const completed = events.filter(
+      (e) => e.type === 'evaluation.completed',
+    ) as EvaluationCompletedEvent[];
+    expect(completed).toHaveLength(1);
+    expect(completed[0].result.matched_rule).toBe('__hushspec_policy_provider__');
+  });
 });

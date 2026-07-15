@@ -201,6 +201,16 @@ fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
     if parts.len() != 2 {
         return None;
     }
+    // Reject any HH:MM component that is not pure ASCII digits. `u8::from_str`
+    // otherwise accepts a leading `+` (e.g. `+9:00`), which the TS (`^\d+$`) and
+    // Python (strict-uint) parsers reject; without this the same token would be
+    // an active window in Rust but permanently inactive there. A non-digit
+    // component fails to parse -> the time-window condition is inert (fail-closed).
+    for part in &parts {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+    }
     let hour: u8 = parts[0].parse().ok()?;
     let minute: u8 = parts[1].parse().ok()?;
     if hour > 23 || minute > 59 {
@@ -762,6 +772,27 @@ mod tests {
             ..Default::default()
         };
         assert!(evaluate_condition(&cond, &ctx));
+    }
+
+    #[test]
+    fn time_window_leading_plus_start_is_inert() {
+        // A leading `+` in an HH:MM token (`+9:00`) must fail to parse, matching
+        // the TS/Python parsers, so the time-window condition is inert
+        // (fail-closed) rather than treating it as 09:00 and activating.
+        let ctx = ctx_with_time("2026-01-14T10:30:00Z");
+        let cond = Condition {
+            time_window: Some(TimeWindowCondition {
+                start: "+9:00".to_string(),
+                end: "17:00".to_string(),
+                timezone: Some("UTC".to_string()),
+                days: vec![],
+            }),
+            context: None,
+            all_of: None,
+            any_of: None,
+            not: None,
+        };
+        assert!(!evaluate_condition(&cond, &ctx));
     }
 
     #[test]

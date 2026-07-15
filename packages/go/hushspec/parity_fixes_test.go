@@ -66,6 +66,63 @@ func TestConditionBoolArrayMembership(t *testing.T) {
 	}
 }
 
+// TestConditionIntFloatDistinction verifies the int-vs-float matching parity
+// with Rust (S1): an integer-shaped expected value matches ONLY an integer
+// actual, while a float-shaped expected value matches an int or float actual by
+// numeric value. Go previously coerced both to float64, so int 5 wrongly
+// matched a float 5.0 actual.
+func TestConditionIntFloatDistinction(t *testing.T) {
+	// expected 5 (int) vs actual 5.0 (float) -> false
+	if EvaluateCondition(
+		&Condition{Context: map[string]interface{}{"session.count": 5}},
+		&RuntimeContext{Session: map[string]interface{}{"count": 5.0}},
+	) {
+		t.Error("expected int 5 must NOT match a float 5.0 actual")
+	}
+
+	// expected 5.0 (float) vs actual 5 (int) -> true
+	if !EvaluateCondition(
+		&Condition{Context: map[string]interface{}{"session.count": 5.0}},
+		&RuntimeContext{Session: map[string]interface{}{"count": 5}},
+	) {
+		t.Error("expected float 5.0 must match an int 5 actual")
+	}
+
+	// expected [5] (int) vs actual [5.0] (float) -> false
+	if EvaluateCondition(
+		&Condition{Context: map[string]interface{}{"session.counts": []interface{}{5}}},
+		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5.0}}},
+	) {
+		t.Error("expected int-array [5] must NOT match a float-array [5.0] actual")
+	}
+
+	// expected 5.0 (float) vs actual [5] (int array, membership) -> true
+	if !EvaluateCondition(
+		&Condition{Context: map[string]interface{}{"session.counts": 5.0}},
+		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5}}},
+	) {
+		t.Error("expected float 5.0 must match membership in an int-array [5] actual")
+	}
+}
+
+// TestTimeWindowRejectsLeadingPlusInHHMM verifies S4: a HH:MM token with a
+// leading '+' (e.g. "+9:00") is a parse failure, leaving the time window inert,
+// matching TS/Python (Go's strconv.Atoi previously accepted the sign).
+func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
+	ctx := &RuntimeContext{CurrentTime: "2026-01-14T10:30:00Z"}
+
+	plus := &Condition{TimeWindow: &TimeWindowCondition{Start: "+9:00", End: "17:00", Timezone: "UTC"}}
+	if EvaluateCondition(plus, ctx) {
+		t.Error(`expected a leading '+' in the HH:MM start ("+9:00") to make the window inert`)
+	}
+
+	// Control: the equivalent zero-padded digits are active at 10:30.
+	valid := &Condition{TimeWindow: &TimeWindowCondition{Start: "09:00", End: "17:00", Timezone: "UTC"}}
+	if !EvaluateCondition(valid, ctx) {
+		t.Error("expected a valid 09:00-17:00 window to be active at 10:30 UTC")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // S2: reject the same exotic/non-portable regex constructs everywhere.
 // ---------------------------------------------------------------------------
@@ -248,6 +305,38 @@ func TestRejectsNonIntegerFloatIntegerFields(t *testing.T) {
 	// Control: an integer value parses cleanly.
 	if _, err := Parse("hushspec: \"0.1.0\"\nrules:\n  patch_integrity:\n    max_additions: 2\n"); err != nil {
 		t.Errorf("expected integer max_additions to parse, got: %v", err)
+	}
+}
+
+// TestRejectsNegativeAndNullIntegerFields covers the raw-validator gaps where
+// Go accepted integers the other SDKs reject: a negative Option<usize> field
+// (Rust rejects via the unsigned type, TS/Python via a min bound) and an
+// explicit null in a required (non-Option) usize field (which the typed Go
+// model silently coerced to its default).
+func TestRejectsNegativeAndNullIntegerFields(t *testing.T) {
+	rejected := map[string]string{
+		"policy_version_negative":       "hushspec: \"0.1.0\"\nmetadata:\n  policy_version: -5\n",
+		"code_execution_max_scan_bytes": "hushspec: \"0.1.0\"\nrules:\n  code_execution:\n    max_scan_bytes: -5\n",
+		"code_execution_max_exec_time":  "hushspec: \"0.1.0\"\nrules:\n  code_execution:\n    max_execution_time_ms: -5\n",
+		"patch_integrity_max_additions": "hushspec: \"0.1.0\"\nrules:\n  patch_integrity:\n    max_additions: null\n",
+		"patch_integrity_max_deletions": "hushspec: \"0.1.0\"\nrules:\n  patch_integrity:\n    max_deletions: null\n",
+	}
+	for name, doc := range rejected {
+		if _, err := Parse(doc); err == nil {
+			t.Errorf("%s: expected the document to be rejected at parse", name)
+		}
+	}
+
+	// Controls: valid non-negative integers parse cleanly.
+	accepted := map[string]string{
+		"policy_version":  "hushspec: \"0.1.0\"\nmetadata:\n  policy_version: 3\n",
+		"code_execution":  "hushspec: \"0.1.0\"\nrules:\n  code_execution:\n    max_scan_bytes: 1000\n    max_execution_time_ms: 500\n",
+		"patch_integrity": "hushspec: \"0.1.0\"\nrules:\n  patch_integrity:\n    max_additions: 10\n    max_deletions: 5\n",
+	}
+	for name, doc := range accepted {
+		if _, err := Parse(doc); err != nil {
+			t.Errorf("%s: expected the document to parse, got: %v", name, err)
+		}
 	}
 }
 

@@ -46,15 +46,21 @@ func validateRawRules(rules map[string]any, errs *[]string) {
 		return
 	}
 	if pi := rawObject(rules, "patch_integrity"); pi != nil {
-		checkRawInteger(pi, "max_additions", "rules.patch_integrity.max_additions", errs)
-		checkRawInteger(pi, "max_deletions", "rules.patch_integrity.max_deletions", errs)
+		// max_additions/max_deletions are required (non-Option) usize fields in
+		// the reference models: an explicit null -- which serde rejects at parse
+		// and which the typed Go model would otherwise silently coerce to a
+		// default -- is rejected here, as is a non-integer float.
+		checkRawRequiredInteger(pi, "max_additions", "rules.patch_integrity.max_additions", errs)
+		checkRawRequiredInteger(pi, "max_deletions", "rules.patch_integrity.max_deletions", errs)
 	}
 	if ta := rawObject(rules, "tool_access"); ta != nil {
 		checkRawInteger(ta, "max_args_size", "rules.tool_access.max_args_size", errs)
 	}
 	if ce := rawObject(rules, "code_execution"); ce != nil {
-		checkRawInteger(ce, "max_execution_time_ms", "rules.code_execution.max_execution_time_ms", errs)
-		checkRawInteger(ce, "max_scan_bytes", "rules.code_execution.max_scan_bytes", errs)
+		// Option<usize> fields: absent/null are accepted, but a negative value
+		// (which serde's unsigned type rejects at parse) must be rejected too.
+		checkRawNonNegativeInteger(ce, "max_execution_time_ms", "rules.code_execution.max_execution_time_ms", errs)
+		checkRawNonNegativeInteger(ce, "max_scan_bytes", "rules.code_execution.max_scan_bytes", errs)
 	}
 }
 
@@ -146,7 +152,10 @@ func validateRawMetadata(md map[string]any, errs *[]string) {
 	if md == nil {
 		return
 	}
-	checkRawInteger(md, "policy_version", "metadata.policy_version", errs)
+	// policy_version is an Option<usize>: absent/null are accepted, but a
+	// non-integer float or a negative value (rejected by the unsigned type at
+	// parse in the reference models) is not.
+	checkRawNonNegativeInteger(md, "policy_version", "metadata.policy_version", errs)
 	if v, ok := md["classification"]; ok {
 		if s, isStr := v.(string); !isStr || !containsTyped(Classification(s), Classifications) {
 			*errs = append(*errs, fmt.Sprintf("metadata.classification %v is not a valid classification", v))
@@ -198,6 +207,63 @@ func isRawInteger(v any) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// isRawNegativeInteger reports whether v is a signed integer scalar with a
+// negative value. Unsigned integer types are never negative.
+func isRawNegativeInteger(v any) bool {
+	switch n := v.(type) {
+	case int:
+		return n < 0
+	case int8:
+		return n < 0
+	case int16:
+		return n < 0
+	case int32:
+		return n < 0
+	case int64:
+		return n < 0
+	default:
+		return false
+	}
+}
+
+// checkRawNonNegativeInteger records an error when key is present with a
+// non-null value that is not a non-negative integer scalar. It mirrors an
+// Option<usize> field in the reference models: an absent key or an explicit
+// null is accepted (the field stays None), while a non-integer (e.g. 1.5) or a
+// negative integer (e.g. -5, which serde's unsigned type rejects at parse) is
+// not. Absent/null are left untouched so an omitted optional field keeps its
+// default, matching the other SDKs.
+func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *[]string) {
+	v, ok := obj[key]
+	if !ok || v == nil {
+		return
+	}
+	if !isRawInteger(v) {
+		*errs = append(*errs, fmt.Sprintf("%s must be an integer", path))
+		return
+	}
+	if isRawNegativeInteger(v) {
+		*errs = append(*errs, fmt.Sprintf("%s must be non-negative", path))
+	}
+}
+
+// checkRawRequiredInteger records an error when key is present with a value
+// that is null or not an integer scalar. It mirrors a required (non-Option)
+// usize field: an absent key is accepted (the typed model supplies the
+// default), but an explicit null -- which serde rejects at parse and which the
+// typed Go model would otherwise coerce to its default -- is rejected, as is a
+// non-integer float. A negative value stays a cross-field concern of
+// [Validate], matching the existing behavior for these fields.
+func checkRawRequiredInteger(obj map[string]any, key, path string, errs *[]string) {
+	v, ok := obj[key]
+	if !ok {
+		return
+	}
+	if v == nil || !isRawInteger(v) {
+		*errs = append(*errs, fmt.Sprintf("%s must be an integer", path))
 	}
 }
 

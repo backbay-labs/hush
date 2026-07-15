@@ -115,3 +115,25 @@ name: parent
         ok, err = resolve(child)
         assert not ok
         assert "nope" in err
+
+    def test_rejects_http_extends(self):
+        # The default composite loader has no HTTP client -- an http(s)://
+        # extends reference must be rejected with a clear error rather than
+        # silently handed to the filesystem loader (which would fail with a
+        # confusing "no such file or directory" instead).
+        child = parse_or_raise(
+            'hushspec: "0.1.0"\nname: x\n'
+            'extends: "http://example.com/policy.yaml"\n'
+        )
+        ok, err = resolve(child)
+        assert not ok
+        assert "HTTP" in err
+
+    def test_rejects_https_extends(self):
+        child = parse_or_raise(
+            'hushspec: "0.1.0"\nname: x\n'
+            'extends: "https://example.com/policy.yaml"\n'
+        )
+        ok, err = resolve(child)
+        assert not ok
+        assert "HTTP" in err

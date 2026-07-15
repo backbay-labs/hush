@@ -469,6 +469,23 @@ def _validate_origins(
                 _validate_optional_string(match, "sensitivity", errors, f"{profile_path}.match.sensitivity")
                 _validate_optional_string(match, "actor_role", errors, f"{profile_path}.match.actor_role")
 
+                # S2: a present-but-empty free-text match field (e.g.
+                # `provider: ""`) is a degenerate, unrepresentable-consistently
+                # constraint -- reject it (parity with Go's raw validator,
+                # which already does this). `space_type`/`visibility` are
+                # enums and already reject "" as an invalid enum value via
+                # `_validate_optional_enum` above, so they are excluded here.
+                for match_field in (
+                    "provider",
+                    "tenant_id",
+                    "space_id",
+                    "sensitivity",
+                    "actor_role",
+                ):
+                    _reject_empty_match_string(
+                        match, match_field, f"{profile_path}.match.{match_field}", errors
+                    )
+
         posture = _validate_optional_string(profile, "posture", errors, f"{profile_path}.posture")
         if posture is not None:
             if posture_states is None:
@@ -724,6 +741,18 @@ def _validate_string_value(value: Any, errors: list[str], path: str) -> str | No
     return value
 
 
+def _reject_empty_match_string(
+    obj: dict[str, Any], key: str, path: str, errors: list[str]
+) -> None:
+    """Reject a present free-text origin-match field whose value is the empty
+    string (S2). An absent field is untouched -- an all-absent match still
+    matches every origin. Type errors are reported separately by
+    `_validate_optional_string`, so a non-string value here is ignored."""
+    value = obj.get(key)
+    if isinstance(value, str) and value == "":
+        errors.append(f"{path} must not be empty")
+
+
 def _validate_enum_value(
     value: Any, errors: list[str], path: str, allowed: set[str]
 ) -> str | None:
@@ -784,12 +813,92 @@ def _validate_number_value(
 
 # Pattern that detects regex features outside the RE2 subset.
 # See hushspec/validate.py for full documentation. Kept identical to that
-# module's `_RE2_DISALLOWED`, including the possessive-brace ({n}+/{n,}+/
-# {n,m}+), \Z/\z anchor, and empty-character-class ([], [^]) additions.
+# module's `_RE2_DISALLOWED`. Possessive quantifiers (including possessive
+# braces {n}+/{n,}+/{n,m}+), \Z/\z anchors, and empty character classes ([],
+# [^]) are checked by the escape/class-aware `_disallowed_regex_feature`
+# scanner below instead of this substring regex -- a raw substring match
+# over-rejects those constructs inside a character class or as an escaped
+# literal (see `_disallowed_regex_feature`'s docstring in validate.py).
 _RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\{[0-9]*,?[0-9]*\}\+"
-    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<|\\Z|\\z|\[\]|\[\^\]"
+    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
+    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
 )
+
+
+# Shared rejection message for possessive quantifiers. Kept identical to the
+# copy in hushspec/validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+_POSSESSIVE_MESSAGE = (
+    "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
+    "across the HushSpec SDK regex engines"
+)
+
+
+# Portability pre-check: reject regex constructs that are unsupported by, or
+# behave differently across, the four SDK engines (possessive quantifiers,
+# \Z/\z end-anchors, empty character classes []/[^]) so a pattern validates
+# identically everywhere. See hushspec/validate.py's `_disallowed_regex_
+# feature` for full documentation. Kept identical to that module's copy and
+# to the Rust/Go implementations.
+def _disallowed_regex_feature(pattern: str) -> str | None:
+    chars = list(pattern)
+    n = len(chars)
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            # \Z / \z are end-anchors only outside a character class; inside
+            # one they are an escaped literal letter, so ignore them there.
+            if not in_class and i + 1 < n and chars[i + 1] in ("Z", "z"):
+                return (
+                    "\\Z and \\z end-anchors are not portable across the "
+                    "HushSpec SDK regex engines; anchor with $"
+                )
+            i += 2  # skip the escaped char
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            # Empty class [] or negated-empty [^] (JS matches none/any; the
+            # other engines reject the bare form).
+            j = i + 1
+            if j < n and chars[j] == "^":
+                j += 1
+            if j < n and chars[j] == "]":
+                return (
+                    "empty character classes [] and [^] are not portable "
+                    "across the HushSpec SDK regex engines"
+                )
+            in_class = True
+            i += 1
+            continue
+        if c in ("*", "+", "?"):
+            # A quantifier immediately followed by + is possessive.
+            if i + 1 < n and chars[i + 1] == "+":
+                return _POSSESSIVE_MESSAGE
+            i += 1
+            continue
+        if c == "{":
+            # Treat {...} as a quantifier only when it parses as one; a
+            # literal { is scanned through. A quantifier brace followed by +
+            # is possessive ({n}+, {n,}+, {n,m}+).
+            j = i + 1
+            while j < n and chars[j] != "}":
+                j += 1
+            if j < n:
+                inner = "".join(chars[i + 1 : j])
+                if _brace_kind(inner) != "none":
+                    if j + 1 < n and chars[j + 1] == "+":
+                        return _POSSESSIVE_MESSAGE
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+        i += 1
+    return None
 
 
 def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
@@ -799,8 +908,13 @@ def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
         errors.append(f"{path} must be a valid regular expression: {exc}")
         return
 
-    # RE2-feature check first, then the nested-quantifier (ReDoS) heuristic.
-    if _RE2_DISALLOWED.search(pattern) or _has_nested_quantifier(pattern):
+    # Portability pre-check first, then the RE2-feature check, then the
+    # nested-quantifier (ReDoS) heuristic.
+    if (
+        _disallowed_regex_feature(pattern) is not None
+        or _RE2_DISALLOWED.search(pattern)
+        or _has_nested_quantifier(pattern)
+    ):
         errors.append(
             f"{path}: pattern uses features not in the RE2 subset "
             "(backreferences, lookaround, etc.) which may cause ReDoS"

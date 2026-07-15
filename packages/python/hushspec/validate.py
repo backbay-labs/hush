@@ -385,25 +385,112 @@ def _validate_detection(
 # - Lookahead: (?=...), (?!...)
 # - Lookbehind: (?<=...), (?<!...)
 # - Atomic groups: (?>...)
-# - Possessive quantifiers: *+, ++, ?+, and possessive braces {n}+/{n,}+/{n,m}+
-#   (Python's `re` (3.11+) actually *compiles* these as real possessive
-#   quantifiers rather than erroring, unlike a syntax error in JS/Go, so they
-#   must be rejected here explicitly to keep validation accept/reject parity
-#   across all four SDKs)
 # - Conditional patterns: (?(...)...|...)
 # - Recursive patterns: (?R), (?1), (?2), ...
 # - Named backreferences: (?P=name)
 # - Subroutine calls: \g<name>
-# - \Z / \z end-of-string anchors (engine semantics differ across SDKs;
-#   users anchor with $ instead)
-# - Empty character classes [] and [^] (JS accepts these; Rust/Python/Go do
-#   not, so they are rejected here for parity and defense in depth even
-#   though Python's `re.compile` already rejects them via its own
-#   leading-bracket-is-literal rule)
+#
+# Possessive quantifiers (*+, ++, ?+, and possessive braces {n}+/{n,}+/
+# {n,m}+), \Z/\z end-of-string anchors, and empty character classes ([],
+# [^]) are also disallowed for cross-SDK portability (see
+# `_disallowed_regex_feature` below), but are intentionally NOT part of this
+# substring regex: a raw substring match over-rejects those constructs when
+# they appear inside a character class (`[*+]`, `[?+]`), as an escaped
+# backslash followed by a literal Z/z rather than the real anchor (`\\Z`,
+# written in a pattern string as an escaped `\` then `Z`), etc. The
+# escape-aware, character-class-aware scanner below distinguishes these
+# cases correctly.
 _RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\{[0-9]*,?[0-9]*\}\+"
-    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<|\\Z|\\z|\[\]|\[\^\]"
+    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
+    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
 )
+
+
+# Shared rejection message for possessive quantifiers. Must stay identical to
+# the copy in raw_validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+_POSSESSIVE_MESSAGE = (
+    "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
+    "across the HushSpec SDK regex engines"
+)
+
+
+def _disallowed_regex_feature(pattern: str) -> str | None:
+    """Portability pre-check: reject regex constructs that are unsupported by,
+    or behave differently across, the four SDK engines so a pattern validates
+    identically everywhere. Scanning outside character classes and honoring
+    ``\\``-escapes, it rejects:
+      * possessive quantifiers ``*+``, ``++``, ``?+`` and possessive braces
+        ``{n}+``, ``{n,}+``, ``{n,m}+`` (Python's `re` (3.11+) actually
+        *compiles* these as real possessive quantifiers rather than erroring
+        like JS/Go do at compile time),
+      * ``\\Z`` and ``\\z`` end-anchors (Rust/Python/Go accept them with
+        differing semantics; JavaScript reads ``\\Z``/``\\z`` as a literal
+        letter -- users anchor with ``$``),
+      * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
+        the others reject them).
+
+    Must stay byte-identical to the Rust, TypeScript, and Go implementations,
+    and to the copy of this function in raw_validate.py.
+    """
+    chars = list(pattern)
+    n = len(chars)
+    in_class = False
+    i = 0
+    while i < n:
+        c = chars[i]
+        if c == "\\":
+            # \Z / \z are end-anchors only outside a character class; inside
+            # one they are an escaped literal letter, so ignore them there.
+            if not in_class and i + 1 < n and chars[i + 1] in ("Z", "z"):
+                return (
+                    "\\Z and \\z end-anchors are not portable across the "
+                    "HushSpec SDK regex engines; anchor with $"
+                )
+            i += 2  # skip the escaped char
+            continue
+        if in_class:
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            # Empty class [] or negated-empty [^] (JS matches none/any; the
+            # other engines reject the bare form).
+            j = i + 1
+            if j < n and chars[j] == "^":
+                j += 1
+            if j < n and chars[j] == "]":
+                return (
+                    "empty character classes [] and [^] are not portable "
+                    "across the HushSpec SDK regex engines"
+                )
+            in_class = True
+            i += 1
+            continue
+        if c in ("*", "+", "?"):
+            # A quantifier immediately followed by + is possessive.
+            if i + 1 < n and chars[i + 1] == "+":
+                return _POSSESSIVE_MESSAGE
+            i += 1
+            continue
+        if c == "{":
+            # Treat {...} as a quantifier only when it parses as one; a
+            # literal { is scanned through. A quantifier brace followed by +
+            # is possessive ({n}+, {n,}+, {n,m}+).
+            j = i + 1
+            while j < n and chars[j] != "}":
+                j += 1
+            if j < n:
+                inner = "".join(chars[i + 1 : j])
+                if _brace_kind(inner) != "none":
+                    if j + 1 < n and chars[j + 1] == "+":
+                        return _POSSESSIVE_MESSAGE
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+        i += 1
+    return None
 
 
 def is_safe_regex(pattern: str) -> bool:
@@ -417,10 +504,16 @@ def is_safe_regex(pattern: str) -> bool:
     (e.g. ``(a+)+``) that catastrophically backtracks on the backtracking
     engines (JavaScript ``RegExp``, Python ``re``).
     """
-    # RE2-feature check first.
+    # Portability pre-check first: possessive quantifiers, \Z/\z anchors, and
+    # empty character classes, via the escape/class-aware scanner.
+    if _disallowed_regex_feature(pattern) is not None:
+        return False
+    # RE2-feature check second: backreferences, lookaround, atomic groups,
+    # conditional/recursive patterns -- Python's `re` compiles these, unlike
+    # RE2, so they must be rejected explicitly via substring match.
     if _RE2_DISALLOWED.search(pattern) is not None:
         return False
-    # Nested-quantifier check second.
+    # Nested-quantifier check third.
     return not _has_nested_quantifier(pattern)
 
 

@@ -67,6 +67,14 @@ func createCompositeLoader() ResolveLoader {
 			return &LoadedSpec{Source: reference, Spec: spec}, nil
 		}
 
+		// Reject HTTP(S) references explicitly rather than letting them fall
+		// through to the filesystem loader (which would try to open a file
+		// literally named "https://..."). The composite loader has no network
+		// support, so mirror Rust/TS and fail with a clear error.
+		if strings.HasPrefix(reference, "https://") || strings.HasPrefix(reference, "http://") {
+			return nil, fmt.Errorf("HTTP-based policy loading is not supported by the composite loader: %q", reference)
+		}
+
 		if !strings.ContainsAny(reference, `/\.`) {
 			if spec, ok := LoadBuiltin(reference); ok {
 				return &LoadedSpec{Source: "builtin:" + reference, Spec: spec}, nil

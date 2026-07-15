@@ -151,6 +151,25 @@ extensions:
 }
 
 #[test]
+fn validate_origins_rejects_empty_match_field() {
+    // A present-but-empty free-text match field (`provider: ""`) is an
+    // unsatisfiable, degenerate constraint. Go's plain-string model cannot
+    // distinguish it from an absent field, so all SDKs reject it for parity.
+    let yaml = r#"
+hushspec: "0.1.0"
+extensions:
+  origins:
+    profiles:
+      - id: empty-provider
+        match:
+          provider: ""
+"#;
+    let spec = HushSpec::parse(yaml).unwrap();
+    let result = validate(&spec);
+    assert!(!result.is_valid(), "empty match.provider must be rejected");
+}
+
+#[test]
 fn parse_detection_extension() {
     let yaml = r#"
 hushspec: "0.1.0"

@@ -84,7 +84,14 @@ def _create_composite_loader() -> Resolver:
     """Loader that serves `builtin:<name>` references from the embedded
     rulesets and everything else from the filesystem (mirrors the Rust/TS
     resolvers). A bare name with no path separators or dots is tried as a
-    builtin before falling back to the filesystem."""
+    builtin before falling back to the filesystem.
+
+    `http://`/`https://` references are rejected outright, mirroring Rust's
+    (non-`http`-feature) `create_composite_loader` and TS's synchronous
+    `createCompositeLoader`: this loader has no HTTP client, so silently
+    handing a URL to the filesystem loader would fail with a confusing
+    "no such file or directory" error instead of a clear one.
+    """
 
     def _loader(reference: str, source: str | None) -> LoadedSpec:
         if reference.startswith("builtin:"):
@@ -92,6 +99,12 @@ def _create_composite_loader() -> Resolver:
             if spec is None:
                 raise ValueError(f"unknown builtin ruleset '{reference}'")
             return LoadedSpec(source=reference, spec=spec)
+
+        if reference.startswith("http://") or reference.startswith("https://"):
+            raise ValueError(
+                "HTTP-based policy loading is not supported by the default "
+                f"loader; provide a custom `loader` for '{reference}'"
+            )
 
         if "/" not in reference and "\\" not in reference and "." not in reference:
             spec = load_builtin(reference)

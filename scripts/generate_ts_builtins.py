@@ -88,7 +88,7 @@ def main() -> int:
             return 1
         return 0
 
-    OUTPUT.write_text(rendered)
+    OUTPUT.write_text(rendered, newline="\n")
     return 0
 
 

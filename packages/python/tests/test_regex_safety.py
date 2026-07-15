@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 from hushspec import is_safe_regex, parse, parse_or_raise, validate
 
 
@@ -105,6 +107,87 @@ class TestIsSafeRegex:
 
     def test_rejects_empty_negated_character_class(self):
         assert is_safe_regex("[^]") is False
+
+
+
+# S3: escape/character-class-aware portability scanner
+#
+# The old `_RE2_DISALLOWED` raw-substring checks for possessive quantifiers
+# and \Z/\z anchors over-rejected patterns where the possessive-looking
+# characters sit inside a character class, or where \Z/\z is actually an
+# escaped backslash followed by a literal Z/z. `_disallowed_regex_feature`
+# (ported from Rust's `disallowed_regex_feature` in
+# crates/hushspec/src/validate.rs) is escape-aware and character-class-aware
+# and must ACCEPT/REJECT the identical shared list across all four SDKs.
+
+
+class TestRegexPortabilityScanner:
+    REJECT = [
+        "a++",
+        "a*+",
+        "a?+",
+        "a{2}+",
+        "a{2,}+",
+        "(ab)++",
+        "\\Z",
+        "\\z",
+        "[]",
+        "[^]",
+    ]
+
+    # Previously (wrongly) rejected by the raw-substring check; must now be
+    # accepted, same as Rust/Go already did.
+    ACCEPT = [
+        "[*+]",
+        "[?+]",
+        "\\\\Z",
+        "\\\\z",
+        "[a{2}+]",
+        "a\\{2}+",
+        "\\[]",
+        "a{2,5}?",
+        "(?:abc)+",
+        "[+*]",
+    ]
+
+    def test_rejects_shared_list(self):
+        for pattern in self.REJECT:
+            assert is_safe_regex(pattern) is False, f"{pattern!r} should be rejected"
+
+    def test_accepts_shared_list(self):
+        for pattern in self.ACCEPT:
+            assert is_safe_regex(pattern) is True, f"{pattern!r} should be accepted"
+
+    def test_rejects_shared_list_via_parse(self):
+        # Exercises raw_validate.py's independent copy of the scanner -- the
+        # path parse() actually takes for user-supplied policies -- not just
+        # validate.py's is_safe_regex, to guard against the two copies
+        # drifting apart. Patterns are serialized via yaml.safe_dump so
+        # backslash-heavy patterns round-trip without manual YAML escaping.
+        #
+        # Note: we only assert overall rejection (fail-closed), not that the
+        # error text names "RE2" specifically -- lowercase `\z` is not a
+        # recognized Python `re` escape at all (unlike `\Z`), so Python's own
+        # `re.compile` rejects it with a "bad escape" error before our
+        # portability scanner or the RE2-feature check ever runs. That is a
+        # pre-existing, engine-specific quirk unrelated to this scanner; the
+        # pattern is still correctly rejected either way.
+        for pattern in self.REJECT:
+            doc = {
+                "hushspec": "0.1.0",
+                "rules": {"shell_commands": {"forbidden_patterns": [pattern]}},
+            }
+            ok, err = parse(yaml.safe_dump(doc))
+            assert ok is False, f"{pattern!r} should be rejected: {err}"
+
+    def test_accepts_shared_list_via_parse(self):
+        for pattern in self.ACCEPT:
+            doc = {
+                "hushspec": "0.1.0",
+                "rules": {"shell_commands": {"forbidden_patterns": [pattern]}},
+            }
+            ok, result = parse(yaml.safe_dump(doc))
+            assert ok is True, f"{pattern!r} should parse: {result if not ok else ''}"
 
 
 

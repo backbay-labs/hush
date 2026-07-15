@@ -486,15 +486,35 @@ function validateOriginsExtension(
         addError(ctx, 'invalid_match', `${profilePath}.match must be an object`);
       } else {
         rejectUnknownKeys(profile.match, ORIGIN_MATCH_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${profilePath}.match: ${key}`);
-        validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
-        validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
-        validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
+        const provider = validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
+        const tenantId = validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
+        const spaceId = validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
         validateOptionalEnum(profile.match, 'space_type', ctx, `${profilePath}.match.space_type`, ORIGIN_SPACE_TYPES_SET);
         validateOptionalEnum(profile.match, 'visibility', ctx, `${profilePath}.match.visibility`, ORIGIN_VISIBILITIES_SET);
         validateOptionalBoolean(profile.match, 'external_participants', ctx, `${profilePath}.match.external_participants`);
         validateOptionalStringArray(profile.match, 'tags', ctx, `${profilePath}.match.tags`);
-        validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
-        validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
+        const sensitivity = validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
+        const actorRole = validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
+
+        // Cross-SDK parity fix (spec item S2): a present-but-empty free-text
+        // match field (e.g. `provider: ""`) is an unsatisfiable constraint
+        // that Go's plain-string model can't distinguish from an absent
+        // field; Go's raw validator already rejects it, so reject it here
+        // too to restore fail-closed accept/reject parity across the SDKs
+        // (mirrors Rust `validate_origins`). The enum fields above already
+        // reject "" as an invalid enum value, so they're excluded here.
+        const freeTextMatchFields: Array<[string, string | undefined]> = [
+          ['provider', provider],
+          ['tenant_id', tenantId],
+          ['space_id', spaceId],
+          ['sensitivity', sensitivity],
+          ['actor_role', actorRole],
+        ];
+        for (const [fieldName, value] of freeTextMatchFields) {
+          if (value === '') {
+            addError(ctx, 'empty_match_field', `${profilePath}.match.${fieldName} must not be empty`);
+          }
+        }
       }
     }
 

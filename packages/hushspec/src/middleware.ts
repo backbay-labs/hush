@@ -240,6 +240,31 @@ export class HushGuard {
   evaluate(action: EvaluationAction): EvaluationResult {
     const policy = this.activePolicyResult();
     if ('decision' in policy) {
+      // Provider-failure deny: mirrors gate()'s buildFailureReceipt handling
+      // (see its doc comment) so a sink-only guard (sink, no observer) is
+      // never silent here either. Before this, evaluate() returned the
+      // failure result directly without ever building or sending a receipt,
+      // so a fromProvider guard with a sink but no observer emitted zero
+      // receipts on a provider outage -- the exact "monitored block must
+      // never be silent" violation buildFailureReceipt was introduced to
+      // close for gate()/check()/enforce().
+      const receipt = this.sink
+        ? buildFailureReceipt(this.policy, action, policy, this.audit)
+        : undefined;
+      if (receipt && this.sink) {
+        try {
+          this.sink.send(receipt);
+        } catch {
+          /* sinks must not break evaluation */
+        }
+      }
+      this.observableEvaluator?.notifyEvaluationCompleted(
+        this.observerAction(action),
+        policy,
+        0,
+        undefined,
+        receipt,
+      );
       return policy;
     }
     if (this.sink) {

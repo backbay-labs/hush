@@ -12,21 +12,25 @@
  * - Lookbehind: (?<=...), (?<!...)
  * - Atomic groups: (?>...)
  * - Possessive quantifiers: *+, ++, ?+, and possessive braces {n}+, {n,}+,
- *   {n,m}+ (checked separately by hasPossessiveBraceQuantifier below, since
- *   detecting a genuine brace quantifier -- as opposed to a `}` and `+` that
- *   happen to sit next to each other in a character class or as unrelated
- *   literals -- needs escape/class-aware scanning, not a fixed substring)
+ *   {n,m}+ (checked separately by hasPossessiveQuantifier below, since
+ *   distinguishing a genuine possessive quantifier from possessive-looking
+ *   characters that are actually literal class members (`[*+]`, `[?+]`) or
+ *   an unrelated literal brace (`a{b}+`) needs escape/class-aware scanning,
+ *   not a fixed substring)
  * - Conditional patterns: (?(...)...|...)
  * - Recursive patterns: (?R), (?1), (?2), ...
  * - Named backreferences: (?P=name)
  * - Subroutine calls: \g<name>
  * - \Z / \z end-of-string anchors (Rust/Python/Go semantics differ from each
  *   other; JavaScript treats them as literal letters). Use $ instead.
+ *   (checked separately by hasEndAnchorEscape below, since a fixed substring
+ *   can't distinguish the anchor `\Z` from an escaped backslash followed by
+ *   a literal Z, i.e. the pattern text `\\Z`)
  * - Empty character classes: [], [^] (checked separately by
  *   hasEmptyCharacterClass below; JavaScript accepts them, Rust/Python/Go do
  *   not)
  */
-const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\*\+|\+\+|\?\+|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<|\\Z|\\z/;
+const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g</;
 const LEADING_INLINE_FLAGS = /^\(\?([ims]+)\)/;
 const PYTHON_NAMED_GROUP = /\(\?P<([A-Za-z_][A-Za-z0-9_]*)>/g;
 
@@ -38,17 +42,19 @@ export interface CompiledPolicyRegex {
 
 export function isSafeRegex(pattern: string): boolean {
   // RE2-feature check first: reject non-RE2 features (backreferences, lookaround,
-  // atomic/possessive constructs, ...). This alone guarantees safety on the
-  // RE2-based SDKs (Rust, Go).
+  // atomic constructs, ...). This alone guarantees safety on the RE2-based SDKs
+  // (Rust, Go).
   if (RE2_DISALLOWED.test(pattern)) {
     return false;
   }
-  // Possessive brace quantifiers (`{n}+`, `{n,}+`, `{n,m}+`) and empty
-  // character classes (`[]`, `[^]`) both need escape/class-aware scanning to
-  // detect precisely (a fixed substring like `}+` would also misfire inside
-  // an unrelated character class such as `[a}+]`), so they get dedicated
-  // walks rather than a RE2_DISALLOWED alternative.
-  if (hasPossessiveBraceQuantifier(pattern) || hasEmptyCharacterClass(pattern)) {
+  // Possessive quantifiers (bare `*+`/`++`/`?+` and braced `{n}+`, `{n,}+`,
+  // `{n,m}+`), `\Z`/`\z` end-anchors, and empty character classes (`[]`,
+  // `[^]`) all need escape/class-aware scanning to detect precisely -- a
+  // fixed substring would also misfire inside an unrelated character class
+  // (e.g. `[*+]`, `[a{2}+]`) or on an escaped backslash followed by a literal
+  // Z/z (`\\Z`), so they get dedicated walks rather than a RE2_DISALLOWED
+  // alternative.
+  if (hasPossessiveQuantifier(pattern) || hasEndAnchorEscape(pattern) || hasEmptyCharacterClass(pattern)) {
     return false;
   }
   // Nested-quantifier check last: RE2 tolerates shapes like `(a+)+` that
@@ -196,18 +202,29 @@ function braceKind(inner: string): QuantKind {
 }
 
 /**
- * Fail-closed scan for possessive brace quantifiers: `{n}+`, `{n,}+`,
- * `{n,m}+`. The bare possessive forms (`*+`, `++`, `?+`) are already caught
- * by RE2_DISALLOWED; this is the one shape it misses. Reuses `braceKind` to
- * confirm the `{...}` is a genuine quantifier (not a literal brace, e.g.
- * `a{b}+`, where `+` legitimately quantifies the literal `}`), and tracks
- * character-class state (like hasNestedQuantifier) so a `}+` that is just
- * literal text inside a class -- e.g. `[a{2}+]`, where `{`, `2`, `}`, `+` are
- * all ordinary class members -- is never misread as a quantifier. A `?`
- * immediately after the closing brace is the pre-existing, allowed lazy
- * marker (`{n,m}?`), not possessive, and is skipped rather than flagged.
+ * Fail-closed, escape/class-aware scan for possessive quantifiers: the bare
+ * forms `*+`, `++`, `?+` and the brace forms `{n}+`, `{n,}+`, `{n,m}+`.
+ *
+ * Both forms used to be split across two mechanisms: the bare forms were a
+ * fixed substring in RE2_DISALLOWED, and only the brace form got a scanning
+ * walk. That substring over-rejected possessive-*looking* characters that
+ * are actually literal class members (e.g. `[*+]`, `[?+]`), so the bare
+ * forms are now detected the same escape/class-aware way as the brace form,
+ * in this single scan.
+ *
+ * Reuses `braceKind` to confirm a `{...}` is a genuine quantifier (not a
+ * literal brace, e.g. `a{b}+`, where `+` legitimately quantifies the literal
+ * `}`), and tracks character-class state (like hasNestedQuantifier) so a
+ * `*`, `+`, `?`, or `}+` that is just literal text inside a class -- e.g.
+ * `[*+]`, `[a{2}+]`, where those characters are all ordinary class members
+ * -- is never misread as a quantifier. A `?` immediately after the closing
+ * brace is the pre-existing, allowed lazy marker (`{n,m}?`), not possessive,
+ * and is skipped rather than flagged.
+ *
+ * Must stay behaviorally identical to Rust `disallowed_regex_feature` / Go
+ * `disallowedRegexFeature`.
  */
-function hasPossessiveBraceQuantifier(pattern: string): boolean {
+function hasPossessiveQuantifier(pattern: string): boolean {
   const chars = Array.from(pattern);
   const n = chars.length;
   let inClass = false;
@@ -230,6 +247,9 @@ function hasPossessiveBraceQuantifier(pattern: string): boolean {
       i += 1;
       continue;
     }
+    if ((c === '*' || c === '+' || c === '?') && chars[i + 1] === '+') {
+      return true;
+    }
     if (c === '{') {
       let j = i + 1;
       while (j < n && chars[j] !== '}') {
@@ -238,6 +258,61 @@ function hasPossessiveBraceQuantifier(pattern: string): boolean {
       if (j < n && braceKind(chars.slice(i + 1, j).join('')) !== 'none' && chars[j + 1] === '+') {
         return true;
       }
+    }
+    i += 1;
+  }
+  return false;
+}
+
+/**
+ * Fail-closed, escape/class-aware scan for the `\Z` / `\z` end-of-string
+ * anchors (Rust/Python/Go treat them as anchors with subtly differing
+ * semantics from each other and from `$`; JavaScript `RegExp` treats them as
+ * a literal letter).
+ *
+ * Formerly a fixed substring in RE2_DISALLOWED, which couldn't distinguish
+ * the anchor `\Z` (backslash then Z) from an escaped backslash followed by a
+ * literal Z (the pattern text `\\Z`: backslash-backslash then Z, matching a
+ * literal `\` then a literal `Z` -- not an anchor at all), so both were
+ * rejected identically. Consuming the escaped pair (`i += 2`) only *after*
+ * checking whether the next char is `Z`/`z` is what tells them apart: in
+ * `\Z` the check fires on the first (only) backslash; in `\\Z` the first
+ * backslash's escape pair consumes the second backslash before `Z` is ever
+ * reconsidered, so by the time `Z` is reached it is an ordinary character,
+ * not one immediately preceded by an unescaped backslash.
+ *
+ * Also class-aware: `\Z`/`\z` inside a character class (e.g. `[\Z]`) is an
+ * escaped literal letter, not an anchor, so the check is skipped whenever
+ * `inClass` is set.
+ *
+ * Must stay behaviorally identical to Rust `disallowed_regex_feature` / Go
+ * `disallowedRegexFeature`.
+ */
+function hasEndAnchorEscape(pattern: string): boolean {
+  const chars = Array.from(pattern);
+  const n = chars.length;
+  let inClass = false;
+  let i = 0;
+  while (i < n) {
+    const c = chars[i];
+    if (c === '\\') {
+      if (!inClass && (chars[i + 1] === 'Z' || chars[i + 1] === 'z')) {
+        return true;
+      }
+      i += 2;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') {
+        inClass = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '[') {
+      inClass = true;
+      i += 1;
+      continue;
     }
     i += 1;
   }
