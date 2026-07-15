@@ -156,8 +156,31 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('\\\\z')).toBe(true);
   });
 
-  it('does not treat an escaped Z inside a character class as an anchor ([\\Z])', () => {
-    expect(isSafeRegex('[\\Z]')).toBe(true);
+  // Cross-SDK parity regression fix (v3, item 2): `\Z`/`\z` INSIDE a character
+  // class. JavaScript `RegExp` is the only SDK engine that accepts `[\Z]`/`[\z]`
+  // (reading the escape as a literal letter); Rust `regex`, Python `re`, and Go
+  // RE2 all reject them at compile time. Those three lean on that compile-time
+  // rejection (their scanners skip in-class `\Z`), but TS `isSafeRegex` has no
+  // compile backstop -- `new RegExp('[\\Z]')` succeeds -- so hasEndAnchorEscape
+  // must flag in-class `\Z`/`\z` itself to keep the net accept/reject identical.
+  // A prior wave over-corrected here and accepted `[\Z]`; this re-rejects it.
+  it('rejects \\Z inside a character class ([\\Z])', () => {
+    expect(isSafeRegex('[\\Z]')).toBe(false);
+  });
+
+  it('rejects \\z inside a character class ([\\z])', () => {
+    expect(isSafeRegex('[\\z]')).toBe(false);
+  });
+
+  it('rejects \\Z inside a non-empty character class ([x\\Z])', () => {
+    expect(isSafeRegex('[x\\Z]')).toBe(false);
+  });
+
+  // The escaped-literal `\\Z` (backslash-backslash then Z) is still NOT an
+  // anchor and stays accepted, including inside a class (`[\\Z]` = literal `\`
+  // and `Z`) -- the escape pair consumes the second backslash before Z is seen.
+  it('still accepts the escaped-literal \\\\Z inside a class ([\\\\Z])', () => {
+    expect(isSafeRegex('[\\\\Z]')).toBe(true);
   });
 
   // Cross-SDK parity fix (spec item S2): empty character classes compile

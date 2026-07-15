@@ -137,3 +137,62 @@ name: parent
         ok, err = resolve(child)
         assert not ok
         assert "HTTP" in err
+
+
+class TestExtendsDepthCap:
+    def test_long_acyclic_chain_errors_at_depth_cap(self):
+        # S2: an acyclic `extends` chain longer than the cap (32) must fail
+        # closed with a clean error rather than recurse until a stack overflow.
+        # 40 distinct specs, each extending the next; the 40th is terminal.
+        total = 40
+        specs: dict[str, object] = {}
+        for i in range(total):
+            if i < total - 1:
+                specs[f"spec-{i}"] = parse_or_raise(
+                    f'hushspec: "0.1.0"\nname: spec-{i}\nextends: spec-{i + 1}\n'
+                )
+            else:
+                specs[f"spec-{i}"] = parse_or_raise(
+                    f'hushspec: "0.1.0"\nname: spec-{i}\n'
+                )
+
+        def loader(reference: str, _source):
+            return LoadedSpec(source=f"memory://{reference}", spec=specs[reference])
+
+        ok, err = resolve(specs["spec-0"], source="memory://spec-0", loader=loader)
+        assert not ok
+        assert isinstance(err, str)
+        assert "exceeds maximum depth of 32" in err
+
+    def test_depth_three_chain_resolves(self):
+        # A short chain (child -> spec-1 -> spec-2 -> spec-3) is well under the
+        # cap and must resolve, merging the whole chain end-to-end.
+        specs = {
+            "spec-1": parse_or_raise(
+                'hushspec: "0.1.0"\nname: spec-1\nextends: spec-2\n'
+            ),
+            "spec-2": parse_or_raise(
+                'hushspec: "0.1.0"\nname: spec-2\nextends: spec-3\n'
+            ),
+            "spec-3": parse_or_raise(
+                'hushspec: "0.1.0"\nname: spec-3\n'
+                "rules:\n"
+                "  tool_access:\n"
+                "    default: block\n"
+            ),
+        }
+        child = parse_or_raise(
+            'hushspec: "0.1.0"\nname: child\nextends: spec-1\n'
+        )
+
+        def loader(reference: str, _source):
+            return LoadedSpec(source=f"memory://{reference}", spec=specs[reference])
+
+        ok, resolved = resolve(child, source="memory://child", loader=loader)
+        assert ok, resolved
+        assert resolved.extends is None
+        assert resolved.name == "child"
+        # Rule from the deepest ancestor (spec-3) is inherited through the chain.
+        assert resolved.rules is not None
+        assert resolved.rules.tool_access is not None
+        assert resolved.rules.tool_access.default.value == "block"

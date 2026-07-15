@@ -2,6 +2,11 @@ use crate::{HushSpec, merge};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Maximum depth of an `extends` chain. Beyond this the resolver fails closed
+/// rather than recursing until the stack overflows. Shipped policies are depth
+/// <= 2; 32 is far above any realistic composition. Identical across all SDKs.
+const MAX_EXTENDS_DEPTH: usize = 32;
+
 /// A loaded HushSpec document plus its canonical source identifier.
 #[derive(Clone, Debug)]
 pub struct LoadedSpec {
@@ -18,6 +23,8 @@ pub enum ResolveError {
     Parse { path: String, message: String },
     #[error("circular extends detected: {chain}")]
     Cycle { chain: String },
+    #[error("extends chain exceeds maximum depth of 32")]
+    MaxDepth,
     #[error("{message}")]
     Http { message: String },
     #[error("could not resolve reference '{reference}': {message}")]
@@ -71,7 +78,7 @@ fn try_load_builtin(reference: &str) -> Option<Result<LoadedSpec, ResolveError>>
 pub mod http {
     use super::*;
     use std::io::Read as _;
-    use std::net::IpAddr;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[derive(Clone, Debug)]
     pub struct HttpLoaderConfig {
@@ -94,6 +101,22 @@ pub mod http {
         }
     }
 
+    /// Extract the embedded IPv4 address from a deprecated IPv4-*compatible*
+    /// IPv6 address (`::a.b.c.d`, i.e. all high 96 bits zero, low 32 bits the
+    /// IPv4). Returns `None` for `::` and `::1` (handled elsewhere) and for the
+    /// IPv4-*mapped* form (`::ffff:a.b.c.d`, where segment 5 is `0xffff`).
+    fn ipv4_compatible(v6: &Ipv6Addr) -> Option<Ipv4Addr> {
+        let segments = v6.segments();
+        if segments[..6].iter().any(|&segment| segment != 0) {
+            return None;
+        }
+        let low = (u32::from(segments[6]) << 16) | u32::from(segments[7]);
+        if low <= 1 {
+            return None; // :: (unspecified) and ::1 (loopback)
+        }
+        Some(Ipv4Addr::from(low))
+    }
+
     fn is_private_ip(ip: &IpAddr) -> bool {
         match ip {
             IpAddr::V4(v4) => {
@@ -107,8 +130,12 @@ pub mod http {
                     || v6.is_unspecified() // ::
                     || v6.is_unique_local() // fc00::/7
                     || v6.is_unicast_link_local() // fe80::/10
-                    // IPv4-mapped addresses
+                    // IPv4-mapped addresses (::ffff:a.b.c.d)
                     || v6.to_ipv4_mapped().is_some_and(|v4| {
+                        v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+                    })
+                    // Deprecated IPv4-compatible addresses (::a.b.c.d)
+                    || ipv4_compatible(v6).is_some_and(|v4| {
                         v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
                     })
             }
@@ -449,6 +476,38 @@ pub mod http {
         }
 
         #[test]
+        fn is_private_ip_ipv4_compatible() {
+            // Deprecated IPv4-compatible form `::a.b.c.d` must be flagged when the
+            // embedded IPv4 is private.
+            // ::a9fe:a9fe -> 169.254.169.254 (link-local / cloud metadata)
+            assert!(is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0xa9fe, 0xa9fe
+            ))));
+            // ::7f00:1 -> 127.0.0.1 (loopback)
+            assert!(is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0x7f00, 0x0001
+            ))));
+            // ::0a00:1 -> 10.0.0.1 (private)
+            assert!(is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0x0a00, 0x0001
+            ))));
+            // IPv4-mapped form is still handled: ::ffff:127.0.0.1
+            assert!(is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0xffff, 0x7f00, 0x0001
+            ))));
+
+            // A compatible form wrapping a PUBLIC IPv4 stays public.
+            // ::0808:0808 -> 8.8.8.8
+            assert!(!is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0, 0, 0, 0, 0, 0, 0x0808, 0x0808
+            ))));
+            // A genuine public IPv6 stays public.
+            assert!(!is_private_ip(&IpAddr::V6(Ipv6Addr::new(
+                0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111
+            ))));
+        }
+
+        #[test]
         fn etag_cache_round_trip() {
             let dir = std::env::temp_dir().join(format!(
                 "hushspec-cache-test-{}",
@@ -527,7 +586,7 @@ where
     if let Some(source) = source {
         stack.push(source.to_string());
     }
-    resolve_inner(spec, source, loader, &mut stack)
+    resolve_inner(spec, source, loader, &mut stack, 0)
 }
 
 pub fn resolve_from_path(path: impl AsRef<Path>) -> Result<HushSpec, ResolveError> {
@@ -551,6 +610,7 @@ fn resolve_inner<F>(
     source: Option<&str>,
     loader: &F,
     stack: &mut Vec<String>,
+    depth: usize,
 ) -> Result<HushSpec, ResolveError>
 where
     F: Fn(&str, Option<&str>) -> Result<LoadedSpec, ResolveError>,
@@ -558,6 +618,11 @@ where
     let Some(reference) = spec.extends.as_deref() else {
         return Ok(spec.clone());
     };
+
+    // Fail closed on unbounded (acyclic) chains before the native stack blows up.
+    if depth >= MAX_EXTENDS_DEPTH {
+        return Err(ResolveError::MaxDepth);
+    }
 
     let loaded = loader(reference, source)?;
     if let Some(index) = stack.iter().position(|entry| entry == &loaded.source) {
@@ -569,7 +634,8 @@ where
     }
 
     stack.push(loaded.source.clone());
-    let resolved_parent = resolve_inner(&loaded.spec, Some(&loaded.source), loader, stack)?;
+    let resolved_parent =
+        resolve_inner(&loaded.spec, Some(&loaded.source), loader, stack, depth + 1)?;
     stack.pop();
     Ok(merge(&resolved_parent, spec))
 }
@@ -714,5 +780,69 @@ rules:
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("http") || msg.contains("HTTP"));
+    }
+
+    // ---- S2: extends chain depth cap ----
+
+    /// An in-memory spec that optionally extends `parent`.
+    fn chain_spec(extends: Option<&str>) -> HushSpec {
+        let yaml = match extends {
+            Some(parent) => format!("hushspec: \"0.1.0\"\nextends: \"{parent}\"\nname: n\n"),
+            None => "hushspec: \"0.1.0\"\nname: n\n".to_string(),
+        };
+        HushSpec::parse(&yaml).expect("chain spec parses")
+    }
+
+    /// Map `spec_0..spec_{len-1}` where each extends the next; `spec_{len-1}` is the leaf.
+    fn chain_specs(len: usize) -> std::collections::HashMap<String, HushSpec> {
+        let mut specs = std::collections::HashMap::new();
+        for i in 0..len {
+            let parent = (i + 1 < len).then(|| format!("spec_{}", i + 1));
+            specs.insert(format!("spec_{i}"), chain_spec(parent.as_deref()));
+        }
+        specs
+    }
+
+    /// A loader that resolves references against an in-memory spec map.
+    fn map_loader(
+        specs: std::collections::HashMap<String, HushSpec>,
+    ) -> impl Fn(&str, Option<&str>) -> Result<LoadedSpec, ResolveError> {
+        move |reference: &str, _from: Option<&str>| {
+            specs
+                .get(reference)
+                .cloned()
+                .map(|spec| LoadedSpec {
+                    source: reference.to_string(),
+                    spec,
+                })
+                .ok_or_else(|| ResolveError::NotFound {
+                    reference: reference.to_string(),
+                    message: "not in test map".to_string(),
+                })
+        }
+    }
+
+    #[test]
+    fn extends_chain_depth_cap_rejects_deep_chain() {
+        let specs = chain_specs(40);
+        let root = specs["spec_0"].clone();
+        let loader = map_loader(specs);
+        let err = resolve_with_loader(&root, Some("spec_0"), &loader)
+            .expect_err("40-deep chain must fail closed, not overflow the stack");
+        assert!(
+            matches!(err, ResolveError::MaxDepth),
+            "expected MaxDepth, got {err:?}"
+        );
+        assert_eq!(err.to_string(), "extends chain exceeds maximum depth of 32");
+    }
+
+    #[test]
+    fn extends_chain_depth_three_still_resolves() {
+        let specs = chain_specs(3);
+        let root = specs["spec_0"].clone();
+        let loader = map_loader(specs);
+        let resolved = resolve_with_loader(&root, Some("spec_0"), &loader)
+            .expect("3-deep chain resolves cleanly");
+        assert!(resolved.extends.is_none());
     }
 }

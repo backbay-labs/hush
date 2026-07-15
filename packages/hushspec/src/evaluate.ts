@@ -129,11 +129,12 @@ function globMatches(pattern: string, target: string): boolean {
       if (i + 1 < pattern.length && pattern[i + 1] === '*') {
         if (i + 2 < pattern.length && pattern[i + 2] === '/') {
           // `**/` matches zero or more leading path segments (including zero),
-          // so `**/.env` matches both `.env` and `a/b/.env`.
-          regex += '(?:.*/)?';
+          // so `**/.env` matches both `.env` and `a/b/.env`. Uses `[^\n]`
+          // rather than `.` -- see the `u`-flag note below for why.
+          regex += '(?:[^\\n]*/)?';
           i += 3;
         } else {
-          regex += '.*';
+          regex += '[^\\n]*';
           i += 2;
         }
       } else {
@@ -141,7 +142,7 @@ function globMatches(pattern: string, target: string): boolean {
         i += 1;
       }
     } else if (ch === '?') {
-      regex += '.';
+      regex += '[^\\n]';
       i += 1;
     } else if ('.+(){}[]^$|\\'.includes(ch)) {
       regex += '\\' + ch;
@@ -154,12 +155,20 @@ function globMatches(pattern: string, target: string): boolean {
   regex += '$';
 
   try {
-    // 'u' flag: makes `?` -> `.` code-point-aware so a single `?` matches one
-    // full Unicode code point (e.g. an astral emoji) rather than one UTF-16
-    // code unit. Every construct this translator emits (the escaped literals
-    // `\. \+ \( \) \{ \} \[ \] \^ \$ \| \\`, plus `(?:.*/)?`, `[^/]*`, `.*`,
-    // `^`, `$`, and literal source characters) is valid under `u`, so this is
-    // a pure widening of `?` with no effect on existing ASCII glob behavior.
+    // `?`/`**`/`**/` emit `[^\n]` (not `.`) for cross-SDK parity: JavaScript
+    // `.` excludes EVERY line terminator (`\n`, `\r`, U+2028, U+2029) -- even
+    // under the `u` flag -- whereas the Rust/Python/Go reference engines exclude
+    // only `\n`. Emitting `.` here would fail to match a target with an interior
+    // `\r`/U+2028/U+2029 (e.g. `secrets/**` vs `secrets/x\ry`), silently letting
+    // it slip past a `forbidden_paths`/`block` glob that the other SDKs enforce.
+    // `[^\n]` excludes only `\n`, matching the reference engines exactly.
+    //
+    // 'u' flag: makes the negated classes code-point-aware so a single `?`
+    // (`[^\n]`) matches one full Unicode code point (e.g. an astral emoji)
+    // rather than one UTF-16 code unit. Every construct this translator emits
+    // (the escaped literals `\. \+ \( \) \{ \} \[ \] \^ \$ \| \\`, plus
+    // `(?:[^\n]*/)?`, `[^/]*`, `[^\n]*`, `[^\n]`, `^`, `$`, and literal source
+    // characters) is valid under `u`.
     return new RegExp(regex, 'u').test(target);
   } catch {
     return false;

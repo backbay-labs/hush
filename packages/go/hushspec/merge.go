@@ -53,6 +53,9 @@ func mergeSpecs(base, child *HushSpec, deep bool) *HushSpec {
 	}
 	result.Extends = ""
 	result.MergeStrategy = child.MergeStrategy
+	if child.Metadata != nil {
+		result.Metadata = child.Metadata
+	}
 
 	if child.Rules != nil {
 		if result.Rules == nil {

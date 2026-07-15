@@ -19,10 +19,19 @@ export interface ResolveOptions {
   load?: (reference: string, from?: string) => LoadedSpec;
 }
 
+/**
+ * Maximum `extends` chain depth. Cycle detection only catches exact repeats, so
+ * a long *acyclic* chain would otherwise recurse unbounded until a stack
+ * overflow. 32 is far above any realistic composition (shipped policies are
+ * depth <= 2); the cap fails closed with a clean error. Must match the other
+ * SDK resolvers.
+ */
+const MAX_EXTENDS_DEPTH = 32;
+
 export function resolve(spec: HushSpec, options: ResolveOptions = {}): ResolveResult {
   const stack = options.source ? [options.source] : [];
   const load = options.load ?? createCompositeLoader();
-  return resolveInner(spec, options.source, load, stack);
+  return resolveInner(spec, options.source, load, stack, 0);
 }
 
 export function resolveFromFile(filePath: string): ResolveResult {
@@ -76,9 +85,17 @@ function resolveInner(
   source: string | undefined,
   load: (reference: string, from?: string) => LoadedSpec,
   stack: string[],
+  depth: number,
 ): ResolveResult {
   if (!spec.extends) {
     return { ok: true, value: spec };
+  }
+
+  if (depth >= MAX_EXTENDS_DEPTH) {
+    return {
+      ok: false,
+      error: `extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`,
+    };
   }
 
   let loaded: LoadedSpec;
@@ -100,7 +117,7 @@ function resolveInner(
   }
 
   stack.push(loaded.source);
-  const parent = resolveInner(loaded.spec, loaded.source, load, stack);
+  const parent = resolveInner(loaded.spec, loaded.source, load, stack, depth + 1);
   stack.pop();
   if (!parent.ok) {
     return parent;

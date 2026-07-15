@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,75 @@ func TestCompositeLoaderRejectsHTTPReferences(t *testing.T) {
 		if _, err := Resolve(spec, "", nil); err == nil {
 			t.Errorf("expected Resolve to reject an %q extends reference, got no error", ref)
 		}
+	}
+}
+
+// buildExtendsChain builds n distinct in-memory specs "spec0".."spec{n-1}"
+// where each extends the next (spec[i] -> spec[i+1]) and the last is
+// terminal (no extends).
+func buildExtendsChain(t *testing.T, n int) map[string]*HushSpec {
+	t.Helper()
+	specs := make(map[string]*HushSpec, n)
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("spec%d", i)
+		yaml := fmt.Sprintf("hushspec: \"0.1.0\"\nname: %s\n", name)
+		if i < n-1 {
+			yaml += fmt.Sprintf("extends: spec%d\n", i+1)
+		}
+		spec, err := Parse(yaml)
+		if err != nil {
+			t.Fatalf("failed to parse %s: %v", name, err)
+		}
+		specs[name] = spec
+	}
+	return specs
+}
+
+// memoryLoader resolves extends references purely from an in-memory map,
+// keyed by name, with a synthetic "memory://<name>" source.
+func memoryLoader(specs map[string]*HushSpec) ResolveLoader {
+	return func(reference string, from string) (*LoadedSpec, error) {
+		spec, ok := specs[reference]
+		if !ok {
+			return nil, fmt.Errorf("unknown in-memory spec %q", reference)
+		}
+		return &LoadedSpec{Source: "memory://" + reference, Spec: spec}, nil
+	}
+}
+
+// TestResolveExtendsChainDepthCapErrorsCleanly covers parity fix S2: cycle
+// detection alone does not bound a long ACYCLIC extends chain, which would
+// otherwise recurse without limit. A chain of 40 distinct specs, each
+// extending the next, must be rejected cleanly (no crash) once the chain
+// exceeds the maximum depth of 32.
+func TestResolveExtendsChainDepthCapErrorsCleanly(t *testing.T) {
+	specs := buildExtendsChain(t, 40)
+	loader := memoryLoader(specs)
+
+	_, err := Resolve(specs["spec0"], "memory://spec0", loader)
+	if err == nil {
+		t.Fatal("expected a 40-deep extends chain to error")
+	}
+	if !strings.Contains(err.Error(), "extends chain exceeds maximum depth of 32") {
+		t.Fatalf("expected a maximum-depth error, got: %v", err)
+	}
+}
+
+// TestResolveShallowExtendsChainStillResolves is the control for the depth
+// cap: a realistic, shallow chain (3 hops) must still resolve normally.
+func TestResolveShallowExtendsChainStillResolves(t *testing.T) {
+	specs := buildExtendsChain(t, 4) // spec0 -> spec1 -> spec2 -> spec3 (3 hops)
+	loader := memoryLoader(specs)
+
+	resolved, err := Resolve(specs["spec0"], "memory://spec0", loader)
+	if err != nil {
+		t.Fatalf("expected a 3-deep extends chain to resolve cleanly, got error: %v", err)
+	}
+	if resolved.Extends != "" {
+		t.Fatalf("expected resolved spec to clear extends, got %q", resolved.Extends)
+	}
+	if resolved.Name != "spec0" {
+		t.Fatalf("expected resolved spec name to be spec0, got %q", resolved.Name)
 	}
 }
 

@@ -1,7 +1,10 @@
+import time
+
 from hushspec import (
     DefaultAction,
     DetectionExtension,
     Extensions,
+    GovernanceMetadata,
     HushSpec,
     MergeStrategy,
     PatchIntegrityRule,
@@ -455,6 +458,51 @@ hushspec: "0.1.0"
         # Child has no name, falls back to base
         assert merged.name == "base-name"
 
+    def test_merge_metadata_child_over_parent(self):
+        # S1: metadata must merge child-over-parent like every other field
+        # (it was previously dropped from the merged result entirely).
+        base = parse_or_raise("""
+hushspec: "0.1.0"
+name: base
+metadata:
+  author: a
+""")
+        child = parse_or_raise("""
+hushspec: "0.1.0"
+name: child
+extends: base
+metadata:
+  author: b
+""")
+        merged = merge(base, child)
+        assert merged.metadata is not None
+        assert merged.metadata.author == "b"
+
+    def test_merge_metadata_parent_preserved_when_child_absent(self):
+        base = parse_or_raise("""
+hushspec: "0.1.0"
+name: base
+metadata:
+  author: a
+""")
+        child = parse_or_raise("""
+hushspec: "0.1.0"
+name: child
+extends: base
+""")
+        merged = merge(base, child)
+        assert merged.metadata is not None
+        assert merged.metadata.author == "a"
+
+    def test_merge_metadata_is_deep_copied(self):
+        # Mutating the merged metadata must not bleed into the source specs.
+        base = HushSpec(hushspec="0.1.0", metadata=GovernanceMetadata(author="a"))
+        child = HushSpec(hushspec="0.1.0")
+        merged = merge(base, child)
+        assert merged.metadata is not None
+        merged.metadata.author = "mutated"
+        assert base.metadata.author == "a"
+
 
 class TestRoundtrip:
     def test_roundtrip_yaml(self):
@@ -717,3 +765,85 @@ extensions:
         result = validate(spec)
         assert not result.is_valid
         assert any("must match" in str(e) for e in result.errors)
+
+
+# YAML loader robustness (parity with the Rust/TS/Go SDKs)
+#
+# PyYAML's `safe_load` is more permissive than the YAML parsers behind the
+# other three SDKs in three ways that a fail-closed parser must not tolerate:
+# it silently accepts duplicate mapping keys (last-wins), has no alias/anchor
+# expansion cap (a "billion laughs" bomb blows up our post-parse tree walks),
+# and lets deeply nested flow YAML surface an uncaught RecursionError instead
+# of a clean parse error. `parse()` now hardens all three.
+
+
+class TestYamlRobustness:
+    def test_rejects_duplicate_top_level_keys(self):
+        # PyYAML would keep the last value; Rust/TS/Go reject duplicates.
+        ok, err = parse('hushspec: "0.1.0"\nname: a\nname: b\n')
+        assert ok is False
+        assert isinstance(err, str)
+        assert "duplicate key" in err
+
+    def test_rejects_duplicate_nested_keys(self):
+        yaml = """
+hushspec: "0.1.0"
+rules:
+  egress:
+    default: block
+    default: allow
+"""
+        ok, err = parse(yaml)
+        assert ok is False
+        assert isinstance(err, str)
+        assert "duplicate key" in err
+
+    def test_anchor_bomb_fails_fast(self):
+        # A nested-anchor bomb: tiny source text whose alias-expanded size is
+        # astronomically large. It must be rejected quickly (via the alias
+        # expansion cap), not hang while the post-parse passes walk the
+        # expanded structure.
+        lines = ["a: &a [x,x,x,x,x,x,x,x,x]"]
+        prev = "a"
+        for name in "bcdefghij":
+            fan = ",".join([f"*{prev}"] * 9)
+            lines.append(f"{name}: &{name} [{fan}]")
+            prev = name
+        bomb = "\n".join(lines) + "\n"
+
+        start = time.monotonic()
+        ok, err = parse(bomb)
+        elapsed = time.monotonic() - start
+
+        assert ok is False
+        assert isinstance(err, str)
+        # Generous bound purely as a hang detector -- the cap rejects in ~ms.
+        assert elapsed < 5.0, f"anchor bomb took {elapsed:.2f}s (expected fast rejection)"
+
+    def test_deeply_nested_flow_returns_error_not_traceback(self):
+        # 10000-deep flow sequence overflows the interpreter stack during
+        # compose; PyYAML raises a bare RecursionError (not a YAMLError), which
+        # must be caught so parse() returns (False, msg) rather than crashing.
+        deep = "[" * 10000 + "]" * 10000
+        ok, err = parse(deep)
+        assert ok is False
+        assert isinstance(err, str)
+
+    def test_legitimate_anchors_still_resolve(self):
+        # A small, non-malicious anchor/alias document must still parse fine.
+        yaml = """
+hushspec: "0.1.0"
+name: anchored
+rules:
+  egress:
+    allow: &domains
+      - api.example.com
+    block: []
+    default: block
+"""
+        ok, spec = parse(yaml)
+        assert ok is True
+        assert isinstance(spec, HushSpec)
+        assert spec.rules is not None
+        assert spec.rules.egress is not None
+        assert spec.rules.egress.allow == ["api.example.com"]

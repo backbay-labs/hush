@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { parseOrThrow } from '../src/parse.js';
 import { resolve, resolveFromFile, createCompositeLoader } from '../src/resolve.js';
 import { loadBuiltin, BUILTIN_NAMES } from '../src/builtin.js';
-import { createHttpLoader } from '../src/http-loader.js';
+import { createHttpLoader, isPrivateIp } from '../src/http-loader.js';
 
 describe('resolve', () => {
   it('resolves extends chains from the filesystem', () => {
@@ -103,6 +103,46 @@ name: parent
     if (result.ok) {
       expect(result.value.extends).toBeUndefined();
       expect(result.value.name).toBe('parent');
+    }
+  });
+
+  // Parity fix (v3, item S2): a long *acyclic* extends chain used to recurse
+  // unbounded (cycle detection only catches exact repeats). The resolver now
+  // caps the chain at depth 32 and fails closed with a clean error.
+  it('errors cleanly on an extends chain deeper than the cap (40 levels)', () => {
+    const depth = 40;
+    const load = (reference: string) => {
+      const n = Number(reference.slice('level-'.length));
+      const spec = n < depth
+        ? parseOrThrow(`hushspec: "0.1.0"\nextends: level-${n + 1}\n`)
+        : parseOrThrow('hushspec: "0.1.0"\nname: leaf\n');
+      return { source: `memory://level-${n}`, spec };
+    };
+    const root = parseOrThrow('hushspec: "0.1.0"\nextends: level-1\n');
+    const result = resolve(root, { source: 'memory://root', load });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('exceeds maximum depth of 32');
+    }
+  });
+
+  it('resolves a short extends chain within the cap (3 specs deep)', () => {
+    const load = (reference: string) => {
+      switch (reference) {
+        case 'a':
+          return { source: 'memory://a', spec: parseOrThrow('hushspec: "0.1.0"\nextends: b\n') };
+        case 'b':
+          return { source: 'memory://b', spec: parseOrThrow('hushspec: "0.1.0"\nname: leaf\n') };
+        default:
+          throw new Error(`unexpected reference ${reference}`);
+      }
+    };
+    const root = parseOrThrow('hushspec: "0.1.0"\nextends: a\n');
+    const result = resolve(root, { source: 'memory://root', load });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.extends).toBeUndefined();
+      expect(result.value.name).toBe('leaf');
     }
   });
 });
@@ -211,5 +251,37 @@ describe('http loader', () => {
     await expect(loader('https://[fc00::1]/policy.yaml')).rejects.toThrow('SSRF protection');
     await expect(loader('https://[fe80::1]/policy.yaml')).rejects.toThrow('SSRF protection');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+// Parity fix (v3, item S3): the SSRF filter recognized the IPv4-*mapped* form
+// (`::ffff:a.b.c.d`) but not the deprecated IPv4-*compatible* form (`::a.b.c.d`
+// / `::hextet:hextet`, all high bits zero), so `::a9fe:a9fe` (169.254.169.254
+// cloud metadata) and `::7f00:1` (127.0.0.1 loopback) were not flagged. The
+// low 32 bits are now extracted as IPv4 and run through the IPv4 private check.
+describe('isPrivateIp: IPv4-compatible IPv6 (SSRF)', () => {
+  it('flags the deprecated IPv4-compatible form (::a.b.c.d / ::hextet:hextet)', () => {
+    expect(isPrivateIp('::a9fe:a9fe')).toBe(true); // 169.254.169.254 cloud metadata
+    expect(isPrivateIp('::7f00:1')).toBe(true); // 127.0.0.1 loopback
+    expect(isPrivateIp('::0.0.0.0')).toBe(true); // all-zero unspecified
+    expect(isPrivateIp('::a0a:a0a')).toBe(true); // 10.10.10.10 private
+  });
+
+  it('still flags the IPv4-mapped form and native private ranges', () => {
+    expect(isPrivateIp('::ffff:169.254.169.254')).toBe(true);
+    expect(isPrivateIp('::ffff:a9fe:a9fe')).toBe(true);
+    expect(isPrivateIp('::1')).toBe(true);
+    expect(isPrivateIp('::')).toBe(true);
+    expect(isPrivateIp('fc00::1')).toBe(true);
+    expect(isPrivateIp('fe80::1')).toBe(true);
+    expect(isPrivateIp('127.0.0.1')).toBe(true);
+  });
+
+  it('leaves genuine public IPs public', () => {
+    expect(isPrivateIp('8.8.8.8')).toBe(false);
+    expect(isPrivateIp('1.1.1.1')).toBe(false);
+    expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
+    // ::2606:4700 -> 38.6.71.0 is a PUBLIC IPv4, so the compatible form stays public.
+    expect(isPrivateIp('::2606:4700')).toBe(false);
   });
 });

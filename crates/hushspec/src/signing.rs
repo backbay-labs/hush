@@ -17,7 +17,7 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -182,7 +182,9 @@ pub fn verify_policy(
         &signature.key_id,
         signature.signer.as_deref(),
     );
-    match verifying_key.verify(&payload, &ed_sig) {
+    // `verify_strict` rejects small-order / torsion public keys and non-canonical
+    // (malleable) signatures that the permissive `verify` would accept.
+    match verifying_key.verify_strict(&payload, &ed_sig) {
         Ok(()) => VerificationOutcome::Valid {
             key_id: signature.key_id.clone(),
             signed_at: signature.signed_at.clone(),

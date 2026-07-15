@@ -57,6 +57,10 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
     extensions: deep
       ? mergeExtensionsDeep(base.extensions, child.extensions)
       : mergeExtensionsMerge(base.extensions, child.extensions),
+    // Top-level governance metadata is merged child-over-parent like every
+    // other field (matches Rust `merge_with_strategy`); the `replace` strategy
+    // above already carries the child's metadata via the spread.
+    metadata: child.metadata ?? base.metadata,
   };
 }
 

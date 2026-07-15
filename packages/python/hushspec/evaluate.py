@@ -1357,13 +1357,31 @@ def panic_policy() -> HushSpec:
 
 
 def check_panic_sentinel(path: str) -> bool:
-    """Activate panic mode if the sentinel file at *path* exists."""
+    """Activate panic mode if the sentinel file at *path* exists.
+
+    This is a kill switch, so it **fails closed**: if the file's existence
+    cannot be determined (a permission or other I/O error from ``os.stat``),
+    the sentinel is treated as present and panic mode is activated. Only a
+    definitive "not found" (``FileNotFoundError`` / ``NotADirectoryError``)
+    counts as absent. This mirrors Rust's ``try_exists().unwrap_or(true)`` --
+    ``os.path.isfile`` was wrong here because it silently returns ``False`` on
+    any stat error, letting the kill switch fail OPEN.
+    """
     import os
 
-    exists = os.path.isfile(path)
-    if exists:
+    try:
+        os.stat(path)
+        present = True
+    except (FileNotFoundError, NotADirectoryError):
+        present = False
+    except OSError:
+        # Could not prove the sentinel is absent (e.g. PermissionError);
+        # treat it as present so the kill switch never fails open.
+        present = True
+
+    if present:
         activate_panic()
-    return exists
+    return present
 
 
 

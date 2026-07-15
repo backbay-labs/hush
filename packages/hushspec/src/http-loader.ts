@@ -57,7 +57,51 @@ function mappedIpv4Address(normalized: string): string | undefined {
   return `${a}.${b}.${c}.${d}`;
 }
 
-function isPrivateIp(ip: string): boolean {
+/**
+ * Extract the embedded IPv4 address from a deprecated IPv4-*compatible* IPv6
+ * address -- `::a.b.c.d` (dotted) or `::hextet:hextet` -- where the high 96
+ * bits are all zero and the low 32 bits are non-zero, returning it as a dotted
+ * string. Unlike the IPv4-*mapped* `::ffff:` form these have no `ffff` marker,
+ * so `::7f00:1` (127.0.0.1 loopback) and `::a9fe:a9fe` (169.254.169.254 cloud
+ * metadata) would otherwise slip past the SSRF filter. Excludes `::` itself and
+ * the `::ffff:` mapped form (handled by mappedIpv4Address); `::1` is handled by
+ * the caller before this runs.
+ */
+function compatibleIpv4Address(normalized: string): string | undefined {
+  if (!normalized.startsWith('::') || normalized === '::') {
+    return undefined;
+  }
+  const rest = normalized.slice(2);
+  // The IPv4-mapped `::ffff:...` form is mappedIpv4Address's job; don't overlap.
+  if (rest === '' || rest.startsWith('ffff:')) {
+    return undefined;
+  }
+
+  if (rest.includes('.')) {
+    // Dotted-quad compatible form, e.g. `::169.254.169.254`.
+    return rest;
+  }
+
+  // Trailing 32 bits as one or two hextets, e.g. "7f00:1" or "a9fe:a9fe".
+  const groups = rest.split(':');
+  if (groups.length === 0 || groups.length > 2) {
+    return undefined;
+  }
+  let value = 0;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) {
+      return undefined;
+    }
+    value = value * 0x10000 + parseInt(group, 16);
+  }
+  const a = (value >>> 24) & 0xff;
+  const b = (value >>> 16) & 0xff;
+  const c = (value >>> 8) & 0xff;
+  const d = value & 0xff;
+  return `${a}.${b}.${c}.${d}`;
+}
+
+export function isPrivateIp(ip: string): boolean {
   const normalized = ip.toLowerCase().split('%')[0];
   if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') {
     return true;
@@ -65,6 +109,11 @@ function isPrivateIp(ip: string): boolean {
 
   const mappedIpv4 = mappedIpv4Address(normalized);
   if (mappedIpv4 != null && isPrivateIp(mappedIpv4)) {
+    return true;
+  }
+
+  const compatibleIpv4 = compatibleIpv4Address(normalized);
+  if (compatibleIpv4 != null && isPrivateIp(compatibleIpv4)) {
     return true;
   }
 

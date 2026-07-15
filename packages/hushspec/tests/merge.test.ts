@@ -91,4 +91,21 @@ rules:
     const merged = merge(base, child);
     expect(merged.name).toBe('base');
   });
+
+  // Parity fix (v3, item S1): the merged result used to DROP top-level
+  // `metadata` entirely; it is now merged child-over-parent like every other
+  // field, matching Rust `merge_with_strategy`.
+  it('merges metadata child-over-parent', () => {
+    const base = parseOrThrow('hushspec: "0.1.0"\nname: base\nmetadata:\n  author: a\n');
+    const child = parseOrThrow('hushspec: "0.1.0"\nname: child\nextends: base\nmetadata:\n  author: b\n');
+    const merged = merge(base, child);
+    expect(merged.metadata?.author).toBe('b');
+  });
+
+  it('preserves parent metadata when the child has none', () => {
+    const base = parseOrThrow('hushspec: "0.1.0"\nname: base\nmetadata:\n  author: a\n');
+    const child = parseOrThrow('hushspec: "0.1.0"\nname: child\nextends: base\n');
+    const merged = merge(base, child);
+    expect(merged.metadata?.author).toBe('a');
+  });
 });

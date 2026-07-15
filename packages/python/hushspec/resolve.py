@@ -18,6 +18,12 @@ class LoadedSpec:
 
 Resolver = Callable[[str, str | None], LoadedSpec]
 
+# Maximum length of an `extends` chain. Resolvers only detect exact-repeat
+# cycles, so a long *acyclic* chain would otherwise recurse unbounded until a
+# stack overflow. 32 is far above any realistic composition (shipped policies
+# are depth <= 2); the same limit is enforced identically across all four SDKs.
+_MAX_EXTENDS_DEPTH = 32
+
 
 def resolve(
     spec: HushSpec,
@@ -58,9 +64,13 @@ def _resolve_inner(
     source: str | None,
     loader: Resolver,
     stack: list[str],
+    depth: int = 0,
 ) -> tuple[bool, HushSpec | str]:
     if spec.extends is None:
         return True, spec
+
+    if depth >= _MAX_EXTENDS_DEPTH:
+        return False, f"extends chain exceeds maximum depth of {_MAX_EXTENDS_DEPTH}"
 
     try:
         loaded = loader(spec.extends, source)
@@ -72,7 +82,7 @@ def _resolve_inner(
         return False, f"circular extends detected: {' -> '.join(cycle)}"
 
     stack.append(loaded.source)
-    ok, parent = _resolve_inner(loaded.spec, loaded.source, loader, stack)
+    ok, parent = _resolve_inner(loaded.spec, loaded.source, loader, stack, depth + 1)
     stack.pop()
     if not ok:
         return False, parent

@@ -461,6 +461,42 @@ extensions:
 	}
 }
 
+// TestMergeMetadataChildOverParent covers parity fix S1: a resolved policy's
+// top-level metadata must be the child's when the child sets any, and fall
+// back to the base's when the child has none (matching Rust's
+// `child.metadata.clone().or_else(|| base.metadata.clone())`). Go previously
+// kept the base's metadata unconditionally, ignoring the child's.
+func TestMergeMetadataChildOverParent(t *testing.T) {
+	base := mustParse(t, `
+hushspec: "0.1.0"
+name: base
+metadata:
+  author: "a"
+`)
+	child := mustParse(t, `
+hushspec: "0.1.0"
+name: child
+extends: base
+metadata:
+  author: "b"
+`)
+
+	merged := Merge(base, child)
+	if merged.Metadata == nil || merged.Metadata.Author != "b" {
+		t.Fatalf("expected child metadata.author to win, got %+v", merged.Metadata)
+	}
+
+	childNoMetadata := mustParse(t, `
+hushspec: "0.1.0"
+name: child
+extends: base
+`)
+	fallback := Merge(base, childNoMetadata)
+	if fallback.Metadata == nil || fallback.Metadata.Author != "a" {
+		t.Fatalf("expected base metadata to be preserved when child has none, got %+v", fallback.Metadata)
+	}
+}
+
 func TestMarshalRoundTripExtensions(t *testing.T) {
 	spec := mustParse(t, `
 hushspec: "0.1.0"

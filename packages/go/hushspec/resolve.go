@@ -14,6 +14,12 @@ type LoadedSpec struct {
 	Spec   *HushSpec
 }
 
+// maxExtendsDepth caps the length of an extends chain. Cycle detection only
+// catches an exact repeat of a prior source; a long but acyclic chain would
+// otherwise recurse without bound and overflow the stack. 32 is far above
+// any realistic composition depth (shipped policies are depth <= 2).
+const maxExtendsDepth = 32
+
 // ResolveLoader loads a HushSpec referenced by an extends field.
 // reference is the extends value; from is the source of the referencing document.
 type ResolveLoader func(reference string, from string) (*LoadedSpec, error)
@@ -29,7 +35,7 @@ func Resolve(spec *HushSpec, source string, loader ResolveLoader) (*HushSpec, er
 	if source != "" {
 		stack = append(stack, source)
 	}
-	return resolveInner(spec, source, loader, stack)
+	return resolveInner(spec, source, loader, stack, 0)
 }
 
 // ResolveFile loads a HushSpec from disk and flattens its extends chain.
@@ -85,9 +91,16 @@ func createCompositeLoader() ResolveLoader {
 	}
 }
 
-func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []string) (*HushSpec, error) {
+func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []string, depth int) (*HushSpec, error) {
 	if spec == nil || spec.Extends == "" {
 		return spec, nil
+	}
+
+	// Cycle detection only catches an exact repeat of a prior source; a long
+	// acyclic chain would otherwise recurse without bound. Fail closed with a
+	// clean error before doing any further loading once the cap is hit.
+	if depth >= maxExtendsDepth {
+		return nil, fmt.Errorf("extends chain exceeds maximum depth of %d", maxExtendsDepth)
 	}
 
 	loaded, err := loader(spec.Extends, source)
@@ -103,7 +116,7 @@ func resolveInner(spec *HushSpec, source string, loader ResolveLoader, stack []s
 	}
 
 	nextStack := append(stack, loaded.Source)
-	parent, err := resolveInner(loaded.Spec, loaded.Source, loader, nextStack)
+	parent, err := resolveInner(loaded.Spec, loaded.Source, loader, nextStack, depth+1)
 	if err != nil {
 		return nil, err
 	}

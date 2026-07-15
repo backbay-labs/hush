@@ -281,12 +281,22 @@ function hasPossessiveQuantifier(pattern: string): boolean {
  * reconsidered, so by the time `Z` is reached it is an ordinary character,
  * not one immediately preceded by an unescaped backslash.
  *
- * Also class-aware: `\Z`/`\z` inside a character class (e.g. `[\Z]`) is an
- * escaped literal letter, not an anchor, so the check is skipped whenever
- * `inClass` is set.
+ * NOT class-aware for the anchor: `\Z`/`\z` are flagged even inside a
+ * character class (`[\Z]`, `[\z]`, `[x\Z]`). JavaScript `RegExp` is the only
+ * SDK engine that ACCEPTS `[\Z]`/`[\z]` (reading the escape as a literal
+ * letter); Rust's `regex`, Python's `re`, and Go's RE2 all REJECT them at
+ * compile time. Those three SDKs lean on that compile-time rejection -- their
+ * `disallowed_regex_feature` scanners skip in-class `\Z` -- but TS
+ * `isSafeRegex` has no compile backstop (`new RegExp('[\\Z]')` succeeds), so
+ * this scan must reject in-class `\Z`/`\z` itself to keep the net accept/reject
+ * decision identical across all four SDKs. The escaped-pair consumption
+ * (`i += 2` only after the check) still keeps the literal `\\Z`
+ * (backslash-backslash then Z) accepted everywhere -- there the first
+ * backslash's escape pair consumes the second backslash before `Z` is ever
+ * examined.
  *
- * Must stay behaviorally identical to Rust `disallowed_regex_feature` / Go
- * `disallowedRegexFeature`.
+ * Net accept/reject behavior stays identical to Rust `disallowed_regex_feature`
+ * (+ its `Regex::new` backstop) / Go `disallowedRegexFeature`.
  */
 function hasEndAnchorEscape(pattern: string): boolean {
   const chars = Array.from(pattern);
@@ -296,7 +306,7 @@ function hasEndAnchorEscape(pattern: string): boolean {
   while (i < n) {
     const c = chars[i];
     if (c === '\\') {
-      if (!inClass && (chars[i + 1] === 'Z' || chars[i + 1] === 'z')) {
+      if (chars[i + 1] === 'Z' || chars[i + 1] === 'z') {
         return true;
       }
       i += 2;

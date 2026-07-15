@@ -164,3 +164,24 @@ class TestPanicSentinel:
 
         assert not check_panic_sentinel(sentinel)
         assert not is_panic_active()
+
+    def test_sentinel_stat_error_fails_closed(self, monkeypatch):
+        # A kill switch must fail CLOSED: if the sentinel's existence cannot be
+        # determined (e.g. a PermissionError from stat), treat it as PRESENT and
+        # activate panic -- matching Rust's `try_exists().unwrap_or(true)`. The
+        # old `os.path.isfile` swallowed such errors and failed OPEN.
+        def _raise_permission(_path):
+            raise PermissionError("stat blocked")
+
+        monkeypatch.setattr(os, "stat", _raise_permission)
+        assert check_panic_sentinel("/guarded/hushspec_panic")
+        assert is_panic_active()
+
+    def test_sentinel_definitive_not_found_stays_absent(self, monkeypatch):
+        # Only a definitive "not found" counts as absent (no activation).
+        def _raise_not_found(_path):
+            raise FileNotFoundError("missing")
+
+        monkeypatch.setattr(os, "stat", _raise_not_found)
+        assert not check_panic_sentinel("/does/not/exist")
+        assert not is_panic_active()
