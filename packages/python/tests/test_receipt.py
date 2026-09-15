@@ -187,7 +187,9 @@ class TestEvaluateAudited:
     def test_duration_is_recorded_only_when_asked(self):
         spec = _spec_with_tool_access()
         action = EvaluationAction(type="tool_call", target="read_file")
-        assert evaluate_audited(spec, action, _enabled_config()).duration_us >= 0
+        assert isinstance(
+            evaluate_audited(spec, action, _enabled_config()).duration_us, int
+        )
         off = AuditConfig(enabled=True, include_rule_trace=True, record_duration=False)
         assert evaluate_audited(spec, action, off).duration_us is None
 
@@ -298,8 +300,11 @@ class TestComputePolicyHash:
         assert CONTENT_HASH_RE.match(compute_policy_hash(spec))
 
     def test_is_deterministic(self):
-        spec = _minimal_spec()
-        assert compute_policy_hash(spec) == compute_policy_hash(spec)
+        # Two independently built equal specs, not one object twice: hashing
+        # the same object would also pass with an identity-keyed cache.
+        assert compute_policy_hash(_minimal_spec()) == compute_policy_hash(
+            _minimal_spec()
+        )
 
     def test_differs_for_different_specs(self):
         spec1 = _minimal_spec()
@@ -326,7 +331,8 @@ class TestReceiptToDict:
         # A minimal spec with no rules, no posture extension, and no origin
         # produces an ALLOW decision where matched_rule, reason, origin_profile
         # and posture are all None -- and the tool_access rule_trace entry also
-        # carries a None rule_path. None should survive as an explicit null.
+        # carries a None rule_path. An absent value is an omitted key, never an
+        # explicit null (receipt spec section 3).
         spec = _minimal_spec()
         action = EvaluationAction(type="tool_call", target="anything")
         receipt = evaluate_audited(spec, action, _enabled_config())

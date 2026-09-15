@@ -1,8 +1,6 @@
 import os
 import tempfile
 
-import pytest
-
 from hushspec import (
     Decision,
     EvaluationAction,
@@ -14,13 +12,6 @@ from hushspec import (
     is_panic_active,
     panic_policy,
 )
-
-
-@pytest.fixture(autouse=True)
-def _reset_panic():
-    deactivate_panic()
-    yield
-    deactivate_panic()
 
 
 class TestPanicActivation:
@@ -88,16 +79,11 @@ class TestPanicPolicy:
         assert spec.hushspec == "0.1.0"
         assert spec.rules is not None
 
-    def test_panic_policy_does_not_depend_on_cwd(self):
-        original = os.getcwd()
-        tmpdir = tempfile.mkdtemp(prefix="hushspec-panic-")
-        try:
-            os.chdir(tmpdir)
-            spec = panic_policy()
-            assert spec.name == "__hushspec_panic__"
-        finally:
-            os.chdir(original)
-            os.rmdir(tmpdir)
+    def test_panic_policy_does_not_depend_on_cwd(self, tmp_path, monkeypatch):
+        # The panic policy is embedded, not read from disk: it must build the
+        # same wherever the process happens to be standing.
+        monkeypatch.chdir(tmp_path)
+        assert panic_policy().name == "__hushspec_panic__"
 
     def test_panic_policy_denies_file_reads(self):
         spec = panic_policy()
@@ -157,12 +143,10 @@ class TestPanicSentinel:
         finally:
             os.unlink(sentinel)
 
-    def test_sentinel_file_missing_does_not_activate(self):
-        sentinel = os.path.join(tempfile.gettempdir(), "nonexistent_hushspec_panic")
-        if os.path.exists(sentinel):
-            os.unlink(sentinel)
+    def test_sentinel_file_missing_does_not_activate(self, tmp_path):
+        sentinel = tmp_path / "nonexistent_hushspec_panic"
 
-        assert not check_panic_sentinel(sentinel)
+        assert not check_panic_sentinel(str(sentinel))
         assert not is_panic_active()
 
     def test_sentinel_stat_error_fails_closed(self, monkeypatch):

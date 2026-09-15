@@ -206,7 +206,7 @@ class _ReloadLoop:
         self._lock = threading.RLock()
         #: Serializes whole ticks. Reentrant so a tick may be driven from an
         #: ``on_change`` callback without deadlocking; across threads it stops
-        #: two ticks from loading concurrently and the slower one from
+        #: two ticks from loading at once and the slower one from
         #: overwriting the newer policy.
         self._tick_lock = threading.RLock()
         self._stop = threading.Event()

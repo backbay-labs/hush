@@ -541,10 +541,9 @@ extensions:
         assert result.evaluation.matched_rule == "detection"
         assert result.evaluation.reason == "content flagged by jailbreak detection"
 
-    def test_jailbreak_score_compared_as_percent_not_rounded(self) -> None:
-        # jailbreak_dan alone scores 0.5 -> 50.0, which meets warn_threshold
-        # (40) but not block_threshold (45 < 50, so this is actually a deny
-        # -- pick thresholds that isolate the warn band instead).
+    def test_a_score_inside_the_warn_band_warns(self) -> None:
+        # jailbreak_dan alone scores 0.5 -> 50, which is at warn_threshold and
+        # below block_threshold, so the band decides (detection spec 3.4).
         spec = parse_or_raise(
             """\
 hushspec: "0.1.0"

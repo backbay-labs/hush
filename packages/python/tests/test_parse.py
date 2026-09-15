@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 from hushspec import (
     DefaultAction,
     DetectionExtension,
@@ -48,11 +50,8 @@ name: test
 hushspec: "0.1.0"
 unknown_field: true
 """
-        try:
+        with pytest.raises(ValueError, match="unknown field `unknown_field`"):
             parse_or_raise(yaml)
-            assert False, "Expected ValueError"
-        except ValueError as e:
-            assert "unknown field `unknown_field`" in str(e)
 
 
 class TestParseWithRules:

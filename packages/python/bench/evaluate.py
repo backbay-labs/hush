@@ -36,8 +36,10 @@ predates ``compile_policy``.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -74,17 +76,17 @@ ACTIONS: list[EvaluationAction] = [
 ]
 
 
-def _best(fn, iterations: int, repeat: int) -> float:
+def _best(fn: Callable[[], None], iterations: int, repeat: int) -> float:
     """Nanoseconds per call, best of *repeat* runs of *iterations* calls."""
+    if iterations < 1 or repeat < 1:
+        raise ValueError("iterations and repeat must both be at least 1")
     fn()  # warm up
-    best = None
+    best = math.inf
     for _ in range(repeat):
         start = time.perf_counter_ns()
         for _ in range(iterations):
             fn()
-        elapsed = time.perf_counter_ns() - start
-        if best is None or elapsed < best:
-            best = elapsed
+        best = min(best, time.perf_counter_ns() - start)
     return best / iterations
 
 
@@ -104,7 +106,10 @@ def main() -> int:
 
     print(f"policy:  {args.policy}")
     print(f"actions: {count} per iteration, {args.iterations} iterations x {args.repeat} runs")
-    print(f"python:  {sys.version.split()[0]}   hushspec {hushspec.__version__}")
+    print(
+        f"python:  {sys.version.split()[0]}   "
+        f"hushspec spec {hushspec.__version__}"
+    )
     print()
 
     def free() -> None:

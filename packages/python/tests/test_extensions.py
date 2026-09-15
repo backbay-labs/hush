@@ -696,10 +696,37 @@ extensions:
     def test_the_wildcard_still_applies_where_no_named_transition_matches(self):
         assert self._next("restricted") == "locked"
 
+    SAME_FROM_POLICY = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [tool_call]
+      locked:
+        capabilities: []
+    transitions:
+      - from: standard
+        to: restricted
+        on: critical_violation
+      - from: standard
+        to: locked
+        on: critical_violation
+"""
+
     def test_among_equals_document_order_wins(self):
-        # Two `from: standard` transitions share the trigger; the first one
-        # written is the one that fires.
-        assert self._next("standard") == "restricted"
+        # No wildcard here, so only document order can decide: two `from:
+        # standard` transitions share the trigger and the first one written
+        # fires.
+        policy = compile_policy(parse_or_raise(self.SAME_FROM_POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current="standard", signal="critical_violation")
+        )
+        assert posture is not None
+        assert posture.next == "restricted"
 
     def test_no_matching_trigger_holds_the_state(self):
         policy = compile_policy(parse_or_raise(self.POLICY))

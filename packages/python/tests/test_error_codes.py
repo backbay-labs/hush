@@ -55,7 +55,7 @@ def test_an_error_message_is_a_string_that_also_carries_its_code() -> None:
 
 
 def test_an_error_message_refuses_an_unregistered_code() -> None:
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="'E999' is not a registered error code"):
         ErrorMessage("nope", "E999")
 
 

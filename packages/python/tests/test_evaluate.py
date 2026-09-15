@@ -73,7 +73,7 @@ def _collect_evaluation_cases():
         if not dir_path.exists():
             continue
         for yaml_file in sorted(dir_path.glob("*.yaml")):
-            with open(yaml_file) as f:
+            with open(yaml_file, encoding="utf-8") as f:
                 # The HushSpec YAML profile is YAML 1.2 Core: `on`/`yes` are
                 # plain strings, not booleans, so a fixture's `on:` transition
                 # trigger must survive the load -> re-dump round trip below.

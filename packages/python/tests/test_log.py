@@ -325,7 +325,11 @@ def test_the_vector_directories_are_populated() -> None:
     ids=lambda p: p.stem,
 )
 def test_valid_vector_verifies(path: Path) -> None:
-    verify_log(path.name, path.read_text(), _signed_options())
+    report = verify_log(path.name, path.read_text(), _signed_options())
+    # A verifier that walked nothing would also not raise.
+    assert report.entries > 0
+    assert report.files == 1
+    assert report.last_entry_hash
 
 
 def test_the_rotated_pair_verifies_in_order() -> None:

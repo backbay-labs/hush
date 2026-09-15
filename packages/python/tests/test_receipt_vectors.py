@@ -166,15 +166,21 @@ def test_expected_receipt_matches_byte_for_byte(fixture: Path, index: int) -> No
     )
 
 
-def test_expected_receipts_round_trip_through_the_parser() -> None:
-    # Conformance item 5: parsing a receipt and re-serializing in canonical
-    # form yields the same bytes.
-    for fixture, index in EXPECTED_CASES[:25]:
-        path = _expected_path(fixture, index)
-        text = path.read_text()
-        receipt = parse_receipt(text)
-        assert canonical_json(receipt) == canonical_json_value(json.loads(text))
-        assert receipt_hash(receipt) == receipt_hash(parse_receipt(receipt_to_dict(receipt)))
+@pytest.mark.parametrize(
+    ("fixture", "index"),
+    EXPECTED_CASES,
+    ids=[f"{fixture.stem}-{index}" for fixture, index in EXPECTED_CASES],
+)
+def test_an_expected_receipt_round_trips_through_the_parser(
+    fixture: Path, index: int
+) -> None:
+    # Parsing a receipt and re-serializing it in canonical form yields the same
+    # bytes, and the hash is unchanged by the trip (receipt spec section 6).
+    path = _expected_path(fixture, index)
+    text = path.read_text()
+    receipt = parse_receipt(text)
+    assert canonical_json(receipt) == canonical_json_value(json.loads(text))
+    assert receipt_hash(receipt) == receipt_hash(parse_receipt(receipt_to_dict(receipt)))
 
 
 # --------------------------------------------------------------------------- #

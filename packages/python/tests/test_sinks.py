@@ -108,11 +108,21 @@ class TestFileReceiptSink:
 
 
 class TestStderrReceiptSink:
-    def test_does_not_crash(self):
+    def test_writes_one_json_object_per_receipt_to_stderr(self, capsys):
         sink = StderrReceiptSink()
-        # Should not raise.
         sink.send(_make_receipt(Decision.ALLOW))
         sink.send(_make_receipt(Decision.DENY))
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        written = captured.err
+        assert written.count("[hushspec] ") == 2
+        decisions = [
+            json.loads(block)["decision"]
+            for block in written.split("[hushspec] ")
+            if block.strip()
+        ]
+        assert decisions == ["allow", "deny"]
 
 
 
@@ -212,12 +222,16 @@ class TestCallbackSink:
 
 
 class TestNullSink:
-    def test_does_not_crash(self):
+    def test_discards_every_receipt_and_writes_nothing(self, capsys):
         sink = NullSink()
-        # Should not raise.
-        sink.send(_make_receipt(Decision.ALLOW))
-        sink.send(_make_receipt(Decision.DENY))
-        sink.send(_make_receipt(Decision.WARN))
+        for decision in (Decision.ALLOW, Decision.DENY, Decision.WARN):
+            sink.send(_make_receipt(decision))
+        sink.record_policy_event(
+            PolicyEvent.loaded(_policy_summary(), "enforce")
+        )
+
+        captured = capsys.readouterr()
+        assert (captured.out, captured.err) == ("", "")
 
 
 

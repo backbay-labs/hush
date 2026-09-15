@@ -220,7 +220,7 @@ class _GuardState:
     """The policy a guard is enforcing, as one immutable unit.
 
     A hot reload replaces the whole object in a single attribute store, so an
-    evaluation running concurrently sees either every field of the outgoing
+    evaluation on another thread sees either every field of the outgoing
     policy or every field of the incoming one. Read field by field, a swap
     landing mid-evaluation could pair one policy's decision with another
     policy's content hash -- which is exactly what the hash in a receipt is
@@ -579,6 +579,16 @@ class HushGuard:
         return self._watcher
 
     @property
+    def enforcement_mode(self) -> str:
+        """The guard's configured mode, ``"enforce"`` or ``"monitor"``.
+
+        Per-rule overrides and panic resolution apply per action, so the mode a
+        given decision was enforced under is the one on its
+        :class:`~hushspec.receipt.EnforcementSummary`, not this.
+        """
+        return self._enforcement_mode
+
+    @property
     def policy(self) -> HushSpec:
         """The resolved policy in force, as every evaluation sees it.
 
@@ -680,8 +690,7 @@ class HushGuard:
         # detection.py emits the bare literal matched_rule "detection" (see
         # hushspec/detection.py) rather than a hierarchical rule path, so an
         # override keyed "extensions.detection" would otherwise silently
-        # never match. Normalize before prefix matching (mirrors TS
-        # middleware.ts's effectiveMode normalization).
+        # never match. Normalize before prefix matching.
         if matched == "detection":
             matched = "extensions.detection"
         if matched is not None:
@@ -707,8 +716,9 @@ class HushGuard:
     def _run_evaluation(
         self, action: EvaluationAction
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
-        # One read of the state for the whole evaluation: a concurrent hot
-        # reload must not pair one policy's decision with another's hash.
+        # One read of the state for the whole evaluation: a hot reload on
+        # another thread must not pair one policy's decision with another's
+        # hash.
         state = self._state
         if state.refusal is not None:
             return self._refused_evaluation(action, state)
@@ -859,7 +869,7 @@ class HushGuard:
         # policy it has not prepared.
         compiled = compile_policy(resolution, strict=False)
         previous_hash = self._state.policy_hash
-        # One store, so an evaluator running concurrently sees either the whole
+        # One store, so an evaluator on another thread sees either the whole
         # old policy or the whole new one. A swap that verifies also clears an
         # earlier refusal: the guard now holds a policy it was able to prove.
         self._state = _GuardState(

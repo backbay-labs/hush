@@ -61,24 +61,21 @@ pytest.importorskip(
 
 
 def _signature_schema() -> dict[str, Any]:
-    """Return the 0.2 signature schema, from ``schemas/`` or the staging area.
+    """The published signature schema for this envelope format version.
 
-    The schema is being promoted out of ``schemas/staged/0.2.0/`` as part of
-    this release; read whichever copy is the 0.2 one so the test does not race
-    the promotion.
+    A schema that has moved or whose ``format_version`` has drifted is a
+    failure, not a skip: keeping the envelopes this SDK writes in step with
+    the published schema is what these tests are for.
     """
-    candidates = [
-        REPO_ROOT / "schemas" / "hushspec-signature.v0.schema.json",
-        REPO_ROOT / "schemas" / "staged" / "0.2.0" / "hushspec-signature.v0.schema.json",
-    ]
-    for path in candidates:
-        if not path.is_file():
-            continue
-        schema = json.loads(path.read_text(encoding="utf-8"))
-        version = schema.get("properties", {}).get("format_version", {})
-        if version.get("const") == ENVELOPE_FORMAT_VERSION:
-            return schema
-    pytest.skip("no 0.2 signature schema found in schemas/ or schemas/staged/0.2.0/")
+    path = REPO_ROOT / "schemas" / "hushspec-signature.v0.schema.json"
+    assert path.is_file(), f"{path} is missing"
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    declared = schema.get("properties", {}).get("format_version", {}).get("const")
+    assert declared == ENVELOPE_FORMAT_VERSION, (
+        f"{path} declares format_version {declared!r}, "
+        f"this SDK writes {ENVELOPE_FORMAT_VERSION!r}"
+    )
+    return schema
 
 
 def _load_manifest() -> dict[str, Any]:
@@ -490,11 +487,12 @@ def test_rollback_requires_both_sides(generated_key: str, basic_policy: Any) -> 
     )
 
 
-def test_verify_needs_explicit_trust(basic_policy: Any) -> None:
+def test_verify_needs_exactly_one_trust_input(basic_policy: Any) -> None:
+    """Neither trust input and both of them are distinct refusals."""
     envelope = json.loads((VECTOR_DIR / "policies" / "basic.sig").read_text(encoding="utf-8"))
-    with pytest.raises(SigningError):
+    with pytest.raises(SigningError, match="keyring|public key|trust"):
         verify_policy(basic_policy, envelope)
-    with pytest.raises(SigningError):
+    with pytest.raises(SigningError, match="both|one of|not both"):
         verify_policy(
             basic_policy,
             envelope,

@@ -362,8 +362,27 @@ class TestBatching:
 
     def test_close_is_idempotent(self, collector: _Collector):
         sink = _sink(collector)
+        assert sink.close() is True
+        assert sink.close() is True
+
+    def test_a_closed_sink_drops_and_says_why(self, collector: _Collector):
+        errors: list[Exception] = []
+        sink = _sink(collector, on_error=errors.append)
         sink.close()
+        sink.send(_receipt())
+        assert sink.dropped == 1
+        assert [str(exc) for exc in errors] == ["OTLP sink is closed; record dropped"]
+
+    def test_a_deferred_sink_can_be_started(self, collector: _Collector):
+        sink = OtlpReceiptSink(
+            collector.endpoint, batch_size=1, flush_interval_s=0.05, start=False
+        )
+        sink.send(_receipt())
+        assert collector.records == []
+        sink.start()
+        assert sink.flush(5.0) is True
         sink.close()
+        assert len(collector.records) == 1
 
 
 class TestRetry:

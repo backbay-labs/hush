@@ -166,12 +166,17 @@ def _declares_rejection(meta: dict[str, Any], names: set[str]) -> bool:
 
 class TestSharedFixtures:
     def test_valid_documents(self):
+        checked = 0
         for subdir in VALID_DIRS:
             for fixture_path in iter_yaml_files(subdir):
                 ok, result = parse(fixture_path.read_text())
                 assert ok, f"{fixture_path}: {result}"
                 validation = validate(result)
                 assert validation.is_valid, f"{fixture_path}: {validation.errors}"
+                checked += 1
+        # A renamed or missing directory yields no files, and a loop over
+        # nothing passes: count, so that shows up as a failure.
+        assert checked > 0, "no valid vectors were found"
 
     def test_invalid_documents(self):
         """Every `invalid/` vector is refused, for the reason its sidecar names.
@@ -211,6 +216,7 @@ class TestSharedFixtures:
         assert checked > 0, "no invalid vectors were found"
 
     def test_merge_fixtures(self):
+        checked = 0
         for subdir in MERGE_DIRS:
             for directory in iter_fixture_dirs(subdir):
                 base_path = directory / "base.yaml"
@@ -222,6 +228,8 @@ class TestSharedFixtures:
                     if not child_path.stem.startswith("child-"):
                         continue
                     self._run_merge_fixture(base, child_path)
+                    checked += 1
+        assert checked > 0, "no merge vectors were found"
 
     def _run_merge_fixture(self, base, child_path: Path) -> None:
         """Merge (or resolve) one `child-*.yaml` and compare with its expectation.
@@ -262,8 +270,10 @@ class TestSharedFixtures:
         ), f"{child_path}: merged output differed from {expected_path.name}"
 
     def test_evaluator_fixtures(self):
+        checked = 0
         for subdir in EVALUATION_DIRS:
             for fixture_path in iter_yaml_files(subdir):
+                checked += 1
                 # YAML 1.2 Core (the HushSpec profile): `on:`/`yes:` stay
                 # strings, so the policy survives the re-dump below.
                 raw = yaml.load(fixture_path.read_text(), Loader=CoreSafeLoader)
@@ -324,7 +334,7 @@ class TestSharedFixtures:
                             )
                         if "receipt" in expect:
                             _assert_receipt_members(expect["receipt"], receipt, label)
-
+        assert checked > 0, "no evaluator vectors were found"
 
 
 def _fixed_receipt(
@@ -514,7 +524,8 @@ class TestMergeFixtureConventions:
         )
 
         assert not expects_rejection(child_path)
-        with pytest.raises(AssertionError):
+        # The mismatching pin, not some other assertion inside the runner.
+        with pytest.raises(AssertionError, match="expected rejection|digest pin"):
             TestSharedFixtures()._run_merge_fixture(base, child_path)
 
     def test_a_vector_marked_reject_that_resolves_is_a_failure(self, tmp_path):
