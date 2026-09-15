@@ -1,0 +1,17 @@
+# core 2.3 and 8 (Level 2): a self-referencing extends chain is a cycle and
+# MUST be refused. The pin is this document's own content hash, computable
+# because the canonical projection excludes `extends`; it is what routes the
+# vector through the resolver, where the cycle is detected before the pin is
+# compared.
+hushspec: "0.2.0"
+name: cycle-self
+extends: "child-self-cycle.yaml#sha256:adec8597cb68ffb7426702bff16d532957e18d1b2134ac49528fcf58aea982b2"
+rules:
+  egress:
+    allow:
+      - "b.example.com"
+    default: block
+  tool_access:
+    allow:
+      - read_file
+    default: block

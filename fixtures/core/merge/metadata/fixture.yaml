@@ -1,0 +1,6 @@
+description: >-
+  Metadata merge behaviour (core spec 2.5, final paragraph, and 4.1): the
+  child's metadata object replaces the base's wholesale when present, and is
+  inherited unchanged when absent. It has its own directory because it needs a
+  base that carries governance metadata, which the shared core/merge base
+  deliberately does not.

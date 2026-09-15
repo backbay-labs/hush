@@ -1,0 +1,13 @@
+# core 4.1 (`replace`): the child document replaces the base outright. The base
+# is loaded only to prove the reference resolves; none of its posture states,
+# budgets or transitions survive.
+hushspec: "0.1.0"
+extends: base
+merge_strategy: replace
+extensions:
+  posture:
+    initial: locked
+    states:
+      locked:
+        capabilities: []
+    transitions: []

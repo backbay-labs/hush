@@ -1,0 +1,51 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "project-leaf",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:aea053ba9f4994f212245c45e996a71f99d0cc6a2ff252dd0cc5d0f4bb2eba5d"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/repo/src/a.txt",
+    "content_hash": "sha256:0fd69effdea9c770f8e2d10bcea7cc11dd3d77cf782b21f1a587c7e4c6afbea0",
+    "content_size": 10
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.team_token",
+  "reason": "content matched secret pattern 'team_token'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "path did not match any forbidden pattern"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.team_token",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'team_token'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

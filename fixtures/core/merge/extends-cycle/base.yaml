@@ -1,0 +1,7 @@
+hushspec: "0.2.0"
+name: cycle-base
+rules:
+  egress:
+    allow:
+      - "a.example.com"
+    default: block

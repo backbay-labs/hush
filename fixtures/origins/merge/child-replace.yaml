@@ -1,0 +1,17 @@
+# core 4.1 (`replace`): the child replaces the base outright. The base's
+# posture extension and both of its origin profiles are discarded, including
+# the `default_behavior` the base set.
+hushspec: "0.1.0"
+extends: base
+merge_strategy: replace
+extensions:
+  origins:
+    default_behavior: minimal_profile
+    profiles:
+      - id: email-external
+        match:
+          provider: email
+          visibility: public
+        egress:
+          allow: []
+          default: block

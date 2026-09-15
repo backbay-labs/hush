@@ -1,0 +1,156 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+hushspec_test: "0.1.0"
+description: "core 3.1 and 6.1: `enabled: false` makes a rule block inert for every one of the twelve blocks -- a present-but-disabled block contributes nothing, exactly as an absent one does. Every action below is denied by the same block when it is enabled (see the per-block vectors); here all twelve are disabled and every action is allowed."
+policy:
+  hushspec: "0.2.0"
+  name: every-rule-block-disabled
+  rules:
+    forbidden_paths:
+      enabled: false
+      patterns:
+        - "**/.ssh/**"
+    path_allowlist:
+      enabled: false
+      read:
+        - "/repo/src/**"
+      write:
+        - "/repo/src/**"
+      patch:
+        - "/repo/src/**"
+    egress:
+      enabled: false
+      allow: []
+      block:
+        - "evil.example.com"
+      default: block
+    secret_patterns:
+      enabled: false
+      patterns:
+        - name: aws_access_key
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+    patch_integrity:
+      enabled: false
+      max_additions: 1
+      max_deletions: 1
+      forbidden_patterns:
+        - "rm[ ]+-rf[ ]+/"
+    shell_commands:
+      enabled: false
+      forbidden_patterns:
+        - "rm[ ]+-rf[ ]+/"
+    tool_access:
+      enabled: false
+      allow: []
+      block:
+        - shell_exec
+      require_confirmation: []
+      default: block
+    computer_use:
+      enabled: false
+      mode: guardrail
+      allowed_actions:
+        - remote.session.connect
+    remote_desktop_channels:
+      enabled: false
+      clipboard: false
+      audio: false
+    input_injection:
+      enabled: false
+      allowed_types:
+        - keyboard_text
+    browser_automation:
+      enabled: false
+      allowed_domains:
+        - "*.example.com"
+      blocked_domains:
+        - "evil.example.com"
+      allowed_verbs:
+        - navigate
+    code_execution:
+      enabled: false
+      language_allowlist:
+        - python
+      module_denylist:
+        - subprocess
+      network_access: false
+cases:
+  - description: "forbidden_paths disabled: a forbidden path is allowed"
+    action:
+      type: file_read
+      target: "/home/me/.ssh/id_rsa"
+    expect:
+      decision: allow
+  - description: "path_allowlist disabled: a path outside the allowlist is allowed"
+    action:
+      type: file_read
+      target: "/etc/hosts"
+    expect:
+      decision: allow
+  - description: "egress disabled: a blocked host is allowed"
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: allow
+  - description: "secret_patterns disabled: a credential in the content is allowed"
+    action:
+      type: file_write
+      target: "/repo/src/config.ts"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: allow
+  - description: "patch_integrity disabled: an oversized patch carrying a forbidden pattern is allowed"
+    action:
+      type: patch_apply
+      target: "/repo/src/main.rs"
+      content: |
+        +rm -rf /
+        +b
+        -c
+    expect:
+      decision: allow
+  - description: "shell_commands disabled: a forbidden command is allowed"
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: allow
+  - description: "tool_access disabled: a blocked tool is allowed"
+    action:
+      type: tool_call
+      target: "shell_exec"
+    expect:
+      decision: allow
+  - description: "computer_use disabled: an action outside the guardrail allowlist is allowed"
+    action:
+      type: computer_use
+      target: "remote.file_transfer"
+    expect:
+      decision: allow
+  - description: "remote_desktop_channels disabled: a disabled channel is allowed"
+    action:
+      type: computer_use
+      target: "remote.clipboard"
+    expect:
+      decision: allow
+  - description: "input_injection disabled: an unlisted injection type is allowed"
+    action:
+      type: input_inject
+      target: "mouse_click"
+    expect:
+      decision: allow
+  - description: "browser_automation disabled: a blocked domain is allowed"
+    action:
+      type: browser_action
+      target: navigate
+      url: "https://evil.example.com/"
+    expect:
+      decision: allow
+  - description: "code_execution disabled: a denied module and a language outside the allowlist are allowed"
+    action:
+      type: code_exec
+      target: javascript
+      content: "import subprocess"
+    expect:
+      decision: allow
