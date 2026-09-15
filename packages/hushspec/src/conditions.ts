@@ -1,8 +1,26 @@
-import type { HushSpec } from './schema.js';
-import type { EvaluationAction, EvaluationResult } from './evaluate.js';
-import { evaluate } from './evaluate.js';
+/**
+ * Conditional rules system for HushSpec (core spec 3.13).
+ *
+ * A `Condition` gates whether a rule block is active. Conditions are a
+ * document field (`when`) on every rule block; the out-of-band map accepted by
+ * `evaluateWithContext` is kept as an override that is ANDed with each block's
+ * own `when`.
+ *
+ * Design principles:
+ * - **Fail-closed toward enforcement**: a missing context field makes the
+ *   condition false (the block goes inert), but a condition the engine cannot
+ *   evaluate at all -- unresolvable time zone, unparsable `current_time`, a
+ *   malformed `HH:MM` that escaped validation, or nesting past the depth cap --
+ *   leaves the block ACTIVE.
+ * - **Deterministic**: same context + condition = same result, always.
+ * - **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
+ */
 
-const MAX_NESTING_DEPTH = 8;
+/** Maximum allowed nesting depth for compound conditions (core spec 3.13). */
+export const MAX_NESTING_DEPTH = 8;
+
+/** Day abbreviations accepted in `time_window.days`. */
+export const DAY_ABBREVIATIONS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 
 export interface TimeWindowCondition {
   start: string;
@@ -46,7 +64,10 @@ function evaluateConditionDepth(
   depth: number,
 ): boolean {
   if (depth > MAX_NESTING_DEPTH) {
-    return false;
+    // Validation rejects this at parse time; an out-of-band condition that
+    // exceeds the depth cannot be evaluated, and an unevaluable condition must
+    // not switch a control off (core spec 3.13), so treat it as held.
+    return true;
   }
 
   if (condition.time_window != null) {
@@ -94,17 +115,23 @@ function checkTimeWindow(
   tw: TimeWindowCondition,
   context: RuntimeContext,
 ): boolean {
+  // Fail closed toward enforcement (core spec 3.13): a window the engine
+  // cannot evaluate -- unresolvable time zone, unparsable current_time, or a
+  // malformed HH:MM that escaped validation -- leaves the block ACTIVE.
   const now = resolveCurrentTime(context, tw.timezone);
   if (now == null) {
-    return false;
+    return true;
   }
 
   const [hour, minute, dayOfWeek] = now;
 
   const startParsed = parseHHMM(tw.start);
+  if (startParsed == null) {
+    return true;
+  }
   const endParsed = parseHHMM(tw.end);
-  if (startParsed == null || endParsed == null) {
-    return false;
+  if (endParsed == null) {
+    return true;
   }
 
   const [startH, startM] = startParsed;
@@ -157,8 +184,7 @@ function parseHHMM(s: string): [number, number] | undefined {
 }
 
 function dayAbbreviation(day: number): string {
-  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  return days[day] ?? 'mon';
+  return DAY_ABBREVIATIONS[day] ?? 'mon';
 }
 
 /** Returns [hour, minute, dayOfWeek] where dayOfWeek is 0=Mon..6=Sun. */
@@ -183,12 +209,30 @@ function resolveCurrentTime(
   }
 
   const tz = timezone ?? 'UTC';
-  const offsetMinutes = parseTimezoneOffsetMinutes(tz);
-  if (offsetMinutes != null) {
-    const adjusted = new Date(date.getTime() + offsetMinutes * 60_000);
+  // Order mirrors Rust: the IANA database (chrono-tz there, Intl here) is
+  // consulted before the fixed-offset table, so `US/Eastern` keeps its DST
+  // rules rather than collapsing to a fixed -05:00.
+  const utcOffset = parseUtcOrNumericOffsetMinutes(tz);
+  if (utcOffset != null) {
+    const adjusted = new Date(date.getTime() + utcOffset * 60_000);
     return utcDateParts(adjusted);
   }
 
+  const intlParts = resolveViaIntl(date, tz);
+  if (intlParts != null) {
+    return intlParts;
+  }
+
+  const aliasOffset = FIXED_OFFSET_ALIASES[tz];
+  if (aliasOffset != null) {
+    const adjusted = new Date(date.getTime() + aliasOffset * 60_000);
+    return utcDateParts(adjusted);
+  }
+
+  return undefined;
+}
+
+function resolveViaIntl(date: Date, tz: string): [number, number, number] | undefined {
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
@@ -205,7 +249,7 @@ function resolveCurrentTime(
       return undefined;
     }
 
-    const dayOfWeek = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].indexOf(weekday);
+    const dayOfWeek = (DAY_ABBREVIATIONS as readonly string[]).indexOf(weekday);
     if (dayOfWeek < 0) {
       return undefined;
     }
@@ -222,9 +266,34 @@ function utcDateParts(date: Date): [number, number, number] {
   return [date.getUTCHours(), date.getUTCMinutes(), dayOfWeek];
 }
 
-function parseTimezoneOffsetMinutes(tz: string): number | undefined {
+/**
+ * Fixed-offset aliases accepted by the reference engine (Rust
+ * `parse_timezone_offset`). Consulted only after the IANA database, so a name
+ * the platform knows (e.g. `EST`, `CET`, `US/Eastern`) keeps its real rules.
+ */
+const FIXED_OFFSET_ALIASES: Record<string, number> = {
+  'US/Eastern': -5 * 60,
+  EST: -5 * 60,
+  'US/Central': -6 * 60,
+  CST: -6 * 60,
+  'US/Mountain': -7 * 60,
+  MST: -7 * 60,
+  'US/Pacific': -8 * 60,
+  PST: -8 * 60,
+  GB: 0,
+  CET: 60,
+  EET: 120,
+  Japan: 9 * 60,
+  JST: 9 * 60,
+  PRC: 8 * 60,
+  IST: 5 * 60 + 30,
+};
+
+const UTC_ALIASES = new Set(['UTC', 'utc', 'Etc/UTC', 'Etc/GMT', 'GMT']);
+
+function parseUtcOrNumericOffsetMinutes(tz: string): number | undefined {
   const normalized = tz.trim();
-  if (['UTC', 'utc', 'Etc/UTC', 'Etc/GMT', 'GMT'].includes(normalized)) {
+  if (UTC_ALIASES.has(normalized)) {
     return 0;
   }
 
@@ -241,6 +310,22 @@ function parseTimezoneOffsetMinutes(tz: string): number | undefined {
 
   const totalMinutes = hours * 60 + minutes;
   return match[1] === '-' ? -totalMinutes : totalMinutes;
+}
+
+/**
+ * Whether `tz` is an identifier this engine can resolve: an IANA zone, a
+ * known fixed-offset alias, or a numeric `+HH:MM` / `-HH:MM` offset.
+ */
+export function timezoneIsKnown(tz: string): boolean {
+  if (parseUtcOrNumericOffsetMinutes(tz) != null) return true;
+  if (Object.prototype.hasOwnProperty.call(FIXED_OFFSET_ALIASES, tz)) return true;
+  try {
+    // Intl throws RangeError on an unknown time zone.
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function checkContextMatch(
@@ -336,41 +421,113 @@ function matchValue(actual: unknown, expected: unknown): boolean {
   return false;
 }
 
-export function evaluateWithContext(
-  spec: HushSpec,
-  action: EvaluationAction,
-  context: RuntimeContext,
-  conditions: Record<string, Condition>,
-): EvaluationResult {
-  const effectiveSpec = applyConditions(spec, context, conditions);
-  return evaluate(effectiveSpec, action);
+/**
+ * Parse-time validation of one condition (core spec 3.13). Unknown keys are
+ * rejected by the document validator; this checks the `HH:MM` fields, the
+ * timezone, the day abbreviations, and the nesting depth. Returns one message
+ * per violation, each prefixed with `path` (for example `rules.egress.when`).
+ */
+export function validateCondition(condition: Condition, path: string): string[] {
+  const errors: string[] = [];
+  validateConditionDepth(condition, path, 0, errors);
+  return errors;
 }
 
-function applyConditions(
-  spec: HushSpec,
-  context: RuntimeContext,
-  conditions: Record<string, Condition>,
-): HushSpec {
-  if (!spec.rules) {
-    return spec;
+function validateConditionDepth(
+  condition: Condition,
+  path: string,
+  depth: number,
+  errors: string[],
+): void {
+  if (depth > MAX_NESTING_DEPTH) {
+    errors.push(
+      `${path}: conditions nest deeper than the maximum of ${MAX_NESTING_DEPTH} levels`,
+    );
+    return;
   }
 
-  const effectiveRules = { ...spec.rules };
-  let changed = false;
-
-  for (const [blockName, condition] of Object.entries(conditions)) {
-    if (!evaluateCondition(condition, context)) {
-      const key = blockName as keyof typeof effectiveRules;
-      if (key in effectiveRules && effectiveRules[key] != null) {
-        (effectiveRules as Record<string, unknown>)[key] = undefined;
-        changed = true;
+  const tw = condition.time_window;
+  if (tw != null && typeof tw === 'object') {
+    for (const field of ['start', 'end'] as const) {
+      const value = tw[field];
+      if (typeof value !== 'string' || parseHHMM(value) == null) {
+        errors.push(
+          `${path}.time_window.${field}: ${debugQuote(value)} is not a valid HH:MM time`,
+        );
+      }
+    }
+    if (tw.timezone != null) {
+      if (typeof tw.timezone !== 'string' || !timezoneIsKnown(tw.timezone)) {
+        errors.push(
+          `${path}.time_window.timezone: ${debugQuote(tw.timezone)} is neither an IANA time zone nor a fixed offset`,
+        );
+      }
+    }
+    if (Array.isArray(tw.days)) {
+      for (const day of tw.days) {
+        const known = typeof day === 'string'
+          && (DAY_ABBREVIATIONS as readonly string[]).includes(day.toLowerCase());
+        if (!known) {
+          errors.push(
+            `${path}.time_window.days: ${debugQuote(day)} is not one of mon, tue, wed, thu, fri, sat, sun`,
+          );
+        }
       }
     }
   }
 
-  if (!changed) {
-    return spec;
+  if (Array.isArray(condition.all_of)) {
+    condition.all_of.forEach((child, index) => {
+      validateConditionDepth(child, `${path}.all_of[${index}]`, depth + 1, errors);
+    });
   }
-
-  return { ...spec, rules: effectiveRules };
+  if (Array.isArray(condition.any_of)) {
+    condition.any_of.forEach((child, index) => {
+      validateConditionDepth(child, `${path}.any_of[${index}]`, depth + 1, errors);
+    });
+  }
+  if (condition.not != null) {
+    validateConditionDepth(condition.not, `${path}.not`, depth + 1, errors);
+  }
 }
+
+function debugQuote(value: unknown): string {
+  return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * Rule blocks that may carry a `when` condition, in core spec Section 5 order.
+ */
+export const CONDITION_RULE_BLOCKS = [
+  'forbidden_paths',
+  'path_allowlist',
+  'egress',
+  'secret_patterns',
+  'patch_integrity',
+  'shell_commands',
+  'tool_access',
+  'computer_use',
+  'remote_desktop_channels',
+  'input_injection',
+  'browser_automation',
+  'code_execution',
+] as const;
+
+/**
+ * Validate every rule block's `when` condition (core spec 3.13, 7.10).
+ * Returns one message per violation, each prefixed with the rule path.
+ */
+export function validateConditions(rules: RulesWithConditions): string[] {
+  const errors: string[] = [];
+  for (const name of CONDITION_RULE_BLOCKS) {
+    const when = rules[name]?.when;
+    if (when != null) {
+      errors.push(...validateCondition(when, `rules.${name}.when`));
+    }
+  }
+  return errors;
+}
+
+type RulesWithConditions = {
+  [K in (typeof CONDITION_RULE_BLOCKS)[number]]?: { when?: Condition };
+};

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { HUSHSPEC_VERSION } from '../src/version.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -82,7 +83,7 @@ describe('panic mode', () => {
 
   it('panicPolicy returns a valid HushSpec', () => {
     const spec = panicPolicy();
-    expect(spec.hushspec).toBe('0.1.0');
+    expect(spec.hushspec).toBe(HUSHSPEC_VERSION);
     expect(spec.name).toBe('__hushspec_panic__');
     expect(spec.rules).toBeDefined();
     expect(spec.rules!.forbidden_paths).toBeDefined();

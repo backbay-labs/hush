@@ -19,7 +19,6 @@ hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 `;
 
@@ -252,7 +251,6 @@ hushspec: "0.1.0"
 name: prompt-injection-detection
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -267,7 +265,6 @@ hushspec: "0.1.0"
 name: jailbreak-detection
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -282,7 +279,6 @@ hushspec: "0.1.0"
 name: both-detectors
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -301,7 +297,6 @@ hushspec: "0.1.0"
 name: threat-intel-only
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -416,7 +411,6 @@ hushspec: "0.1.0"
 name: jailbreak-warn-band
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -523,7 +517,6 @@ hushspec: "0.1.0"
 name: injection-disabled
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -548,7 +541,6 @@ hushspec: "0.1.0"
 name: injection-truncated
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:

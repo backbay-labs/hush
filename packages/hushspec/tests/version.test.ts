@@ -1,0 +1,50 @@
+import { describe, it, expect } from 'vitest';
+import {
+  HUSHSPEC_SUPPORTED_MINORS,
+  HUSHSPEC_VERSION,
+  isSupported,
+  supportedMinor,
+} from '../src/version.js';
+import { parse } from '../src/parse.js';
+import { validate } from '../src/validate.js';
+
+// D14 (core spec 2.2): an engine that supports minor version X.Y accepts every
+// X.Y.Z document.
+
+describe('version acceptance (D14)', () => {
+  it('writes 0.2.0 and supports the 0.1 and 0.2 minors', () => {
+    expect(HUSHSPEC_VERSION).toBe('0.2.0');
+    expect([...HUSHSPEC_SUPPORTED_MINORS]).toEqual(['0.1', '0.2']);
+  });
+
+  it('accepts every patch level of a supported minor', () => {
+    for (const version of ['0.1.0', '0.1.1', '0.1.99', '0.2.0', '0.2.7']) {
+      expect(isSupported(version), version).toBe(true);
+    }
+    expect(supportedMinor('0.1.99')).toBe('0.1');
+    expect(supportedMinor('0.2.7')).toBe('0.2');
+  });
+
+  it('rejects unsupported or malformed versions', () => {
+    for (const version of ['0.3.0', '1.0.0', '0.1', '0.1.0.0', '0.1.x', '+0.1.0', '', ' 0.1.0']) {
+      expect(isSupported(version), version).toBe(false);
+      expect(supportedMinor(version), version).toBeUndefined();
+    }
+  });
+
+  it('validates a 0.1.1 document', () => {
+    const result = parse('hushspec: "0.1.1"\nname: patch-version\nrules:\n  egress:\n    default: block\n');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(validate(result.value).valid).toBe(true);
+  });
+
+  it('reports the supported minors when rejecting a version', () => {
+    const result = validate({ hushspec: '0.9.0' });
+    expect(result.valid).toBe(false);
+    expect(result.errors[0].code).toBe('unsupported_version');
+    expect(result.errors[0].message).toBe(
+      'unsupported hushspec version: 0.9.0 (this engine accepts minor versions 0.1, 0.2)',
+    );
+  });
+});

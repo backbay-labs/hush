@@ -5,7 +5,7 @@ import type {
   OriginVisibilityValue,
   TransitionTriggerValue,
 } from './generated/contract.js';
-import type { EgressRule, ToolAccessRule } from './rules.js';
+import type { DefaultAction } from './rules.js';
 
 export interface Extensions {
   posture?: PostureExtension;
@@ -45,12 +45,34 @@ export interface OriginProfile {
   id: string;
   match?: OriginMatch;
   posture?: string;
-  tool_access?: ToolAccessRule;
-  egress?: EgressRule;
+  tool_access?: OriginToolAccessOverlay;
+  egress?: OriginEgressOverlay;
   data?: OriginDataPolicy;
   budgets?: OriginBudgets;
   bridge?: BridgePolicy;
   explanation?: string;
+}
+
+/**
+ * Tri-state tool-access overlay for an origin profile (origins spec 4, D12).
+ *
+ * An overlay is not a rule block: it has no `enabled` and no `when`, and
+ * `default` / `max_args_size` are genuinely absent when omitted rather than
+ * materialized to the base rule's default.
+ */
+export interface OriginToolAccessOverlay {
+  allow?: string[];
+  block?: string[];
+  require_confirmation?: string[];
+  default?: DefaultAction;
+  max_args_size?: number;
+}
+
+/** Tri-state egress overlay for an origin profile (origins spec 4, D12). */
+export interface OriginEgressOverlay {
+  allow?: string[];
+  block?: string[];
+  default?: DefaultAction;
 }
 
 export interface OriginMatch {
