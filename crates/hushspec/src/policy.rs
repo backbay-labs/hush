@@ -195,6 +195,15 @@ impl Policy {
         self
     }
 
+    /// The kill switch this policy will compile with: the process-wide latch
+    /// unless [`Policy::with_panic_state`] replaced it. A
+    /// [`HushGuard`](crate::HushGuard) adopts it so arming the guard and
+    /// arming the policy are the same act.
+    #[must_use]
+    pub fn panic_state(&self) -> &PanicState {
+        &self.panic
+    }
+
     /// Resolve with `options`. Without this call, resolution runs with
     /// [`ResolveOptions::default`]: builtins and files, no verification.
     #[must_use]

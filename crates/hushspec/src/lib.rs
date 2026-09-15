@@ -45,6 +45,7 @@ mod generated_canonical_schemas;
 mod generated_contract;
 mod generated_models;
 pub mod governance;
+pub mod guard;
 pub mod log;
 pub mod merge;
 pub mod observer;
@@ -87,6 +88,10 @@ pub use evaluate::{
 };
 pub use extensions::Extensions;
 pub use governance::{ControlMapping, GovernanceMetadata, GovernanceWarning, validate_governance};
+pub use guard::{
+    Denied, EnforcementConfig, GuardDecision, GuardError, HushGuard, HushGuardBuilder, WarnHandler,
+    matches_rule_path_prefix,
+};
 pub use log::{
     ChainedFileSink, EntryType, GENESIS_HASH, LOG_VERSION, LogEntry, LogError, LogSignature,
     LogStarted, LogVerifyOptions, LogVerifyReport, Payload, PolicyEvent, PolicyEventKind, SdkInfo,
