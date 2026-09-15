@@ -36,9 +36,15 @@ pub const GOVERNANCE_METADATA_KEYS: &[&str] = &[
     "policy_version",
     "effective_date",
     "expiry_date",
+    "owner",
+    "reviewers",
+    "next_review_date",
+    "changelog",
+    "supersedes",
     "controls",
 ];
 pub const CONTROL_MAPPING_KEYS: &[&str] = &["framework", "control_id", "rule_paths", "notes"];
+pub const CHANGELOG_ENTRY_KEYS: &[&str] = &["version", "date", "summary", "author"];
 pub const FORBIDDEN_PATH_KEYS: &[&str] = &["when", "enabled", "patterns", "exceptions"];
 pub const PATH_ALLOWLIST_KEYS: &[&str] = &["when", "enabled", "read", "write", "patch"];
 pub const EGRESS_KEYS: &[&str] = &["when", "enabled", "allow", "block", "default"];

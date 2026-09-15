@@ -1049,6 +1049,31 @@ class ControlMapping:
         return data
 
 @dataclass
+class ChangelogEntry:
+    version: str
+    date: str
+    summary: str
+    author: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ChangelogEntry:
+        return cls(
+            version=data['version'],
+            date=data['date'],
+            summary=data['summary'],
+            author=(data.get('author') if data.get('author') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['version'] = self.version
+        data['date'] = self.date
+        data['summary'] = self.summary
+        if self.author is not None:
+            data['author'] = self.author
+        return data
+
+@dataclass
 class GovernanceMetadata:
     author: str | None = None
     approved_by: str | None = None
@@ -1059,6 +1084,11 @@ class GovernanceMetadata:
     policy_version: int | None = None
     effective_date: str | None = None
     expiry_date: str | None = None
+    owner: str | None = None
+    reviewers: list[str] = field(default_factory=list)
+    next_review_date: str | None = None
+    changelog: list[ChangelogEntry] = field(default_factory=list)
+    supersedes: str | None = None
     controls: list[ControlMapping] = field(default_factory=list)
 
     @classmethod
@@ -1073,6 +1103,11 @@ class GovernanceMetadata:
             policy_version=(data.get('policy_version') if data.get('policy_version') is not None else None),
             effective_date=(data.get('effective_date') if data.get('effective_date') is not None else None),
             expiry_date=(data.get('expiry_date') if data.get('expiry_date') is not None else None),
+            owner=(data.get('owner') if data.get('owner') is not None else None),
+            reviewers=[item for item in data.get('reviewers') or []],
+            next_review_date=(data.get('next_review_date') if data.get('next_review_date') is not None else None),
+            changelog=[ChangelogEntry.from_dict(item) for item in data.get('changelog') or []],
+            supersedes=(data.get('supersedes') if data.get('supersedes') is not None else None),
             controls=[ControlMapping.from_dict(item) for item in data.get('controls') or []],
         )
 
@@ -1096,6 +1131,16 @@ class GovernanceMetadata:
             data['effective_date'] = self.effective_date
         if self.expiry_date is not None:
             data['expiry_date'] = self.expiry_date
+        if self.owner is not None:
+            data['owner'] = self.owner
+        if self.reviewers:
+            data['reviewers'] = [item for item in self.reviewers]
+        if self.next_review_date is not None:
+            data['next_review_date'] = self.next_review_date
+        if self.changelog:
+            data['changelog'] = [item.to_dict() for item in self.changelog]
+        if self.supersedes is not None:
+            data['supersedes'] = self.supersedes
         if self.controls:
             data['controls'] = [item.to_dict() for item in self.controls]
         return data

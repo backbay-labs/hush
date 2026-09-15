@@ -558,6 +558,16 @@ pub struct ControlMapping {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ChangelogEntry {
+    pub version: String,
+    pub date: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GovernanceMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
@@ -577,6 +587,16 @@ pub struct GovernanceMetadata {
     pub effective_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_review_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changelog: Vec<ChangelogEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supersedes: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub controls: Vec<ControlMapping>,
 }

@@ -9,11 +9,14 @@ export const RULE_KEYS_SET: ReadonlySet<string> = new Set(RULE_KEYS);
 export const EXTENSION_KEYS = ['posture', 'origins', 'detection'] as const;
 export const EXTENSION_KEYS_SET: ReadonlySet<string> = new Set(EXTENSION_KEYS);
 
-export const GOVERNANCE_METADATA_KEYS = ['author', 'approved_by', 'approval_date', 'classification', 'change_ticket', 'lifecycle_state', 'policy_version', 'effective_date', 'expiry_date', 'controls'] as const;
+export const GOVERNANCE_METADATA_KEYS = ['author', 'approved_by', 'approval_date', 'classification', 'change_ticket', 'lifecycle_state', 'policy_version', 'effective_date', 'expiry_date', 'owner', 'reviewers', 'next_review_date', 'changelog', 'supersedes', 'controls'] as const;
 export const GOVERNANCE_METADATA_KEYS_SET: ReadonlySet<string> = new Set(GOVERNANCE_METADATA_KEYS);
 
 export const CONTROL_MAPPING_KEYS = ['framework', 'control_id', 'rule_paths', 'notes'] as const;
 export const CONTROL_MAPPING_KEYS_SET: ReadonlySet<string> = new Set(CONTROL_MAPPING_KEYS);
+
+export const CHANGELOG_ENTRY_KEYS = ['version', 'date', 'summary', 'author'] as const;
+export const CHANGELOG_ENTRY_KEYS_SET: ReadonlySet<string> = new Set(CHANGELOG_ENTRY_KEYS);
 
 export const FORBIDDEN_PATH_KEYS = ['when', 'enabled', 'patterns', 'exceptions'] as const;
 export const FORBIDDEN_PATH_KEYS_SET: ReadonlySet<string> = new Set(FORBIDDEN_PATH_KEYS);
