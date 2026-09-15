@@ -1,0 +1,11 @@
+description: >-
+  Circular inheritance (core spec 2.3 and 8, Level 2): a document whose
+  extends chain reaches a document already on the chain MUST be rejected, not
+  resolved to a fixed point and not followed until the depth cap. The vector
+  pins itself by its own content hash, which is what sends it through the
+  resolver: the projection the hash covers excludes `extends`, so the pin is
+  computable even for a self-reference. The cycle is detected before the pin
+  is compared, so the refusal is `cycle` rather than `digest_mismatch`.
+  A refusal directory of its own, because the two portable rejection markings
+  are directory-wide.
+reject: true

@@ -1,0 +1,9 @@
+hushspec: "0.1.0"
+merge_strategy: replace
+extensions:
+  posture:
+    initial: locked
+    states:
+      locked:
+        capabilities: []
+    transitions: []

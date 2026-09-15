@@ -88,6 +88,51 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - L007's twelve-block list and L020's `when` walk are both checked against the published
   core schema, so a thirteenth rule block cannot be added without both noticing.
 - Exit `2` now also covers `--out` combined with `--format text`.
+### Added (RFC 09 Wave 5, conformance program: P4-01, P4-02, P4-03)
+
+- **Conformance levels 4 and 5** are normative in `spec/hushspec-core.md` section 8, closing the
+  forward references the receipt and signing specifications already made. **Level 4 (Auditor)**:
+  receipt format 0.2, a canonical `policy.content_hash` over the resolved document, a `rule_trace`
+  recorded rather than reconstructed, the committed receipt for every evaluation case reproduced
+  after RFC 8785 canonicalization, and the canonical-form and resolution vectors. **Level 5
+  (Attested)**: a conforming signature verifier, verification on load recorded in
+  `receipt.policy.signature`, a hash-linked log rejected at the line its file name names, receipt
+  signing, and bundle verification. Section 8 also states that a claim is made against a corpus
+  pinned by digest, and that `not_attempted` is never a pass.
+- **`fixtures/MANIFEST.json`**, generated and checked by
+  `scripts/generate_fixture_manifest.py --check` in CI: every file under `fixtures/` except
+  `staged/`, with its SHA-256, category, module, and the level at which it becomes required. A
+  conformance claim cites the corpus by this file's digest.
+- **Expected error codes on every `invalid/` vector.** `spec/registries/error-codes.yaml` registers
+  the codes the reference validator emits (`E000`-`E005`, `E010`, `E011`), validated by
+  `schemas/hushspec-error-codes.v0.schema.json`, whose `$defs/ExpectedError` is the shape of the new
+  `fixtures/<module>/invalid/<name>.expect.yaml` sidecars. The Rust testkit asserts the code and any
+  `message_contains` substring. The TypeScript, Python and Go runners still require only rejection;
+  that gap is documented in `docs/src/reference/conformance.md` and closes with P6-03.
+- **`schemas/hushspec-merge-vector.v0.schema.json`** writes down the merge vector directory
+  convention (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, the digest-pin path through the
+  resolver, and the two refusal markings all four runners honour), validated against every merge
+  directory in the corpus by a testkit test.
+- **`schemas/hushspec-conformance-report.v0.schema.json`** and
+  `hushspec-testkit --fixtures fixtures --report report.json`, which runs the evidence-chain vectors
+  as well as the document corpus, computes the highest fully passing level, validates the report
+  against its own schema, and writes it.
+- **`hushspec-testkit bundle`** packages `spec/`, `schemas/` and `fixtures/` (minus `staged/`) with
+  a README on running them. Reproducible byte for byte; `release.yml` builds it, checks
+  reproducibility with a second build, and adds it to the release assets and the attestation
+  `subject-path`.
+- **`docs/src/reference/conformance-statement.md`**: the template a third party fills in to publish
+  a conformance claim, with the procedure for producing the evidence and the rules for an honest
+  statement.
+- **Vectors for eleven previously unvectored requirements**: `enabled: false` on all twelve rule
+  blocks, `tool_access.max_args_size` at and over the limit, deny-over-warn precedence with both
+  outcomes real at once, all three secret severities, the inert `threat_intel` detector, an extends
+  cycle, a three-hop chain (merge and evaluation), the missing merge strategy in every module
+  (`merge` for core, `replace` for the three extensions), and `metadata` merge behaviour. The
+  coverage table in `docs/src/reference/conformance.md` now has no empty cells.
+- **`hushspec-testkit` is publishable**: crates.io metadata, a rewritten README, a publish step in
+  `publish.yml` after `hushspec`, and `scripts/generate_testkit_schemas.py` embedding the schemas
+  the runner validates against, without which `cargo package` cannot reach them.
 
 ### Added (RFC 09 Wave 4, Rust)
 

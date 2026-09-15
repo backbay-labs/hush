@@ -688,7 +688,11 @@ Test vectors: `fixtures/core/invalid/`.
 
 ## 8. Conformance Levels
 
-Implementations of HushSpec declare conformance at one of four levels. Each level subsumes all requirements of the levels below it.
+Implementations of HushSpec declare conformance at one of six levels. Each level subsumes all requirements of the levels below it: an implementation claiming Level N MUST satisfy every requirement of Levels 0 through N.
+
+A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v0.schema.json`; a level reported as `not_attempted` is not a pass.
+
+Vectors under `fixtures/staged/` are not part of any level until they are promoted (Section 1.1).
 
 ### Level 0: Parser
 
@@ -703,6 +707,7 @@ A Level 1 implementation additionally:
 - Validates all field types and constraints as specified in Section 7.
 - Rejects documents with unknown fields at any nesting level.
 - Validates enum values, uniqueness constraints, numeric constraints, the regex profile, and conditions.
+- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v0.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
 
 ### Level 2: Merger
 
@@ -717,7 +722,34 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document.
 - Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Sections 3, 5, and 6, including the normalization and matching algorithms of Section 3.14.
 - Implements aggregation and precedence as defined in Section 6.1 and denies unknown action types per Section 5.
-- Passes the HushSpec conformance test vectors under `fixtures/` in the reference repository.
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v0.schema.json`.
+
+### Level 4: Auditor
+
+Level 3 says an engine reaches the right decision. Level 4 says it can prove which document it reached it under, and why, to someone who was not there.
+
+A Level 4 implementation additionally:
+- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v0.schema.json`, per the Receipt specification Section 2.
+- Computes `policy.content_hash` as the canonical content hash of the **resolved** document, per the Canonical Form specification. Passes every vector under `fixtures/core/hash/`: for each, the canonical text byte for byte and the resulting digest.
+- **Records** `rule_trace` during evaluation rather than reconstructing it afterwards, satisfying Receipt specification Section 4.3. Every applicable rule block MUST appear in evaluation order, with the closed `rule_block` identifiers of the receipt schema.
+- Produces, for every case of every evaluation vector, a receipt byte-identical after RFC 8785 canonicalization to the committed vector under `fixtures/receipts/expected/<module>/<fixture stem>/<case index>.json`, under the fixed inputs that directory's README states.
+- Accepts every vector under `fixtures/receipts/valid/` and rejects every vector under `fixtures/receipts/invalid/`.
+- Resolves `extends` with chain provenance: passes every vector under `fixtures/core/resolve/`, producing the expected resolved `content_hash` and the expected chain of `{source, content_hash}` links, or the expected rejection reason. This includes `#sha256:` digest pinning (Section 2.3).
+
+A Level 4 engine's output is audit evidence: given a receipt and the policy it names, a third party can recompute the hash, replay the trace, and get the same answer.
+
+### Level 5: Attested
+
+Level 4 evidence is only as trustworthy as the document it was produced under. Level 5 adds provenance: which policy was in force, who signed it, and whether the record has been tampered with since.
+
+A Level 5 implementation additionally:
+- Is a conforming **verifier** under the Signing specification Section 2: for every case in `fixtures/signing/vectors.yaml` it returns `valid`, or invalid with the exact reason code of Signing specification Section 6.4.
+- Performs **verification on load** (Signing specification Section 6.5): every hop of an `extends` chain is verified against the trusted keyring or its digest pin, the load fails closed when a signature is required and absent or invalid, and the outcome is recorded in every receipt's `policy.signature`.
+- Verifies a hash-linked log: passes every vector under `fixtures/log/valid/`, including the rotated pair as one chain, and rejects every vector under `fixtures/log/invalid/` **at the line the file name names**. Detecting that a log is broken is not enough; an implementation MUST identify where.
+- Signs and verifies receipts: passes every vector under `fixtures/receipts/signed/valid/` and rejects every vector under `fixtures/receipts/signed/invalid/`.
+- Verifies policy bundles: for every case in `fixtures/bundle/vectors.yaml` it returns `valid` or the exact reason code of the Bundle specification Section 5.4.
+
+An implementation MAY conform at Level 5 for verification only. Producing signatures, logs and bundles is described by the same specifications, but a verifier is what a conformance claim at this level asserts, because verification is what a relying party depends on.
 
 ---
 

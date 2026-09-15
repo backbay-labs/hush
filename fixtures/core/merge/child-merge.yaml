@@ -1,0 +1,13 @@
+# core 4.1 (`merge`): a shallow merge at the `rules` level. The child's
+# `rules.egress` replaces the base's entirely -- the base's `allow` list is not
+# retained, because fields inside a rule block are never merged individually --
+# while `rules.forbidden_paths`, which the child does not mention, is preserved.
+hushspec: "0.1.0"
+name: child-merge
+extends: base
+merge_strategy: merge
+rules:
+  egress:
+    block:
+      - "z.com"
+    default: block

@@ -288,10 +288,33 @@ fn schema_list_json_is_machine_readable() {
 
     let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let entries = parsed.as_array().expect("list should be a JSON array");
-    assert_eq!(entries.len(), 13);
-    assert!(entries.iter().any(|e| e["name"] == "core"));
-    assert!(entries.iter().any(|e| e["name"] == "hash-vector"));
-    assert!(entries.iter().any(|e| e["name"] == "framework-registry"));
+    // Counted from `schemas/` rather than hardcoded: the published set grows,
+    // and a stale literal here would fail every PR that adds a schema instead
+    // of catching the thing this test is for -- a schema on disk that never
+    // made it into the embedded module.
+    let published = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas"))
+        .expect("schemas/ is readable")
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .count();
+    assert_eq!(
+        entries.len(),
+        published,
+        "h2h schema --list is missing a schema"
+    );
+    for expected in [
+        "core",
+        "hash-vector",
+        "framework-registry",
+        "error-codes",
+        "merge-vector",
+        "conformance-report",
+    ] {
+        assert!(
+            entries.iter().any(|e| e["name"] == expected),
+            "{expected} is missing from h2h schema --list"
+        );
+    }
 }
 
 #[test]

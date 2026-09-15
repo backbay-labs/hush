@@ -6,13 +6,16 @@
 /// Short schema names accepted by `h2h schema`, in canonical order.
 pub const SCHEMA_NAMES: &[&str] = &[
     "bundle",
+    "conformance-report",
     "core",
     "detection",
+    "error-codes",
     "evaluator-test",
     "framework-registry",
     "hash-vector",
     "keyring",
     "log-entry",
+    "merge-vector",
     "origins",
     "posture",
     "receipt",
@@ -23,8 +26,13 @@ pub const SCHEMA_NAMES: &[&str] = &[
 /// Published file name for each short schema name.
 pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("bundle", "hushspec-bundle.v0.schema.json"),
+    (
+        "conformance-report",
+        "hushspec-conformance-report.v0.schema.json",
+    ),
     ("core", "hushspec-core.v0.schema.json"),
     ("detection", "hushspec-detection.v0.schema.json"),
+    ("error-codes", "hushspec-error-codes.v0.schema.json"),
     ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
     (
         "framework-registry",
@@ -33,6 +41,7 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("hash-vector", "hushspec-hash-vector.v0.schema.json"),
     ("keyring", "hushspec-keyring.v0.schema.json"),
     ("log-entry", "hushspec-log-entry.v0.schema.json"),
+    ("merge-vector", "hushspec-merge-vector.v0.schema.json"),
     ("origins", "hushspec-origins.v0.schema.json"),
     ("posture", "hushspec-posture.v0.schema.json"),
     ("receipt", "hushspec-receipt.v0.schema.json"),
@@ -303,6 +312,157 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "string",
           "minLength": 1,
           "description": "A signing spec 6.4 reason code, or one of the load-time conditions missing_signature, no_keyring, signing_unavailable."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "conformance-report",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v0.schema.json",
+  "title": "HushSpec Conformance Report v0",
+  "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
+  "type": "object",
+  "required": [
+    "implementation",
+    "fixtures_version",
+    "manifest_sha256",
+    "levels",
+    "results",
+    "generated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "implementation": {
+      "$ref": "#/$defs/Implementation",
+      "description": "The implementation under test."
+    },
+    "fixtures_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "The specification version the corpus tracks, copied from fixtures/MANIFEST.json."
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 of the fixtures/MANIFEST.json bytes the run used. This is what makes a report citable: it pins the exact corpus, not just its version."
+    },
+    "levels": {
+      "type": "object",
+      "required": ["0", "1", "2", "3", "4", "5"],
+      "additionalProperties": false,
+      "description": "One outcome per conformance level. Levels subsume, so a report whose highest passing level is N MUST report \"pass\" for every level below N.",
+      "properties": {
+        "0": { "$ref": "#/$defs/LevelResult" },
+        "1": { "$ref": "#/$defs/LevelResult" },
+        "2": { "$ref": "#/$defs/LevelResult" },
+        "3": { "$ref": "#/$defs/LevelResult" },
+        "4": { "$ref": "#/$defs/LevelResult" },
+        "5": { "$ref": "#/$defs/LevelResult" }
+      }
+    },
+    "highest_level": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 5,
+      "description": "The highest level that passed with every level below it also passing; null when even Level 0 did not pass. Derived from `levels`, and repeated here so a consumer need not re-derive it."
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VectorResult" },
+      "description": "Every vector the run attempted, in corpus order."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "When the report was produced, RFC 3339 UTC with second precision."
+    }
+  },
+  "$defs": {
+    "Implementation": {
+      "type": "object",
+      "required": ["name", "version", "language"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Product or library name, as it is distributed."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of the implementation under test."
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Implementation language (\"rust\", \"typescript\", \"python\", \"go\", ...). Free text: the corpus is not limited to the four reference SDKs."
+        }
+      }
+    },
+    "Status": {
+      "enum": ["pass", "fail", "not_attempted"],
+      "description": "pass: every vector the level requires was run and passed. fail: at least one required vector ran and did not pass. not_attempted: the runner did not exercise this level -- never a synonym for pass."
+    },
+    "LevelResult": {
+      "type": "object",
+      "required": ["status", "passed", "failed", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/Status" },
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that passed."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that failed."
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level the runner declined to attempt. A level with any skipped vector MUST NOT report \"pass\"."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the level is not \"pass\", when the counts alone would not say (a missing optional feature, a deliberately unsupported module)."
+        }
+      }
+    },
+    "VectorResult": {
+      "type": "object",
+      "required": ["path", "category", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-relative path of the vector, POSIX separators, matching a fixtures/MANIFEST.json entry. A vector whose unit is a case inside a file appends \"#<index>\"."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The vector's manifest category (valid, invalid, merge, evaluation, canonical, resolve, receipt, receipt-expected, receipt-signed, log, signing, bundle)."
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "The conformance level the vector belongs to."
+        },
+        "status": { "$ref": "#/$defs/Status" },
+        "message": {
+          "type": "string",
+          "description": "Diagnostic for a failure, or a short note for a pass."
         }
       }
     }
@@ -1222,6 +1382,94 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
 "##,
     ),
     (
+        "error-codes",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v0.schema.json",
+  "title": "HushSpec Error Code Registry v0",
+  "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
+  "type": "object",
+  "required": ["registry_version", "codes"],
+  "additionalProperties": false,
+  "properties": {
+    "registry_version": {
+      "type": "string",
+      "pattern": "^0\\.\\d+\\.\\d+$",
+      "description": "Registry format version."
+    },
+    "codes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/ErrorCode" },
+      "description": "Registered error codes, ordered by code."
+    }
+  },
+  "$defs": {
+    "Code": {
+      "type": "string",
+      "pattern": "^E[0-9]{3}$",
+      "description": "Error code identifier: the letter E followed by three digits. Once registered, a code's meaning never changes and the code is never reused for a different condition."
+    },
+    "ErrorCode": {
+      "type": "object",
+      "required": ["code", "summary", "description", "phase"],
+      "additionalProperties": false,
+      "description": "One registered error code.",
+      "properties": {
+        "code": { "$ref": "#/$defs/Code" },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "One-line description, suitable for a table."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the code means and which specification requirement it enforces."
+        },
+        "phase": {
+          "enum": ["io", "parse", "validate", "resolve"],
+          "description": "Where in load -> parse -> validate -> resolve the refusal happens. A code from an earlier phase pre-empts later ones: a document that fails to parse is never validated."
+        },
+        "emitted_by": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Reference-implementation commands that report this code today. Informative."
+        },
+        "superseded_by": {
+          "$ref": "#/$defs/Code",
+          "description": "Set when a code is retired: the code that replaces it. A retired code is never reused."
+        }
+      }
+    },
+    "ExpectedError": {
+      "type": "object",
+      "required": ["reject", "code"],
+      "additionalProperties": false,
+      "description": "A fixtures/<module>/invalid/<name>.expect.yaml sidecar: the outcome the vector beside it MUST produce. Level 1 requires the rejection; naming the code is required of implementations that emit registry codes (core spec Section 8, Level 1).",
+      "properties": {
+        "reject": {
+          "const": true,
+          "description": "Always true. The sidecar exists only to describe a refusal; an accepted document has no sidecar."
+        },
+        "code": {
+          "$ref": "#/$defs/Code",
+          "description": "The registered code the refusal carries."
+        },
+        "message_contains": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional substring the diagnostic must contain, for vectors where the code alone would not distinguish the requirement being tested. Compared literally and case-sensitively."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
         "evaluator-test",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1826,6 +2074,104 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             },
             "reason": {
               "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "merge-vector",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-merge-vector.v0.schema.json",
+  "title": "HushSpec Merge Vector v0",
+  "description": "The shape of a merge vector directory under fixtures/ (core spec Section 4, Merge Semantics; Section 8 Level 2). Merge vectors are a directory convention rather than a single file, so this schema describes the *descriptor* a conformance runner builds for one directory -- which is what the four SDK runners already reconstruct from the filenames -- and, under $defs/FixtureManifest, the optional fixture.yaml that sits in the directory.\n\nDiscovery. A merge vector directory is any directory under fixtures/ that holds a base.yaml beside at least one child-<name>.yaml. Runners walk fixtures/<module>/merge/ and its subdirectories; a vector that needs its own base -- a digest pin names one exact document, so a pin-match and a pin-mismatch case cannot share one -- gets a subdirectory instead of colliding with the shared base.\n\nFiles. base.yaml is the parent document. child-<name>.yaml is the overlay; its merge_strategy selects the strategy under test. expected-<name>.yaml is the document the merge MUST produce, matched to its child by replacing the leading 'child-' with 'expected-'. Any other *.yaml in the directory (an intermediate hop of a multi-hop chain, say) is inert: runners only iterate the child-*.yaml files.\n\nComposition. A child whose extends carries a '#sha256:' pin is resolved (core Section 2.3) with a loader scoped to the vector directory, which also accepts the bare references 'base' and 'base.yaml'; the pin is then actually checked. Every other child is composed with a direct merge(base, child), which is what the vectors are testing.\n\nRefusal. A vector that must be refused rather than merged carries no expected-<name>.yaml and is marked instead. Only two markings are honoured by all four SDK runners, so only these two are normative: an 'expect-reject' file in the directory, or 'reject: true' in the directory's fixture.yaml. Both are directory-wide; a refusal case therefore lives in its own subdirectory with its own base.yaml. The per-child spellings some runners additionally accept (a '<stem>.expect-reject' marker, a 'reject' name list, per-child entries under 'cases') are tolerated aliases, not portable.",
+  "type": "object",
+  "required": ["directory", "base", "children"],
+  "additionalProperties": false,
+  "properties": {
+    "directory": {
+      "type": "string",
+      "pattern": "^fixtures/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "description": "Repository-relative path of the vector directory, POSIX separators."
+    },
+    "base": {
+      "const": "base.yaml",
+      "description": "The parent document. Always named base.yaml: discovery in all four runners keys on that exact name."
+    },
+    "children": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/Child" },
+      "description": "Every child-<name>.yaml in the directory, sorted by file name."
+    },
+    "manifest": {
+      "$ref": "#/$defs/FixtureManifest",
+      "description": "The parsed fixture.yaml, when the directory has one."
+    },
+    "reject_marker": {
+      "type": "string",
+      "enum": ["expect-reject", "fixture.yaml"],
+      "description": "How the directory declares that its vectors are refusals. Present only for a refusal directory; absent for a merging one."
+    }
+  },
+  "$defs": {
+    "Child": {
+      "type": "object",
+      "required": ["file", "expected", "pinned"],
+      "additionalProperties": false,
+      "description": "One overlay document and what the runner must do with it.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^child-[A-Za-z0-9._-]+\\.ya?ml$",
+          "description": "File name of the overlay, which MUST start with 'child-'."
+        },
+        "expected": {
+          "type": ["string", "null"],
+          "pattern": "^expected-[A-Za-z0-9._-]+\\.ya?ml$",
+          "description": "File name of the expected merged document: the child's name with 'child-' replaced by 'expected-'. Null exactly when the directory is marked as a refusal, since a refused vector produces no document to compare."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the child's extends carries a '#sha256:' digest pin, which sends the vector through the resolver instead of a direct merge."
+        },
+        "merge_strategy": {
+          "enum": ["deep_merge", "merge", "replace"],
+          "description": "The strategy the child declares (core Section 4). Absent when the child relies on the default, deep_merge."
+        }
+      }
+    },
+    "FixtureManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "fixture.yaml: optional per-directory metadata. Its only portable key is the directory-wide 'reject'. 'description' is informative and ignored by runners.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the directory's vectors exercise, and the specification section they come from."
+        },
+        "reject": {
+          "const": true,
+          "description": "Every child in this directory MUST be refused rather than merged. Only the literal true is portable across the four runners; a list of child names is an alias one runner accepts and the others ignore, so it MUST NOT be used."
+        },
+        "cases": {
+          "type": "object",
+          "description": "Per-child overrides. Honoured by the Python and Go runners only, so a directory that relies on this is not portable; kept in the schema because the corpus may still carry one.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reject": {
+                "type": "boolean",
+                "description": "Whether this one child is refused."
+              }
             }
           }
         }

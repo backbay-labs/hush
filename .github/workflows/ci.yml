@@ -51,6 +51,10 @@ jobs:
         run: python3 scripts/generate_canonical_schemas.py --check
       - name: Check generated CLI frameworks
         run: python3 scripts/generate_cli_frameworks.py --check
+      - name: Check generated testkit schemas
+        run: python3 scripts/generate_testkit_schemas.py --check
+      - name: Check the fixture manifest
+        run: python3 scripts/generate_fixture_manifest.py --check
       # Re-derives the three hand-built bundle vectors from the committed
       # valid one, signing with OpenSSL: a standing cross-check of the Rust
       # signer as well as a staleness guard.

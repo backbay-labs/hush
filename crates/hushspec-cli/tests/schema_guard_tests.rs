@@ -39,7 +39,15 @@ fn every_schema_meta_validates_and_id_matches_filename() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 13, "expected the 13 published schemas");
+    // A floor, not an exact count: the published set grows, and this test is
+    // here to catch a schema that does not meta-validate or whose `$id` drifts
+    // from its file name, never to fail every PR that adds one. The exact set
+    // is enforced by `generated_schemas_match_the_schemas_directory` in
+    // `cmd_schema.rs`, which compares the embedded module with the directory.
+    assert!(
+        checked >= 15,
+        "expected at least the 15 published schemas, found {checked}"
+    );
 }
 
 /// The framework registry is normative input to lint L013 and to the embedded

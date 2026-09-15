@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v0.schema.json",
+  "title": "HushSpec Conformance Report v0",
+  "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
+  "type": "object",
+  "required": [
+    "implementation",
+    "fixtures_version",
+    "manifest_sha256",
+    "levels",
+    "results",
+    "generated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "implementation": {
+      "$ref": "#/$defs/Implementation",
+      "description": "The implementation under test."
+    },
+    "fixtures_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "The specification version the corpus tracks, copied from fixtures/MANIFEST.json."
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 of the fixtures/MANIFEST.json bytes the run used. This is what makes a report citable: it pins the exact corpus, not just its version."
+    },
+    "levels": {
+      "type": "object",
+      "required": ["0", "1", "2", "3", "4", "5"],
+      "additionalProperties": false,
+      "description": "One outcome per conformance level. Levels subsume, so a report whose highest passing level is N MUST report \"pass\" for every level below N.",
+      "properties": {
+        "0": { "$ref": "#/$defs/LevelResult" },
+        "1": { "$ref": "#/$defs/LevelResult" },
+        "2": { "$ref": "#/$defs/LevelResult" },
+        "3": { "$ref": "#/$defs/LevelResult" },
+        "4": { "$ref": "#/$defs/LevelResult" },
+        "5": { "$ref": "#/$defs/LevelResult" }
+      }
+    },
+    "highest_level": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 5,
+      "description": "The highest level that passed with every level below it also passing; null when even Level 0 did not pass. Derived from `levels`, and repeated here so a consumer need not re-derive it."
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VectorResult" },
+      "description": "Every vector the run attempted, in corpus order."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "When the report was produced, RFC 3339 UTC with second precision."
+    }
+  },
+  "$defs": {
+    "Implementation": {
+      "type": "object",
+      "required": ["name", "version", "language"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Product or library name, as it is distributed."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of the implementation under test."
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Implementation language (\"rust\", \"typescript\", \"python\", \"go\", ...). Free text: the corpus is not limited to the four reference SDKs."
+        }
+      }
+    },
+    "Status": {
+      "enum": ["pass", "fail", "not_attempted"],
+      "description": "pass: every vector the level requires was run and passed. fail: at least one required vector ran and did not pass. not_attempted: the runner did not exercise this level -- never a synonym for pass."
+    },
+    "LevelResult": {
+      "type": "object",
+      "required": ["status", "passed", "failed", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/Status" },
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that passed."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that failed."
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level the runner declined to attempt. A level with any skipped vector MUST NOT report \"pass\"."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the level is not \"pass\", when the counts alone would not say (a missing optional feature, a deliberately unsupported module)."
+        }
+      }
+    },
+    "VectorResult": {
+      "type": "object",
+      "required": ["path", "category", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-relative path of the vector, POSIX separators, matching a fixtures/MANIFEST.json entry. A vector whose unit is a case inside a file appends \"#<index>\"."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The vector's manifest category (valid, invalid, merge, evaluation, canonical, resolve, receipt, receipt-expected, receipt-signed, log, signing, bundle)."
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "The conformance level the vector belongs to."
+        },
+        "status": { "$ref": "#/$defs/Status" },
+        "message": {
+          "type": "string",
+          "description": "Diagnostic for a failure, or a short note for a pass."
+        }
+      }
+    }
+  }
+}

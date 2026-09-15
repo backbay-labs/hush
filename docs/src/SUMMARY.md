@@ -33,5 +33,6 @@
 - [CLI Reference](reference/cli.md)
 - [Conformance Levels](reference/conformance.md)
 - [SDK Conformance Matrix](reference/sdk-conformance.md)
+- [Conformance Statement](reference/conformance-statement.md)
 - [Versioning](reference/versioning.md)
 - [JSON Schema](reference/json-schema.md)

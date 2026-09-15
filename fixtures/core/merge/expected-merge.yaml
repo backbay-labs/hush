@@ -1,0 +1,12 @@
+hushspec: "0.1.0"
+name: child-merge
+merge_strategy: merge
+rules:
+  egress:
+    block:
+      - "z.com"
+    default: block
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+      - "**/.aws/**"

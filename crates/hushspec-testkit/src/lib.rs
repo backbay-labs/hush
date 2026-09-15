@@ -1,7 +1,14 @@
 pub mod bundle;
+pub mod conformance_bundle;
 pub mod diff;
 pub mod emit;
+pub mod evidence;
+pub mod expect;
 pub mod fixture;
 pub mod r#gen;
+pub mod generated_schemas;
+pub mod manifest;
+pub mod merge_vector;
 pub mod minimize;
+pub mod report;
 pub mod runner;

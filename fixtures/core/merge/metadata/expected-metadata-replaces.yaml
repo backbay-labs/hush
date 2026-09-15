@@ -1,0 +1,10 @@
+hushspec: "0.2.0"
+name: child-metadata-replaces
+metadata:
+  author: platform@example.com
+  policy_version: 4
+rules:
+  egress:
+    allow:
+      - "b.example.com"
+    default: block

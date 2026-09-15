@@ -1,0 +1,19 @@
+hushspec: "0.2.0"
+name: child-metadata-inherited
+metadata:
+  author: security@example.com
+  approved_by: ciso@example.com
+  approval_date: "2026-01-15"
+  classification: internal
+  lifecycle_state: approved
+  policy_version: 3
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths:
+        - rules.egress
+rules:
+  egress:
+    allow:
+      - "c.example.com"
+    default: block

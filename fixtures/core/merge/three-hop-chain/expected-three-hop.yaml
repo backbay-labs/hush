@@ -1,0 +1,31 @@
+# merge(merge(base, mid), child). Note what came from where:
+#   forbidden_paths  <- base   (survives two hops untouched)
+#   egress           <- child  (replaces mid's, which replaced base's)
+#   secret_patterns  <- mid    (the child never mentions it)
+#   tool_access      <- child  (replaces base's)
+#   description      <- base   (the child sets none, so the root's is kept)
+#   name             <- child  (scalar replacement at every hop)
+hushspec: "0.2.0"
+name: project-leaf
+description: organisation baseline
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+      - "**/.aws/**"
+  egress:
+    allow:
+      - "c.example.com"
+    default: block
+  secret_patterns:
+    patterns:
+      - name: team_token
+        pattern: "TEAMTOKEN[0-9]+"
+        severity: error
+  tool_access:
+    allow:
+      - read_file
+    block: []
+    require_confirmation:
+      - git_push
+    default: block

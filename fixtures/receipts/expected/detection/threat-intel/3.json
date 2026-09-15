@@ -1,0 +1,54 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "threat-intel-declared",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:3df6edd91e9723283afd04942ed462138e9bfbc29976f6d6ac728f3a3e01887c"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "publish",
+    "content_hash": "sha256:03fffb8510e0e948bc68ba8efb893d63695f7dd5ec998f6710d9635afee14b53",
+    "content_size": 13
+  },
+  "decision": "warn",
+  "matched_rule": "rules.tool_access.require_confirmation",
+  "reason": "tool requires confirmation",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.require_confirmation",
+      "outcome": "warn",
+      "evaluated": true,
+      "reason": "tool requires confirmation"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "detection_trace": [
+    {
+      "detector_id": "regex_injection@1",
+      "category": "prompt_injection",
+      "score": 0.0,
+      "level": "none",
+      "matched": false
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

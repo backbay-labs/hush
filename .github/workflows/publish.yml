@@ -57,6 +57,27 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         run: sleep 30
 
+      # The conformance runner is part of the published surface: a third party
+      # claiming a level needs the tool that produces the report, not just the
+      # vectors. Same already-published tolerance as hushspec above, so a rerun
+      # for a partially published version does not fail the job.
+      - name: Publish hushspec-testkit (conformance runner)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            cargo publish -p hushspec-testkit --dry-run
+          elif cargo publish -p hushspec-testkit 2>publish_err.log; then
+            cat publish_err.log
+          elif grep -qiE "already (uploaded|exists)" publish_err.log; then
+            cat publish_err.log
+            echo "::warning::hushspec-testkit version already on crates.io; continuing"
+          else
+            cat publish_err.log >&2
+            echo "::error::hushspec-testkit publish failed (not an already-published error)"
+            exit 1
+          fi
+
       - name: Publish hushspec-cli (h2h binary)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}

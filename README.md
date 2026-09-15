@@ -70,6 +70,8 @@ rules:
 
 All four SDKs implement the full HushSpec pipeline, from parse and validate through resolution and evaluation.
 
+The six conformance levels are defined in [`spec/hushspec-core.md`](./spec/hushspec-core.md) section 8; which level each SDK reaches, and against which vectors, is in the [SDK Conformance Matrix](./docs/src/reference/sdk-conformance.md). Rust reaches Level 5 (Attested); TypeScript, Python and Go reach Level 4 (Auditor).
+
 | Capability | Rust | TypeScript | Python | Go |
 |---|:---:|:---:|:---:|:---:|
 | Parse + Validate (Level 1) | Yes | Yes | Yes | Yes |
