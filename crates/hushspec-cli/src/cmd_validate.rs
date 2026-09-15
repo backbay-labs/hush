@@ -210,6 +210,7 @@ fn error_code(err: &hushspec::ValidationError) -> String {
         hushspec::ValidationError::UnsupportedVersion(_) => "E002".into(),
         hushspec::ValidationError::DuplicatePatternName(_) => "E003".into(),
         hushspec::ValidationError::InvalidRegex { .. } => "E005".into(),
+        hushspec::ValidationError::InvalidDate { .. } => "E011".into(),
         hushspec::ValidationError::Custom(_) => "E004".into(),
     }
 }

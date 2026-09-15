@@ -70,7 +70,8 @@ Exit: `0` valid · `1` invalid · `2` a file was missing.
 
 Error codes in the output: `E000` I/O, `E001` YAML parse, `E002` unsupported
 version, `E003` duplicate pattern name, `E004` other validation error, `E005`
-invalid regex, `E010` extends resolution failure.
+invalid regex, `E010` extends resolution failure, `E011` a `metadata` date that
+is not an ISO 8601 calendar date (`YYYY-MM-DD`).
 
 ## `h2h resolve`
 
@@ -300,24 +301,35 @@ found or the policy could not be read.
 ## `h2h audit`
 
 Show a policy's governance metadata (author, approver, classification,
-lifecycle, change ticket, effective and expiry dates) and run advisory
-governance checks.
+lifecycle, change ticket, effective and expiry dates), run the governance
+checks, and optionally print the control → rule-path matrix.
 
 ```bash
 h2h audit policy.yaml
 h2h audit policy.yaml --format json
+h2h audit policy.yaml --controls        # control -> rule-path matrix + coverage
+h2h audit policy.yaml --strict          # every finding is fatal
 ```
 
 | Flag | Description |
 |---|---|
 | `<FILE>` | Policy file to audit. |
 | `-f, --format <text\|json>` | Output format (default `text`). |
+| `--controls` | Also report the control → rule-path matrix and rule-block coverage. |
+| `--strict` | Exit non-zero when a check fails, a governance finding is reported, or a control rule path does not resolve (L012). |
 
-Checks are advisory: a failing check is reported but does not by itself change
-the exit code.
+Every governance check that fires is listed with its code, severity and the
+document path it concerns — `GOV_SOD_VIOLATION` (author is also the approver),
+`GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER`,
+`GOV_EXPIRED`, `GOV_LIFECYCLE`, `GOV_MISSING_APPROVAL_DATE`,
+`GOV_RESTRICTED_NO_APPROVER` (core spec 2.5). Warnings are advisory: without
+`--strict` they are reported and the command still exits `0`. The one
+error-severity finding, `GOV_SELF_SUPERSEDES`, fails the audit either way,
+because `h2h validate` rejects that document too.
 
-Exit: `0` report produced · `1` the document did not parse · `2` file not found
-or unreadable.
+Exit: `0` report produced · `1` the document did not parse, an error-severity
+finding fired, or `--strict` saw a failing check or finding · `2` file not
+found or unreadable.
 
 ## `h2h init`
 
@@ -370,11 +382,17 @@ h2h verify policy.yaml --key h2h.pub
 | Command | Flags |
 |---|---|
 | `keygen` | `--output-dir <DIR>` (default `.`); writes `h2h.key` (mode `0600`) and `h2h.pub`. |
-| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--key-id <ID>`, `--signer <IDENTITY>`, `-o, --output <PATH>` (default `<POLICY>.sig`). |
+| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--key-id <ID>`, `--signer <IDENTITY>`, `-o, --output <PATH>` (default `<POLICY>.sig`), `--allow-unapproved`. |
 | `verify` | `<POLICY>`, `-k, --key <PATH>`, `-s, --sig <PATH>` (default `<POLICY>.sig`). |
 
 Signatures cover the file's exact bytes, so reformatting a signed policy
 invalidates its signature — sign after `h2h fmt`, not before.
+
+`sign` refuses a policy whose `metadata.lifecycle_state` is not `approved` or
+`deployed`, and a policy that does not parse: a signature is a durable
+attestation that this exact document was approved, so signing a draft would
+attest something that never happened. `--allow-unapproved` overrides the gate
+for development.
 
 Exit: `0` signed / signature valid · `1` any failure (unreadable file, invalid
 key, missing or invalid signature).

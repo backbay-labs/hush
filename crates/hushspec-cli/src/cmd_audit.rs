@@ -1,5 +1,6 @@
 use clap::ValueEnum;
 use colored::Colorize;
+use hushspec::governance::GovernanceSeverity;
 use hushspec::{HushSpec, validate_governance};
 use std::path::PathBuf;
 
@@ -17,8 +18,8 @@ pub struct AuditArgs {
     #[arg(long)]
     controls: bool,
 
-    /// Exit non-zero when a governance check fails or a control rule path does
-    /// not resolve (lint L012)
+    /// Exit non-zero when a governance check fails, a governance finding is
+    /// reported, or a control rule path does not resolve (lint L012)
     #[arg(long)]
     strict: bool,
 }
@@ -43,6 +44,9 @@ struct AuditReport {
     effective_date: Option<String>,
     expiry_date: Option<String>,
     checks: Vec<AuditCheck>,
+    /// Every governance check that fired, with its code, severity and the
+    /// document path it is about.
+    findings: Vec<AuditFinding>,
     /// Present only with `--controls`, so the default JSON shape is unchanged.
     #[serde(skip_serializing_if = "Option::is_none")]
     controls: Option<ControlsReport>,
@@ -53,6 +57,14 @@ struct AuditCheck {
     name: String,
     passed: bool,
     detail: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct AuditFinding {
+    code: String,
+    severity: String,
+    path: String,
+    message: String,
 }
 
 /// The control -> rule-path matrix for a policy, grouped by framework.
@@ -128,6 +140,21 @@ pub fn run(args: AuditArgs) -> i32 {
         .iter()
         .map(|w| w.code.as_str())
         .collect();
+    let findings: Vec<AuditFinding> = governance_warnings
+        .iter()
+        .map(|finding| AuditFinding {
+            code: finding.code.clone(),
+            severity: finding.severity.as_str().to_string(),
+            path: finding.path.clone(),
+            message: finding.message.clone(),
+        })
+        .collect();
+    // An error-severity finding means `h2h validate` rejects the document, so
+    // it fails the audit with or without --strict; --strict additionally
+    // promotes the advisory warnings.
+    let has_error_finding = governance_warnings
+        .iter()
+        .any(|finding| finding.severity == GovernanceSeverity::Error);
 
     let metadata = spec.metadata.as_ref();
 
@@ -216,6 +243,16 @@ pub fn run(args: AuditArgs) -> i32 {
     });
 
     checks.push(AuditCheck {
+        name: "Separation of duties".into(),
+        passed: !warning_codes.contains(&"GOV_SOD_VIOLATION"),
+        detail: if warning_codes.contains(&"GOV_SOD_VIOLATION") {
+            Some("author and approved_by are the same identity".into())
+        } else {
+            None
+        },
+    });
+
+    checks.push(AuditCheck {
         name: "Restricted approval check".into(),
         passed: !warning_codes.contains(&"GOV_RESTRICTED_NO_APPROVER"),
         detail: if warning_codes.contains(&"GOV_RESTRICTED_NO_APPROVER") {
@@ -254,6 +291,7 @@ pub fn run(args: AuditArgs) -> i32 {
             .any(|control| !control.unresolved_rule_paths.is_empty())
     });
     let failed_checks = checks.iter().any(|check| !check.passed);
+    let has_findings = !findings.is_empty();
 
     let report = AuditReport {
         file: args.file.display().to_string(),
@@ -268,6 +306,7 @@ pub fn run(args: AuditArgs) -> i32 {
         effective_date,
         expiry_date,
         checks,
+        findings,
         controls,
     };
 
@@ -280,10 +319,12 @@ pub fn run(args: AuditArgs) -> i32 {
         }
     }
 
-    // Governance is advisory -- without --strict the command always exits 0
-    // regardless of check outcomes. --strict promotes a failed check, and an
-    // unresolvable control rule path (lint L012), to a non-zero exit.
-    if args.strict && (failed_checks || unresolved_paths) {
+    // Governance is advisory -- without --strict the command exits 0 whatever
+    // the checks and warnings say. --strict promotes a failed check, any
+    // governance finding, and an unresolvable control rule path (lint L012) to
+    // a non-zero exit. An error-severity finding is not advisory at all -- the
+    // same document fails `h2h validate` -- so it fails the audit either way.
+    if has_error_finding || (args.strict && (failed_checks || unresolved_paths || has_findings)) {
         1
     } else {
         0
@@ -469,6 +510,37 @@ fn print_text_report(report: &AuditReport) {
             print!(" ({})", detail.yellow());
         }
         println!();
+    }
+
+    println!();
+    println!("{}", "Governance findings:".bold());
+    if report.findings.is_empty() {
+        println!("  {} none", "\u{2713}".green());
+    }
+    // Padded columns are written without color: a ColoredString pads to the
+    // width of its escape sequences, not of its visible text.
+    let code_width = report
+        .findings
+        .iter()
+        .map(|finding| finding.code.chars().count())
+        .max()
+        .unwrap_or(0);
+    let path_width = report
+        .findings
+        .iter()
+        .map(|finding| finding.path.chars().count())
+        .max()
+        .unwrap_or(0);
+    for finding in &report.findings {
+        let marker = if finding.severity == "error" {
+            "\u{2717}".red()
+        } else {
+            "\u{26a0}".yellow()
+        };
+        println!(
+            "  {} {:<code_width$}  {:<path_width$}  {}",
+            marker, finding.code, finding.path, finding.message
+        );
     }
 
     if let Some(controls) = &report.controls {

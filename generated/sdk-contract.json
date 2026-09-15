@@ -39,6 +39,11 @@
       "policy_version",
       "effective_date",
       "expiry_date",
+      "owner",
+      "reviewers",
+      "next_review_date",
+      "changelog",
+      "supersedes",
       "controls"
     ],
     "CONTROL_MAPPING_KEYS": [
@@ -46,6 +51,12 @@
       "control_id",
       "rule_paths",
       "notes"
+    ],
+    "CHANGELOG_ENTRY_KEYS": [
+      "version",
+      "date",
+      "summary",
+      "author"
     ],
     "FORBIDDEN_PATH_KEYS": [
       "when",

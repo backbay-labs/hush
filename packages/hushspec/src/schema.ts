@@ -22,6 +22,14 @@ export interface ControlMapping {
   notes?: string;
 }
 
+/** One revision of the policy. Advisory metadata: no effect on evaluation. */
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  author?: string;
+  summary: string;
+}
+
 /** Informational only -- has no impact on evaluation. */
 export interface GovernanceMetadata {
   author?: string;
@@ -33,6 +41,11 @@ export interface GovernanceMetadata {
   policy_version?: number;
   effective_date?: string;
   expiry_date?: string;
+  owner?: string;
+  reviewers?: string[];
+  next_review_date?: string;
+  changelog?: ChangelogEntry[];
+  supersedes?: string;
   controls?: ControlMapping[];
 }
 

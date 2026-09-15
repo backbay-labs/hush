@@ -340,6 +340,13 @@ type ControlMapping struct {
 	Notes     string   `yaml:"notes,omitempty" json:"notes,omitempty"`
 }
 
+type ChangelogEntry struct {
+	Version string `yaml:"version" json:"version"`
+	Date    string `yaml:"date" json:"date"`
+	Summary string `yaml:"summary" json:"summary"`
+	Author  string `yaml:"author,omitempty" json:"author,omitempty"`
+}
+
 type GovernanceMetadata struct {
 	Author         string           `yaml:"author,omitempty" json:"author,omitempty"`
 	ApprovedBy     string           `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
@@ -350,5 +357,10 @@ type GovernanceMetadata struct {
 	PolicyVersion  *int             `yaml:"policy_version,omitempty" json:"policy_version,omitempty"`
 	EffectiveDate  string           `yaml:"effective_date,omitempty" json:"effective_date,omitempty"`
 	ExpiryDate     string           `yaml:"expiry_date,omitempty" json:"expiry_date,omitempty"`
+	Owner          string           `yaml:"owner,omitempty" json:"owner,omitempty"`
+	Reviewers      []string         `yaml:"reviewers,omitempty" json:"reviewers,omitempty"`
+	NextReviewDate string           `yaml:"next_review_date,omitempty" json:"next_review_date,omitempty"`
+	Changelog      []ChangelogEntry `yaml:"changelog,omitempty" json:"changelog,omitempty"`
+	Supersedes     string           `yaml:"supersedes,omitempty" json:"supersedes,omitempty"`
 	Controls       []ControlMapping `yaml:"controls,omitempty" json:"controls,omitempty"`
 }

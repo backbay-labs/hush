@@ -168,6 +168,53 @@ func validateRawMetadata(md map[string]any, errs *[]string) {
 		}
 	}
 	validateRawControls(md, errs)
+	validateRawChangelog(md, errs)
+}
+
+// validateRawChangelog performs the structural checks on metadata.changelog
+// that the typed decode cannot express: a missing `version`, `date` or
+// `summary` is indistinguishable from an empty one in the typed struct.
+func validateRawChangelog(md map[string]any, errs *[]string) {
+	raw, ok := md["changelog"]
+	if !ok {
+		return
+	}
+	changelog, ok := raw.([]any)
+	if !ok {
+		*errs = append(*errs, "metadata.changelog must be an array")
+		return
+	}
+
+	for i, entryRaw := range changelog {
+		path := fmt.Sprintf("metadata.changelog[%d]", i)
+		entry, ok := entryRaw.(map[string]any)
+		if !ok {
+			*errs = append(*errs, path+" must be an object")
+			continue
+		}
+
+		for key := range entry {
+			if _, known := ChangelogEntryKeys[key]; !known {
+				*errs = append(*errs, fmt.Sprintf("unknown field at %s: %v", path, key))
+			}
+		}
+
+		if version, ok := entry["version"].(string); !ok {
+			*errs = append(*errs, path+".version is required")
+		} else if version == "" {
+			*errs = append(*errs, path+".version must not be empty")
+		}
+
+		if _, ok := entry["date"].(string); !ok {
+			*errs = append(*errs, path+".date is required")
+		}
+
+		if summary, ok := entry["summary"].(string); !ok {
+			*errs = append(*errs, path+".summary is required")
+		} else if summary == "" {
+			*errs = append(*errs, path+".summary must not be empty")
+		}
+	}
 }
 
 // frameworkIDPattern is the `framework` grammar from the core schema. Whether

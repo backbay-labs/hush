@@ -428,6 +428,15 @@ STRUCTS = [
         ],
     },
     {
+        "name": "ChangelogEntry",
+        "fields": [
+            field("version", "string", required=True),
+            field("date", "string", required=True),
+            field("summary", "string", required=True),
+            field("author", "string"),
+        ],
+    },
+    {
         "name": "GovernanceMetadata",
         "fields": [
             field("author", "string"),
@@ -439,6 +448,11 @@ STRUCTS = [
             field("policy_version", "count", go_pointer=True),
             field("effective_date", "string"),
             field("expiry_date", "string"),
+            field("owner", "string"),
+            field("reviewers", list_of("string"), default=[], emit_empty=False, rs_skip_empty=True),
+            field("next_review_date", "string"),
+            field("changelog", list_of("ChangelogEntry"), default=[], emit_empty=False, rs_skip_empty=True),
+            field("supersedes", "string"),
             field("controls", list_of("ControlMapping"), default=[], emit_empty=False, rs_skip_empty=True),
         ],
     },
