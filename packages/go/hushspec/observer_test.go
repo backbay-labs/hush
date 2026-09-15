@@ -358,6 +358,14 @@ func TestWebhookObserverDropsOnOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWebhookObserver: %v", err)
 	}
+	// Torn down on every path, in this order: the handler is released first so
+	// the in-flight POST can finish, and only then does Close wait for the
+	// delivery goroutine. A failed assertion would otherwise wedge both, and
+	// server.Close waits for the blocked handler.
+	defer func() {
+		close(release)
+		_ = observer.Close()
+	}()
 
 	for i := 0; i < 50; i++ {
 		observer.OnError(errors.New("event"))
@@ -372,10 +380,6 @@ func TestWebhookObserverDropsOnOverflow(t *testing.T) {
 		t.Fatal("drops must be reported through OnError")
 	}
 
-	close(release)
-	if err := observer.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
 }
 
 func TestStderrObserverDenyOnly(t *testing.T) {

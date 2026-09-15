@@ -349,10 +349,6 @@ func withDetection(t *testing.T, spec *HushSpec, detection *DetectionExtension) 
 	return &clone
 }
 
-func boolPtr(b bool) *bool                      { return &b }
-func intPtr(i int) *int                         { return &i }
-func levelPtr(l DetectionLevel) *DetectionLevel { return &l }
-
 // evaluationResultsEqual compares two EvaluationResult values field-by-field.
 // It does not use == because Posture is a pointer: two independent Evaluate()
 // calls that agree on posture content still allocate distinct *PostureResult

@@ -16,8 +16,7 @@ import (
 // builtins, so every SDK resolves it with its embedded rulesets and no
 // filesystem. The expectation is either the resolved content hash plus the
 // chain links (root first, the leaf recorded as `memory`), or a rejection
-// reason. Rust generates the vectors; this runner checks the Go resolver
-// against the committed ones.
+// reason. This runner checks the resolver against the committed vectors.
 
 type resolveVector struct {
 	HushSpecResolve string         `yaml:"hushspec_resolve"`

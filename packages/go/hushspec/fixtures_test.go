@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -443,13 +444,24 @@ func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, b
 // per-case controls and tags and the rule_trace / receipt assertions.
 var supportedTestVersions = []string{"0.1.0", "0.2.0"}
 
-func fixtureRepoRoot(t *testing.T) string {
-	t.Helper()
+// repoRoot is the checkout this package lives in, resolved from this source
+// file's own path so it does not depend on the working directory. It takes no
+// testing handle, so a benchmark can use it too.
+func repoRoot() (string, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("failed to resolve test file path")
+		return "", errors.New("failed to resolve the test file path")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../..")), nil
+}
+
+func fixtureRepoRoot(t *testing.T) string {
+	t.Helper()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func fixtureFiles(t *testing.T, repoRoot, subdir string) []string {

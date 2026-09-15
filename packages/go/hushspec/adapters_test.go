@@ -26,10 +26,6 @@ func actionsEqual(a, b EvaluationAction) bool {
 	return true
 }
 
-func size(n int) *int { return &n }
-
-func text(s string) *string { return &s }
-
 func TestMapAnthropicToolUse(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -60,7 +56,7 @@ func TestMapAnthropicToolUse(t *testing.T) {
 			tool:  "text_editor_20250429",
 			input: `{"command":"str_replace","path":"/app/main.go","new_str":"package main"}`,
 			want: EvaluationAction{
-				Type: "file_write", Target: "/app/main.go", Content: text("package main"),
+				Type: "file_write", Target: "/app/main.go", Content: strPtr("package main"),
 			},
 		},
 		{
@@ -74,7 +70,7 @@ func TestMapAnthropicToolUse(t *testing.T) {
 			tool:  "str_replace_based_edit_tool",
 			input: `{"command":"create","path":"/app/x.env","file_text":"AKIA0123"}`,
 			want: EvaluationAction{
-				Type: "file_write", Target: "/app/x.env", Content: text("AKIA0123"),
+				Type: "file_write", Target: "/app/x.env", Content: strPtr("AKIA0123"),
 			},
 		},
 		{
@@ -93,19 +89,19 @@ func TestMapAnthropicToolUse(t *testing.T) {
 			name:  "mcp tools are evaluated under the inner tool name",
 			tool:  "mcp__github__create_issue",
 			input: `{"title":"hi"}`,
-			want:  EvaluationAction{Type: "tool_call", Target: "create_issue", ArgsSize: size(14)},
+			want:  EvaluationAction{Type: "tool_call", Target: "create_issue", ArgsSize: intPtr(14)},
 		},
 		{
 			name:  "unknown tools are tool calls",
 			tool:  "search",
 			input: `{"q":"hi"}`,
-			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: size(10)},
+			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: intPtr(10)},
 		},
 		{
 			name:  "whitespace does not change the measured size",
 			tool:  "search",
 			input: "{\n  \"q\": \"hi\"\n}",
-			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: size(10)},
+			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: intPtr(10)},
 		},
 		{
 			name:  "a missing field maps to an empty target",
@@ -117,7 +113,7 @@ func TestMapAnthropicToolUse(t *testing.T) {
 			name:  "input that is not an object is still gated",
 			tool:  "search",
 			input: `"nope"`,
-			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: size(6)},
+			want:  EvaluationAction{Type: "tool_call", Target: "search", ArgsSize: intPtr(6)},
 		},
 		{
 			name:  "no input at all",
@@ -147,13 +143,13 @@ func TestMapOpenAIToolCall(t *testing.T) {
 			name:      "function calls are tool calls",
 			function:  "get_weather",
 			arguments: `{"city":"Boston"}`,
-			want:      EvaluationAction{Type: "tool_call", Target: "get_weather", ArgsSize: size(17)},
+			want:      EvaluationAction{Type: "tool_call", Target: "get_weather", ArgsSize: intPtr(17)},
 		},
 		{
 			name:      "empty arguments still measure",
 			function:  "ping",
 			arguments: "",
-			want:      EvaluationAction{Type: "tool_call", Target: "ping", ArgsSize: size(0)},
+			want:      EvaluationAction{Type: "tool_call", Target: "ping", ArgsSize: intPtr(0)},
 		},
 	}
 	for _, c := range cases {
@@ -189,7 +185,7 @@ func TestMapMCPToolCall(t *testing.T) {
 			name:      "write_file carries its payload",
 			tool:      "write_file",
 			arguments: map[string]any{"path": "/tmp/x", "content": "AKIA0123"},
-			want:      EvaluationAction{Type: "file_write", Target: "/tmp/x", Content: text("AKIA0123")},
+			want:      EvaluationAction{Type: "file_write", Target: "/tmp/x", Content: strPtr("AKIA0123")},
 		},
 		{
 			name:      "run_command",
@@ -225,7 +221,7 @@ func TestMapMCPToolCall(t *testing.T) {
 			name:      "unknown tools are tool calls",
 			tool:      "summarize",
 			arguments: map[string]any{"n": float64(3)},
-			want:      EvaluationAction{Type: "tool_call", Target: "summarize", ArgsSize: size(7)},
+			want:      EvaluationAction{Type: "tool_call", Target: "summarize", ArgsSize: intPtr(7)},
 		},
 		{
 			name:      "no arguments",

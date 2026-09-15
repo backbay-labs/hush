@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -33,14 +34,22 @@ rules:
     default: block
 `
 
+// policyWrites counts every policy a test has written, so each one gets a
+// distinct modification time.
+var policyWrites atomic.Int64
+
 func writePolicy(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
-	// Move the modification time back so a rewrite within the same filesystem
-	// timestamp granularity still looks like a change.
-	stale := time.Now().Add(-time.Minute)
+	// Stamp each write a whole minute further back than the last, so a rewrite
+	// is a visible change whatever the filesystem's timestamp granularity is --
+	// two writes milliseconds apart can otherwise land on the same stamp. Back
+	// in time rather than forward: the watcher compares stamps for inequality,
+	// not for order, and a future stamp would be a surprise to anything else
+	// reading the file.
+	stale := time.Now().Add(-time.Duration(policyWrites.Add(1)) * time.Minute)
 	if err := os.Chtimes(path, stale, stale); err != nil {
 		t.Fatalf("chtimes %s: %v", path, err)
 	}

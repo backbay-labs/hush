@@ -307,6 +307,9 @@ func TestOTLPSinkRetriesServerErrors(t *testing.T) {
 	c := &collector{status: []int{http.StatusServiceUnavailable, http.StatusInternalServerError}}
 	server := startCollector(t, c)
 
+	// OnError is called from the exporter goroutine, so the slice it appends to
+	// is read under the same mutex.
+	var mu sync.Mutex
 	var failures []error
 	sink, err := NewOTLPReceiptSink(OTLPOptions{
 		Endpoint:      server.URL,
@@ -314,7 +317,11 @@ func TestOTLPSinkRetriesServerErrors(t *testing.T) {
 		RetryBackoff:  time.Millisecond,
 		MaxRetries:    3,
 		Client:        server.Client(),
-		OnError:       func(err error) { failures = append(failures, err) },
+		OnError: func(err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			failures = append(failures, err)
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewOTLPReceiptSink: %v", err)
@@ -331,8 +338,11 @@ func TestOTLPSinkRetriesServerErrors(t *testing.T) {
 	if got := len(c.requests()); got != 3 {
 		t.Fatalf("expected two retries and a success, got %d requests", got)
 	}
-	if len(failures) != 0 {
-		t.Fatalf("a retried export that succeeds is not an error: %v", failures)
+	mu.Lock()
+	reported := append([]error(nil), failures...)
+	mu.Unlock()
+	if len(reported) != 0 {
+		t.Fatalf("a retried export that succeeds is not an error: %v", reported)
 	}
 	if sink.Exported() != 1 {
 		t.Fatalf("expected one exported record, got %d", sink.Exported())
@@ -393,6 +403,14 @@ func TestOTLPSinkDropsOnOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOTLPReceiptSink: %v", err)
 	}
+	// Torn down on every path, in this order: the handler is released first so
+	// the in-flight export can finish, and only then does Close wait for the
+	// exporter goroutine. A failed assertion would otherwise wedge both, and
+	// the server's cleanup waits for the blocked handler.
+	defer func() {
+		close(c.block)
+		_ = sink.Close()
+	}()
 
 	receipt := otlpTestReceipt(t, DecisionAllow)
 	for i := 0; i < 100; i++ {
@@ -410,10 +428,6 @@ func TestOTLPSinkDropsOnOverflow(t *testing.T) {
 		t.Fatal("drops must be reported through OnError")
 	}
 
-	close(c.block)
-	if err := sink.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
 }
 
 func TestOTLPSinkRejectsBadEndpoints(t *testing.T) {
