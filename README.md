@@ -369,17 +369,17 @@ const result = evaluator.evaluate(spec, action);
 <details>
 <summary>Policy Signing</summary>
 
-Policies can be signed and verified with Ed25519 keys via the Rust SDK (feature-gated) and the `h2h` CLI's `sign`, `verify`, and `keygen` commands. Signature verification is a separate, explicit step today — it is not yet wired into policy loading or `extends` resolution, and it has not been ported to TypeScript, Python, or Go. The signature format conforms to `hushspec-signature.v0.schema.json`.
+Policies can be signed and verified with Ed25519 keys via the Rust SDK (feature-gated) and the `h2h` CLI's `sign`, `verify`, and `keygen` commands. The signature covers the **content hash of the resolved policy**, not the file's bytes, so reformatting a signed policy keeps it valid and a change to a base policy reached through `extends` invalidates it. Keys are standard PEM (PKCS#8 and SubjectPublicKeyInfo), named by the SHA-256 of their SPKI. Signature verification is a separate, explicit step today — it is not yet wired into policy loading or `extends` resolution, and it has not been ported to TypeScript, Python, or Go. The format is specified in [`spec/hushspec-signing.md`](./spec/hushspec-signing.md) and `hushspec-signature.v0.schema.json`.
 
 ```bash
-# Generate a keypair
+# Generate a keypair (writes h2h.key.pem and h2h.pub.pem, prints the key id)
 h2h keygen --output-dir mykeys
 
 # Sign a policy (creates policy.yaml.sig)
-h2h sign policy.yaml --key mykeys/h2h.key
+h2h sign policy.yaml --key mykeys/h2h.key.pem --expires-in 90d
 
 # Verify the signature
-h2h verify policy.yaml --key mykeys/h2h.pub
+h2h verify policy.yaml --key mykeys/h2h.pub.pem
 ```
 
 </details>

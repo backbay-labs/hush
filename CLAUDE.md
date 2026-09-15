@@ -114,10 +114,11 @@ h2h fmt policy.yaml
 h2h hash policy.yaml
 h2h hash policy.yaml --format canonical
 
-# Sign / verify / keygen
+# Sign / verify / keygen (signature format 0.2)
 h2h keygen
-h2h sign policy.yaml --key h2h.key
-h2h verify policy.yaml --key h2h.pub
+h2h sign policy.yaml --key h2h.key.pem --expires-in 90d
+h2h verify policy.yaml --key h2h.pub.pem
+h2h verify policy.yaml --keyring keyring.json --last-seen-version 4
 ```
 
 ### Conformance Testkit

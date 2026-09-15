@@ -361,7 +361,7 @@ h2h schema --list --format json
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | `core`, `detection`, `evaluator-test`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
+| `[NAME]` | `core`, `detection`, `evaluator-test`, `keyring`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -371,22 +371,58 @@ Exit: `0` printed · `2` unknown schema name, or neither a name nor `--list`.
 
 ## `h2h sign` / `h2h verify` / `h2h keygen`
 
-Ed25519 detached signatures over the raw policy bytes.
+Ed25519 detached signatures, envelope format 0.2
+([`spec/hushspec-signing.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-signing.md)).
 
 ```bash
 h2h keygen --output-dir ~/.hushspec
-h2h sign policy.yaml --key h2h.key --signer security@example.com
-h2h verify policy.yaml --key h2h.pub
+h2h sign policy.yaml --key ~/.hushspec/h2h.key.pem --expires-in 90d --signer security@example.com
+h2h verify policy.yaml --keyring ~/.hushspec/keyring.json --last-seen-version 4
 ```
 
 | Command | Flags |
 |---|---|
-| `keygen` | `--output-dir <DIR>` (default `.`); writes `h2h.key` (mode `0600`) and `h2h.pub`. |
-| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--key-id <ID>`, `--signer <IDENTITY>`, `-o, --output <PATH>` (default `<POLICY>.sig`), `--allow-unapproved`. |
-| `verify` | `<POLICY>`, `-k, --key <PATH>`, `-s, --sig <PATH>` (default `<POLICY>.sig`). |
+| `keygen` | `--output-dir <DIR>` (default `.`), `--name <NAME>` (default `h2h`), `--convert <OLD_KEY>`, `--force`; writes `<NAME>.key.pem` (PKCS#8, mode `0600`) and `<NAME>.pub.pem` (SPKI), and prints the `key_id`. |
+| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--expires-in <DURATION>` (`30d`, `12h`, `90m`, `3600s`), `--policy-version <N>`, `--signer <IDENTITY>`, `-o, --out <PATH>` (default `<POLICY>.sig`), `--allow-unapproved`. |
+| `verify` | `<POLICY>`, `-s, --sig <PATH>`, `-k, --key <PATH>` **or** `--keyring <PATH>`, `--now <TIMESTAMP>`, `--max-skew <SECONDS>` (default `300`), `--last-seen-version <N>`, `-f, --format <text\|json>`. |
 
-Signatures cover the file's exact bytes, so reformatting a signed policy
-invalidates its signature — sign after `h2h fmt`, not before.
+### What is signed
+
+The envelope covers the **content hash of the resolved policy**, not the file's
+bytes — the same digest `h2h hash` prints. So reformatting a signed policy keeps
+its signature valid, and a change to a base policy reached through `extends`
+invalidates every signature over the policies that extend it, because the
+enforced policy changed. `sign` resolves and validates the chain first and
+refuses to sign when it cannot.
+
+### Keys and trust
+
+Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public — exactly
+what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
+key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
+recomputes that id from the public key rather than trusting a keyring's claim.
+
+`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v0.schema.json)
+listing the trusted keys, each of which may carry `not_after` (retire a key
+without invalidating older signatures) or `revoked: true` (reject everything it
+signed). `--key` is the one-key shorthand.
+
+### Reason codes
+
+A failed `verify` prints the reason code of the first check that failed, the
+same string a receipt's `policy.signature.reason` carries:
+
+`malformed_envelope`, `unsupported_format_version`, `unsupported_algorithm`,
+`unknown_key_id`, `key_revoked`, `key_retired`, `signed_at_in_future`,
+`expired`, `signature_mismatch`, `content_hash_mismatch`,
+`policy_version_rollback`.
+
+### Migrating from 0.1
+
+HushSpec 0.1 signed raw file bytes with bespoke 32-byte key files. Convert the
+key with `h2h keygen --convert old.key` and re-sign: a 0.1 signature attests
+something 0.2 does not claim, so `verify` reports
+`unsupported_format_version` and says to re-sign rather than failing obscurely.
 
 `sign` refuses a policy whose `metadata.lifecycle_state` is not `approved` or
 `deployed`, and a policy that does not parse: a signature is a durable
@@ -394,8 +430,9 @@ attestation that this exact document was approved, so signing a draft would
 attest something that never happened. `--allow-unapproved` overrides the gate
 for development.
 
-Exit: `0` signed / signature valid · `1` any failure (unreadable file, invalid
-key, missing or invalid signature).
+Exit: `0` signed / signature valid · `1` a signing or verification failure
+(invalid key or keyring, any reason code) · `2` usage (missing policy or
+signature file, nothing to trust, unparseable `--now` or `--expires-in`).
 
 ## `h2h panic`
 

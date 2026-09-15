@@ -31,9 +31,20 @@ payload = c.jcs(env).encode()
 pub = "".join(l for l in open("fixtures/signing/keys/test-signing.pub.pem") if not l.startswith("#"))
 with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False) as k: k.write(pub)
 with tempfile.NamedTemporaryFile("wb", delete=False) as s: s.write(sig)
-print(subprocess.run(["openssl","pkeyutl","-verify","-pubin","-inkey",k.name,"-rawin","-sigfile",s.name],
-                     input=payload, capture_output=True).stdout.decode().strip())
+# `-rawin` needs a seekable input, so the payload goes to a file rather than stdin.
+with tempfile.NamedTemporaryFile("wb", delete=False) as m: m.write(payload)
+print(subprocess.run(["openssl","pkeyutl","-verify","-pubin","-inkey",k.name,"-rawin",
+                      "-sigfile",s.name,"-in",m.name], capture_output=True).stdout.decode().strip())
 EOF
+```
+
+`h2h verify` walks these vectors too:
+
+```bash
+h2h verify fixtures/signing/policies/basic.yaml \
+  --sig fixtures/signing/policies/basic.sig \
+  --keyring fixtures/signing/keys/keyring.json \
+  --now 2026-09-15T12:00:00.000Z
 ```
 
 Expected outcomes and reason codes are defined in spec sections 6.2 and 6.4. No SDK runner walks
