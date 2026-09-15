@@ -145,9 +145,18 @@ fn glob_pattern_strategy() -> impl Strategy<Value = String> {
     ]
 }
 
-/// Regexes guaranteed to compile and behave identically in Rust `regex`,
-/// JS `RegExp`, Python `re`, and Go `regexp`: no `\d`/`\w`/`\s`, no
-/// lookaround, no backreferences, no flags.
+/// Regexes inside the HushSpec regex profile, which all four SDKs translate to
+/// identical semantics: no lookaround, no backreferences, no non-leading inline
+/// flags, no non-portable escapes.
+///
+/// The `\d`/`\w`/`\s`/`\b`/`.`/`$` arms are the dialect-divergence probes: each
+/// of those constructs means something different in at least one of Rust
+/// `regex`, JS `RegExp`, Python `re` and Go RE2 before the profile translation
+/// (Unicode vs ASCII classes, `$` before a trailing newline, `\s` including
+/// NBSP or excluding `\v`, `.` excluding `\r`), so generating them here is what
+/// makes the differential fuzzer able to catch a translator that drifts. The
+/// Unicode content arms in `content_strategy` supply the haystacks that tell
+/// the two readings apart.
 fn safe_regex_strategy() -> impl Strategy<Value = String> {
     let literal = || string_regex("[a-z]{2,8}").expect("valid generator regex");
     prop_oneof![
@@ -156,6 +165,18 @@ fn safe_regex_strategy() -> impl Strategy<Value = String> {
         literal().prop_map(|text| format!("{text}[0-9]{{2,4}}")),
         (literal(), literal()).prop_map(|(left, right)| format!("({left}|{right})")),
         literal().prop_map(|text| format!("{text}-[a-z0-9]{{4,16}}")),
+        // Profile-dialect probes.
+        literal().prop_map(|text| format!("{text}\\d{{1,3}}")),
+        literal().prop_map(|text| format!("{text}\\w+")),
+        literal().prop_map(|text| format!("{text}\\s{text}")),
+        literal().prop_map(|text| format!("\\b{text}\\b")),
+        literal().prop_map(|text| format!("{text}.{text}")),
+        literal().prop_map(|text| format!("{text}$")),
+        literal().prop_map(|text| format!("^{text}\\S*$")),
+        literal().prop_map(|text| format!("[\\d\\w]{{2,6}}{text}")),
+        literal().prop_map(|text| format!("(?i){text}\\d+")),
+        literal().prop_map(|text| format!("(?s){text}.{text}")),
+        literal().prop_map(|text| format!("(?m){text}$")),
     ]
 }
 
@@ -672,14 +693,60 @@ fn content_strategy(harvest: &TargetHarvest) -> BoxedStrategy<Option<String>> {
             .prop_map(Some)
             .boxed(),
         diff_content_strategy().prop_map(Some).boxed(),
+        dialect_content_strategy().prop_map(Some).boxed(),
     ];
     // Strings that MATCH the policy's own secret patterns (exercises deny paths).
+    // `string_regex` reads the pattern with Rust `regex` semantics -- Unicode
+    // `\d`/`\w`, `.` over whole code points -- so for a profile-dialect pattern
+    // it generates exactly the haystacks that separate the Unicode reading from
+    // the profile's ASCII one.
     for pattern in harvest.secret_regexes.iter().take(2) {
         if let Ok(matching) = string_regex(pattern) {
-            options.push(matching.prop_map(Some).boxed());
+            options.push(
+                matching
+                    .prop_map(|text| Some(sanitize_content(&text)))
+                    .boxed(),
+            );
         }
     }
     proptest::strategy::Union::new(options).boxed()
+}
+
+/// Haystacks built from the characters that read differently across the four SDK
+/// regex engines before the HushSpec regex profile translation: Arabic-Indic
+/// digits (a Unicode `\d`), a non-ASCII letter (a Unicode `\w`, and so a `\b`
+/// boundary or not), NBSP (whitespace to JavaScript's `\s`), the vertical tab
+/// (absent from Go RE2's `\s`), `\r` (excluded by JavaScript's `.`), `\n`
+/// (Python's `$` matches before a trailing one) and an astral code point (two
+/// UTF-16 code units to JavaScript).
+fn dialect_content_strategy() -> impl Strategy<Value = String> {
+    let piece = prop_oneof![
+        string_regex("[a-z]{1,6}").expect("valid generator regex"),
+        Just("\u{661}\u{662}\u{663}".to_string()),
+        Just("123".to_string()),
+        Just("\u{e9}".to_string()),
+        Just("\u{a0}".to_string()),
+        Just("\u{b}".to_string()),
+        Just("\r".to_string()),
+        Just("\n".to_string()),
+        Just("\t".to_string()),
+        Just(" ".to_string()),
+        Just("_".to_string()),
+        Just("\u{1F600}".to_string()),
+    ];
+    prop::collection::vec(piece, 0..10).prop_map(|pieces| pieces.concat())
+}
+
+/// Drop the two characters whose *case folding* still differs across the SDKs:
+/// U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII `s`/`k`
+/// in Rust `regex` and Go RE2, but not in JavaScript `RegExp` (no `u` flag) or
+/// Python `re` under `re.ASCII`. That is the one regex-profile divergence left
+/// open (see `hushspec::regex_profile`), so generated haystacks stay clear of
+/// it rather than reporting it as a fresh difference on every run.
+fn sanitize_content(text: &str) -> String {
+    text.chars()
+        .filter(|c| *c != '\u{17F}' && *c != '\u{212A}')
+        .collect()
 }
 
 fn diff_content_strategy() -> impl Strategy<Value = String> {
