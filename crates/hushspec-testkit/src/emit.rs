@@ -2,9 +2,54 @@ use crate::diff::{CaseVerdict, DiffError, DivergenceKind};
 use crate::minimize::MinimizedCase;
 use sha2::{Digest, Sha256};
 
+/// Flatten a minimized policy's `extends` chain into the document itself.
+///
+/// The four shared-fixture runners parse an evaluator fixture's embedded
+/// policy and evaluate it directly -- none of them resolves `extends` -- so a
+/// fixture that kept the reference would silently evaluate against an empty
+/// base and stop reproducing anything. Bake the resolved document in instead,
+/// which is also what makes the fixture readable without chasing a builtin.
+fn flatten_extends(policy: &serde_json::Value) -> Result<serde_json::Value, DiffError> {
+    let Some(serde_json::Value::String(_)) = policy.get("extends") else {
+        return Ok(policy.clone());
+    };
+    let yaml = serde_yaml::to_string(policy)
+        .map_err(|error| DiffError::Config(format!("failed to re-encode policy: {error}")))?;
+    let spec = hushspec::HushSpec::parse(&yaml)
+        .map_err(|error| DiffError::Config(format!("minimized policy does not parse: {error}")))?;
+    let resolved = crate::diff::resolve_builtin_extends(&spec).map_err(DiffError::Config)?;
+    serde_json::to_value(&resolved)
+        .map_err(|error| DiffError::Config(format!("failed to re-encode resolved policy: {error}")))
+}
+
+/// Split an action into the `action` and case-level `context` the
+/// evaluator-test schema expects.
+///
+/// `EvaluationAction` carries `context` inline, but the fixture schema's
+/// `Action` is `additionalProperties: false` without it and puts the runtime
+/// context on the case instead (where all four runners read it from). Emitting
+/// the action verbatim would therefore produce a fixture that fails schema
+/// validation in every runner.
+fn split_action_context(
+    action: &serde_json::Value,
+) -> (serde_json::Value, Option<serde_json::Value>) {
+    let Some(map) = action.as_object() else {
+        return (action.clone(), None);
+    };
+    let mut stripped = map.clone();
+    let context = stripped.remove("context").filter(|value| !value.is_null());
+    (serde_json::Value::Object(stripped), context)
+}
+
 /// Build a standard evaluator fixture from a minimized diverging case.
 /// The `expect` block comes from the Rust oracle; the failing SDK's suite
 /// will fail on this fixture until the divergence is fixed.
+///
+/// `rule_trace` is deliberately not written into `expect`: the evaluator-test
+/// schema's `ExpectedResult` is `additionalProperties: false` with no
+/// `rule_trace` member, so a fixture carrying one would be rejected by every
+/// runner. A trace-only divergence still emits (pinning `reason`, which the
+/// trace is built from) and is still reported by the difftest run.
 pub fn build_regression_fixture(
     min: &MinimizedCase,
     oracle_verdict: &CaseVerdict,
@@ -28,8 +73,11 @@ pub fn build_regression_fixture(
             serde_json::Value::String(matched_rule.clone()),
         );
     }
-    // reason strings are only pinned when the divergence itself was about them.
-    if min.kind == DivergenceKind::Reason
+    // reason strings are only pinned when the divergence itself was about
+    // them -- or about the rule trace, whose entries are made of the same
+    // per-block reasons and which `expect` has no field for (see the
+    // rule_trace note on `build_regression_fixture`).
+    if matches!(min.kind, DivergenceKind::Reason | DivergenceKind::RuleTrace)
         && let Some(reason) = &result.reason
     {
         expect.insert(
@@ -54,18 +102,26 @@ pub fn build_regression_fixture(
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_else(|| "unknown".to_string());
+    let policy = flatten_extends(&min.policy)?;
+    let (action, context) = split_action_context(&min.action);
+    let mut case = serde_json::Map::new();
+    case.insert(
+        "description".to_string(),
+        serde_json::Value::String("minimized diverging case".to_string()),
+    );
+    case.insert("action".to_string(), action);
+    if let Some(context) = context {
+        case.insert("context".to_string(), context);
+    }
+    case.insert("expect".to_string(), serde_json::Value::Object(expect));
     let fixture = serde_json::json!({
         "hushspec_test": "0.1.0",
         "description": format!(
             "auto-minimized differential regression (sdk {}, seed {seed}, kind {kind_slug})",
             min.sdk
         ),
-        "policy": min.policy,
-        "cases": [{
-            "description": "minimized diverging case",
-            "action": min.action,
-            "expect": serde_json::Value::Object(expect),
-        }],
+        "policy": policy,
+        "cases": [serde_json::Value::Object(case)],
     });
 
     // The Rust reference evaluator accepts any string as `action.type`,
@@ -162,6 +218,71 @@ mod tests {
             "emitted fixture failed the testkit runner: {}",
             results[0].message
         );
+    }
+
+    /// A repro whose policy still needs its base must round-trip: the runners
+    /// do not resolve `extends`, so the emitted fixture has to carry the
+    /// flattened document (and must not keep the reference).
+    #[test]
+    fn build_regression_fixture_flattens_builtin_extends() {
+        let mut min = minimized();
+        min.policy = serde_json::json!({"hushspec": "0.2.0", "extends": "builtin:default"});
+        min.action = serde_json::json!({"type": "tool_call", "target": "shell_exec"});
+        let verdict = oracle_verdict(&min);
+        let CaseVerdict::Ok { result } = &verdict else {
+            panic!("oracle must evaluate the extends case, got {verdict:?}");
+        };
+        assert_eq!(result.decision, "deny", "builtin:default blocks shell_exec");
+
+        let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("fixture builds");
+        assert!(
+            !yaml.contains("extends:"),
+            "the emitted fixture must not keep an unresolved extends:\n{yaml}"
+        );
+        assert!(yaml.contains("shell_exec"), "{yaml}");
+        assert_round_trips_through_runner(&filename, &yaml);
+    }
+
+    /// `EvaluationAction` carries `context` inline; the fixture schema puts it
+    /// on the case. Emitting it in the wrong place fails schema validation in
+    /// all four runners, so the emitter has to move it.
+    #[test]
+    fn build_regression_fixture_moves_action_context_onto_the_case() {
+        let mut min = reason_case();
+        min.action = serde_json::json!({
+            "type": "file_read",
+            "target": "/home/user/.ssh/id_rsa",
+            "context": {"environment": "production", "current_time": "2026-03-02T09:30:00Z"},
+        });
+        let verdict = oracle_verdict(&min);
+        let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("fixture builds");
+
+        let fixture: serde_json::Value = serde_yaml::from_str(&yaml).expect("fixture is YAML");
+        let case = &fixture["cases"][0];
+        assert!(
+            case["action"].get("context").is_none(),
+            "context must not stay on the action:\n{yaml}"
+        );
+        assert_eq!(case["context"]["environment"], "production");
+        assert_eq!(case["context"]["current_time"], "2026-03-02T09:30:00Z");
+        assert_round_trips_through_runner(&filename, &yaml);
+    }
+
+    /// A trace-only divergence still yields a fixture, and it pins the reason
+    /// (the trace's own building block) since `expect` has no `rule_trace`.
+    #[test]
+    fn build_regression_fixture_emits_a_rule_trace_divergence() {
+        let mut min = reason_case();
+        min.kind = DivergenceKind::RuleTrace;
+        let verdict = oracle_verdict(&min);
+        let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("fixture builds");
+        assert!(yaml.contains("reason:"), "{yaml}");
+        let fixture: serde_json::Value = serde_yaml::from_str(&yaml).expect("fixture is YAML");
+        assert!(
+            fixture["cases"][0]["expect"].get("rule_trace").is_none(),
+            "expect has no rule_trace member in the evaluator-test schema:\n{yaml}"
+        );
+        assert_round_trips_through_runner(&filename, &yaml);
     }
 
     #[test]

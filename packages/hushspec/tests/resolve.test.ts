@@ -6,6 +6,7 @@ import YAML from 'yaml';
 import { parseOrThrow } from '../src/parse.js';
 import { resolve, resolveFromFile, createCompositeLoader } from '../src/resolve.js';
 import { loadBuiltin, BUILTIN_NAMES } from '../src/builtin.js';
+import { validate } from '../src/validate.js';
 import { createHttpLoader, isPrivateIp } from '../src/http-loader.js';
 
 describe('resolve', () => {
@@ -283,5 +284,34 @@ describe('isPrivateIp: IPv4-compatible IPv6 (SSRF)', () => {
     expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
     // ::2606:4700 -> 38.6.71.0 is a PUBLIC IPv4, so the compatible form stays public.
     expect(isPrivateIp('::2606:4700')).toBe(false);
+  });
+});
+
+describe('resolved documents validate', () => {
+  // `merge()` clears the fields it consumes by setting them to `undefined`
+  // rather than deleting them, so a resolved document reaches `validate()` as
+  // `{ ..., extends: undefined }`. `key in obj` counts that as present, which
+  // made `validate(resolve(spec))` fail with "extends must be a string" in
+  // TypeScript while Rust, Python and Go all accepted the same document --
+  // found by the cross-SDK differential fuzzer once it started generating
+  // `extends: builtin:*` (P1-12).
+  it('accepts a document whose extends chain has just been flattened', () => {
+    const spec = parseOrThrow('hushspec: "0.2.0"\nextends: "builtin:default"\n');
+    const resolved = resolve(spec);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+
+    expect('extends' in resolved.value).toBe(true);
+    expect(resolved.value.extends).toBeUndefined();
+
+    const validation = validate(resolved.value);
+    expect(validation.errors).toEqual([]);
+    expect(validation.valid).toBe(true);
+  });
+
+  it('still rejects an extends that is present with a non-string value', () => {
+    const validation = validate({ hushspec: '0.2.0', extends: 42 } as never);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.some(error => error.message.includes('extends'))).toBe(true);
   });
 });

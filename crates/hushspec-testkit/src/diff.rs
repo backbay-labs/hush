@@ -1,4 +1,5 @@
 use crate::bundle::CaseBundle;
+use hushspec::evaluate::{RuleEvaluation, RuleOutcome, evaluate_traced};
 use hushspec::{EvaluationAction, EvaluationResult, HushSpec};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -31,7 +32,7 @@ pub enum CaseVerdict {
     Error { message: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NormalizedResult {
     pub decision: String,
@@ -43,6 +44,49 @@ pub struct NormalizedResult {
     pub origin_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub posture: Option<NormalizedPosture>,
+    /// The evaluator's own rule trace, in evaluation order (core spec 5) --
+    /// what each SDK's traced evaluation, and therefore its receipt
+    /// `rule_trace`, records.
+    ///
+    /// Defaulted rather than required so an older harness's report still
+    /// deserializes; its omitted trace then compares as empty against the
+    /// oracle's populated one, which is exactly the `RuleTrace` divergence a
+    /// stale harness should produce rather than silently pass.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rule_trace: Vec<NormalizedRuleEvaluation>,
+}
+
+/// One rule-block consultation, normalized to the shape every SDK's traced
+/// evaluation produces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NormalizedRuleEvaluation {
+    pub rule_block: String,
+    pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_rule: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub evaluated: bool,
+}
+
+impl From<&RuleEvaluation> for NormalizedRuleEvaluation {
+    fn from(entry: &RuleEvaluation) -> Self {
+        let outcome = match entry.outcome {
+            RuleOutcome::Allow => "allow",
+            RuleOutcome::Warn => "warn",
+            RuleOutcome::Deny => "deny",
+            RuleOutcome::Skip => "skip",
+        }
+        .to_string();
+        NormalizedRuleEvaluation {
+            rule_block: entry.rule_block.clone(),
+            outcome,
+            matched_rule: entry.matched_rule.clone(),
+            reason: entry.reason.clone(),
+            evaluated: entry.evaluated,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,8 +96,12 @@ pub struct NormalizedPosture {
     pub next: String,
 }
 
-impl From<EvaluationResult> for NormalizedResult {
-    fn from(result: EvaluationResult) -> Self {
+impl NormalizedResult {
+    /// Normalize an evaluation outcome together with the rule trace that
+    /// produced it. Detection may rewrite `decision`/`matched_rule`/`reason`
+    /// afterwards (see `evaluate_with_detection`) but never re-runs the rule
+    /// blocks, so the trace always comes from the base traced evaluation.
+    pub fn with_trace(result: EvaluationResult, trace: &[RuleEvaluation]) -> Self {
         let decision = match result.decision {
             hushspec::Decision::Allow => "allow",
             hushspec::Decision::Warn => "warn",
@@ -69,7 +117,14 @@ impl From<EvaluationResult> for NormalizedResult {
                 current: posture.current,
                 next: posture.next,
             }),
+            rule_trace: trace.iter().map(NormalizedRuleEvaluation::from).collect(),
         }
+    }
+}
+
+impl From<EvaluationResult> for NormalizedResult {
+    fn from(result: EvaluationResult) -> Self {
+        NormalizedResult::with_trace(result, &[])
     }
 }
 
@@ -115,6 +170,19 @@ impl CaseEvaluator for InProcessEvaluator {
     }
 }
 
+/// Flatten a document's `extends` chain with the composite loader, which
+/// serves `builtin:<name>` from the SDK's own embedded rulesets.
+///
+/// The generator only ever emits `builtin:` references, so the loader's
+/// filesystem branch is unreachable here and every SDK resolves from bytes it
+/// ships -- no repo layout, no network, no ordering dependency. All three
+/// harnesses call their SDK's equivalent (`resolve` / `Resolve`) at the same
+/// point in the pipeline: parse -> resolve -> validate -> evaluate.
+pub fn resolve_builtin_extends(spec: &HushSpec) -> Result<HushSpec, String> {
+    hushspec::resolve_with_loader(spec, None, &hushspec::create_composite_loader())
+        .map_err(|error| error.to_string())
+}
+
 // CaseVerdict::Ok carries a full NormalizedResult, so it's a "large" Err
 // payload by clippy's default threshold. This is a private, parse-time-only
 // helper (not the hot evaluation path), so the extra stack bytes on the
@@ -128,6 +196,14 @@ fn parse_policy(policy: &serde_json::Value) -> Result<HushSpec, CaseVerdict> {
         phase: "parse".to_string(),
         message: error.to_string(),
     })?;
+    let spec = if spec.extends.is_some() {
+        resolve_builtin_extends(&spec).map_err(|message| CaseVerdict::Rejected {
+            phase: "resolve".to_string(),
+            message,
+        })?
+    } else {
+        spec
+    };
     let validation = hushspec::validate(&spec);
     if !validation.is_valid() {
         return Err(CaseVerdict::Rejected {
@@ -147,8 +223,15 @@ fn evaluate_action(spec: &HushSpec, action: &serde_json::Value) -> CaseVerdict {
             };
         }
     };
+    // Detection-aware result + the base evaluator's trace. `evaluate_with_detection`
+    // recomputes the base evaluation internally and returns no trace, so the
+    // trace is taken from an explicit `evaluate_traced` call over the same
+    // inputs -- the two agree by construction (detection never re-runs rule
+    // blocks) and every harness mirrors this pairing.
+    let traced = evaluate_traced(spec, &action, None, &std::collections::HashMap::new());
+    let evaluation = hushspec::evaluate_with_detection(spec, &action).evaluation;
     CaseVerdict::Ok {
-        result: hushspec::evaluate(spec, &action).into(),
+        result: NormalizedResult::with_trace(evaluation, &traced.trace),
     }
 }
 
@@ -161,6 +244,7 @@ pub enum DivergenceKind {
     Reason,
     OriginProfile,
     Posture,
+    RuleTrace,
     MissingCase,
     /// The harness answered for a case key the oracle (and therefore the
     /// bundle) never produced. Both the oracle and every SDK evaluate the
@@ -182,6 +266,9 @@ pub struct Divergence {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompareOptions {
     pub ignore_reason: bool,
+    /// Escape hatch for bisecting a trace-only regression; off by default so
+    /// the fuzzer compares the whole trace, not just the final verdict.
+    pub ignore_rule_trace: bool,
 }
 
 /// Compare an SDK report against the Rust oracle. First difference wins per
@@ -257,6 +344,9 @@ fn verdict_divergence(
             }
             if left.posture != right.posture {
                 return Some(DivergenceKind::Posture);
+            }
+            if !options.ignore_rule_trace && left.rule_trace != right.rule_trace {
+                return Some(DivergenceKind::RuleTrace);
             }
             None
         }
@@ -376,6 +466,7 @@ pub struct DifftestConfig {
     pub report_path: Option<std::path::PathBuf>,
     pub bundles_dir: std::path::PathBuf,
     pub ignore_reason: bool,
+    pub ignore_rule_trace: bool,
     pub repo_root: std::path::PathBuf,
     /// Replay an existing bundle instead of generating (single chunk).
     pub bundle_path: Option<std::path::PathBuf>,
@@ -472,6 +563,7 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
             let report = evaluator.evaluate_bundle(&bundle)?;
             let options = CompareOptions {
                 ignore_reason: config.ignore_reason,
+                ignore_rule_trace: config.ignore_rule_trace,
             };
             for divergence in compare_reports(&oracle_report, &report, &options) {
                 if config.minimize {
@@ -536,6 +628,7 @@ fn handle_divergence(
         failing,
         &CompareOptions {
             ignore_reason: config.ignore_reason,
+            ignore_rule_trace: config.ignore_rule_trace,
         },
         &crate::minimize::MinimizeConfig::default(),
     ) {
@@ -573,6 +666,33 @@ fn handle_divergence(
 mod tests {
     use super::*;
 
+    /// `(decision, matched_rule, reason)` plus the `(rule_block, outcome)`
+    /// sequence of the trace -- everything the differential comparison looks
+    /// at, minus the trace's own reason strings, which the per-block reasons
+    /// of `hushspec::evaluate` already pin in that crate's own suite.
+    type VerdictShape<'a> = (
+        &'a str,
+        Option<&'a str>,
+        Option<&'a str>,
+        Vec<(&'a str, &'a str)>,
+    );
+
+    fn verdict_shape(verdict: &CaseVerdict) -> VerdictShape<'_> {
+        let CaseVerdict::Ok { result } = verdict else {
+            panic!("expected an evaluated verdict, got {verdict:?}");
+        };
+        (
+            result.decision.as_str(),
+            result.matched_rule.as_deref(),
+            result.reason.as_deref(),
+            result
+                .rule_trace
+                .iter()
+                .map(|entry| (entry.rule_block.as_str(), entry.outcome.as_str()))
+                .collect(),
+        )
+    }
+
     #[test]
     fn oracle_matches_hand_computed_verdicts_on_sample_bundle() {
         let bundle = CaseBundle::from_json(include_str!("../testdata/sample-bundle.json"))
@@ -582,61 +702,189 @@ mod tests {
         assert_eq!(report.sdk, "rust");
         assert_eq!(report.results.len(), 4);
 
-        let allow = report.results.get("g0001/a0001").expect("case present");
         assert_eq!(
-            allow,
-            &CaseVerdict::Ok {
-                result: NormalizedResult {
-                    decision: "allow".to_string(),
-                    matched_rule: Some("rules.tool_access.allow".to_string()),
-                    reason: Some("tool is explicitly allowed".to_string()),
-                    origin_profile: None,
-                    posture: None,
-                }
-            }
+            verdict_shape(report.results.get("g0001/a0001").expect("case present")),
+            (
+                "allow",
+                Some("rules.tool_access.allow"),
+                Some("tool is explicitly allowed"),
+                vec![("tool_access", "allow"), ("secret_patterns", "skip")],
+            )
         );
 
-        let deny = report.results.get("g0001/a0002").expect("case present");
         assert_eq!(
-            deny,
-            &CaseVerdict::Ok {
-                result: NormalizedResult {
-                    decision: "deny".to_string(),
-                    matched_rule: Some("rules.tool_access.block".to_string()),
-                    reason: Some("tool is explicitly blocked".to_string()),
-                    origin_profile: None,
-                    posture: None,
-                }
-            }
+            verdict_shape(report.results.get("g0001/a0002").expect("case present")),
+            (
+                "deny",
+                Some("rules.tool_access.block"),
+                Some("tool is explicitly blocked"),
+                vec![("tool_access", "deny"), ("secret_patterns", "skip")],
+            )
         );
 
-        let forbidden = report.results.get("g0002/a0001").expect("case present");
         assert_eq!(
-            forbidden,
-            &CaseVerdict::Ok {
-                result: NormalizedResult {
-                    decision: "deny".to_string(),
-                    matched_rule: Some("rules.forbidden_paths.patterns".to_string()),
-                    reason: Some("path matched a forbidden pattern".to_string()),
-                    origin_profile: None,
-                    posture: None,
-                }
-            }
+            verdict_shape(report.results.get("g0002/a0001").expect("case present")),
+            (
+                "deny",
+                Some("rules.forbidden_paths.patterns"),
+                Some("path matched a forbidden pattern"),
+                vec![("forbidden_paths", "deny"), ("path_allowlist", "skip")],
+            )
         );
 
-        let fallthrough = report.results.get("g0002/a0002").expect("case present");
         assert_eq!(
-            fallthrough,
-            &CaseVerdict::Ok {
-                result: NormalizedResult {
-                    decision: "allow".to_string(),
-                    matched_rule: None,
-                    reason: None,
-                    origin_profile: None,
-                    posture: None,
+            verdict_shape(report.results.get("g0002/a0002").expect("case present")),
+            (
+                "allow",
+                None,
+                None,
+                vec![("forbidden_paths", "allow"), ("path_allowlist", "skip")],
+            )
+        );
+    }
+
+    /// The oracle must report the trace, not just the verdict: a trace-only
+    /// disagreement is a real evaluator divergence (it is what a receipt
+    /// records), and before P1-12 it was invisible to the fuzzer.
+    #[test]
+    fn oracle_reports_a_rule_trace_and_trace_only_differences_diverge() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({
+                "hushspec": "0.2.0",
+                "rules": {"tool_access": {"allow": ["read_file"], "default": "block"}}
+            }),
+            serde_json::json!({"type": "tool_call", "target": "read_file"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        let verdict = report.results.get("g0001/a0001").expect("case present");
+        let CaseVerdict::Ok { result } = verdict else {
+            panic!("expected an evaluated verdict, got {verdict:?}");
+        };
+        assert!(
+            !result.rule_trace.is_empty(),
+            "the oracle must surface the evaluator's rule trace"
+        );
+
+        // Same verdict, empty trace: exactly what a harness that forgot to
+        // report `rule_trace` would send.
+        let mut stripped = result.clone();
+        stripped.rule_trace.clear();
+        let observed = SdkReport {
+            sdk: "go".to_string(),
+            results: [(
+                "g0001/a0001".to_string(),
+                CaseVerdict::Ok { result: stripped },
+            )]
+            .into_iter()
+            .collect(),
+        };
+        let divergences = compare_reports(&report, &observed, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::RuleTrace);
+
+        // ...and --ignore-rule-trace suppresses exactly that.
+        let options = CompareOptions {
+            ignore_reason: false,
+            ignore_rule_trace: true,
+        };
+        assert!(compare_reports(&report, &observed, &options).is_empty());
+    }
+
+    /// `extends` must be resolved before evaluation, or a policy whose rules
+    /// all come from its base would evaluate as if it had none.
+    #[test]
+    fn oracle_resolves_builtin_extends_before_evaluating() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0", "extends": "builtin:default"}),
+            serde_json::json!({"type": "tool_call", "target": "shell_exec"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        let verdict = report.results.get("g0001/a0001").expect("case present");
+        let CaseVerdict::Ok { result } = verdict else {
+            panic!("expected an evaluated verdict, got {verdict:?}");
+        };
+        assert_eq!(result.decision, "deny");
+        assert_eq!(
+            result.matched_rule.as_deref(),
+            Some("rules.tool_access.block"),
+            "builtin:default blocks shell_exec; an unresolved document would allow it"
+        );
+    }
+
+    /// Generating a Wave 2 rule block is not the same as *reaching* it: a
+    /// block that is disabled, gated off by a false `when`, or short-circuited
+    /// by the origins/posture guards is traced as `skip` and proves nothing.
+    /// Assert the oracle actually evaluates the new blocks over a generated
+    /// corpus, and that detection escalates at least one verdict.
+    #[test]
+    fn generated_corpus_actually_reaches_the_wave_two_evaluators() {
+        let bundle = crate::r#gen::generate_bundle(
+            5,
+            &crate::r#gen::GenConfig {
+                groups: 200,
+                actions_per_group: 4,
+            },
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+
+        let mut evaluated_blocks: std::collections::BTreeSet<&str> =
+            std::collections::BTreeSet::new();
+        let mut detection_escalations = 0usize;
+        for verdict in report.results.values() {
+            let CaseVerdict::Ok { result } = verdict else {
+                continue;
+            };
+            if result.matched_rule.as_deref() == Some("detection") {
+                detection_escalations += 1;
+            }
+            for entry in &result.rule_trace {
+                if entry.evaluated {
+                    evaluated_blocks.insert(match entry.rule_block.as_str() {
+                        "browser_automation" => "browser_automation",
+                        "code_execution" => "code_execution",
+                        "origins" => "origins",
+                        "posture_capability" => "posture_capability",
+                        "default" => "default",
+                        _ => continue,
+                    });
                 }
             }
+        }
+        for expected in [
+            "browser_automation",
+            "code_execution",
+            "origins",
+            "posture_capability",
+            "default",
+        ] {
+            assert!(
+                evaluated_blocks.contains(expected),
+                "no generated case ever evaluated `{expected}` (saw {evaluated_blocks:?})"
+            );
+        }
+        assert!(
+            detection_escalations > 0,
+            "no generated case was escalated by the detection extension"
         );
+    }
+
+    /// An unresolvable `extends` is a rejection with its own phase, not a
+    /// silent fall-through to evaluating the unresolved document.
+    #[test]
+    fn oracle_rejects_an_unknown_builtin_extends() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0", "extends": "builtin:no-such-ruleset"}),
+            serde_json::json!({"type": "tool_call", "target": "x"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        match report.results.get("g0001/a0001").expect("case present") {
+            CaseVerdict::Rejected { phase, .. } => assert_eq!(phase, "resolve"),
+            other => panic!("expected a resolve rejection, got {other:?}"),
+        }
     }
 
     #[test]
@@ -674,6 +922,7 @@ mod tests {
                 reason: reason.map(str::to_string),
                 origin_profile: None,
                 posture: None,
+                rule_trace: Vec::new(),
             },
         }
     }
@@ -773,6 +1022,7 @@ mod tests {
         let oracle = report_of("rust", &[("k", ok_verdict("allow", None, Some("a")))]);
         let observed = report_of("py", &[("k", ok_verdict("allow", None, Some("b")))]);
         let options = CompareOptions {
+            ignore_rule_trace: false,
             ignore_reason: true,
         };
         assert!(compare_reports(&oracle, &observed, &options).is_empty());
@@ -962,6 +1212,7 @@ EOF
             report_path: Some(dir.path().join("report.json")),
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
+            ignore_rule_trace: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -997,6 +1248,7 @@ EOF
             report_path: None,
             bundles_dir: std::env::temp_dir().join("hushspec-difftest-empty"),
             ignore_reason: false,
+            ignore_rule_trace: false,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,
@@ -1043,6 +1295,7 @@ EOF
             report_path: None,
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
+            ignore_rule_trace: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -1075,13 +1328,26 @@ EOF
         // hand-built single-case bundle (replayed from disk, not generated)
         // with a guaranteed, deterministic divergence so minimization
         // terminates in at most a handful of subprocess spawns.
+        //
+        // The policy carries an `extends` and the action a runtime `context`
+        // -- the two P1-12 fields the generator now emits and that the fixture
+        // schema cannot express verbatim (no `extends` resolver in the
+        // runners, no `context` on the schema's `Action`). Putting them in the
+        // input proves the minimize -> emit -> discover -> run_conformance
+        // round-trip really does flatten and relocate them, rather than
+        // emitting a fixture that is quietly wrong.
         let dir = tempfile::tempdir().expect("tempdir");
         let bundle = CaseBundle::single_case(
             serde_json::json!({
-                "hushspec": "0.1.0",
+                "hushspec": "0.2.0",
+                "extends": "builtin:default",
                 "rules": {"tool_access": {"block": ["shell_exec"], "default": "allow"}}
             }),
-            serde_json::json!({"type": "tool_call", "target": "shell_exec"}),
+            serde_json::json!({
+                "type": "tool_call",
+                "target": "shell_exec",
+                "context": {"environment": "production", "current_time": "2026-03-02T09:30:00Z"},
+            }),
         );
         let bundle_path = dir.path().join("input-bundle.json");
         std::fs::write(&bundle_path, bundle.to_json().expect("bundle serializes"))
@@ -1125,6 +1391,7 @@ EOF
             report_path: None,
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
+            ignore_rule_trace: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: Some(bundle_path),
             harness_override: Some(vec![
@@ -1210,6 +1477,7 @@ EOF
             report_path: None,
             bundles_dir: std::env::temp_dir().join("hushspec-difftest-panic-guard"),
             ignore_reason: false,
+            ignore_rule_trace: false,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,

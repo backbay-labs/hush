@@ -40,9 +40,20 @@ const PanicRule = "__hushspec_panic__"
 
 // EvaluationAction is the input to the reference evaluator.
 type EvaluationAction struct {
-	Type    string `json:"type" yaml:"type"`
-	Target  string `json:"target,omitempty" yaml:"target,omitempty"`
-	Content string `json:"content,omitempty" yaml:"content,omitempty"`
+	Type   string `json:"type" yaml:"type"`
+	Target string `json:"target,omitempty" yaml:"target,omitempty"`
+	// Content is the payload scanned by secret_patterns, patch_integrity,
+	// browser_automation's credential detector, code_execution's module
+	// denylist and the detection extension.
+	//
+	// A pointer because *presence* is load-bearing, not just emptiness: core
+	// spec 3.4 scans `egress` and `tool_call` "only when `content` is
+	// present", so an explicitly empty payload is still scanned (and a pattern
+	// that matches the empty string still fires) while an absent one leaves
+	// the block unevaluated. The other three SDKs model this with
+	// Option<String> / `str | None` / `content?: string`; a plain string here
+	// conflated the two and made Go the odd one out.
+	Content *string `json:"content,omitempty" yaml:"content,omitempty"`
 	// URL is the navigation destination of a browser_action (core spec 3.11).
 	// A nil URL skips the destination-host check entirely; a present-but-empty
 	// URL is an unusable host that matches no pattern.
@@ -59,6 +70,21 @@ type EvaluationAction struct {
 	// Context is the runtime context consulted by `when` conditions (core spec
 	// 3.13). When absent, conditions see an empty context and the engine clock.
 	Context *RuntimeContext `json:"context,omitempty" yaml:"context,omitempty"`
+}
+
+// HasContent reports whether the action carries a content payload at all,
+// independent of whether that payload is empty (core spec 3.4).
+func (a *EvaluationAction) HasContent() bool {
+	return a != nil && a.Content != nil
+}
+
+// ContentOrEmpty is the action's content payload, or "" when it carries none.
+// Use it where the scan itself is wanted; use HasContent for applicability.
+func (a *EvaluationAction) ContentOrEmpty() string {
+	if a == nil || a.Content == nil {
+		return ""
+	}
+	return *a.Content
 }
 
 type OriginContext struct {
@@ -394,7 +420,7 @@ func (e *evaluator) evaluateBlock(
 		rule := rules.SecretPatterns
 		pathBearing := action.Type == "file_write" || action.Type == "patch_apply"
 		// egress and tool_call are scanned only when they carry content.
-		if !pathBearing && action.Content == "" {
+		if !pathBearing && !action.HasContent() {
 			return blockDecision{}, inactiveAbsent(block)
 		}
 		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
@@ -406,7 +432,7 @@ func (e *evaluator) evaluateBlock(
 		if pathBearing {
 			skipPath = &normalizedPath
 		}
-		return evaluateSecretPatterns(rule, skipPath, action.Content), nil
+		return evaluateSecretPatterns(rule, skipPath, action.ContentOrEmpty()), nil
 
 	case "patch_integrity":
 		if rules == nil || rules.PatchIntegrity == nil {
@@ -416,7 +442,7 @@ func (e *evaluator) evaluateBlock(
 		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
 			return blockDecision{}, skipped
 		}
-		return evaluatePatchIntegrity(rule, action.Content), nil
+		return evaluatePatchIntegrity(rule, action.ContentOrEmpty()), nil
 
 	case "shell_commands":
 		if rules == nil || rules.ShellCommands == nil {
@@ -999,10 +1025,10 @@ func evaluateBrowserAutomation(rule *BrowserAutomationRule, action *EvaluationAc
 	}
 
 	// 3. credential detection on typed input.
-	if rule.CredentialDetection && action.Content != "" {
+	if rule.CredentialDetection && action.HasContent() {
 		for _, builtin := range builtinCredentialPatterns {
 			re, err := CompileProfileRegex(builtin.pattern)
-			if err == nil && re.MatchString(action.Content) {
+			if err == nil && re.MatchString(action.ContentOrEmpty()) {
 				return denyDecision(
 					"rules.browser_automation.credential_detection",
 					fmt.Sprintf("typed input matched built-in credential detector '%s'", builtin.name),
@@ -1017,7 +1043,7 @@ func evaluateBrowserAutomation(rule *BrowserAutomationRule, action *EvaluationAc
 					fmt.Sprintf("credential pattern is invalid: %v", err),
 				)
 			}
-			if re.MatchString(action.Content) {
+			if re.MatchString(action.ContentOrEmpty()) {
 				return denyDecision(
 					"rules.browser_automation.credential_detection",
 					fmt.Sprintf("typed input matched extra_credential_patterns[%d]", index),
@@ -1063,8 +1089,8 @@ func evaluateCodeExecution(rule *CodeExecutionRule, action *EvaluationAction) bl
 	}
 
 	// 4. module denylist: literal word match within the scanned prefix.
-	if action.Content != "" {
-		scanned := action.Content
+	if action.HasContent() {
+		scanned := action.ContentOrEmpty()
 		if rule.MaxScanBytes != nil && *rule.MaxScanBytes < len(scanned) {
 			end := *rule.MaxScanBytes
 			for end > 0 && !isUTF8Boundary(scanned, end) {
