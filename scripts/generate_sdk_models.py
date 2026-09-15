@@ -58,6 +58,7 @@ def field(
     go_name: str | None = None,
     go_pointer: bool = False,
     emit_empty: bool = False,
+    rs_skip_empty: bool = False,
 ) -> dict:
     return {
         "name": name,
@@ -70,6 +71,12 @@ def field(
         "go_name": go_name or camel(name),
         "go_pointer": go_pointer,
         "emit_empty": emit_empty,
+        # Rust serializes empty collections by default (the other SDKs omit
+        # them). Set this to skip an empty collection in Rust too, so absent and
+        # empty round-trip identically across all four SDKs. Opt-in rather than
+        # global: flipping it for every list field would change the wire shape
+        # of every existing document.
+        "rs_skip_empty": rs_skip_empty,
     }
 
 
@@ -412,6 +419,15 @@ STRUCTS = [
         ],
     },
     {
+        "name": "ControlMapping",
+        "fields": [
+            field("framework", "string", required=True),
+            field("control_id", "string", required=True, go_name="ControlID"),
+            field("rule_paths", list_of("string"), required=True, emit_empty=True),
+            field("notes", "string"),
+        ],
+    },
+    {
         "name": "GovernanceMetadata",
         "fields": [
             field("author", "string"),
@@ -423,6 +439,7 @@ STRUCTS = [
             field("policy_version", "count", go_pointer=True),
             field("effective_date", "string"),
             field("expiry_date", "string"),
+            field("controls", list_of("ControlMapping"), default=[], emit_empty=False, rs_skip_empty=True),
         ],
     },
 ]
@@ -715,6 +732,9 @@ def render_rust() -> str:
                     attrs.append(f'default = "{default_meta[0]}"')
                 elif default == [] or default == {} or default is False or not field_info["required"]:
                     attrs.append("default")
+                    if field_info["rs_skip_empty"] and is_collection(field_info["type"]):
+                        helper = "Vec::is_empty" if field_info["type"]["kind"] == "list" else "BTreeMap::is_empty"
+                        attrs.append(f'skip_serializing_if = "{helper}"')
             if attrs:
                 lines.append(f"    #[serde({', '.join(attrs)})]")
             lines.append(

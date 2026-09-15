@@ -1,0 +1,12 @@
+# Core 2.5: rule_paths MUST list at least one rule path.
+hushspec: "0.2.0"
+name: controls-empty-paths
+metadata:
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths: []
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

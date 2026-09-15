@@ -54,6 +54,7 @@ CONTRACT = {
         "RULE_KEYS": def_props(CORE, "Rules"),
         "EXTENSION_KEYS": def_props(CORE, "Extensions"),
         "GOVERNANCE_METADATA_KEYS": def_props(CORE, "GovernanceMetadata"),
+        "CONTROL_MAPPING_KEYS": def_props(CORE, "ControlMapping"),
         "FORBIDDEN_PATH_KEYS": def_props(CORE, "ForbiddenPaths"),
         "PATH_ALLOWLIST_KEYS": def_props(CORE, "PathAllowlist"),
         "EGRESS_KEYS": def_props(CORE, "Egress"),

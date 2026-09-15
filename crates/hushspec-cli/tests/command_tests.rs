@@ -287,8 +287,9 @@ fn schema_list_json_is_machine_readable() {
 
     let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let entries = parsed.as_array().expect("list should be a JSON array");
-    assert_eq!(entries.len(), 7);
+    assert_eq!(entries.len(), 8);
     assert!(entries.iter().any(|e| e["name"] == "core"));
+    assert!(entries.iter().any(|e| e["name"] == "framework-registry"));
 }
 
 #[test]

@@ -16,6 +16,7 @@ from hushspec.generated_contract import (
     CLASSIFICATIONS,
     COMPUTER_USE_KEYS,
     COMPUTER_USE_MODES,
+    CONTROL_MAPPING_KEYS,
     DEFAULT_ACTIONS,
     DETECTION_KEYS,
     DETECTION_LEVELS,
@@ -53,6 +54,7 @@ from hushspec.generated_contract import (
 )
 
 DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
+FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
 
@@ -308,6 +310,64 @@ def _validate_governance_metadata(obj: dict[str, Any], errors: list[str]) -> Non
     _validate_optional_int(obj, "policy_version", errors, f"{path}.policy_version", min_value=1)
     _validate_optional_string(obj, "effective_date", errors, f"{path}.effective_date")
     _validate_optional_string(obj, "expiry_date", errors, f"{path}.expiry_date")
+    _validate_control_mappings(obj, errors, path)
+
+
+def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    """Structural check of ``metadata.controls`` (core spec 2.5).
+
+    Whether the framework is registered in ``spec/registries/frameworks.yaml``,
+    and whether the rule paths resolve, are semantic questions answered by
+    ``h2h lint`` (L012, L013); the registry deliberately stays out of the SDKs.
+    """
+    if "controls" not in obj:
+        return
+
+    controls = obj["controls"]
+    if not isinstance(controls, list):
+        errors.append(f"{path}.controls must be an array")
+        return
+
+    for index, entry in enumerate(controls):
+        entry_path = f"{path}.controls[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{entry_path} must be an object")
+            continue
+
+        _reject_unknown_keys(entry, CONTROL_MAPPING_KEYS, errors, entry_path)
+
+        framework = _validate_required_string(
+            entry, "framework", errors, f"{entry_path}.framework is required"
+        )
+        if framework is not None and FRAMEWORK_ID_PATTERN.match(framework) is None:
+            errors.append(
+                f"{entry_path}.framework {framework!r} must match ^[a-z0-9][a-z0-9.-]*$"
+            )
+
+        control_id = _validate_required_string(
+            entry, "control_id", errors, f"{entry_path}.control_id is required"
+        )
+        if control_id == "":
+            errors.append(f"{entry_path}.control_id must not be empty")
+
+        if "rule_paths" not in entry:
+            errors.append(f"{entry_path}.rule_paths is required")
+        else:
+            rule_paths = _validate_optional_string_array(
+                entry, "rule_paths", errors, f"{entry_path}.rule_paths"
+            )
+            if rule_paths is not None:
+                if not rule_paths:
+                    errors.append(
+                        f"{entry_path}.rule_paths must list at least one rule path"
+                    )
+                for entry_index, rule_path in enumerate(rule_paths):
+                    if rule_path == "":
+                        errors.append(
+                            f"{entry_path}.rule_paths[{entry_index}] must not be empty"
+                        )
+
+        _validate_optional_string(entry, "notes", errors, f"{entry_path}.notes")
 
 
 def _validate_extensions(obj: dict[str, Any], errors: list[str]) -> None:

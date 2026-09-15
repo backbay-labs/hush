@@ -7,6 +7,8 @@
 use crate::generated_models::{Classification, LifecycleState};
 use crate::schema::HushSpec;
 
+pub use crate::generated_models::{ControlMapping, GovernanceMetadata};
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GovernanceWarning {
     pub code: String,
@@ -130,6 +132,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert!(warnings.is_empty());
@@ -148,6 +151,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert_eq!(warnings.len(), 1);
@@ -167,6 +171,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert_eq!(warnings.len(), 1);
@@ -186,6 +191,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert!(warnings.is_empty());
@@ -204,6 +210,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: Some("2020-01-01".into()),
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert_eq!(warnings.len(), 1);
@@ -223,6 +230,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: Some("2099-12-31".into()),
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert!(warnings.is_empty());
@@ -241,6 +249,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert_eq!(warnings.len(), 1);
@@ -260,6 +269,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert!(warnings.is_empty());
@@ -278,6 +288,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert_eq!(warnings.len(), 1);
@@ -297,6 +308,7 @@ mod tests {
             policy_version: None,
             effective_date: None,
             expiry_date: None,
+            controls: Vec::new(),
         });
         let warnings = validate_governance(&spec);
         assert!(warnings.is_empty());

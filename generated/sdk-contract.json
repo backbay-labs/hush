@@ -38,7 +38,14 @@
       "lifecycle_state",
       "policy_version",
       "effective_date",
-      "expiry_date"
+      "expiry_date",
+      "controls"
+    ],
+    "CONTROL_MAPPING_KEYS": [
+      "framework",
+      "control_id",
+      "rule_paths",
+      "notes"
     ],
     "FORBIDDEN_PATH_KEYS": [
       "when",

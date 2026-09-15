@@ -1024,6 +1024,31 @@ class ThreatIntelDetection:
         return data
 
 @dataclass
+class ControlMapping:
+    framework: str
+    control_id: str
+    rule_paths: list[str]
+    notes: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ControlMapping:
+        return cls(
+            framework=data['framework'],
+            control_id=data['control_id'],
+            rule_paths=[item for item in data.get('rule_paths', [])],
+            notes=(data.get('notes') if data.get('notes') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['framework'] = self.framework
+        data['control_id'] = self.control_id
+        data['rule_paths'] = [item for item in self.rule_paths]
+        if self.notes is not None:
+            data['notes'] = self.notes
+        return data
+
+@dataclass
 class GovernanceMetadata:
     author: str | None = None
     approved_by: str | None = None
@@ -1034,6 +1059,7 @@ class GovernanceMetadata:
     policy_version: int | None = None
     effective_date: str | None = None
     expiry_date: str | None = None
+    controls: list[ControlMapping] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> GovernanceMetadata:
@@ -1047,6 +1073,7 @@ class GovernanceMetadata:
             policy_version=(data.get('policy_version') if data.get('policy_version') is not None else None),
             effective_date=(data.get('effective_date') if data.get('effective_date') is not None else None),
             expiry_date=(data.get('expiry_date') if data.get('expiry_date') is not None else None),
+            controls=[ControlMapping.from_dict(item) for item in data.get('controls') or []],
         )
 
     def to_dict(self) -> dict:
@@ -1069,4 +1096,6 @@ class GovernanceMetadata:
             data['effective_date'] = self.effective_date
         if self.expiry_date is not None:
             data['expiry_date'] = self.expiry_date
+        if self.controls:
+            data['controls'] = [item.to_dict() for item in self.controls]
         return data
