@@ -377,6 +377,57 @@ jobs:
           # warning is suppressed -- both still print in the job log.
           ./target/debug/h2h lint rulesets/permissive.yaml
 
+  # ── The vertical library's control-tagged suites ───────────────────
+  library-suites:
+    name: Library Suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build h2h
+        run: cargo build -p hushspec-cli
+
+      # Every rule block and every named secret pattern of each library policy
+      # must be hit by at least one case: --fail-on-uncovered is the gate, and
+      # the JUnit report is what a reviewer reads.
+      - name: Run the library suites
+        run: |
+          set -o pipefail
+          ./target/debug/h2h test \
+            --fixtures fixtures/library \
+            --fail-on-uncovered \
+            --format junit \
+            --report-file target/library-suites.xml \
+            | tee target/library-suites.txt
+
+      # The run's own summary (results + the rule-coverage table) is the
+      # summary: it needs no third-party action and cannot drift from what the
+      # gate actually checked.
+      - name: Publish the run summary
+        if: always()
+        run: |
+          {
+            echo '## Library suites'
+            echo
+            echo '```'
+            cat target/library-suites.txt || echo '(the suites did not run)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Uploaded as an artifact so a JUnit consumer (a test-report action, a
+      # dashboard) can read the per-case controls and tags.
+      - name: Upload the JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-suites-junit
+          path: target/library-suites.xml
+          if-no-files-found: error
+
   # ── Dependency audits ──────────────────────────────────────────────
   cargo-deny:
     name: cargo-deny

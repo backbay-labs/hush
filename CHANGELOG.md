@@ -44,6 +44,9 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   it proves, and between them the cases hit every rule block and every named secret pattern of
   the resolved policy. CI runs them with `--fail-on-uncovered` and uploads the JUnit report.
   The conformance testkit discovers them too.
+- CI gains a **Library Suites** job: it runs the suites with `--fail-on-uncovered`, writes the
+  run's results and rule-coverage table to the GitHub step summary, and uploads the JUnit
+  report as an artifact for any JUnit consumer.
 
 ### Fixed (RFC 09 P3-03)
 
