@@ -52,7 +52,7 @@
 //! | `service.name` | [`OtlpConfig::service_name`], default `hushspec` |
 //! | `hushspec.sdk` | `hushspec-rust` |
 //! | `hushspec.sdk.version` | This crate's version |
-//! | `hushspec.spec_version` | [`HUSHSPEC_VERSION`](crate::HUSHSPEC_VERSION) |
+//! | `hushspec.spec_version` | [`HUSHSPEC_VERSION`] |
 //!
 //! # Delivery
 //!

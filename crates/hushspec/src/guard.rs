@@ -31,7 +31,7 @@
 //! - A policy that did not verify under `require_signature` puts the guard in
 //!   the [refused](HushGuard::refused) state: every action is denied with
 //!   `__hushspec_policy_unverified__` and an
-//!   [`unverified_policy_receipt`](crate::unverified_policy_receipt), so the
+//!   [`unverified_policy_receipt`], so the
 //!   attempt is on the record rather than silently absent (signing spec 6.5).
 //! - Panic mode and the refusal deny under *enforce* whatever the configured
 //!   mode says: a kill switch that monitor mode could wave through would not
