@@ -79,9 +79,23 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   accepts `actor` and `timeSource` options.
 - Vector runners for `fixtures/core/resolve/`, `fixtures/receipts/{expected,valid,invalid}`,
   `fixtures/log/{valid,invalid}` and `fixtures/receipts/signed/`.
+- `CompiledPolicy` (P6-01): `compilePolicy(spec)` / `compileResolution(resolution)` build every
+  policy regex, path glob, host pattern, tool set, parsed `when` condition, severity table and
+  detector configuration once, and `evaluate` / `evaluateTraced` / `evaluateWithContext` /
+  `evaluateWithDetection` / `evaluateAudited` run against that form; `contentHash` is computed on
+  first use and cached, and the source document is kept verbatim for receipts. `compilePolicy`
+  raises `CompileError` for a pattern outside the regex profile instead of deferring it to an
+  evaluation-time deny (`{ strict: false }` keeps the deny). `HushGuard` compiles once at
+  construction and on `swapPolicy()`, and exposes `guard.compiled`.
 
 ### Changed (RFC 09 Wave 4, TypeScript)
 
+- Evaluation no longer compiles patterns per call: the free `evaluate()` functions compile the
+  document on first use and cache the compilation against the document object (a `WeakMap`), so
+  decisions, receipts, hashes and traces are unchanged while a mixed action set against
+  `rulesets/default.yaml` drops from 17.9 us to 4.4 us per evaluation (4.0x) and
+  `HushGuard.check()` from 18.0 us to 4.9 us (3.7x); compiling the policy on every action would
+  cost 73 us. `packages/hushspec/bench/evaluate.mjs` (`npm run bench`) is the benchmark.
 - **Breaking.** `evaluateAudited` takes a `Resolution` rather than a `HushSpec`; use
   `evaluateAuditedSpec` for a bare document. `AuditConfig` is `{ enabled, includeRuleTrace,
   recordDuration }` -- `redact_content` is gone, because a 0.2 receipt never carries content.
