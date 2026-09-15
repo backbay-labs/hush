@@ -1,0 +1,66 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:222bd0a70429fecabd49f3c8051d2501333b9bd6789ebacb290712e0bf2c7256"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "github_search",
+    "origin": {
+      "external_participants": true,
+      "provider": "slack",
+      "space_id": "C123",
+      "visibility": "internal"
+    }
+  },
+  "decision": "allow",
+  "matched_rule": "extensions.origins.profiles.exact-channel.tool_access.allow",
+  "reason": "tool is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "origin_profile",
+      "rule_path": "extensions.origins.profiles.exact-channel",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "origin profile selected"
+    },
+    {
+      "rule_block": "posture_capability",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "posture capabilities satisfied"
+    },
+    {
+      "rule_block": "tool_access",
+      "rule_path": "extensions.origins.profiles.exact-channel.tool_access.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool is explicitly allowed"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "origin_profile": "exact-channel",
+  "posture": {
+    "current": "standard",
+    "next": "standard"
+  }
+}

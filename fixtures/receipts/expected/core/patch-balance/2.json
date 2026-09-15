@@ -1,0 +1,56 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:dd527601512676abc19e6a3c66837002b3a231c0e151f4978aa477f05d3b3c0c"
+  },
+  "action": {
+    "type": "patch_apply",
+    "target": "/proj/a.txt",
+    "content_hash": "sha256:affe940056aa21f6489494122fd818a656e91d47fdb2dc900aaa0ca5eb5b55c5",
+    "content_size": 15
+  },
+  "decision": "deny",
+  "matched_rule": "rules.patch_integrity.max_imbalance_ratio",
+  "reason": "patch exceeded max imbalance ratio",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "patch_integrity",
+      "rule_path": "rules.patch_integrity.max_imbalance_ratio",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "patch exceeded max imbalance ratio"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

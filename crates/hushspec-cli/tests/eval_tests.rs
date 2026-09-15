@@ -600,7 +600,9 @@ fn eval_format_json_emits_deterministic_report() {
     assert_eq!(report["decision"], "deny");
     assert_eq!(report["matched_rule"], "rules.egress.default");
     assert_eq!(report["action"]["type"], "egress");
-    assert_eq!(report["policy"]["content_hash"].as_str().unwrap().len(), 64);
+    let content_hash = report["policy"]["content_hash"].as_str().unwrap();
+    assert!(content_hash.starts_with("sha256:") && content_hash.len() == 71);
+    assert_eq!(report["enforcement"]["outcome"], "blocked");
     assert!(!report["rule_trace"].as_array().unwrap().is_empty());
     assert!(report.get("receipt_id").is_none());
     assert!(report.get("timestamp").is_none());

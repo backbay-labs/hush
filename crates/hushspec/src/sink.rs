@@ -10,10 +10,19 @@ pub enum SinkError {
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
+    /// A hash-linked log could not be continued or written consistently.
+    #[error("log chain error: {0}")]
+    Chain(String),
 }
 
 pub trait ReceiptSink: Send + Sync {
     fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError>;
+
+    /// Record a policy-in-effect event (RFC 09 P2-10). Sinks that only carry
+    /// receipts ignore it; the hash-linked log writes it as an entry.
+    fn record_policy_event(&self, _event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
+        Ok(())
+    }
 }
 
 /// Appends receipts as JSON Lines to a file.
@@ -98,6 +107,18 @@ impl ReceiptSink for MultiSink {
         let mut first_error: Option<SinkError> = None;
         for sink in &self.sinks {
             if let Err(e) = sink.send(receipt)
+                && first_error.is_none()
+            {
+                first_error = Some(e);
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn record_policy_event(&self, event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
+        let mut first_error: Option<SinkError> = None;
+        for sink in &self.sinks {
+            if let Err(e) = sink.record_policy_event(event)
                 && first_error.is_none()
             {
                 first_error = Some(e);

@@ -1,0 +1,45 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "secret-patterns-content-presence",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:36fb3b7639236f270a92570faad752c6d6ffa6e014472fa7a43bb515d70201c7"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com",
+    "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "content_size": 0
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.matches_empty",
+  "reason": "content matched secret pattern 'matches_empty'",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no egress rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.matches_empty",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'matches_empty'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

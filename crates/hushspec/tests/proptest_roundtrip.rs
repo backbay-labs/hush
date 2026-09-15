@@ -16,11 +16,12 @@ use std::collections::HashMap;
 
 use hushspec::schema::MergeStrategy;
 use hushspec::{
-    AuditConfig, BrowserAutomationRule, CodeExecutionRule, ComputerUseMode, ComputerUseRule,
-    Condition, DecisionReceipt, DefaultAction, EgressRule, EvaluationAction, ForbiddenPathsRule,
-    HushSpec, InputInjectionRule, PatchIntegrityRule, PathAllowlistRule, RemoteDesktopChannelsRule,
-    Rules, RuntimeContext, SecretPattern, SecretPatternsRule, Severity, ShellCommandsRule,
-    TimeWindowCondition, ToolAccessRule, evaluate_audited, evaluate_condition, merge, validate,
+    AuditConfig, AuditContext, BrowserAutomationRule, CodeExecutionRule, ComputerUseMode,
+    ComputerUseRule, Condition, DecisionReceipt, DefaultAction, EgressRule, EvaluationAction,
+    ForbiddenPathsRule, HushSpec, InputInjectionRule, PatchIntegrityRule, PathAllowlistRule,
+    RemoteDesktopChannelsRule, Rules, RuntimeContext, SecretPattern, SecretPatternsRule, Severity,
+    ShellCommandsRule, TimeWindowCondition, ToolAccessRule, evaluate_audited_spec,
+    evaluate_condition, merge, validate,
 };
 use proptest::prelude::*;
 use proptest::string::string_regex;
@@ -641,16 +642,20 @@ proptest! {
 
     #[test]
     fn decision_receipt_json_round_trip(spec in policy_strategy(), action in action_strategy()) {
-        let receipt = evaluate_audited(&spec, &action, &AuditConfig::default());
+        let receipt = evaluate_audited_spec(&spec, &action, &AuditConfig::default(), &AuditContext::default())
+            .expect("generated policies are resolved");
         let json = serde_json::to_string(&receipt).expect("receipt serializes to JSON");
-        let parsed: DecisionReceipt = serde_json::from_str(&json)
+        let parsed = DecisionReceipt::parse(&json)
             .unwrap_or_else(|error| panic!("receipt must re-parse from JSON: {error}\n{json}"));
-        prop_assert_eq!(parsed, receipt);
+        prop_assert_eq!(parsed.clone(), receipt.clone());
+        // Canonical form is stable: re-serializing the parsed receipt hashes the same.
+        prop_assert_eq!(parsed.receipt_hash().unwrap(), receipt.receipt_hash().unwrap());
     }
 
     #[test]
     fn decision_receipt_matches_schema(spec in policy_strategy(), action in action_strategy()) {
-        let receipt = evaluate_audited(&spec, &action, &AuditConfig::default());
+        let receipt = evaluate_audited_spec(&spec, &action, &AuditConfig::default(), &AuditContext::default())
+            .expect("generated policies are resolved");
         let value = serde_json::to_value(&receipt).expect("receipt serializes to JSON value");
         let schema = compiled_receipt_schema();
         if let Err(errors) = schema.validate(&value) {

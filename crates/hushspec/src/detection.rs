@@ -1,9 +1,13 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, evaluate};
+use crate::conditions::{Condition, RuntimeContext};
+use crate::evaluate::{
+    Decision, EvaluationAction, EvaluationResult, TracedEvaluation, evaluate_traced,
+};
 use crate::extensions::DetectionLevel;
 use crate::schema::HushSpec;
+use std::collections::HashMap;
 
 /// Result from a single detector run.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -426,6 +430,74 @@ pub struct EvaluationWithDetection {
 /// Applies to prompt_injection `max_scan_bytes` and jailbreak `max_input_bytes`.
 const DEFAULT_SCAN_BYTES: usize = 200_000;
 
+/// The level a normalized detector score maps to in a receipt's
+/// `detection_trace` (receipt spec 4.6). `none` is a zero score, `low` is a
+/// non-zero score below every policy threshold floor, and the rest follow the
+/// `DetectionLevel` floors of the prompt-injection thresholds (0.25 / 0.5 /
+/// 0.75), applied to every detector's normalized 0-1 score.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectorLevel {
+    None,
+    Low,
+    Suspicious,
+    High,
+    Critical,
+}
+
+impl DetectorLevel {
+    /// Map a normalized score to its level.
+    #[must_use]
+    pub fn from_score(score: f64) -> Self {
+        if score <= 0.0 {
+            Self::None
+        } else if score < level_floor(DetectionLevel::Suspicious) {
+            Self::Low
+        } else if score < level_floor(DetectionLevel::High) {
+            Self::Suspicious
+        } else if score < level_floor(DetectionLevel::Critical) {
+            Self::High
+        } else {
+            Self::Critical
+        }
+    }
+}
+
+/// One detector's contribution, recorded as it ran (receipt spec 4.6).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectorEvaluation {
+    /// Stable detector identifier with a version suffix, e.g. `regex_injection@1`.
+    pub detector_id: String,
+    pub category: DetectionCategory,
+    /// Normalized score in [0, 1].
+    pub score: f64,
+    pub level: DetectorLevel,
+    /// True when the finding met the policy's warn or block threshold.
+    pub matched: bool,
+}
+
+/// Version suffix appended to a built-in detector's name to form its id.
+const DETECTOR_ID_VERSION: &str = "@1";
+
+/// A traced evaluation with the detection pipeline folded in.
+#[derive(Clone, Debug)]
+pub struct TracedEvaluationWithDetection {
+    /// The rule-block evaluation and its recorded trace, before detection.
+    pub traced: TracedEvaluation,
+    /// The final decision callers act on (base evaluation, possibly escalated
+    /// by detection).
+    pub evaluation: EvaluationResult,
+    /// The `DetectionResult` produced by each detector that ran.
+    pub detections: Vec<DetectionResult>,
+    /// The strictest contribution across detectors (`None` < `Warn` < `Deny`).
+    pub detection_decision: Option<Decision>,
+    /// Per-detector receipt entries, in run order. `None` when the pipeline did
+    /// not run (no `detection:` extension); `Some(empty)` when it ran and no
+    /// detector was enabled or there was no content to scan.
+    pub detector_trace: Option<Vec<DetectorEvaluation>>,
+}
+
 /// Evaluate an action against policy rules, then fold in the policy's
 /// `detection:` extension (if any) using the built-in detectors.
 ///
@@ -439,35 +511,59 @@ const DEFAULT_SCAN_BYTES: usize = 200_000;
 /// weakens a policy decision. On escalation the returned evaluation carries
 /// `matched_rule = "detection"`; otherwise the base evaluation is returned
 /// unchanged, so a policy deny keeps its own matched_rule.
+///
+/// [`evaluate`]: crate::evaluate::evaluate
 pub fn evaluate_with_detection(
     spec: &HushSpec,
     action: &EvaluationAction,
 ) -> EvaluationWithDetection {
-    let base = evaluate(spec, action);
+    let traced = evaluate_with_detection_traced(spec, action, None, &HashMap::new());
+    EvaluationWithDetection {
+        evaluation: traced.evaluation,
+        detections: traced.detections,
+        detection_decision: traced.detection_decision,
+    }
+}
+
+/// [`evaluate_with_detection`] with the recorded rule trace and per-detector
+/// receipt entries (used by receipts).
+pub fn evaluate_with_detection_traced(
+    spec: &HushSpec,
+    action: &EvaluationAction,
+    context: Option<&RuntimeContext>,
+    conditions: &HashMap<String, Condition>,
+) -> TracedEvaluationWithDetection {
+    let traced = evaluate_traced(spec, action, context, conditions);
+    let base = traced.result.clone();
 
     let Some(detection) = spec
         .extensions
         .as_ref()
         .and_then(|extensions| extensions.detection.as_ref())
     else {
-        return EvaluationWithDetection {
+        return TracedEvaluationWithDetection {
+            traced,
             evaluation: base,
             detections: Vec::new(),
             detection_decision: None,
+            detector_trace: None,
         };
     };
 
     let content = action.content.as_deref().unwrap_or_default();
     if content.is_empty() {
-        return EvaluationWithDetection {
+        return TracedEvaluationWithDetection {
+            traced,
             evaluation: base,
             detections: Vec::new(),
             detection_decision: None,
+            detector_trace: Some(Vec::new()),
         };
     }
 
     let registry = DetectorRegistry::with_defaults();
     let mut detections: Vec<DetectionResult> = Vec::new();
+    let mut detector_trace: Vec<DetectorEvaluation> = Vec::new();
     // (category, contribution) for each detector that raised a warn/deny.
     let mut contributions: Vec<(&'static str, Decision)> = Vec::new();
 
@@ -484,7 +580,6 @@ pub fn evaluate_with_detection(
         );
         let result = detector.detect(scan);
         let score = result.score;
-        detections.push(result);
 
         let block_floor = level_floor(
             prompt_injection
@@ -496,11 +591,23 @@ pub fn evaluate_with_detection(
                 .warn_at_or_above
                 .unwrap_or(DetectionLevel::Suspicious),
         );
-        if score >= block_floor {
+        let matched = if score >= block_floor {
             contributions.push(("prompt_injection", Decision::Deny));
+            true
         } else if score >= warn_floor {
             contributions.push(("prompt_injection", Decision::Warn));
-        }
+            true
+        } else {
+            false
+        };
+        detector_trace.push(DetectorEvaluation {
+            detector_id: format!("{}{DETECTOR_ID_VERSION}", result.detector_name),
+            category: DetectionCategory::PromptInjection,
+            score,
+            level: DetectorLevel::from_score(score),
+            matched,
+        });
+        detections.push(result);
     }
 
     // jailbreak -> jailbreak detector, 0-100 thresholds (score * 100).
@@ -513,16 +620,28 @@ pub fn evaluate_with_detection(
             jailbreak.max_input_bytes.unwrap_or(DEFAULT_SCAN_BYTES),
         );
         let result = detector.detect(scan);
-        let scaled = result.score * 100.0;
-        detections.push(result);
+        let score = result.score;
+        let scaled = score * 100.0;
 
         let block_threshold = jailbreak.block_threshold.unwrap_or(80) as f64;
         let warn_threshold = jailbreak.warn_threshold.unwrap_or(50) as f64;
-        if scaled >= block_threshold {
+        let matched = if scaled >= block_threshold {
             contributions.push(("jailbreak", Decision::Deny));
+            true
         } else if scaled >= warn_threshold {
             contributions.push(("jailbreak", Decision::Warn));
-        }
+            true
+        } else {
+            false
+        };
+        detector_trace.push(DetectorEvaluation {
+            detector_id: format!("{}{DETECTOR_ID_VERSION}", result.detector_name),
+            category: DetectionCategory::Jailbreak,
+            score,
+            level: DetectorLevel::from_score(score),
+            matched,
+        });
+        detections.push(result);
     }
 
     // threat_intel is intentionally NOT wired: the built-in regex engine has no
@@ -542,10 +661,12 @@ pub fn evaluate_with_detection(
     if final_decision == base.decision {
         // No escalation: return the base evaluation untouched so a policy deny
         // keeps its own matched_rule and detection never weakens a decision.
-        return EvaluationWithDetection {
+        return TracedEvaluationWithDetection {
+            traced,
             evaluation: base,
             detections,
             detection_decision,
+            detector_trace: Some(detector_trace),
         };
     }
 
@@ -557,7 +678,8 @@ pub fn evaluate_with_detection(
         .map(|(category, _)| *category)
         .unwrap_or("prompt_injection");
 
-    EvaluationWithDetection {
+    TracedEvaluationWithDetection {
+        traced,
         evaluation: EvaluationResult {
             decision: final_decision,
             matched_rule: Some("detection".to_string()),
@@ -567,6 +689,7 @@ pub fn evaluate_with_detection(
         },
         detections,
         detection_decision,
+        detector_trace: Some(detector_trace),
     }
 }
 

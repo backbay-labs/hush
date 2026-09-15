@@ -1185,6 +1185,58 @@ pub fn verify_policy_at(
 }
 
 // --------------------------------------------------------------------------
+// Receipt signing (RFC 09 P2-06, receipt spec 6)
+// --------------------------------------------------------------------------
+
+/// A receipt together with a signature over its receipt hash.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignedReceipt {
+    pub receipt: crate::receipt::DecisionReceipt,
+    /// A 0.2 envelope whose `content_hash` is the receipt hash.
+    pub signature: Envelope,
+}
+
+/// Sign a receipt: the envelope's `content_hash` is the receipt hash
+/// (receipt spec 6), so the signature covers every field.
+///
+/// `policy_name` and `policy_version` are left unset unless `options`
+/// provides them; a receipt already names its policy.
+///
+/// # Errors
+///
+/// [`SigningError::Canonical`] when the receipt cannot be canonicalized, or
+/// as [`sign_content_hash`].
+pub fn sign_receipt(
+    receipt: &crate::receipt::DecisionReceipt,
+    signing_key: &SigningKey,
+    options: &SignOptions,
+) -> Result<SignedReceipt, SigningError> {
+    let hash = receipt.receipt_hash()?;
+    let signature = sign_content_hash(&hash, signing_key, options)?;
+    Ok(SignedReceipt {
+        receipt: receipt.clone(),
+        signature,
+    })
+}
+
+/// Verify a receipt signature: the ten checks of signing spec 6.2 with the
+/// receipt hash as the content hash.
+///
+/// # Errors
+///
+/// [`VerifyError`] carrying the reason code of the failed check; a receipt
+/// that cannot be canonicalized is a `content_hash_mismatch`.
+pub fn verify_receipt(
+    signed: &SignedReceipt,
+    keyring: &Keyring,
+    options: &VerifyOptions,
+) -> Result<Verified, VerifyError> {
+    let hash = signed.receipt.receipt_hash().ok();
+    verify_content_hash(&signed.signature, hash.as_deref(), keyring, options)
+}
+
+// --------------------------------------------------------------------------
 // Format 0.1 compatibility (signing spec appendix A)
 // --------------------------------------------------------------------------
 

@@ -1,0 +1,47 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:8671e836a3bc2d5f7ade2a014ef17f4f91b4006209526efe36e2a9a746cdbff4"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/tmp/a.txt",
+    "content_hash": "sha256:15963692b7146dd664c32e9767e5d512966b337975bde796503e590693c2ad92",
+    "content_size": 6
+  },
+  "decision": "allow",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "content did not match any secret pattern"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

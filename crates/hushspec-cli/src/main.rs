@@ -7,7 +7,9 @@ mod cmd_hash;
 mod cmd_init;
 mod cmd_keygen;
 mod cmd_lint;
+mod cmd_log;
 mod cmd_panic;
+mod cmd_receipts;
 mod cmd_resolve;
 mod cmd_schema;
 mod cmd_sign;
@@ -19,6 +21,7 @@ mod controls;
 mod generated_frameworks;
 mod generated_schemas;
 mod input;
+mod verify_opts;
 
 use clap::{Parser, Subcommand};
 
@@ -73,6 +76,10 @@ enum Commands {
     Completions(cmd_completions::CompletionsArgs),
     /// Print CLI, build, and spec version information
     Version(cmd_version::VersionArgs),
+    /// Verify a hash-linked receipt log
+    Log(cmd_log::LogArgs),
+    /// Verify decision receipts against a policy and a keyring
+    Receipts(cmd_receipts::ReceiptsArgs),
 }
 
 fn main() {
@@ -97,6 +104,8 @@ fn main() {
         Commands::Schema(args) => cmd_schema::run(args),
         Commands::Completions(args) => cmd_completions::run(args),
         Commands::Version(args) => cmd_version::run(args),
+        Commands::Log(args) => cmd_log::run(args),
+        Commands::Receipts(args) => cmd_receipts::run(args),
     };
 
     std::process::exit(exit_code);

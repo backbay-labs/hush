@@ -8,6 +8,19 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 Wave 4, Rust)
+
+- Receipt format 0.2 in the Rust SDK: `evaluate_audited` now takes a `Resolution` and an
+  `AuditContext`, records actor, canonical `policy.content_hash`, `extends_chain`, signature
+  status, recorded rule and detection traces, and the enforcement disposition; UUID v7 ids and
+  millisecond timestamps. The staged receipt schema is promoted.
+- Verify-on-load and digest pinning: `resolve_with_options` / `resolve_path_with_options`
+  return a `Resolution` with per-hop chain links and verification outcomes;
+  `extends: "<ref>#sha256:<hex>"` pins a base document.
+- Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v0.schema.json`):
+  `ChainedFileSink`, `PolicyEvent` records, `verify_logs`, and `h2h log verify`.
+- Receipt signing (`sign_receipt` / `verify_receipt`) and `h2h receipts verify`.
+
 ### Added
 
 - Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,

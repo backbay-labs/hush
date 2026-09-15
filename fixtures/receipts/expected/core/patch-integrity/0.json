@@ -1,0 +1,56 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:28428016da478de199bd5aa1507dab61f70c2d547935dd785d11c4adbf70bc1e"
+  },
+  "action": {
+    "type": "patch_apply",
+    "target": "/src/config.rs",
+    "content_hash": "sha256:b5433c12caa6b52f94a746d8a2f960569543e5c19f2331b3df011ebc4fe45bd8",
+    "content_size": 51
+  },
+  "decision": "deny",
+  "matched_rule": "rules.patch_integrity.forbidden_patterns[0]",
+  "reason": "patch content matched a forbidden pattern",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "patch_integrity",
+      "rule_path": "rules.patch_integrity.forbidden_patterns[0]",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "patch content matched a forbidden pattern"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

@@ -11,7 +11,6 @@ by `$id` see one identity across the transition. Nothing in CI reads this direct
 
 | Staged schema | Replaces | Spec | Promoted by |
 |---|---|---|---|
-| `0.2.0/hushspec-receipt.v0.schema.json` | `schemas/hushspec-receipt.v0.schema.json` | `spec/hushspec-receipt.md` | RFC 09 P2-04 (receipt v0.2 in all SDKs) |
 
 Why staged rather than replaced in place: the live receipt schema is validated against the
 SDKs' *current* output by `crates/hushspec/tests/receipt.rs` and
