@@ -1,0 +1,143 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+#
+# Control-tagged suite for library/general/air-gapped.yaml (RFC 09 P3-03).
+# Every case names the control it is evidence for, and between them the
+# cases hit every rule block and every named secret pattern of the
+# resolved policy -- `h2h test --fail-on-uncovered` is the gate.
+#
+# The suite extends the embedded copy of the policy, so it runs against
+# exactly the bytes the SDKs ship; `scripts/generate_*_builtins.py
+# --check` is what keeps that copy equal to the file.
+hushspec_test: "0.2.0"
+description: "air-gapped: control-tagged evaluation suite for the vertical library policy"
+policy:
+  hushspec: "0.1.0"
+  name: air-gapped-suite
+  extends: "builtin:library/general/air-gapped"
+cases:
+  - description: "an unlisted destination is denied by default"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.20"
+    tags: ["deny", "egress", "fail-closed"]
+    action:
+      type: "egress"
+      target: "registry.npmjs.org"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.default"
+  - description: "credential stores are unreachable"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.5.15"
+    tags: ["deny", "paths"]
+    action:
+      type: "file_read"
+      target: "/home/agent/.ssh/id_ed25519"
+    expect:
+      decision: deny
+      matched_rule: "rules.forbidden_paths.patterns"
+  - description: "a forbidden shell command is denied (ls -la)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "shell"]
+    action:
+      type: "shell_command"
+      target: "ls -la"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "a patch larger than max_additions (0) is denied"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.32"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+line 0\n+line 1\n+line 2\n+line 3\n+line 4\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.max_additions"
+  - description: "an allowlisted tool is allowed (read_file)"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.5.15"
+    tags: ["allow", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+    expect:
+      decision: allow
+      matched_rule: "rules.tool_access.allow"
+  - description: "an unlisted tool is denied in allowlist mode"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.5.15"
+    tags: ["deny", "tools", "fail-closed"]
+    action:
+      type: "tool_call"
+      target: "write_file"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.allow"
+  - description: "tool arguments above max_args_size (524288) are denied"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.5.15"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+      args_size: 524289
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.max_args_size"
+  - description: "the scanner denies aws_access_key in written content"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.12"
+    tags: ["deny", "secrets", "aws_access_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_access_key"
+  - description: "the scanner denies private_key in written content"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.12"
+    tags: ["deny", "secrets", "private_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "-----BEGIN RSA PRIVATE KEY-----"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.private_key"
+  - description: "the scanner denies generic_api_key in written content"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.12"
+    tags: ["deny", "secrets", "generic_api_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "api_key: A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.generic_api_key"
+  - description: "there is no confirmation path: a write tool is denied outright"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.5.15"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "write_file"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.allow"

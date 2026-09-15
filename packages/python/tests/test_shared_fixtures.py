@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +12,37 @@ from hushspec.conditions import RuntimeContext
 from hushspec.detection import evaluate_with_detection
 from hushspec.evaluate import EvaluationAction, OriginContext, PostureContext
 from hushspec.parse import CoreSafeLoader
-from hushspec.resolve import DIGEST_PIN_MARKER, create_composite_loader, resolve
+from hushspec.receipt import (
+    Actor,
+    AuditConfig,
+    AuditContext,
+    TimeSource,
+    deterministic_uuid_v7,
+    evaluate_audited,
+    receipt_to_dict,
+)
+from hushspec.resolve import (
+    DIGEST_PIN_MARKER,
+    Resolution,
+    create_composite_loader,
+    resolve,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES_ROOT = REPO_ROOT / "fixtures"
+
+# Fixture format versions this runner accepts (evaluator-test schema).
+SUPPORTED_TEST_VERSIONS = {"0.1.0", "0.2.0"}
+
+# The fixed inputs an ``expect.receipt`` assertion is evaluated under, pinned
+# by fixtures/receipts/expected/README.md -- the same ones the expected-receipt
+# vectors use, so a fixture's ``expect.receipt`` and those files describe one
+# object.
+RECEIPT_CLOCK_MILLIS = 1_789_473_600_000
+
+# Receipt members that are inputs rather than outcomes, never compared.
+RECEIPT_IGNORED_MEMBERS = {"actor", "timestamp", "receipt_id"}
 
 VALID_DIRS = [
     "core/valid",
@@ -213,7 +240,7 @@ class TestSharedFixtures:
                 # YAML 1.2 Core (the HushSpec profile): `on:`/`yes:` stay
                 # strings, so the policy survives the re-dump below.
                 raw = yaml.load(fixture_path.read_text(), Loader=CoreSafeLoader)
-                assert raw["hushspec_test"] == "0.1.0"
+                assert raw["hushspec_test"] in SUPPORTED_TEST_VERSIONS
                 assert raw["description"].strip()
                 assert raw["cases"]
 
@@ -256,6 +283,91 @@ class TestSharedFixtures:
                         assert actual.posture is not None, label
                         assert actual.posture.current == expect["posture"]["current"], label
                         assert actual.posture.next == expect["posture"]["next"], label
+
+                    # `rule_trace` and `receipt` are asserted through the
+                    # audited path, because a receipt is where both are
+                    # published (receipt spec 4.3).
+                    if "rule_trace" in expect or "receipt" in expect:
+                        receipt = _fixed_receipt(
+                            spec, action, case.get("context"), index
+                        )
+                        if "rule_trace" in expect:
+                            _assert_rule_trace(
+                                expect["rule_trace"], receipt["rule_trace"], label
+                            )
+                        if "receipt" in expect:
+                            _assert_receipt_members(expect["receipt"], receipt, label)
+
+
+
+def _fixed_receipt(
+    spec, action: EvaluationAction, context: dict[str, Any] | None, case_index: int
+) -> dict[str, Any]:
+    """The format 0.2 receipt for one case under the pinned fixed inputs."""
+    # The fixture's policy is already resolved here: one link, no chain.
+    resolution = Resolution.from_resolved(spec)
+    config = AuditConfig(
+        enabled=True,
+        include_rule_trace=True,
+        # Off: an assertion must not depend on the machine running it.
+        record_duration=False,
+    )
+    ctx = AuditContext(
+        actor=Actor(
+            agent_id="fixture-agent",
+            session_id="fixture-session",
+            principal="fixture@hushspec.dev",
+            runtime="hushspec-conformance/0.2",
+        ),
+        enforcement=None,
+        enforcement_mode="enforce",
+        time_source=TimeSource.TRUSTED.value,
+        clock=datetime.fromtimestamp(RECEIPT_CLOCK_MILLIS / 1000, tz=timezone.utc),
+        receipt_id=deterministic_uuid_v7(RECEIPT_CLOCK_MILLIS, case_index),
+        context=RuntimeContext.from_dict(context) if context is not None else None,
+    )
+    return receipt_to_dict(evaluate_audited(resolution, action, config, ctx))
+
+
+def _render_trace_entry(entry: dict[str, Any]) -> str:
+    """``rule_block:outcome[@rule_path]``, the spelling a mismatch reports."""
+    rule_path = entry.get("rule_path")
+    rendered = f"{entry['rule_block']}:{entry['outcome']}"
+    return f"{rendered}@{rule_path}" if rule_path is not None else rendered
+
+
+def _assert_rule_trace(
+    expected: list[dict[str, Any]], actual: list[dict[str, Any]], label: str
+) -> None:
+    """In order, in full, and member-wise -- ``rule_path`` only where spelled."""
+    rendered = ", ".join(_render_trace_entry(entry) for entry in actual)
+    assert len(expected) == len(actual), (
+        f"{label}: expected {len(expected)} rule_trace entries, "
+        f"got {len(actual)} [{rendered}]"
+    )
+    for index, (want, got) in enumerate(zip(expected, actual)):
+        assert want["rule_block"] == got["rule_block"], f"{label}: rule_trace[{index}]"
+        assert want["outcome"] == got["outcome"], f"{label}: rule_trace[{index}]"
+        if "rule_path" in want:
+            assert want["rule_path"] == got.get("rule_path"), (
+                f"{label}: rule_trace[{index}].rule_path"
+            )
+
+
+def _assert_receipt_members(
+    expected: dict[str, Any], actual: dict[str, Any], label: str, path: str = ""
+) -> None:
+    """Nested objects are compared member-wise; everything else exactly."""
+    for key, want in expected.items():
+        if path == "" and key in RECEIPT_IGNORED_MEMBERS:
+            continue
+        at = key if path == "" else f"{path}.{key}"
+        got = actual.get(key) if isinstance(actual, dict) else None
+        if isinstance(want, dict):
+            assert isinstance(got, dict), f"{label}: receipt.{at} is not an object"
+            _assert_receipt_members(want, got, label, at)
+            continue
+        assert got == want, f"{label}: receipt.{at}: expected {want!r}, got {got!r}"
 
 
 def parse_or_fail(path: Path):

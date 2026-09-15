@@ -94,6 +94,13 @@ rules:
         pattern: "(?i)aws_secret_access_key[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9/+=]{40}"
         severity: critical
         description: "AWS secret key in pipeline content"
+      # The first matching pattern names the finding, so the specific
+      # Actions-token shape is listed before the general `gh[opsur]_` one it
+      # would otherwise be reported as.
+      - name: github_actions_token
+        pattern: "ghs_[A-Za-z0-9]{36}"
+        severity: critical
+        description: "GitHub Actions installation token"
       - name: github_token
         pattern: "gh[opsur]_[A-Za-z0-9]{36}"
         severity: critical
@@ -101,10 +108,6 @@ rules:
       - name: github_fine_grained_pat
         pattern: "github_pat_[0-9a-zA-Z_]{50,}"
         severity: critical
-      - name: github_actions_token
-        pattern: "ghs_[A-Za-z0-9]{36}"
-        severity: critical
-        description: "GitHub Actions installation token"
       - name: npm_token
         pattern: "npm_[A-Za-z0-9]{36}"
         severity: critical

@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -141,8 +140,9 @@ func TestSharedFixtures(t *testing.T) {
 				if err := yaml.Unmarshal([]byte(source), &fixture); err != nil {
 					t.Fatalf("%s: failed to parse evaluator fixture: %v", fixturePath, err)
 				}
-				if !evaluatorTestVersionRE.MatchString(fixture.HushSpecTest) {
-					t.Fatalf("%s: expected an 0.Y.Z hushspec_test version, got %q", fixturePath, fixture.HushSpecTest)
+				if !slices.Contains(supportedTestVersions, fixture.HushSpecTest) {
+					t.Fatalf("%s: unsupported hushspec_test version %q (supported: %s)",
+						fixturePath, fixture.HushSpecTest, strings.Join(supportedTestVersions, ", "))
 				}
 				if strings.TrimSpace(fixture.Description) == "" {
 					t.Fatalf("%s: evaluator fixture description must be non-empty", fixturePath)
@@ -354,9 +354,10 @@ func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, b
 	return false, false
 }
 
-// evaluatorTestVersionRE matches the `hushspec_test` fixture-format version
-// (schemas/hushspec-evaluator-test.v0.schema.json).
-var evaluatorTestVersionRE = regexp.MustCompile(`^0\.\d+\.\d+$`)
+// supportedTestVersions are the `hushspec_test` fixture-format versions this
+// runner accepts (schemas/hushspec-evaluator-test.v0.schema.json). 0.2.0 adds
+// per-case controls and tags and the rule_trace / receipt assertions.
+var supportedTestVersions = []string{"0.1.0", "0.2.0"}
 
 func fixtureRepoRoot(t *testing.T) string {
 	t.Helper()

@@ -54,6 +54,26 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("detection/invalid", FixtureCategory::DetectionInvalid),
     ];
 
+    // The vertical-library suites (`fixtures/library/<vertical>/*.test.yaml`)
+    // are evaluator fixtures like any other, one directory deeper.
+    let mut categories: Vec<(String, FixtureCategory)> = categories
+        .iter()
+        .map(|(subdir, category)| ((*subdir).to_string(), *category))
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(fixtures_dir.join("library")) {
+        let mut verticals: Vec<String> = entries
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| format!("library/{}", entry.file_name().to_string_lossy()))
+            .collect();
+        verticals.sort();
+        categories.extend(
+            verticals
+                .into_iter()
+                .map(|subdir| (subdir, FixtureCategory::Evaluation)),
+        );
+    }
+
     for (subdir, category) in &categories {
         let dir = fixtures_dir.join(subdir);
         if !dir.exists() {

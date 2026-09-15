@@ -368,6 +368,8 @@ Run evaluation test suites (`*.test.yaml` fixtures).
 h2h test --fixtures fixtures/core/evaluation
 h2h test policy.test.yaml --format tap
 h2h test --policy policy.yaml --fixtures ./tests
+h2h test --fixtures fixtures/library --fail-on-uncovered \
+  --format junit --report-file target/library-suites.xml
 ```
 
 | Flag | Description |
@@ -376,10 +378,41 @@ h2h test --policy policy.yaml --fixtures ./tests
 | `--fixtures <PATH>` | Directory (or file) of fixtures to collect. |
 | `-p, --policy <PATH>` | Policy that overrides the one embedded in fixtures. |
 | `--sentinel <PATH>` | Panic sentinel to consult before evaluating. |
-| `-f, --format <text\|tap\|json>` | Output format (default `text`). |
+| `-f, --format <text\|tap\|json\|junit>` | Output format (default `text`). |
+| `--report-file <PATH>` | Write the report in `--format` here; stdout then carries the readable summary. |
+| `--fail-on-uncovered` | Exit non-zero when a declared rule path was never hit. |
 
-Exit: `0` all cases passed · `1` a case failed · `2` no fixture files were
-found or the policy could not be read.
+Fixtures are validated against
+[`hushspec-evaluator-test.v0`](./json-schema.md) before any case runs, and both
+fixture-format versions are accepted: `0.1.0`, and `0.2.0` with its per-case
+`controls` / `tags` and its `expect.rule_trace` / `expect.receipt` assertions.
+A case that declares either assertion is checked against the receipt the
+document produces under the fixed inputs of
+`fixtures/receipts/expected/README.md`.
+
+**Rule coverage.** Every run compares the rule paths each policy under test
+*declares* -- every rule block of the resolved document, plus every named
+secret pattern -- with the paths any case *hit*, through `matched_rule` and
+through each `rule_trace` entry's `rule_path`. A path inside a block credits
+the block, so `rules.egress.allow` covers `rules.egress` and
+`rules.secret_patterns.patterns.ssn` covers both the block and that pattern.
+The table prints after the run; `--fail-on-uncovered` turns a gap into a
+non-zero exit, which is how the library suites are gated in CI.
+
+**JUnit.** `--format junit` emits one `<testsuite>` per fixture file and one
+`<testcase>` per case, carrying each case's controls and tags as
+`<property name="control">` / `<property name="tag">` and each failure as a
+`<failure>` with the expected and actual values. A final `rule coverage`
+suite reports the declared/covered counts per policy, and fails there too
+under `--fail-on-uncovered`.
+
+**JSON.** `--format json` prints an object: `passed`, `failed`, `fixtures[]`
+(per file, with each case's `controls` and `tags`), and `coverage` with the
+per-policy `declared`, `covered` and `uncovered` paths.
+
+Exit: `0` all cases passed · `1` a case failed, or a declared rule path was
+never hit under `--fail-on-uncovered` · `2` no fixture files were found, a
+fixture did not match the schema, or the policy could not be read.
 
 ## `h2h audit`
 

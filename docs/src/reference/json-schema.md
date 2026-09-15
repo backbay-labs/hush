@@ -12,7 +12,7 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-posture.v0.schema.json` | Posture extension schema (v0.x) |
 | `hushspec-origins.v0.schema.json` | Origins extension schema (v0.x) |
 | `hushspec-detection.v0.schema.json` | Detection extension schema (v0.x) |
-| `hushspec-evaluator-test.v0.schema.json` | Evaluation test fixture format used by `h2h test`, the testkit, and every SDK's shared-fixture runner |
+| `hushspec-evaluator-test.v0.schema.json` | Evaluation test fixture format used by `h2h test`, the testkit, and every SDK's shared-fixture runner. Format `0.2.0` adds per-case `controls` and `tags` and the `expect.rule_trace` / `expect.receipt` assertions; `0.1.0` fixtures stay valid |
 | `hushspec-hash-vector.v0.schema.json` | Canonical-form test vector format ([`fixtures/core/hash/`](https://github.com/backbay-labs/hush/tree/main/fixtures/core/hash)); see the [canonical form spec](../canonical-spec.md) |
 | `hushspec-receipt.v0.schema.json` | Decision receipt format 0.2; see the [receipt spec](../receipt-spec.md) |
 | `hushspec-log-entry.v0.schema.json` | Hash-linked log entry (receipts and policy events) written by chained sinks and checked by `h2h log verify` |

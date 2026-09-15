@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "0.2.0",
-  "generated_at": "2026-09-15T18:56:46Z",
+  "generated_at": "2026-09-15T19:28:20Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -228,6 +228,13 @@
       "level": 3
     },
     {
+      "path": "fixtures/core/evaluation/receipt-expectation.test.yaml",
+      "sha256": "b189ff0a83cb47731b78d023b7e98d4943e95188eda6803196c08d079efdb6dd",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
       "path": "fixtures/core/evaluation/regex-ascii-classes.test.yaml",
       "sha256": "f45cb16efab5cd267e2de3466d316178a5644981439c15a110bac2284a86fdf3",
       "category": "evaluation",
@@ -244,6 +251,13 @@
     {
       "path": "fixtures/core/evaluation/rule-blocks-disabled.test.yaml",
       "sha256": "199f445f48c305947c40b46617db218baa86b80178cbdbc6a313b30094106853",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/rule-trace.test.yaml",
+      "sha256": "d97f51e67478eb431feffc775b8f792e121d7ca7b1d76c8bc1af91e6b6e3c767",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1157,6 +1171,69 @@
       "category": "valid",
       "module": "detection",
       "level": 1
+    },
+    {
+      "path": "fixtures/library/README.md",
+      "sha256": "fe6f985d5dbaebd619195af3be443ccfd60d17f586242e29e8077ee83e392755",
+      "category": "doc",
+      "module": "library",
+      "level": 0
+    },
+    {
+      "path": "fixtures/library/devops/cicd-hardened.test.yaml",
+      "sha256": "4d97424fda9dd13c2981ea66e57e862a49a06a01711a2f4af9e61a72a555d265",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/education/ferpa-student.test.yaml",
+      "sha256": "614b5e6f3b30698f9bad6a2065e69f921cdc332ae0b30bd350ada4b480a76294",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/finance/pci-dss.test.yaml",
+      "sha256": "ad98ac21a74548ba6aa90c9b2684e57b7718be90b97a36389859d5d835736934",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/finance/soc2-base.test.yaml",
+      "sha256": "8cdb7fda88a7f0035dc75764b4b82e5a72b9570928b60ee210ca28c1f5641ad4",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/general/air-gapped.test.yaml",
+      "sha256": "8de2a37ed619f6950ff5f8588796837251164a37db4a41a28b6f74de5118b813",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/general/recommended.test.yaml",
+      "sha256": "a1542631a9ba887a79a3c5c83325b915ca706d7bf03d1755a92ed8b51431873b",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/government/fedramp-base.test.yaml",
+      "sha256": "d161774d348716656fd4c5bf7725faa2a9c8b5cd64ca5c98f9b178dd67fbe730",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
+    },
+    {
+      "path": "fixtures/library/healthcare/hipaa-base.test.yaml",
+      "sha256": "e9f6c033606594317c2643720800e1647d2c6767743ec7b2e161e82b329c7b81",
+      "category": "library-suite",
+      "module": "library",
+      "level": 3
     },
     {
       "path": "fixtures/log/README.md",
@@ -2258,6 +2335,20 @@
       "level": 4
     },
     {
+      "path": "fixtures/receipts/expected/core/receipt-expectation/0.json",
+      "sha256": "598866e23ba9ff39976c038866641a8c81a179abecdd59f8366b80b4b2f07eec",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/receipt-expectation/1.json",
+      "sha256": "1579841a1c7799288ea2abdfefb018a65c7d9d3885e032452e4b6dc4024a8c23",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
       "path": "fixtures/receipts/expected/core/regex-ascii-classes/0.json",
       "sha256": "d8b85fa16ab9ac6b13555a4fba4d32fc95c100589defb150ff9e68bd99e171d6",
       "category": "receipt-expected",
@@ -2435,6 +2526,27 @@
     {
       "path": "fixtures/receipts/expected/core/rule-blocks-disabled/9.json",
       "sha256": "1e3ab830c19fd31827ccc8597eb1ae2c399d17fcc110c3f5267390094d2c7efa",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/rule-trace/0.json",
+      "sha256": "798f27e558d9f2a90dfb07529a7e1bd22925f4fbe93df227a80fc5f0cb9ee1d5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/rule-trace/1.json",
+      "sha256": "ce2b9c54dbce7a7e032d01cb98e4eac5e303dca8c3f2b94caae6bd191f3681c5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/rule-trace/2.json",
+      "sha256": "dbca81f92d83c96eada2e17ecf68210e65a9e02bcc12587d99fbb6912d1f8cdb",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
@@ -3263,6 +3375,27 @@
       "sha256": "0ead1ba991371198b6d410858cf1dcfdc44776148fd23083bb69df1b55fb04ff",
       "category": "receipt",
       "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/report/24h.jsonl",
+      "sha256": "8de43bc8773f2d0e0c7919bd01599568c4506e0373db975c131a0e10fa641ffa",
+      "category": "report",
+      "module": "report",
+      "level": 4
+    },
+    {
+      "path": "fixtures/report/README.md",
+      "sha256": "9710e42d0765db120f9ef2416389a0883b45a4318ea9ddb76d543ed29006d92f",
+      "category": "doc",
+      "module": "report",
+      "level": 0
+    },
+    {
+      "path": "fixtures/report/expected-report.json",
+      "sha256": "398386f10cc38169b97c64c7db15de2f70f1a37c722381aee1a85265a16614b1",
+      "category": "report",
+      "module": "report",
       "level": 4
     },
     {

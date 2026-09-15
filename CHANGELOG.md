@@ -133,6 +133,58 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - **`hushspec-testkit` is publishable**: crates.io metadata, a rewritten README, a publish step in
   `publish.yml` after `hushspec`, and `scripts/generate_testkit_schemas.py` embedding the schemas
   the runner validates against, without which `cargo package` cannot reach them.
+### Added (RFC 09 P3-02, test-as-evidence)
+
+- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v0.schema.json`,
+  same file name): a case may declare `controls: [{framework, control_id}]` -- the controls it
+  is evidence for -- and free-form `tags`, and its `expect` may assert `rule_trace` (the
+  recorded trace of receipt spec 4.3, compared in order and in full, with `rule_path` compared
+  only where it is spelled) and `receipt` (a partial format 0.2 receipt whose members must equal
+  the receipt produced under the fixed inputs of `fixtures/receipts/expected/README.md`;
+  `actor`, `timestamp` and `receipt_id` are ignored, nested objects are compared member-wise).
+  `hushspec_test` now accepts `0.1.0` and `0.2.0`, so every existing fixture stays valid.
+- `h2h test --format junit` writes a JUnit XML report -- one `<testsuite>` per fixture file,
+  one `<testcase>` per case, each case's `controls` and `tags` as `<property>` entries, and each
+  failure as a `<failure>` carrying the expected and the actual value -- and `--report-file`
+  writes the report to a path while stdout keeps the readable summary.
+- Rule coverage in `h2h test`: every run compares the rule paths a policy declares (every rule
+  block of the resolved document, plus every named secret pattern) with the paths its cases hit
+  through `matched_rule` and through each `rule_trace` entry, prints the table, and reports the
+  numbers in the JSON report's new `coverage` member and in a `rule coverage` JUnit suite.
+  `--fail-on-uncovered` exits non-zero when a declared path was never hit.
+
+### Added (RFC 09 P3-03, vertical library)
+
+- The eight `library/` policies are embedded as built-ins in all four SDKs under
+  `builtin:library/<vertical>/<name>`, so `extends: "builtin:library/finance/pci-dss"`
+  resolves with no file system and no checkout. The four builtin generators now walk
+  `library/` alongside `rulesets/`; the existing `rulesets/` names are unchanged, and the
+  Go SDK gains an exported `BuiltinNames`. A library policy keeps its own document `name`
+  (`pci-dss`): the prefix is a location, not a rename.
+
+### Added (RFC 09 P3-03, library suites)
+
+- A control-tagged evaluation suite for each of the eight library policies under
+  `fixtures/library/<vertical>/<name>.test.yaml` (198 cases): every case declares the control
+  it proves, and between them the cases hit every rule block and every named secret pattern of
+  the resolved policy. CI runs them with `--fail-on-uncovered` and uploads the JUnit report.
+  The conformance testkit discovers them too.
+- CI gains a **Library Suites** job: it runs the suites with `--fail-on-uncovered`, writes the
+  run's results and rule-coverage table to the GitHub step summary, and uploads the JUnit
+  report as an artifact for any JUnit consumer.
+
+### Fixed (RFC 09 P3-03)
+
+- `library/devops/cicd-hardened.yaml` listed `github_actions_token` (`ghs_...`) after the
+  general `github_token` (`gh[opsur]_...`) that subsumes it, so an Actions token was always
+  reported as a personal access token and the specific rule could never fire. The specific
+  pattern now comes first; the set of matched content is unchanged.
+
+### Changed (RFC 09 P3-02)
+
+- `h2h test --format json` now prints an object (`passed`, `failed`, `fixtures[]`, `coverage`)
+  rather than a bare array of per-file results; the per-file objects are unchanged and now also
+  carry each case's `controls` and `tags`.
 
 ### Added (RFC 09 Wave 4, Rust)
 

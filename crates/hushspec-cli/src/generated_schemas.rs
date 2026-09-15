@@ -1482,8 +1482,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
   "properties": {
     "hushspec_test": {
       "type": "string",
-      "pattern": "^0\\.\\d+\\.\\d+$",
-      "description": "Fixture format version."
+      "enum": ["0.1.0", "0.2.0"],
+      "description": "Fixture format version. 0.2.0 adds per-case `controls` and `tags` and the `expect.rule_trace` / `expect.receipt` assertions; a fixture that uses any of them declares 0.2.0."
     },
     "description": {
       "type": "string",
@@ -1518,6 +1518,16 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "context": {
           "$ref": "#/$defs/RuntimeContext"
+        },
+        "controls": {
+          "type": "array",
+          "description": "The controls this case proves (test-as-evidence). Reported by `h2h test --format junit` as `<property>` entries and by `--format json` per case.",
+          "items": { "$ref": "#/$defs/ControlRef" }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form labels for selecting or grouping cases (for example `deny`, `phi`, `smoke`).",
+          "items": { "type": "string", "minLength": 1 }
         },
         "expect": {
           "$ref": "#/$defs/ExpectedResult"
@@ -1629,7 +1639,42 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "posture": {
           "$ref": "#/$defs/PostureResult"
+        },
+        "rule_trace": {
+          "type": "array",
+          "description": "The recorded rule trace (receipt spec 4.3), compared in order and in full: the actual trace must have exactly this many entries, and each entry must match the members declared here.",
+          "items": { "$ref": "#/$defs/RuleTraceExpectation" }
+        },
+        "receipt": {
+          "type": "object",
+          "description": "A partial format 0.2 receipt. Every member present here must equal the corresponding member of the receipt produced under the fixed inputs of fixtures/receipts/expected/README.md; members absent here are not compared. Nested objects are compared member-wise (a partial nested object matches); arrays are compared in full. `actor`, `timestamp` and `receipt_id` are ignored even when present, because they are inputs rather than outcomes.",
+          "minProperties": 1,
+          "additionalProperties": true
         }
+      }
+    },
+    "ControlRef": {
+      "type": "object",
+      "description": "A control this case is evidence for. `framework` is an id from spec/registries/frameworks.yaml.",
+      "required": ["framework", "control_id"],
+      "additionalProperties": false,
+      "properties": {
+        "framework": { "type": "string", "minLength": 1 },
+        "control_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "RuleTraceExpectation": {
+      "type": "object",
+      "description": "One expected rule-trace entry. `rule_block` uses the closed ids of the receipt schema; `rule_path` is compared only when present.",
+      "required": ["rule_block", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "rule_block": { "type": "string", "minLength": 1 },
+        "outcome": {
+          "type": "string",
+          "enum": ["allow", "warn", "deny", "skip"]
+        },
+        "rule_path": { "type": "string", "minLength": 1 }
       }
     },
     "PostureResult": {
