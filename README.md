@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Portable, open specification for AI agent security rules</strong>
+  <strong>Agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under.</strong>
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 
 ---
 
-HushSpec is an open policy format for AI agent security rules. It defines **what** an agent may do at runtime, including filesystem access, network egress, tool usage, secret detection, and more, without prescribing **how** those controls must be enforced. That separation makes policies portable across runtimes, frameworks, and languages.
+HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under — filesystem access, network egress, tool usage, secret detection, and more. It defines **what** an agent may do at runtime without prescribing **how** those controls must be enforced, and it pairs each policy with structured decision receipts so enforcement can become evidence. That separation, plus fail-closed defaults, makes policies portable across runtimes, frameworks, and languages — and auditable wherever they run.
 
 **v0.1.1-alpha** — The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published and functional. Parse, validate, evaluate, merge, resolve, detect, sign, and audit your way through 10 rule types and 3 extension modules. The API surface is stabilizing but not yet frozen — expect refinements before v1.0.
 
@@ -76,10 +76,15 @@ All four SDKs implement the full HushSpec pipeline, from parse and validate thro
 | Merge (Level 2) | Yes | Yes | Yes | Yes |
 | Resolve (Level 2+) | Yes | Yes | Yes | Yes |
 | Evaluate (Level 3) | Yes | Yes | Yes | Yes |
-| Audit Trail (Level 4) | Yes | Yes | Yes | Yes |
+| Decision receipts | Yes | Yes | Yes | Yes |
 | Detection | Yes | Yes | Yes | Yes |
-| Observability | Yes | Yes | Yes | Yes |
+| Observability | No | Yes | Yes | No |
 | Receipt Sinks | Yes | Yes | Yes | Yes |
+| Policy signing (Ed25519) | Yes (feature-gated) | No | No | No |
+| HushGuard middleware | No | Yes | Yes | No |
+| Hot reload (watch/poll) | No | Yes | No | No |
+
+`content_hash` is not yet byte-identical across SDKs for the same policy (each SDK canonicalizes differently today); see `docs/plans/09-compliance-as-code-plan.md`.
 
 ## Installation
 
@@ -201,7 +206,7 @@ assert result.decision in ("allow", "warn", "deny")
 
 ## HushGuard Middleware
 
-`HushGuard` wraps policy loading and evaluation behind a simple `evaluate`, `check`, and `enforce` interface for application code.
+`HushGuard` wraps policy loading and evaluation behind a simple `evaluate`, `check`, and `enforce` interface for application code. Available in TypeScript and Python today; not yet in Rust or Go.
 
 ```typescript
 import { HushGuard } from '@hushspec/core';
@@ -280,7 +285,7 @@ const receipt = evaluateAudited(spec, action, {
 // receipt.decision, receipt.rule_evaluations, receipt.policy_summary
 ```
 
-Receipt sinks (`FileReceiptSink`, `ConsoleReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`) are available in all four SDKs for routing receipts to storage, logging, or OTLP endpoints.
+Receipt sinks (`FileReceiptSink`, `ConsoleReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`) are available in all four SDKs for routing receipts to storage, logging, or custom callback endpoints. No OTLP sink exists in any SDK today.
 
 </details>
 
@@ -326,7 +331,7 @@ guard.enforce(action);
 <details>
 <summary>Observability</summary>
 
-The `EvaluationObserver` interface and `ObservableEvaluator` wrapper emit structured events for every evaluation, policy load, and policy reload. Built-in observers include `JsonLineObserver`, `ConsoleObserver`, and `MetricsCollector`.
+The `EvaluationObserver` interface and `ObservableEvaluator` wrapper emit structured events for every evaluation, policy load, and policy reload. Built-in observers include `JsonLineObserver`, `ConsoleObserver`, and `MetricsCollector`. Available in TypeScript and Python today; not yet in Rust or Go.
 
 ```typescript
 import { ObservableEvaluator, JsonLineObserver, MetricsCollector } from '@hushspec/core';
@@ -342,7 +347,7 @@ const result = evaluator.evaluate(spec, action);
 <details>
 <summary>Policy Signing</summary>
 
-Policies can be signed with Ed25519 keys and verified at load time. The CLI provides `sign`, `verify`, and `keygen` commands. The signature format conforms to `hushspec-signature.v0.schema.json`.
+Policies can be signed and verified with Ed25519 keys via the Rust SDK (feature-gated) and the `h2h` CLI's `sign`, `verify`, and `keygen` commands. Signature verification is a separate, explicit step today — it is not yet wired into policy loading or `extends` resolution, and it has not been ported to TypeScript, Python, or Go. The signature format conforms to `hushspec-signature.v0.schema.json`.
 
 ```bash
 # Generate a keypair
@@ -383,7 +388,7 @@ deactivatePanic();
 <details>
 <summary>Policy Loading and Hot Reload</summary>
 
-Policies can be loaded from local files, HTTPS URLs (with ETag caching and SSRF protection), or built-in rulesets. `PolicyWatcher` and `PolicyPoller` support hot reload without restarting the process.
+Policies can be loaded from local files, HTTPS URLs (with ETag caching and SSRF protection), or built-in rulesets in all four SDKs. `PolicyWatcher` and `PolicyPoller` support hot reload without restarting the process — currently TypeScript only.
 
 ```typescript
 import { PolicyWatcher, HushGuard } from '@hushspec/core';
@@ -491,6 +496,13 @@ scripts/           Code generation and CI tooling
 ## Specification
 
 The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for programmatic validation are in [`schemas/`](./schemas/). Full documentation is in [`docs/`](./docs/src/introduction.md).
+
+## Project
+
+- [`CHANGELOG.md`](./CHANGELOG.md) — release history, Keep a Changelog format.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — build/test commands, conventions, and the fixture-first rule for SDK changes.
+- [`GOVERNANCE.md`](./GOVERNANCE.md) — how spec changes are proposed, ratified, and released.
+- [`SECURITY.md`](./SECURITY.md) — supported versions and how to report a vulnerability.
 
 ## License
 

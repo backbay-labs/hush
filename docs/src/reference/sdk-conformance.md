@@ -9,10 +9,10 @@ not merely because it exposes merge helpers.
 
 | SDK | Level 0 | Level 1 | Level 2 | Level 3 | Notes | Evidence |
 |-----|---------|---------|---------|---------|-------|----------|
-| Rust | Yes | Yes | Yes | Yes | Rust now provides filesystem-based `extends` resolution with cycle detection, executes the evaluator fixture corpus through the reference evaluator, and publishes structured evaluator outputs. | [`rust`], [`shared-fixtures (rust)`], [`cross-sdk-roundtrip`] |
-| TypeScript | Yes | Yes | Yes | No | TypeScript now resolves filesystem-based `extends` chains with cycle detection and participates in the cross-SDK roundtrip corpus. It does not ship a reference evaluator. | [`typescript`], [`shared-fixtures (typescript)`], [`cross-sdk-roundtrip`] |
-| Python | Yes | Yes | Yes | No | Python now resolves filesystem-based `extends` chains with cycle detection and participates in the cross-SDK roundtrip corpus. It does not ship a reference evaluator. | [`python`], [`shared-fixtures (python)`], [`cross-sdk-roundtrip`] |
-| Go | Yes | Yes | Yes | No | Go now resolves filesystem-based `extends` chains with cycle detection and participates in the cross-SDK roundtrip corpus. It does not ship a reference evaluator. | [`go`], [`shared-fixtures (go)`], [`cross-sdk-roundtrip`] |
+| Rust | Yes | Yes | Yes | Yes | Rust provides filesystem-based `extends` resolution with cycle detection, executes the evaluator fixture corpus through the reference evaluator, and publishes structured evaluator outputs. | [`rust`], [`shared-fixtures (rust)`], [`cross-sdk-roundtrip`] |
+| TypeScript | Yes | Yes | Yes | Yes | TypeScript resolves filesystem-based `extends` chains with cycle detection, ships its own `evaluate()` engine, and runs the shared evaluation fixture corpus in CI (`shared-fixtures (typescript)`). It also participates in the cross-SDK roundtrip corpus. | [`typescript`], [`shared-fixtures (typescript)`], [`cross-sdk-roundtrip`] |
+| Python | Yes | Yes | Yes | Yes | Python resolves filesystem-based `extends` chains with cycle detection, ships its own `evaluate()` engine, and runs the shared evaluation fixture corpus in CI (`shared-fixtures (python)`). It also participates in the cross-SDK roundtrip corpus. | [`python`], [`shared-fixtures (python)`], [`cross-sdk-roundtrip`] |
+| Go | Yes | Yes | Yes | Yes | Go resolves filesystem-based `extends` chains with cycle detection, ships its own `evaluate()` engine, and runs the shared evaluation fixture corpus in CI (`shared-fixtures (go)`). It also participates in the cross-SDK roundtrip corpus. | [`go`], [`shared-fixtures (go)`], [`cross-sdk-roundtrip`] |
 
 [`rust`]: https://github.com/backbay-labs/hush/actions/workflows/ci.yml
 [`typescript`]: https://github.com/backbay-labs/hush/actions/workflows/ci.yml
