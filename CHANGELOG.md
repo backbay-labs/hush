@@ -113,6 +113,12 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   guard -> `check` -> `ChainedFileSink` + `OtlpSink`, with metrics, a monitored rule block and
   hot reload. New guide `docs/src/guides/runtime-integration.md`.
 - `Policy::panic_state()` reads the kill switch a policy will compile with.
+### Added (RFC 09 Wave 5, spec-first)
+
+- **D18 ratified** (posture spec 5.3): a transition whose `from` names the current state outranks a `"*"` transition for the same trigger; the reference evaluator now implements it and the last staged vector is promoted (`fixtures/staged/` is gone).
+- **`when.capability` and `when.rate`** (core spec 3.13, D19): a rule block can be gated on the effective posture state granting a capability, or on an engine-supplied counter in the new runtime-context `counters` map crossing a threshold; both are unevaluable-means-active. Rust implements them; `RateCondition`, `RateComparison`, `evaluate_condition_with_capabilities`, and `is_capability_identifier` are exported.
+- **`heuristic_injection@1`** (detection spec 3.5, D20): a normative, integer-scored prompt-injection detector with a fixed signal table that every engine must reproduce exactly, configured by `prompt_injection.heuristics`; the reference registry runs it beside `regex_injection@1`.
+- Lint L021 (warning): a `when.capability` naming a capability no posture state grants.
 
 ### Added (RFC 09 Wave 5, Integrations)
 

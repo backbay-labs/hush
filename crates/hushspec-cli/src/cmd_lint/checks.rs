@@ -633,6 +633,94 @@ pub(super) fn check_degenerate_conditions(
     }
 }
 
+/// L021 (warning): a `when.capability` that names a capability no posture state
+/// grants can never be true when the policy has a posture extension, so its
+/// block is permanently inert -- a control that reads as conditional and is
+/// actually switched off. Without a posture extension the predicate is
+/// unevaluable and the block stays active (core spec 3.13), so nothing is
+/// reported: the policy is then simply not using posture yet.
+pub(super) fn check_ungranted_capability_conditions(
+    spec: &HushSpec,
+    file: &str,
+    findings: &mut Vec<LintFinding>,
+) {
+    let Some(rules) = spec.rules.as_ref() else {
+        return;
+    };
+    let Some(posture) = spec
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.posture.as_ref())
+    else {
+        return;
+    };
+    let mut granted: Vec<&str> = posture
+        .states
+        .values()
+        .flat_map(|state| state.capabilities.iter().map(String::as_str))
+        .collect();
+    granted.sort_unstable();
+    granted.dedup();
+    for (block, condition) in rule_block_conditions(rules) {
+        if let Some(condition) = condition {
+            walk_capabilities(
+                condition,
+                &format!("{block}.when"),
+                &granted,
+                file,
+                findings,
+            );
+        }
+    }
+}
+
+fn walk_capabilities(
+    condition: &Condition,
+    path: &str,
+    granted: &[&str],
+    file: &str,
+    findings: &mut Vec<LintFinding>,
+) {
+    if let Some(name) = &condition.capability
+        && granted.binary_search(&name.as_str()).is_err()
+    {
+        findings.push(LintFinding::keyed(
+            "L021",
+            "warning",
+            format!(
+                "{path}.capability names `{name}`, which no posture state grants -- the block can never be active"
+            ),
+            file,
+            format!("{path}.capability"),
+        ));
+    }
+    if let Some(all_of) = &condition.all_of {
+        for (index, child) in all_of.iter().enumerate() {
+            walk_capabilities(
+                child,
+                &format!("{path}.all_of[{index}]"),
+                granted,
+                file,
+                findings,
+            );
+        }
+    }
+    if let Some(any_of) = &condition.any_of {
+        for (index, child) in any_of.iter().enumerate() {
+            walk_capabilities(
+                child,
+                &format!("{path}.any_of[{index}]"),
+                granted,
+                file,
+                findings,
+            );
+        }
+    }
+    if let Some(not) = &condition.not {
+        walk_capabilities(not, &format!("{path}.not"), granted, file, findings);
+    }
+}
+
 fn walk_condition(condition: &Condition, path: &str, file: &str, findings: &mut Vec<LintFinding>) {
     if let Some(window) = &condition.time_window {
         check_time_window(window, path, file, findings);

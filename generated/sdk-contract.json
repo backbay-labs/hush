@@ -156,13 +156,20 @@
       "context",
       "all_of",
       "any_of",
-      "not"
+      "not",
+      "capability",
+      "rate"
     ],
     "TIME_WINDOW_KEYS": [
       "start",
       "end",
       "timezone",
       "days"
+    ],
+    "RATE_CONDITION_KEYS": [
+      "counter",
+      "threshold",
+      "comparison"
     ],
     "POSTURE_KEYS": [
       "initial",
@@ -248,7 +255,12 @@
       "enabled",
       "warn_at_or_above",
       "block_at_or_above",
-      "max_scan_bytes"
+      "max_scan_bytes",
+      "heuristics"
+    ],
+    "PROMPT_INJECTION_HEURISTICS_KEYS": [
+      "enabled",
+      "min_score"
     ],
     "JAILBREAK_KEYS": [
       "enabled",

@@ -202,6 +202,13 @@ pub(super) const RULES: &[RuleDoc] = &[
         full: "The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. An `all_of`/`any_of` with no members is likewise always true.",
         level: "note",
     },
+    RuleDoc {
+        id: "L021",
+        name: "ungranted-capability",
+        short: "A `when.capability` names a capability no posture state grants.",
+        full: "With a posture extension present, a `when.capability` that no state grants can never be true, so its rule block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported.",
+        level: "warning",
+    },
 ];
 
 fn rule_index(code: &str) -> Option<usize> {

@@ -1070,6 +1070,37 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "not": {
           "$ref": "#/$defs/Condition",
           "description": "The sub-condition must not hold."
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "The effective posture state must grant this capability. Unevaluable (the block stays active) when the policy has no posture extension."
+        },
+        "rate": {
+          "$ref": "#/$defs/RateCondition"
+        }
+      }
+    },
+    "RateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counter", "threshold", "comparison"],
+      "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
+      "properties": {
+        "counter": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "Counter name in the runtime context's `counters` map."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Non-negative threshold."
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["gte", "lt"],
+          "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
     },
@@ -1313,6 +1344,28 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "minimum": 1,
           "default": 200000,
           "description": "Maximum input size to scan, in bytes."
+        },
+        "heuristics": {
+          "$ref": "#/$defs/PromptInjectionHeuristics"
+        }
+      }
+    },
+    "PromptInjectionHeuristics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration of the normative heuristic_injection@1 detector (detection spec 3.5).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the heuristic detector runs alongside the regex detector."
+        },
+        "min_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Integer scores below this floor are reported as 0 (no signal)."
         }
       }
     },
@@ -1549,6 +1602,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "current_time": {
           "type": "string",
           "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
+        },
+        "counters": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Engine-maintained counters consulted by `rate` conditions (core spec 3.13)."
         }
       }
     },

@@ -1,0 +1,10 @@
+# D19 (core 3.13): a counter name must match the identifier grammar.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      rate:
+        counter: "9lives"
+        threshold: 3
+        comparison: gte
+    forbidden_patterns: ["rm[ \\t]+-rf"]

@@ -57,11 +57,14 @@ export const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set(BROWSER_
 export const CODE_EXECUTION_KEYS = ['when', 'enabled', 'language_allowlist', 'module_denylist', 'network_access', 'max_execution_time_ms', 'max_scan_bytes'] as const;
 export const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set(CODE_EXECUTION_KEYS);
 
-export const CONDITION_KEYS = ['time_window', 'context', 'all_of', 'any_of', 'not'] as const;
+export const CONDITION_KEYS = ['time_window', 'context', 'all_of', 'any_of', 'not', 'capability', 'rate'] as const;
 export const CONDITION_KEYS_SET: ReadonlySet<string> = new Set(CONDITION_KEYS);
 
 export const TIME_WINDOW_KEYS = ['start', 'end', 'timezone', 'days'] as const;
 export const TIME_WINDOW_KEYS_SET: ReadonlySet<string> = new Set(TIME_WINDOW_KEYS);
+
+export const RATE_CONDITION_KEYS = ['counter', 'threshold', 'comparison'] as const;
+export const RATE_CONDITION_KEYS_SET: ReadonlySet<string> = new Set(RATE_CONDITION_KEYS);
 
 export const POSTURE_KEYS = ['initial', 'states', 'transitions'] as const;
 export const POSTURE_KEYS_SET: ReadonlySet<string> = new Set(POSTURE_KEYS);
@@ -102,8 +105,11 @@ export const BRIDGE_TARGET_KEYS_SET: ReadonlySet<string> = new Set(BRIDGE_TARGET
 export const DETECTION_KEYS = ['prompt_injection', 'jailbreak', 'threat_intel'] as const;
 export const DETECTION_KEYS_SET: ReadonlySet<string> = new Set(DETECTION_KEYS);
 
-export const PROMPT_INJECTION_KEYS = ['enabled', 'warn_at_or_above', 'block_at_or_above', 'max_scan_bytes'] as const;
+export const PROMPT_INJECTION_KEYS = ['enabled', 'warn_at_or_above', 'block_at_or_above', 'max_scan_bytes', 'heuristics'] as const;
 export const PROMPT_INJECTION_KEYS_SET: ReadonlySet<string> = new Set(PROMPT_INJECTION_KEYS);
+
+export const PROMPT_INJECTION_HEURISTICS_KEYS = ['enabled', 'min_score'] as const;
+export const PROMPT_INJECTION_HEURISTICS_KEYS_SET: ReadonlySet<string> = new Set(PROMPT_INJECTION_HEURISTICS_KEYS);
 
 export const JAILBREAK_KEYS = ['enabled', 'block_threshold', 'warn_threshold', 'max_input_bytes'] as const;
 export const JAILBREAK_KEYS_SET: ReadonlySet<string> = new Set(JAILBREAK_KEYS);

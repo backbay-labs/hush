@@ -391,10 +391,19 @@ extensions:
         &fixed_ctx(),
     );
     let trace = flagged.detection_trace.as_ref().expect("detection ran");
-    assert_eq!(trace.len(), 1);
+    assert_eq!(
+        trace.len(),
+        2,
+        "the regex and the heuristic prompt-injection detectors both ran"
+    );
     assert_eq!(trace[0].detector_id, "regex_injection@1");
     assert!(trace[0].score > 0.0);
     assert!(trace[0].matched);
+    assert_eq!(trace[1].detector_id, "heuristic_injection@1");
+    assert!(
+        trace[1].matched,
+        "instruction_override + exfiltration_coercion scores 75"
+    );
     assert_ne!(flagged.decision, Decision::Allow);
     assert_eq!(flagged.matched_rule.as_deref(), Some("detection"));
     assert_schema_valid(&flagged);

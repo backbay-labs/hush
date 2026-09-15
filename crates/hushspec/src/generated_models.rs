@@ -518,6 +518,17 @@ pub struct PromptInjectionDetection {
     pub block_at_or_above: Option<DetectionLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_scan_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heuristics: Option<PromptInjectionHeuristics>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PromptInjectionHeuristics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_score: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

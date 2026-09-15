@@ -1,0 +1,10 @@
+# D19 (core 3.13): threshold is a non-negative integer.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      rate:
+        counter: shell_commands
+        threshold: -1
+        comparison: gte
+    forbidden_patterns: ["rm[ \\t]+-rf"]

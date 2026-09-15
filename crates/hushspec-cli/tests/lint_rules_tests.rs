@@ -266,6 +266,50 @@ rules:
     assert_eq!(path, "rules.egress.when.time_window.start");
 }
 
+#[test]
+fn l021_reports_a_capability_no_state_grants() {
+    let findings = findings_of(
+        r#"hushspec: "0.1.0"
+name: ungranted-capability
+rules:
+  egress:
+    when:
+      capability: shell
+    allow: ["api.example.com"]
+    default: block
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call, egress]
+    transitions: []
+"#,
+    );
+    let (_, severity, path) = find(&findings, "L021").expect("L021");
+    assert_eq!(severity, "warning");
+    assert_eq!(path, "rules.egress.when.capability");
+}
+
+#[test]
+fn l021_is_silent_without_a_posture_extension() {
+    let findings = findings_of(
+        r#"hushspec: "0.1.0"
+name: no-posture
+rules:
+  egress:
+    when:
+      capability: shell
+    allow: ["api.example.com"]
+    default: block
+"#,
+    );
+    assert!(
+        find(&findings, "L021").is_none(),
+        "unevaluable predicates keep the block active"
+    );
+}
+
 /// `--fail-on-warnings` is the CI gate. An `info`-only run must still pass it,
 /// or the deny-all presets (`rulesets/panic.yaml`, `rulesets/strict.yaml`)
 /// could not be gated at all.

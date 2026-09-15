@@ -17,7 +17,7 @@ The specification defines a YAML-based document format that any conformant engin
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.
 
-**Test vector.** A fixture file under `fixtures/` in the reference repository that exercises a requirement. Where a requirement names a test vector, a conformant engine MUST produce the decisions that vector expects. Vectors marked *staged* (`fixtures/staged/`) encode requirements ratified in this version that the reference implementation has not yet shipped; they become normative for conformance when promoted into `fixtures/`.
+**Test vector.** A fixture file under `fixtures/` in the reference repository that exercises a requirement. Where a requirement names a test vector, a conformant engine MUST produce the decisions that vector expects.
 
 ### 1.2 Design Principles
 
@@ -456,6 +456,8 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `all_of`      | array of Condition      | Every sub-condition must be true.                                                           |
 | `any_of`      | array of Condition      | At least one sub-condition must be true. An empty array is treated as absent.               |
 | `not`         | Condition               | The sub-condition must be false.                                                            |
+| `capability`  | string                  | The effective posture state MUST grant this capability. Unevaluable when the policy has no posture extension. |
+| `rate`        | object                  | An engine-supplied counter compared with a threshold. See below.                          |
 
 **Time window object.**
 
@@ -466,25 +468,47 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset `+HH:MM`/`-HH:MM`. |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
 
+**Rate condition object.**
+
+| Field        | Type    | Required | Description                                                                                  |
+|--------------|---------|----------|----------------------------------------------------------------------------------------------|
+| `counter`    | string  | REQUIRED | Name of a counter in the runtime context's `counters` map (identifier grammar below).       |
+| `threshold`  | integer | REQUIRED | Non-negative.                                                                                |
+| `comparison` | string  | REQUIRED | `gte` (true when `counter >= threshold`) or `lt` (true when `counter < threshold`).          |
+
+The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation.
+
+**Capability condition.** `capability` names a posture capability (posture spec Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
+
+**Identifier grammar.** Capability names and counter names are one or more dot-separated segments, each a lowercase ASCII letter followed by lowercase ASCII letters, digits, or underscores:
+
+```abnf
+identifier = segment *("." segment)
+segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+```
+
 The window is half-open: it contains the current local time `t` when `start <= t < end`. When `start > end` the window wraps midnight and contains `t` when `t >= start` or `t < end`; for wrapped windows, a time before `end` counts toward the *previous* calendar day when `days` is checked. When `start == end` the window is the whole day. The current time is the engine's clock converted to `timezone`, or the runtime context's `current_time` when supplied.
 
-**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
+**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
 - has a `time_window` whose `start` or `end` is not `HH:MM` with `00 <= HH <= 23` and `00 <= MM <= 59`;
 - has a `timezone` that is neither an IANA identifier known to the engine nor a fixed offset;
 - lists a `days` entry outside the seven abbreviations;
-- nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep.
+- has a `capability` or a `rate.counter` that does not match the identifier grammar;
+- has a `rate` object missing `counter`, `threshold`, or `comparison`, a negative `threshold`, or a `comparison` other than `gte` / `lt`;
+- nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep. `capability` and `rate` are leaf predicates and do not add nesting.
 
 **Evaluation (fail-closed toward enforcement).**
 - A `context` key that is absent from the runtime context makes the condition `false`.
 - An engine that cannot resolve the `timezone` at evaluation time (for example because its time-zone database lacks the identifier) MUST treat the block as **active**, not inert: an unresolvable condition MUST NOT switch a security control off.
-- Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation.
+- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are **unevaluable** and MUST be treated as held: the block stays active. An unevaluable condition MUST NOT switch a security control off.
+- Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation. Because `capability` depends on the effective posture state, engines resolve posture (and the origins profile it may come from) before evaluating conditions.
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`.
 
 ### 3.14 Pattern Matching
 
@@ -692,7 +716,6 @@ Implementations of HushSpec declare conformance at one of six levels. Each level
 
 A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v0.schema.json`; a level reported as `not_attempted` is not a pass.
 
-Vectors under `fixtures/staged/` are not part of any level until they are promoted (Section 1.1).
 
 ### Level 0: Parser
 
@@ -906,3 +929,6 @@ Each entry names the decision ID from RFC 09 (`docs/plans/09-compliance-as-code-
 | D16 | 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
 | D17 | 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
 | --  | 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
+| D18 | posture 5.3    | Named `from` outranks `"*"` for the same trigger (see posture spec Appendix C).                              |
+| D19 | 3.13           | `when` gains the `capability` and `rate` leaf predicates; the runtime context gains `counters`; identifier grammar for capability and counter names. |
+| D20 | detection 3.5  | The normative `heuristic_injection@1` detector: integer scoring over a fixed signal table, reproduced exactly by every engine. |
