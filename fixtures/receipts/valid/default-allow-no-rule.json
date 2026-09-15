@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01994b7e-2c24-7444-8444-0123456789ab",
+  "timestamp": "2026-09-15T08:30:00.123Z",
+  "time_source": "system",
+  "actor": {
+    "runtime": "hushspec-go/0.2.0"
+  },
+  "policy": {
+    "name": "default",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5"
+  },
+  "action": {
+    "type": "file_read",
+    "target": "/proj/README.md"
+  },
+  "decision": "allow",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "path matches no forbidden pattern"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "block not present"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "duration_us": 41
+}
