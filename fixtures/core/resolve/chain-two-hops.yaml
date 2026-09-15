@@ -1,5 +1,5 @@
 hushspec_resolve: 0.1.0
-description: a builtin that itself extends a builtin yields three links, root first
+description: a policy that extends a builtin yields two links, root first
 policy:
   hushspec: 0.1.0
   name: grandchild

@@ -138,7 +138,7 @@ fn definitions() -> Vec<(&'static str, &'static str, String, Option<&'static str
         ),
         (
             "chain-two-hops",
-            "a builtin that itself extends a builtin yields three links, root first",
+            "a policy that extends a builtin yields two links, root first",
             "hushspec: \"0.1.0\"\nname: grandchild\nextends: \"builtin:ai-agent\"\nrules:\n  tool_access:\n    block: [\"deploy\"]\n    default: allow\n".to_string(),
             None,
         ),
