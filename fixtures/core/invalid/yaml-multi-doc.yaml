@@ -1,4 +1,4 @@
-# D17 (core 2.4): a file must contain exactly one YAML document. Staged: Go currently decodes only the first document.
+# A file must contain exactly one YAML document (core spec 2.4).
 hushspec: "0.1.0"
 name: first
 ---

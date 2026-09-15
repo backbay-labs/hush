@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D19 (core 3.13): a when.capability condition gates its block on the effective posture state granting the capability; a state that does not grant it makes the block inert"
+description: "A when.capability condition gates its block on the effective posture state granting the capability; a state that does not grant it makes the block inert (core spec 3.13)"
 policy:
   hushspec: "0.1.0"
   rules:

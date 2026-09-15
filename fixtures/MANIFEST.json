@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "0.2.0",
-  "generated_at": "2026-09-15T20:13:13Z",
+  "generated_at": "2026-09-15T21:43:25Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -61,70 +61,70 @@
     },
     {
       "path": "fixtures/core/evaluation/browser-automation.test.yaml",
-      "sha256": "aa12df34041abdb1a5acedee08ed53c76c8ff03b76051b080c87b216238b5fd2",
+      "sha256": "03e155fa53160f68cadf8e2731d8c6d0de8ef070adc8ba3ef9ad10c2690889cb",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/code-execution.test.yaml",
-      "sha256": "7a74be93a477a9debd0ef65f927ac248ad5d4ab6183defb1d480ce5aa4637f75",
+      "sha256": "7e69a129be57cab59a796293c4722df021d082095781e7b0b1fca4a2a8af9ed1",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml",
-      "sha256": "530b4be51c60477e872430ad1ba68a301abcdc5734a1b001dc68968d4881b740",
+      "sha256": "ca0c22c1559f093f8a1d8af98bd7a93deb61e389362e5848a118728cb49e1772",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/computer-use.test.yaml",
-      "sha256": "2bc7e9094e6f799f5bcb011262c15a6cca40a865ca6b742e10f103b9e8da398b",
+      "sha256": "f0b1a314d2c335654816c363539eb74e17c494517b268c20a46a73208c89b72f",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml",
-      "sha256": "47763d5f53b910d755ade92c50aaece6732f21f6f8579bbeee710aa43f5da2c1",
+      "sha256": "8dba0746d2374e4cee7a3e8d54cdf1431796fbd78f5b68d1a5d70a2f3c20fc1f",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/conditions-capability.test.yaml",
-      "sha256": "0a15315787dfe6920addb2f07fbd85df5d629c1f57c5ffa88ad5e4c137ff8cc2",
+      "sha256": "244aa62c527d5174ecdf7819b198dca059dab1fdd9d1993e2a745bac3cd855a4",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/conditions-rate.test.yaml",
-      "sha256": "aa77256ffc3e421dc13b1266f7227fe4f1492d7bfc3d3956c4c0b06c6fc82301",
+      "sha256": "dad99fa8ed46a8a87a8c00e80df75f2b1e11b0942d5d7e82e773c1c83f040e45",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/conditions.test.yaml",
-      "sha256": "4c5fe13fdcc794aade1c22c3c02592b011de23b4d8da748abeefbf4de0ab2e2b",
+      "sha256": "bc420a8642a81ca8600a2a1004a3bed44ed9ccb9a40258c7eb059f61b7376e5c",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/content-scan-egress-tool.test.yaml",
-      "sha256": "9a117a2502f8ed350c77412af7ae902ac66d0a706ce0ccaef5643ed3a4914e9b",
+      "sha256": "6cd3e32cb9a808fbb397a80c1894e4034b1ec68f8f449b0f5c42011e34d7dcfb",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/custom-action-capability.test.yaml",
-      "sha256": "0cd87feb402898aa962cd7e8ad5358c76db34922f74173234c432982bcdf4b49",
+      "sha256": "63c0dce5e481527cabf48d67cfda22c9676f9b40becfab315829dc21588b3121",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -152,14 +152,14 @@
     },
     {
       "path": "fixtures/core/evaluation/egress-host-normalization.test.yaml",
-      "sha256": "b80bb94dea561d5216a1f912e87619344aad481455c7c0a3ebb445b782545ac8",
+      "sha256": "e217f7997af66242adbde3079ebb3eb82b8b7079ad31e3f89787d6b24bcbd089",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/egress-normalization.test.yaml",
-      "sha256": "865ea80c6d933b096196c2ce90f0f1ea7976147c57056b597e045ddd25bd78c0",
+      "sha256": "5559395c2eaf9d66b2bf73b6867f190f5f1f2a29e6b1728d7b2929c52ce697ca",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -201,21 +201,21 @@
     },
     {
       "path": "fixtures/core/evaluation/no-early-return.test.yaml",
-      "sha256": "bccd7bfb2df2d734d76ccee61245f623143a7efb70e9260c0563b05632da1d91",
+      "sha256": "1a800b1cda2cd1c7973acf635c333f38feee7d993be8dc33dedc687a948c31c9",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/patch-balance-zero.test.yaml",
-      "sha256": "d7b42cccfb120456abeb8e1b21d23bd703f75cefda4e175c2986c8e85f1dcf03",
+      "sha256": "eb36df38f8f262e5c60b802a6f3906e975247c24991809e7d3f0a9c708753dd9",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/patch-balance.test.yaml",
-      "sha256": "1dacc2fb66a7acbc45416994772c8df5027df5186fefcc8c9cbe5de9b01b29f5",
+      "sha256": "f3bb71a55424f062c3ac572945fa9b2eed9595e00e51994d2d57a6665b04249f",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -229,21 +229,21 @@
     },
     {
       "path": "fixtures/core/evaluation/patch-integrity.test.yaml",
-      "sha256": "3efdcba0c48c680a2a1414d5fa2cd3fab1fed8cf51e28cbc613c7ca9251b432a",
+      "sha256": "572d2093a8ce4d6215152ecdc79dd84c4b5a222c0ced7e9b17ae624aa83dfa81",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/path-normalization-lexical.test.yaml",
-      "sha256": "a248275622432069c26982378e1478b14980c56131ca06bf42b4f72674452e13",
+      "sha256": "7b963785abc96ab6edde4c532d59c75b4e9db1321500ca1ef480702b9c86f3b0",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/path-normalization.test.yaml",
-      "sha256": "98cd82f2608579b2ed59df03682cd897bb633a6b57bc6f4da9a26a3db06190be",
+      "sha256": "5174b43c46897f80f1868e150970793b1510b4acec7052103275cca3ac960015",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -257,7 +257,7 @@
     },
     {
       "path": "fixtures/core/evaluation/regex-ascii-classes.test.yaml",
-      "sha256": "f45cb16efab5cd267e2de3466d316178a5644981439c15a110bac2284a86fdf3",
+      "sha256": "15245dcc5537d2f8abce6d0397e27d2ba8d049cd0e31bbbad0e3cb3e8b5cf9af",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -278,14 +278,14 @@
     },
     {
       "path": "fixtures/core/evaluation/rule-trace.test.yaml",
-      "sha256": "d97f51e67478eb431feffc775b8f792e121d7ca7b1d76c8bc1af91e6b6e3c767",
+      "sha256": "3b1b2f58cd5b14ca52762c87e5f40d8134e2783fc3a9a7b458b6d05f3ad258e5",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/secret-patterns-content-presence.test.yaml",
-      "sha256": "97bcabfb888e947a7c3f99a329aeea87430a5d88471d88f1ffd9f028cc3c4d2b",
+      "sha256": "048b9a73642980de947e703686914c859106ab3c3be8d7101cee8669202f0ccc",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -299,21 +299,21 @@
     },
     {
       "path": "fixtures/core/evaluation/secret-severity-mapping.test.yaml",
-      "sha256": "2aeae5f9ae9e63d0e9999110bf67de3b8a5f1da56a70152736b36bffd92a1f7e",
+      "sha256": "00e1573314b5197b92f55bae6eb12f40687f334229020437ad0c6e8aa8dca46e",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/severity-mapping.test.yaml",
-      "sha256": "1e0c54c04bc9ff72e7bd87d0c528d278b5929972f366a5de7b8bc9577a9e8daa",
+      "sha256": "d8b69129111dd4c9068adb2823d8eec8a361c6f2685effa20fc69b4f1c439324",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/severity-precedence.test.yaml",
-      "sha256": "1df04d27e0f51146c01943bdefeaa0b3c6a2fb362cd8b0d74c56cd20f29915aa",
+      "sha256": "72bfc682a9e540069c70b967119e9a78c837413cfab7cb3648dae7f56504d91a",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -327,28 +327,28 @@
     },
     {
       "path": "fixtures/core/evaluation/tool-access.test.yaml",
-      "sha256": "6813d881a1cfb6db1f7d87a4ae2503691735738d3d30c6d5c8b499696fdd1993",
+      "sha256": "41db170aec09092013f88d3a9e7c6eaa31c7827cf93c35f30c3390fd3fcaee43",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/tool-allowlist-deny.test.yaml",
-      "sha256": "996143bc9f855f7089a4c26c30eff471c92c0511d4dc6982f2561046b12a880c",
+      "sha256": "85aec5ae69b7c949109941511ee4ff3374010dea145f677e423b60a1c6324dd2",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/tool-exact-match.test.yaml",
-      "sha256": "b79a037f0fc15a8899456b0af14a2b24320051e14b3ba62b6f0146637b12b0a6",
+      "sha256": "bf165e590aaa64000af63b987aaa98b5310221b26f6e375fbb4147fb548d377a",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/tool-glob-literal.test.yaml",
-      "sha256": "f3c35ceb8e9dbc87e8bef0803125332b681475dc1b770138d04eb1fb44e51780",
+      "sha256": "8aaa4add41f9ee316fe56667f642d946dffc84e6aea2ec745411292074386b17",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -362,14 +362,14 @@
     },
     {
       "path": "fixtures/core/evaluation/unknown-action.test.yaml",
-      "sha256": "baadcd20f8f466f2a8a940e456bebdb83435b51894a70462bed289ee0629c4d8",
+      "sha256": "884585656c3b15e5f32fe64fc627c47c6dda686000c32bb758fe357ade5a274c",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/hash/README.md",
-      "sha256": "4bb7ddbc283705640ef55d80d4433e57fbffb3afd226a35983c3ad5b68fbcbe6",
+      "sha256": "b1a538003b63003eb6857ee4b2d50cd3f889b14f6c76e5a2cbb93a6e039ae6b0",
       "category": "doc",
       "module": "core",
       "level": 0
@@ -523,7 +523,7 @@
     },
     {
       "path": "fixtures/core/invalid/float-version.yaml",
-      "sha256": "1a6dfaf0a9cf937a94c4c8b88b1145d7317d9d5cbd7cd05841b909b0dd55e64d",
+      "sha256": "5cf5800b15db7faa950a47ab619313896ecbb6cd693288884ad4a39621c0c412",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -663,7 +663,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-bad-day.yaml",
-      "sha256": "93458d8b042f26a4bb0c6b54910b66e147f291a7bb2064dc6ae503f7a9de828a",
+      "sha256": "b11c6e3143f7f3ade18b9b9a1d96db9118e9162667c13a07b96c610b82510591",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -677,7 +677,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-bad-time.yaml",
-      "sha256": "3597bc33ffbec902f4895765af65670ceedb585ea1fd397afd6e2dbbf11d5ba3",
+      "sha256": "1535989a6652055a9fc4a383e0737f916c857b437f49b92065eb971fa66bd576",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -691,7 +691,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-bad-timezone.yaml",
-      "sha256": "f8e7559792a1ee7f234f7e44fefa5f79e663d093518e39fdd034aa0c93594abd",
+      "sha256": "7957774ac05a9550a1ad032521203b18b11d7efe7b64ab91bc4cb77e25dba272",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -705,7 +705,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-capability-bad-name.yaml",
-      "sha256": "b80689f1a4d1aa4788d450ae4240f93bbb44157154f8485790513098064df015",
+      "sha256": "f025f32816723b1fe125b3790b8cfbb224120aedd4efa7b370ebd28c53150c94",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -719,7 +719,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-rate-bad-comparison.yaml",
-      "sha256": "4bd1e8d5ba3c9d021f81a7765dd8a71c4f1f8badc29ff68465a3dabfaf5f8359",
+      "sha256": "cb721c1c05114b39704bfd92b6cb559f8d81721733d02823da6678670f761cf2",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -733,7 +733,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-rate-bad-counter.yaml",
-      "sha256": "df7ea85f26b60372264a856aeed5545902f5012ac6eb31f69a199d0d6e819554",
+      "sha256": "89a425beae982a209e76e7090431541420eea06193869c00744231fe597b5887",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -747,7 +747,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-rate-missing-threshold.yaml",
-      "sha256": "8183a3d3d41d639c2c352758bf416e816de1e2b46a48c866e4aface3f6a0bc5e",
+      "sha256": "78c8a23a95b81552909c7e061b05ad626b6c9f150682022aa3e8d47f80ee5b71",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -761,7 +761,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-rate-negative-threshold.yaml",
-      "sha256": "d97ea4ff9c22bc28eed2904ecd48988008e6bb1121ade4b082b82be2b55b08b1",
+      "sha256": "cc6777855ba2d88a7f2a6fcc842b6a932113b7db1dbafcbc3704abd4246e9beb",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -775,7 +775,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-too-deep.yaml",
-      "sha256": "93c09e0ca8fc3e9e528809321a0c6ed42a4eaf6b7876ea872c8eb8800986a6be",
+      "sha256": "d12cd64aa070a77221283dfc55356e8df81bc0dfe8493c5ed92fef0cb5228e12",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -789,7 +789,7 @@
     },
     {
       "path": "fixtures/core/invalid/when-unknown-key.yaml",
-      "sha256": "a3698de2530d3abdd96390d62cd46dac2612844c122bb1617c72befb7f7cf9b4",
+      "sha256": "0fd6f89ef7af9ab08ae5a6cbe2fe12efd6aef734a9e2a396752f258addf23e34",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -803,7 +803,7 @@
     },
     {
       "path": "fixtures/core/invalid/yaml-alias.yaml",
-      "sha256": "0ecd51f2ec239d8fafa19f9b885b3a24b34019ab66555d95bd5eb54f3eee1e5c",
+      "sha256": "e7837df740eed5d45e04faa3b583f3b4cc947e2d98184a4b03cacb41c60be71a",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -817,7 +817,7 @@
     },
     {
       "path": "fixtures/core/invalid/yaml-bool-yes.yaml",
-      "sha256": "76bc9b6791aa42919d34814e92ede4a05a0739e778948afcfaab9a65e9968ec4",
+      "sha256": "bbb6a521ee50d12499e30154deb2ee91d3319e1701c4c0610d2e46e303cec45c",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -831,7 +831,7 @@
     },
     {
       "path": "fixtures/core/invalid/yaml-duplicate-key.yaml",
-      "sha256": "3ab4e1a51b8d16b2ba897f09a376094376d30c413d85f54946094ff6396166b1",
+      "sha256": "11d853286bc2b43653b7802c44cbd11f25e2b9e600b2dfeabe0f6f7e05e11a4c",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -845,7 +845,7 @@
     },
     {
       "path": "fixtures/core/invalid/yaml-merge-key.yaml",
-      "sha256": "40ed2b39914dc9f70d13bc0eca645e4f6a06967d23c9b0a06d4454632f84e4fa",
+      "sha256": "11b08a480b74fd028e417d59bc6eee902e87a7dca73c1e4b97f9a9839e8a19fb",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -859,7 +859,7 @@
     },
     {
       "path": "fixtures/core/invalid/yaml-multi-doc.yaml",
-      "sha256": "bf512f7ade0bb6420cb742b7ad3b07a610127df71e7580be9db16706a2b7e2a6",
+      "sha256": "5a2598a9bacd30a8b7ddaf2cad6f282b81e328e872459c96f9ae5d2fbc8039a4",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -1160,35 +1160,35 @@
     },
     {
       "path": "fixtures/core/valid/version-patch-accept.yaml",
-      "sha256": "d3a4aab50fe0f70169cc7569fd82be3a4977ec5e25f0ac775b7b96ab6105a8ef",
+      "sha256": "b858230e25569017ac481939d3048edc6601be1acb1efd603dedc7ec9f87160a",
       "category": "valid",
       "module": "core",
       "level": 1
     },
     {
       "path": "fixtures/core/valid/when-conditions.yaml",
-      "sha256": "2d2647b2a7ebd8a766666a303c18798d0791850989719cb597b71a6bc651bb68",
+      "sha256": "b0a3770b2825fd2ebd29fd3194d1a2db37e14f81011939c083f1eb297cdcd5c5",
       "category": "valid",
       "module": "core",
       "level": 1
     },
     {
       "path": "fixtures/detection/evaluation/heuristic-injection-disabled.test.yaml",
-      "sha256": "1312b13ac70dc3e384fd83df36e1fa6e409ce2c43ad777b664fc371bf110b0ad",
+      "sha256": "bc00bb7ebc695fda325b814c31281ba862f367f05c207ea65b612726b185748f",
       "category": "evaluation",
       "module": "detection",
       "level": 3
     },
     {
       "path": "fixtures/detection/evaluation/heuristic-injection-min-score.test.yaml",
-      "sha256": "ade89b92080cbcf34116dd2d9201d23320e83864658f7c2ffc62c8f73620b7b2",
+      "sha256": "51f6beec07c55c3f4310be959ff5e4915fe139d48483c7099559085b5cea3f54",
       "category": "evaluation",
       "module": "detection",
       "level": 3
     },
     {
       "path": "fixtures/detection/evaluation/heuristic-injection.test.yaml",
-      "sha256": "c0ba96488dc0741d21835dcecb8522b1740c05135d9e9baa94be81d8f543b0dc",
+      "sha256": "23f12aa9c71265edfabfdd9d8efaab30b37d587a4a900aad54a739f21ceb9b6a",
       "category": "evaluation",
       "module": "detection",
       "level": 3
@@ -1293,56 +1293,56 @@
     },
     {
       "path": "fixtures/library/devops/cicd-hardened.test.yaml",
-      "sha256": "4d97424fda9dd13c2981ea66e57e862a49a06a01711a2f4af9e61a72a555d265",
+      "sha256": "0525ea8592c0c1c7147b27b63383dc51afb22bb644badfc995b2719bcefa16d4",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/education/ferpa-student.test.yaml",
-      "sha256": "614b5e6f3b30698f9bad6a2065e69f921cdc332ae0b30bd350ada4b480a76294",
+      "sha256": "5f59f42ee89c78a27efab613fd32830857a54e06dbed75d1e163a5ffce55ad5e",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/finance/pci-dss.test.yaml",
-      "sha256": "ad98ac21a74548ba6aa90c9b2684e57b7718be90b97a36389859d5d835736934",
+      "sha256": "2506748e72d40db7dac0f6204992c3075d27e60cfdd8c9b4035adaa39d1835c2",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/finance/soc2-base.test.yaml",
-      "sha256": "8cdb7fda88a7f0035dc75764b4b82e5a72b9570928b60ee210ca28c1f5641ad4",
+      "sha256": "e0aedb3317c085f5e8e36aee03d4946a2f3b016ee7c922f8bcafddd09b4d80ff",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/general/air-gapped.test.yaml",
-      "sha256": "8de2a37ed619f6950ff5f8588796837251164a37db4a41a28b6f74de5118b813",
+      "sha256": "4b8666580c2476055c9402b4eaed3d273798358609c7740e339e6df5e109ec60",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/general/recommended.test.yaml",
-      "sha256": "a1542631a9ba887a79a3c5c83325b915ca706d7bf03d1755a92ed8b51431873b",
+      "sha256": "de94b709cf927301cbe644dcc92b1341f5cfec4a7f2730341680cad6f383e8f6",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/government/fedramp-base.test.yaml",
-      "sha256": "d161774d348716656fd4c5bf7725faa2a9c8b5cd64ca5c98f9b178dd67fbe730",
+      "sha256": "3cad96b3a372fb7765d821b81c79bee8daf3f1a71b3ed11a3834298ceba8a777",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/healthcare/hipaa-base.test.yaml",
-      "sha256": "e9f6c033606594317c2643720800e1647d2c6767743ec7b2e161e82b329c7b81",
+      "sha256": "0df0347451912a46ddc7645ebf7823707e42a1cdcdb38690993360ee2eaa5a32",
       "category": "library-suite",
       "module": "library",
       "level": 3
@@ -1419,14 +1419,14 @@
     },
     {
       "path": "fixtures/origins/evaluation/default-behavior-deny.test.yaml",
-      "sha256": "64960714f02c0a8c593bba07e9352b8b12395dc712b03afcfc3ae2ce9b97c54a",
+      "sha256": "3d71ecc21d4f159702d887be661849fc4ecafa730e094dc64d2b5a895fe7e8cf",
       "category": "evaluation",
       "module": "origins",
       "level": 3
     },
     {
       "path": "fixtures/origins/evaluation/match-presence.test.yaml",
-      "sha256": "f9090589c45f3672912dead895dcb79d8f91303a5b303d5100788f8451325ba3",
+      "sha256": "4a444c1ff7a50e046cb7a4df1b07230a81e52aeb6c0f86bd0ea9a8e09abb9da0",
       "category": "evaluation",
       "module": "origins",
       "level": 3
@@ -1440,7 +1440,7 @@
     },
     {
       "path": "fixtures/origins/evaluation/origin-priority.test.yaml",
-      "sha256": "220f2c8647d007735dad4b4ef12f128c1767d399d10c0a41811314d75019c4b0",
+      "sha256": "0111ec3dfaad2d40184903dff4d4793bfad18b3ab0a654c8bc2b02ce49c15ed2",
       "category": "evaluation",
       "module": "origins",
       "level": 3
@@ -1454,7 +1454,7 @@
     },
     {
       "path": "fixtures/origins/evaluation/tri-state-overlay.test.yaml",
-      "sha256": "258ba8ca480d5cc4cf7fbba3f5e4b0fb3bf6e4ba93d3582c1332191a7e3f3c7e",
+      "sha256": "b7878008dd4a5931f900d99388bb18d0bb067c556cc37b82f818f34b9123e7dd",
       "category": "evaluation",
       "module": "origins",
       "level": 3
@@ -1545,7 +1545,7 @@
     },
     {
       "path": "fixtures/posture/evaluation/empty-capabilities.test.yaml",
-      "sha256": "780ce5d92b4d9e3f0100b497ed0758c60482550a386afb34bd65c9c38d0f2cc3",
+      "sha256": "c50e4b5f598c6c74ed0fffef6fbfd7348d485535d83408a84ef59aecb2f65445",
       "category": "evaluation",
       "module": "posture",
       "level": 3
@@ -1559,7 +1559,7 @@
     },
     {
       "path": "fixtures/posture/evaluation/transition-priority.test.yaml",
-      "sha256": "170c3ef21b3d9d5a81e32df1c928f2c4a041954d42b16fe8c80501ee7e0fd108",
+      "sha256": "9050429668fec6e404f1bb98b861c44dc29aeea87e738a3c2e62ba1324864eb2",
       "category": "evaluation",
       "module": "posture",
       "level": 3
@@ -3729,7 +3729,7 @@
     },
     {
       "path": "fixtures/report/README.md",
-      "sha256": "9710e42d0765db120f9ef2416389a0883b45a4318ea9ddb76d543ed29006d92f",
+      "sha256": "ae8ae551adce5faedf7f37f9925a54138228268522bad7ce3a2ee9772ef694cf",
       "category": "doc",
       "module": "report",
       "level": 0
@@ -3743,7 +3743,7 @@
     },
     {
       "path": "fixtures/signing/README.md",
-      "sha256": "b467758753a82e22972895655b99953aa716c1453cf52fc164df1f1a814df63c",
+      "sha256": "a9393217a5a4af203323e8c11e334b9b60a0128c7cae89bfb500d5d396419b9c",
       "category": "doc",
       "module": "signing",
       "level": 0

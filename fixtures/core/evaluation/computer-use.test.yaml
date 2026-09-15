@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "Computer use guard evaluation (D9, core 3.8: guardrail denies unlisted actions)"
+description: "Computer use guard evaluation: the guardrail denies unlisted actions (core spec 3.8)"
 policy:
   hushspec: "0.1.0"
   rules:

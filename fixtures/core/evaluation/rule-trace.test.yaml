@@ -35,7 +35,7 @@ cases:
           outcome: allow
         - rule_block: secret_patterns
           outcome: skip
-  - description: "a forbidden write still records the secret scan after the path denial (D2)"
+  - description: "a forbidden write still records the secret scan after the path denial"
     tags: ["rule-trace", "no-early-return"]
     action:
       type: file_write

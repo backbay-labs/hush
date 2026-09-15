@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D18 (posture 5.3): for the same trigger, a transition whose from names the current state outranks one whose from is the wildcard, regardless of document order; the wildcard still applies to states with no named transition"
+description: "For the same trigger, a transition whose from names the current state outranks one whose from is the wildcard, regardless of document order; the wildcard still applies to states with no named transition (posture spec 5.3)"
 policy:
   hushspec: "0.1.0"
   rules:

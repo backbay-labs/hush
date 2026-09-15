@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D12 (origins 3): a profile without a match field is never a candidate; an empty match object is the lowest-priority default profile"
+description: "A profile without a match field is never a candidate; an empty match object is the lowest-priority default profile (origins spec 3)"
 policy:
   hushspec: "0.1.0"
   rules:

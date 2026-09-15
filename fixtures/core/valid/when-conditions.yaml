@@ -1,4 +1,4 @@
-# D15 (core 3.13): every condition form is accepted on a rule block.
+# Every condition form is accepted on a rule block (core spec 3.13).
 hushspec: "0.1.0"
 name: when-conditions
 rules:

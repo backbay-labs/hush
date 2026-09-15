@@ -1,5 +1,5 @@
 hushspec_test: "0.2.0"
-description: "D20 (detection 3.5.1): heuristics.enabled false turns the heuristic detector off; only the regex detector records a trace entry"
+description: "heuristics.enabled false turns the heuristic detector off; only the regex detector records a trace entry (detection spec 3.5.1)"
 policy:
   hushspec: "0.1.0"
   rules:

@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D4 (core 3.7 step 5): when allow is non-empty, an unlisted tool is denied and default is not consulted"
+description: "When allow is non-empty, an unlisted tool is denied and default is not consulted (core spec 3.7 step 5)"
 policy:
   hushspec: "0.1.0"
   rules:

@@ -1,4 +1,4 @@
-# D17 (core 2.4): anchors and aliases are rejected. Staged: all four SDKs currently accept aliases.
+# Anchors and aliases are rejected (core spec 2.4).
 hushspec: "0.1.0"
 rules:
   forbidden_paths:

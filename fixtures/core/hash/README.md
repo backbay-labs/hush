@@ -17,7 +17,7 @@ say why in the commit message: every SDK must be updated in the same change.
 
 ## Status
 
-Hash-vector runners (RFC 09 P2-02), one per SDK:
+Hash-vector runners, one per SDK:
 
 - Rust: `cargo test -p hushspec --test canonical_vectors`, plus the testkit's `hash`
   category (`cargo run -p hushspec-testkit --bin hushspec-testkit -- --fixtures fixtures`).

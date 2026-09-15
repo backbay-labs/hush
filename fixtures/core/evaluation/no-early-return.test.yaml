@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D2 (core 6.1): every applicable block is evaluated; an allowlist or exception match never skips secret_patterns or patch_integrity"
+description: "Every applicable block is evaluated; an allowlist or exception match never skips secret_patterns or patch_integrity (core spec 6.1)"
 policy:
   hushspec: "0.1.0"
   rules:

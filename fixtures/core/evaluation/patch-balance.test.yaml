@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D10 (core 3.5): require_balance ratio semantics for non-zero counts"
+description: "require_balance ratio semantics for non-zero counts (core spec 3.5)"
 policy:
   hushspec: "0.1.0"
   rules:

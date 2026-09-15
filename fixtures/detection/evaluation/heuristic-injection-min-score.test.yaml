@@ -1,5 +1,5 @@
 hushspec_test: "0.2.0"
-description: "D20 (detection 3.5.1): heuristics.min_score floors the integer score; below it the detector reports 0 and contributes nothing"
+description: "heuristics.min_score floors the integer score; below it the detector reports 0 and contributes nothing (detection spec 3.5.1)"
 policy:
   hushspec: "0.1.0"
   rules:

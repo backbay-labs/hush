@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D9 (core 3.8): guardrail mode denies unlisted actions; supersedes the warn expectation in fixtures/core/evaluation/computer-use.test.yaml"
+description: "Guardrail mode denies unlisted actions; supersedes the warn expectation in fixtures/core/evaluation/computer-use.test.yaml (core spec 3.8)"
 policy:
   hushspec: "0.1.0"
   rules:

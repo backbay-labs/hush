@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D15 (core 3.13): a when condition gates its rule block; missing context makes the block inert; current_time drives time windows"
+description: "A when condition gates its rule block; missing context makes the block inert; current_time drives time windows (core spec 3.13)"
 policy:
   hushspec: "0.1.0"
   rules:
