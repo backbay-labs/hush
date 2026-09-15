@@ -39,12 +39,12 @@ import (
 // `key_id` does not match its public key, a policy that no longer resolves:
 // each is a rejection with a reason code, never a fallback.
 //
-// This file deliberately stops at sign and verify. Wiring verification into
-// policy loading (`require_signature`, digest-pinned `extends` hops) is
-// P2-08; a caller that wants it today resolves the chain itself and hands the
-// resolved document to [VerifyPolicy], which is also what spec section 10
-// requires of a verify-on-load implementation: verify the in-memory resolved
-// document, not a file that is re-read afterwards.
+// This file stops at sign and verify. Wiring verification into policy loading
+// -- `require_signature`, digest-pinned `extends` hops, a signature outcome
+// per chain hop -- is resolve.go's [ResolveWithOptions], which calls
+// [VerifyPolicy] once per hop against that hop's own resolved document. That
+// is what spec section 10 requires of a verify-on-load implementation: verify
+// the in-memory resolved document, not a file that is re-read afterwards.
 
 // SignatureFormatVersion is the only envelope format this SDK produces or
 // accepts (spec section 4). Verifiers never negotiate: any other value is
@@ -257,12 +257,29 @@ func envelopeErr(reason, format string, args ...any) *EnvelopeError {
 }
 
 // ReasonFromError returns the verification reason code carried by an
-// [EnvelopeError], so a caller can turn a parse failure into the reason code
-// it reports without type-switching by hand.
+// [EnvelopeError], a [DigestMismatchError] or a [SignatureRequiredError], so a
+// caller can turn a parse or load failure into the reason code it reports
+// without type-switching by hand.
 func ReasonFromError(err error) (string, bool) {
 	var envErr *EnvelopeError
 	if errors.As(err, &envErr) {
 		return envErr.Reason, true
+	}
+	// Verification on load (resolve.go) refuses a chain with two failures of
+	// its own, both of which a caller reports the same way as an envelope
+	// check: a hop whose pinned digest did not match, and a hop that required
+	// a signature and had none that verified.
+	var digestErr *DigestMismatchError
+	if errors.As(err, &digestErr) {
+		return ReasonDigestMismatch, true
+	}
+	var signatureErr *SignatureRequiredError
+	if errors.As(err, &signatureErr) {
+		reason := signatureErr.Status.Reason
+		if reason == "" {
+			reason = ReasonMissingSignature
+		}
+		return reason, true
 	}
 	return "", false
 }
