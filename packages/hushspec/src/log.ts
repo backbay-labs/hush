@@ -62,8 +62,8 @@ export function thisSdk(): SdkInfo {
 export type PolicyEventKind = 'loaded' | 'swapped';
 
 /**
- * A policy-in-effect record (RFC 09 P2-10): what was enforced from this
- * moment on, with the same identity a receipt carries.
+ * A policy-in-effect record (log spec 6): what was enforced from this moment
+ * on, with the same identity a receipt carries.
  */
 export interface PolicyEvent {
   event: PolicyEventKind;
@@ -371,9 +371,9 @@ export class ChainedFileSink implements ReceiptSink {
    * @throws {LogChainError} when the lock cannot be taken.
    */
   append(payload: Payload): LogEntry {
-    // Key order mirrors the Rust reference's struct order, so two SDKs writing
-    // the same chain produce byte-identical files (the hash itself is over the
-    // canonical form and does not depend on it).
+    // Member order is fixed (log spec 4), so two writers appending the same
+    // chain produce byte-identical files. The hash itself is over the
+    // canonical form and does not depend on it.
     const entry: LogEntry = {
       log_version: LOG_VERSION,
       seq: this.seq + 1,
@@ -416,7 +416,7 @@ export class ChainedFileSink implements ReceiptSink {
     this.append({ receipt });
   }
 
-  /** Record a policy-in-effect event (RFC 09 P2-10). */
+  /** Record a policy-in-effect event (log spec 6). */
   recordPolicyEvent(event: PolicyEvent): LogEntry {
     return this.append({ policyEvent: event });
   }

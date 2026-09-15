@@ -1,10 +1,10 @@
 /**
  * Pattern that detects regex features outside the RE2 subset.
  *
- * HushSpec requires all regex patterns to be RE2-compatible to prevent ReDoS
- * attacks. JavaScript's RegExp uses a backtracking engine that is vulnerable
- * to catastrophic backtracking with certain pattern constructs. By restricting
- * patterns to the RE2 subset, we ensure safe O(mn) evaluation across all SDKs.
+ * HushSpec requires every policy regex to stay inside the RE2 subset (core
+ * spec 3.14.3). JavaScript's `RegExp` is a backtracking engine, and certain
+ * constructs make it backtrack catastrophically; the subset keeps evaluation
+ * O(mn) whichever engine a conformant SDK is built on.
  *
  * Disallowed features:
  * - Backreferences: \1, \2, ..., \k<name>
@@ -21,14 +21,14 @@
  * - Recursive patterns: (?R), (?1), (?2), ...
  * - Named backreferences: (?P=name)
  * - Subroutine calls: \g<name>
- * - \Z / \z end-of-string anchors (Rust/Python/Go semantics differ from each
- *   other; JavaScript treats them as literal letters). Use $ instead.
- *   (checked separately by hasEndAnchorEscape below, since a fixed substring
- *   can't distinguish the anchor `\Z` from an escaped backslash followed by
- *   a literal Z, i.e. the pattern text `\\Z`)
+ * - \Z / \z end-of-string anchors (engines disagree on their meaning, and
+ *   JavaScript reads them as literal letters). Use $ instead. (checked
+ *   separately by hasEndAnchorEscape below, since a fixed substring can't
+ *   distinguish the anchor `\Z` from an escaped backslash followed by a
+ *   literal Z, i.e. the pattern text `\\Z`)
  * - Empty character classes: [], [^] (checked separately by
- *   hasEmptyCharacterClass below; JavaScript accepts them, Rust/Python/Go do
- *   not)
+ *   hasEmptyCharacterClass below; JavaScript accepts them where most engines
+ *   reject them)
  */
 const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g</;
 
@@ -39,9 +39,9 @@ export interface CompiledPolicyRegex {
 }
 
 export function isSafeRegex(pattern: string): boolean {
-  // RE2-feature check first: reject non-RE2 features (backreferences, lookaround,
-  // atomic constructs, ...). This alone guarantees safety on the RE2-based SDKs
-  // (Rust, Go).
+  // RE2-feature check first: reject the constructs outside the subset
+  // (backreferences, lookaround, atomic groups, ...). On an RE2-backed engine
+  // this alone is enough for the linear-time guarantee.
   if (RE2_DISALLOWED.test(pattern)) {
     return false;
   }
@@ -49,15 +49,15 @@ export function isSafeRegex(pattern: string): boolean {
   // `{n,m}+`), `\Z`/`\z` end-anchors, and empty character classes (`[]`,
   // `[^]`) all need escape/class-aware scanning to detect precisely -- a
   // fixed substring would also misfire inside an unrelated character class
-  // (e.g. `[*+]`, `[a{2}+]`) or on an escaped backslash followed by a literal
-  // Z/z (`\\Z`), so they get dedicated walks rather than a RE2_DISALLOWED
+  // (`[*+]`, `[a{2}+]`) or on an escaped backslash followed by a literal Z/z
+  // (`\\Z`), so each gets a dedicated walk rather than a RE2_DISALLOWED
   // alternative.
   if (hasPossessiveQuantifier(pattern) || hasEndAnchorEscape(pattern) || hasEmptyCharacterClass(pattern)) {
     return false;
   }
   // Nested-quantifier check last: RE2 tolerates shapes like `(a+)+` that
-  // catastrophically backtrack on the backtracking engines (JavaScript `RegExp`,
-  // Python `re`), so reject them here to keep the contract identical across SDKs.
+  // catastrophically backtrack on a backtracking engine, so they are rejected
+  // here too and the accepted set is the same whatever the engine.
   return !hasNestedQuantifier(pattern);
 }
 
@@ -69,8 +69,7 @@ type QuantKind = 'none' | 'bounded' | 'unbounded';
  * escaped parens and character-class contents -- and rejects when a group whose
  * body contains an unbounded quantifier (`*`, `+`, `{n,}`) is itself immediately
  * followed by an unbounded quantifier. Bounded quantifiers (`(a{1,3}){1,3}`,
- * `(abc)+`) are accepted. Must stay identical to the Rust, Python, and Go
- * implementations.
+ * `(abc)+`) are accepted.
  */
 function hasNestedQuantifier(pattern: string): boolean {
   const chars = Array.from(pattern);
@@ -203,24 +202,12 @@ function braceKind(inner: string): QuantKind {
  * Fail-closed, escape/class-aware scan for possessive quantifiers: the bare
  * forms `*+`, `++`, `?+` and the brace forms `{n}+`, `{n,}+`, `{n,m}+`.
  *
- * Both forms used to be split across two mechanisms: the bare forms were a
- * fixed substring in RE2_DISALLOWED, and only the brace form got a scanning
- * walk. That substring over-rejected possessive-*looking* characters that
- * are actually literal class members (e.g. `[*+]`, `[?+]`), so the bare
- * forms are now detected the same escape/class-aware way as the brace form,
- * in this single scan.
- *
- * Reuses `braceKind` to confirm a `{...}` is a genuine quantifier (not a
- * literal brace, e.g. `a{b}+`, where `+` legitimately quantifies the literal
- * `}`), and tracks character-class state (like hasNestedQuantifier) so a
- * `*`, `+`, `?`, or `}+` that is just literal text inside a class -- e.g.
- * `[*+]`, `[a{2}+]`, where those characters are all ordinary class members
- * -- is never misread as a quantifier. A `?` immediately after the closing
- * brace is the pre-existing, allowed lazy marker (`{n,m}?`), not possessive,
- * and is skipped rather than flagged.
- *
- * Must stay behaviorally identical to Rust `disallowed_regex_feature` / Go
- * `disallowedRegexFeature`.
+ * A fixed substring would over-reject: `*`, `+`, `?` and `}+` are ordinary
+ * literal members inside a character class (`[*+]`, `[?+]`, `[a{2}+]`), and a
+ * `{...}` that is not digit-shaped is a literal brace whose trailing `+`
+ * genuinely quantifies the `}` (`a{b}+`). So the scan tracks class state and
+ * reuses `braceKind` to confirm a real quantifier. A `?` after the closing
+ * brace is the allowed lazy marker (`{n,m}?`), not a possessive one.
  */
 function hasPossessiveQuantifier(pattern: string): boolean {
   const chars = Array.from(pattern);
@@ -264,37 +251,22 @@ function hasPossessiveQuantifier(pattern: string): boolean {
 
 /**
  * Fail-closed, escape/class-aware scan for the `\Z` / `\z` end-of-string
- * anchors (Rust/Python/Go treat them as anchors with subtly differing
- * semantics from each other and from `$`; JavaScript `RegExp` treats them as
- * a literal letter).
+ * anchors, which the profile forbids in favour of `$`: engines that treat
+ * them as anchors disagree with each other about whether a trailing newline
+ * is inside the match, and JavaScript `RegExp` reads them as a literal
+ * letter instead.
  *
- * Formerly a fixed substring in RE2_DISALLOWED, which couldn't distinguish
- * the anchor `\Z` (backslash then Z) from an escaped backslash followed by a
- * literal Z (the pattern text `\\Z`: backslash-backslash then Z, matching a
- * literal `\` then a literal `Z` -- not an anchor at all), so both were
- * rejected identically. Consuming the escaped pair (`i += 2`) only *after*
- * checking whether the next char is `Z`/`z` is what tells them apart: in
- * `\Z` the check fires on the first (only) backslash; in `\\Z` the first
- * backslash's escape pair consumes the second backslash before `Z` is ever
- * reconsidered, so by the time `Z` is reached it is an ordinary character,
- * not one immediately preceded by an unescaped backslash.
+ * The escaped pair is consumed (`i += 2`) only *after* checking whether the
+ * next character is `Z`/`z`, which is what distinguishes the anchor `\Z`
+ * (one backslash then Z) from the pattern text `\\Z` -- an escaped backslash
+ * followed by a literal Z, matching `\` then `Z` and not an anchor at all.
+ * In the latter the first backslash's escape pair swallows the second before
+ * `Z` is ever examined, so `\\Z` stays accepted.
  *
- * NOT class-aware for the anchor: `\Z`/`\z` are flagged even inside a
- * character class (`[\Z]`, `[\z]`, `[x\Z]`). JavaScript `RegExp` is the only
- * SDK engine that ACCEPTS `[\Z]`/`[\z]` (reading the escape as a literal
- * letter); Rust's `regex`, Python's `re`, and Go's RE2 all REJECT them at
- * compile time. Those three SDKs lean on that compile-time rejection -- their
- * `disallowed_regex_feature` scanners skip in-class `\Z` -- but TS
- * `isSafeRegex` has no compile backstop (`new RegExp('[\\Z]')` succeeds), so
- * this scan must reject in-class `\Z`/`\z` itself to keep the net accept/reject
- * decision identical across all four SDKs. The escaped-pair consumption
- * (`i += 2` only after the check) still keeps the literal `\\Z`
- * (backslash-backslash then Z) accepted everywhere -- there the first
- * backslash's escape pair consumes the second backslash before `Z` is ever
- * examined.
- *
- * Net accept/reject behavior stays identical to Rust `disallowed_regex_feature`
- * (+ its `Regex::new` backstop) / Go `disallowedRegexFeature`.
+ * Deliberately not class-aware for the anchor: `[\Z]`, `[\z]` and `[x\Z]` are
+ * flagged too. Engines that reject `\Z` at compile time also reject it inside
+ * a class, but `new RegExp('[\\Z]')` succeeds, so a pattern accepted here
+ * would be a compile error elsewhere unless this scan refuses it.
  */
 function hasEndAnchorEscape(pattern: string): boolean {
   const chars = Array.from(pattern);
@@ -328,12 +300,13 @@ function hasEndAnchorEscape(pattern: string): boolean {
 }
 
 /**
- * Fail-closed scan for empty character classes: `[]`, `[^]`. Unlike most
- * regex engines (Rust `regex`, Python `re`, Go RE2 all reject an empty class
- * as a compile error), JavaScript's `RegExp` accepts `[]` (matches nothing)
- * and `[^]` (matches any character, including newline) as valid syntax, so
- * neither `new RegExp(...)` nor hasNestedQuantifier's class handling catches
- * them. A class is empty when the first content character right after `[`
+ * Fail-closed scan for empty character classes: `[]`, `[^]`. Most regex
+ * engines reject an empty class as a compile error, but JavaScript's `RegExp`
+ * accepts `[]` (matches nothing) and `[^]` (matches any character, including
+ * newline) as valid syntax, so neither `new RegExp(...)` nor
+ * `hasNestedQuantifier`'s class handling catches them.
+ *
+ * A class is empty when the first content character right after `[`
  * (or after the `[^` negation marker) is an unescaped `]`, which in
  * JavaScript/PCRE-family semantics closes the class immediately rather than
  * being read as a literal `]` member (unlike POSIX bracket expressions).
@@ -380,20 +353,17 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  * ------------------------------------------------------------------------ */
 
 /**
- * The HushSpec regex profile: the one regex dialect every HushSpec engine must
- * implement, so a user-authored pattern in `secret_patterns`,
+ * The HushSpec regex profile (core spec 3.14.3): the one regex dialect every
+ * HushSpec engine implements, so a user-authored pattern in `secret_patterns`,
  * `patch_integrity.forbidden_patterns`, or `shell_commands.forbidden_patterns`
- * produces the *same* decision in Rust, TypeScript, Python, and Go.
+ * produces the *same* decision wherever the policy is enforced.
  *
- * The four SDK engines agree on syntax but disagree on semantics, so the
- * profile is reached by *translating* the author's pattern into an equivalent
- * pattern in each host dialect before compiling it. The same translation runs
- * in `validate` and in `evaluate`, so the two can never disagree.
+ * Host regex engines agree on syntax but disagree on semantics, so the profile
+ * is reached by *translating* the author's pattern into an equivalent pattern
+ * in the host dialect before compiling it. The same translation runs in
+ * `validate` and in `evaluate`, so the two can never disagree.
  *
- * Profile (normative summary; keep in sync with
- * `crates/hushspec/src/regex_profile.rs`,
- * `packages/python/hushspec/regex_profile.py`, and
- * `packages/go/hushspec/regex_profile.go`):
+ * Profile (summary of the normative definition):
  *
  * 1. Syntax is RE2-class -- lookaround, backreferences, possessive
  *    quantifiers, atomic/conditional/recursive groups and nested unbounded
@@ -415,14 +385,12 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  *    U+2028 and U+2029, and consumes a single UTF-16 code unit, so it is
  *    rewritten to an explicit alternation that takes a surrogate pair as one
  *    character (see `DOT_SOURCE`/`DOT_ALL_SOURCE`). The `u` flag would give the
- *    same code-point semantics but would also reject patterns the other three
- *    engines accept (identity escapes like `\-`, a literal `{`), so it is not
- *    used.
+ *    same code-point semantics but would also reject patterns the profile
+ *    accepts (identity escapes like `\-`, a literal `{`), so it is not used.
  * 5. `$` matches only at end of text, and `^` only at start, unless a leading
  *    `(?m)` makes them line anchors around `\n`. JavaScript's `m` flag also
  *    treats `\r`, U+2028 and U+2029 as line terminators, so `(?m)` is compiled
  *    by rewriting `^`/`$` to `\n`-only lookarounds rather than by setting `m`.
- *    (The Python SDK rewrites `$` to `\Z` for the non-`(?m)` case.)
  * 6. Unanchored search semantics.
  * 7. Compile failure at evaluation time denies, carrying the offending rule
  *    path (see `evaluate.ts`).
@@ -434,10 +402,10 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  * unsupported by at least one engine, or -- worse -- silently reinterpreted by
  * JavaScript as the bare letter.
  *
- * Known residual divergence: under a leading `(?i)`, Rust and Go case-fold with
- * the full Unicode simple case-folding table while JavaScript (no `u` flag) and
- * Python (`re.ASCII`) fold only ASCII, so U+017F (long s) and U+212A (Kelvin
- * sign) match `(?i)s` / `(?i)k` in Rust and Go but not here.
+ * Known residual divergence: under a leading `(?i)`, an engine that applies
+ * the full Unicode simple case-folding table matches U+017F (long s) and
+ * U+212A (Kelvin sign) against `(?i)s` / `(?i)k`. JavaScript without the `u`
+ * flag folds only ASCII, so they do not match here.
  */
 
 /** Character-class body for ASCII `\d`. */
@@ -451,9 +419,9 @@ const SPACE_BODY = '\\t\\n\\v\\f\\r ';
  * One code point that is not `\n` -- the profile's `.`.
  *
  * The surrogate-pair alternation comes first so an astral code point is
- * consumed whole, the way Rust/Python/Go `.` consumes one code point; a bare
- * `[^\n]` would consume half of it. `[^\n]` (unlike JavaScript's own `.`)
- * deliberately keeps `\r`, U+2028 and U+2029 as ordinary characters.
+ * consumed whole, as one character; a bare `[^\n]` would consume half of it.
+ * `[^\n]` (unlike JavaScript's own `.`) deliberately keeps `\r`, U+2028 and
+ * U+2029 as ordinary characters.
  */
 const DOT_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])';
 
@@ -461,9 +429,9 @@ const DOT_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])';
 const DOT_ALL_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\s\\S])';
 
 /**
- * `^` and `$` under a leading `(?m)`. JavaScript's `m` flag would also break
- * lines at `\r`, U+2028 and U+2029; Rust, Python and Go break only at `\n`, so
- * the anchors are spelled out with `\n`-only lookarounds instead.
+ * `^` and `$` under a leading `(?m)`. The profile breaks lines only at `\n`,
+ * while JavaScript's `m` flag would also break at `\r`, U+2028 and U+2029, so
+ * the anchors are spelled out as `\n`-only lookarounds instead.
  */
 const MULTILINE_START_SOURCE = '(?:^|(?<=\\n))';
 const MULTILINE_END_SOURCE = '(?:$|(?=\\n))';
@@ -587,7 +555,7 @@ function translateEscape(
       );
     }
     // JavaScript word boundaries are ASCII without the `u` flag, which is
-    // exactly the profile definition; Rust needs `(?-u:\b)` to get here.
+    // exactly the profile definition, so the escape passes through unchanged.
     return `\\${escaped}`;
   }
   if (escaped === 'A' || escaped === 'Z' || escaped === 'z') {
@@ -637,8 +605,8 @@ function translateEscape(
 
 /**
  * Walk the pattern body, translating profile constructs into JavaScript
- * `RegExp` source and rejecting anything that is not portable across the four
- * SDKs. `dotAll` and `multiLine` carry a leading `(?s)` / `(?m)`: both are
+ * `RegExp` source and rejecting anything outside the profile. `dotAll` and
+ * `multiLine` carry a leading `(?s)` / `(?m)`: both are
  * compiled by rewriting the affected constructs rather than by setting the `s`
  * and `m` flags, whose JavaScript definitions of "any character" and "line
  * terminator" both differ from the profile's.
@@ -671,8 +639,8 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
     }
 
     if (c === '[') {
-      // `[]` / `[^]` read as an empty class (a compile error) in Rust, Python
-      // and Go but as "match nothing"/"match anything" in JavaScript.
+      // `[]` / `[^]` are a compile error in most engines but read as "match
+      // nothing" / "match anything" in JavaScript.
       let cursor = index + 1;
       if (chars[cursor] === '^') {
         cursor += 1;
@@ -693,9 +661,9 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
       if (error != null) {
         throw new Error(error);
       }
-      // Python's named-group spelling `(?P<name>...)` is accepted by Rust, Go
-      // and Python but is a syntax error in JavaScript; `(?<name>...)` is
-      // accepted by every engine the profile targets.
+      // The `(?P<name>...)` named-group spelling is a syntax error in
+      // JavaScript; `(?<name>...)` means the same thing and is accepted by
+      // every engine the profile targets.
       if (chars[index + 1] === '?' && chars[index + 2] === 'P' && chars[index + 3] === '<') {
         out += '(?<';
         index += 4;

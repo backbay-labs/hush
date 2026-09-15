@@ -339,7 +339,7 @@ const ORIGINS = object({
         {
           id: { schema: LEAF },
           // `match: {}` is the explicit catch-all profile; an absent `match`
-          // never matches (spec section 3.3, origins D12).
+          // never matches (spec section 3.3, origins spec 3).
           match: {
             presenceSignificant: true,
             schema: object({

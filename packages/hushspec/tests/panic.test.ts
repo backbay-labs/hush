@@ -121,17 +121,13 @@ describe('panic mode', () => {
     expect(result.decision).toBe('deny');
   });
 
-  // DRIFT-GUARD: panicPolicy() is a YAML document (rulesets/panic.yaml,
-  // mirrored as PANIC_POLICY_YAML in src/evaluate.ts), not a hardcoded
-  // decision -- unlike the global activatePanic()/isPanicActive() switch
-  // tested above, it is only as deny-all as the rule blocks it declares. It
-  // was previously missing an `input_injection` block entirely, so
-  // evaluateInputInjection() fell through to its "no rule configured" allow
-  // default and an `input_inject` action was ALLOWED under the emergency
-  // deny-all policy. Assert deny for input_inject plus one action of every
-  // other governed rule type, so a future accidental drop of any block from
-  // PANIC_POLICY_YAML (or rulesets/panic.yaml drifting out of sync with it)
-  // is caught here instead of silently reopening a hole in panic mode.
+  // panicPolicy() is a YAML document (PANIC_POLICY_YAML in src/evaluate.ts,
+  // mirroring rulesets/panic.yaml), not a hardcoded decision like the global
+  // activatePanic()/isPanicActive() switch above: it is only as deny-all as
+  // the rule blocks it declares. A block dropped from it would leave its
+  // action type with no rule configured, which evaluates to allow -- a hole
+  // in the emergency policy. One action of every governed type is asserted
+  // here so that drift is caught rather than silently reopening one.
   it('panic policy denies input injection and every other governed action type', () => {
     const spec = panicPolicy();
     const actions = [

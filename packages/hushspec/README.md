@@ -43,8 +43,13 @@ import { HushGuard } from '@hushspec/core';
 
 const guard = HushGuard.fromFile('./policy.yaml');
 
-// Check without throwing
-const result = guard.check({ type: 'tool_call', target: 'bash' });
+// May this action proceed? (boolean, never throws)
+if (!guard.check({ type: 'tool_call', target: 'bash' })) {
+  console.log('Blocked');
+}
+
+// The decision and the disposition behind it
+const { result, proceed } = guard.gate({ type: 'tool_call', target: 'bash' });
 if (result.decision === 'deny') {
   console.log('Blocked:', result.reason);
 }
@@ -163,9 +168,10 @@ const guard = HushGuard.fromFile('./policy.yaml', {
 guard.enforce({ type: 'egress', target: 'api.github.com' });
 
 const report = verifyLogFiles(['./audit.jsonl']);
-if (!report.ok) {
-  // report.break names the file, 1-based line, and what failed there.
-  throw new Error(`${report.break.file}:${report.break.line}: ${report.break.message}`);
+if (report.break) {
+  // The first break: the file, the 1-based line, and what failed there.
+  const { file, line, message } = report.break;
+  throw new Error(`${file}:${line}: ${message}`);
 }
 ```
 
@@ -192,8 +198,8 @@ periodically as an external anchor.
 `OtlpReceiptSink` is a `ReceiptSink` that exports receipts and
 `policy_loaded` / `policy_swapped` events to an OpenTelemetry collector as
 OTLP/HTTP **logs** in JSON encoding (`POST <endpoint>/v1/logs`). It uses
-`node:http` / `node:https` directly, so the SDK stays dependency-free and an
-application that already runs the OTel SDK is unaffected.
+`node:http` / `node:https` directly, so the SDK takes no OpenTelemetry
+dependency and an application that already runs the OTel SDK is unaffected.
 
 ```typescript
 import { HushGuard, OtlpReceiptSink } from '@hushspec/core';
@@ -234,17 +240,35 @@ a convenience and the file is the evidence.
 
 ### Detection Pipeline
 
-Plug prompt injection, jailbreak, and exfiltration checks into the evaluation flow.
+Prompt injection, jailbreak and exfiltration checks run as part of evaluation
+whenever the policy carries a `detection:` extension. The extension configures
+them; there is nothing to wire up in code.
+
+```yaml
+extensions:
+  detection:
+    prompt_injection:
+      warn_at_or_above: suspicious
+      block_at_or_above: high
+    jailbreak:
+      warn_threshold: 50
+      block_threshold: 80
+```
 
 ```typescript
-import { evaluateWithDetection, DetectorRegistry } from '@hushspec/core';
+import { evaluateWithDetection } from '@hushspec/core';
 
-const registry = DetectorRegistry.withDefaults();
-const result = evaluateWithDetection(spec, action, registry, {
-  enabled: true,
-  prompt_injection_threshold: 0.5,
-});
+const { evaluation, detections, detectionDecision } = evaluateWithDetection(spec, action);
+// evaluation.decision  -> the decision to act on, detection folded in
+// detections           -> each detector's score and matched patterns
+// detectionDecision    -> what detection alone contributed, if anything
 ```
+
+Detection can escalate an allow or a warn but never weakens a policy deny.
+`HushGuard`'s `evaluate()`, `check()`, `gate()` and `enforce()` all route
+through the same pipeline, and a receipt records what ran in
+`detection_trace`. Register a custom `Detector` with `DetectorRegistry` to
+score input outside the built-in set.
 
 ### Framework Adapters
 

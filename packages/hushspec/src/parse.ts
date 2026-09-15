@@ -1,6 +1,7 @@
 import YAML, { isScalar } from 'yaml';
 import type { HushSpec } from './schema.js';
 import { validateForParse, type ErrorCode } from './validate.js';
+import { utf8ByteLength } from './utf8.js';
 
 export type ParseResult =
   | { ok: true; value: HushSpec }
@@ -24,7 +25,7 @@ export const MAX_DOCUMENT_DEPTH = 32;
 export const MAX_NODE_COUNT = 100_000;
 
 /**
- * Parse a HushSpec document under the YAML profile of core spec 2.4 (D17).
+ * Parse a HushSpec document under the YAML profile of core spec 2.4.
  *
  * The `yaml` package is configured for the YAML 1.2 Core schema (so `yes`/`no`
  * are strings, not booleans), rejects duplicate mapping keys, rejects tab
@@ -33,7 +34,7 @@ export const MAX_NODE_COUNT = 100_000;
  * depth and node count; those checks live here.
  */
 export function parse(yaml: string): ParseResult {
-  if (byteLength(yaml) > MAX_DOCUMENT_BYTES) {
+  if (utf8ByteLength(yaml) > MAX_DOCUMENT_BYTES) {
     return parseError(`document exceeds the maximum size of ${MAX_DOCUMENT_BYTES} bytes`);
   }
 
@@ -44,8 +45,7 @@ export function parse(yaml: string): ParseResult {
 
   let doc: unknown;
   // A duplicate mapping key is reported by the `yaml` package without naming
-  // the key; this records it so the diagnostic can say which one, the way the
-  // reference engine's deserializer does.
+  // the key; this records it so the diagnostic can say which one.
   let duplicateKey: string | undefined;
   try {
     doc = YAML.parse(yaml, {
@@ -115,10 +115,6 @@ function describeYamlError(error: unknown, duplicateKey: string | undefined): st
   return `duplicate entry with key ${JSON.stringify(duplicateKey)}${where}`;
 }
 
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
 interface Measured {
   depth: number;
   nodes: number;
@@ -139,8 +135,8 @@ function measure(value: unknown, depth: number): Measured {
     let maxDepth = depth;
     let nodes = 1;
     for (const [, item] of Object.entries(value as Record<string, unknown>)) {
-      // The key is a scalar node one level down, matching the reference
-      // engine's traversal of YAML mappings.
+      // A mapping key is itself a scalar node one level down, so it counts
+      // toward both the depth and the node budget (core spec 2.4).
       if (depth + 1 > maxDepth) maxDepth = depth + 1;
       nodes += 1;
       const child = measure(item, depth + 1);
@@ -159,8 +155,7 @@ function measure(value: unknown, depth: number): Measured {
  * The scanner tracks comments, quoted scalars, and block scalars so that a `*`
  * or `&` inside them is not mistaken for an indicator. In YAML a plain scalar
  * cannot begin with `&` or `*`, so an indicator at a node-start position is
- * always an anchor or alias. Port of `yaml_profile_violation` in
- * `crates/hushspec/src/schema.rs`.
+ * always an anchor or alias.
  */
 export function yamlProfileViolation(yaml: string): string | undefined {
   let blockScalarIndent: number | undefined;

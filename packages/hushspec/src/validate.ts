@@ -103,15 +103,14 @@ type UnknownRecord = Record<string, unknown>;
 /**
  * Whether `key` is present on `obj` *with a value*.
  *
- * `key in obj` alone counts `{ extends: undefined }` as present. In
- * TypeScript an optional property explicitly set to `undefined` is
- * indistinguishable from an absent one -- and setting it is exactly what
- * `merge()` (and therefore `resolve()`) does for the fields it clears, while
- * the Rust, Python and Go SDKs drop those fields outright. Treating
- * `undefined` as present made a resolved document valid in three SDKs and
- * invalid in this one ("extends must be a string"). YAML never yields
- * `undefined` -- an empty scalar parses as `null`, which still reaches the
- * type checks below -- so this only forgives the in-memory spelling.
+ * `key in obj` alone counts `{ extends: undefined }` as present, but in
+ * TypeScript an optional property explicitly set to `undefined` is the
+ * in-memory spelling of an absent one -- and setting it is exactly what
+ * `merge()` (and therefore `resolve()`) does for the fields it clears. Reading
+ * it as present would make a resolved document fail with "extends must be a
+ * string". YAML never yields `undefined` -- an empty scalar parses as `null`,
+ * which still reaches the type checks below -- so this forgives nothing a
+ * document can express.
  */
 function hasValue(obj: unknown, key: string): boolean {
   return isRecord(obj) && key in obj && obj[key] !== undefined;
@@ -123,9 +122,9 @@ interface ValidationContext {
   checkSupportedVersion: boolean;
   includeWarnings: boolean;
   /**
-   * Semantic `when` checks (HH:MM, IANA zone, day names, nesting depth). The
-   * reference engine performs these in `validate()`, not at parse time, where
-   * only the structural shape is enforced.
+   * Semantic `when` checks (HH:MM, IANA zone, day names, nesting depth).
+   * These belong to `validate()`; parse time enforces only the structural
+   * shape (core spec 2.4, 3.13).
    */
   checkConditionSemantics: boolean;
 }
@@ -277,7 +276,7 @@ function validateRules(obj: UnknownRecord, ctx: ValidationContext): void {
 }
 
 function validateForbiddenPathsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, FORBIDDEN_PATH_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, FORBIDDEN_PATH_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'patterns', ctx, `${path}.patterns`);
@@ -285,7 +284,7 @@ function validateForbiddenPathsRule(obj: UnknownRecord, ctx: ValidationContext, 
 }
 
 function validatePathAllowlistRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, PATH_ALLOWLIST_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, PATH_ALLOWLIST_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'read', ctx, `${path}.read`);
@@ -294,7 +293,7 @@ function validatePathAllowlistRule(obj: UnknownRecord, ctx: ValidationContext, p
 }
 
 function validateEgressRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, EGRESS_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, EGRESS_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
@@ -303,7 +302,7 @@ function validateEgressRule(obj: UnknownRecord, ctx: ValidationContext, path: st
 }
 
 function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, SECRET_PATTERNS_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, SECRET_PATTERNS_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'skip_paths', ctx, `${path}.skip_paths`);
@@ -321,7 +320,7 @@ function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, 
       addError(ctx, 'E001', `${itemPath} must be an object`);
       return;
     }
-    rejectUnknownKeys(pattern, SECRET_PATTERN_KEYS_SET, ctx, `${itemPath}`);
+    rejectUnknownKeys(pattern, SECRET_PATTERN_KEYS_SET, ctx, itemPath);
     const name = validateRequiredString(pattern, 'name', ctx, `${itemPath}.name`);
     const regex = validateRequiredString(pattern, 'pattern', ctx, `${itemPath}.pattern`);
     validateRequiredEnum(pattern, 'severity', ctx, `${itemPath}.severity`, SEVERITIES_SET);
@@ -340,7 +339,7 @@ function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, 
 }
 
 function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, PATCH_INTEGRITY_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, PATCH_INTEGRITY_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalInteger(obj, 'max_additions', ctx, `${path}.max_additions`, { min: 0 });
@@ -356,7 +355,7 @@ function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, 
 }
 
 function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, SHELL_COMMAND_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, SHELL_COMMAND_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
 
@@ -367,7 +366,7 @@ function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, p
 }
 
 function validateToolAccessRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, TOOL_ACCESS_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, TOOL_ACCESS_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
@@ -378,7 +377,7 @@ function validateToolAccessRule(obj: UnknownRecord, ctx: ValidationContext, path
 }
 
 function validateComputerUseRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, COMPUTER_USE_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, COMPUTER_USE_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalEnum(obj, 'mode', ctx, `${path}.mode`, COMPUTER_USE_MODES_SET);
@@ -386,7 +385,7 @@ function validateComputerUseRule(obj: UnknownRecord, ctx: ValidationContext, pat
 }
 
 function validateRemoteDesktopRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, REMOTE_DESKTOP_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, REMOTE_DESKTOP_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalBoolean(obj, 'clipboard', ctx, `${path}.clipboard`);
@@ -396,7 +395,7 @@ function validateRemoteDesktopRule(obj: UnknownRecord, ctx: ValidationContext, p
 }
 
 function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, INPUT_INJECTION_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, INPUT_INJECTION_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allowed_types', ctx, `${path}.allowed_types`);
@@ -404,7 +403,7 @@ function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, 
 }
 
 function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, BROWSER_AUTOMATION_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, BROWSER_AUTOMATION_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allowed_domains', ctx, `${path}.allowed_domains`);
@@ -419,7 +418,7 @@ function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContex
 }
 
 function validateCodeExecutionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, CODE_EXECUTION_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, CODE_EXECUTION_KEYS_SET, ctx, path);
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'language_allowlist', ctx, `${path}.language_allowlist`);
@@ -445,7 +444,7 @@ function validateExtensions(obj: UnknownRecord, ctx: ValidationContext): void {
 }
 
 function validatePostureExtension(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, POSTURE_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, POSTURE_KEYS_SET, ctx, path);
 
   const initial = validateRequiredString(obj, 'initial', ctx, `${path}.initial`);
   const states = validateRequiredRecord(obj, 'states', ctx, `${path}.states`);
@@ -465,7 +464,7 @@ function validatePostureExtension(obj: UnknownRecord, ctx: ValidationContext, pa
         addError(ctx, 'E001', `${statePath} must be an object`);
         continue;
       }
-      rejectUnknownKeys(state, POSTURE_STATE_KEYS_SET, ctx, `${statePath}`);
+      rejectUnknownKeys(state, POSTURE_STATE_KEYS_SET, ctx, statePath);
       validateOptionalString(state, 'description', ctx, `${statePath}.description`);
 
       const capabilities = validateOptionalStringArray(state, 'capabilities', ctx, `${statePath}.capabilities`);
@@ -502,7 +501,7 @@ function validatePostureExtension(obj: UnknownRecord, ctx: ValidationContext, pa
         return;
       }
 
-      rejectUnknownKeys(transition, POSTURE_TRANSITION_KEYS_SET, ctx, `${transitionPath}`);
+      rejectUnknownKeys(transition, POSTURE_TRANSITION_KEYS_SET, ctx, transitionPath);
 
       const from = validateRequiredString(transition, 'from', ctx, `${transitionPath}.from`);
       const to = validateRequiredString(transition, 'to', ctx, `${transitionPath}.to`);
@@ -536,7 +535,7 @@ function validateOriginsExtension(
   path: string,
   postureStates: Set<string> | undefined,
 ): void {
-  rejectUnknownKeys(obj, ORIGINS_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, ORIGINS_KEYS_SET, ctx, path);
   validateOptionalEnum(obj, 'default_behavior', ctx, `${path}.default_behavior`, ORIGIN_DEFAULT_BEHAVIORS_SET);
 
   if (!hasValue(obj, 'profiles')) return;
@@ -553,7 +552,7 @@ function validateOriginsExtension(
       return;
     }
 
-    rejectUnknownKeys(profile, ORIGIN_PROFILE_KEYS_SET, ctx, `${profilePath}`);
+    rejectUnknownKeys(profile, ORIGIN_PROFILE_KEYS_SET, ctx, profilePath);
     const id = validateRequiredString(profile, 'id', ctx, `${profilePath}.id`);
     if (id) {
       if (profileIds.has(id)) {
@@ -570,10 +569,10 @@ function validateOriginsExtension(
         const provider = validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
         const tenantId = validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
         const spaceId = validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
-        // `space_type` and `visibility` are plain strings in the reference
-        // model, checked against their module's set at validation time: a
-        // value outside it is a constraint violation (E004), not the parse
-        // refusal an enum-typed field would produce.
+        // `space_type` and `visibility` are open strings in the model and are
+        // checked against their module's set here: a value outside it is a
+        // constraint violation (E004), not the parse refusal a closed enum
+        // would produce.
         validateOptionalMatchEnum(profile.match, 'space_type', ctx, `${profilePath}.match`, ORIGIN_SPACE_TYPES_SET);
         validateOptionalMatchEnum(profile.match, 'visibility', ctx, `${profilePath}.match`, ORIGIN_VISIBILITIES_SET);
         validateOptionalBoolean(profile.match, 'external_participants', ctx, `${profilePath}.match.external_participants`);
@@ -581,13 +580,10 @@ function validateOriginsExtension(
         const sensitivity = validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
         const actorRole = validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
 
-        // Cross-SDK parity fix (spec item S2): a present-but-empty free-text
-        // match field (e.g. `provider: ""`) is an unsatisfiable constraint
-        // that Go's plain-string model can't distinguish from an absent
-        // field; Go's raw validator already rejects it, so reject it here
-        // too to restore fail-closed accept/reject parity across the SDKs
-        // (mirrors Rust `validate_origins`). The enum fields above already
-        // reject "" as an invalid enum value, so they're excluded here.
+        // A present-but-empty free-text match field (`provider: ""`) is an
+        // unsatisfiable constraint indistinguishable from an absent one, so
+        // it is refused rather than silently never matching. The enum fields
+        // above already reject "" as an invalid value.
         const freeTextMatchFields: Array<[string, string | undefined]> = [
           ['provider', provider],
           ['tenant_id', tenantId],
@@ -655,7 +651,7 @@ function validateOriginsExtension(
                 addError(ctx, 'E001', `${targetPath} must be an object`);
                 return;
               }
-              rejectUnknownKeys(target, BRIDGE_TARGET_KEYS_SET, ctx, `${targetPath}`);
+              rejectUnknownKeys(target, BRIDGE_TARGET_KEYS_SET, ctx, targetPath);
               validateOptionalString(target, 'provider', ctx, `${targetPath}.provider`);
               validateOptionalEnum(target, 'space_type', ctx, `${targetPath}.space_type`, ORIGIN_SPACE_TYPES_SET);
               validateOptionalStringArray(target, 'tags', ctx, `${targetPath}.tags`);
@@ -671,13 +667,13 @@ function validateOriginsExtension(
 }
 
 /**
- * Tri-state tool-access overlay on an origin profile (origins spec 4, D12).
+ * Tri-state tool-access overlay on an origin profile (origins spec 4).
  * An overlay is not a rule block: it carries no `enabled` and no `when`, and
  * an omitted `default` / `max_args_size` stays absent rather than inheriting
  * the base rule's materialized default.
  */
 function validateOriginToolAccessOverlay(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET, ctx, path);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
   validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
   validateOptionalStringArray(obj, 'require_confirmation', ctx, `${path}.require_confirmation`);
@@ -685,19 +681,18 @@ function validateOriginToolAccessOverlay(obj: UnknownRecord, ctx: ValidationCont
   validateOptionalInteger(obj, 'max_args_size', ctx, `${path}.max_args_size`, { min: 1 });
 }
 
-/** Tri-state egress overlay on an origin profile (origins spec 4, D12). */
+/** Tri-state egress overlay on an origin profile (origins spec 4). */
 function validateOriginEgressOverlay(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, ORIGIN_EGRESS_OVERLAY_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, ORIGIN_EGRESS_OVERLAY_KEYS_SET, ctx, path);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
   validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
   validateOptionalEnum(obj, 'default', ctx, `${path}.default`, DEFAULT_ACTIONS_SET);
 }
 
 /**
- * Validate a rule block's `when` condition (core spec 3.13, D15): the
- * structural shape always, the semantics (HH:MM, IANA zone, day names,
- * nesting depth) only in full `validate()`, mirroring the reference engine
- * where serde enforces the shape at parse time and `validate` the rest.
+ * Validate a rule block's `when` condition (core spec 3.13): the structural
+ * shape always, the semantics (HH:MM, IANA zone, day names, nesting depth)
+ * only in full `validate()`.
  */
 function validateWhen(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   if (!hasValue(obj, 'when')) return;
@@ -721,7 +716,7 @@ function validateConditionShape(
   path: string,
   depth: number,
 ): void {
-  rejectUnknownKeys(obj, CONDITION_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, CONDITION_KEYS_SET, ctx, path);
 
   if (hasValue(obj, 'time_window')) {
     const tw = obj.time_window;
@@ -729,7 +724,7 @@ function validateConditionShape(
     if (!isRecord(tw)) {
       addError(ctx, 'E001', `${twPath} must be an object`);
     } else {
-      rejectUnknownKeys(tw, TIME_WINDOW_KEYS_SET, ctx, `${twPath}`);
+      rejectUnknownKeys(tw, TIME_WINDOW_KEYS_SET, ctx, twPath);
       validateRequiredString(tw, 'start', ctx, `${twPath}.start`);
       validateRequiredString(tw, 'end', ctx, `${twPath}.end`);
       validateOptionalString(tw, 'timezone', ctx, `${twPath}.timezone`);
@@ -751,7 +746,7 @@ function validateConditionShape(
     if (!isRecord(rate)) {
       addError(ctx, 'E001', `${ratePath} must be an object`);
     } else {
-      rejectUnknownKeys(rate, RATE_CONDITION_KEYS_SET, ctx, `${ratePath}`);
+      rejectUnknownKeys(rate, RATE_CONDITION_KEYS_SET, ctx, ratePath);
       validateRequiredString(rate, 'counter', ctx, `${ratePath}.counter`);
       validateRequiredInteger(rate, 'threshold', ctx, `${ratePath}.threshold`);
       validateRequiredEnum(rate, 'comparison', ctx, `${ratePath}.comparison`, RATE_COMPARISONS_SET);
@@ -847,7 +842,7 @@ function validateChangelog(obj: UnknownRecord, ctx: ValidationContext, path: str
       return;
     }
 
-    rejectUnknownKeys(entry, CHANGELOG_ENTRY_KEYS_SET, ctx, `${entryPath}`);
+    rejectUnknownKeys(entry, CHANGELOG_ENTRY_KEYS_SET, ctx, entryPath);
 
     const version = validateRequiredString(entry, 'version', ctx, `${entryPath}.version`);
     if (version === '') {
@@ -890,7 +885,7 @@ function changelogDisorder(changelog: unknown): number {
 
 function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext): void {
   const path = 'metadata';
-  rejectUnknownKeys(obj, GOVERNANCE_METADATA_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, GOVERNANCE_METADATA_KEYS_SET, ctx, path);
 
   validateOptionalString(obj, 'author', ctx, `${path}.author`);
   validateOptionalString(obj, 'approved_by', ctx, `${path}.approved_by`);
@@ -997,7 +992,7 @@ function validateControlMappings(obj: UnknownRecord, ctx: ValidationContext, pat
       return;
     }
 
-    rejectUnknownKeys(entry, CONTROL_MAPPING_KEYS_SET, ctx, `${entryPath}`);
+    rejectUnknownKeys(entry, CONTROL_MAPPING_KEYS_SET, ctx, entryPath);
 
     const framework = validateRequiredString(entry, 'framework', ctx, `${entryPath}.framework`);
     if (framework != null && !FRAMEWORK_ID_PATTERN.test(framework)) {
@@ -1028,21 +1023,20 @@ function validateControlMappings(obj: UnknownRecord, ctx: ValidationContext, pat
 }
 
 function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  rejectUnknownKeys(obj, DETECTION_KEYS_SET, ctx, `${path}`);
+  rejectUnknownKeys(obj, DETECTION_KEYS_SET, ctx, path);
 
   validateOptionalRuleObject(obj, 'prompt_injection', ctx, (section, sectionCtx, sectionPath) => {
-    rejectUnknownKeys(section, PROMPT_INJECTION_KEYS_SET, sectionCtx, `${sectionPath}`);
+    rejectUnknownKeys(section, PROMPT_INJECTION_KEYS_SET, sectionCtx, sectionPath);
     validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
     const warn = validateOptionalEnum(section, 'warn_at_or_above', sectionCtx, `${sectionPath}.warn_at_or_above`, DETECTION_LEVELS_SET);
     const block = validateOptionalEnum(section, 'block_at_or_above', sectionCtx, `${sectionPath}.block_at_or_above`, DETECTION_LEVELS_SET);
     validateOptionalInteger(section, 'max_scan_bytes', sectionCtx, `${sectionPath}.max_scan_bytes`, { min: 1 });
 
     validateOptionalRuleObject(section, 'heuristics', sectionCtx, (heuristics, heuristicsCtx, heuristicsPath) => {
-      rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, `${heuristicsPath}`);
+      rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, heuristicsPath);
       validateOptionalBoolean(heuristics, 'enabled', heuristicsCtx, `${heuristicsPath}.enabled`);
-      // A floor the reference engine spells `usize`: a negative value is a
-      // type error, and the upper bound is left to the detector (a floor
-      // above 100 simply silences it).
+      // An unsigned floor: a negative value is a type error, and the upper
+      // bound is left to the detector (a floor above 100 simply silences it).
       if (hasValue(heuristics, 'min_score')) {
         const minScore = heuristics.min_score;
         if (typeof minScore !== 'number' || !Number.isInteger(minScore) || minScore < 0) {
@@ -1060,7 +1054,7 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
   });
 
   validateOptionalRuleObject(obj, 'jailbreak', ctx, (section, sectionCtx, sectionPath) => {
-    rejectUnknownKeys(section, JAILBREAK_KEYS_SET, sectionCtx, `${sectionPath}`);
+    rejectUnknownKeys(section, JAILBREAK_KEYS_SET, sectionCtx, sectionPath);
     validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
     const block = validateOptionalInteger(section, 'block_threshold', sectionCtx, `${sectionPath}.block_threshold`, { min: 0, max: 100 });
     const warn = validateOptionalInteger(section, 'warn_threshold', sectionCtx, `${sectionPath}.warn_threshold`, { min: 0, max: 100 });
@@ -1072,11 +1066,11 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
   });
 
   validateOptionalRuleObject(obj, 'threat_intel', ctx, (section, sectionCtx, sectionPath) => {
-    rejectUnknownKeys(section, THREAT_INTEL_KEYS_SET, sectionCtx, `${sectionPath}`);
+    rejectUnknownKeys(section, THREAT_INTEL_KEYS_SET, sectionCtx, sectionPath);
     validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
     validateOptionalString(section, 'pattern_db', sectionCtx, `${sectionPath}.pattern_db`);
-    // Spelled the way the reference engine spells it: one range constraint
-    // rather than a separate floor and ceiling.
+    // One range constraint rather than a separate floor and ceiling, so the
+    // message names the interval the value has to fall in.
     const similarity = validateOptionalNumber(section, 'similarity_threshold', sectionCtx, `${sectionPath}.similarity_threshold`);
     if (similarity != null && (similarity < 0 || similarity > 1)) {
       addError(
@@ -1171,8 +1165,8 @@ function validateRequiredEnum(
 }
 
 /**
- * A required non-negative integer -- the shape the reference engine spells as
- * `u64`, where a negative value is a *type* error rather than a range one.
+ * A required non-negative integer. The field is unsigned, so a negative value
+ * is a *type* error (E001) rather than a range one.
  */
 function validateRequiredInteger(
   obj: UnknownRecord,
@@ -1229,9 +1223,9 @@ function validateOptionalEnum(
 }
 
 /**
- * An origins `match` field the reference model holds as a plain string: a
- * value outside its module's set is refused by `validate` (E004), spelled the
- * way the reference engine spells it.
+ * An origins `match` field the model holds as an open string: any string
+ * parses, and a value outside its module's set is refused by `validate` as a
+ * constraint violation (E004).
  */
 function validateOptionalMatchEnum(
   obj: UnknownRecord,
@@ -1332,9 +1326,8 @@ function validateEnumValue(
 }
 
 /**
- * Every integer field of the HushSpec model is unsigned in the reference
- * engine, so a negative value is a *type* refusal (E001) there rather than a
- * range one -- as is a non-integer.
+ * Every integer field of the HushSpec model is unsigned, so a negative value
+ * is a *type* refusal (E001) rather than a range one -- as is a non-integer.
  */
 function validateIntegerValue(
   value: unknown,
@@ -1411,9 +1404,9 @@ function validateRegex(pattern: string, ctx: ValidationContext, path: string): v
 }
 
 /**
- * Every HushSpec object denies unknown keys (core spec 2.4), so an unrecognized
- * member is a parse-time refusal: E001, spelled the way the reference engine's
- * deserializer spells it.
+ * Every HushSpec object denies unknown keys (core spec 2.4), so an
+ * unrecognized member is a parse-time refusal: E001, with the message naming
+ * the members that were expected.
  */
 function rejectUnknownKeys(
   obj: UnknownRecord,
@@ -1436,8 +1429,7 @@ function at(path: string | undefined): string {
 
 /**
  * A required member that is absent, reported against its *parent* -- the
- * object the member is missing from -- as the reference deserializer reports
- * it.
+ * object the member is missing from, which is where an author has to add it.
  */
 function missingField(ctx: ValidationContext, key: string, path: string): void {
   const suffix = `.${key}`;

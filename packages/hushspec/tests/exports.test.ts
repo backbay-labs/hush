@@ -4,9 +4,9 @@ import { ConsoleReceiptSink } from '../src/sinks.js';
 import { HUSHSPEC_SUPPORTED_VERSIONS, SUPPORTED_VERSIONS } from '../src/version.js';
 
 /**
- * The public surface every SDK is expected to carry under the same names
- * (RFC 09 isomorphism). A rename here is a breaking change for anyone porting
- * code between the four SDKs, so the names are pinned rather than assumed.
+ * The public surface every HushSpec SDK carries under the same names. A
+ * rename here is a breaking change for anyone porting code between SDKs, so
+ * the names are pinned rather than assumed.
  */
 describe('package entry point', () => {
   const REQUIRED = [

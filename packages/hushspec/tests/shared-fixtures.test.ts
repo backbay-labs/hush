@@ -33,7 +33,7 @@ interface RuleTraceExpectation {
 interface EvaluationCase {
   description: string;
   action: Record<string, unknown>;
-  /** Runtime context for `when` conditions (evaluator-test schema v0, D15). */
+  /** Runtime context for `when` conditions (evaluator-test schema v0). */
   context?: RuntimeContext;
   /** The controls this case is evidence for (evaluator-test schema 0.2). */
   controls?: { framework: string; control_id: string }[];
@@ -246,7 +246,7 @@ describe('shared fixture corpus', () => {
         const label = `[${path.relative(fixturesRoot, fixturePath)}] ${testCase.description}`;
         it(`evaluates ${label}`, () => {
           // Per-case `context` is delivered on the action, which is where the
-          // evaluator reads the runtime context for `when` conditions (D15).
+          // evaluator reads the runtime context for `when` conditions.
           const action: EvaluationAction = {
             ...(testCase.action as unknown as EvaluationAction),
             ...(testCase.context != null ? { context: testCase.context } : {}),

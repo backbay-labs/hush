@@ -75,6 +75,22 @@ describe('mapOpenAIToolCall', () => {
     expect(action.type).toBe('tool_call');
     expect(action.args_size).toBe(2);
   });
+
+  // A model can emit truncated or malformed JSON arguments. Throwing here
+  // would gate the call on whatever the caller does with the exception rather
+  // than on the policy, so the mapping never parses the arguments.
+  it('maps malformed JSON arguments without throwing', () => {
+    const truncated = '{"location":"NY';
+    const action = mapOpenAIToolCall('get_weather', truncated);
+    expect(action.type).toBe('tool_call');
+    expect(action.target).toBe('get_weather');
+    expect(action.args_size).toBe(truncated.length);
+  });
+
+  it('still evaluates a call whose arguments are not JSON', () => {
+    const guard = HushGuard.fromYaml(DENY_POLICY);
+    expect(createOpenAIGuard(guard)('dangerous_tool', 'not json').decision).toBe('deny');
+  });
 });
 
 describe('createOpenAIGuard', () => {

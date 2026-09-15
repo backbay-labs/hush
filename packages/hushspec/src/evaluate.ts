@@ -21,8 +21,9 @@
  * the caller holds the document object. Hold a `CompiledPolicy` (or a
  * `HushGuard`) directly when evaluating the same policy repeatedly.
  *
- * This file is a port of `crates/hushspec/src/evaluate.rs`, which is the
- * normative reference implementation; keep the two in lockstep.
+ * The core specification is normative for every decision here, and
+ * `fixtures/core/evaluation/` pins it: a change in behaviour has to be a
+ * change in the specification first.
  */
 import type { HushSpec } from './schema.js';
 import type { Condition, RuntimeContext } from './conditions.js';
@@ -240,8 +241,9 @@ export function compilePathGlob(pattern: string): RegExp | undefined {
         source += '(?:[^/]*/)*';
         index += 3;
       } else {
-        // The reference engine's `.` excludes only `\n`; JavaScript's `.`
-        // additionally excludes `\r`, U+2028 and U+2029, so spell it out.
+        // `**` is any run of characters except newlines (core spec 3.14.1).
+        // JavaScript's `.` also excludes `\r`, U+2028 and U+2029, so the class
+        // is spelled out rather than left to the host's definition.
         source += '[^\\n]*';
         index += 2;
       }
@@ -271,15 +273,6 @@ export function compilePathGlob(pattern: string): RegExp | undefined {
 export function pathGlobMatches(pattern: string, path: string): boolean {
   const regex = compilePathGlob(pattern);
   return regex != null && regex.test(path);
-}
-
-/**
- * Match a raw path target against a path glob, normalizing the target first.
- * Kept for callers outside the evaluator; prefer {@link pathGlobMatches} with
- * an already-normalized path.
- */
-export function globMatches(pattern: string, target: string): boolean {
-  return pathGlobMatches(pattern, normalizePath(target));
 }
 
 // ---------------------------------------------------------------------------
@@ -442,7 +435,8 @@ export function compileHostPattern(pattern: string): CompiledHostPattern {
   while (index < chars.length) {
     if (chars[index] === '*') {
       if (chars[index + 1] === '*') {
-        // Reference `.` excludes only `\n`; spell it out for JS parity.
+        // `**` is one or more characters except newlines (core spec 3.14.2);
+        // JavaScript's `.` also excludes `\r`, U+2028 and U+2029.
         source += '[^\\n]+';
         index += 2;
       } else {

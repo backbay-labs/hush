@@ -190,9 +190,9 @@ export function resolutionFromResolved(spec: HushSpec, source?: string): Resolut
 
 /**
  * Why a chain could not be resolved at all, in the vocabulary
- * `fixtures/core/resolve/` uses and the Rust `ResolveError` variants map to.
- * `digest_mismatch` and `signature_required` come back as a
- * {@link PolicyVerificationError}, which carries the same codes.
+ * `fixtures/core/resolve/` uses. `digest_mismatch` and `missing_signature`
+ * come back as a {@link PolicyVerificationError}, which carries the same
+ * codes.
  */
 export type ResolveReasonCode =
   | 'invalid_pin'
@@ -268,15 +268,14 @@ export class PolicyVerificationError extends Error {
  * Maximum `extends` chain depth. Cycle detection only catches exact repeats, so
  * a long *acyclic* chain would otherwise recurse unbounded until a stack
  * overflow. 32 is far above any realistic composition (shipped policies are
- * depth <= 2); the cap fails closed with a clean error. Must match the other
- * SDK resolvers.
+ * depth <= 2); the cap fails closed with a clean error.
  */
 const MAX_EXTENDS_DEPTH = 32;
 
 /**
  * The chain identity of a document that was not loaded from anywhere -- a
- * spec handed to the resolver in memory. Matches the Rust reference's
- * `MEMORY_SOURCE`, which is what `fixtures/core/resolve/` pins.
+ * spec handed to the resolver in memory. The same spelling in every SDK, and
+ * what `fixtures/core/resolve/` pins.
  */
 export const MEMORY_SOURCE = 'memory';
 

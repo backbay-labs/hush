@@ -43,6 +43,7 @@ import type { PolicyEvent } from './log.js';
 import { policyLoadedEvent, policySwappedEvent } from './log.js';
 import type { ReceiptSink } from './sinks.js';
 import { EXTENSION_KEYS_SET, RULE_KEYS_SET } from './generated/contract.js';
+import { utf8ByteLength } from './utf8.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
 
@@ -113,16 +114,13 @@ export interface HushGuardOptions {
 }
 
 /**
- * `matched_rule` for every denial issued by a guard that refused its policy.
+ * `matched_rule` for every denial issued by a guard that refused its policy:
+ * the receipt spec's reserved `__hushspec_policy_unverified__`, used both in
+ * the in-memory result and in the receipt.
  *
  * Distinct from `__hushspec_policy_provider__` (the policy could not be
  * *obtained*) because this one means the policy was obtained and rejected --
  * the receipt has to be able to say which.
- */
-/**
- * Rule id reported for actions refused because the policy failed verification.
- * One spelling across SDKs and across the in-memory result and the receipt:
- * the receipt spec's reserved `__hushspec_policy_unverified__`.
  */
 export const POLICY_SIGNATURE_RULE: string = POLICY_UNVERIFIED_RULE;
 
@@ -299,11 +297,10 @@ function validateEnforcementConfig(config: EnforcementConfig, observable: boolea
  * `gate()`, where there is no policy to run `evaluateAudited()` against --
  * only the already-computed `result`.
  *
- * Without this, a guard configured with a `sink` but no `observer` (monitor
- * mode accepts either, per `validateEnforcementConfig`) would go completely
- * silent on a provider outage: `record()` only forwards a receipt to the sink
- * when one is present, and the provider-failure branch used to always pass
- * `undefined`. That violates "a monitored block is never silent".
+ * A guard configured with a `sink` but no `observer` (monitor mode accepts
+ * either) would otherwise go completely silent on a provider outage, since
+ * `record()` forwards to the sink only when a receipt is present. A monitored
+ * block is never silent.
  *
  * `policy` is the identity of the guard's last successfully loaded policy; it
  * was never evaluated against `action`, which is the whole point of this path,
@@ -333,7 +330,7 @@ function buildFailureReceipt(
             content_hash: `sha256:${createHash('sha256')
               .update(action.content, 'utf8')
               .digest('hex')}`,
-            content_size: Buffer.byteLength(action.content, 'utf8'),
+            content_size: utf8ByteLength(action.content),
           }),
       ...(action.args_size === undefined ? {} : { args_size: action.args_size }),
     },
@@ -558,9 +555,8 @@ export class HushGuard {
   evaluate(action: EvaluationAction): EvaluationResult {
     const active = this.activePolicy();
     if ('decision' in active) {
-      // Provider-failure (or signature-refusal) deny: mirrors gate()'s
-      // handling so a sink-only guard (sink, no observer -- monitor mode
-      // accepts either) is never silent here either.
+      // Provider-failure (or signature-refusal) deny, audited exactly as
+      // gate() audits it so a sink-only guard is never silent here either.
       const enforcement = impliedEnforcement(active.decision, this.effectiveMode(active));
       const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
       this.send(receipt);
@@ -626,12 +622,9 @@ export class HushGuard {
     const active = this.activePolicy();
     if ('decision' in active) {
       // Provider failure or a policy that would not verify: no policy to run
-      // evaluateAudited() against -- but the decision must still be audited.
-      // A monitored outage must never proceed silently, so build a receipt
-      // whenever a sink is configured rather than passing undefined:
-      // record() only reaches the sink when a receipt is present, and a
-      // sink-only guard (sink, no observer -- monitor mode accepts either)
-      // would otherwise emit nothing at all here.
+      // evaluateAudited() against, but the decision must still be audited, so
+      // a receipt is built whenever a sink is configured (see
+      // buildFailureReceipt).
       const mode = this.effectiveMode(active);
       const proceed = mode === 'monitor';
       const enforcement: EnforcementSummary = {
@@ -686,10 +679,9 @@ export class HushGuard {
       return 'enforce';
     }
     let matched = result.matched_rule;
-    // detection.ts emits the bare literal 'detection' as matched_rule rather
-    // than a hierarchical rule path (see packages/hushspec/src/detection.ts),
-    // so an override keyed 'extensions.detection' would otherwise silently
-    // never match. Normalize before prefix matching.
+    // A detection escalation reports the bare `matched_rule` 'detection'
+    // rather than a hierarchical rule path, so an override keyed
+    // 'extensions.detection' would silently never match. Normalize first.
     if (matched === 'detection') {
       matched = 'extensions.detection';
     }

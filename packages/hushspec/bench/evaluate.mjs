@@ -2,7 +2,7 @@
 /**
  * Evaluation benchmark: compile-per-call vs. compiled policy.
  *
- * Measures the three ways a policy gets evaluated in this SDK against a mixed
+ * Measures the four ways a policy gets evaluated in this SDK against a mixed
  * action set:
  *
  *   compile-per-call   compilePolicy() + evaluate() on every action -- what an
@@ -40,8 +40,8 @@ const entry = path.resolve(process.cwd(), option('entry', path.join(packageRoot,
 
 const sdk = await import(entry);
 const { parseOrThrow, evaluate, HushGuard } = sdk;
-// Absent from a pre-P6-01 build: the comparison then reports only the rows
-// that build can run.
+// Absent from a build predating compiled policies (`--entry` can point at an
+// older one): the comparison then reports only the rows that build can run.
 const compilePolicy = sdk.compilePolicy;
 
 const spec = parseOrThrow(readFileSync(policyPath, 'utf8'));

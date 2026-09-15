@@ -9,6 +9,20 @@ import type {
 import type { Condition, RuntimeContext } from './conditions.js';
 import type { DetectionExtension, DetectionLevel } from './extensions.js';
 import { compileProfileRegex } from './regex.js';
+import { truncateUtf8 } from './utf8.js';
+
+/**
+ * Detectors and the pipeline that folds their verdict into an evaluation
+ * (spec/hushspec-detection.md).
+ *
+ * Every pattern here writes its character classes out in full -- `[ \t\n\r\f]`
+ * rather than `\s`, `[0-9]` rather than `\d`, an explicit non-member boundary
+ * rather than `\b`. Those shorthands are Unicode-aware in some regex engines
+ * and ASCII-only in others, so spelling them out is what makes a detector
+ * score the same number in every conformant engine: NBSP-obfuscated text and
+ * fullwidth digits are outside the class everywhere, not only where the host
+ * engine happens to say so.
+ */
 
 export type DetectionCategory = 'prompt_injection' | 'jailbreak' | 'data_exfiltration';
 
@@ -69,12 +83,6 @@ export class RegexInjectionDetector implements Detector {
     this.patterns = [
       {
         name: 'ignore_instructions',
-        // Character classes spelled out explicitly ([ \t\n\r\f] / [0-9] /
-        // [A-Za-z0-9_]) instead of \s/\d/\w: those shorthands are
-        // Unicode-aware in Rust `regex`/Python `re` but ASCII-only in Go
-        // RE2/JS `RegExp`, which made Go/JS miss NBSP-obfuscated injection
-        // content that Rust/Python caught. Spelling them out keeps all four
-        // SDKs consistently ASCII-whitespace-only, restoring cross-SDK parity.
         regex: /ignore[ \t\n\r\f]+(all[ \t\n\r\f]+)?(previous|prior|above)[ \t\n\r\f]+(instructions|rules|prompts)/i,
         weight: 0.4,
       },
@@ -244,11 +252,11 @@ function uppercaseSignal(text: string): boolean {
 }
 
 /**
- * Fold `A-Z` and nothing else. `String.prototype.toLowerCase` is
- * Unicode-aware -- it maps the Kelvin sign to `k` and `I` with a dot above to
- * `i` plus a combining dot -- where the reference engine's
- * `to_ascii_lowercase` touches only ASCII, so spelling it out is what keeps
- * the score identical across SDKs.
+ * Fold `A-Z` and nothing else (detection spec 3.5).
+ *
+ * `String.prototype.toLowerCase` is Unicode-aware -- it maps the Kelvin sign
+ * to `k` and `I` with a dot above to `i` plus a combining dot -- which would
+ * make the heuristic score depend on the host's case-folding table.
  */
 function asciiFold(text: string): string {
   return text.replace(/[A-Z]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 32));
@@ -343,9 +351,6 @@ export class RegexJailbreakDetector implements Detector {
     this.patterns = [
       {
         name: 'jailbreak_dan',
-        // See RegexInjectionDetector for why \s is spelled out as
-        // [ \t\n\r\f] here (Go RE2 / JS RegExp vs. Rust regex / Python re
-        // Unicode-vs-ASCII parity).
         regex: /(DAN|do[ \t\n\r\f]+anything[ \t\n\r\f]+now|developer[ \t\n\r\f]+mode|jailbreak)/i,
         weight: 0.5,
       },
@@ -395,15 +400,6 @@ export class RegexExfiltrationDetector implements Detector {
     this.patterns = [
       {
         name: 'ssn',
-        // Explicit ASCII non-digit boundary instead of `\b`: `\b` is
-        // Unicode-aware in Rust `regex`/Python `re` (a letter like "é" or
-        // "中" is `\w`, so no boundary forms before the digits) but
-        // ASCII-only in Go RE2/JS `RegExp`. This keeps all four SDKs in
-        // agreement -- e.g. "café123-45-6789" and "中123-45-6789" now match
-        // identically everywhere. The body also spells out [0-9] instead of
-        // \d: \d is Unicode-aware in Rust/Python (matching fullwidth digits
-        // like "１２３-４５-６７８９") but ASCII-only in Go RE2/JS, so
-        // spelling it out keeps all four SDKs ASCII-digit-only too.
         regex: /(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)/,
         weight: 0.8,
       },
@@ -414,18 +410,11 @@ export class RegexExfiltrationDetector implements Detector {
       },
       {
         name: 'email_address',
-        // Explicit ASCII boundaries instead of \b, for the same reason as
-        // ssn above: \b is a Unicode word boundary in Rust/Python but
-        // ASCII-only in Go RE2/JS. Spelling it out as an explicit
-        // non-member-character boundary keeps the pattern text (and
-        // matching behavior) identical across all four SDKs instead of
-        // relying on each engine's own definition of "word".
         regex: /(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)/,
         weight: 0.3,
       },
       {
         name: 'api_key_pattern',
-        // \s -> [ \t\n\r\f], \S -> [^ \t\n\r\f]: see RegexInjectionDetector.
         regex: /(api[_\-]?key|secret[_\-]?key|access[_\-]?token)[ \t\n\r\f]*[:=][ \t\n\r\f]*[^ \t\n\r\f]+/i,
         weight: 0.6,
       },
@@ -556,27 +545,6 @@ function decisionRank(decision: Decision | undefined): number {
 /** `deny > warn > allow`; `undefined` (no detector contribution) ranks lowest. */
 function stricterDecision(base: Decision, candidate: Decision | undefined): Decision {
   return candidate != null && decisionRank(candidate) > decisionRank(base) ? candidate : base;
-}
-
-/**
- * Truncate `input` to at most `maxBytes` UTF-8 bytes without splitting a
- * multi-byte character. JS strings are UTF-16, but `max_scan_bytes` /
- * `max_input_bytes` are byte counts shared with the Rust/Python/Go SDKs
- * (whose native string types are UTF-8 byte sequences), so the limit is
- * applied against the UTF-8 encoding rather than `string.length`.
- */
-function truncateUtf8(input: string, maxBytes: number): string {
-  const bytes = Buffer.from(input, 'utf8');
-  if (bytes.length <= maxBytes) {
-    return input;
-  }
-  let end = maxBytes;
-  // Back off while the next byte is a UTF-8 continuation byte (`10xxxxxx`),
-  // so the cut point never splits a multi-byte character.
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) {
-    end -= 1;
-  }
-  return bytes.toString('utf8', 0, end);
 }
 
 // Singletons: the spec-driven path only ever drives these built-in detectors

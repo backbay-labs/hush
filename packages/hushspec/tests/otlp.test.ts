@@ -327,8 +327,14 @@ describe('OtlpReceiptSink batching', () => {
       flushIntervalMs: 10,
     });
 
+    // The batch is nowhere near `batchSize`, so only the timer can export it.
     sink.send(makeReceipt('warn'));
     await waitFor(() => collector.captures.length === 1);
+
+    const exported = records(collector.captures[0].payload);
+    expect(exported).toHaveLength(1);
+    expect(exported[0].severityText).toBe('WARN');
+    expect(sink.queued).toBe(0);
 
     await sink.close();
     await collector.close();

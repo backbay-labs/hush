@@ -133,11 +133,10 @@ extensions:
     expect(result.ok).toBe(false);
   });
 
-  // Cross-SDK parity fix (spec item S2): an empty string for a free-text
-  // match field is a degenerate, unrepresentable constraint (Go's raw
-  // validator already rejects it); Rust/TS/Python previously accepted it.
-  // Covers all five free-text match fields -- the enum fields (space_type,
-  // visibility) already reject "" as an invalid enum value and are untouched.
+  // An empty string for a free-text match field is an unsatisfiable
+  // constraint indistinguishable from an absent one, so it is refused rather
+  // than silently never matching. All five free-text fields are covered; the
+  // enum fields (space_type, visibility) already reject "" as invalid.
   for (const field of ['provider', 'tenant_id', 'space_id', 'sensitivity', 'actor_role']) {
     it(`rejects an empty string for match.${field}`, () => {
       const result = parse(`
