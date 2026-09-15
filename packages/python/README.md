@@ -82,6 +82,41 @@ outcome = guard.gate(EvaluationAction(type="shell_command", target="rm -rf /"))
 Receipts written by the sink carry `enforcement` (mode + outcome) alongside
 the evaluated `decision`. Panic mode always blocks, even under monitor.
 
+### Verify on load
+
+A guard can refuse to enforce a policy it cannot prove. With
+`require_signature`, every hop of the `extends` chain that is not a `builtin:`
+ruleset must carry either a detached signature that verifies against the
+trusted keys (`<policy>.yaml.sig`, see `h2h sign`) or a digest pin naming its
+exact content hash.
+
+```python
+guard = HushGuard.from_file(
+    "./policy.yaml",
+    require_signature=True,
+    trusted_keys=[open("release.pub.pem").read()],
+)
+
+guard.resolution.signature.verified   # True
+guard.resolution.chain                # root first, leaf last, one hash per hop
+```
+
+If verification fails the guard does not raise -- it *refuses*: every
+evaluation denies with `matched_rule` `__hushspec_policy_signature__` and
+`guard.refusal.reason` carries the reason code (`missing_signature`,
+`unknown_key_id`, `content_hash_mismatch`, ...). Without `require_signature` a
+keyring still buys opportunistic verification, recorded in
+`guard.resolution.signature` and never blocking the load.
+
+Pin a base by digest to get integrity without keys at all:
+
+```yaml
+extends: "./base.yaml#sha256:9f2c...<64 hex>"
+```
+
+A pin that no longer matches is always fatal, signatures configured or not.
+`resolve_with_options()` exposes the same machinery without a guard.
+
 ## Features
 
 ### Evaluation

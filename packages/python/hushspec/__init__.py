@@ -83,6 +83,7 @@ from hushspec.signing import (
 )
 from hushspec.merge import merge
 from hushspec.middleware import (
+    POLICY_SIGNATURE_RULE,
     EnforcementConfig,
     GateOutcome,
     HushGuard,
@@ -128,12 +129,21 @@ from hushspec.conditions import (
 from hushspec.parse import parse, parse_or_raise
 from hushspec.builtins import BUILTIN_NAMES, load_builtin
 from hushspec.resolve import (
+    ChainLink,
     LoadedSpec,
+    PolicyVerificationError,
+    ResolveOptions,
+    Resolution,
+    SignatureStatus,
+    VerifyOptions,
     create_builtin_loader,
     create_composite_loader,
+    default_signature_locator,
     resolve,
     resolve_file,
     resolve_or_raise,
+    resolve_with_options,
+    resolve_with_options_or_raise,
 )
 from hushspec.rules import (
     BrowserAutomationRule,
@@ -234,9 +244,18 @@ __all__ = [
     "merge",
     "create_builtin_loader",
     "create_composite_loader",
+    "default_signature_locator",
     "resolve",
     "resolve_file",
     "resolve_or_raise",
+    "resolve_with_options",
+    "resolve_with_options_or_raise",
+    "ChainLink",
+    "PolicyVerificationError",
+    "ResolveOptions",
+    "Resolution",
+    "SignatureStatus",
+    "VerifyOptions",
     "load_builtin",
     "BUILTIN_NAMES",
     "LoadedSpec",
@@ -311,6 +330,7 @@ __all__ = [
     "EnforcementConfig",
     "EnforcementSummary",
     "GateOutcome",
+    "POLICY_SIGNATURE_RULE",
     "matches_rule_path_prefix",
     "EvaluationObserver",
     "ObservableEvaluator",
