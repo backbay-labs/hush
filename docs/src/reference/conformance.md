@@ -1,9 +1,38 @@
 # Conformance Levels
 
-HushSpec defines four conformance levels. Each level subsumes all requirements of the levels below it.
+HushSpec defines six conformance levels. Each level subsumes all requirements of
+the levels below it, so a Level 4 implementation is also a Level 3 one. The
+normative definitions are in
+[`spec/hushspec-core.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-core.md)
+section 8; this page is the reader's version, plus the vector coverage behind it.
 
 For the current per-SDK status on `main`, see the
-[SDK Conformance Matrix](sdk-conformance.md).
+[SDK Conformance Matrix](sdk-conformance.md). To publish a claim of your own,
+fill in the [Conformance Statement](conformance-statement.md) template.
+
+## Claiming a level
+
+A claim is made against a specific corpus, not against "the fixtures". Every
+file under `fixtures/` is inventoried in `fixtures/MANIFEST.json` with its
+SHA-256, its category, and the level at which it becomes required, and a claim
+names the corpus by the SHA-256 of that manifest.
+
+The machine-readable form of a claim is a
+[conformance report](json-schema.md): `hushspec-conformance-report.v0.schema.json`.
+The reference runner writes one, and validates it against its own schema before
+writing:
+
+```bash
+hushspec-testkit --fixtures fixtures --report report.json
+```
+
+`highest_level` in the report is the largest N for which levels 0 through N all
+pass. A level with any unattempted vector reports `not_attempted`, which is
+never a synonym for a pass.
+
+Everything needed to do this without cloning the repository ships as
+`hushspec-conformance-<version>.tar.gz`, attached to every release: the prose,
+the schemas, the vectors, and the manifest.
 
 ## Level 0: Parser
 
@@ -25,8 +54,35 @@ A Level 1 implementation additionally:
 - Enforces uniqueness constraints (e.g., secret pattern `name` fields)
 - Validates numeric constraints (non-negative integers, positive ratios)
 - Validates regex syntax in pattern fields
+- Rejects every `invalid/` vector, with the error code its `.expect.yaml`
+  sidecar names if the implementation reports codes at all
 
 This level is required for linters, schema validators, and policy authoring tools.
+
+### Error codes
+
+Every `fixtures/<module>/invalid/<name>.yaml` has a `<name>.expect.yaml`
+sidecar naming the code its refusal must carry, drawn from
+[`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml):
+
+```yaml
+reject: true
+code: "E001"
+message_contains: "anchors are not allowed"
+```
+
+Without this, "the document was rejected" is a weak assertion — a vector that
+tests the YAML profile passes just as well when the engine refuses it for an
+unrelated reason.
+
+**Known gap.** The Rust reference implementation emits these codes and the Rust
+testkit asserts them. The TypeScript, Python and Go validators do not emit
+registry codes yet, so their fixture runners require only that the vector is
+rejected. Aligning them is [RFC 09](https://github.com/backbay-labs/hush/blob/main/docs/plans/09-compliance-as-code-plan.md)
+package P6-03; until it lands, a Level 1 claim for those three SDKs covers the
+rejection but not the code. The spec is written to match: an implementation
+that reports no codes conforms, one that reports codes must report the
+registered one.
 
 ## Level 2: Merger
 
@@ -47,7 +103,54 @@ A Level 3 implementation additionally:
 - Implements decision precedence (`deny` > `warn` > `allow`)
 - Passes the published evaluator fixtures, which are themselves versioned and schema-validated
 
-This is the full engine level. Clawdstrike is a Level 3 implementation.
+This is the full engine level: all four HushSpec SDKs and Clawdstrike are
+Level 3 implementations.
+
+## Level 4: Auditor
+
+Level 3 says an engine reaches the right decision. Level 4 says it can prove
+which document it reached that decision under, and why, to someone who was not
+there.
+
+A Level 4 implementation additionally:
+
+- Emits [decision receipts](receipt-spec.md) at format 0.2 that validate
+  against the published schema
+- Computes `policy.content_hash` as the [canonical](canonical-spec.md) hash of
+  the *resolved* document, and reproduces every `fixtures/core/hash/` vector
+  byte for byte
+- **Records** `rule_trace` during evaluation rather than reconstructing it
+  afterwards, and reproduces every committed receipt under
+  `fixtures/receipts/expected/` after canonicalization
+- Accepts every `fixtures/receipts/valid/` vector and rejects every
+  `fixtures/receipts/invalid/` one
+- Resolves `extends` with chain provenance and digest pinning, passing
+  `fixtures/core/resolve/`
+
+Given a Level 4 receipt and the policy it names, a third party can recompute
+the hash, replay the trace, and get the same answer.
+
+## Level 5: Attested
+
+Level 4 evidence is only as trustworthy as the document it was produced under.
+Level 5 adds provenance: which policy was in force, who signed it, and whether
+the record has been altered since.
+
+A Level 5 implementation additionally:
+
+- Is a conforming [signature](signing-spec.md) verifier: every case in
+  `fixtures/signing/vectors.yaml` returns `valid` or the exact reason code
+- Verifies **on load**, so every hop of an `extends` chain is checked against
+  the keyring or its digest pin, fails closed, and records the outcome in
+  `receipt.policy.signature`
+- Verifies a hash-linked log, identifying *which line* first breaks the chain
+  for every `fixtures/log/invalid/` vector
+- Signs and verifies receipts (`fixtures/receipts/signed/`)
+- Verifies policy bundles (`fixtures/bundle/vectors.yaml`)
+
+An implementation may claim Level 5 for verification only: producing
+signatures, logs and bundles is described by the same specifications, but
+verification is what a relying party depends on.
 
 ## Fixture coverage
 
