@@ -101,6 +101,24 @@ All four SDKs implement the full HushSpec pipeline, from parse and validate thro
 
 All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 
+### GitHub Action
+
+```yaml
+- uses: backbay-labs/hush@v0.2.0
+  with:
+    command: validate       # validate | lint | test | audit | bundle-verify
+    paths: policies/**/*.yaml
+```
+
+The composite action at [`action.yml`](./action.yml) downloads the matching
+`h2h-<tag>-<target>.tar.gz` release, verifies it against `SHA256SUMS` and the
+build provenance attestation, caches it, and runs the command -- no separate
+install step. Before the first tagged release ships binaries, pass
+`version: source` to build `crates/hushspec-cli` instead. See
+[CI Integration](docs/src/guides/ci.md) for validate-on-PR, SARIF-uploading
+lint, and JUnit test runs, plus the accompanying `.pre-commit-hooks.yaml` and
+the `Dockerfile`/`ghcr.io/backbay-labs/h2h` container image.
+
 ### Rust
 
 ```toml

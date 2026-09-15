@@ -26,6 +26,7 @@
 - [Writing Your First Policy](guides/first-policy.md)
 - [Using with Clawdstrike](guides/clawdstrike.md)
 - [Editor Setup](guides/editor-setup.md)
+- [CI Integration](guides/ci.md)
 
 # Reference
 
