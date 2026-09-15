@@ -21,6 +21,7 @@ _BUDGET_NAMES = frozenset(
 )
 
 _DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
+_ISO_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _DETECTION_LEVEL_ORDER = {
     DetectionLevel.SAFE: 0,
     DetectionLevel.SUSPICIOUS: 1,
@@ -88,7 +89,7 @@ def validate(spec: HushSpec) -> ValidationResult:
         _validate_origins(spec.extensions, errors)
         _validate_detection(spec.extensions, errors, warnings)
 
-    _validate_governance(spec, warnings)
+    _validate_governance(spec, errors, warnings)
 
     return ValidationResult(errors=errors, warnings=warnings)
 
@@ -746,11 +747,89 @@ def _is_valid_duration(value: str) -> bool:
     return bool(_DURATION_PATTERN.match(value))
 
 
-def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
+def _is_iso_date(value: str) -> bool:
+    """``YYYY-MM-DD``, and a date that actually exists.
+
+    Dates are compared as strings throughout the toolchain -- which is calendar
+    order only for this shape -- so an unchecked ``01/02/2026`` would make an
+    expired policy compare as current instead of failing loudly.
+    """
+    if _ISO_DATE_PATTERN.match(value) is None:
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _compare_changelog_versions(left: str, right: str) -> int:
+    """Numeric when both versions are plain integers, lexicographic otherwise."""
+    if left.strip().isdigit() and right.strip().isdigit():
+        a, b = int(left), int(right)
+        return 0 if a == b else (-1 if a < b else 1)
+    return 0 if left == right else (-1 if left < right else 1)
+
+
+def _changelog_disorder(entries: list) -> int:
+    """Index of the first entry not ordered after the one above it (the list
+    runs newest first), or ``-1`` when the list is ordered."""
+    for index in range(1, len(entries)):
+        previous, current = entries[index - 1], entries[index]
+        version_order = _compare_changelog_versions(previous.version, current.version)
+        ordered = version_order > 0 or (version_order == 0 and previous.date >= current.date)
+        if not ordered:
+            return index
+    return -1
+
+
+def _validate_governance(
+    spec: HushSpec, errors: list[ValidationError], warnings: list[str]
+) -> None:
     if spec.metadata is None:
         return
 
     metadata = spec.metadata
+    today = date.today().isoformat()
+
+    for field_path, value in (
+        ("metadata.approval_date", metadata.approval_date),
+        ("metadata.effective_date", metadata.effective_date),
+        ("metadata.expiry_date", metadata.expiry_date),
+        ("metadata.next_review_date", metadata.next_review_date),
+    ):
+        if value is not None and not _is_iso_date(value):
+            errors.append(
+                ValidationError(
+                    "invalid_date",
+                    f"{field_path}: '{value}' is not an ISO 8601 date (YYYY-MM-DD)",
+                )
+            )
+
+    for index, entry in enumerate(metadata.changelog):
+        if not _is_iso_date(entry.date):
+            errors.append(
+                ValidationError(
+                    "invalid_date",
+                    f"metadata.changelog[{index}].date: '{entry.date}' "
+                    "is not an ISO 8601 date (YYYY-MM-DD)",
+                )
+            )
+
+    # GOV_SELF_SUPERSEDES: a document that replaces its own version describes an
+    # impossible lineage, so it is an error rather than an advisory warning.
+    if (
+        metadata.supersedes is not None
+        and metadata.policy_version is not None
+        and metadata.supersedes.strip() == str(metadata.policy_version)
+    ):
+        errors.append(
+            ValidationError(
+                "invalid_value",
+                f"metadata.supersedes '{metadata.supersedes}' "
+                "is the policy's own policy_version",
+            )
+        )
 
     if metadata.lifecycle_state is not None:
         if metadata.lifecycle_state in (LifecycleState.DEPRECATED, LifecycleState.ARCHIVED):
@@ -759,8 +838,7 @@ def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
             )
 
     if metadata.expiry_date is not None:
-        today = date.today().isoformat()
-        if metadata.expiry_date < today:
+        if _is_iso_date(metadata.expiry_date) and metadata.expiry_date < today:
             warnings.append(
                 f"policy expiry_date '{metadata.expiry_date}' is in the past"
             )
@@ -770,3 +848,36 @@ def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
 
     if metadata.classification == Classification.RESTRICTED and metadata.approved_by is None:
         warnings.append("classification is 'restricted' but no approved_by is set")
+
+    # GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that a
+    # copy-paste with different capitalization defeats is no check at all.
+    if metadata.author is not None and metadata.approved_by is not None:
+        author = metadata.author.strip()
+        if author != "" and author.lower() == metadata.approved_by.strip().lower():
+            warnings.append(
+                f"author and approved_by are the same identity '{author}': "
+                "separation of duties requires a different approver"
+            )
+
+    # GOV_UNAPPROVED_STATE.
+    if (
+        metadata.lifecycle_state in (LifecycleState.APPROVED, LifecycleState.DEPLOYED)
+        and metadata.approved_by is None
+    ):
+        warnings.append(
+            f"lifecycle_state is '{metadata.lifecycle_state.value}' but no approved_by is set"
+        )
+
+    # GOV_REVIEW_OVERDUE.
+    if metadata.next_review_date is not None:
+        if _is_iso_date(metadata.next_review_date) and metadata.next_review_date < today:
+            warnings.append(
+                f"policy next_review_date '{metadata.next_review_date}' is in the past"
+            )
+
+    # GOV_CHANGELOG_ORDER.
+    disorder = _changelog_disorder(metadata.changelog)
+    if disorder >= 0:
+        warnings.append(
+            f"changelog entries are not in descending version/date order at entry {disorder}"
+        )

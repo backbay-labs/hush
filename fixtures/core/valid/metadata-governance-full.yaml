@@ -1,0 +1,33 @@
+hushspec: "0.2.0"
+name: governed-policy
+description: "Core 2.5: the full governance metadata surface -- ownership, reviewers, review dates, lineage and changelog -- none of which influences evaluation"
+metadata:
+  author: "security@example.com"
+  owner: "platform-security@example.com"
+  approved_by: "ciso@example.com"
+  approval_date: "2026-09-01"
+  reviewers:
+    - "appsec@example.com"
+    - "privacy@example.com"
+  classification: internal
+  change_ticket: "CHG-4821"
+  lifecycle_state: approved
+  policy_version: 4
+  # The version this document replaces; never its own policy_version.
+  supersedes: "3"
+  effective_date: "2026-09-02"
+  expiry_date: "2099-09-02"
+  next_review_date: "2099-03-01"
+  # Newest first: descending by version, then by date.
+  changelog:
+    - version: "4"
+      date: "2026-09-01"
+      summary: "Restrict egress to the approved API host"
+      author: "security@example.com"
+    - version: "3"
+      date: "2026-03-14"
+      summary: "First governed revision"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

@@ -11,6 +11,7 @@ import {
   CLASSIFICATIONS_SET,
   COMPUTER_USE_KEYS_SET,
   COMPUTER_USE_MODES_SET,
+  CHANGELOG_ENTRY_KEYS_SET,
   CONTROL_MAPPING_KEYS_SET,
   DEFAULT_ACTIONS_SET,
   DETECTION_KEYS_SET,
@@ -721,33 +722,145 @@ function validateConditionShape(
   }
 }
 
+/**
+ * `YYYY-MM-DD`, and a date that actually exists (no Feb 29 outside a leap
+ * year). Dates are compared as strings throughout the toolchain -- which is
+ * calendar order only for this shape -- so an unchecked `01/02/2026` would
+ * make an expired policy compare as current instead of failing loudly.
+ */
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const lengths = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= lengths[month - 1];
+}
+
+function validateOptionalDate(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): void {
+  const value = validateOptionalString(obj, key, ctx, path);
+  if (value != null && !isIsoDate(value)) {
+    addError(ctx, 'invalid_date', `${path}: '${value}' is not an ISO 8601 date (YYYY-MM-DD)`);
+  }
+}
+
+/** Numeric when both versions are plain integers, lexicographic otherwise. */
+function compareChangelogVersions(left: string, right: string): number {
+  const a = Number(left.trim());
+  const b = Number(right.trim());
+  if (Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b >= 0 && left.trim() !== '' && right.trim() !== '') {
+    return a === b ? 0 : a < b ? -1 : 1;
+  }
+  return left === right ? 0 : left < right ? -1 : 1;
+}
+
+function validateChangelog(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  if (!('changelog' in obj)) return;
+
+  const changelog = obj.changelog;
+  if (!Array.isArray(changelog)) {
+    addError(ctx, 'invalid_array', `${path}.changelog must be an array`);
+    return;
+  }
+
+  changelog.forEach((entry, index) => {
+    const entryPath = `${path}.changelog[${index}]`;
+    if (!isRecord(entry)) {
+      addError(ctx, 'invalid_type', `${entryPath} must be an object`);
+      return;
+    }
+
+    rejectUnknownKeys(entry, CHANGELOG_ENTRY_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${entryPath}: ${key}`);
+
+    const version = validateRequiredString(entry, 'version', ctx, `${entryPath}.version`);
+    if (version === '') {
+      addError(ctx, 'invalid_value', `${entryPath}.version must not be empty`);
+    }
+
+    const date = validateRequiredString(entry, 'date', ctx, `${entryPath}.date`);
+    if (date != null && !isIsoDate(date)) {
+      addError(ctx, 'invalid_date', `${entryPath}.date: '${date}' is not an ISO 8601 date (YYYY-MM-DD)`);
+    }
+
+    validateOptionalString(entry, 'author', ctx, `${entryPath}.author`);
+
+    const summary = validateRequiredString(entry, 'summary', ctx, `${entryPath}.summary`);
+    if (summary === '') {
+      addError(ctx, 'invalid_value', `${entryPath}.summary must not be empty`);
+    }
+  });
+}
+
+/**
+ * Index of the first changelog entry not ordered after the one above it (the
+ * list runs newest first), or -1 when the list is ordered. Entries that are
+ * not well-formed are skipped: `validateChangelog` already reported them.
+ */
+function changelogDisorder(changelog: unknown): number {
+  if (!Array.isArray(changelog)) return -1;
+  for (let index = 1; index < changelog.length; index += 1) {
+    const previous = changelog[index - 1];
+    const current = changelog[index];
+    if (!isRecord(previous) || !isRecord(current)) continue;
+    if (typeof previous.version !== 'string' || typeof current.version !== 'string') continue;
+    if (typeof previous.date !== 'string' || typeof current.date !== 'string') continue;
+    const versionOrder = compareChangelogVersions(previous.version, current.version);
+    const ordered = versionOrder > 0 || (versionOrder === 0 && previous.date >= current.date);
+    if (!ordered) return index;
+  }
+  return -1;
+}
+
 function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext): void {
   const path = 'metadata';
   rejectUnknownKeys(obj, GOVERNANCE_METADATA_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
 
   validateOptionalString(obj, 'author', ctx, `${path}.author`);
   validateOptionalString(obj, 'approved_by', ctx, `${path}.approved_by`);
-  validateOptionalString(obj, 'approval_date', ctx, `${path}.approval_date`);
+  validateOptionalDate(obj, 'approval_date', ctx, `${path}.approval_date`);
   validateOptionalEnum(obj, 'classification', ctx, `${path}.classification`, CLASSIFICATIONS_SET);
   validateOptionalString(obj, 'change_ticket', ctx, `${path}.change_ticket`);
   validateOptionalEnum(obj, 'lifecycle_state', ctx, `${path}.lifecycle_state`, LIFECYCLE_STATES_SET);
   validateOptionalInteger(obj, 'policy_version', ctx, `${path}.policy_version`, { min: 1 });
-  validateOptionalString(obj, 'effective_date', ctx, `${path}.effective_date`);
-  validateOptionalString(obj, 'expiry_date', ctx, `${path}.expiry_date`);
+  validateOptionalDate(obj, 'effective_date', ctx, `${path}.effective_date`);
+  validateOptionalDate(obj, 'expiry_date', ctx, `${path}.expiry_date`);
+  validateOptionalString(obj, 'owner', ctx, `${path}.owner`);
+  validateOptionalStringArray(obj, 'reviewers', ctx, `${path}.reviewers`);
+  validateOptionalDate(obj, 'next_review_date', ctx, `${path}.next_review_date`);
+  validateChangelog(obj, ctx, path);
+  validateOptionalString(obj, 'supersedes', ctx, `${path}.supersedes`);
   validateControlMappings(obj, ctx, path);
 
+  // GOV_SELF_SUPERSEDES: a document that replaces its own version describes an
+  // impossible lineage, so it is an error rather than an advisory warning.
+  if (typeof obj.supersedes === 'string' && typeof obj.policy_version === 'number') {
+    if (obj.supersedes.trim() === String(obj.policy_version)) {
+      addError(
+        ctx,
+        'invalid_value',
+        `${path}.supersedes '${obj.supersedes}' is the policy's own policy_version`,
+      );
+    }
+  }
+
   if (!ctx.includeWarnings) return;
+
+  const today = new Date().toISOString().slice(0, 10);
 
   const lifecycleState = typeof obj.lifecycle_state === 'string' ? obj.lifecycle_state : undefined;
   if (lifecycleState === 'deprecated' || lifecycleState === 'archived') {
     ctx.warnings.push(`policy lifecycle state is '${lifecycleState}'`);
   }
 
-  if (typeof obj.expiry_date === 'string') {
-    const today = new Date().toISOString().slice(0, 10);
-    if (obj.expiry_date < today) {
-      ctx.warnings.push(`policy expiry_date '${obj.expiry_date}' is in the past`);
-    }
+  if (typeof obj.expiry_date === 'string' && isIsoDate(obj.expiry_date) && obj.expiry_date < today) {
+    ctx.warnings.push(`policy expiry_date '${obj.expiry_date}' is in the past`);
   }
 
   if (hasValue(obj, 'approved_by') && !hasValue(obj, 'approval_date')) {
@@ -756,6 +869,37 @@ function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext):
 
   if (obj.classification === 'restricted' && !hasValue(obj, 'approved_by')) {
     ctx.warnings.push("classification is 'restricted' but no approved_by is set");
+  }
+
+  // GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that a
+  // copy-paste with different capitalization defeats is no check at all.
+  if (typeof obj.author === 'string' && typeof obj.approved_by === 'string') {
+    const author = obj.author.trim();
+    if (author !== '' && author.toLowerCase() === obj.approved_by.trim().toLowerCase()) {
+      ctx.warnings.push(
+        `author and approved_by are the same identity '${author}': separation of duties requires a different approver`,
+      );
+    }
+  }
+
+  // GOV_UNAPPROVED_STATE.
+  if ((lifecycleState === 'approved' || lifecycleState === 'deployed') && !hasValue(obj, 'approved_by')) {
+    ctx.warnings.push(`lifecycle_state is '${lifecycleState}' but no approved_by is set`);
+  }
+
+  // GOV_REVIEW_OVERDUE.
+  if (
+    typeof obj.next_review_date === 'string' &&
+    isIsoDate(obj.next_review_date) &&
+    obj.next_review_date < today
+  ) {
+    ctx.warnings.push(`policy next_review_date '${obj.next_review_date}' is in the past`);
+  }
+
+  // GOV_CHANGELOG_ORDER.
+  const disorder = changelogDisorder(obj.changelog);
+  if (disorder >= 0) {
+    ctx.warnings.push(`changelog entries are not in descending version/date order at entry ${disorder}`);
   }
 }
 

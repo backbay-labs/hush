@@ -1,0 +1,10 @@
+hushspec: "0.2.0"
+name: bad-metadata-date
+description: "Core 2.5: every metadata date must be an ISO 8601 calendar date (YYYY-MM-DD); 2026-13-45 names no day"
+metadata:
+  author: "security@example.com"
+  expiry_date: "2026-13-45"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block
