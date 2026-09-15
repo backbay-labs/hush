@@ -89,10 +89,17 @@ fn test_valid_fixture(fixture: &TestFixture) -> TestResult {
             fixture_path: path,
             category: fixture.category,
             passed: false,
-            message: format!("Parse failed: {e}"),
+            message: format!("{PARSE_FAILURE_PREFIX}{e}"),
         },
     }
 }
+
+/// Prefix of the message a Level 1 result carries when the document did not
+/// parse at all.
+///
+/// `report::build` scores Level 0 (parsing) off this prefix, so the two must
+/// agree; it lives here, next to the only `format!` that writes it.
+pub const PARSE_FAILURE_PREFIX: &str = "Parse failed: ";
 
 fn test_invalid_fixture(fixture: &TestFixture) -> TestResult {
     let path = fixture.path.display().to_string();
@@ -386,9 +393,15 @@ fn compare_receipt(
         conditions: HashMap::new(),
     };
     let receipt = hushspec::evaluate_audited(resolution, action, &config, &ctx);
-    let actual = serde_json::to_value(&receipt).ok()?;
+    let actual = match serde_json::to_value(&receipt) {
+        Ok(actual) => actual,
+        Err(error) => return Some(format!("could not serialize the produced receipt: {error}")),
+    };
 
-    for (key, want) in expected.as_object()? {
+    let Some(expected_members) = expected.as_object() else {
+        return Some("expect.receipt must be an object".to_string());
+    };
+    for (key, want) in expected_members {
         if RECEIPT_IGNORED_MEMBERS.contains(&key.as_str()) {
             continue;
         }

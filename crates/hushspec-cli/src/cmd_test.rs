@@ -310,18 +310,22 @@ pub fn run(args: TestArgs) -> i32 {
         return 2;
     }
 
-    let external_policy = args.policy.as_ref().map(|path| {
-        // Resolve `extends` here: `--policy` names the document the suite runs
-        // against, and an unresolved leaf drops every block its base declares.
-        hushspec::resolve_from_path_with_builtins(path).unwrap_or_else(|e| {
-            eprintln!(
-                "{} Failed to load policy {}: {e}",
-                "ERROR".red(),
-                path.display()
-            );
-            std::process::exit(2);
-        })
-    });
+    // Resolve `extends` here: `--policy` names the document the suite runs
+    // against, and an unresolved leaf drops every block its base declares.
+    let external_policy = match args.policy.as_ref() {
+        Some(path) => match hushspec::resolve_from_path_with_builtins(path) {
+            Ok(policy) => Some(policy),
+            Err(e) => {
+                eprintln!(
+                    "{} Failed to load policy {}: {e}",
+                    "ERROR".red(),
+                    path.display()
+                );
+                return 2;
+            }
+        },
+        None => None,
+    };
     let external_policy_key = args
         .policy
         .as_ref()
@@ -361,7 +365,13 @@ pub fn run(args: TestArgs) -> i32 {
         TestOutputFormat::Text => render_text(&fixture_results, total_passed, total_failed),
         TestOutputFormat::Tap => render_tap(&fixture_results),
         TestOutputFormat::Json => {
-            render_json(&fixture_results, total_passed, total_failed, &coverage)
+            match render_json(&fixture_results, total_passed, total_failed, &coverage) {
+                Ok(json) => json,
+                Err(message) => {
+                    eprintln!("{} {message}", "ERROR".red());
+                    return 2;
+                }
+            }
         }
         TestOutputFormat::Junit => {
             render_junit(&fixture_results, &coverage, args.fail_on_uncovered)
@@ -864,7 +874,13 @@ fn compare_receipt(
         ));
     };
 
-    let expected_members = expected.as_object()?;
+    let Some(expected_members) = expected.as_object() else {
+        return Some(Mismatch::new(
+            "receipt",
+            "an object",
+            "expect.receipt is not an object",
+        ));
+    };
     for (key, want) in expected_members {
         if RECEIPT_IGNORED_MEMBERS.contains(&key.as_str()) {
             continue;
@@ -1034,7 +1050,7 @@ fn render_json(
     total_passed: usize,
     total_failed: usize,
     coverage: &BTreeMap<String, Coverage>,
-) -> String {
+) -> Result<String, String> {
     let fixtures: Vec<JsonFixtureResult> = results
         .iter()
         .map(|fr| {
@@ -1081,8 +1097,8 @@ fn render_json(
     };
 
     match serde_json::to_string_pretty(&report) {
-        Ok(json) => format!("{json}\n"),
-        Err(_) => String::new(),
+        Ok(json) => Ok(format!("{json}\n")),
+        Err(e) => Err(format!("could not serialize the JSON report: {e}")),
     }
 }
 
@@ -1109,9 +1125,13 @@ fn xml_escape(value: &str) -> String {
 /// A JUnit `classname`: the fixture path with separators turned into dots, so
 /// report viewers group by suite the way they do for a package.
 fn junit_classname(file: &str) -> String {
-    file.trim_end_matches(".test.yaml")
-        .trim_end_matches(".test.yml")
-        .replace(['/', '\\'], ".")
+    // `strip_suffix`, not `trim_end_matches`: the latter strips the suffix
+    // repeatedly, so `a.test.yaml.test.yaml` would collapse to `a`.
+    let stem = file
+        .strip_suffix(".test.yaml")
+        .or_else(|| file.strip_suffix(".test.yml"))
+        .unwrap_or(file);
+    stem.replace(['/', '\\'], ".")
 }
 
 fn render_junit(

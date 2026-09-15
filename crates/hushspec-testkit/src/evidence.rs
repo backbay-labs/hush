@@ -604,7 +604,15 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
     use hushspec::signing::{Keyring, VerifyOptions};
 
     let root = fixtures_dir.join("log");
-    let keyring = Keyring::load(&fixtures_dir.join("signing/keys/keyring.json")).ok();
+    // Fail closed on the keyring: the signed vectors need it to tell a bad
+    // signature from a good one, and `.ok()` here would let every one of them
+    // pass without a signature ever being checked.
+    let keyring = match Keyring::load(&fixtures_dir.join("signing/keys/keyring.json")) {
+        Ok(keyring) => Some(keyring),
+        Err(error) => {
+            return vec![fail(label(&root), "log", 5, format!("keyring: {error}"))];
+        }
+    };
     let options = || LogVerifyOptions {
         require_signatures: false,
         keyring: keyring.clone(),
@@ -647,7 +655,7 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
             .map(|(name, text)| (name.as_str(), text.as_str()))
             .collect();
         let name = "fixtures/log/valid/rotated-*.jsonl".to_string();
-        match verify_logs(&pair, &LogVerifyOptions::default()) {
+        match verify_logs(&pair, &options()) {
             Ok(_) => results.push(pass(
                 name,
                 "log",
@@ -676,25 +684,34 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
             .rsplit('-')
             .next()
             .and_then(|tail| tail.parse().ok());
+        let Some(expected_line) = expected_line else {
+            results.push(fail(
+                name,
+                "log",
+                5,
+                "an invalid log vector must name the line it breaks at, as \
+                 `<reason>-line-<n>.jsonl`"
+                    .to_string(),
+            ));
+            continue;
+        };
         match verify_log(&file_name, &text, &options()) {
             Ok(_) => results.push(fail(name, "log", 5, "accepted a broken chain".to_string())),
-            Err(error) => match expected_line {
-                Some(line) if error.line != line => results.push(fail(
-                    name,
-                    "log",
-                    5,
-                    format!(
-                        "break reported at line {} but expected line {line}",
-                        error.line
-                    ),
-                )),
-                _ => results.push(pass(
-                    name,
-                    "log",
-                    5,
-                    format!("refused at line {}: {error}", error.line),
-                )),
-            },
+            Err(error) if error.line != expected_line => results.push(fail(
+                name,
+                "log",
+                5,
+                format!(
+                    "break reported at line {} but expected line {expected_line}",
+                    error.line
+                ),
+            )),
+            Err(error) => results.push(pass(
+                name,
+                "log",
+                5,
+                format!("refused at line {}: {error}", error.line),
+            )),
         }
     }
 

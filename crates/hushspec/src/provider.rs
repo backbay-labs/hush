@@ -553,6 +553,10 @@ impl PolicyWatcher {
     /// [`ProviderError`] from the initial load.
     pub fn start(self) -> Result<PolicyHandle, ProviderError> {
         let Self { provider, reload } = self;
+        // Fingerprint before loading: taking it afterwards would bake a write
+        // that landed during the load into the baseline, and that edit would
+        // then never be delivered.
+        let baseline = stat(provider.path());
         let initial = provider.load()?;
         let state = Arc::new(HandleState::default());
         let current = Arc::new(Mutex::new(Arc::new(initial)));
@@ -575,7 +579,7 @@ impl PolicyWatcher {
         let thread = std::thread::Builder::new()
             .name("hushspec-policy-watcher".to_string())
             .spawn(move || {
-                let mut fingerprint = stat(&path);
+                let mut fingerprint = baseline;
                 while driver.wait() {
                     driver.check_sentinel();
                     let next = stat(&path);

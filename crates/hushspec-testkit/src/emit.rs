@@ -265,6 +265,51 @@ fn trace_candidates(
     {
         candidates.push(value);
     }
+    // The schema's `RuleTraceExpectation` is `additionalProperties: false`
+    // over exactly `rule_block`, `outcome` and an optional `rule_path`, so the
+    // two full spellings above -- both of which always serialize `evaluated`
+    // -- can never validate. Offer the projection last: it is the shape the
+    // runner compares and the committed vectors use, so a trace-only
+    // divergence gets a fixture that actually pins the trace.
+    //
+    // It is projected from the evaluator's trace, not the receipt's, because
+    // that is the trace the runner recomputes; the two `rule_block` ids the
+    // receipt spelling renames are applied here (receipt spec 4.3, item 5).
+    if !result.rule_trace.is_empty() {
+        let projected: Vec<serde_json::Value> = result
+            .rule_trace
+            .iter()
+            .map(|entry| {
+                let rule_block = match entry.rule_block.as_str() {
+                    "default"
+                        if entry.matched_rule.as_deref()
+                            == Some(hushspec::evaluate::UNKNOWN_ACTION_TYPE_RULE) =>
+                    {
+                        hushspec::receipt::UNKNOWN_ACTION_TYPE_BLOCK
+                    }
+                    "origins" => hushspec::receipt::ORIGIN_PROFILE_BLOCK,
+                    other => other,
+                };
+                let mut object = serde_json::Map::new();
+                object.insert(
+                    "rule_block".to_string(),
+                    serde_json::Value::String(rule_block.to_string()),
+                );
+                object.insert(
+                    "outcome".to_string(),
+                    serde_json::Value::String(entry.outcome.clone()),
+                );
+                if let Some(rule_path) = &entry.matched_rule {
+                    object.insert(
+                        "rule_path".to_string(),
+                        serde_json::Value::String(rule_path.clone()),
+                    );
+                }
+                serde_json::Value::Object(object)
+            })
+            .collect();
+        candidates.push(serde_json::Value::Array(projected));
+    }
     candidates
 }
 
@@ -408,8 +453,9 @@ mod tests {
         assert_round_trips_through_runner(&filename, &yaml);
     }
 
-    /// A trace-only divergence still yields a fixture, and it pins the reason
-    /// (the trace's own building block) since `expect` has no `rule_trace`.
+    /// A trace-only divergence must pin the trace itself, not just the reason:
+    /// a fixture that records only the decision is green on the very SDK whose
+    /// trace diverged.
     #[test]
     fn build_regression_fixture_emits_a_rule_trace_divergence() {
         let mut min = reason_case();
@@ -418,10 +464,15 @@ mod tests {
         let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("fixture builds");
         assert!(yaml.contains("reason:"), "{yaml}");
         let fixture: serde_json::Value = serde_yaml::from_str(&yaml).expect("fixture is YAML");
-        assert!(
-            fixture["cases"][0]["expect"].get("rule_trace").is_none(),
-            "expect has no rule_trace member in the evaluator-test schema:\n{yaml}"
-        );
+        let trace = fixture["cases"][0]["expect"]["rule_trace"]
+            .as_array()
+            .unwrap_or_else(|| panic!("expect.rule_trace must be pinned:\n{yaml}"));
+        assert!(!trace.is_empty(), "{yaml}");
+        for entry in trace {
+            let entry = entry.as_object().expect("a trace entry is an object");
+            assert!(entry.contains_key("rule_block"), "{yaml}");
+            assert!(entry.contains_key("outcome"), "{yaml}");
+        }
         assert_round_trips_through_runner(&filename, &yaml);
     }
 
@@ -457,9 +508,10 @@ mod tests {
 
     /// The candidate list is what makes the member's *spelling* the schema's
     /// business rather than the emitter's: the evaluator trace first, the
-    /// receipt trace second, and nothing at all when there is no trace.
+    /// receipt trace second, the schema's projection last, and nothing at all
+    /// when there is no trace.
     #[test]
-    fn trace_candidates_offer_both_spellings() {
+    fn trace_candidates_offer_every_spelling_including_the_schema_s() {
         let min = reason_case();
         let CaseVerdict::Ok { result } = oracle_verdict(&min) else {
             panic!("the reference did not evaluate the reason case");
@@ -468,14 +520,25 @@ mod tests {
         let receipt = receipt_for(&min, &policy).expect("the case records a receipt");
 
         let candidates = trace_candidates(&result, Some(&receipt));
-        assert_eq!(candidates.len(), 2, "{candidates:?}");
+        assert_eq!(candidates.len(), 3, "{candidates:?}");
         // The evaluator's own spelling: `matched_rule`, no engine-stage ids.
         assert!(candidates[0][0].get("matched_rule").is_some());
         assert!(candidates[0][0].get("rule_path").is_none());
         // The receipt's: `rule_path`.
         assert!(candidates[1][0].get("rule_path").is_some());
+        // The schema's: exactly rule_block, outcome and an optional rule_path.
+        let projected = candidates[2][0].as_object().expect("an object");
+        assert!(projected.contains_key("rule_block"));
+        assert!(projected.contains_key("outcome"));
+        assert!(
+            projected
+                .keys()
+                .all(|key| matches!(key.as_str(), "rule_block" | "outcome" | "rule_path")),
+            "the projected candidate must carry nothing the schema forbids: {projected:?}"
+        );
 
-        assert!(trace_candidates(&result, None).len() == 1);
+        // Without a receipt: the evaluator spelling and the projection.
+        assert_eq!(trace_candidates(&result, None).len(), 2);
         assert!(
             trace_candidates(&crate::diff::NormalizedResult::default(), None).is_empty(),
             "a case with no trace pins no trace"

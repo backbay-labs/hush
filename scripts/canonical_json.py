@@ -450,6 +450,9 @@ def main(argv: list[str] | None = None) -> int:
         if errors:
             print(f"{len(errors)} hash vector failure(s)")
             return 1
+        if count == 0:
+            print(f"no hash vectors found under {args.target}", file=sys.stderr)
+            return 1
         print(f"{count}/{count} hash vectors OK")
         return 0
 

@@ -934,9 +934,14 @@ fn column_width<'a>(values: impl Iterator<Item = &'a str>, heading: &str) -> usi
         .max(heading.len())
 }
 
+/// The first 12 characters of a digest, for the text report's fixed columns.
+///
+/// Receipts are parsed before their `content_hash` is format-checked, so the
+/// digest may be any string: truncate by character, never by byte.
 fn short_hash(hash: &str) -> String {
     let hex = hash.strip_prefix("sha256:").unwrap_or(hash);
-    format!("sha256:{}", &hex[..hex.len().min(12)])
+    let head: String = hex.chars().take(12).collect();
+    format!("sha256:{head}")
 }
 
 // ----------------------------------------------------------------------- csv
@@ -1268,6 +1273,7 @@ fn write_csv(report: &Report, args: &ReportArgs) -> i32 {
         names.push("controls");
         names.push("unmapped_rule_blocks");
     }
+    let written = names.len();
     for name in names {
         let path = dir.join(format!("{name}.csv"));
         if let Err(error) = std::fs::write(&path, table(report, name)) {
@@ -1279,7 +1285,7 @@ fn write_csv(report: &Report, args: &ReportArgs) -> i32 {
             return 2;
         }
     }
-    println!("wrote {} table(s) to {}", CSV_TABLES.len(), dir.display());
+    println!("wrote {written} table(s) to {}", dir.display());
     0
 }
 

@@ -179,6 +179,16 @@ def main() -> int:
             )
             _report_drift(current, fresh)
             return 1
+        # The manifest is cited by its sha256, so its bytes are the artifact:
+        # matching content is not enough if the formatting has drifted.
+        expected = render({**fresh, "generated_at": current.get("generated_at", now)})
+        if MANIFEST.read_text(encoding="utf-8") != expected:
+            print(
+                f"{MANIFEST.relative_to(ROOT)} is not canonically formatted -- rerun "
+                "scripts/generate_fixture_manifest.py",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
     # Keep the recorded timestamp when nothing else changed, so regenerating

@@ -205,10 +205,9 @@ pub fn build(
             .filter(|result| {
                 result.level == Some(1)
                     && result.status == Status::Fail
-                    && result
-                        .message
-                        .as_deref()
-                        .is_some_and(|message| message.contains("Parse failed"))
+                    && result.message.as_deref().is_some_and(|message| {
+                        message.contains(crate::runner::PARSE_FAILURE_PREFIX)
+                    })
             })
             .count() as u32;
         let entry = levels.get_mut("0").expect("level 0 exists");

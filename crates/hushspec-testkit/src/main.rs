@@ -77,12 +77,14 @@ fn main() {
 
     let fixtures = hushspec_testkit::fixture::discover_fixtures(&cli.fixtures);
     if fixtures.is_empty() {
+        // Exiting 0 here would make a conformance job pointed at the wrong
+        // path green having verified nothing.
         eprintln!(
             "{} No fixtures found in {}",
-            "WARN".yellow(),
+            "ERROR".red(),
             cli.fixtures.display()
         );
-        std::process::exit(0);
+        std::process::exit(1);
     }
 
     let results = hushspec_testkit::runner::run_conformance(&fixtures);

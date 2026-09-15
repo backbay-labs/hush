@@ -611,8 +611,9 @@ fn classify_change(old: &EvaluationResult, new: &EvaluationResult) -> String {
         (Decision::Warn, Decision::Deny) => "escalated".to_string(),
         // Demotion: deny -> warn
         (Decision::Deny, Decision::Warn) => "demoted".to_string(),
-        // All equal cases already returned above.
-        _ => unreachable!(),
+        // Equal decisions returned above; anything left is a decision pair
+        // this build does not classify, which is a diff label, not a crash.
+        _ => "changed".to_string(),
     }
 }
 
