@@ -57,6 +57,10 @@ struct Cli {
     #[arg(long)]
     ignore_reason: bool,
 
+    /// Compare everything except the per-rule-block evaluation trace
+    #[arg(long)]
+    ignore_rule_trace: bool,
+
     /// Replay an existing bundle instead of generating
     #[arg(long)]
     bundle: Option<PathBuf>,
@@ -92,6 +96,7 @@ fn main() {
         report_path: cli.report,
         bundles_dir: cli.bundles_dir,
         ignore_reason: cli.ignore_reason,
+        ignore_rule_trace: cli.ignore_rule_trace,
         repo_root: repo_root(),
         bundle_path: cli.bundle,
         harness_override: None,

@@ -141,12 +141,25 @@ fn candidate_index(case_key: &str) -> Option<usize> {
     number.checked_sub(1)
 }
 
+/// Whether the Rust oracle would evaluate this candidate rather than reject
+/// it. Mirrors `diff::parse_policy` exactly -- parse, resolve `extends`,
+/// validate -- so a candidate that survives here is one the oracle can
+/// actually answer for, and shrinking never wanders into a bundle where every
+/// SDK merely agrees on "rejected".
 fn rust_accepts(policy: &Value) -> bool {
     let Ok(yaml) = serde_yaml::to_string(policy) else {
         return false;
     };
     let Ok(spec) = hushspec::HushSpec::parse(&yaml) else {
         return false;
+    };
+    let spec = if spec.extends.is_some() {
+        match crate::diff::resolve_builtin_extends(&spec) {
+            Ok(resolved) => resolved,
+            Err(_) => return false,
+        }
+    } else {
+        spec
     };
     hushspec::validate(&spec).is_valid()
 }
@@ -179,6 +192,26 @@ fn shrink_candidates(policy: &Value, action: &Value) -> Vec<(Value, Value)> {
                     }
                     candidates.push((Value::Object(smaller), action.clone()));
                 }
+
+                // Drop each field *within* a block. Without this, a block's
+                // `when` condition (and the 0.2.0 sub-fields of
+                // browser_automation / code_execution) can only be removed by
+                // deleting the whole block, so a repro that needs the block
+                // keeps its entire condition tree no matter how irrelevant.
+                for (block, body) in section_map {
+                    let Value::Object(body_map) = body else {
+                        continue;
+                    };
+                    for field in body_map.keys() {
+                        let mut body_smaller = body_map.clone();
+                        body_smaller.remove(field);
+                        let mut section_smaller = section_map.clone();
+                        section_smaller.insert(block.clone(), Value::Object(body_smaller));
+                        let mut smaller = map.clone();
+                        smaller.insert(section.to_string(), Value::Object(section_smaller));
+                        candidates.push((Value::Object(smaller), action.clone()));
+                    }
+                }
             }
         }
     }
@@ -209,23 +242,43 @@ fn shrink_candidates(policy: &Value, action: &Value) -> Vec<(Value, Value)> {
         }
     }
 
-    // Action reductions: drop optional keys, halve strings. "type" is kept.
+    // Action reductions: drop optional keys, halve strings. "type" is kept,
+    // and so is `context` whenever the policy has a `time_window` condition:
+    // without `context.current_time` such a condition reads the wall clock,
+    // which would make both the shrink probes and any emitted fixture
+    // time-dependent.
+    let needs_pinned_clock = policy.to_string().contains("\"time_window\"");
     if let Value::Object(map) = action {
         for key in map.keys() {
-            if key == "type" {
+            if key == "type" || (key == "context" && needs_pinned_clock) {
                 continue;
             }
             let mut smaller = map.clone();
             smaller.remove(key);
             candidates.push((policy.clone(), Value::Object(smaller)));
         }
-        for field in ["target", "content"] {
+        for field in ["target", "content", "url"] {
             if let Some(Value::String(text)) = map.get(field)
                 && text.chars().count() > 8
             {
                 let half: String = text.chars().take(text.chars().count() / 2).collect();
                 let mut smaller = map.clone();
                 smaller.insert(field.to_string(), Value::String(half));
+                candidates.push((policy.clone(), Value::Object(smaller)));
+            }
+        }
+        // Drop each field of the runtime context individually, keeping
+        // `current_time` -- dropping that would let a `time_window` condition
+        // read the wall clock and make the repro nondeterministic.
+        if let Some(Value::Object(context)) = map.get("context") {
+            for key in context.keys() {
+                if key == "current_time" {
+                    continue;
+                }
+                let mut context_smaller = context.clone();
+                context_smaller.remove(key);
+                let mut smaller = map.clone();
+                smaller.insert("context".to_string(), Value::Object(context_smaller));
                 candidates.push((policy.clone(), Value::Object(smaller)));
             }
         }
@@ -334,6 +387,7 @@ mod tests {
                                 reason: None,
                                 origin_profile: None,
                                 posture: None,
+                                rule_trace: Vec::new(),
                             },
                         },
                     );
@@ -452,6 +506,7 @@ mod tests {
                                 reason: None,
                                 origin_profile: None,
                                 posture: None,
+                                rule_trace: Vec::new(),
                             },
                         },
                     );
@@ -493,6 +548,7 @@ mod tests {
                                 reason: None,
                                 origin_profile: None,
                                 posture: None,
+                                rule_trace: Vec::new(),
                             },
                         },
                     );
@@ -507,6 +563,7 @@ mod tests {
                         reason: None,
                         origin_profile: None,
                         posture: None,
+                        rule_trace: Vec::new(),
                     },
                 },
             );
