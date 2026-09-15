@@ -4,6 +4,7 @@ import math
 import re
 from typing import Any, Callable
 
+from hushspec.regex_profile import compile_profile_regex
 from hushspec.generated_contract import (
     BRIDGE_POLICY_KEYS,
     BRIDGE_TARGET_KEYS,
@@ -902,14 +903,10 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
 
 
 def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
-    try:
-        re.compile(pattern)
-    except re.error as exc:
-        errors.append(f"{path} must be a valid regular expression: {exc}")
-        return
-
-    # Portability pre-check first, then the RE2-feature check, then the
-    # nested-quantifier (ReDoS) heuristic.
+    # Portability pre-check, RE2-feature check and nested-quantifier (ReDoS)
+    # heuristic first, all reported with the shared "not in the RE2 subset"
+    # message. This module keeps its own copies of the two scanners on purpose
+    # (see their docstrings) so parse() and validate() cannot silently drift.
     if (
         _disallowed_regex_feature(pattern) is not None
         or _RE2_DISALLOWED.search(pattern)
@@ -919,6 +916,17 @@ def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
             f"{path}: pattern uses features not in the RE2 subset "
             "(backreferences, lookaround, etc.) which may cause ReDoS"
         )
+        return
+
+    # Everything else goes through compile_profile_regex, which repeats those
+    # checks and then applies the HushSpec regex profile (ASCII shorthands,
+    # leading-only inline flags, portable escapes) before compiling. It is the
+    # exact call the evaluator makes, so parse() rejects precisely the patterns
+    # evaluation would deny on.
+    try:
+        compile_profile_regex(pattern)
+    except ValueError as exc:
+        errors.append(f"{path} must be a valid regular expression: {exc}")
 
 
 # Nested-quantifier (catastrophic backtracking / ReDoS) heuristic.

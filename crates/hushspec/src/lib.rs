@@ -9,6 +9,7 @@ pub mod governance;
 pub mod merge;
 pub mod panic;
 pub mod receipt;
+pub mod regex_profile;
 pub mod resolve;
 pub mod rules;
 pub mod schema;
@@ -38,6 +39,7 @@ pub use receipt::{
     AuditConfig, DecisionReceipt, EnforcementMode, EnforcementOutcome, EnforcementSummary,
     evaluate_audited,
 };
+pub use regex_profile::{RegexProfileError, compile_profile_regex};
 pub use resolve::{
     BUILTIN_NAMES, LoadedSpec, ResolveError, create_composite_loader, load_builtin,
     resolve_from_path, resolve_from_path_with_builtins, resolve_with_loader,

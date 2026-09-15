@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from hushspec.extensions import DetectionLevel, TransitionTrigger
+from hushspec.regex_profile import compile_profile_regex
 from hushspec.schema import Classification, HushSpec, LifecycleState
 from hushspec.version import is_supported
 
@@ -632,23 +633,30 @@ def _brace_kind(inner: str) -> str:
 
 
 def _validate_regex(pattern: str, path: str, errors: list[ValidationError]) -> None:
-    try:
-        re.compile(pattern)
-    except re.error as e:
-        errors.append(
-            ValidationError(
-                "invalid_regex",
-                f"{path} must be a valid regular expression: {e}",
-            )
-        )
-        return
-
+    # RE2/ReDoS safety first, so a lookaround or ``(a+)+`` keeps reporting the
+    # dedicated ``non_re2_regex`` code rather than being swallowed by the
+    # profile compile below (which also rejects them, to stay fail-closed at
+    # evaluation time).
     if not is_safe_regex(pattern):
         errors.append(
             ValidationError(
                 "non_re2_regex",
                 f"{path}: pattern uses features not in the RE2 subset "
                 "(backreferences, lookaround, etc.) which may cause ReDoS",
+            )
+        )
+        return
+
+    # Profile check second: ``compile_profile_regex`` is the exact call the
+    # evaluator makes, so a pattern that validates here can never fail to
+    # compile at evaluation time -- and vice versa.
+    try:
+        compile_profile_regex(pattern)
+    except ValueError as e:
+        errors.append(
+            ValidationError(
+                "invalid_regex",
+                f"{path} must be a valid regular expression: {e}",
             )
         )
 

@@ -494,7 +494,7 @@ A pattern MUST NOT use: lookahead or lookbehind; backreferences; possessive quan
 
 **Failure handling.** A pattern that fails to compile at evaluation time (for example because a document bypassed validation) MUST produce **deny** from its block with `matched_rule` set to the pattern's path and a reason naming the compile failure. An engine that bounds matching time MUST treat exceeding the bound as **deny**.
 
-Test vectors: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/regex-dialect-staged.test.yaml` (staged), `fixtures/core/invalid/regex-*.yaml`.
+Test vectors: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/core/evaluation/regex-ascii-classes.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/regex-dialect-staged.test.yaml` (staged), `fixtures/core/invalid/regex-*.yaml`.
 
 ---
 

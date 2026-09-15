@@ -421,25 +421,30 @@ func validateOptionalNonNegativeInt(value *int, code, msg string, result *Valida
 // validateRegex rejects ReDoS-unsafe and non-portable patterns. A portability
 // pre-check runs first, rejecting constructs that are unsupported by, or behave
 // differently across, the four SDK regex engines (possessive quantifiers,
-// \Z/\z end-anchors, empty character classes). Go's regexp is RE2-only, so the
-// RE2-feature check then comes for free at compile time; the nested-quantifier
-// check finally rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2
-// tolerates but the backtracking SDK engines (JS RegExp, Python re) do not,
-// keeping the safety contract identical across all four SDKs.
+// \Z/\z end-anchors, empty character classes). The nested-quantifier check then
+// rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2 tolerates but
+// the backtracking SDK engines (JS RegExp, Python re) do not. The HushSpec
+// regex profile check comes last, and carries the RE2-feature rejection with it
+// because Go's regexp is RE2-only.
 func validateRegex(pattern, path string, result *ValidationResult) {
 	if message, bad := disallowedRegexFeature(pattern); bad {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s must be a valid regular expression: %s", path, message))
 		return
 	}
-	if _, err := regexp.Compile(pattern); err != nil {
-		result.addError("INVALID_REGEX",
-			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
-		return
-	}
 	if hasNestedQuantifier(pattern) {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
+		return
+	}
+	// CompileProfileRegex is the exact call the evaluator makes: it repeats the
+	// two checks above, applies the HushSpec regex profile (ASCII \d/\w/\s/\b,
+	// leading-only inline flags, portable escapes) and then compiles. Routing
+	// validation through it means a pattern that validates here can never fail
+	// to compile at evaluation time -- and vice versa.
+	if _, err := CompileProfileRegex(pattern); err != nil {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
 	}
 }
 

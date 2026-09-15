@@ -17,7 +17,7 @@ import type {
   PostureExtension,
 } from './extensions.js';
 import { parseOrThrow } from './parse.js';
-import { compileSafePolicyRegex } from './regex.js';
+import { compileProfileRegex } from './regex.js';
 
 export type Decision = 'allow' | 'warn' | 'deny';
 
@@ -516,7 +516,7 @@ function evaluateSecretPatterns(
 
   for (const pattern of rule.patterns ?? []) {
     try {
-      if (compileSafePolicyRegex(pattern.pattern).regex.test(content)) {
+      if (compileProfileRegex(pattern.pattern).regex.test(content)) {
         return denyResult(
           `rules.secret_patterns.patterns.${pattern.name}`,
           `content matched secret pattern '${pattern.name}'`,
@@ -550,7 +550,7 @@ function evaluatePatchIntegrity(
   const forbiddenPatterns = rule.forbidden_patterns ?? [];
   for (let index = 0; index < forbiddenPatterns.length; index++) {
     try {
-      if (compileSafePolicyRegex(forbiddenPatterns[index]).regex.test(content)) {
+      if (compileProfileRegex(forbiddenPatterns[index]).regex.test(content)) {
         return denyResult(
           `rules.patch_integrity.forbidden_patterns[${index}]`,
           'patch content matched a forbidden pattern',
@@ -618,7 +618,7 @@ function evaluateShellRule(
   const forbiddenPatterns = rule.forbidden_patterns ?? [];
   for (let index = 0; index < forbiddenPatterns.length; index++) {
     try {
-      if (compileSafePolicyRegex(forbiddenPatterns[index]).regex.test(target)) {
+      if (compileProfileRegex(forbiddenPatterns[index]).regex.test(target)) {
         return denyResult(
           `rules.shell_commands.forbidden_patterns[${index}]`,
           'shell command matched a forbidden pattern',

@@ -313,7 +313,11 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "valid regular expression" in err
+        # Empty classes are a portability rejection (JavaScript accepts `[]`
+        # and `[^]`; the other three engines reject them), so they are reported
+        # by the shared RE2-subset pre-check rather than by Python's own
+        # `re.compile`.
+        assert "RE2" in err
 
     def test_rejects_lookbehind_in_patch_integrity(self):
         yaml = """
