@@ -143,7 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n{}", metrics.render_prometheus());
     println!(
-        "verify the log with:  h2h verify-log {}",
+        "verify the log with:  h2h log verify {}",
         log_path.display()
     );
     Ok(())

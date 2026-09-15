@@ -50,6 +50,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   guard -> `check` -> `ChainedFileSink` + `OtlpSink`, with metrics, a monitored rule block and
   hot reload. New guide `docs/src/guides/runtime-integration.md`.
 - `Policy::panic_state()` reads the kill switch a policy will compile with.
+
 ### Added (RFC 09 Wave 5, Integrations)
 
 - GitHub composite Action (`action.yml`, `backbay-labs/hush@<ref>`): installs `h2h` --
