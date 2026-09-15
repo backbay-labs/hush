@@ -23,6 +23,10 @@ HUSHSPEC_SUPPORTED_VERSIONS: tuple[str, ...] = ("0.1.0", "0.2.0")
 #: Backwards-compatible alias for the representative full versions.
 SUPPORTED_VERSIONS = frozenset(HUSHSPEC_SUPPORTED_VERSIONS)
 
+#: Unprefixed alias for :data:`HUSHSPEC_SUPPORTED_MINORS`, so the constant can
+#: be reached under the same short name in every SDK.
+SUPPORTED_MINORS: tuple[str, ...] = HUSHSPEC_SUPPORTED_MINORS
+
 
 def _is_digits(part: str) -> bool:
     return len(part) > 0 and all("0" <= ch <= "9" for ch in part)
