@@ -1,0 +1,51 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "receipt-expectation",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:b20f10662d8ef79eba5e275c43fb94641bd8ec0e6348f3663d7ecc0535e534a1"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/srv/app/config.env",
+    "content_hash": "sha256:1ae81d179d0467050b1531a7324b36fe175eaec96154e0b9673934dec34f8eb4",
+    "content_size": 24
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.aws",
+  "reason": "content matched secret pattern 'aws'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.aws",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'aws'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

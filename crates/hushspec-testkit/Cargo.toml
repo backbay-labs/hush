@@ -20,6 +20,8 @@ path = "src/bin/hushspec-difftest.rs"
 
 [dependencies]
 hushspec = { version = "0.1", path = "../hushspec" }
+# Only for the fixed clock an `expect.receipt` assertion is evaluated under.
+chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1"

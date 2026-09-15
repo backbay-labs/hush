@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+hushspec_test: "0.2.0"
+description: "expect.rule_trace (evaluator-test 0.2, receipt spec 4.3): the recorded trace is asserted in order and in full, including the blocks that were consulted and skipped"
+policy:
+  hushspec: "0.1.0"
+  name: rule-trace
+  rules:
+    forbidden_paths:
+      patterns:
+        - "**/.env"
+    egress:
+      allow:
+        - "api.example.com"
+      default: block
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+        - name: todo_marker
+          pattern: "(?i)TODO-LEAK"
+          severity: warn
+cases:
+  - description: "an allowed egress records the egress allow and the secret scan that found nothing to read"
+    tags: ["rule-trace", "egress"]
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+      rule_trace:
+        - rule_block: egress
+          rule_path: rules.egress.allow
+          outcome: allow
+        - rule_block: secret_patterns
+          outcome: skip
+  - description: "a forbidden write still records the secret scan after the path denial (D2)"
+    tags: ["rule-trace", "no-early-return"]
+    action:
+      type: file_write
+      target: "/srv/app/.env"
+      content: "AWS=AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+      rule_trace:
+        - rule_block: forbidden_paths
+          rule_path: rules.forbidden_paths.patterns
+          outcome: deny
+        - rule_block: path_allowlist
+          outcome: skip
+        - rule_block: secret_patterns
+          rule_path: rules.secret_patterns.patterns.aws
+          outcome: deny
+  - description: "a warn-severity pattern records a warn outcome in the trace"
+    tags: ["rule-trace", "warn"]
+    action:
+      type: file_write
+      target: "/srv/app/notes.md"
+      content: "TODO-LEAK: rotate the key"
+    expect:
+      decision: warn
+      matched_rule: rules.secret_patterns.patterns.todo_marker
+      rule_trace:
+        - rule_block: forbidden_paths
+          outcome: allow
+        - rule_block: path_allowlist
+          outcome: skip
+        - rule_block: secret_patterns
+          rule_path: rules.secret_patterns.patterns.todo_marker
+          outcome: warn

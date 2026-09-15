@@ -1,0 +1,51 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "rule-trace",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:6a073d9b86419b089642a3cd40e20b47d1bba89c0dc57e5ca9a4936dec45fdfc"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/srv/app/notes.md",
+    "content_hash": "sha256:655e5764930186aca1977559b0efebcd32d9b90e041a8fec17fdb532198986f5",
+    "content_size": 25
+  },
+  "decision": "warn",
+  "matched_rule": "rules.secret_patterns.patterns.todo_marker",
+  "reason": "content matched secret pattern 'todo_marker'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "path did not match any forbidden pattern"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.todo_marker",
+      "outcome": "warn",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'todo_marker'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

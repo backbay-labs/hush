@@ -9,17 +9,36 @@ import { validate } from '../src/validate.js';
 import { evaluateWithDetection } from '../src/detection.js';
 import type { EvaluationAction } from '../src/evaluate.js';
 import type { RuntimeContext } from '../src/conditions.js';
-import { resolveWithOptions, type Loader } from '../src/resolve.js';
+import { resolveWithOptions, resolutionFromResolved, type Loader } from '../src/resolve.js';
 import type { HushSpec } from '../src/schema.js';
+import {
+  deterministicUuidV7,
+  evaluateAudited,
+  type AuditConfig,
+  type AuditContext,
+  type DecisionReceipt,
+  type RuleTraceEntry,
+} from '../src/receipt.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const fixturesRoot = path.join(repoRoot, 'fixtures');
+
+/** One expected `rule_trace` entry (evaluator-test schema 0.2). */
+interface RuleTraceExpectation {
+  rule_block: string;
+  outcome: string;
+  rule_path?: string;
+}
 
 interface EvaluationCase {
   description: string;
   action: Record<string, unknown>;
   /** Runtime context for `when` conditions (evaluator-test schema v0, D15). */
   context?: RuntimeContext;
+  /** The controls this case is evidence for (evaluator-test schema 0.2). */
+  controls?: { framework: string; control_id: string }[];
+  /** Free-form labels (evaluator-test schema 0.2). */
+  tags?: string[];
   expect: {
     decision: string;
     matched_rule?: string;
@@ -29,7 +48,99 @@ interface EvaluationCase {
       current: string;
       next: string;
     };
+    rule_trace?: RuleTraceExpectation[];
+    receipt?: Record<string, unknown>;
   };
+}
+
+/**
+ * The fixed inputs an `expect.receipt` assertion is evaluated under, pinned by
+ * `fixtures/receipts/expected/README.md` -- the same ones the expected-receipt
+ * vectors use, so a fixture's `expect.receipt` and those files describe one
+ * object.
+ */
+const RECEIPT_CLOCK_MILLIS = 1_789_473_600_000;
+
+const RECEIPT_CONFIG: AuditConfig = {
+  enabled: true,
+  includeRuleTrace: true,
+  // Off: an assertion must not depend on the machine running it.
+  recordDuration: false,
+};
+
+/** Receipt members that are inputs rather than outcomes, never compared. */
+const RECEIPT_IGNORED_MEMBERS = new Set(['actor', 'timestamp', 'receipt_id']);
+
+function receiptContext(caseIndex: number, context?: RuntimeContext): AuditContext {
+  return {
+    actor: {
+      agent_id: 'fixture-agent',
+      session_id: 'fixture-session',
+      principal: 'fixture@hushspec.dev',
+      runtime: 'hushspec-conformance/0.2',
+    },
+    enforcementMode: 'enforce',
+    timeSource: 'trusted',
+    clock: new Date(RECEIPT_CLOCK_MILLIS),
+    receiptId: deterministicUuidV7(RECEIPT_CLOCK_MILLIS, caseIndex),
+    ...(context != null ? { context } : {}),
+  };
+}
+
+/** `rule_block:outcome[@rule_path]`, the spelling a trace mismatch reports. */
+function renderTraceEntry(entry: { rule_block: string; outcome: string; rule_path?: string }): string {
+  return entry.rule_path != null
+    ? `${entry.rule_block}:${entry.outcome}@${entry.rule_path}`
+    : `${entry.rule_block}:${entry.outcome}`;
+}
+
+/**
+ * Assert `expect.rule_trace` against the recorded trace: in order, in full,
+ * and member by member -- `rule_path` only where the fixture spells it.
+ */
+function assertRuleTrace(
+  expected: RuleTraceExpectation[],
+  actual: RuleTraceEntry[],
+  label: string,
+): void {
+  expect(actual.map(renderTraceEntry).length, `${label}: rule_trace length`).toBe(expected.length);
+  expected.forEach((want, index) => {
+    const got = actual[index];
+    expect(got.rule_block, `${label}: rule_trace[${index}].rule_block`).toBe(want.rule_block);
+    expect(got.outcome, `${label}: rule_trace[${index}].outcome`).toBe(want.outcome);
+    if (want.rule_path != null) {
+      expect(got.rule_path, `${label}: rule_trace[${index}].rule_path`).toBe(want.rule_path);
+    }
+  });
+}
+
+/**
+ * Assert a partial `expect.receipt` against the receipt produced under the
+ * fixed inputs: nested objects are compared member-wise, everything else
+ * exactly.
+ */
+function assertReceiptMembers(
+  expected: Record<string, unknown>,
+  actual: Record<string, unknown>,
+  label: string,
+  path = '',
+): void {
+  for (const [key, want] of Object.entries(expected)) {
+    if (path === '' && RECEIPT_IGNORED_MEMBERS.has(key)) continue;
+    const at = path === '' ? key : `${path}.${key}`;
+    const got = actual?.[key];
+    if (want != null && typeof want === 'object' && !Array.isArray(want)) {
+      expect(got, `${label}: receipt.${at}`).toBeTypeOf('object');
+      assertReceiptMembers(
+        want as Record<string, unknown>,
+        got as Record<string, unknown>,
+        label,
+        at,
+      );
+      continue;
+    }
+    expect(got, `${label}: receipt.${at}`).toEqual(want);
+  }
 }
 
 interface EvaluationFixture {
@@ -38,6 +149,9 @@ interface EvaluationFixture {
   policy: unknown;
   cases: EvaluationCase[];
 }
+
+/** Fixture format versions this runner accepts (evaluator-test schema). */
+const SUPPORTED_TEST_VERSIONS = ['0.1.0', '0.2.0'];
 
 const validDirs = [
   'core/valid',
@@ -105,7 +219,7 @@ describe('shared fixture corpus', () => {
       const parsed = parse(policyYaml);
 
       it(`validates evaluator fixture ${path.relative(fixturesRoot, fixturePath)}`, () => {
-        expect(raw.hushspec_test).toMatch(/^0\.\d+\.\d+$/);
+        expect(SUPPORTED_TEST_VERSIONS).toContain(raw.hushspec_test);
         expect(raw.description.trim().length).toBeGreaterThan(0);
         expect(Array.isArray(raw.cases)).toBe(true);
         expect(raw.cases.length).toBeGreaterThan(0);
@@ -117,8 +231,9 @@ describe('shared fixture corpus', () => {
       if (!parsed.ok) continue;
       const spec = parsed.value;
 
-      for (const testCase of raw.cases) {
-        it(`evaluates [${path.relative(fixturesRoot, fixturePath)}] ${testCase.description}`, () => {
+      raw.cases.forEach((testCase, caseIndex) => {
+        const label = `[${path.relative(fixturesRoot, fixturePath)}] ${testCase.description}`;
+        it(`evaluates ${label}`, () => {
           // Per-case `context` is delivered on the action, which is where the
           // evaluator reads the runtime context for `when` conditions (D15).
           const action: EvaluationAction = {
@@ -146,8 +261,29 @@ describe('shared fixture corpus', () => {
             expect(result.posture!.current).toBe(testCase.expect.posture.current);
             expect(result.posture!.next).toBe(testCase.expect.posture.next);
           }
+
+          // `rule_trace` and `receipt` are asserted through the audited path,
+          // because a receipt is where both are published (receipt spec 4.3).
+          if (testCase.expect.rule_trace != null || testCase.expect.receipt != null) {
+            const receipt: DecisionReceipt = evaluateAudited(
+              resolutionFromResolved(spec),
+              action,
+              RECEIPT_CONFIG,
+              receiptContext(caseIndex, testCase.context),
+            );
+            if (testCase.expect.rule_trace != null) {
+              assertRuleTrace(testCase.expect.rule_trace, receipt.rule_trace, label);
+            }
+            if (testCase.expect.receipt != null) {
+              assertReceiptMembers(
+                testCase.expect.receipt,
+                JSON.parse(JSON.stringify(receipt)) as Record<string, unknown>,
+                label,
+              );
+            }
+          }
         });
-      }
+      });
     }
   }
 });
