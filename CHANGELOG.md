@@ -19,6 +19,23 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   `hushspec-validate`, `hushspec-lint`, `hushspec-lint-strict` and `hushspec-fmt-check`. A
   multi-stage `Dockerfile` builds an `h2h` image, published to `ghcr.io/backbay-labs/h2h` on
   every tagged release. New guide: `docs/src/guides/ci.md`.
+### Added (RFC 09 Wave 5)
+
+- `h2h report <log.jsonl|receipts.jsonl>...`: compliance evidence over a window of receipts.
+  Reads a hash-linked log or a plain receipt JSONL (classified line by line, signed receipts
+  included), verifies the chain before counting anything and refuses to report on a broken one
+  without `--unverified`, and refuses a line that does not parse without `--lenient`. Aggregates
+  totals by decision, enforcement mode and disposition; per rule block (evaluated, skipped, fired,
+  deny/warn, top `rule_path`s); per action type; per policy `content_hash` with the
+  `policy_loaded` / `policy_swapped` timeline; per actor; policy-signature outcomes by reason; and
+  detections by detector and level. With `--policy`, joins `metadata.controls` into a per-control
+  evidence table (evaluated / fired / denied / last seen, plus the rule blocks that fired with no
+  control behind them). `--format json` is validated by the new
+  `schemas/hushspec-report.v0.schema.json` (`h2h schema report`), `--format csv` writes one table
+  per file into `--out` (or the `--by` table to stdout), and `--format oscal` behind
+  `--experimental-oscal` emits a minimal OSCAL 1.1.2 assessment-results skeleton. The aggregation
+  itself is the new `hushspec::report` module. Vectors: `fixtures/report/` -- a synthetic 24-hour
+  log and the exact report it must produce, both drift-checked.
 
 ### Added (RFC 09 Wave 4, Rust)
 

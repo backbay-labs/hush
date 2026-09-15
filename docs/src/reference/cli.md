@@ -537,6 +537,57 @@ Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
 
 Prints the document's own content hash with `extends` and `merge_strategy` stripped and no resolution: the value a digest pin names and a receipt records for a chain link.
 
+## `h2h report <files...>`
+
+Turns a window of receipts into a compliance evidence report: what the policy decided, which controls ran, how often they fired, which policy was in force while they did, and -- with `--policy` -- which compliance controls that adds up to.
+
+```bash
+h2h report audit.jsonl                                     # the whole log, as tables
+h2h report audit.jsonl --since 2026-09-01T00:00:00Z --until 2026-09-30T23:59:59Z
+h2h report audit.jsonl --policy library/healthcare/hipaa-base.yaml --by control
+h2h report audit.jsonl --format json > report.json         # validates against the report schema
+h2h report audit.jsonl --format csv --out ./evidence/      # one CSV per table
+```
+
+Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line, so a mixed file works. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
+
+When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
+
+| Flag | Meaning |
+|---|---|
+| `--since` / `--until <TIMESTAMP>` | RFC 3339 bounds on receipts and policy events. Both inclusive. The window narrows what is *counted*, never what is *verified*. |
+| `--policy <PATH>` | Join `metadata.controls` (core spec 2.5.1) against the receipts. Without it, a policy named by a log's `extends_chain` is resolved when it still resolves from here. |
+| `--format text\|json\|csv\|oscal` | Default `text`. |
+| `--by control\|rule\|decision\|policy` | Report on one table only; also picks the table `--format csv` writes to stdout. |
+| `--out <PATH>` | A directory for `--format csv` (one CSV per table), a file for every other format. |
+| `--lenient` | Skip unparsable lines instead of refusing. |
+| `--unverified` | Report on a log whose chain did not verify. |
+| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). |
+| `--top-paths <N>` | How many `rule_path`s each rule-block row lists (default 5). |
+| `--experimental-oscal` | Required by `--format oscal`. |
+
+### What it aggregates
+
+- **Totals** by decision (`allow`/`warn`/`deny`), by enforcement mode (`enforce`/`monitor`), and by disposition (`allowed`/`confirmed`/`blocked`/`would_block`).
+- **Per rule block**: evaluated and skipped trace entries, `fired` (an evaluated entry whose outcome was not `allow`, so exactly warn + deny), the deny and warn split, and the most frequent `rule_path`s.
+- **Per action type**, **per policy `content_hash`** with first and last seen, and the **`policy_loaded` / `policy_swapped` timeline**.
+- **Per actor** (`agent_id` / `session_id` / `principal`).
+- **Signature status** as each receipt recorded it at load time, with failures grouped by reason.
+- **Detections** by `detector_id`, with the level histogram and how many findings met a threshold.
+- **Control evidence**, with `--policy`: for each framework and control, the `rule_paths` it maps to, the rule blocks those were observed under, and the receipts / evaluations / fired / denied counts with a last-seen timestamp -- plus `unmapped_fired_rule_blocks`, the blocks that fired with no control behind them (lint L011's static gap, observed dynamically).
+
+A mapping that names a rule block (`rules.egress`) is evidenced by everything that block recorded. A deeper mapping (`rules.egress.block`) is only evidenced by an evaluation whose recorded `rule_path` is at or under it, so a control is never credited with an evaluation that matched the allowlist instead. Only receipts naming the policy's own content hash count toward its controls; the report says how many did (`receipts_matching_policy`).
+
+### Formats
+
+`--format json` emits one document validated by [`schemas/hushspec-report.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v0.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
+
+`--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
+
+Exit 0 when the report was produced, 1 for a broken chain without `--unverified`, 2 for unusable inputs or flags.
+
+Vectors: [`fixtures/report/`](https://github.com/backbay-labs/hush/tree/main/fixtures/report) -- a synthetic 24-hour log and the exact report it must produce.
+
 ## `h2h bundle`
 
 Policy bundle attestation ([bundle spec](../bundle-spec.md)). A bundle is a DSSE
