@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-bundle.v0.schema.json",
+  "title": "HushSpec Policy Bundle v0.1",
+  "description": "A policy bundle (spec/hushspec-bundle.md): a DSSE envelope whose payload is an in-toto Statement v1 carrying the resolved policy, its extends chain, and the resolver that produced them. The root of this schema is the envelope; the base64 payload cannot be validated in place, so a verifier decodes it and validates the result against #/$defs/Statement.",
+  "type": "object",
+  "required": [
+    "payloadType",
+    "payload",
+    "signatures"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "payloadType": {
+      "type": "string",
+      "const": "application/vnd.in-toto+json",
+      "description": "DSSE payload type. Bound into the signature by the PAE (spec section 3.1)."
+    },
+    "payload": {
+      "$ref": "#/$defs/Base64",
+      "description": "Standard base64 with padding of the RFC 8785 canonical bytes of the statement."
+    },
+    "signatures": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Signature"
+      },
+      "description": "Signatures over PAE(payloadType, payload bytes). MAY be empty; an unsigned bundle is not evidence and fails verification with dsse_signature_mismatch."
+    }
+  },
+  "$defs": {
+    "Base64": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$",
+      "minLength": 1
+    },
+    "ContentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Signature": {
+      "type": "object",
+      "required": [
+        "keyid",
+        "sig"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "keyid": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "The signing key's key_id: sha256: plus the hex SHA-256 of its SPKI DER (signing spec 5.2). Verifiers recompute it from the public key they hold."
+        },
+        "sig": {
+          "$ref": "#/$defs/Base64",
+          "description": "Standard base64 with padding of the 64-byte Ed25519 signature."
+        }
+      }
+    },
+    "Statement": {
+      "type": "object",
+      "description": "The decoded payload: an in-toto Statement v1 carrying the policy-bundle predicate.",
+      "required": [
+        "_type",
+        "subject",
+        "predicateType",
+        "predicate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "_type": {
+          "type": "string",
+          "const": "https://in-toto.io/Statement/v1"
+        },
+        "subject": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "$ref": "#/$defs/Subject"
+          },
+          "description": "Exactly one subject: the canonical form of the resolved policy."
+        },
+        "predicateType": {
+          "type": "string",
+          "const": "https://hushspec.dev/attestation/policy-bundle/v0.1"
+        },
+        "predicate": {
+          "$ref": "#/$defs/PolicyBundlePredicate"
+        }
+      }
+    },
+    "Subject": {
+      "type": "object",
+      "required": [
+        "name",
+        "digest"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Informational label: the policy's name, else the leaf source's file name."
+        },
+        "digest": {
+          "type": "object",
+          "required": [
+            "sha256"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "$ref": "#/$defs/Sha256Hex",
+              "description": "The resolved policy's content hash without the sha256: prefix, as in-toto requires."
+            }
+          }
+        }
+      }
+    },
+    "PolicyBundlePredicate": {
+      "type": "object",
+      "required": [
+        "bundle_version",
+        "policy",
+        "chain",
+        "resolved",
+        "resolver",
+        "created_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "bundle_version": {
+          "type": "string",
+          "const": "0.1",
+          "description": "Predicate format version. Verifiers MUST reject an unknown value."
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicyIdentity"
+        },
+        "chain": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ChainLink"
+          },
+          "description": "The extends chain, root first and leaf last. A policy with no extends has exactly one link."
+        },
+        "resolved": {
+          "type": "object",
+          "description": "The canonical projection of the resolved document (canonical spec 3), as a JSON object. Re-serializing it with RFC 8785 reproduces the canonical form the subject digest names. Kept opaque here so this schema is self-contained; validate it against schemas/hushspec-core.v0.schema.json separately."
+        },
+        "resolver": {
+          "$ref": "#/$defs/Resolver"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "signature_verification": {
+          "$ref": "#/$defs/SignatureStatus",
+          "description": "The leaf policy's own signature status at bundling time. Absent when the bundler attempted no verification."
+        }
+      }
+    },
+    "PolicyIdentity": {
+      "type": "object",
+      "required": [
+        "content_hash",
+        "spec_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "The resolved policy's content hash. Equals the subject digest with the sha256: prefix restored."
+        },
+        "spec_version": {
+          "type": "string",
+          "description": "The resolved document's hushspec field."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "ChainLink": {
+      "type": "object",
+      "required": [
+        "source",
+        "content_hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A provenance label, not an identity: builtin:strict, a path, an https: URL. Verifiers compare chains by content_hash only."
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "The content hash of this document canonicalized on its own, with its extends and merge_strategy stripped."
+        },
+        "signature": {
+          "$ref": "#/$defs/SignatureStatus"
+        }
+      }
+    },
+    "Resolver": {
+      "type": "object",
+      "required": [
+        "tool",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What produced the bundle: h2h for the reference CLI."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "SignatureStatus": {
+      "type": "object",
+      "required": [
+        "verified"
+      ],
+      "additionalProperties": false,
+      "description": "The outcome of policy signature verification (receipt spec 4.2, signing spec 6).",
+      "properties": {
+        "verified": {
+          "type": "boolean"
+        },
+        "key_id": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "verified_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A signing spec 6.4 reason code, or one of the load-time conditions signature_missing, no_keyring, signing_unavailable."
+        }
+      }
+    }
+  }
+}
