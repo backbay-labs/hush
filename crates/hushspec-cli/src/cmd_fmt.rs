@@ -13,7 +13,7 @@ pub struct FmtArgs {
     files: Vec<PathBuf>,
 
     /// Check formatting without modifying files (exit 1 if changes needed)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "diff")]
     check: bool,
 
     /// Show what would change without modifying files

@@ -1,4 +1,4 @@
-use hushspec::{HushSpec, merge};
+use hushspec::{DefaultAction, HushSpec, merge};
 
 #[test]
 fn merge_replace_uses_child() {
@@ -33,43 +33,14 @@ rules:
     assert!(merged.rules.as_ref().unwrap().tool_access.is_some());
 }
 
+/// `merge` and `deep_merge` share `merge_rules` verbatim and differ only in
+/// how they treat `extensions` (see `hushspec::merge`), so a rules-only
+/// document cannot distinguish them; that distinction is covered in
+/// `tests/extensions.rs`. What this pins is the rule-block behavior both
+/// share: the child's block replaces the base's, and the base's other blocks
+/// survive.
 #[test]
-fn merge_shallow_child_overrides_rule() {
-    let base = HushSpec::parse(
-        r#"
-hushspec: "0.1.0"
-rules:
-  egress:
-    allow: ["a.com"]
-    default: block
-  forbidden_paths:
-    patterns: ["**/.ssh/**"]
-"#,
-    )
-    .unwrap();
-    let child = HushSpec::parse(
-        r#"
-hushspec: "0.1.0"
-extends: base
-merge_strategy: merge
-rules:
-  egress:
-    allow: ["b.com"]
-    default: allow
-"#,
-    )
-    .unwrap();
-    let merged = merge(&base, &child);
-    assert!(merged.extends.is_none());
-    let rules = merged.rules.as_ref().unwrap();
-    // egress replaced by child
-    assert_eq!(rules.egress.as_ref().unwrap().allow, vec!["b.com"]);
-    // forbidden_paths preserved from base
-    assert!(rules.forbidden_paths.is_some());
-}
-
-#[test]
-fn merge_deep_child_overrides_rule() {
+fn child_rule_block_replaces_the_base_block_and_siblings_are_preserved() {
     let base = HushSpec::parse(
         r#"
 hushspec: "0.1.0"
@@ -96,8 +67,11 @@ rules:
     let merged = merge(&base, &child);
     assert!(merged.extends.is_none());
     let rules = merged.rules.as_ref().unwrap();
-    // deep_merge is default: child egress overrides base egress
-    assert_eq!(rules.egress.as_ref().unwrap().allow, vec!["b.com"]);
-    // forbidden_paths preserved from base
-    assert!(rules.forbidden_paths.is_some());
+    let egress = rules.egress.as_ref().unwrap();
+    assert_eq!(egress.allow, vec!["b.com"]);
+    assert_eq!(egress.default, DefaultAction::Allow);
+    assert!(
+        rules.forbidden_paths.is_some(),
+        "a block the child never mentions must survive the merge"
+    );
 }

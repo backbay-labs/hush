@@ -140,6 +140,18 @@ pub fn run(args: VerifyArgs) -> i32 {
     }
 }
 
+/// Exit code for a keyring that would not load.
+///
+/// The split follows the CLI's convention: 2 for input the tool could not
+/// read, 1 for input it read and rejected. It is decided from the error, not
+/// from a `path.exists()` stat racing the failed open.
+pub(crate) fn keyring_exit_code(error: &hushspec::signing::SigningError) -> i32 {
+    match error {
+        hushspec::signing::SigningError::Io(_) => 2,
+        _ => 1,
+    }
+}
+
 fn load_keyring(key: Option<&Path>, keyring: Option<&Path>) -> Result<Keyring, i32> {
     match (key, keyring) {
         (_, Some(path)) => Keyring::load(path).map_err(|e| {
@@ -148,7 +160,7 @@ fn load_keyring(key: Option<&Path>, keyring: Option<&Path>) -> Result<Keyring, i
                 "ERROR".red(),
                 path.display()
             );
-            if path.exists() { 1 } else { 2 }
+            keyring_exit_code(&e)
         }),
         (Some(path), None) => {
             let text = std::fs::read_to_string(path).map_err(|e| {

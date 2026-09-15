@@ -135,6 +135,13 @@ fn bench_audited(c: &mut Criterion) {
             })
         },
     );
+}
+
+/// Content hashing. Not part of the audited evaluation path -- the receipt
+/// budget in `tests/bench_thresholds.rs` excludes it -- so it is measured on
+/// its own rather than inside `bench_audited`.
+fn bench_hashing(c: &mut Criterion) {
+    let spec = default_spec();
     c.bench_function("policy_hash/default", |b| {
         b.iter(|| hushspec::content_hash(black_box(&spec)))
     });
@@ -194,6 +201,7 @@ criterion_group!(
     bench_evaluate_compiled,
     bench_compile,
     bench_audited,
+    bench_hashing,
     bench_detection,
     bench_glob
 );

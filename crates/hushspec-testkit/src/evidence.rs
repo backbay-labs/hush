@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use hushspec::receipt::{
     Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode, TimeSource,
     deterministic_uuid_v7, evaluate_audited,
@@ -27,7 +27,7 @@ use crate::report::{Status, VectorResult};
 
 /// Fixed evaluation time of every expected receipt: 2026-09-15T12:00:00.000Z
 /// (`fixtures/receipts/expected/README.md`).
-const CLOCK_MILLIS: u64 = 1_789_473_600_000;
+use crate::bundle::{AUDIT_CLOCK_MILLIS as CLOCK_MILLIS, audit_clock};
 
 /// The modules that carry evaluation vectors, and so expected receipts.
 const EVALUATION_MODULES: [&str; 4] = ["core", "posture", "origins", "detection"];
@@ -204,7 +204,7 @@ fn expected_receipt_context(case_index: usize) -> AuditContext {
         }),
         enforcement_mode: EnforcementMode::Enforce,
         time_source: TimeSource::Trusted,
-        clock: Some(Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap()),
+        clock: Some(audit_clock()),
         receipt_id: Some(deterministic_uuid_v7(CLOCK_MILLIS, case_index as u64)),
         ..AuditContext::default()
     }
@@ -604,12 +604,20 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
     use hushspec::signing::{Keyring, VerifyOptions};
 
     let root = fixtures_dir.join("log");
-    let keyring = Keyring::load(&fixtures_dir.join("signing/keys/keyring.json")).ok();
+    // Fail closed on the keyring: the signed vectors need it to tell a bad
+    // signature from a good one, and `.ok()` here would let every one of them
+    // pass without a signature ever being checked.
+    let keyring = match Keyring::load(&fixtures_dir.join("signing/keys/keyring.json")) {
+        Ok(keyring) => Some(keyring),
+        Err(error) => {
+            return vec![fail(label(&root), "log", 5, format!("keyring: {error}"))];
+        }
+    };
     let options = || LogVerifyOptions {
         require_signatures: false,
         keyring: keyring.clone(),
         verify: Some(VerifyOptions {
-            now: Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap(),
+            now: audit_clock(),
             max_clock_skew_seconds: 300,
             last_seen_version: None,
         }),
@@ -647,7 +655,7 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
             .map(|(name, text)| (name.as_str(), text.as_str()))
             .collect();
         let name = "fixtures/log/valid/rotated-*.jsonl".to_string();
-        match verify_logs(&pair, &LogVerifyOptions::default()) {
+        match verify_logs(&pair, &options()) {
             Ok(_) => results.push(pass(
                 name,
                 "log",
@@ -676,25 +684,34 @@ pub fn run_log_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
             .rsplit('-')
             .next()
             .and_then(|tail| tail.parse().ok());
+        let Some(expected_line) = expected_line else {
+            results.push(fail(
+                name,
+                "log",
+                5,
+                "an invalid log vector must name the line it breaks at, as \
+                 `<reason>-line-<n>.jsonl`"
+                    .to_string(),
+            ));
+            continue;
+        };
         match verify_log(&file_name, &text, &options()) {
             Ok(_) => results.push(fail(name, "log", 5, "accepted a broken chain".to_string())),
-            Err(error) => match expected_line {
-                Some(line) if error.line != line => results.push(fail(
-                    name,
-                    "log",
-                    5,
-                    format!(
-                        "break reported at line {} but expected line {line}",
-                        error.line
-                    ),
-                )),
-                _ => results.push(pass(
-                    name,
-                    "log",
-                    5,
-                    format!("refused at line {}: {error}", error.line),
-                )),
-            },
+            Err(error) if error.line != expected_line => results.push(fail(
+                name,
+                "log",
+                5,
+                format!(
+                    "break reported at line {} but expected line {expected_line}",
+                    error.line
+                ),
+            )),
+            Err(error) => results.push(pass(
+                name,
+                "log",
+                5,
+                format!("refused at line {}: {error}", error.line),
+            )),
         }
     }
 
@@ -720,7 +737,7 @@ pub fn run_signed_receipt_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
         }
     };
     let options = VerifyOptions {
-        now: Utc.with_ymd_and_hms(2026, 9, 15, 12, 0, 0).unwrap(),
+        now: audit_clock(),
         max_clock_skew_seconds: 300,
         last_seen_version: None,
     };

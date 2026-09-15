@@ -275,30 +275,9 @@ fn is_leap_year(year: u32) -> bool {
     (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
+/// Today in UTC, as the `YYYY-MM-DD` the date fields are compared against.
 fn current_date_iso() -> String {
-    let now = std::time::SystemTime::now();
-    let secs = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let days = secs / 86400;
-    let (year, month, day) = days_to_date(days);
-    format!("{year:04}-{month:02}-{day:02}")
-}
-
-/// Algorithm from http://howardhinnant.github.io/date_algorithms.html
-fn days_to_date(days_since_epoch: u64) -> (u64, u64, u64) {
-    let z = days_since_epoch + 719_468;
-    let era = z / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m, d)
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
 #[cfg(test)]
@@ -718,10 +697,12 @@ metadata:
     }
 
     #[test]
-    fn days_to_date_known_values() {
-        // 2024-01-01 is day 19723 since epoch
-        assert_eq!(days_to_date(19723), (2024, 1, 1));
-        // 1970-01-01 is day 0
-        assert_eq!(days_to_date(0), (1970, 1, 1));
+    fn current_date_iso_is_a_calendar_date() {
+        let today = current_date_iso();
+        assert_eq!(today.len(), 10, "{today}");
+        assert!(
+            chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d").is_ok(),
+            "{today} must be the YYYY-MM-DD the metadata dates are compared against"
+        );
     }
 }

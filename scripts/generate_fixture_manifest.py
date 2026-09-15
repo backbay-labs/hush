@@ -65,8 +65,8 @@ CATEGORY_RULES: list[tuple[re.Pattern[str], str, int]] = [
     # per-hop hashes, which is canonical-form territory: Level 4, not the
     # Level 2 ability to merge an extends chain at all.
     (re.compile(r"^fixtures/core/resolve/"), "resolve", 4),
-    # Control-tagged suites for the vertical policy library: evaluation vectors
-    # whose policy is a library builtin.
+    # Control-tagged suites for the vertical policy library:
+    # evaluation vectors whose policy is a library builtin.
     (re.compile(r"^fixtures/library/.+\.test\.yaml$"), "library-suite", 3),
     (re.compile(rf"^fixtures/(?:{MODULES})/evaluation/"), "evaluation", 3),
     (re.compile(r"^fixtures/core/hash/"), "canonical", 4),
@@ -76,8 +76,8 @@ CATEGORY_RULES: list[tuple[re.Pattern[str], str, int]] = [
     (re.compile(r"^fixtures/log/"), "log", 5),
     (re.compile(r"^fixtures/signing/"), "signing", 5),
     (re.compile(r"^fixtures/bundle/"), "bundle", 5),
-    # Evidence-report vectors: a synthetic log and the report h2h report must
-    # produce from it; Level 4 material (receipts, canonical hashes).
+    # Evidence-report vectors: a synthetic log and the report
+    # h2h report must produce from it; Level 4 material (receipts, canonical hashes).
     (re.compile(r"^fixtures/report/"), "report", 4),
 ]
 
@@ -178,6 +178,16 @@ def main() -> int:
                 file=sys.stderr,
             )
             _report_drift(current, fresh)
+            return 1
+        # The manifest is cited by its sha256, so its bytes are the artifact:
+        # matching content is not enough if the formatting has drifted.
+        expected = render({**fresh, "generated_at": current.get("generated_at", now)})
+        if MANIFEST.read_text(encoding="utf-8") != expected:
+            print(
+                f"{MANIFEST.relative_to(ROOT)} is not canonically formatted -- rerun "
+                "scripts/generate_fixture_manifest.py",
+                file=sys.stderr,
+            )
             return 1
         return 0
 

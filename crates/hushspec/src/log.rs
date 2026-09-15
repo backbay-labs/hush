@@ -78,7 +78,7 @@ pub enum PolicyEventKind {
     Swapped,
 }
 
-/// A policy-in-effect record (RFC 09 P2-10): what was enforced from this
+/// A policy-in-effect record (log spec 6): what was enforced from this
 /// moment on, with the same identity a receipt carries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -315,15 +315,41 @@ impl ChainedFileSink {
     /// The file currently being written.
     #[must_use]
     pub fn path(&self) -> PathBuf {
-        self.state.lock().expect("log state poisoned").path.clone()
+        self.state().path.clone()
     }
 
     /// The last sequence number and entry hash written (or the genesis
     /// values for an empty log).
     #[must_use]
     pub fn head(&self) -> (u64, String) {
-        let state = self.state.lock().expect("log state poisoned");
+        let state = self.state();
         (state.seq, state.prev_hash.clone())
+    }
+
+    /// Observe the chain head, recovering from a poisoned lock.
+    ///
+    /// A sink must never break enforcement, so reading the head of a log whose
+    /// previous writer panicked reports what is there rather than panicking in
+    /// turn. Writers go through [`Self::state_mut`], which refuses instead.
+    fn state(&self) -> std::sync::MutexGuard<'_, ChainState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Take the chain head for writing, refusing a poisoned lock.
+    ///
+    /// A panic between bumping `seq` and storing `entry_hash` would leave the
+    /// head describing an entry that was never written, so appending onto it
+    /// would produce a chain that cannot verify. Fail closed instead.
+    fn state_mut(&self) -> Result<std::sync::MutexGuard<'_, ChainState>, SinkError> {
+        self.state.lock().map_err(|_| {
+            SinkError::Chain(
+                "log state is poisoned: a previous append panicked, so the chain head \
+                 cannot be trusted to continue the log"
+                    .to_string(),
+            )
+        })
     }
 
     /// Append one entry.
@@ -333,7 +359,7 @@ impl ChainedFileSink {
     /// [`SinkError::Io`], [`SinkError::Serialization`], or
     /// [`SinkError::Chain`].
     pub fn append(&self, payload: Payload) -> Result<LogEntry, SinkError> {
-        let mut state = self.state.lock().expect("log state poisoned");
+        let mut state = self.state_mut()?;
         let mut entry = LogEntry {
             log_version: LOG_VERSION.to_string(),
             seq: state.seq + 1,
@@ -388,7 +414,7 @@ impl ChainedFileSink {
         Ok(entry)
     }
 
-    /// Record a policy-in-effect event (RFC 09 P2-10).
+    /// Record a policy-in-effect event (log spec 6).
     ///
     /// # Errors
     ///
@@ -413,7 +439,7 @@ impl ChainedFileSink {
             )));
         }
         let (previous_file, previous_entry_hash) = {
-            let mut state = self.state.lock().expect("log state poisoned");
+            let mut state = self.state_mut()?;
             // Only the file name: logs are moved between hosts, and a path
             // would leak the writer's layout for no verification benefit.
             let previous = state
@@ -532,9 +558,17 @@ fn with_file_lock<T>(
             Err(error) => return Err(SinkError::Io(error)),
         }
     }
-    let result = f();
-    let _ = fs::remove_file(&lock_path);
-    result
+    // Release through `Drop`: a panic inside `f` would otherwise leave the
+    // lock file behind, and every later append would wait out `LOCK_TIMEOUT`
+    // and then fail permanently.
+    struct LockGuard(PathBuf);
+    impl Drop for LockGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let _guard = LockGuard(lock_path);
+    f()
 }
 
 // --------------------------------------------------------------------------
@@ -650,7 +684,12 @@ pub fn verify_logs(
                         "a continued file must start with a log_started entry".into(),
                     ));
                 };
-                if started.previous_entry_hash.as_deref() != carried_hash.as_deref() {
+                // An empty predecessor carries the genesis hash, which
+                // `rotate` records as an absent `previous_entry_hash`; treat
+                // the two spellings as the same link.
+                let started_hash = started.previous_entry_hash.as_deref();
+                let carried = carried_hash.as_deref();
+                if started_hash.unwrap_or(GENESIS_HASH) != carried.unwrap_or(GENESIS_HASH) {
                     return Err(fail(
                         "log_started.previous_entry_hash does not match the previous file's last hash"
                             .into(),

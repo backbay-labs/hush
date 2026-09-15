@@ -15,10 +15,20 @@ pub enum SinkError {
     Chain(String),
 }
 
+/// Where an engine puts the receipts it records.
+///
+/// A sink must never break enforcement: implementations report a failure as
+/// [`SinkError`] rather than panicking, and callers surface it on the
+/// `sink.error` observer channel instead of denying on it.
 pub trait ReceiptSink: Send + Sync {
+    /// Record one decision receipt.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the destination reports; see [`SinkError`].
     fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError>;
 
-    /// Record a policy-in-effect event (RFC 09 P2-10). Sinks that only carry
+    /// Record a policy-in-effect event (log spec 6). Sinks that only carry
     /// receipts ignore it; the hash-linked log writes it as an entry.
     fn record_policy_event(&self, _event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
         Ok(())
@@ -31,6 +41,8 @@ pub struct FileReceiptSink {
 }
 
 impl FileReceiptSink {
+    /// Append receipts to `path`, creating it on the first write.
+    #[must_use]
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().to_path_buf(),
@@ -69,6 +81,8 @@ pub struct FilteredSink {
 }
 
 impl FilteredSink {
+    /// Forward only the receipts whose decision is in `decisions`.
+    #[must_use]
     pub fn new(sink: Box<dyn ReceiptSink>, decisions: Vec<Decision>) -> Self {
         Self {
             inner: sink,
@@ -76,6 +90,8 @@ impl FilteredSink {
         }
     }
 
+    /// Forward only denials.
+    #[must_use]
     pub fn deny_only(sink: Box<dyn ReceiptSink>) -> Self {
         Self::new(sink, vec![Decision::Deny])
     }
@@ -97,6 +113,8 @@ pub struct MultiSink {
 }
 
 impl MultiSink {
+    /// Fan every receipt out to all of `sinks`.
+    #[must_use]
     pub fn new(sinks: Vec<Box<dyn ReceiptSink>>) -> Self {
         Self { sinks }
     }
@@ -145,6 +163,8 @@ pub struct CallbackSink {
 }
 
 impl CallbackSink {
+    /// Hand each receipt to `callback`.
+    #[must_use]
     pub fn new(
         callback: impl Fn(&DecisionReceipt) -> Result<(), SinkError> + Send + Sync + 'static,
     ) -> Self {

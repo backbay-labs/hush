@@ -106,16 +106,16 @@ fn file_sink_appends_not_overwrites() {
 }
 
 #[test]
-fn file_sink_handles_concurrent_writers() {
+fn file_sink_writes_whole_lines_under_parallel_writers() {
     // 8 threads x 200 receipts through one shared sink. If `FileReceiptSink`
-    // ever interleaves writes (e.g. a future refactor batches multiple
-    // `write()` syscalls per `send()`), lines get corrupted (a line that
+    // ever interleaves writes (say a future refactor batches several
+    // `write()` syscalls per `send()`), lines get corrupted: a line that
     // fails to parse as JSON, or a line count short of 1600 because two
-    // writers' bytes landed in the same line).
+    // writers' bytes landed in the same line.
     const THREADS: usize = 8;
     const PER_THREAD: usize = 200;
 
-    let dir = std::env::temp_dir().join(format!("hushspec_sink_concurrent_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hushspec_sink_parallel_{}", std::process::id()));
     let path = dir.join("receipts.jsonl");
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -133,7 +133,7 @@ fn file_sink_handles_concurrent_writers() {
                     let mut receipt = make_receipt(decision);
                     receipt.receipt_id = format!("t{thread_id}-r{i}");
                     sink.send(&receipt)
-                        .expect("concurrent send should not error");
+                        .expect("send from a writer thread should not error");
                 }
             })
         })
@@ -149,7 +149,7 @@ fn file_sink_handles_concurrent_writers() {
         lines.len(),
         THREADS * PER_THREAD,
         "expected {} lines from {THREADS} threads x {PER_THREAD} receipts; \
-         a lower count means concurrent writes interleaved and merged lines",
+         a lower count means writes interleaved and merged lines",
         THREADS * PER_THREAD
     );
 
@@ -362,16 +362,14 @@ fn multi_sink_reports_errors_from_every_failing_inner_sink() {
 // --- NullSink ---
 
 #[test]
-fn null_sink_does_not_crash() {
+fn null_sink_accepts_every_decision_and_reports_success() {
     let sink = NullSink;
-    let receipt = make_receipt(Decision::Allow);
-
-    let result = sink.send(&receipt);
-    assert!(result.is_ok());
-
-    // Send multiple times to verify stability.
-    sink.send(&make_receipt(Decision::Deny)).unwrap();
-    sink.send(&make_receipt(Decision::Warn)).unwrap();
+    for decision in [Decision::Allow, Decision::Deny, Decision::Warn] {
+        assert!(
+            sink.send(&make_receipt(decision)).is_ok(),
+            "NullSink must never fail: it is the sink a caller picks to opt out"
+        );
+    }
 }
 
 // --- CallbackSink ---
@@ -401,14 +399,13 @@ fn callback_sink_invokes_callback() {
 // --- StderrReceiptSink ---
 
 #[test]
-fn stderr_sink_does_not_crash() {
+fn stderr_sink_reports_success_for_every_decision() {
     use hushspec::sink::StderrReceiptSink;
 
+    // The bytes on stderr are not capturable from here; what this pins is
+    // that writing them never turns into a sink error the guard would report.
     let sink = StderrReceiptSink;
-    let receipt = make_receipt(Decision::Allow);
-
-    // We cannot easily capture stderr in a test, but we can verify it
-    // does not panic or return an error.
-    let result = sink.send(&receipt);
-    assert!(result.is_ok());
+    for decision in [Decision::Allow, Decision::Deny, Decision::Warn] {
+        assert!(sink.send(&make_receipt(decision)).is_ok());
+    }
 }

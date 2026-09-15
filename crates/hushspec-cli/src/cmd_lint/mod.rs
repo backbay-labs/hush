@@ -374,13 +374,13 @@ pub fn run(args: LintArgs) -> i32 {
             // not line up with the on-disk leaf, so applying them in place
             // would rewrite the wrong entries -- and materialize inherited
             // rules into a file that deliberately delegates them.
-            if matches!(args.format, LintOutputFormat::Text) {
-                eprintln!(
-                    "{} {}: --fix/--dry-run is not supported for policies with `extends` (findings describe the resolved document)",
-                    "warning".yellow(),
-                    path.display()
-                );
-            }
+            // On stderr, so it reaches JSON and SARIF callers too without
+            // corrupting the document on stdout.
+            eprintln!(
+                "{} {}: --fix/--dry-run is not supported for policies with `extends` (findings describe the resolved document)",
+                "warning".yellow(),
+                path.display()
+            );
         } else if want_fix {
             fixed_codes = fix::apply_fixes(&mut spec, &findings);
 
@@ -463,7 +463,7 @@ pub fn run(args: LintArgs) -> i32 {
             .collect();
 
         if matches!(args.format, LintOutputFormat::Text) {
-            print_text_findings(&rendered, &display);
+            print_text_findings(&rendered);
         }
 
         all_results.push(FileLintResult {
@@ -505,7 +505,7 @@ pub fn run(args: LintArgs) -> i32 {
 /// second line when there is one. A finding whose key could not be located
 /// falls back to the pre-span `location` string so nothing is ever reported
 /// without a pointer of some kind.
-fn print_text_findings(findings: &[FindingJson], _file: &str) {
+fn print_text_findings(findings: &[FindingJson]) {
     for f in findings {
         let severity_colored = match f.severity.as_str() {
             "error" => format!("error[{}]", f.code).red().to_string(),
@@ -560,10 +560,10 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     check_empty_rule_blocks(rules, file, &mut findings);
 
     // L002: overlapping-patterns
-    check_overlapping_patterns(rules, file, &mut findings);
+    check_overlapping_patterns(rules, &mut findings);
 
     // L003: shadowed-exception
-    check_shadowed_exceptions(rules, file, &mut findings);
+    check_shadowed_exceptions(rules, &mut findings);
 
     // L004: overly-broad-egress
     check_overly_broad_egress(rules, file, &mut findings);
@@ -575,7 +575,7 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     check_disabled_rules(rules, file, &mut findings);
 
     // L008: duplicate-patterns
-    check_duplicate_patterns(rules, file, &mut findings);
+    check_duplicate_patterns(rules, &mut findings);
 
     // L009: missing-secret-patterns
     check_missing_secret_patterns(rules, file, &mut findings);
@@ -772,11 +772,7 @@ fn check_empty_rule_blocks(rules: &hushspec::Rules, file: &str, findings: &mut V
     }
 }
 
-fn check_overlapping_patterns(
-    rules: &hushspec::Rules,
-    _file: &str,
-    findings: &mut Vec<LintFinding>,
-) {
+fn check_overlapping_patterns(rules: &hushspec::Rules, findings: &mut Vec<LintFinding>) {
     if let Some(forbidden_paths) = &rules.forbidden_paths {
         find_overlapping_globs(
             &forbidden_paths.patterns,
@@ -907,11 +903,7 @@ fn generate_synthetic_paths(pattern: &str) -> Vec<String> {
     paths
 }
 
-fn check_shadowed_exceptions(
-    rules: &hushspec::Rules,
-    _file: &str,
-    findings: &mut Vec<LintFinding>,
-) {
+fn check_shadowed_exceptions(rules: &hushspec::Rules, findings: &mut Vec<LintFinding>) {
     let Some(forbidden_paths) = &rules.forbidden_paths else {
         return;
     };
@@ -1159,7 +1151,7 @@ fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<
     }
 }
 
-fn check_duplicate_patterns(rules: &hushspec::Rules, _file: &str, findings: &mut Vec<LintFinding>) {
+fn check_duplicate_patterns(rules: &hushspec::Rules, findings: &mut Vec<LintFinding>) {
     if let Some(forbidden_paths) = &rules.forbidden_paths {
         find_duplicates(
             &forbidden_paths.patterns,

@@ -10,6 +10,17 @@ pub const AUDIT_CLOCK: &str = "2026-09-15T12:00:00.000Z";
 /// case is `deterministic_uuid_v7(AUDIT_CLOCK_MILLIS, case index)`.
 pub const AUDIT_CLOCK_MILLIS: u64 = 1_789_473_600_000;
 
+/// [`AUDIT_CLOCK_MILLIS`] as an instant (2026-09-15T12:00:00Z).
+///
+/// Every vector that needs a clock reads it from here, so a receipt recorded
+/// by one part of the testkit and verified by another cannot disagree about
+/// what "now" was.
+#[must_use]
+pub fn audit_clock() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::from_timestamp_millis(AUDIT_CLOCK_MILLIS as i64)
+        .expect("AUDIT_CLOCK_MILLIS is a representable instant")
+}
+
 /// A portable set of differential test cases: policies with actions to
 /// evaluate. Serialized as JSON so every SDK replays identical cases.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -132,6 +143,23 @@ impl CaseBundle {
             for case in &group.actions {
                 if format!("{}/{}", group.id, case.id) == case_key {
                     return Some(position);
+                }
+                position += 1;
+            }
+        }
+        None
+    }
+
+    /// The group, action and bundle-order position behind a `gNNNN/aNNNN`
+    /// case key, or `None` when this bundle never produced it.
+    #[must_use]
+    pub fn find_case(&self, case_key: &str) -> Option<(&CaseGroup, &CaseAction, u64)> {
+        let (group_id, case_id) = case_key.split_once('/')?;
+        let mut position = 0u64;
+        for group in &self.groups {
+            for case in &group.actions {
+                if group.id == group_id && case.id == case_id {
+                    return Some((group, case, position));
                 }
                 position += 1;
             }

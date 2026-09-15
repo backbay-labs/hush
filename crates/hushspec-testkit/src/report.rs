@@ -205,10 +205,9 @@ pub fn build(
             .filter(|result| {
                 result.level == Some(1)
                     && result.status == Status::Fail
-                    && result
-                        .message
-                        .as_deref()
-                        .is_some_and(|message| message.contains("Parse failed"))
+                    && result.message.as_deref().is_some_and(|message| {
+                        message.contains(crate::runner::PARSE_FAILURE_PREFIX)
+                    })
             })
             .count() as u32;
         let entry = levels.get_mut("0").expect("level 0 exists");
@@ -254,7 +253,7 @@ pub fn build(
 #[must_use]
 pub fn reference_implementation() -> Implementation {
     Implementation {
-        name: "hushspec (Rust reference implementation)".to_string(),
+        name: "hushspec (reference implementation)".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         language: "rust".to_string(),
     }

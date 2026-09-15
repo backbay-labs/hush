@@ -26,7 +26,7 @@ hushspec-testkit --fixtures fixtures
 # Add the evidence-chain vectors (levels 4 and 5) and write a report
 hushspec-testkit --fixtures fixtures --report report.json
 
-# Report on an implementation that is not the Rust reference
+# Report on an implementation other than the Rust one
 hushspec-testkit --fixtures fixtures --report report.json \
   --implementation "acme-guard" --implementation-version 2.1.0 \
   --implementation-language go
@@ -102,7 +102,7 @@ Exit codes: `0` no divergence, `1` divergence found, `2` infrastructure error
 ```
 
 Case keys are `"{group_id}/{action_id}"`. Every policy in a generated bundle
-passes `hushspec::validate` in the Rust reference implementation, so any SDK
+passes `hushspec::validate` in the reference implementation, so any SDK
 rejecting one is an acceptance divergence. Consumers must reject unknown
 bundle fields and unknown `hushspec_diff` versions (fail-closed).
 

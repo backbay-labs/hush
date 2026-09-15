@@ -226,7 +226,7 @@ pub struct EnforcementSummary {
 impl EnforcementSummary {
     /// The disposition implied by a decision when there is no enforcement
     /// point to say otherwise: an allow proceeds; a warn with no confirmation
-    /// channel is a deny (core spec D16); under monitor mode a warn or deny
+    /// channel is a deny (core spec 6); under monitor mode a warn or deny
     /// proceeds and is recorded as `would_block`.
     #[must_use]
     pub fn implied(decision: Decision, mode: EnforcementMode) -> Self {
@@ -375,6 +375,34 @@ pub struct AuditContext {
 #[must_use]
 pub fn format_timestamp(instant: DateTime<Utc>) -> String {
     instant.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Whether `value` is exactly what [`format_timestamp`] produces: RFC 3339
+/// UTC, millisecond precision, `Z` suffix.
+///
+/// The shape is checked before parsing because `parse_from_rfc3339` also
+/// accepts offsets and other sub-second precisions, which receipts and
+/// envelopes do not.
+///
+/// Only the signing and bundle envelopes validate timestamps they were
+/// handed, so this is gated with them.
+#[cfg(feature = "signing")]
+pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shape = b"####-##-##T##:##:##.###Z";
+    if bytes.len() != shape.len() {
+        return false;
+    }
+    for (byte, expected) in bytes.iter().zip(shape) {
+        let ok = match expected {
+            b'#' => byte.is_ascii_digit(),
+            other => byte == other,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    DateTime::parse_from_rfc3339(value).is_ok()
 }
 
 /// A UUID v7 whose random bits come from `seed` instead of an RNG, so a

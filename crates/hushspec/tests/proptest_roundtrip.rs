@@ -620,10 +620,14 @@ fn action_strategy() -> impl Strategy<Value = EvaluationAction> {
         )
 }
 
-/// Compiles `schemas/hushspec-receipt.v0.schema.json`, mirroring the helper
-/// in `tests/receipt.rs` (duplicated rather than shared, since integration
-/// test files are separate compilation units).
-fn compiled_receipt_schema() -> jsonschema::JSONSchema {
+/// The compiled receipt schema, built once for the whole file: compiling it
+/// per proptest case dominated the runtime of `decision_receipt_matches_schema`.
+static RECEIPT_SCHEMA: std::sync::LazyLock<jsonschema::JSONSchema> =
+    std::sync::LazyLock::new(compile_receipt_schema);
+
+/// Compiles `schemas/hushspec-receipt.v0.schema.json`. `tests/receipt.rs` has
+/// its own copy: integration test files are separate compilation units.
+fn compile_receipt_schema() -> jsonschema::JSONSchema {
     let schema_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../schemas/hushspec-receipt.v0.schema.json"
@@ -657,8 +661,7 @@ proptest! {
         let receipt = evaluate_audited_spec(&spec, &action, &AuditConfig::default(), &AuditContext::default())
             .expect("generated policies are resolved");
         let value = serde_json::to_value(&receipt).expect("receipt serializes to JSON value");
-        let schema = compiled_receipt_schema();
-        if let Err(errors) = schema.validate(&value) {
+        if let Err(errors) = RECEIPT_SCHEMA.validate(&value) {
             let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
             prop_assert!(false, "receipt failed schema validation: {messages:?}\n{value:#}");
         }
