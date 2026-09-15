@@ -169,8 +169,11 @@ jobs:
         run: pytest packages/python/tests/test_shared_fixtures.py -v
 
       - name: Go shared fixtures
+        # -count=1 disables the test result cache. The fixture corpus lives
+        # outside the Go module, so a cached "ok" survives a fixtures/ change
+        # that should have failed this job.
         if: matrix.sdk == 'go'
-        run: cd packages/go && go test ./... -run TestSharedFixtures -v
+        run: cd packages/go && go test ./... -run TestSharedFixtures -count=1 -v
 
   smoke-snippets:
     name: Smoke Snippets
