@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,12 @@ var (
 		"origins/evaluation",
 		"detection/evaluation",
 	}
+	// mergeFixtureDirs are the merge vector directories that must exist. The
+	// runner walks fixtures/ for every directory shaped like one (a base.yaml
+	// beside at least one child-*.yaml), so a new vector set -- the
+	// digest-pinned ones, say -- is picked up without editing this list; these
+	// four are then asserted to still be among what was found, so a rename
+	// cannot silently drop coverage instead.
 	mergeFixtureDirs = []string{
 		"core/merge",
 		"posture/merge",
@@ -83,22 +90,45 @@ func TestSharedFixtures(t *testing.T) {
 		}
 	}
 
-	for _, dir := range mergeFixtureDirs {
-		basePath := filepath.Join(repoRoot, "fixtures", dir, "base.yaml")
-		if _, err := os.Stat(basePath); err != nil {
-			continue
+	discovered := discoverMergeFixtureDirs(t, repoRoot)
+	for _, want := range mergeFixtureDirs {
+		if !slices.Contains(discovered, want) {
+			t.Fatalf("merge vector directory %q is no longer discoverable under fixtures/", want)
 		}
+	}
+
+	for _, dir := range discovered {
+		basePath := filepath.Join(repoRoot, "fixtures", dir, "base.yaml")
 		base := parseFixtureOrFail(t, basePath)
 
 		for _, childPath := range fixtureFiles(t, repoRoot, dir) {
-			if !strings.HasPrefix(filepath.Base(childPath), "child-") {
+			name := filepath.Base(childPath)
+			// A per-child manifest sits next to the vector it describes and
+			// shares its name, so it matches the child- prefix without being
+			// a vector of its own.
+			if !strings.HasPrefix(name, "child-") || isMergeFixtureManifest(name) {
 				continue
 			}
 			expectedPath := filepath.Join(filepath.Dir(childPath), strings.Replace(filepath.Base(childPath), "child-", "expected-", 1))
 			t.Run("merge/"+filepath.ToSlash(strings.TrimPrefix(childPath, repoRoot+string(os.PathSeparator))), func(t *testing.T) {
-				expected := parseFixtureOrFail(t, expectedPath)
-				merged := Merge(base, parseFixtureOrFail(t, childPath))
-				assertSpecsEqual(t, merged, expected)
+				merged, err := composeMergeFixture(basePath, base, childPath)
+
+				if mergeFixtureExpectsReject(t, childPath) {
+					if err == nil {
+						t.Fatalf("%s: expected the vector to be rejected, got a merged document", childPath)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("%s: merge vector failed: %v", childPath, err)
+				}
+				if _, statErr := os.Stat(expectedPath); statErr != nil {
+					t.Fatalf(
+						"%s: no %s and no expect-reject marker; a rejected vector needs an \"expect-reject\" file or \"reject: true\" in a fixture.yaml",
+						childPath, filepath.Base(expectedPath),
+					)
+				}
+				assertSpecsEqual(t, merged, parseFixtureOrFail(t, expectedPath))
 			})
 		}
 	}
@@ -154,6 +184,174 @@ func TestSharedFixtures(t *testing.T) {
 			})
 		}
 	}
+}
+
+// isMergeFixtureManifest reports whether a file in a merge directory is a
+// fixture.yaml manifest rather than a vector.
+func isMergeFixtureManifest(name string) bool {
+	return name == "fixture.yaml" || name == "fixture.yml" ||
+		strings.HasSuffix(name, ".fixture.yaml") || strings.HasSuffix(name, ".fixture.yml")
+}
+
+// discoverMergeFixtureDirs finds every merge vector directory under fixtures/:
+// one holding a base.yaml and at least one child-*.yaml. Discovery rather than
+// a fixed list keeps this runner working when the shared fixtures grow a new
+// set of merge vectors, which is the only way the Go SDK sees them.
+func discoverMergeFixtureDirs(t *testing.T, repoRoot string) []string {
+	t.Helper()
+	root := filepath.Join(repoRoot, "fixtures")
+	dirs := make([]string, 0, 8)
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		if _, statErr := os.Stat(filepath.Join(path, "base.yaml")); statErr != nil {
+			return nil
+		}
+		children, readErr := os.ReadDir(path)
+		if readErr != nil {
+			return readErr
+		}
+		for _, child := range children {
+			if !child.IsDir() && strings.HasPrefix(child.Name(), "child-") {
+				relative, relErr := filepath.Rel(root, path)
+				if relErr != nil {
+					return relErr
+				}
+				dirs = append(dirs, filepath.ToSlash(relative))
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk the fixtures tree: %v", err)
+	}
+	slices.Sort(dirs)
+	return dirs
+}
+
+// composeMergeFixture produces the merged document a merge vector asserts.
+//
+// The vectors overlay base.yaml with the child directly, because that is what
+// they are testing. A child that pins its base by digest
+// (`extends: base.yaml#sha256:...`) is resolved instead, so the pin is
+// actually checked -- a mismatched pin then surfaces as the error an
+// expect-reject vector wants.
+func composeMergeFixture(basePath string, base *HushSpec, childPath string) (*HushSpec, error) {
+	source, err := os.ReadFile(childPath)
+	if err != nil {
+		return nil, err
+	}
+	child, err := Parse(string(source))
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(child.Extends, "#sha256:") {
+		return Merge(base, child), nil
+	}
+	resolution, err := ResolveWithOptions(child, childPath, mergeFixtureLoader(basePath), ResolveOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return resolution.Spec, nil
+}
+
+// mergeFixtureLoader resolves a merge vector's extends reference to the
+// vector's own base.yaml. Merge vectors name their base either way -- `base`
+// or `base.yaml` -- so both are accepted; `builtin:` goes to the real loader.
+func mergeFixtureLoader(basePath string) ResolveLoader {
+	composite := createCompositeLoader()
+	return func(reference string, from string) (*LoadedSpec, error) {
+		if strings.HasPrefix(reference, "builtin:") {
+			return composite(reference, from)
+		}
+		if reference == "base" || reference == "base.yaml" || reference == "base.yml" {
+			reference = basePath
+		}
+		return composite(reference, from)
+	}
+}
+
+// mergeFixtureExpectsReject reports whether a merge vector is supposed to fail.
+// Two conventions are honoured, because the shared fixtures are written by the
+// Rust reference implementation and either may appear: an "expect-reject"
+// marker file (beside the child, named for it or for the whole directory), or
+// `reject: true` in a fixture.yaml manifest (per child or per directory).
+func mergeFixtureExpectsReject(t *testing.T, childPath string) bool {
+	t.Helper()
+	dir := filepath.Dir(childPath)
+	name := filepath.Base(childPath)
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+
+	for _, marker := range []string{
+		childPath + ".expect-reject",
+		filepath.Join(dir, stem+".expect-reject"),
+		filepath.Join(dir, "expect-reject"),
+	} {
+		if _, err := os.Stat(marker); err == nil {
+			return true
+		}
+	}
+
+	for _, manifest := range []string{
+		filepath.Join(dir, stem+".fixture.yaml"),
+		filepath.Join(dir, "fixture.yaml"),
+	} {
+		if reject, found := mergeFixtureManifestRejects(t, manifest, name, stem); found {
+			return reject
+		}
+	}
+	return false
+}
+
+// mergeFixtureManifestRejects reads `reject` out of a fixture.yaml, looking for
+// a per-child entry before the directory-wide flag. It reports whether it found
+// a statement at all, so a manifest that says nothing about this child falls
+// through to the next candidate.
+func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, bool) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, false
+	}
+	var manifest map[string]any
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("%s: failed to parse the merge fixture manifest: %v", path, err)
+	}
+
+	lookup := func(scope map[string]any) (bool, bool) {
+		for _, key := range []string{name, stem} {
+			entry, ok := scope[key].(map[string]any)
+			if !ok {
+				continue
+			}
+			if reject, ok := entry["reject"].(bool); ok {
+				return reject, true
+			}
+		}
+		return false, false
+	}
+
+	if reject, found := lookup(manifest); found {
+		return reject, true
+	}
+	for _, group := range []string{"cases", "children", "files", "vectors"} {
+		nested, ok := manifest[group].(map[string]any)
+		if !ok {
+			continue
+		}
+		if reject, found := lookup(nested); found {
+			return reject, true
+		}
+	}
+	if reject, ok := manifest["reject"].(bool); ok {
+		return reject, true
+	}
+	return false, false
 }
 
 // evaluatorTestVersionRE matches the `hushspec_test` fixture-format version
