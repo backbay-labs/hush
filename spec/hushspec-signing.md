@@ -193,6 +193,18 @@ An enforcement point that is configured to require signatures (`require_signatur
 
 An enforcement point not configured to require signatures MAY verify opportunistically and SHOULD record the outcome when it does.
 
+**Load-time reason codes.** When an enforcement point attempts verification on load (because signatures are required, or a keyring is configured), it records a `SignatureStatus` for every hop it attempted. Besides the Section 6.4 codes, the recorded `reason` MAY be one of these load-time conditions, spelled exactly:
+
+| Code | Meaning |
+|---|---|
+| `missing_signature` | No detached envelope was found for the hop (Section 7.1 lookup order). |
+| `no_keyring` | Verification was required but no keyring was configured. |
+| `signing_unavailable` | The runtime lacks the cryptographic backend needed to verify. |
+| `digest_mismatch` | The hop was pinned by digest (Core Specification, Section 2.3) and the loaded document's own content hash did not match. |
+| `invalid_pin` | The `#sha256:` fragment was malformed. |
+
+A hop satisfied by a matching digest pin needs no envelope; when an envelope is nevertheless present it MAY be verified opportunistically and its outcome recorded.
+
 ---
 
 ## 7. Detached and inline signatures

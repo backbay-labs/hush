@@ -58,7 +58,7 @@ fn eval_requires_a_signature_when_asked_and_still_emits_evidence() {
         .args(["--format", "receipt"])
         .assert()
         .code(1)
-        .stderr(predicate::str::contains("signature_missing"))
+        .stderr(predicate::str::contains("missing_signature"))
         .get_output()
         .stdout
         .clone();
@@ -312,6 +312,6 @@ fn explain_shows_chain_and_signature_lines() {
         .assert()
         .stdout(predicate::str::contains("chain:"))
         .stdout(predicate::str::contains("builtin:default"))
-        .stdout(predicate::str::contains("NOT verified: signature_missing"))
+        .stdout(predicate::str::contains("NOT verified: missing_signature"))
         .stdout(predicate::str::contains("enforce: enforce / allowed"));
 }

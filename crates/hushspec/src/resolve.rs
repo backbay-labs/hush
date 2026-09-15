@@ -69,7 +69,7 @@ pub enum ResolveError {
 /// Mirrors `SignatureStatus` in the receipt schema: `verified` is true only
 /// when an envelope was present, its key was in the keyring, and every check
 /// of the signing spec passed. `reason` is the signing-spec reason code, or one
-/// of the load-time conditions `signature_missing`, `no_keyring`,
+/// of the load-time conditions `missing_signature`, `no_keyring`,
 /// `signing_unavailable`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -322,7 +322,7 @@ fn verify_hop(
             None => default_locate_signature(source)?,
         };
         let status = match (located, &options.keyring) {
-            (None, _) => SignatureStatus::failed("signature_missing", None),
+            (None, _) => SignatureStatus::failed("missing_signature", None),
             (Some(_), None) => SignatureStatus::failed("no_keyring", None),
             (Some(bytes), Some(keyring)) => {
                 let text = String::from_utf8_lossy(&bytes);

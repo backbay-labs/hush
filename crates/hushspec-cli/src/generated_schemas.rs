@@ -300,7 +300,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "reason": {
           "type": "string",
           "minLength": 1,
-          "description": "A signing spec 6.4 reason code, or one of the load-time conditions signature_missing, no_keyring, signing_unavailable."
+          "description": "A signing spec 6.4 reason code, or one of the load-time conditions missing_signature, no_keyring, signing_unavailable."
         }
       }
     }
