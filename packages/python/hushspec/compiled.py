@@ -1637,13 +1637,20 @@ class CompiledPolicy:
             signal = posture.signal
 
         if signal is not None:
-            # D18 (pending): first matching transition in document order.
-            for transition in posture_ext.transitions:
-                if transition.from_state != "*" and transition.from_state != current:
-                    continue
-                if _trigger_name(transition.on) != signal:
-                    continue
-                return PostureResult(current=current, next=transition.to)
+            # D18 (posture spec 5.3): a transition whose `from` names the
+            # current state outranks one whose `from` is `"*"`; among equals,
+            # document order. Two passes rather than one scan with a
+            # best-so-far, so the named pass short-circuits on its first hit.
+            for wildcard in (False, True):
+                for transition in posture_ext.transitions:
+                    source = transition.from_state
+                    if (source == "*") is not wildcard:
+                        continue
+                    if not wildcard and source != current:
+                        continue
+                    if _trigger_name(transition.on) != signal:
+                        continue
+                    return PostureResult(current=current, next=transition.to)
 
         return PostureResult(current=current, next=current)
 
