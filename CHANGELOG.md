@@ -71,6 +71,48 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   actions, with `GuardedToolHandler` wrappers that check before the tool runs. `OTLPReceiptSink`
   exports receipts and policy events as OTLP/HTTP JSON logs, batched and retried on a background
   goroutine, with the same wire mapping as the other SDKs.
+### Added (RFC 09 P6-02, Rust runtime integration)
+
+- `hushspec::guard` -- `HushGuard`, the Rust enforcement point, at parity with the
+  TypeScript SDK's. Built from a `Policy`, a `Resolution` or a `CompiledPolicy`; carries the
+  enforcement mode (with per-rule-path overrides, longest prefix wins), an `on_warn`
+  confirmation channel (absent, a `warn` denies -- core spec D16), a `ReceiptSink`, observers,
+  the acting `Actor`, and the `TimeSource`. `check()` returns a `GuardDecision` (result,
+  receipt, `enforced`, `enforcement`, `duration_us`); `evaluate()` records without enforcing;
+  `swap_policy()` hot-swaps atomically and keeps the last good policy when the new one will
+  not validate or compile. A policy that fails verification under `require_signature` puts the
+  guard in the refused state -- every action denied with `__hushspec_policy_unverified__` and an
+  unverified-policy receipt -- rather than failing to build. Panic mode and a refusal always
+  enforce; monitor mode is refused without a sink or an observer. `Send + Sync`, `&self`
+  everywhere, policy behind an `RwLock<Arc<..>>`.
+- `hushspec::observer` -- `EvaluationObserver` (`on_policy_loaded` / `on_evaluation` /
+  `on_error`, all defaulted), `ObservableEvaluator`, `JsonLineObserver`, `StderrObserver`,
+  `MetricsCollector` (counters by decision, action type and rule block, a latency histogram,
+  `snapshot()`, and `render_prometheus()` emitting the documented `hushspec_evaluate_total`,
+  `hushspec_evaluate_duration_us`, `hushspec_rule_match_total` and `hushspec_policy_load_total`
+  series), plus `WebhookObserver` behind `http`. Action `content` is stripped before any
+  observer sees it.
+- `hushspec::provider` -- `PolicyProvider` (`load()` -> `Resolution`, `source()`),
+  `FileProvider`, `HttpProvider` (behind `http`, ETag-aware through the existing HTTPS loader),
+  and two reload drivers: `PolicyWatcher` (stats one file per tick) and `PolicyPoller`
+  (interval reload through any provider, delivering only on a `content_hash` change). Both swap
+  into a `HushGuard`, keep the last good policy on any failure, report through `on_error`, and
+  can check a panic sentinel on the same tick. `PolicyHandle` exposes `current()`,
+  `generation()`, `errors()` and `last_error()`; dropping it stops the thread.
+- `hushspec::otlp` (new `otlp` feature, implies `http`) -- `OtlpSink` exports receipts and
+  policy events as OTLP/HTTP JSON logs to `<endpoint>/v1/logs`: one `logRecord` per entry,
+  `timeUnixNano` from the entry's own timestamp, `INFO`/`WARN`/`ERROR` by decision,
+  `body.stringValue` the canonical JSON of the receipt, and `hushspec.*` attributes for entry
+  type, receipt version, decision, action type, matched rule, policy content hash, receipt hash
+  and enforcement mode/outcome, under `service.name` / `hushspec.sdk` (`hushspec-rust`) /
+  `hushspec.sdk.version` / `hushspec.spec_version` resource attributes. The mapping is written
+  out in the module docs so the four SDK ports agree. Background thread and bounded queue, so
+  export never blocks an evaluation; overflow drops with a counter and a `sink.error` observer
+  event; `5xx` retried with backoff, `4xx` not; drop flushes.
+- `cargo run --example guarded_agent --features otlp` -- a complete tool boundary: policy ->
+  guard -> `check` -> `ChainedFileSink` + `OtlpSink`, with metrics, a monitored rule block and
+  hot reload. New guide `docs/src/guides/runtime-integration.md`.
+- `Policy::panic_state()` reads the kill switch a policy will compile with.
 
 ### Added (RFC 09 Wave 5, Integrations)
 

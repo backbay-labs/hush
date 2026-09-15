@@ -24,6 +24,7 @@
 
 - [Getting Started](guides/getting-started.md)
 - [Writing Your First Policy](guides/first-policy.md)
+- [Runtime Integration](guides/runtime-integration.md)
 - [Using with Clawdstrike](guides/clawdstrike.md)
 - [Editor Setup](guides/editor-setup.md)
 - [CI Integration](guides/ci.md)

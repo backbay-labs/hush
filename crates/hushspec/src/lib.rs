@@ -45,10 +45,15 @@ mod generated_canonical_schemas;
 mod generated_contract;
 mod generated_models;
 pub mod governance;
+pub mod guard;
 pub mod log;
 pub mod merge;
+pub mod observer;
+#[cfg(feature = "otlp")]
+pub mod otlp;
 pub mod panic;
 pub mod policy;
+pub mod provider;
 pub mod receipt;
 pub mod regex_profile;
 pub mod report;
@@ -86,17 +91,35 @@ pub use evaluate::{
 };
 pub use extensions::Extensions;
 pub use governance::{ControlMapping, GovernanceMetadata, GovernanceWarning, validate_governance};
+pub use guard::{
+    Denied, EnforcementConfig, GuardDecision, GuardError, HushGuard, HushGuardBuilder, WarnHandler,
+    matches_rule_path_prefix,
+};
 pub use log::{
     ChainedFileSink, EntryType, GENESIS_HASH, LOG_VERSION, LogEntry, LogError, LogSignature,
     LogStarted, LogVerifyOptions, LogVerifyReport, Payload, PolicyEvent, PolicyEventKind, SdkInfo,
     verify_log, verify_log_files, verify_logs,
 };
 pub use merge::merge;
+#[cfg(feature = "http")]
+pub use observer::WebhookObserver;
+pub use observer::{
+    DURATION_BUCKETS_US, ErrorEvent, EvaluationCompletedEvent, EvaluationObserver,
+    JsonLineObserver, MetricsCollector, MetricsSnapshot, ObservableEvaluator, ObserverEvent,
+    ObserverEventType, ObserverLevel, PolicyLoadedEvent, StderrObserver, decision_label,
+};
+#[cfg(feature = "otlp")]
+pub use otlp::{OtlpConfig, OtlpSink};
 pub use panic::{
     PanicState, activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active,
     panic_policy,
 };
 pub use policy::{Policy, PolicyError};
+#[cfg(feature = "http")]
+pub use provider::HttpProvider;
+pub use provider::{
+    FileProvider, PolicyHandle, PolicyPoller, PolicyProvider, PolicyWatcher, ProviderError,
+};
 pub use receipt::{
     ActionSummary, Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode,
     EnforcementOutcome, EnforcementSummary, POLICY_UNVERIFIED_RULE, PolicySummary, RECEIPT_VERSION,

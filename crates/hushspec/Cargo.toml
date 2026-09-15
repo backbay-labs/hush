@@ -38,7 +38,18 @@ tempfile = "3"
 name = "evaluation"
 harness = false
 
+[[example]]
+name = "guarded_agent"
+required-features = ["otlp"]
+
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
 default = []
 http = ["dep:reqwest", "dep:url"]
 signing = ["dep:ed25519-dalek", "dep:base64", "dep:rand"]
+# OTLP/HTTP export of receipts and policy events (crates/hushspec/src/otlp.rs).
+# Reuses the `http` feature's blocking reqwest client, so it adds no new
+# dependency of its own.
+otlp = ["http"]
