@@ -25,6 +25,7 @@ regex = "1"
 thiserror = "2"
 anyhow = "1"
 similar = "2"
+clap_complete = "4"
 
 [dev-dependencies]
 assert_cmd = "2"

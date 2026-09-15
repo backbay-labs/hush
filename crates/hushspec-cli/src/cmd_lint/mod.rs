@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 #[derive(clap::Args)]
 pub struct LintArgs {
-    /// Policy YAML files to lint
+    /// Policy YAML files to lint; "-" reads the document from stdin
     #[arg(required = true)]
     files: Vec<PathBuf>,
 
@@ -87,39 +87,52 @@ pub fn run(args: LintArgs) -> i32 {
     let mut any_write_error = false;
     let want_fix = args.fix || args.dry_run;
 
-    for path in &args.files {
-        if !path.exists() {
-            if matches!(args.format, LintOutputFormat::Text) {
-                eprintln!("{} file not found: {}", "error".red(), path.display());
-            }
-            all_results.push(FileLintResult {
-                file: path.display().to_string(),
-                findings: vec![FindingJson {
-                    code: "E000".into(),
-                    severity: "error".into(),
-                    message: format!("file not found: {}", path.display()),
-                    location: path.display().to_string(),
-                    fixable: false,
-                }],
-                fixed: Vec::new(),
-            });
-            any_parse_error = true;
-            continue;
-        }
+    // `--fix` rewrites files in place, which stdin has no way to receive:
+    // refuse up front rather than reading the document and silently dropping
+    // the fixed output. (`--dry-run` only prints a diff, so it is fine.)
+    if args.fix && args.files.iter().any(|p| crate::input::is_stdin(p)) {
+        eprintln!(
+            "{} --fix cannot rewrite stdin; write the document to a file first, \
+             or use `h2h fmt -` / `h2h lint - --dry-run`",
+            "error".red()
+        );
+        return 2;
+    }
 
-        let content = match std::fs::read_to_string(path) {
+    for path in &args.files {
+        let display = crate::input::display(path);
+
+        let content = match crate::input::read_policy(path) {
             Ok(c) => c,
-            Err(e) => {
+            Err(crate::input::ReadError::NotFound) => {
                 if matches!(args.format, LintOutputFormat::Text) {
-                    eprintln!("{} failed to read {}: {e}", "error".red(), path.display());
+                    eprintln!("{} file not found: {display}", "error".red());
                 }
                 all_results.push(FileLintResult {
-                    file: path.display().to_string(),
+                    file: display.clone(),
+                    findings: vec![FindingJson {
+                        code: "E000".into(),
+                        severity: "error".into(),
+                        message: format!("file not found: {display}"),
+                        location: display,
+                        fixable: false,
+                    }],
+                    fixed: Vec::new(),
+                });
+                any_parse_error = true;
+                continue;
+            }
+            Err(crate::input::ReadError::Io(e)) => {
+                if matches!(args.format, LintOutputFormat::Text) {
+                    eprintln!("{} {e}", "error".red());
+                }
+                all_results.push(FileLintResult {
+                    file: display.clone(),
                     findings: vec![FindingJson {
                         code: "E000".into(),
                         severity: "error".into(),
                         message: format!("failed to read file: {e}"),
-                        location: path.display().to_string(),
+                        location: display,
                         fixable: false,
                     }],
                     fixed: Vec::new(),
@@ -135,15 +148,15 @@ pub fn run(args: LintArgs) -> i32 {
             Ok(s) => s,
             Err(e) => {
                 if matches!(args.format, LintOutputFormat::Text) {
-                    eprintln!("{} failed to parse {}: {e}", "error".red(), path.display());
+                    eprintln!("{} failed to parse {display}: {e}", "error".red());
                 }
                 all_results.push(FileLintResult {
-                    file: path.display().to_string(),
+                    file: display.clone(),
                     findings: vec![FindingJson {
                         code: "E001".into(),
                         severity: "error".into(),
                         message: format!("YAML parse error: {e}"),
-                        location: path.display().to_string(),
+                        location: display,
                         fixable: false,
                     }],
                     fixed: Vec::new(),
@@ -160,23 +173,28 @@ pub fn run(args: LintArgs) -> i32 {
         // inherits `secret_patterns`). A chain that will not resolve is an
         // error finding, never a silent fall back to the leaf.
         let resolved = if spec.extends.is_some() {
-            match hushspec::resolve_from_path_with_builtins(path) {
+            let resolution = if crate::input::is_stdin(path) {
+                // A document read from stdin has no path to resolve relative
+                // `extends` against, so relative references resolve from the
+                // working directory instead (builtins still work).
+                let loader = hushspec::create_composite_loader();
+                hushspec::resolve_with_loader(&spec, None, &loader)
+            } else {
+                hushspec::resolve_from_path_with_builtins(path)
+            };
+            match resolution {
                 Ok(resolved) => Some(resolved),
                 Err(e) => {
                     if matches!(args.format, LintOutputFormat::Text) {
-                        eprintln!(
-                            "{} failed to resolve {}: {e}",
-                            "error".red(),
-                            path.display()
-                        );
+                        eprintln!("{} failed to resolve {display}: {e}", "error".red());
                     }
                     all_results.push(FileLintResult {
-                        file: path.display().to_string(),
+                        file: display.clone(),
                         findings: vec![FindingJson {
                             code: "E002".into(),
                             severity: "error".into(),
                             message: format!("failed to resolve extends: {e}"),
-                            location: path.display().to_string(),
+                            location: display,
                             fixable: false,
                         }],
                         fixed: Vec::new(),
@@ -189,10 +207,9 @@ pub fn run(args: LintArgs) -> i32 {
             None
         };
 
-        let file_label = path.display().to_string();
         let mut findings = match resolved.as_ref() {
-            Some(resolved) => run_all_checks(resolved, &file_label),
-            None => run_all_checks(&spec, &file_label),
+            Some(resolved) => run_all_checks(resolved, &display),
+            None => run_all_checks(&spec, &display),
         };
         let mut fixed_codes: Vec<String> = Vec::new();
 
@@ -225,7 +242,7 @@ pub fn run(args: LintArgs) -> i32 {
 
                 // Re-lint against the fixed model so the report (and the exit
                 // code below) reflects only what's actually left.
-                findings = run_all_checks(&spec, &path.display().to_string());
+                findings = run_all_checks(&spec, &display);
 
                 // `spec` was mutated in place by `apply_fixes`, so this canonicalizes
                 // the in-memory model directly rather than routing through
@@ -264,7 +281,7 @@ pub fn run(args: LintArgs) -> i32 {
                     );
                 }
             } else if args.dry_run && matches!(args.format, LintOutputFormat::Text) {
-                println!("{} {} nothing to fix", "ok".green(), path.display());
+                println!("{} {display} nothing to fix", "ok".green());
             }
         }
 
@@ -277,11 +294,11 @@ pub fn run(args: LintArgs) -> i32 {
         }
 
         if matches!(args.format, LintOutputFormat::Text) {
-            print_text_findings(&findings, &path.display().to_string());
+            print_text_findings(&findings, &display);
         }
 
         all_results.push(FileLintResult {
-            file: path.display().to_string(),
+            file: display,
             findings: findings
                 .iter()
                 .map(|f| FindingJson::new(resolved.as_ref().unwrap_or(&spec), f))

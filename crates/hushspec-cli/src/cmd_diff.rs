@@ -20,12 +20,29 @@ pub struct DiffArgs {
     /// Output format
     #[arg(short, long, default_value = "text")]
     format: DiffOutputFormat,
+
+    /// Exit 1 when the diff contains a change of this class: "relaxed" (a
+    /// deny becomes allow/warn, or a warn becomes allow), "tightened" (the
+    /// reverse), or "any" (either)
+    #[arg(long, value_name = "CLASS")]
+    fail_on: Option<FailOn>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
 enum DiffOutputFormat {
     Text,
     Json,
+}
+
+/// Change class that makes `h2h diff` exit non-zero.
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum FailOn {
+    /// Any change that can turn a deny into allow/warn or a warn into allow.
+    Relaxed,
+    /// Any change that can turn an allow into warn/deny or a warn into deny.
+    Tightened,
+    /// Either direction.
+    Any,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -107,7 +124,56 @@ pub fn run(args: DiffArgs) -> i32 {
         DiffOutputFormat::Json => print_json_diff(&changes),
     }
 
-    0
+    let Some(fail_on) = args.fail_on else {
+        return 0;
+    };
+
+    let offenders: Vec<&DecisionChange> = changes
+        .iter()
+        .filter(|c| triggers(fail_on, &c.change_type))
+        .collect();
+
+    if offenders.is_empty() {
+        return 0;
+    }
+
+    eprintln!(
+        "{} {} decision change(s) match --fail-on {}",
+        "error".red(),
+        offenders.len(),
+        fail_on_label(fail_on)
+    );
+    for c in &offenders {
+        eprintln!(
+            "  {} {} -> {}: {} -> {}",
+            c.change_type, c.action.action_type, c.action.target, c.old_decision, c.new_decision
+        );
+    }
+
+    1
+}
+
+/// Direction of a decision change, derived from the `change_type` strings
+/// produced by [`classify_change`]. `demoted` (deny -> warn) is a relaxation
+/// because the action stops being blocked; `escalated` (warn -> deny) is a
+/// tightening for the same reason in reverse.
+fn triggers(fail_on: FailOn, change_type: &str) -> bool {
+    let relaxing = matches!(change_type, "relaxed" | "demoted");
+    let tightening = matches!(change_type, "tightened" | "escalated");
+
+    match fail_on {
+        FailOn::Relaxed => relaxing,
+        FailOn::Tightened => tightening,
+        FailOn::Any => relaxing || tightening,
+    }
+}
+
+fn fail_on_label(fail_on: FailOn) -> &'static str {
+    match fail_on {
+        FailOn::Relaxed => "relaxed",
+        FailOn::Tightened => "tightened",
+        FailOn::Any => "any",
+    }
 }
 
 /// Load a policy and resolve its `extends` chain (builtins plus files rooted
@@ -684,7 +750,10 @@ fn floor_char_boundary(s: &str, max_len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_path_targets, extract_regex_literal, format_decision_cell, truncate_str};
+    use super::{
+        FailOn, extract_path_targets, extract_regex_literal, format_decision_cell, triggers,
+        truncate_str,
+    };
     use hushspec::HushSpec;
     use std::collections::BTreeSet;
 
@@ -725,6 +794,32 @@ mod tests {
     fn extract_regex_literal_skips_quantifier_arguments() {
         let literal = extract_regex_literal(r"AKIA[0-9A-Z]{16}");
         assert_eq!(literal, "AKIA0");
+    }
+
+    #[test]
+    fn fail_on_relaxed_covers_deny_to_warn_demotions() {
+        assert!(triggers(FailOn::Relaxed, "relaxed"));
+        assert!(triggers(FailOn::Relaxed, "demoted"));
+        assert!(!triggers(FailOn::Relaxed, "tightened"));
+        assert!(!triggers(FailOn::Relaxed, "escalated"));
+        assert!(!triggers(FailOn::Relaxed, "unchanged"));
+    }
+
+    #[test]
+    fn fail_on_tightened_covers_warn_to_deny_escalations() {
+        assert!(triggers(FailOn::Tightened, "tightened"));
+        assert!(triggers(FailOn::Tightened, "escalated"));
+        assert!(!triggers(FailOn::Tightened, "relaxed"));
+        assert!(!triggers(FailOn::Tightened, "demoted"));
+        assert!(!triggers(FailOn::Tightened, "unchanged"));
+    }
+
+    #[test]
+    fn fail_on_any_covers_both_directions_but_not_unchanged() {
+        for change in ["relaxed", "demoted", "tightened", "escalated"] {
+            assert!(triggers(FailOn::Any, change), "{change} should trigger");
+        }
+        assert!(!triggers(FailOn::Any, "unchanged"));
     }
 
     #[test]
