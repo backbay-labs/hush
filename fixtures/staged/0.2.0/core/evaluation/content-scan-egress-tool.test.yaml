@@ -1,0 +1,48 @@
+hushspec_test: "0.1.0"
+description: "D8 (core 3.4, 5): egress and tool_call actions are scanned by secret_patterns when they carry content"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - "api.example.com"
+      default: block
+    tool_access:
+      default: allow
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+cases:
+  - description: "an allowed egress carrying a secret is denied"
+    action:
+      type: egress
+      target: "api.example.com"
+      content: "{\"key\":\"AKIAABCDEFGHIJKLMNOP\"}"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.aws
+  - description: "an allowed egress without content is allowed"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a tool call carrying a secret in its arguments is denied"
+    action:
+      type: tool_call
+      target: send_message
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.aws
+  - description: "a tool call with clean arguments is allowed"
+    action:
+      type: tool_call
+      target: send_message
+      content: "hello"
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.default

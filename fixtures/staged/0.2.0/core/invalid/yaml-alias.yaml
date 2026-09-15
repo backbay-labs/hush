@@ -1,0 +1,7 @@
+# D17 (core 2.4): anchors and aliases are rejected. Staged: all four SDKs currently accept aliases.
+hushspec: "0.1.0"
+rules:
+  forbidden_paths:
+    patterns: &secrets
+      - "**/.env"
+    exceptions: *secrets

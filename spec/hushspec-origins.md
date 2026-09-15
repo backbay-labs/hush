@@ -1,9 +1,10 @@
 # HushSpec Origins Extension Specification
 
-**Version:** 0.1.0
+**Version:** 0.2.0 (Draft)
 **Status:** Draft
-**Date:** 2026-03-15
-**Companion to:** HushSpec Core v0.1.0
+**Date:** 2026-09-14
+**Companion to:** HushSpec Core v0.2.0
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix B for the list of ratified changes.
 
 ---
 
@@ -80,6 +81,10 @@ The `default_behavior` field controls what happens when no profile matches an in
 - **`"deny"`** (default): Requests from unmatched origins are denied entirely. This is the fail-closed default.
 - **`"minimal_profile"`**: Requests from unmatched origins proceed under the base policy with no origin-specific extensions. Engines SHOULD log a warning when this fallback activates.
 
+Engines MUST enforce `default_behavior`. When the origins extension is present and no profile matches (Section 3), a `default_behavior` of `"deny"` MUST produce **deny** with `matched_rule` `extensions.origins.default_behavior` and no rule block is evaluated. A request that carries **no origin context at all** is unmatched for this purpose: with `default_behavior: deny`, every such request is denied. Documents that must serve requests without origin context MUST declare `default_behavior: minimal_profile`.
+
+Test vectors: `fixtures/staged/0.2.0/origins/evaluation/default-behavior-deny.test.yaml` (staged), `fixtures/origins/evaluation/origin-matching.test.yaml`.
+
 ### 2.2 `profiles`
 
 The `profiles` field is an array of origin profile objects, each with a unique `id`. Profiles are evaluated in match priority order (see Section 3), not array order.
@@ -88,19 +93,21 @@ The `profiles` field is an array of origin profile objects, each with a unique `
 
 ## 3. Match Priority
 
-When an incoming request carries origin context, the engine MUST determine which profile applies using the following deterministic priority order:
+When an incoming request carries origin context, the engine MUST determine which profile applies using the following deterministic algorithm.
 
-1. **Exact `space_id` match (highest priority).** If a profile's `match.space_id` equals the request's space ID, that profile is selected. If multiple profiles match by `space_id`, the first in document order wins.
+**Candidate profiles.** A profile is a candidate when it has a `match` object and every field present in that object is satisfied by the request: a scalar field is satisfied when the request carries an equal value; `tags` is satisfied when every listed tag is present in the request's tags. A profile whose `match` field is **absent** is never a candidate. A profile whose `match` object is present but **empty** (`match: {}`) is a candidate for every request with zero matched fields; it is the default profile, and at most one SHOULD exist.
 
-2. **Most specific match by field count.** Among profiles without `space_id` or whose `space_id` does not match, the profile with the greatest number of matching `match` fields is selected. Each non-null `match` field that equals the corresponding request field counts as one match point. `tags` counts as one match point only if ALL tags in the profile are present in the request.
+**Selection.** Among the candidates:
 
-3. **Provider-only match.** A profile matching only on `provider` is less specific than one matching `provider` + `space_type`.
+1. **`space_id` match wins.** If any candidate's `match.space_id` is present (and therefore equal to the request's `space_id`), the first such candidate in document order is selected, regardless of how many fields other candidates matched.
 
-4. **Default profile (empty match).** A profile with an empty or absent `match` object matches all requests at the lowest specificity. At most one default profile SHOULD exist.
+2. **Otherwise, most matched fields wins.** Each present field of `match` counts as one; `tags` counts as one regardless of how many tags it lists. The candidate with the greatest count is selected. Engines MUST NOT weight fields differently: a profile matching `provider` and `space_type` (two fields) outranks a profile matching only `tenant_id` (one field).
 
-5. **`default_behavior` fallback.** If no profile matches at all, the `default_behavior` field applies.
+3. **Ties break by document order.** Among candidates with the same count, the first in document order is selected.
 
-In case of a tie in match specificity (same number of matching fields, no `space_id` match), the first profile in document order wins.
+4. **No candidate.** `default_behavior` applies (Section 2.1).
+
+Test vectors: `fixtures/origins/evaluation/origin-matching.test.yaml`, `fixtures/origins/evaluation/tied-profiles.test.yaml`, `fixtures/origins/evaluation/match-presence.test.yaml`, `fixtures/staged/0.2.0/origins/evaluation/priority-staged.test.yaml` (staged).
 
 ---
 
@@ -108,19 +115,27 @@ In case of a tie in match specificity (same number of matching fields, no `space
 
 Origin profiles NARROW the base policy. The most restrictive rule wins at every level.
 
+**Tri-state overlays.** A profile's `tool_access` and `egress` objects are overlays on the corresponding base rule block. Every field of the overlay is tri-state: **absent** (inherit the base's value, whatever it is), **present and empty** (contributes nothing), or **present and non-empty** (composed with the base as described below). Engines MUST NOT materialize defaults into an overlay: a profile `egress` that omits `default` inherits the base's `default`, even when the base's is `"allow"`. The `enabled` field is not part of an overlay; a profile cannot enable or disable a base block.
+
 ### 4.1 Tool Access Composition
 
-- **Allowlists:** The effective allowlist is the INTERSECTION of the base `rules.tool_access.allow` and the origin profile's `tool_access.allow`. A tool must appear in both to be allowed.
-- **Blocklists:** The effective blocklist is the UNION of the base `rules.tool_access.block` and the origin profile's `tool_access.block`. A tool blocked by either is blocked.
+- **Allowlists:** When both the base `rules.tool_access.allow` and the overlay `allow` are non-empty, a tool is allowed only if it appears in **both** (intersection). When only one is non-empty, that list alone is the allowlist. When neither is non-empty, no allowlist is in effect.
+- **Blocklists:** The effective blocklist is the UNION of the base `block` and the overlay `block`. A tool blocked by either is blocked.
 - **Require confirmation:** The effective set is the UNION of both `require_confirmation` lists.
-- **Default:** If either the base or origin specifies `"block"`, the effective default is `"block"`.
-- **Max args size:** The smaller of the two values applies, if both are specified.
+- **Default:** The effective default is `"block"` if the base specifies `"block"` or the overlay **specifies** `"block"`; an overlay that omits `default` does not change it.
+- **Max args size:** The smaller of the two values applies when both are specified; otherwise whichever is specified.
+
+Matched-rule paths for overlay decisions are `extensions.origins.profiles.<id>.tool_access.<field>`.
 
 ### 4.2 Egress Composition
 
-- **Allowlists:** The effective allowlist is the INTERSECTION of the base `rules.egress.allow` and the origin profile's `egress.allow`.
-- **Blocklists:** The effective blocklist is the UNION of the base `rules.egress.block` and the origin profile's `egress.block`.
-- **Default:** If either specifies `"block"`, the effective default is `"block"`.
+- **Allowlists:** As for tool access: intersection when both are non-empty, otherwise the non-empty one.
+- **Blocklists:** The effective blocklist is the UNION of the base `block` and the overlay `block`.
+- **Default:** The effective default is `"block"` if the base specifies `"block"` or the overlay **specifies** `"block"`; an overlay that omits `default` does not change it.
+
+Matched-rule paths for overlay decisions are `extensions.origins.profiles.<id>.egress.<field>`.
+
+Test vector: `fixtures/staged/0.2.0/origins/evaluation/tri-state-overlay.test.yaml` (staged).
 
 ### 4.3 Budget Composition
 
@@ -347,3 +362,11 @@ extensions:
           allow_external_sharing: false
         explanation: "Code review context, no deploy"
 ```
+
+## Appendix B. Changes from 0.1.0
+
+| ID  | Section | Change                                                                                                                 |
+|-----|---------|------------------------------------------------------------------------------------------------------------------------|
+| D12 | 2.1     | `default_behavior` MUST be enforced; a request without origin context is unmatched.                                    |
+| D12 | 3       | Selection rewritten as a deterministic algorithm: `space_id` match first, then matched-field count with no per-field weighting, then document order. A profile with no `match` field is never a candidate; `match: {}` is the default profile. |
+| D12 | 4       | Profile `tool_access` and `egress` are tri-state overlays; engines MUST NOT materialize `default` into an overlay. Allowlist intersection defined for the one-sided case. |

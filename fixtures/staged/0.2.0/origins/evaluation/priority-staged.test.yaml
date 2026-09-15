@@ -1,0 +1,70 @@
+hushspec_test: "0.1.0"
+description: "D12 (origins 3): a space_id match beats any field count; otherwise the greater matched-field count wins with no per-field weighting"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+      transitions: []
+    origins:
+      default_behavior: minimal_profile
+      profiles:
+        - id: three-fields
+          match:
+            provider: slack
+            space_type: channel
+            visibility: internal
+          tool_access:
+            block: [ticket_search]
+            default: allow
+        - id: by-space-id
+          match:
+            space_id: C123
+          tool_access:
+            allow: [ticket_search]
+            default: allow
+        - id: tenant-only
+          match:
+            tenant_id: contoso
+          tool_access:
+            block: [ticket_search]
+            default: allow
+        - id: provider-and-external
+          match:
+            provider: teams
+            external_participants: false
+          tool_access:
+            allow: [ticket_search]
+            default: allow
+cases:
+  - description: "a space_id match outranks a profile that matched three other fields"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: slack
+        space_type: channel
+        visibility: internal
+        space_id: C123
+    expect:
+      decision: allow
+      matched_rule: extensions.origins.profiles.by-space-id.tool_access.allow
+      origin_profile: by-space-id
+  - description: "two matched fields outrank one matched field even when the one-field profile is listed first"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: teams
+        tenant_id: contoso
+        external_participants: false
+    expect:
+      decision: allow
+      matched_rule: extensions.origins.profiles.provider-and-external.tool_access.allow
+      origin_profile: provider-and-external

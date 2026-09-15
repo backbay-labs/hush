@@ -1,0 +1,66 @@
+hushspec_test: "0.1.0"
+description: "D13 (core 3.11): browser_automation evaluation for browser_action (staged: evaluator-test schema must add the browser_action type and the url field)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    browser_automation:
+      enabled: true
+      allowed_domains:
+        - "*.example.com"
+      blocked_domains:
+        - "evil.com"
+      allowed_verbs:
+        - navigate
+        - type
+        - screenshot
+      credential_detection: true
+      extra_credential_patterns:
+        - "AKIA[0-9A-Z]{16}"
+cases:
+  - description: "navigation to an allowed host is allowed"
+    action:
+      type: browser_action
+      target: navigate
+      url: "https://app.example.com/dashboard"
+    expect:
+      decision: allow
+      matched_rule: rules.browser_automation
+  - description: "navigation to a blocked host is denied"
+    action:
+      type: browser_action
+      target: navigate
+      url: "https://evil.com/"
+    expect:
+      decision: deny
+      matched_rule: rules.browser_automation.blocked_domains
+  - description: "navigation to a host outside the allowlist is denied"
+    action:
+      type: browser_action
+      target: navigate
+      url: "https://other.org/"
+    expect:
+      decision: deny
+      matched_rule: rules.browser_automation.allowed_domains
+  - description: "an unlisted verb is denied"
+    action:
+      type: browser_action
+      target: click
+    expect:
+      decision: deny
+      matched_rule: rules.browser_automation.allowed_verbs
+  - description: "typing a credential-shaped value is denied"
+    action:
+      type: browser_action
+      target: type
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: rules.browser_automation.credential_detection
+  - description: "typing ordinary text is allowed"
+    action:
+      type: browser_action
+      target: type
+      content: "hello world"
+    expect:
+      decision: allow
+      matched_rule: rules.browser_automation

@@ -1,63 +1,116 @@
 # HushSpec Core Specification
 
-**Version:** 0.1.0
+**Version:** 0.2.0 (Draft)
 **Status:** Draft
-**Date:** 2026-03-15
+**Date:** 2026-09-14
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of ratified changes.
 
 ---
 
 ## 1. Introduction
 
-HushSpec is a portable, engine-neutral specification for declaring security rules at the tool boundary of AI agent runtimes. A HushSpec document declares security intent -- what actions are allowed, blocked, or require confirmation -- without prescribing how those rules are enforced.
+HushSpec is a portable, engine-neutral specification for declaring the security controls an AI agent operates under at the tool boundary. A HushSpec document declares security intent -- what actions are allowed, blocked, or require confirmation -- without prescribing how those rules are enforced.
 
-The specification defines a YAML-based document format that any conformant engine can parse, validate, merge, and evaluate. HushSpec documents are designed to be authored by security teams, shared across organizations, and enforced by heterogeneous runtimes including CLI tools, SDKs, proxies, and embedded WebAssembly modules.
+The specification defines a YAML-based document format that any conformant engine can parse, validate, merge, and evaluate. HushSpec documents are designed to be authored by security and compliance teams, shared across organizations, and enforced by heterogeneous runtimes including CLI tools, SDKs, proxies, and embedded WebAssembly modules.
 
 ### 1.1 Terminology
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.
 
+**Test vector.** A fixture file under `fixtures/` in the reference repository that exercises a requirement. Where a requirement names a test vector, a conformant engine MUST produce the decisions that vector expects. Vectors marked *staged* (`fixtures/staged/`) encode requirements ratified in this version that the reference implementation has not yet shipped; they become normative for conformance when promoted into `fixtures/`.
+
 ### 1.2 Design Principles
 
-1. **Fail-closed.** Ambiguity or error in a HushSpec document MUST result in denial, not allowance.
+1. **Fail-closed.** Ambiguity or error in a HushSpec document, in evaluation inputs, or in the engine's own processing MUST result in denial, not allowance.
 2. **Engine-neutral.** The specification declares intent. Enforcement mechanics are engine-specific.
-3. **Portable.** A valid HushSpec document MUST produce identical semantic decisions across conformant engines.
+3. **Portable.** A valid HushSpec document MUST produce identical decisions across conformant engines. Every matching algorithm in this document is specified to the level a third party can implement from the prose alone.
 4. **Composable.** Documents support single inheritance via `extends` with well-defined merge semantics.
 
 ---
 
 ## 2. Document Structure
 
-A HushSpec document is a YAML file (YAML 1.2) with the following top-level fields:
+A HushSpec document is a YAML file (see Section 2.4 for the YAML profile) with the following top-level fields:
 
-| Field            | Type   | Required | Default       | Description                                      |
-|------------------|--------|----------|---------------|--------------------------------------------------|
-| `hushspec`       | string | REQUIRED | --            | Spec version. MUST match `^0\.` for v0.x.        |
-| `name`           | string | OPTIONAL | --            | Human-readable policy name.                      |
-| `description`    | string | OPTIONAL | --            | Policy description.                              |
-| `extends`        | string | OPTIONAL | --            | Reference to a base policy.                      |
+| Field            | Type   | Required | Default        | Description                                      |
+|------------------|--------|----------|----------------|--------------------------------------------------|
+| `hushspec`       | string | REQUIRED | --             | Spec version. See Section 2.2.                   |
+| `name`           | string | OPTIONAL | --             | Human-readable policy name.                      |
+| `description`    | string | OPTIONAL | --             | Policy description.                              |
+| `extends`        | string | OPTIONAL | --             | Reference to a base policy.                      |
 | `merge_strategy` | string | OPTIONAL | `"deep_merge"` | One of `replace`, `merge`, `deep_merge`.         |
-| `rules`          | object | OPTIONAL | --            | Security rule declarations.                      |
-| `extensions`     | object | OPTIONAL | --            | Extension modules.                               |
+| `rules`          | object | OPTIONAL | --             | Security rule declarations (Section 3).          |
+| `extensions`     | object | OPTIONAL | --             | Extension modules (Section 9).                   |
+| `metadata`       | object | OPTIONAL | --             | Governance metadata (Section 2.5).               |
 
 ### 2.1 Strictness
 
-Conformant parsers MUST reject documents containing unknown top-level fields. This requirement extends recursively: unknown fields within `rules`, within individual rule objects, and within `extensions` MUST also cause rejection. This ensures forward compatibility is explicit and prevents silent misconfiguration.
+Conformant parsers MUST reject documents containing unknown top-level fields. This requirement extends recursively: unknown fields within `rules`, within individual rule objects, within `when` conditions, within `metadata`, and within `extensions` MUST also cause rejection. This ensures forward compatibility is explicit and prevents silent misconfiguration.
+
+Test vectors: `fixtures/core/invalid/unknown-top-level.yaml`, `fixtures/core/invalid/unknown-rule.yaml`.
 
 ### 2.2 Version Field
 
-The `hushspec` field is the only REQUIRED field. Its value MUST be a string matching the pattern `^0\.\d+\.\d+$` for the v0.x series. Parsers MUST reject documents where this field is absent, is not a string, or does not match the expected pattern for the parser's supported version range.
+The `hushspec` field is the only REQUIRED field. Its value MUST be a string matching the pattern `^0\.\d+\.\d+$` for the v0.x series. Parsers MUST reject documents where this field is absent, is not a string (a YAML float such as `0.1` MUST be rejected), or does not match the expected pattern.
+
+**Version acceptance.** An engine that declares support for minor version `X.Y` MUST accept every document whose `hushspec` value is `X.Y.Z` for any non-negative integer `Z`. Patch versions contain only clarifications and errata (see Section 10.1) and never change document validity or evaluation semantics, so rejecting them is a conformance failure. Engines MUST reject documents whose `X.Y` they do not support.
+
+Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/staged/0.2.0/core/valid/version-patch-accept.yaml` (staged).
 
 ### 2.3 Extends Field
 
 The `extends` field is a single string reference to a base policy document. Resolution of this reference (filesystem path, URL, registry identifier, built-in name) is engine-specific and outside the scope of this specification. Engines MUST document their resolution strategy. Circular inheritance MUST be detected and rejected.
 
+A **resolved document** is the output of merging the entire `extends` chain (Section 4). A resolved document MUST NOT contain the `extends` field and MUST NOT contain the `merge_strategy` field. Engines MUST evaluate only resolved documents: evaluating a document whose `extends` reference has not been resolved silently drops the base policy and is a conformance failure. An engine that cannot resolve a reference MUST refuse to evaluate the document rather than evaluate the child alone.
+
+### 2.4 YAML Profile
+
+HushSpec documents use a restricted YAML profile so that every conformant parser accepts and rejects the same byte sequences.
+
+1. Documents MUST be parsed with the **YAML 1.2 Core schema**. In particular, only `true` and `false` are booleans; `yes`, `no`, `on`, `off`, `y`, and `n` are strings and MUST be rejected wherever a boolean is required.
+2. A file MUST contain exactly one YAML document. Multi-document streams (`---` separators with content on both sides) MUST be rejected.
+3. Duplicate mapping keys at any nesting level MUST be rejected.
+4. Anchors (`&`), aliases (`*`), and merge keys (`<<`) MUST be rejected.
+5. The `hushspec` value MUST be a string. Authors SHOULD quote it (`hushspec: "0.2.0"`).
+6. Engines MUST enforce resource limits on the input: a maximum document size, a maximum nesting depth, and a maximum node count. The RECOMMENDED defaults are 1 MiB, 32 levels, and 100,000 nodes. Exceeding any limit MUST be reported as a parse error.
+7. Tabs are not valid YAML indentation and MUST be rejected. Byte order marks MUST be accepted and ignored.
+
+Test vectors: `fixtures/core/invalid/yaml-duplicate-key.yaml`, `fixtures/core/invalid/float-version.yaml`, and the staged vectors `fixtures/staged/0.2.0/core/invalid/yaml-*.yaml` (see `fixtures/staged/README.md`).
+
+### 2.5 Metadata
+
+The OPTIONAL `metadata` object carries governance information about the policy. It MUST NOT influence evaluation decisions. Its fields are:
+
+| Field             | Type    | Required | Description                                                                 |
+|-------------------|---------|----------|-----------------------------------------------------------------------------|
+| `author`          | string  | OPTIONAL | Identity of the policy author (email, team name).                           |
+| `approved_by`     | string  | OPTIONAL | Identity of the policy approver.                                            |
+| `approval_date`   | string  | OPTIONAL | ISO 8601 date the policy was approved.                                      |
+| `classification`  | string  | OPTIONAL | One of `public`, `internal`, `confidential`, `restricted`.                  |
+| `change_ticket`   | string  | OPTIONAL | Change-management reference.                                                |
+| `lifecycle_state` | string  | OPTIONAL | One of `draft`, `review`, `approved`, `deployed`, `deprecated`, `archived`. |
+| `policy_version`  | integer | OPTIONAL | Monotonically increasing version counter. MUST be >= 1.                     |
+| `effective_date`  | string  | OPTIONAL | ISO 8601 date the policy becomes effective.                                 |
+| `expiry_date`     | string  | OPTIONAL | ISO 8601 date the policy expires.                                           |
+
+Unknown keys under `metadata` MUST be rejected (Section 2.1). Under every merge strategy the child's `metadata` object, when present, replaces the base's `metadata` object entirely; when the child omits `metadata`, the base's is preserved. Governance semantics (lifecycle enforcement, approval checks, control mappings) are defined by the HushSpec Governance specification, not by this document.
+
+Test vector: `fixtures/core/valid/metadata.yaml`.
+
 ---
 
 ## 3. Rules
 
-The `rules` object contains up to ten named rule blocks. Each rule block controls a specific security domain. All rule blocks share a common `enabled` field; when `enabled` is `false`, the rule block is inert and MUST NOT influence decisions.
+The `rules` object contains up to twelve named rule blocks. Each rule block controls a specific security domain.
 
 If `rules` is absent or empty, no rules are active. Engines MUST NOT inject implicit rules beyond what the document (and its resolved `extends` chain) declares.
+
+### 3.0 Fields Common to Every Rule Block
+
+| Field     | Type    | Required | Default          | Description                                                        |
+|-----------|---------|----------|------------------|--------------------------------------------------------------------|
+| `enabled` | boolean | OPTIONAL | varies per block | When `false`, the rule block is inert and MUST NOT influence decisions. |
+| `when`    | object  | OPTIONAL | --               | Condition gating whether the block is active. See Section 3.13.    |
 
 ### 3.1 `rules.forbidden_paths`
 
@@ -66,16 +119,16 @@ Block access to sensitive filesystem paths.
 | Field        | Type            | Required | Default | Description                                     |
 |--------------|-----------------|----------|---------|-------------------------------------------------|
 | `enabled`    | boolean         | OPTIONAL | `true`  | Whether this rule is active.                    |
-| `patterns`   | array of string | OPTIONAL | `[]`    | Glob patterns matching forbidden paths.         |
-| `exceptions` | array of string | OPTIONAL | `[]`    | Glob patterns that override pattern matches.    |
+| `patterns`   | array of string | OPTIONAL | `[]`    | Path glob patterns matching forbidden paths.    |
+| `exceptions` | array of string | OPTIONAL | `[]`    | Path glob patterns that override pattern matches. |
 
-**Semantics:** A path is forbidden if and only if:
+**Semantics:** The target path is normalized and matched as specified in Section 3.14.1. A path is forbidden if and only if:
 1. It matches at least one entry in `patterns`, AND
 2. It does NOT match any entry in `exceptions`.
 
-Glob matching MUST support `*` (any sequence within a path segment), `**` (any sequence of segments including separators), and `?` (any single character). Matching is case-sensitive on case-sensitive filesystems. Engines on case-insensitive filesystems SHOULD document their behavior.
+A forbidden path produces **deny** with `matched_rule` `rules.forbidden_paths.patterns`. A path that matches an exception produces **allow** from this block with `matched_rule` `rules.forbidden_paths.exceptions`; that allow MUST NOT prevent other applicable blocks from being evaluated (Section 6.1). When `patterns` is empty, no paths are forbidden regardless of the `enabled` state.
 
-When `patterns` is empty, no paths are forbidden regardless of the `enabled` state.
+Test vectors: `fixtures/core/evaluation/forbidden-paths.test.yaml`, `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/path-normalization-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
 
 ### 3.2 `rules.path_allowlist`
 
@@ -84,31 +137,31 @@ Allowlist-based path access control. When enabled, only paths matching the allow
 | Field   | Type            | Required | Default | Description                                          |
 |---------|-----------------|----------|---------|------------------------------------------------------|
 | `enabled` | boolean       | OPTIONAL | `false` | Whether this rule is active.                         |
-| `read`  | array of string | OPTIONAL | `[]`    | Glob patterns allowed for read access.               |
-| `write` | array of string | OPTIONAL | `[]`    | Glob patterns allowed for write access.              |
-| `patch` | array of string | OPTIONAL | `[]`    | Glob patterns allowed for patch operations.          |
+| `read`  | array of string | OPTIONAL | `[]`    | Path glob patterns allowed for read access.          |
+| `write` | array of string | OPTIONAL | `[]`    | Path glob patterns allowed for write access.         |
+| `patch` | array of string | OPTIONAL | `[]`    | Path glob patterns allowed for patch operations.     |
 
-**Semantics:** When enabled, a file operation is allowed only if the target path matches at least one pattern in the corresponding array (`read`, `write`, or `patch`). If `patch` is empty, patch operations fall back to the `write` array. If the relevant array is empty (and no fallback applies), all operations of that type are denied.
+**Semantics:** When enabled, a file operation is allowed by this block only if the normalized target path (Section 3.14.1) matches at least one pattern in the corresponding array (`read`, `write`, or `patch`). If `patch` is empty, patch operations fall back to the `write` array. If the relevant array is empty (and no fallback applies), all operations of that type are denied. A match produces **allow** with `matched_rule` `rules.path_allowlist`; a non-match produces **deny** with the same `matched_rule`. An allow from this block MUST NOT prevent other applicable blocks (in particular `secret_patterns` and `patch_integrity`) from being evaluated (Section 6.1).
 
-Glob syntax follows the same rules as Section 3.1.
+Test vector: `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
 
 ### 3.3 `rules.egress`
 
-Network egress control by domain.
+Network egress control by host.
 
 | Field     | Type            | Required | Default   | Description                                       |
 |-----------|-----------------|----------|-----------|---------------------------------------------------|
 | `enabled` | boolean         | OPTIONAL | `true`    | Whether this rule is active.                      |
-| `allow`   | array of string | OPTIONAL | `[]`      | Domain glob patterns to allow.                    |
-| `block`   | array of string | OPTIONAL | `[]`      | Domain glob patterns to block.                    |
+| `allow`   | array of string | OPTIONAL | `[]`      | Host patterns to allow.                           |
+| `block`   | array of string | OPTIONAL | `[]`      | Host patterns to block.                           |
 | `default` | string          | OPTIONAL | `"block"` | Default decision: `"allow"` or `"block"`.         |
 
-**Semantics:** For a given target domain:
-1. If the domain matches any entry in `block`, the decision is **deny**. Block takes precedence over allow.
-2. If the domain matches any entry in `allow`, the decision is **allow**.
-3. Otherwise, the `default` value applies.
+**Semantics:** The target is normalized to a host as specified in Section 3.14.2, then:
+1. If the host matches any entry in `block`, the decision is **deny** (`rules.egress.block`). Block takes precedence over allow.
+2. If the host matches any entry in `allow`, the decision is **allow** (`rules.egress.allow`).
+3. Otherwise, the `default` value applies (`rules.egress.default`).
 
-Domain patterns use glob syntax where `*` matches any sequence of characters within a single domain label and `**` matches across labels (e.g., `**.example.com` matches `foo.bar.example.com`). Port numbers, if present in the target, are stripped before matching.
+Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/egress-normalization-staged.test.yaml` (staged).
 
 ### 3.4 `rules.secret_patterns`
 
@@ -118,23 +171,36 @@ Detect secrets in content before it is written or transmitted.
 |--------------|-------------------------|----------|---------|----------------------------------------------|
 | `enabled`    | boolean                 | OPTIONAL | `true`  | Whether this rule is active.                 |
 | `patterns`   | array of SecretPattern  | OPTIONAL | `[]`    | Named regex patterns for secret detection.   |
-| `skip_paths` | array of string         | OPTIONAL | `[]`    | Glob patterns of paths to skip scanning.     |
+| `skip_paths` | array of string         | OPTIONAL | `[]`    | Path glob patterns of paths to skip scanning. |
 
 **SecretPattern object:**
 
 | Field         | Type   | Required | Description                                          |
 |---------------|--------|----------|------------------------------------------------------|
 | `name`        | string | REQUIRED | Unique identifier for this pattern.                  |
-| `pattern`     | string | REQUIRED | Regular expression to match against content.         |
+| `pattern`     | string | REQUIRED | Regular expression (Section 3.14.3 profile).         |
 | `severity`    | string | REQUIRED | One of `"critical"`, `"error"`, `"warn"`.            |
 | `description` | string | OPTIONAL | Human-readable description of what this detects.     |
 
 **Constraints:**
 - The `name` field MUST be unique within the `patterns` array. Parsers MUST reject documents with duplicate names.
-- The `pattern` field MUST be a valid regular expression. Engines SHOULD support PCRE2-compatible syntax at minimum. Invalid regexes MUST cause document rejection (fail-closed).
+- The `pattern` field MUST conform to the HushSpec regex profile (Section 3.14.3). Non-conforming or invalid patterns MUST cause document rejection (fail-closed).
 - The `severity` field MUST be one of the three enumerated values.
 
-**Semantics:** Content is scanned against each pattern. A match produces a finding at the specified severity. The engine determines how severities map to decisions (e.g., `"critical"` and `"error"` -> deny, `"warn"` -> warn). If the target path matches any `skip_paths` entry, scanning is bypassed.
+**Which actions are scanned.** The `content` of the action is scanned for `file_write` and `patch_apply` actions always, and for `egress` and `tool_call` actions whenever the action carries `content`. Other action types are not scanned by this block. `skip_paths` applies only to path-bearing actions (`file_write`, `patch_apply`): if the normalized target path matches any `skip_paths` entry, scanning is bypassed and this block produces **allow** with `matched_rule` `rules.secret_patterns.skip_paths`.
+
+**Severity to decision.** Every pattern is tested against the content (unanchored search). The block's decision is determined by the highest severity among the patterns that matched:
+
+| Highest matched severity | Decision | `matched_rule`                               |
+|--------------------------|----------|----------------------------------------------|
+| `critical`               | deny     | `rules.secret_patterns.patterns.<name>`      |
+| `error`                  | deny     | `rules.secret_patterns.patterns.<name>`      |
+| `warn`                   | warn     | `rules.secret_patterns.patterns.<name>`      |
+| (no match)               | allow    | --                                           |
+
+`<name>` is the first pattern in document order among those at the highest matched severity. Engines MUST NOT stop at the first match: a later `critical` pattern MUST outrank an earlier `warn` pattern.
+
+Test vectors: `fixtures/core/evaluation/secret-patterns.test.yaml`, `fixtures/core/evaluation/severity-mapping.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/severity-mapping-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/content-scan-egress-tool.test.yaml` (staged).
 
 ### 3.5 `rules.patch_integrity`
 
@@ -152,12 +218,19 @@ Validate the safety and reasonableness of patch/diff content.
 **Constraints:**
 - `max_additions` and `max_deletions` MUST be non-negative integers.
 - `max_imbalance_ratio` MUST be a positive number (> 0).
+- Each `forbidden_patterns` entry MUST conform to the regex profile (Section 3.14.3).
+
+**Counting.** Additions are lines of the patch content beginning with `+` but not `+++`; deletions are lines beginning with `-` but not `---`.
 
 **Semantics:** A patch is denied if:
-1. The number of added lines exceeds `max_additions`, OR
-2. The number of deleted lines exceeds `max_deletions`, OR
-3. Any line in the patch matches a `forbidden_patterns` entry, OR
-4. `require_balance` is `true` AND the ratio of additions to deletions (or deletions to additions, whichever is larger) exceeds `max_imbalance_ratio`. When either additions or deletions is zero and the other is nonzero and `require_balance` is `true`, the patch is denied.
+1. Any line in the patch matches a `forbidden_patterns` entry (`rules.patch_integrity.forbidden_patterns[<index>]`), OR
+2. The number of added lines exceeds `max_additions` (`rules.patch_integrity.max_additions`), OR
+3. The number of deleted lines exceeds `max_deletions` (`rules.patch_integrity.max_deletions`), OR
+4. `require_balance` is `true` AND the ratio of the larger count to the smaller count exceeds `max_imbalance_ratio` (`rules.patch_integrity.max_imbalance_ratio`). When `require_balance` is `true` and exactly one of the two counts is zero while the other is nonzero, the patch MUST be denied regardless of `max_imbalance_ratio` (the ratio is treated as infinite). When both counts are zero the patch is balanced.
+
+Checks are evaluated in the order listed; the first failing check determines `matched_rule`.
+
+Test vectors: `fixtures/core/evaluation/patch-integrity.test.yaml`, `fixtures/core/evaluation/patch-integrity-defaults.test.yaml`, `fixtures/core/evaluation/patch-balance.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/patch-balance-zero.test.yaml` (staged).
 
 ### 3.6 `rules.shell_commands`
 
@@ -168,7 +241,9 @@ Block dangerous shell commands before execution.
 | `enabled`            | boolean         | OPTIONAL | `true`  | Whether this rule is active.                  |
 | `forbidden_patterns` | array of string | OPTIONAL | `[]`    | Regex patterns forbidden in shell commands.   |
 
-**Semantics:** A shell command is denied if any portion of the command string matches any `forbidden_patterns` entry. Matching is performed against the complete command string as provided to the engine, including arguments and pipes. Empty `forbidden_patterns` means no commands are blocked by this rule.
+**Semantics:** A shell command is denied (`rules.shell_commands.forbidden_patterns[<index>]`) if any portion of the command string matches any `forbidden_patterns` entry (unanchored search per Section 3.14.3). Matching is performed against the complete command string as provided to the engine, including arguments and pipes. Empty `forbidden_patterns` means no commands are blocked by this rule.
+
+Test vector: `fixtures/core/evaluation/shell-commands.test.yaml`.
 
 ### 3.7 `rules.tool_access`
 
@@ -183,16 +258,17 @@ Control tool and MCP (Model Context Protocol) invocations.
 | `default`              | string          | OPTIONAL | `"allow"` | Default decision: `"allow"` or `"block"`.        |
 | `max_args_size`        | integer         | OPTIONAL | --        | Maximum argument payload size in bytes.          |
 
+**Tool name matching.** Tool names MUST be compared as exact, case-sensitive strings after Unicode NFC normalization of both sides. Glob and regex metacharacters (`*`, `?`, `[`, `{`) have no special meaning in tool names: the entry `danger_*` matches only a tool literally named `danger_*`. Engines MUST NOT apply glob matching to tool names.
+
 **Semantics:** For a given tool invocation:
-1. If the tool name matches any entry in `block`, the decision is **deny**. Block takes precedence.
-2. If `require_confirmation` is non-empty and the tool name matches an entry, the decision is **warn** (requiring confirmation). Confirmation semantics are engine-specific.
-3. If `allow` is non-empty and the tool name matches an entry, the decision is **allow**.
-4. If `allow` is non-empty and the tool name does NOT match, the decision is **deny** (allowlist mode).
-5. Otherwise, the `default` value applies.
+1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps.
+2. If the tool name equals any entry in `block`, the decision is **deny** (`rules.tool_access.block`). Block takes precedence.
+3. If the tool name equals any entry in `require_confirmation`, the decision is **warn** (`rules.tool_access.require_confirmation`). Confirmation semantics are engine-specific; see Section 6.
+4. If `allow` is non-empty and the tool name equals an entry, the decision is **allow** (`rules.tool_access.allow`).
+5. If `allow` is non-empty and the tool name equals no entry, the decision is **deny** (`rules.tool_access.allow`, reason "tool is not in the allowlist"). This is allowlist mode; the `default` field MUST NOT be consulted when `allow` is non-empty.
+6. Otherwise (`allow` is empty), the `default` value applies (`rules.tool_access.default`).
 
-Tool names are matched as exact strings. Glob or regex matching is NOT supported for tool names.
-
-If `max_args_size` is specified and the serialized argument payload exceeds this size in bytes, the invocation is denied regardless of other rules.
+Test vectors: `fixtures/core/evaluation/tool-access.test.yaml`, `fixtures/core/evaluation/tool-exact-match.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/tool-exact-match-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/tool-allowlist-deny.test.yaml` (staged).
 
 ### 3.8 `rules.computer_use`
 
@@ -205,13 +281,15 @@ Control computer use agent (CUA) actions in remote desktop and browser automatio
 | `allowed_actions` | array of string | OPTIONAL | `[]`          | Action identifiers permitted.                   |
 
 **Mode semantics:**
-- `"observe"`: Log all actions but do not block. Decisions are **allow** with audit.
-- `"guardrail"`: Block actions not in `allowed_actions`. Actions in the list are allowed; others are denied.
-- `"fail_closed"`: Deny all actions unless explicitly listed in `allowed_actions`.
+- `"observe"`: Log all actions but do not block. Unlisted actions produce **allow** (`rules.computer_use.mode`) with audit.
+- `"guardrail"`: Actions in `allowed_actions` produce **allow** (`rules.computer_use.allowed_actions`); all other actions produce **deny** (`rules.computer_use.mode`).
+- `"fail_closed"`: Identical reference semantics to `"guardrail"`: deny unless explicitly listed.
 
-The distinction between `guardrail` and `fail_closed` is behavioral: in `guardrail` mode, engines MAY apply heuristics or additional context to borderline cases. In `fail_closed` mode, engines MUST deny anything not explicitly listed.
+Version 0.1.0 described `guardrail` as permitting engine heuristics on borderline cases. That text is withdrawn: there is no defensible, portable distinction between the two blocking modes, so both MUST deny unlisted actions. `fail_closed` is retained so existing documents remain valid and to record the author's intent; engines MUST NOT treat `guardrail` more leniently than `fail_closed`.
 
-Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`). This specification does not mandate a fixed set of action identifiers.
+Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`) compared as exact strings. This specification does not mandate a fixed set of action identifiers.
+
+Test vectors: `fixtures/core/evaluation/computer-use.test.yaml` (its `guardrail` warn expectation is superseded), `fixtures/staged/0.2.0/core/evaluation/computer-use-guardrail-deny.test.yaml` (staged).
 
 ### 3.9 `rules.remote_desktop_channels`
 
@@ -225,7 +303,7 @@ Control side-channel capabilities in remote desktop sessions.
 | `audio`         | boolean | OPTIONAL | `true`  | Allow audio redirection.                 |
 | `drive_mapping` | boolean | OPTIONAL | `false` | Allow drive/filesystem mapping.          |
 
-**Semantics:** When enabled, each boolean field controls whether the corresponding side channel is permitted. A value of `false` means the channel MUST be blocked. A value of `true` means the channel is permitted. Engines that do not support a particular channel SHOULD ignore the corresponding field and document this behavior.
+**Semantics:** When enabled, each boolean field controls whether the corresponding side channel is permitted. The channel is identified by the `computer_use` action target `remote.clipboard`, `remote.file_transfer`, `remote.audio`, or `remote.drive_mapping`. A value of `false` produces **deny** (`rules.remote_desktop_channels.<field>`); `true` produces **allow** with the same `matched_rule`. Targets that name no channel are not evaluated by this block. Engines that do not support a particular channel SHOULD ignore the corresponding field and document this behavior.
 
 ### 3.10 `rules.input_injection`
 
@@ -237,9 +315,186 @@ Control input injection capabilities in computer use agent environments.
 | `allowed_types`              | array of string | OPTIONAL | `[]`    | Input type identifiers permitted.                    |
 | `require_postcondition_probe`| boolean         | OPTIONAL | `false` | Whether postcondition verification is required.      |
 
-**Semantics:** When enabled, only input injection types listed in `allowed_types` are permitted. If `allowed_types` is empty, all input injection is denied (fail-closed). Standard type identifiers include `"keyboard"`, `"mouse"`, and `"touch"`, but engines MAY define additional types.
+**Semantics:** When enabled, only input injection types listed in `allowed_types` are permitted (`rules.input_injection.allowed_types`). If `allowed_types` is empty, all input injection is denied (fail-closed). Standard type identifiers include `"keyboard"`, `"mouse"`, and `"touch"`, but engines MAY define additional types.
 
 If `require_postcondition_probe` is `true`, the engine MUST verify that the injected input produced the expected effect before proceeding. The mechanism for postcondition verification is engine-specific.
+
+Test vector: `fixtures/core/evaluation/input-injection.test.yaml`.
+
+### 3.11 `rules.browser_automation`
+
+Fine-grained controls for browser-automation tool calls: a host allowlist, a verb allowlist, and credential detection in typed input.
+
+| Field                       | Type            | Required | Default | Description                                                                  |
+|-----------------------------|-----------------|----------|---------|------------------------------------------------------------------------------|
+| `enabled`                   | boolean         | OPTIONAL | `false` | Whether this rule is active.                                                 |
+| `allowed_domains`           | array of string | OPTIONAL | `[]`    | Host patterns (Section 3.14.2) the agent may navigate to.                    |
+| `blocked_domains`           | array of string | OPTIONAL | `[]`    | Host patterns that are always denied (evaluated before the allowlist).       |
+| `allowed_verbs`             | array of string | OPTIONAL | `[]`    | Verbs the agent may issue. Empty means any verb.                             |
+| `credential_detection`      | boolean         | OPTIONAL | `true`  | Check typed input for credential-shaped secrets.                             |
+| `extra_credential_patterns` | array of string | OPTIONAL | `[]`    | Additional credential regex patterns (Section 3.14.3) layered on the built-ins. |
+
+**Action shape.** A `browser_action` (Section 5) carries `target` = the verb (e.g. `navigate`, `click`, `type`, `screenshot`), and MAY carry `url` = the destination for navigation verbs and `content` = the typed text for input verbs.
+
+**Semantics:** When enabled:
+1. If `allowed_verbs` is non-empty and `target` equals no entry (exact match), the decision is **deny** (`rules.browser_automation.allowed_verbs`).
+2. If the action carries a `url`, its normalized host (Section 3.14.2) is checked: a match in `blocked_domains` produces **deny** (`rules.browser_automation.blocked_domains`); otherwise, if `allowed_domains` is non-empty and the host matches no entry, the decision is **deny** (`rules.browser_automation.allowed_domains`); if `allowed_domains` is empty, any non-blocked host is permitted.
+3. If `credential_detection` is `true` and the action carries `content`, the content is scanned against the engine's built-in credential detectors and every `extra_credential_patterns` entry; any match produces **deny** (`rules.browser_automation.credential_detection`). Engines MUST document their built-in credential detectors; a document that needs portable detection MUST list its patterns in `extra_credential_patterns`.
+4. Otherwise the decision is **allow** (`rules.browser_automation`).
+
+The block is evaluated only for `browser_action` actions.
+
+Test vectors: `fixtures/core/valid/browser-automation-rule.yaml`, `fixtures/staged/0.2.0/core/evaluation/browser-automation.test.yaml` (staged).
+
+### 3.12 `rules.code_execution`
+
+Restrictions for sandboxed interpreter actions: a language allowlist, a dangerous-module denylist, network gating, and execution bounds.
+
+| Field                   | Type            | Required | Default | Description                                                              |
+|-------------------------|-----------------|----------|---------|--------------------------------------------------------------------------|
+| `enabled`               | boolean         | OPTIONAL | `false` | Whether this rule is active.                                             |
+| `language_allowlist`    | array of string | OPTIONAL | `[]`    | Allowed interpreter languages. Empty means any language.                 |
+| `module_denylist`       | array of string | OPTIONAL | `[]`    | Module names whose use in the code body is denied.                       |
+| `network_access`        | boolean         | OPTIONAL | `false` | Permit code-execution calls that request network access.                 |
+| `max_execution_time_ms` | integer         | OPTIONAL | --      | Maximum execution time in milliseconds. MUST be >= 0 if present.         |
+| `max_scan_bytes`        | integer         | OPTIONAL | --      | Maximum bytes of code to scan for module detection. MUST be >= 1 if present. |
+
+**Action shape.** A `code_exec` action (Section 5) carries `target` = the language identifier (lowercase, e.g. `python`, `javascript`), `content` = the code body, and MAY carry `network: true` when the call requests network access and `timeout_ms` = the requested execution time.
+
+**Semantics:** When enabled:
+1. If `language_allowlist` is non-empty and `target` equals no entry (exact, case-sensitive), the decision is **deny** (`rules.code_execution.language_allowlist`).
+2. If the action requests network access and `network_access` is `false`, the decision is **deny** (`rules.code_execution.network_access`).
+3. If `max_execution_time_ms` is set and the action's `timeout_ms` exceeds it, the decision is **deny** (`rules.code_execution.max_execution_time_ms`).
+4. For each `module_denylist` entry, the first `max_scan_bytes` bytes of `content` (all of it when unset) are searched for the entry as a literal word: the entry MUST be matched only where it is preceded and followed by a character that is not in `[A-Za-z0-9_]` or by the start/end of the scanned text. A match produces **deny** (`rules.code_execution.module_denylist`).
+5. Otherwise the decision is **allow** (`rules.code_execution`).
+
+When `content` is longer than `max_scan_bytes`, only the prefix is scanned; engines SHOULD warn that the scan was truncated. The block is evaluated only for `code_exec` actions.
+
+Test vectors: `fixtures/core/valid/code-execution-rule.yaml`, `fixtures/staged/0.2.0/core/evaluation/code-execution.test.yaml` (staged).
+
+### 3.13 Conditional Rule Blocks (`when`)
+
+Any rule block MAY carry a `when` object that gates whether the block is active for a given evaluation. A block whose condition evaluates to `false` is inert for that evaluation, exactly as if `enabled` were `false`. Conditions are deterministic, not Turing-complete, and are evaluated against a **runtime context** supplied by the engine.
+
+**Condition object.** All fields are OPTIONAL. When several fields are present on one condition object they are combined with AND: every present field must be satisfied.
+
+| Field         | Type                    | Description                                                                                 |
+|---------------|-------------------------|---------------------------------------------------------------------------------------------|
+| `time_window` | object                  | Active during a daily time window. See below.                                               |
+| `context`     | object (string -> any)  | Every key is a dot-delimited path into the runtime context; every value must equal the context value at that path. |
+| `all_of`      | array of Condition      | Every sub-condition must be true.                                                           |
+| `any_of`      | array of Condition      | At least one sub-condition must be true. An empty array is treated as absent.               |
+| `not`         | Condition               | The sub-condition must be false.                                                            |
+
+**Time window object.**
+
+| Field      | Type            | Required | Default   | Description                                                   |
+|------------|-----------------|----------|-----------|---------------------------------------------------------------|
+| `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
+| `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
+| `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset `+HH:MM`/`-HH:MM`. |
+| `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
+
+The window is half-open: it contains the current local time `t` when `start <= t < end`. When `start > end` the window wraps midnight and contains `t` when `t >= start` or `t < end`; for wrapped windows, a time before `end` counts toward the *previous* calendar day when `days` is checked. When `start == end` the window is the whole day. The current time is the engine's clock converted to `timezone`, or the runtime context's `current_time` when supplied.
+
+**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
+
+**Validation (parse time).** Parsers MUST reject a document when any `when` object:
+- contains an unknown key;
+- has a `time_window` whose `start` or `end` is not `HH:MM` with `00 <= HH <= 23` and `00 <= MM <= 59`;
+- has a `timezone` that is neither an IANA identifier known to the engine nor a fixed offset;
+- lists a `days` entry outside the seven abbreviations;
+- nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep.
+
+**Evaluation (fail-closed toward enforcement).**
+- A `context` key that is absent from the runtime context makes the condition `false`.
+- An engine that cannot resolve the `timezone` at evaluation time (for example because its time-zone database lacks the identifier) MUST treat the block as **active**, not inert: an unresolvable condition MUST NOT switch a security control off.
+- Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation.
+
+Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
+
+Test vectors: `fixtures/staged/0.2.0/core/valid/when-conditions.yaml`, `fixtures/staged/0.2.0/core/invalid/when-*.yaml`, `fixtures/staged/0.2.0/core/evaluation/conditions.test.yaml` (all staged; the evaluator-test schema gains a `context` field in the same change).
+
+### 3.14 Pattern Matching
+
+Three pattern classes exist. Engines MUST implement each exactly as specified here; the class is determined by the field, never by the pattern's shape.
+
+| Class        | Fields                                                                                   |
+|--------------|------------------------------------------------------------------------------------------|
+| Path glob    | `forbidden_paths.patterns/exceptions`, `path_allowlist.read/write/patch`, `secret_patterns.skip_paths` |
+| Host pattern | `egress.allow/block`, `browser_automation.allowed_domains/blocked_domains`, origin profile `egress` |
+| Regex        | `secret_patterns.patterns[].pattern`, `patch_integrity.forbidden_patterns`, `shell_commands.forbidden_patterns`, `browser_automation.extra_credential_patterns` |
+
+Tool names (`tool_access`), computer-use action identifiers, input types, verbs, and language identifiers are **exact strings** and belong to no pattern class.
+
+#### 3.14.1 Path Globs
+
+**Target normalization.** Before matching, the target path MUST be transformed, in order:
+1. Unicode NFC normalization.
+2. Every `\` is replaced by `/`.
+3. Runs of consecutive `/` are collapsed to one.
+4. Segments are resolved lexically, without consulting the filesystem: a `.` segment is removed; a `..` segment removes the preceding segment when one exists and is not itself `..`. In an absolute path a `..` that would climb above the root is discarded. In a relative path a leading `..` is retained.
+5. A trailing `/` is removed unless the whole path is `/`.
+
+Patterns MUST be written with `/` separators and are NFC-normalized; they are not otherwise transformed.
+
+**Matching.** The pattern is matched against the entire normalized path (anchored at both ends). Matching is byte-wise case-sensitive; engines MUST NOT fold case. Engines on case-insensitive filesystems SHOULD present the canonical on-disk casing of the target to the evaluator.
+
+| Token | Meaning                                                                                                   |
+|-------|-----------------------------------------------------------------------------------------------------------|
+| `*`   | Any sequence of zero or more characters other than `/`.                                                   |
+| `?`   | Exactly one character other than `/`.                                                                     |
+| `**/` | At the start of the pattern or after a `/`: zero or more complete leading segments (including their `/`). `**/.env` matches `.env`, `a/.env`, `a/b/.env`. |
+| `**`  | Elsewhere (for example a trailing `/**` or `foo**`): any sequence of zero or more characters including `/`. `/home/**` matches `/home/x` and `/home/x/y` but not `/home` (the trailing slash is stripped from the target and the pattern requires the `/`). |
+| other | Literal. `[`, `]`, `{`, `}`, `(`, `)`, `+`, `.`, `^`, `$`, `|`, `\` have no special meaning.               |
+
+Test vectors: `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/core/evaluation/forbidden-paths-leading-globstar.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/path-normalization-staged.test.yaml` (staged).
+
+#### 3.14.2 Host Patterns
+
+**Target normalization.** The egress target MAY be a bare host, a `host:port`, or a URL. It MUST be reduced to a host, in order:
+1. If the target contains `://`, parse it as a URL and take the authority; otherwise the whole target is the authority.
+2. Remove any userinfo (`user:pass@`).
+3. If the authority begins with `[`, the host is the bracketed IPv6 literal including the brackets, and anything after the closing `]` (a `:port`) is removed. Otherwise remove a trailing `:` followed by one or more digits.
+4. Remove any path, query, or fragment.
+5. Convert ASCII letters to lowercase.
+6. Remove one trailing `.`.
+7. Convert any non-ASCII label to its IDNA A-label (punycode) form.
+
+Patterns undergo steps 5-7 only.
+
+**Matching.** After normalization, the host is compared with the pattern anchored at both ends:
+
+| Token | Meaning                                                                                             |
+|-------|-----------------------------------------------------------------------------------------------------|
+| `*`   | One or more characters other than `.` (i.e. within a single label). `*.example.com` matches `api.example.com` but not `a.b.example.com` and not `example.com`. `api-*.example.com` matches `api-1.example.com`. |
+| `**`  | One or more characters including `.` (one or more labels). `**.example.com` matches `a.example.com` and `a.b.example.com` but not `example.com`. |
+| other | Literal, including `.`.                                                                             |
+
+The apex host is never implied by a wildcard; a document that intends to allow `example.com` MUST list it. If the normalized host is an IPv4 literal or a bracketed IPv6 literal, it matches a pattern only when the pattern is character-for-character equal to it; wildcards MUST NOT match IP literals. A target that cannot be reduced to a syntactically valid host MUST be treated as matching nothing (so `default` applies).
+
+Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/egress-normalization-staged.test.yaml` (staged).
+
+#### 3.14.3 Regex Profile
+
+Regular expressions in HushSpec documents MUST conform to the **HushSpec regex profile**, a portable subset of RE2 syntax with fixed semantics. Version 0.1.0 said engines SHOULD support "PCRE2-compatible syntax"; that text is withdrawn.
+
+**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )` and non-capturing `(?: )` groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
+
+A pattern MUST NOT use: lookahead or lookbehind; backreferences; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; named groups or named references; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
+
+**Semantics.** Every engine MUST match with these semantics regardless of its host regex library:
+- The subject is a sequence of Unicode scalar values; `.` and negated classes consume exactly one scalar value.
+- A pattern matches when it matches any substring of the subject (unanchored search).
+- `.` matches any scalar value except `\n` (any scalar value under the `s` flag).
+- `^` and `$` match only at the start and end of the subject; `$` MUST NOT match before a trailing `\n`. Under the `m` flag they also match after and before every `\n`.
+- `\d` is exactly `[0-9]`; `\w` is exactly `[A-Za-z0-9_]`; `\s` is exactly `[ \t\n\r\f\v]`; `\D`, `\W`, `\S` are their complements; `\b` and `\B` use the `\w` definition above. Non-ASCII digits, letters, and spaces MUST NOT match these escapes.
+- The `i` flag folds ASCII letters only; engines MUST NOT apply Unicode case folding.
+- Bracket classes are literal sets of scalar values; the class escapes inside them keep the ASCII definitions above.
+
+**Failure handling.** A pattern that fails to compile at evaluation time (for example because a document bypassed validation) MUST produce **deny** from its block with `matched_rule` set to the pattern's path and a reason naming the compile failure. An engine that bounds matching time MUST treat exceeding the bound as **deny**.
+
+Test vectors: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/regex-dialect-staged.test.yaml` (staged), `fixtures/core/invalid/regex-*.yaml`.
 
 ---
 
@@ -251,7 +506,7 @@ When `extends` is present, the base document is resolved first, then the child d
 
 **`deep_merge` (default):**
 For core `rules`, `deep_merge` is a rule-block merge in HushSpec v0:
-- If the child defines a rule block (for example `rules.egress`), that entire child rule block replaces the base rule block.
+- If the child defines a rule block (for example `rules.egress`), that entire child rule block, including its `when` condition, replaces the base rule block.
 - Rule blocks absent in the child are preserved from the base.
 - Arrays are never appended.
 
@@ -263,6 +518,8 @@ Shallow merge at the `rules` level. If the child defines a rule block (e.g., `ru
 **`replace`:**
 The child document entirely replaces the base document. The base document is loaded only to validate that the reference is resolvable; its content is discarded.
 
+Under every strategy, `metadata` follows Section 2.5.
+
 ### 4.2 Merge Order
 
 Merge is performed pairwise from the root of the inheritance chain to the leaf:
@@ -270,31 +527,37 @@ Merge is performed pairwise from the root of the inheritance chain to the leaf:
 2. Start with the root document.
 3. Apply each subsequent document using the `merge_strategy` declared in that document.
 
-The merged result is a resolved HushSpec document. The `extends` field is consumed during resolution and MUST NOT be present in the merged output.
+The merged result is a resolved HushSpec document. The `extends` and `merge_strategy` fields are consumed during resolution and MUST NOT be present in the merged output (Section 2.3).
 
 ### 4.3 Engine-Specific Helpers
 
 Convenience features such as `additional_patterns`, `remove_patterns`, or other additive/subtractive merge helpers are engine-specific extensions. They are NOT part of this specification. Engines that support such features MUST document them and MUST ensure that the result of applying helpers is expressible as a valid HushSpec document.
 
+Test vectors: `fixtures/core/merge/`, `fixtures/posture/merge/`, `fixtures/origins/merge/`, `fixtures/detection/merge/`.
+
 ---
 
 ## 5. Action Types
 
-HushSpec defines a standard taxonomy of action types. Engines use action types to route evaluation to the appropriate rule blocks.
+HushSpec defines a standard taxonomy of action types. Engines use action types to route evaluation to the applicable rule blocks. The table is normative: for a given action type, exactly the listed blocks are applicable, and every applicable block that is enabled and whose `when` condition holds MUST be evaluated (Section 6.1).
 
-| Action Type     | Description                                      | Primary Rule Block(s)                        |
-|-----------------|--------------------------------------------------|----------------------------------------------|
-| `file_read`     | Reading a file from the filesystem               | `forbidden_paths`, `path_allowlist`          |
-| `file_write`    | Writing or creating a file                       | `forbidden_paths`, `path_allowlist`, `secret_patterns` |
-| `egress`        | Outbound network request                         | `egress`                                     |
-| `shell_command` | Executing a shell command                        | `shell_commands`                             |
-| `tool_call`     | Invoking a tool or MCP endpoint                  | `tool_access`                                |
-| `patch_apply`   | Applying a patch or diff to a file               | `patch_integrity`, `forbidden_paths`, `path_allowlist` |
-| `computer_use`  | Computer use agent action                        | `computer_use`                               |
-| `input_inject`  | Injecting keyboard/mouse/touch input             | `input_injection`                            |
-| `custom`        | Engine-defined action type                       | Engine-specific                              |
+| Action Type      | Description                                   | Inputs                                   | Applicable rule blocks, in evaluation order                                   |
+|------------------|-----------------------------------------------|------------------------------------------|-------------------------------------------------------------------------------|
+| `file_read`      | Reading a file from the filesystem            | `target` = path                          | `forbidden_paths`, `path_allowlist`                                           |
+| `file_write`     | Writing or creating a file                    | `target` = path, `content`               | `forbidden_paths`, `path_allowlist`, `secret_patterns`                        |
+| `patch_apply`    | Applying a patch or diff to a file            | `target` = path, `content` = patch       | `forbidden_paths`, `path_allowlist`, `patch_integrity`, `secret_patterns`     |
+| `shell_command`  | Executing a shell command                     | `target` = command string                | `shell_commands`                                                              |
+| `egress`         | Outbound network request                      | `target` = host or URL, `content`?       | `egress`, `secret_patterns` (only when `content` is present)                  |
+| `tool_call`      | Invoking a tool or MCP endpoint               | `target` = tool name, `args_size`?, `content`? | `tool_access`, `secret_patterns` (only when `content` is present)        |
+| `computer_use`   | Computer use agent action                     | `target` = action identifier             | `computer_use`, `remote_desktop_channels`                                     |
+| `input_inject`   | Injecting keyboard/mouse/touch input          | `target` = input type                    | `input_injection`                                                             |
+| `browser_action` | Browser automation step                       | `target` = verb, `url`?, `content`?      | `browser_automation`                                                          |
+| `code_exec`      | Sandboxed interpreter invocation              | `target` = language, `content` = code, `network`?, `timeout_ms`? | `code_execution`                                      |
+| `custom`         | Engine-defined action type                    | engine-defined                           | none (see below)                                                              |
 
-An action MAY be evaluated against multiple rule blocks. For example, a `file_write` action is checked against `forbidden_paths`, `path_allowlist`, AND `secret_patterns`. If any applicable rule block produces a **deny**, the overall decision is **deny**.
+**Unknown and custom action types.** An action whose type is not in the table above, or whose type is `custom`, has no applicable rule blocks. Because no declared control can vouch for it, the engine MUST produce **deny** with `matched_rule` `__unknown_action_type__` and a reason naming the type. Exception: when the posture extension is active and the current posture state lists the `custom` capability, a `custom` action is permitted by the reference evaluator (engine-specific rules MAY still restrict it). Engines MUST NOT allow an action merely because no rule mentions it.
+
+Test vectors: `fixtures/staged/0.2.0/core/evaluation/unknown-action.test.yaml` (staged; the evaluator-test schema gains the `custom` action type in the same change).
 
 ---
 
@@ -305,16 +568,18 @@ HushSpec defines three standard decision outcomes:
 | Decision | Semantics                                                                   |
 |----------|-----------------------------------------------------------------------------|
 | `allow`  | The action is permitted. Execution may proceed.                             |
-| `warn`   | The action is permitted pending confirmation. Engines determine how confirmation is obtained (interactive prompt, approval queue, auto-approve in CI, etc.). If confirmation is not possible, engines SHOULD treat `warn` as `deny`. |
+| `warn`   | The action is permitted pending confirmation. Engines determine how confirmation is obtained (interactive prompt, approval queue, auto-approve in CI, etc.). An engine that has no confirmation channel configured MUST treat `warn` as `deny`. |
 | `deny`   | The action is blocked. Execution MUST NOT proceed.                          |
 
-### 6.1 Decision Precedence
+### 6.1 Aggregation and Precedence
 
-When multiple rule blocks apply to a single action, decisions are aggregated by precedence:
+Evaluation of one action proceeds as follows:
 
-1. **deny** takes absolute precedence. If any rule block denies, the action is denied.
-2. **warn** is next. If no rule block denies but at least one warns, the action requires confirmation.
-3. **allow** applies only when all applicable rule blocks allow.
+1. **Extension guards.** If the panic protocol is active, the result is **deny** (`__hushspec_panic__`). Otherwise the origins extension selects a profile or applies `default_behavior`, and the posture extension checks the required capability; a deny from either is final and no rule block is evaluated. See the companion specifications.
+2. **Block evaluation.** Every applicable rule block for the action type (Section 5 table) that is present, `enabled`, and whose `when` condition holds is evaluated, in the order listed in the table. Each block yields exactly one of `allow`, `warn`, or `deny` and MAY name a `matched_rule` and `reason`. Engines MUST NOT stop after a block that allows: an allow from `path_allowlist` or from a `forbidden_paths` exception does not exempt the action from `secret_patterns` or `patch_integrity`.
+3. **Aggregation.** The action's decision is the most restrictive block decision: **deny** if any block denied; otherwise **warn** if any block warned; otherwise **allow**. The reported `matched_rule` and `reason` are those of the first block, in evaluation order, whose decision equals the aggregate decision and which named a `matched_rule`; when no block named one they are absent.
+
+Test vectors: `fixtures/core/evaluation/decision-precedence.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
 
 ### 6.2 Monitor (Shadow) Enforcement
 
@@ -326,21 +591,27 @@ Engines MAY provide an explicit, operator-configured monitor mode in which decis
 
 Conformant parsers and validators MUST enforce the following:
 
-1. **Unknown field rejection.** Documents containing fields not defined in this specification at any nesting level MUST be rejected. This is the fail-closed principle applied to schema validation.
+1. **YAML profile.** The input MUST satisfy Section 2.4.
 
-2. **Version field presence.** The `hushspec` field MUST be present and MUST be a string matching `^0\.\d+\.\d+$` for v0.x documents.
+2. **Unknown field rejection.** Documents containing fields not defined in this specification at any nesting level MUST be rejected. This is the fail-closed principle applied to schema validation.
 
-3. **Type correctness.** All fields MUST conform to their declared types. A string where a boolean is expected MUST cause rejection.
+3. **Version field.** The `hushspec` field MUST be present, MUST be a string matching `^0\.\d+\.\d+$`, and MUST name a supported minor version (Section 2.2).
 
-4. **Enum constraints.** Fields with enumerated values (`severity`, `mode`, `default` in egress/tool_access, `merge_strategy`) MUST contain one of the specified values.
+4. **Type correctness.** All fields MUST conform to their declared types. A string where a boolean is expected MUST cause rejection.
 
-5. **Uniqueness constraints.** The `name` field within each element of `secret_patterns.patterns` MUST be unique across the array. Duplicate names MUST cause rejection.
+5. **Enum constraints.** Fields with enumerated values (`severity`, `mode`, `default` in egress/tool_access, `merge_strategy`, `metadata.classification`, `metadata.lifecycle_state`) MUST contain one of the specified values.
 
-6. **Regex validity.** All fields designated as regex patterns MUST be syntactically valid regular expressions. Invalid regexes MUST cause document rejection.
+6. **Uniqueness constraints.** The `name` field within each element of `secret_patterns.patterns` MUST be unique across the array. Duplicate names MUST cause rejection.
 
-7. **Numeric constraints.** `max_additions` and `max_deletions` MUST be non-negative integers. `max_imbalance_ratio` MUST be a positive number (strictly greater than zero). `max_args_size` MUST be a positive integer if present.
+7. **Regex profile.** All fields designated as regex patterns MUST conform to Section 3.14.3. Non-conforming or unparseable patterns MUST cause document rejection.
 
-8. **Boolean fields.** Boolean fields MUST be YAML booleans (`true`/`false`), not strings or integers.
+8. **Numeric constraints.** `max_additions` and `max_deletions` MUST be non-negative integers. `max_imbalance_ratio` MUST be a positive number (strictly greater than zero). `max_args_size` MUST be a positive integer if present. `max_execution_time_ms` MUST be a non-negative integer and `max_scan_bytes` a positive integer if present. `metadata.policy_version` MUST be a positive integer if present.
+
+9. **Boolean fields.** Boolean fields MUST be YAML booleans (`true`/`false`), not strings or integers.
+
+10. **Conditions.** Every `when` object MUST satisfy the validation rules of Section 3.13.
+
+Test vectors: `fixtures/core/invalid/`.
 
 ---
 
@@ -352,7 +623,7 @@ Implementations of HushSpec declare conformance at one of four levels. Each leve
 
 A Level 0 implementation can:
 - Parse valid HushSpec YAML documents into a structured representation.
-- Reject syntactically invalid YAML.
+- Reject syntactically invalid YAML and input violating the YAML profile (Section 2.4).
 - Reject documents missing the required `hushspec` field.
 
 ### Level 1: Validator
@@ -360,22 +631,22 @@ A Level 0 implementation can:
 A Level 1 implementation additionally:
 - Validates all field types and constraints as specified in Section 7.
 - Rejects documents with unknown fields at any nesting level.
-- Validates enum values, uniqueness constraints, and numeric constraints.
+- Validates enum values, uniqueness constraints, numeric constraints, the regex profile, and conditions.
 
 ### Level 2: Merger
 
 A Level 2 implementation additionally:
-- Resolves `extends` references (via at least one resolution strategy).
+- Resolves `extends` references (via at least one resolution strategy) and produces resolved documents per Section 2.3.
 - Correctly implements all three merge strategies (`deep_merge`, `merge`, `replace`).
 - Detects and rejects circular inheritance.
 
 ### Level 3: Evaluator
 
 A Level 3 implementation additionally:
-- Accepts an action (type + context) and a resolved HushSpec document.
-- Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Section 3.
-- Implements decision precedence as defined in Section 6.1.
-- Passes the HushSpec conformance test vectors (published separately).
+- Accepts an action (type + inputs) and a resolved HushSpec document.
+- Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Sections 3, 5, and 6, including the normalization and matching algorithms of Section 3.14.
+- Implements aggregation and precedence as defined in Section 6.1 and denies unknown action types per Section 5.
+- Passes the HushSpec conformance test vectors under `fixtures/` in the reference repository.
 
 ---
 
@@ -403,10 +674,7 @@ The detection extension schema is defined in a separate specification document. 
 
 ### 9.4 Extension Versioning
 
-In HushSpec v0.1.0, extension modules do **not** declare independent version
-fields inside documents. The posture, origins, and detection companion specs are
-versioned alongside the core HushSpec release. A future major version MAY add
-in-document extension versioning if interoperability needs require it.
+In the HushSpec v0 series, extension modules do **not** declare independent version fields inside documents. The posture, origins, and detection companion specs are versioned alongside the core HushSpec release. A future major version MAY add in-document extension versioning if interoperability needs require it.
 
 ### 9.5 Unknown Extensions
 
@@ -420,9 +688,9 @@ HushSpec uses semantic versioning (SemVer 2.0.0).
 
 ### 10.1 v0.x Series
 
-The v0.x series is the initial development series. Breaking changes (field removals, semantic changes, structural reorganization) MAY occur between minor versions (e.g., 0.1.0 to 0.2.0). Patch versions (e.g., 0.1.0 to 0.1.1) are reserved for clarifications and errata that do not change document validity.
+The v0.x series is the initial development series. Breaking changes (field removals, semantic changes, structural reorganization) MAY occur between minor versions (e.g., 0.1.0 to 0.2.0). Patch versions (e.g., 0.2.0 to 0.2.1) are reserved for clarifications and errata that do not change document validity or evaluation semantics; an engine supporting `0.2` MUST therefore accept every `0.2.Z` document (Section 2.2).
 
-Implementations SHOULD clearly document which v0.x minor version(s) they support.
+Implementations MUST document which v0.x minor version(s) they support.
 
 ### 10.2 v1.0+ Series
 
@@ -433,7 +701,7 @@ Upon reaching v1.0.0, HushSpec guarantees backward compatibility within each maj
 
 ### 10.3 Independence
 
-HushSpec versioning is independent of any engine, SDK, or implementation. An engine at version 3.5.0 may implement HushSpec 0.1.0. There is no coupling between specification versions and implementation versions.
+HushSpec versioning is independent of any engine, SDK, or implementation. An engine at version 3.5.0 may implement HushSpec 0.2.0. There is no coupling between specification versions and implementation versions.
 
 ---
 
@@ -446,17 +714,22 @@ hushspec-version = "0." 1*DIGIT "." 1*DIGIT
 ## Appendix B. Minimal Valid Document
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 ```
 
 ## Appendix C. Example Document
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 name: "production-agent-policy"
 description: "Security policy for production AI agent deployments"
 extends: "default"
 merge_strategy: "deep_merge"
+
+metadata:
+  author: "security@example.com"
+  lifecycle_state: "approved"
+  policy_version: 3
 
 rules:
   forbidden_paths:
@@ -483,13 +756,16 @@ rules:
         severity: "critical"
         description: "AWS access key ID"
       - name: "generic_api_key"
-        pattern: "(?i)(api[_-]?key|apikey)\\s*[=:]\\s*['\"]?[a-z0-9]{32,}"
+        pattern: "(?i)(api[_-]?key|apikey)[ \\t]*[=:][ \\t]*['\"]?[a-z0-9]{32,}"
         severity: "error"
 
   shell_commands:
     enabled: true
+    when:
+      context:
+        environment: "production"
     forbidden_patterns:
-      - "rm\\s+-rf\\s+/"
+      - "rm[ \\t]+-rf[ \\t]+/"
       - "curl.*\\|.*sh"
       - "wget.*\\|.*bash"
 
@@ -502,3 +778,28 @@ rules:
       - "database_write"
     default: "allow"
 ```
+
+## Appendix D. Changes from 0.1.0
+
+Each entry names the decision ID from RFC 09 (`docs/plans/09-compliance-as-code-plan.md`).
+
+| ID  | Section        | Change                                                                                                   |
+|-----|----------------|----------------------------------------------------------------------------------------------------------|
+| D1  | 5              | Unknown and `custom` action types deny (`__unknown_action_type__`) instead of allow.                     |
+| D2  | 6.1, 5         | Every applicable block is evaluated and aggregated; allowlist and exception matches no longer short-circuit. Normative applicable-block table added. |
+| D3  | 3.7            | Tool names are exact strings; glob matching of tool names is forbidden.                                   |
+| D4  | 3.7            | Allowlist mode denies unlisted tools; `default` is consulted only when `allow` is empty.                   |
+| D5  | 3.3, 3.14.2    | Host normalization algorithm (scheme, userinfo, port, path, case, trailing dot, IDNA); `*` is one label, `**` one or more; IP literals match exactly. |
+| D6  | 3.1, 3.14.1    | Path normalization algorithm (NFC, separators, `.`/`..`, trailing slash); `?` and `*` never cross `/`; brackets and braces literal. |
+| D7  | 3.14.3         | "PCRE2-compatible" replaced by the HushSpec regex profile with ASCII class semantics; compile failure at evaluation denies. |
+| D8  | 3.4            | Severity-to-decision table; worst severity wins; scanned action types enumerated.                         |
+| D9  | 3.8            | `guardrail` denies unlisted actions; heuristic leniency withdrawn; `fail_closed` is an alias.             |
+| D10 | 3.5            | `require_balance` with a zero side denies; counting rule made explicit.                                    |
+| D11 | posture 3      | Empty `capabilities` denies all (see posture spec Appendix C).                                             |
+| D12 | origins 2, 3, 4| `default_behavior` enforced; priority by `space_id` then field count; tri-state profile overlays; absent `match` never matches (see origins spec Appendix B). |
+| D13 | 3.11, 3.12, 5  | `browser_automation` and `code_execution` documented; `browser_action` and `code_exec` action types added; twelve rule blocks. |
+| D14 | 2.2, 10.1      | Engines accept every patch version of a supported minor version.                                          |
+| D15 | 3.0, 3.13, 7   | `when` conditional rule blocks specified as a document field with parse-time validation.                 |
+| D16 | 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
+| D17 | 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
+| --  | 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
