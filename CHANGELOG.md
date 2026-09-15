@@ -10,6 +10,14 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ### Added
 
+- Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,
+  `changelog[]` and `supersedes`; the four `metadata` date fields plus each changelog entry's
+  `date` must now be an ISO 8601 calendar date (`YYYY-MM-DD`), checked in all four SDKs
+  (`E011` from `h2h validate`). New governance checks with stable codes -- separation of
+  duties (`GOV_SOD_VIOLATION`), `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`,
+  `GOV_CHANGELOG_ORDER`, and the error-severity `GOV_SELF_SUPERSEDES`. `h2h audit` lists every
+  finding with its code, severity and path; `--strict` makes warnings fatal. `h2h sign` refuses
+  a policy that is not `approved` or `deployed` unless `--allow-unapproved` is passed.
 - `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
   materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
   standard-library reference canonicalizer (`scripts/canonical_json.py`), the
