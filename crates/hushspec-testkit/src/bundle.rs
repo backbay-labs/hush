@@ -139,6 +139,23 @@ impl CaseBundle {
         None
     }
 
+    /// The group, action and bundle-order position behind a `gNNNN/aNNNN`
+    /// case key, or `None` when this bundle never produced it.
+    #[must_use]
+    pub fn find_case(&self, case_key: &str) -> Option<(&CaseGroup, &CaseAction, u64)> {
+        let (group_id, case_id) = case_key.split_once('/')?;
+        let mut position = 0u64;
+        for group in &self.groups {
+            for case in &group.actions {
+                if group.id == group_id && case.id == case_id {
+                    return Some((group, case, position));
+                }
+                position += 1;
+            }
+        }
+        None
+    }
+
     /// Fail-closed: rejects unknown fields and unsupported format versions.
     pub fn from_json(json: &str) -> Result<Self, String> {
         let bundle: CaseBundle = serde_json::from_str(json).map_err(|error| error.to_string())?;

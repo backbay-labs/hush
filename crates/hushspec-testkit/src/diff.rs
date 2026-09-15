@@ -146,12 +146,6 @@ impl NormalizedResult {
     }
 }
 
-impl From<EvaluationResult> for NormalizedResult {
-    fn from(result: EvaluationResult) -> Self {
-        NormalizedResult::with_trace(result, &[])
-    }
-}
-
 /// One SDK's verdicts for a whole bundle, keyed "gNNNN/aNNNN", plus the
 /// per-group policy identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -898,6 +892,7 @@ fn verdict_divergence(
 /// Runs an SDK harness as `command... <bundle.json>` and parses its stdout
 /// report. Fail-closed: spawn failures, non-zero exits, and malformed
 /// reports are hard errors, never skipped SDKs.
+#[derive(Clone)]
 pub struct SubprocessEvaluator {
     pub sdk: String,
     pub command: Vec<String>,
@@ -953,7 +948,14 @@ impl CaseEvaluator for SubprocessEvaluator {
     }
 }
 
-/// Harness commands for the three ported SDKs (Tasks 8-10 provide the scripts).
+/// The SDKs a difftest run compares against the Rust implementation.
+///
+/// One list, used by the CLI's `--sdk` value parser, its default, and
+/// [`default_subprocess_evaluators`], so the three cannot drift apart.
+pub const DEFAULT_SDKS: [&str; 3] = ["typescript", "python", "go"];
+
+/// Harness commands for each of [`DEFAULT_SDKS`].
+#[must_use]
 pub fn default_subprocess_evaluators(repo_root: &std::path::Path) -> Vec<SubprocessEvaluator> {
     vec![
         SubprocessEvaluator {
@@ -996,7 +998,7 @@ pub struct DifftestConfig {
     pub actions_per_group: usize,
     pub chunks: usize,
     pub max_seconds: Option<u64>,
-    /// Subset of ["typescript", "python", "go"]; Rust is always the baseline.
+    /// Subset of [`DEFAULT_SDKS`]; Rust is always the baseline.
     pub sdks: Vec<String>,
     pub minimize: bool,
     pub emit_fixtures_dir: Option<std::path::PathBuf>,
@@ -1050,14 +1052,17 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
     }
     std::fs::create_dir_all(&config.bundles_dir)?;
 
+    let available = default_subprocess_evaluators(&config.repo_root);
     let mut evaluators: Vec<SubprocessEvaluator> = Vec::new();
     for sdk in &config.sdks {
-        let mut evaluator = default_subprocess_evaluators(&config.repo_root)
-            .into_iter()
+        let mut evaluator = available
+            .iter()
             .find(|candidate| candidate.sdk == *sdk)
+            .cloned()
             .ok_or_else(|| {
                 DiffError::Config(format!(
-                    "unknown sdk '{sdk}' (expected typescript, python, or go)"
+                    "unknown sdk '{sdk}' (expected {})",
+                    DEFAULT_SDKS.join(", ")
                 ))
             })?;
         if let Some(command) = &config.harness_override {
@@ -1179,20 +1184,9 @@ fn enrich_receipt_divergence(
     failing: &mut dyn CaseEvaluator,
 ) {
     // Group-keyed receipt divergences (the policy-identity receipt) have no
-    // single action to re-run.
-    let Some((group_id, case_id)) = divergence.case_key.split_once('/') else {
-        return;
-    };
-    let resolved = bundle
-        .groups
-        .iter()
-        .find(|group| group.id == group_id)
-        .and_then(|group| {
-            let case = group.actions.iter().find(|case| case.id == case_id)?;
-            let position = bundle.case_position(&divergence.case_key)?;
-            Some((group, case, position))
-        });
-    let Some((group, case, position)) = resolved else {
+    // single action to re-run, and neither does a key this bundle never
+    // produced.
+    let Some((group, case, position)) = bundle.find_case(&divergence.case_key) else {
         return;
     };
     let probe = CaseBundle::single_case_at(
@@ -1245,12 +1239,7 @@ fn handle_divergence(
     // malformed key from a misbehaving harness) cannot be minimized. Record it
     // as-is rather than aborting the whole run and discarding the real
     // divergences already collected in this chunk.
-    let resolved = divergence.case_key.split_once('/').and_then(|(gid, aid)| {
-        let group = bundle.groups.iter().find(|group| group.id == gid)?;
-        let case = group.actions.iter().find(|case| case.id == aid)?;
-        Some((group, case))
-    });
-    let Some((group, case)) = resolved else {
+    let Some((group, case, _)) = bundle.find_case(&divergence.case_key) else {
         outcome.divergences.push(divergence);
         return Ok(());
     };
@@ -1281,12 +1270,19 @@ fn handle_divergence(
             .values()
             .next()
             .ok_or_else(|| DiffError::Config("empty oracle report".to_string()))?;
-        if let Ok((filename, yaml)) =
-            crate::emit::build_regression_fixture(&minimized, verdict, config.seed)
-            && emitted.insert(filename.clone())
-        {
-            let path = crate::emit::write_regression_fixture(dir, &filename, &yaml)?;
-            outcome.fixtures.push(path);
+        match crate::emit::build_regression_fixture(&minimized, verdict, config.seed) {
+            Ok((filename, yaml)) => {
+                if emitted.insert(filename.clone()) {
+                    let path = crate::emit::write_regression_fixture(dir, &filename, &yaml)?;
+                    outcome.fixtures.push(path);
+                }
+            }
+            // Say so: a caller who passed --emit-fixtures and got none has no
+            // other way to learn the emitter refused this case.
+            Err(error) => eprintln!(
+                "note: no regression fixture for {}: {error}",
+                divergence.case_key
+            ),
         }
     }
 
@@ -1621,7 +1617,7 @@ mod tests {
         assert_eq!(divergences.len(), 1);
         assert_eq!(divergences[0].kind, DivergenceKind::Receipt);
         // No receipts were reported, so there is nothing to diff: the run
-        // re-runs the case to fetch them (see `fetch_receipt_difference`).
+        // re-runs the case to fetch them (see `enrich_receipt_divergence`).
         assert!(divergences[0].receipt_difference.is_none());
     }
 

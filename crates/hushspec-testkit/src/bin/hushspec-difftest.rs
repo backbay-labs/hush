@@ -34,7 +34,7 @@ struct Cli {
     max_seconds: Option<u64>,
 
     /// SDKs to compare against the reference (repeatable; default: all three)
-    #[arg(long = "sdk", value_parser = ["typescript", "python", "go"])]
+    #[arg(long = "sdk", value_parser = hushspec_testkit::diff::DEFAULT_SDKS)]
     sdks: Vec<String>,
 
     /// Minimize each divergence before reporting
@@ -87,11 +87,10 @@ fn main() {
         (None, None) => random_seed(),
     };
     let sdks = if cli.sdks.is_empty() {
-        vec![
-            "typescript".to_string(),
-            "python".to_string(),
-            "go".to_string(),
-        ]
+        hushspec_testkit::diff::DEFAULT_SDKS
+            .iter()
+            .map(|sdk| (*sdk).to_string())
+            .collect()
     } else {
         cli.sdks.clone()
     };
