@@ -25,6 +25,7 @@ from hushspec.log import (
     LogVerifyOptions,
     PolicyEvent,
     SdkInfo,
+    SinkError,
     compute_entry_hash,
     verify_log,
     verify_log_files,
@@ -176,7 +177,7 @@ class TestChainedFileSink:
         first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
         sink = _write_basic(first)
         second.write_text("")
-        with pytest.raises(Exception):
+        with pytest.raises(SinkError, match="cannot rotate into existing file"):
             sink.rotate(second)
 
     def test_signed_entries_verify_with_the_keyring_and_fail_without(
@@ -343,3 +344,62 @@ def test_invalid_vector_is_rejected_at_the_named_line(path: Path) -> None:
     with pytest.raises(LogError) as caught:
         verify_log(path.name, path.read_text(), _signed_options())
     assert caught.value.line == expected_line, caught.value.message
+
+
+class TestMalformedEntriesAreRejectedNotRaised:
+    """An entry's hash covers whatever JSON the line held.
+
+    A line can therefore be hash-consistent and still carry a member of the
+    wrong shape. Every such line must come back as a :class:`LogError` naming
+    it, never as an exception out of the verifier.
+    """
+
+    def _rewritten(self, tmp_path: Path, mutate) -> str:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        lines = [line for line in path.read_text().split("\n") if line.strip()]
+        entry = json.loads(lines[-1])
+        mutate(entry)
+        # Re-hash so the line passes the chain and hash checks and reaches the
+        # payload reads this is about.
+        entry.pop("entry_hash", None)
+        entry["entry_hash"] = compute_entry_hash(entry)
+        lines[-1] = json.dumps(entry)
+        return "\n".join(lines) + "\n"
+
+    @pytest.mark.parametrize(
+        "member", ["receipt", "policy_event", "log_started", "signature"]
+    )
+    def test_a_non_object_payload_member_is_a_log_error(
+        self, tmp_path: Path, member: str
+    ) -> None:
+        def mutate(entry):
+            entry[member] = "not-an-object"
+
+        text = self._rewritten(tmp_path, mutate)
+        with pytest.raises(LogError, match=f"{member} is not a JSON object"):
+            verify_log("log.jsonl", text)
+
+    def test_a_boolean_seq_is_not_an_integer(self, tmp_path: Path) -> None:
+        # `True == 1` in Python, so a bare equality check would accept this.
+        def mutate(entry):
+            entry["seq"] = True
+
+        text = self._rewritten(tmp_path, mutate)
+        with pytest.raises(LogError, match="is not an integer"):
+            verify_log("log.jsonl", text)
+
+    def test_a_malformed_tail_is_refused_rather_than_coerced(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        lines = [line for line in path.read_text().split("\n") if line.strip()]
+        entry = json.loads(lines[-1])
+        entry["entry_hash"] = 5
+        lines[-1] = json.dumps(entry)
+        path.write_text("\n".join(lines) + "\n")
+        # str(5) would seed the next entry's prev_hash with "5" and fork the
+        # chain for every later verifier.
+        with pytest.raises(SinkError, match="non-string entry_hash"):
+            ChainedFileSink.open(path)

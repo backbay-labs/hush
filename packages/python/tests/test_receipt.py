@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
+import pytest
+
 from hushspec import (
     Decision,
     EvaluationAction,
@@ -11,6 +13,7 @@ from hushspec import (
 from hushspec.canonical import content_hash
 from hushspec.receipt import (
     RECEIPT_VERSION,
+    ReceiptError,
     Actor,
     AuditConfig,
     AuditContext,
@@ -466,3 +469,51 @@ class TestDecisionReceiptMethods:
         assert receipt.to_dict() == receipt_to_dict(receipt)
         assert receipt.canonical_json() == canonical_json(receipt)
         assert receipt.receipt_hash() == receipt_hash(receipt)
+
+
+class TestParseReceiptRefusals:
+    """Every refusal is a :class:`ReceiptError`, whatever the input looks like."""
+
+    def _receipt(self, **overrides):
+        body = {
+            "receipt_version": RECEIPT_VERSION,
+            "receipt_id": "01994b7e-2c1a-7c3e-8f4a-0123456789ab",
+            "timestamp": "2026-03-15T00:00:00.000Z",
+            "time_source": "system",
+            "policy": {
+                "name": "p",
+                "spec_version": "0.2.0",
+                "content_hash": "sha256:" + "ab" * 32,
+            },
+            "action": {"type": "tool_call", "target": "t"},
+            "decision": "allow",
+            "enforcement": {"mode": "enforce", "outcome": "allowed"},
+            "rule_trace": [],
+        }
+        body.update(overrides)
+        return body
+
+    def test_the_baseline_parses(self):
+        assert parse_receipt(self._receipt()).decision.value == "allow"
+
+    @pytest.mark.parametrize(
+        "member", ["receipt_id", "timestamp", "time_source", "decision"]
+    )
+    def test_a_missing_required_member_is_a_receipt_error(self, member):
+        body = self._receipt()
+        del body[member]
+        with pytest.raises(ReceiptError, match=f"missing {member!r}"):
+            parse_receipt(body)
+
+    def test_an_unknown_decision_is_a_receipt_error(self):
+        with pytest.raises(ReceiptError, match="receipt.decision"):
+            parse_receipt(self._receipt(decision="bogus"))
+
+    def test_an_unknown_rule_trace_outcome_is_a_receipt_error(self):
+        body = self._receipt(
+            rule_trace=[
+                {"rule_block": "egress", "outcome": "nope", "evaluated": True}
+            ]
+        )
+        with pytest.raises(ReceiptError, match="rule_trace.outcome"):
+            parse_receipt(body)

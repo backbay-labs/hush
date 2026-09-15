@@ -495,7 +495,10 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
         for entry in data.get("rule_trace", [])
     ]
     for entry in trace:
-        entry.outcome = RuleOutcome(entry.outcome)
+        try:
+            entry.outcome = RuleOutcome(entry.outcome)
+        except ValueError as exc:
+            raise ReceiptError(f"rule_trace.outcome: {exc}") from exc
     detection = data.get("detection_trace")
     if detection is not None:
         detection = [
@@ -503,6 +506,13 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
             for entry in detection
         ]
     posture = _typed(data.get("posture"), PostureResult, label="posture")
+    for required in ("receipt_id", "timestamp", "time_source", "decision"):
+        if required not in data:
+            raise ReceiptError(f"receipt is missing {required!r}")
+    try:
+        decision = Decision(data["decision"])
+    except ValueError as exc:
+        raise ReceiptError(f"receipt.decision: {exc}") from exc
     return DecisionReceipt(
         receipt_version=data["receipt_version"],
         receipt_id=data["receipt_id"],
@@ -511,7 +521,7 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
         actor=_typed(data.get("actor"), Actor, label="actor"),
         policy=policy,
         action=action,
-        decision=Decision(data["decision"]),
+        decision=decision,
         matched_rule=data.get("matched_rule"),
         reason=data.get("reason"),
         rule_trace=trace,

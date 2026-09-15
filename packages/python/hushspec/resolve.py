@@ -379,8 +379,14 @@ def resolve_with_options(
     Use :func:`resolve_with_options_or_raise` when the failure itself matters --
     it raises :class:`PolicyVerificationError`, which names the hop and carries
     the :class:`SignatureStatus` a receipt records.
+
+    Omitting ``options`` still hashes: the defaults ask for no verification,
+    not for a :class:`Resolution` with no content hash. Use :func:`resolve`
+    for the merge-only path.
     """
-    return _resolve_tuple(spec, source=source, loader=loader, options=options)
+    return _resolve_tuple(
+        spec, source=source, loader=loader, options=options or ResolveOptions()
+    )
 
 
 def resolve_with_options_or_raise(
@@ -430,7 +436,7 @@ def _resolve_tuple(
         except SigningUnavailable:
             raise
         except ValueError as exc:
-            return False, str(exc)
+            return False, _resolve_error(exc)
 
     # Merge-only: no hashing, no verification, no chain -- the historical
     # `resolve()` behaviour, kept off the hot path that difftest and the
@@ -441,8 +447,18 @@ def _resolve_tuple(
             spec, source, loader or _create_composite_loader(), stack, prepared=None
         )
     except ValueError as exc:
-        return False, str(exc)
+        return False, _resolve_error(exc)
     return True, Resolution(spec=resolved, content_hash="", chain=chain)
+
+
+def _resolve_error(exc: ValueError) -> ErrorMessage:
+    """A resolution failure as a message that keeps its registry code.
+
+    Every refusal from the walk is an ``extends`` failure (E010). Returning a
+    bare string would leave a caller reading the default parse code off a
+    message that never came from the parser.
+    """
+    return ErrorMessage(str(exc), getattr(exc, "error_code", ERROR_EXTENDS))
 
 
 # --------------------------------------------------------------------------- #

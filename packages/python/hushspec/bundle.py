@@ -45,7 +45,7 @@ import binascii
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -294,7 +294,13 @@ def parse_bundle(obj: Any) -> DsseEnvelope:
     if isinstance(obj, DsseEnvelope):
         return obj
     if isinstance(obj, (bytes, bytearray)):
-        obj = bytes(obj).decode("utf-8", errors="replace")
+        # Strictly: repairing invalid UTF-8 into U+FFFD would silently change
+        # the bytes a signature covers, so a bundle that is not UTF-8 is
+        # refused rather than mended.
+        try:
+            obj = bytes(obj).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BundleError(f"bundle is not valid UTF-8: {exc}") from exc
     if isinstance(obj, str):
         try:
             obj = json.loads(obj)

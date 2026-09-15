@@ -894,7 +894,7 @@ def verify_policy(
     try:
         actual: str | None = content_hash(resolved_spec)
         detail: str | None = None
-    except CanonicalError as exc:
+    except (CanonicalError, ValueError, TypeError) as exc:
         actual, detail = None, f"the policy has no content hash: {exc}"
     return verify_content_hash(
         envelope,
@@ -1082,7 +1082,12 @@ class SignedReceipt:
         from hushspec.receipt import parse_receipt
 
         if isinstance(obj, (str, bytes)):
-            obj = json.loads(obj)
+            try:
+                obj = json.loads(obj)
+            except ValueError as exc:
+                raise MalformedEnvelope(
+                    f"a signed receipt must be valid JSON: {exc}"
+                ) from exc
         if not isinstance(obj, Mapping):
             raise MalformedEnvelope("a signed receipt must be a JSON object")
         unknown = sorted(set(obj) - {"receipt", "signature"})
@@ -1090,8 +1095,11 @@ class SignedReceipt:
             raise MalformedEnvelope(f"unknown field {unknown[0]!r} in signed receipt")
         if "receipt" not in obj or "signature" not in obj:
             raise MalformedEnvelope("a signed receipt needs 'receipt' and 'signature'")
+        receipt = obj["receipt"]
+        if not isinstance(receipt, Mapping):
+            raise MalformedEnvelope("a signed receipt's 'receipt' must be an object")
         return cls(
-            receipt=parse_receipt(dict(obj["receipt"])),
+            receipt=parse_receipt(dict(receipt)),
             signature=parse_envelope(obj["signature"]),
         )
 
