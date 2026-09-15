@@ -61,7 +61,7 @@ fn assert_valid_sarif(document: &Value) {
 }
 
 /// Two findings whose keys sit at known, distinct positions: an entry-precise
-/// L008 duplicate at line 8 and a block-level L005 at line 10.
+/// L008 duplicate at line 8 and a block-level L017 at line 10.
 const SPANNED: &str = r#"hushspec: "0.1.0"
 name: spanned
 rules:
@@ -106,8 +106,8 @@ fn json_findings_carry_the_line_and_column_of_the_offending_key() {
 
     let permissive = findings
         .iter()
-        .find(|f| f["code"] == "L005")
-        .expect("L005 permissive default");
+        .find(|f| f["code"] == "L017")
+        .expect("L017 permissive default");
     assert_eq!(permissive["path"], "rules.egress.default");
     assert_eq!(permissive["span"]["line"], 10);
     assert_eq!(permissive["span"]["column"], 5);
@@ -192,7 +192,7 @@ fn sarif_output_validates_against_the_vendored_schema() {
     );
 
     let rules = driver["rules"].as_array().unwrap();
-    assert!(rules.iter().any(|rule| rule["id"] == "L010"));
+    assert!(rules.iter().any(|rule| rule["id"] == "L017"));
     for rule in rules {
         assert!(rule["shortDescription"]["text"].is_string(), "{rule}");
         assert!(rule["fullDescription"]["text"].is_string(), "{rule}");
@@ -388,7 +388,7 @@ fn documented_codes_match_the_sarif_catalog() {
         .collect::<std::collections::BTreeSet<_>>()
     {
         assert!(
-            rules.iter().any(|rule| rule["id"] == code),
+            rules.iter().any(|rule| rule["id"] == code) || code == "L005",
             "{code} is documented but not in the SARIF catalog"
         );
     }

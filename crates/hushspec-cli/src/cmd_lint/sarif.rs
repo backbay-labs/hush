@@ -43,6 +43,10 @@ pub(super) struct RuleDoc {
 }
 
 /// Every code `h2h lint` can emit, in code order.
+///
+/// `L005` is absent on purpose: it reported a permissive default as information
+/// and only when the allow list was non-empty, which `L017` now covers as a
+/// warning in every case. The identifier stays retired rather than reused.
 pub(super) const RULES: &[RuleDoc] = &[
     RuleDoc {
         id: "E000",
@@ -92,13 +96,6 @@ pub(super) const RULES: &[RuleDoc] = &[
         short: "An allow list contains a match-everything wildcard.",
         full: "`allow: [\"*\"]` permits every target, which makes the rest of the allow list decorative and the block ineffective as a narrowing device.",
         level: "warning",
-    },
-    RuleDoc {
-        id: "L005",
-        name: "permissive-default",
-        short: "A rule block's default permits while its block list is empty.",
-        full: "`default: allow` with nothing in `block` permits every target, so the allow list decides nothing.",
-        level: "note",
     },
     RuleDoc {
         id: "L006",
@@ -155,6 +152,55 @@ pub(super) const RULES: &[RuleDoc] = &[
         short: "A control mapping's framework or control id is unrecognized.",
         full: "The framework is not in `spec/registries/frameworks.yaml`, or the control id does not match that framework's id pattern. The registry is advisory, so this is an unverifiable claim rather than an invalid document.",
         level: "warning",
+    },
+    RuleDoc {
+        id: "L014",
+        name: "credential-paths-uncovered",
+        short: "A filesystem denylist misses well-known credential locations.",
+        full: "`.env`, `.ssh`, `.aws`, `.gnupg`, `.kube` and `id_rsa` are where agent credentials actually live; a denylist that does not reach all of them leaks the ones it misses. A policy that runs a `path_allowlist` instead is silent, since everything outside the allowlist is already denied. A policy with neither block is reported as information, not as a defect: that is a legitimate shape for a capability-scoped document meant to be composed onto a base.",
+        level: "warning",
+    },
+    RuleDoc {
+        id: "L015",
+        name: "under-graded-credential-pattern",
+        short: "A well-known credential pattern is graded below `critical`.",
+        full: "Severity drives what an engine does with a match, so a pattern that recognizes an AWS key id, a GitHub token, a PEM private key header or an OpenAI key and reports `warn` has downgraded a credential leak to a note.",
+        level: "warning",
+    },
+    RuleDoc {
+        id: "L016",
+        name: "overbroad-forbidden-pattern",
+        short: "A forbidden pattern matches every possible input.",
+        full: "Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything that matches the empty string matches every command or diff. Beside other patterns that is a defect (they become dead) and is reported as a warning; as the only entry in its list it is a coherent deny-all and is reported as information.",
+        level: "warning",
+    },
+    RuleDoc {
+        id: "L017",
+        name: "permissive-default",
+        short: "A rule block's default permits.",
+        full: "`egress.default: allow` permits every host outside `block`, making the allow list decorative; `tool_access.default: allow` with empty `block` and `require_confirmation` permits every tool. Supersedes L005, which reported the same shape as information.",
+        level: "warning",
+    },
+    RuleDoc {
+        id: "L018",
+        name: "empty-capability-allowlist",
+        short: "A capability block is enabled with an empty allowlist.",
+        full: "`enabled: false` makes a block inert, which permits the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright -- reported as information. It is promoted to a warning where the document contradicts itself (`computer_use` permits `input.inject` while `input_injection` denies every type) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed).",
+        level: "warning",
+    },
+    RuleDoc {
+        id: "L019",
+        name: "unreachable-extension",
+        short: "Extension configuration that nothing can ever reach.",
+        full: "A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate (origins spec 3) and one that repeats an earlier profile's `match` always loses the document-order tie; an overlay `allow` entry the base allowlist does not match can never allow anything (origins spec 4.1).",
+        level: "error",
+    },
+    RuleDoc {
+        id: "L020",
+        name: "inert-condition",
+        short: "A `when` clause narrows nothing.",
+        full: "The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. An `all_of`/`any_of` with no members is likewise always true.",
+        level: "note",
     },
 ];
 
@@ -315,6 +361,10 @@ mod tests {
         sorted.dedup();
         assert_eq!(sorted.len(), ids.len(), "duplicate rule id in the catalog");
         assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "{ids:?}");
+        assert!(
+            !ids.contains(&"L005"),
+            "L005 is retired in favour of L017 and must not be reused"
+        );
     }
 
     #[test]

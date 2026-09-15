@@ -28,8 +28,37 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   validated against it offline in `tests/lint_span_tests.rs`. The `Policy Lint` CI job
   uploads the file with `github/codeql-action/upload-sarif`, guarded so a fork -- which
   cannot hold `security-events: write` -- still passes.
+- **Seven new lint rules**, each documented with its rationale in
+  `docs/src/reference/cli.md`:
+  - `L014` (warning/info) credential locations a filesystem denylist misses (`.env`,
+    `.ssh`, `.aws`, `.gnupg`, `.kube`, `id_rsa`), naming the ones it does not reach;
+    silent when the policy runs a `path_allowlist`, informational when it declares neither.
+  - `L015` (warning) a secret pattern that detects a well-known credential class (AWS
+    `AKIA`/`ASIA`, GitHub `gh[opsur]_`, a PEM private key header, OpenAI `sk-`) but is
+    graded below `critical`.
+  - `L016` (warning/info) a forbidden shell or patch pattern that matches every input
+    (`.*`, `.+`, a bare single character, or anything matching the empty string): a warning
+    beside other patterns, which it renders dead; information as the only entry in its
+    list, which is the one way the block can express a deny-all.
+  - `L017` (warning) a permissive default -- `egress.default: allow`, or
+    `tool_access.default: allow` with empty `block` and `require_confirmation`.
+  - `L018` (warning/info) a capability block enabled with an empty allowlist: information
+    for a coherent total deny (the spec's only spelling of one, since `enabled: false`
+    permits), a warning where the document contradicts itself or the block does nothing.
+  - `L019` (error) extension configuration nothing can reach: an unreachable posture state,
+    a transition naming an undefined state, an origin profile with no `match` or one that
+    repeats an earlier profile's, and an overlay `allow` entry the base never allows.
+  - `L020` (info) a `when` clause that narrows nothing -- `start == end`, all seven days,
+    or an empty `all_of`/`any_of`.
+
 ### Changed (RFC 09 P3-04, `h2h lint`)
 
+- **`L005` is retired.** It reported a permissive default as information and only when the
+  allow list was non-empty; `L017` reports every occurrence as a warning. The identifier
+  will not be reused. `rulesets/permissive.yaml` stays gated on lint *errors* only and now
+  reports `L004` and `L017` by design.
+- L007's twelve-block list and L020's `when` walk are both checked against the published
+  core schema, so a thirteenth rule block cannot be added without both noticing.
 - Exit `2` now also covers `--out` combined with `--format text`.
 
 ### Added (RFC 09 Wave 4, Rust)

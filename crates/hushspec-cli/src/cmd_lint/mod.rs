@@ -1,3 +1,4 @@
+mod checks;
 mod fix;
 mod sarif;
 mod spans;
@@ -546,6 +547,11 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     // checked.
     check_control_mappings(spec, file, &mut findings);
 
+    // L019: extension configuration nothing can reach. Runs outside the `rules`
+    // guard for the same reason as the control mappings: a document may declare
+    // extensions and no rule blocks at all.
+    checks::check_unreachable_extensions(spec, file, &mut findings);
+
     let Some(rules) = &spec.rules else {
         return findings;
     };
@@ -562,9 +568,6 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     // L004: overly-broad-egress
     check_overly_broad_egress(rules, file, &mut findings);
 
-    // L005: empty blocklist with default allow
-    check_empty_blocklist_with_default_allow(rules, file, &mut findings);
-
     // L006: regex-complexity
     check_regex_complexity(rules, file, &mut findings);
 
@@ -579,6 +582,24 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
 
     // L010: unreachable-allow
     check_unreachable_allow(rules, file, &mut findings);
+
+    // L014: credential locations a filesystem denylist misses
+    checks::check_credential_coverage(rules, file, &mut findings);
+
+    // L015: a credential-class secret pattern graded below critical
+    checks::check_credential_severity(rules, file, &mut findings);
+
+    // L016: a forbidden pattern that matches every input
+    checks::check_overbroad_forbidden_patterns(rules, file, &mut findings);
+
+    // L017: a rule block whose default permits (supersedes L005)
+    checks::check_permissive_defaults(rules, file, &mut findings);
+
+    // L018: a capability block enabled with an empty allowlist
+    checks::check_empty_capability_allowlists(rules, file, &mut findings);
+
+    // L020: a `when` clause that narrows nothing
+    checks::check_degenerate_conditions(rules, file, &mut findings);
 
     findings
 }
@@ -959,45 +980,7 @@ fn check_overly_broad_egress(rules: &hushspec::Rules, file: &str, findings: &mut
     }
 }
 
-fn check_empty_blocklist_with_default_allow(
-    rules: &hushspec::Rules,
-    file: &str,
-    findings: &mut Vec<LintFinding>,
-) {
-    if let Some(egress) = &rules.egress
-        && egress.enabled
-        && !egress.allow.is_empty()
-        && egress.block.is_empty()
-        && egress.default == DefaultAction::Allow
-    {
-        findings.push(LintFinding::keyed(
-            "L005",
-            "info",
-            "rules.egress has default \"allow\" with an empty block list -- all egress is permitted regardless of the allow list"
-                .into(),
-            file,
-            "rules.egress.default".into(),
-        ));
-    }
-
-    if let Some(tool_access) = &rules.tool_access
-        && tool_access.enabled
-        && !tool_access.allow.is_empty()
-        && tool_access.block.is_empty()
-        && tool_access.require_confirmation.is_empty()
-        && tool_access.default == DefaultAction::Allow
-    {
-        findings.push(LintFinding::keyed(
-            "L005",
-            "info",
-            "rules.tool_access has default \"allow\" with empty block and require_confirmation lists -- all tools are permitted regardless of the allow list"
-                .into(),
-            file,
-            "rules.tool_access.default".into(),
-        ));
-    }
-}
-
+/// L006: regex complexity.
 fn check_regex_complexity(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {
     if let Some(secret_patterns) = &rules.secret_patterns {
         for (i, pat) in secret_patterns.patterns.iter().enumerate() {
@@ -1102,8 +1085,15 @@ fn has_nested_quantifiers(pattern: &str) -> bool {
     false
 }
 
-fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {
-    let disabled_checks: &[(&str, Option<bool>)] = &[
+/// L007: every rule block's `enabled` flag, paired with its path.
+///
+/// All twelve blocks are listed. `enabled: false` makes a block inert, which
+/// *permits* whatever it would otherwise govern, so a block missing from this
+/// list would be a control that can be switched off silently.
+/// `checks::tests::every_rule_block_is_covered` fails if the spec grows a
+/// thirteenth block and this list does not.
+pub(crate) fn rule_block_enabled(rules: &hushspec::Rules) -> Vec<(&'static str, Option<bool>)> {
+    vec![
         (
             "rules.forbidden_paths",
             rules.forbidden_paths.as_ref().map(|r| r.enabled),
@@ -1149,9 +1139,11 @@ fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<
             "rules.code_execution",
             rules.code_execution.as_ref().map(|r| r.enabled),
         ),
-    ];
+    ]
+}
 
-    for &(name, enabled) in disabled_checks {
+fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {
+    for (name, enabled) in rule_block_enabled(rules) {
         if enabled == Some(false) {
             findings.push(LintFinding::keyed(
                 "L007",
