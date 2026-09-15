@@ -51,6 +51,11 @@ jobs:
         run: python3 scripts/generate_canonical_schemas.py --check
       - name: Check generated CLI frameworks
         run: python3 scripts/generate_cli_frameworks.py --check
+      # Re-derives the three hand-built bundle vectors from the committed
+      # valid one, signing with OpenSSL: a standing cross-check of the Rust
+      # signer as well as a staleness guard.
+      - name: Check derived bundle vectors
+        run: python3 scripts/generate_bundle_vectors.py --check
 
   rust:
     name: Rust
