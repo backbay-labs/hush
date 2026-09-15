@@ -42,9 +42,28 @@ func validateRawDocument(yamlStr string) []string {
 	return errs
 }
 
+// rawConditionBlocks are the rule blocks whose `when` the raw validator walks.
+// It is the block list of core spec 3.13, kept in the order ValidateConditions
+// reports in so both spell a violation the same way.
+var rawConditionBlocks = []string{
+	"forbidden_paths", "path_allowlist", "egress", "secret_patterns",
+	"patch_integrity", "shell_commands", "tool_access", "computer_use",
+	"remote_desktop_channels", "input_injection", "browser_automation",
+	"code_execution",
+}
+
 func validateRawRules(rules map[string]any, errs *[]string) {
 	if rules == nil {
 		return
+	}
+	for _, name := range rawConditionBlocks {
+		block := rawObject(rules, name)
+		if block == nil {
+			continue
+		}
+		if when, present := block["when"]; present {
+			validateRawCondition(when, fmt.Sprintf("rules.%s.when", name), 0, errs)
+		}
 	}
 	if pi := rawObject(rules, "patch_integrity"); pi != nil {
 		// max_additions/max_deletions are required (non-Option) usize fields in
@@ -62,6 +81,112 @@ func validateRawRules(rules map[string]any, errs *[]string) {
 		// (which serde's unsigned type rejects at parse) must be rejected too.
 		checkRawNonNegativeInteger(ce, "max_execution_time_ms", "rules.code_execution.max_execution_time_ms", errs)
 		checkRawNonNegativeInteger(ce, "max_scan_bytes", "rules.code_execution.max_scan_bytes", errs)
+	}
+}
+
+// validateRawCondition checks the parts of a `when` object the typed decode
+// cannot express: the `rate` predicate's required members, its non-negative
+// integer threshold, and its closed `comparison` set (core spec 3.13). Those
+// are shape failures that the reference implementation refuses at parse time,
+// so they are reported here rather than as constraint violations. The
+// identifier grammar and the nesting depth stay with [ValidateConditions],
+// which the reference reports as constraint violations.
+//
+// The walk descends `all_of`, `any_of` and `not` so a nested `rate` is checked
+// too; it stops one level past the nesting cap, which ValidateConditions
+// reports on its own.
+func validateRawCondition(raw any, path string, depth int, errs *[]string) {
+	if depth > MaxNestingDepth {
+		return
+	}
+	condition, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if rate, present := condition["rate"]; present {
+		validateRawRate(rate, path+".rate", errs)
+	}
+	for _, key := range []string{"all_of", "any_of"} {
+		children, isList := condition[key].([]any)
+		if !isList {
+			continue
+		}
+		for index, child := range children {
+			validateRawCondition(child, fmt.Sprintf("%s.%s[%d]", path, key, index), depth+1, errs)
+		}
+	}
+	if child, present := condition["not"]; present {
+		validateRawCondition(child, path+".not", depth+1, errs)
+	}
+}
+
+func validateRawRate(raw any, path string, errs *[]string) {
+	rate, ok := raw.(map[string]any)
+	if !ok {
+		*errs = append(*errs, fmt.Sprintf("%s: invalid type: %s, expected a rate condition object",
+			path, describeRawScalar(raw)))
+		return
+	}
+	for key := range rate {
+		if _, known := RateConditionKeys[key]; !known {
+			*errs = append(*errs, fmt.Sprintf("%s: unknown field `%s`, expected one of `counter`, `threshold`, `comparison`",
+				path, key))
+		}
+	}
+
+	if _, present := rate["counter"]; !present {
+		*errs = append(*errs, fmt.Sprintf("%s: missing field `counter`", path))
+	} else if _, isString := rate["counter"].(string); !isString {
+		*errs = append(*errs, fmt.Sprintf("%s.counter: invalid type: %s, expected a string",
+			path, describeRawScalar(rate["counter"])))
+	}
+
+	threshold, present := rate["threshold"]
+	switch {
+	case !present:
+		*errs = append(*errs, fmt.Sprintf("%s: missing field `threshold`", path))
+	case !isRawInteger(threshold):
+		*errs = append(*errs, fmt.Sprintf("%s.threshold: invalid type: %s, expected a non-negative integer",
+			path, describeRawScalar(threshold)))
+	case isRawNegativeInteger(threshold):
+		*errs = append(*errs, fmt.Sprintf("%s.threshold: invalid type: integer `%v`, expected a non-negative integer",
+			path, threshold))
+	}
+
+	comparison, present := rate["comparison"]
+	switch {
+	case !present:
+		*errs = append(*errs, fmt.Sprintf("%s: missing field `comparison`", path))
+	default:
+		name, isString := comparison.(string)
+		if !isString || !containsTyped(RateComparison(name), RateComparisons) {
+			*errs = append(*errs, fmt.Sprintf(
+				"%s.comparison: unknown variant `%v`, expected `gte` or `lt`", path, comparison))
+		}
+	}
+}
+
+// describeRawScalar renders a raw YAML value the way a decoder names it in an
+// "invalid type" diagnostic.
+func describeRawScalar(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return fmt.Sprintf("string %q", value)
+	case bool:
+		return fmt.Sprintf("boolean `%v`", value)
+	case float32, float64:
+		return fmt.Sprintf("floating point `%v`", value)
+	case map[string]any:
+		return "a map"
+	case []any:
+		return "a sequence"
+	default:
+		if isRawInteger(v) {
+			return fmt.Sprintf("integer `%v`", value)
+		}
+		return fmt.Sprintf("`%v`", value)
 	}
 }
 
