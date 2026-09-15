@@ -347,7 +347,7 @@ def resolve_or_raise(
 def resolve_file(path: str | Path) -> tuple[bool, HushSpec | str]:
     source = str(Path(path).resolve())
     try:
-        content = Path(source).read_text()
+        content = Path(source).read_text(encoding="utf-8")
     except OSError as exc:
         # A transport-level failure, not a statement about the document:
         # nothing was parsed (error-code registry, E000).
@@ -815,7 +815,7 @@ def _load_from_filesystem(reference: str, source: str | None) -> LoadedSpec:
     if not path.is_absolute():
         path = Path(source).parent / path if source is not None else path.resolve()
     canonical = path.resolve()
-    content = canonical.read_text()
+    content = canonical.read_text(encoding="utf-8")
     ok, parsed = parse(content)
     if not ok:
         raise ValueError(f"failed to parse HushSpec at {canonical}: {parsed}")

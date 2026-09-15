@@ -888,3 +888,31 @@ class TestConditionsAgainstThePostureState:
 
     def test_a_non_granting_state_makes_the_block_inert(self):
         assert self._decide("restricted") == Decision.ALLOW
+
+
+class TestTimezoneOffsetStrictness:
+    """A fixed ``+HH:MM`` offset is ASCII digits and nothing else.
+
+    A zone the engine cannot resolve leaves the rule block active (core spec
+    3.13). Accepting an offset another engine refuses would resolve the zone
+    here, evaluate the window, and let it switch the block off.
+    """
+
+    def test_a_plain_offset_resolves(self):
+        assert timezone_is_known("+09:30")
+        assert timezone_is_known("-05:00")
+
+    def test_an_offset_with_inner_whitespace_is_unknown(self):
+        assert not timezone_is_known("+ 9")
+        assert not timezone_is_known("+09: 30")
+
+    def test_an_offset_with_an_underscore_separator_is_unknown(self):
+        assert not timezone_is_known("+1_2")
+
+    def test_a_non_ascii_digit_offset_is_unknown(self):
+        assert not timezone_is_known("+\u0661\u0662")
+        assert not timezone_is_known("+\uff10\uff19")
+
+    def test_an_out_of_range_offset_is_unknown(self):
+        assert not timezone_is_known("+24:00")
+        assert not timezone_is_known("+09:60")

@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -691,7 +692,15 @@ _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {
 }
 
 
+@lru_cache(maxsize=256)
 def _resolve_timezone(tz: str) -> Optional[tzinfo]:
+    """The ``tzinfo`` for an IANA name or a fixed ``+HH:MM`` offset.
+
+    Cached: this runs once per conditional rule block per action, and the
+    names zoneinfo cannot resolve (fixed offsets, the short aliases below)
+    each pay a tzpath walk and an exception before reaching the fallback.
+    Both branches return immutable objects, so sharing one is safe.
+    """
     if not isinstance(tz, str):
         return None
     try:
@@ -717,17 +726,23 @@ def _resolve_timezone(tz: str) -> Optional[tzinfo]:
 
 
 def _parse_offset_value(s: str) -> Optional[int]:
+    """Minutes for a ``+HH``/``+HH:MM`` offset body, or ``None``.
+
+    The digits are parsed strictly. A zone that cannot be resolved leaves
+    the rule block active (core spec 3.13), so tolerating whitespace,
+    underscores or non-ASCII digits here would resolve a zone another
+    engine refuses and could switch a control off.
+    """
     if ":" in s:
         hours_str, minutes_str = s.split(":", 1)
     else:
         hours_str = s
         minutes_str = "0"
-    try:
-        hours = int(hours_str)
-        minutes = int(minutes_str)
-    except ValueError:
+    hours = _parse_strict_uint(hours_str)
+    minutes = _parse_strict_uint(minutes_str)
+    if hours is None or minutes is None:
         return None
-    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+    if hours > 23 or minutes > 59:
         return None
     return hours * 60 + minutes
 

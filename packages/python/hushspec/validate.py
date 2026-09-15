@@ -796,8 +796,14 @@ def _is_iso_date(value: str) -> bool:
 
 
 def _compare_changelog_versions(left: str, right: str) -> int:
-    """Numeric when both versions are plain integers, lexicographic otherwise."""
-    if left.strip().isdigit() and right.strip().isdigit():
+    """Numeric when both versions are plain integers, lexicographic otherwise.
+
+    ``str.isdigit`` is not the test: it holds for superscripts and other
+    Unicode digits that ``int()`` either refuses outright or reads with a
+    value no other engine agrees on. Only an ASCII digit run compares
+    numerically.
+    """
+    if _is_ascii_digits(left.strip()) and _is_ascii_digits(right.strip()):
         a, b = int(left), int(right)
         return 0 if a == b else (-1 if a < b else 1)
     return 0 if left == right else (-1 if left < right else 1)

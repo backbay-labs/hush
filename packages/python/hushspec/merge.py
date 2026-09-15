@@ -10,6 +10,7 @@ from hushspec.extensions import (
     OriginsExtension,
     PostureExtension,
     PromptInjectionDetection,
+    PromptInjectionHeuristics,
     ThreatIntelDetection,
 )
 from hushspec.rules import Rules
@@ -246,6 +247,23 @@ def _merge_prompt_injection(
             child.max_scan_bytes
             if child.max_scan_bytes is not None
             else base.max_scan_bytes
+        ),
+        heuristics=_merge_injection_heuristics(base.heuristics, child.heuristics),
+    )
+
+
+def _merge_injection_heuristics(
+    base: Optional[PromptInjectionHeuristics],
+    child: Optional[PromptInjectionHeuristics],
+) -> Optional[PromptInjectionHeuristics]:
+    if child is None:
+        return copy.deepcopy(base) if base is not None else None
+    if base is None:
+        return copy.deepcopy(child)
+    return PromptInjectionHeuristics(
+        enabled=child.enabled if child.enabled is not None else base.enabled,
+        min_score=(
+            child.min_score if child.min_score is not None else base.min_score
         ),
     )
 

@@ -1,4 +1,5 @@
 from hushspec import (
+    DetectionLevel,
     HushSpec,
     OriginDefaultBehavior,
     PostureContext,
@@ -707,3 +708,67 @@ extensions:
             None, PostureContext(current="standard", signal="user_approval")
         )
         assert posture is not None and posture.next == "standard"
+
+
+class TestDetectionMerge:
+    """`extensions.detection` merges field by field, heuristics included."""
+
+    BASE = """
+hushspec: "0.2.0"
+name: base
+extensions:
+  detection:
+    prompt_injection:
+      enabled: true
+      warn_at_or_above: suspicious
+      heuristics:
+        enabled: false
+        min_score: 70
+"""
+
+    def _merged(self, child_yaml: str):
+        merged = merge(parse_or_raise(self.BASE), parse_or_raise(child_yaml))
+        return merged.extensions.detection.prompt_injection
+
+    def test_a_child_that_says_nothing_keeps_the_base_heuristics(self):
+        # A child overriding an unrelated field must not silently switch the
+        # normative heuristic detector back on: the base disabled it.
+        injection = self._merged(
+            'hushspec: "0.2.0"\n'
+            "name: child\n"
+            "extensions:\n"
+            "  detection:\n"
+            "    prompt_injection:\n"
+            "      max_scan_bytes: 1000\n"
+        )
+        assert injection.max_scan_bytes == 1000
+        assert injection.warn_at_or_above == DetectionLevel.SUSPICIOUS
+        assert injection.heuristics is not None
+        assert injection.heuristics.enabled is False
+        assert injection.heuristics.min_score == 70
+
+    def test_a_child_overrides_one_heuristics_field_and_inherits_the_other(self):
+        injection = self._merged(
+            'hushspec: "0.2.0"\n'
+            "name: child\n"
+            "extensions:\n"
+            "  detection:\n"
+            "    prompt_injection:\n"
+            "      heuristics:\n"
+            "        enabled: true\n"
+        )
+        assert injection.heuristics.enabled is True
+        assert injection.heuristics.min_score == 70
+
+    def test_a_child_supplies_heuristics_the_base_omits(self):
+        base = parse_or_raise(
+            'hushspec: "0.2.0"\nname: base\n'
+            "extensions:\n  detection:\n    prompt_injection:\n      enabled: true\n"
+        )
+        child = parse_or_raise(
+            'hushspec: "0.2.0"\nname: child\n'
+            "extensions:\n  detection:\n    prompt_injection:\n"
+            "      heuristics:\n        min_score: 55\n"
+        )
+        injection = merge(base, child).extensions.detection.prompt_injection
+        assert injection.heuristics.min_score == 55
