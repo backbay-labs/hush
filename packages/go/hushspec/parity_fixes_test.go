@@ -106,14 +106,19 @@ func TestConditionIntFloatDistinction(t *testing.T) {
 }
 
 // TestTimeWindowRejectsLeadingPlusInHHMM verifies S4: a HH:MM token with a
-// leading '+' (e.g. "+9:00") is a parse failure, leaving the time window inert,
-// matching TS/Python (Go's strconv.Atoi previously accepted the sign).
+// leading '+' (e.g. "+9:00") is a parse failure, matching TS/Python (Go's
+// strconv.Atoi would otherwise accept the sign). Under D15 an unparsable
+// window cannot be evaluated, so it leaves the rule block ACTIVE (fail closed
+// toward enforcement) and validation rejects the document outright.
 func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
 	ctx := &RuntimeContext{CurrentTime: "2026-01-14T10:30:00Z"}
 
 	plus := &Condition{TimeWindow: &TimeWindowCondition{Start: "+9:00", End: "17:00", Timezone: "UTC"}}
-	if EvaluateCondition(plus, ctx) {
-		t.Error(`expected a leading '+' in the HH:MM start ("+9:00") to make the window inert`)
+	if !EvaluateCondition(plus, ctx) {
+		t.Error(`expected an unparsable HH:MM start ("+9:00") to leave the rule block active`)
+	}
+	if len(ValidateCondition(plus, "rules.egress.when")) != 1 {
+		t.Error(`expected a leading '+' in the HH:MM start ("+9:00") to be rejected by validation`)
 	}
 
 	// Control: the equivalent zero-padded digits are active at 10:30.

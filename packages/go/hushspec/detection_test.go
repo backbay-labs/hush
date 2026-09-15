@@ -806,11 +806,14 @@ func TestEvaluateWithDetection_RecordsResultForEachConfiguredDetectorEvenWithout
 	}
 }
 
+// allowAllPolicy permits every tool via `default: allow`. It deliberately
+// leaves `allow` empty: under D3/D4 tool names match exactly and a non-empty
+// allow list puts the block in allowlist mode, where an unlisted tool denies
+// and `default` is never consulted.
 const allowAllPolicy = `
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 `

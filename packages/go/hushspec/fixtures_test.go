@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -47,8 +48,9 @@ type evaluationFixture struct {
 }
 
 type evaluationFixtureCase struct {
-	Description string         `yaml:"description"`
-	Action      map[string]any `yaml:"action"`
+	Description string          `yaml:"description"`
+	Action      map[string]any  `yaml:"action"`
+	Context     *RuntimeContext `yaml:"context,omitempty"`
 	Expect      struct {
 		Decision string `yaml:"decision"`
 	} `yaml:"expect"`
@@ -104,12 +106,13 @@ func TestSharedFixtures(t *testing.T) {
 	for _, dir := range evaluationFixtureDirs {
 		for _, fixturePath := range fixtureFiles(t, repoRoot, dir) {
 			t.Run("evaluation/"+filepath.ToSlash(strings.TrimPrefix(fixturePath, repoRoot+string(os.PathSeparator))), func(t *testing.T) {
+				source := readFixtureOrFail(t, fixturePath)
 				var fixture evaluationFixture
-				if err := yaml.Unmarshal([]byte(readFixtureOrFail(t, fixturePath)), &fixture); err != nil {
+				if err := yaml.Unmarshal([]byte(source), &fixture); err != nil {
 					t.Fatalf("%s: failed to parse evaluator fixture: %v", fixturePath, err)
 				}
-				if fixture.HushSpecTest != "0.1.0" {
-					t.Fatalf("%s: expected hushspec_test 0.1.0, got %q", fixturePath, fixture.HushSpecTest)
+				if !evaluatorTestVersionRE.MatchString(fixture.HushSpecTest) {
+					t.Fatalf("%s: expected an 0.Y.Z hushspec_test version, got %q", fixturePath, fixture.HushSpecTest)
 				}
 				if strings.TrimSpace(fixture.Description) == "" {
 					t.Fatalf("%s: evaluator fixture description must be non-empty", fixturePath)
@@ -124,8 +127,11 @@ func TestSharedFixtures(t *testing.T) {
 					if !slices.Contains([]string{"allow", "warn", "deny"}, testCase.Expect.Decision) {
 						t.Fatalf("%s: cases[%d].expect.decision must be allow, warn, or deny", fixturePath, index)
 					}
-					if _, ok := testCase.Action["type"].(string); !ok {
-						t.Fatalf("%s: cases[%d].action.type must be a string", fixturePath, index)
+					// The evaluator-test schema accepts any non-empty action
+					// type so unknown-type vectors can assert the D1 deny.
+					actionType, ok := testCase.Action["type"].(string)
+					if !ok || actionType == "" {
+						t.Fatalf("%s: cases[%d].action.type must be a non-empty string", fixturePath, index)
 					}
 				}
 
@@ -140,10 +146,19 @@ func TestSharedFixtures(t *testing.T) {
 				if result := Validate(spec); !result.IsValid() {
 					t.Fatalf("%s: embedded policy failed validation: %+v", fixturePath, result.Errors)
 				}
+
+				// Actually evaluate every case: the shared-fixture CI job runs
+				// only this test, so shape-checking alone would let an
+				// evaluator regression through.
+				runEvaluationFixture(t, fixturePath, source)
 			})
 		}
 	}
 }
+
+// evaluatorTestVersionRE matches the `hushspec_test` fixture-format version
+// (schemas/hushspec-evaluator-test.v0.schema.json).
+var evaluatorTestVersionRE = regexp.MustCompile(`^0\.\d+\.\d+$`)
 
 func fixtureRepoRoot(t *testing.T) string {
 	t.Helper()
