@@ -1,9 +1,11 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::conditions::{Condition, RuntimeContext};
 use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, TracedEvaluation};
 use crate::extensions::DetectionLevel;
+use crate::regex_profile::compile_profile_regex;
 use crate::schema::HushSpec;
 use std::collections::HashMap;
 
@@ -60,6 +62,7 @@ impl DetectorRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         registry.register(Box::new(RegexInjectionDetector::new()));
+        registry.register(Box::new(HeuristicInjectionDetector::new()));
         registry.register(Box::new(RegexJailbreakDetector::new()));
         registry.register(Box::new(RegexExfiltrationDetector::new()));
         registry
@@ -78,6 +81,20 @@ impl DetectorRegistry {
         self.detectors
             .iter()
             .find(|detector| detector.category() == category)
+            .map(|detector| &**detector)
+    }
+
+    /// Every registered detector of `category`, in registration order. The
+    /// prompt-injection pipeline runs all of them (the regex detector and the
+    /// normative heuristic detector), each against the category's byte budget
+    /// and thresholds.
+    pub fn detectors_for(
+        &self,
+        category: DetectionCategory,
+    ) -> impl Iterator<Item = &dyn Detector> {
+        self.detectors
+            .iter()
+            .filter(move |detector| detector.category() == category)
             .map(|detector| &**detector)
     }
 }
@@ -230,6 +247,205 @@ impl Detector for RegexInjectionDetector {
             detector_name: self.name().to_string(),
             category: self.category(),
             score,
+            matched_patterns,
+            explanation,
+        }
+    }
+}
+
+/// Name of the normative heuristic detector (`heuristic_injection@1` once the
+/// id version suffix is appended).
+pub const HEURISTIC_DETECTOR_NAME: &str = "heuristic_injection";
+
+/// The signal families of `heuristic_injection@1`, verbatim from detection
+/// spec 3.5: `(family, weight, patterns)`. Patterns are written in the
+/// HushSpec regex profile (ASCII classes, no lookaround) and matched against
+/// the NFC-normalized, ASCII-case-folded input, so they are lowercase. A
+/// family contributes its weight at most once; the sum is clamped to 100.
+pub const HEURISTIC_FAMILIES: &[(&str, u32, &[&str])] = &[
+    (
+        "instruction_override",
+        40,
+        &[
+            r"ignore (all |any |the |every |your )?(previous|prior|above|earlier|preceding) (instructions?|prompts?|rules|guidance)",
+            r"disregard (all |any |the |your )?(system|previous|prior|earlier|above) (prompts?|instructions?|rules)",
+            r"forget (all |everything )?(you were told|your instructions|the instructions|previous instructions|prior instructions)",
+            r"(new|updated|revised|override) instructions?[ \t]*:",
+        ],
+    ),
+    (
+        "role_switch",
+        30,
+        &[
+            r"you are now (a|an|the|my|in) ",
+            r"act as (a|an|the|my|if you were) ",
+            r"pretend (to be|you are|that you are|you have) ",
+            r"from now on,? you (are|will|must|should)",
+            r"developer mode",
+            r"do anything now",
+            r"dan mode",
+        ],
+    ),
+    (
+        "delimiter_smuggling",
+        30,
+        &[
+            r"<\|(im_start|im_end|system|endoftext)\|>",
+            r"\[/?inst\]",
+            r"##+[ \t]*(system|assistant|instructions)",
+            r"(begin|end) (system|hidden|secret) (prompt|instructions)",
+            r"<(system|assistant)>",
+            r"(---+|===+|```)[ \t]*(system|assistant|user)[ \t]*[:\n]",
+        ],
+    ),
+    (
+        "exfiltration_coercion",
+        35,
+        &[
+            r"(reveal|print|show|output|repeat|display|dump|leak|expose) (me )?(all )?(of )?(the |your )?(hidden |initial |original |secret |system |confidential |full )?(system prompt|prompt|instructions|rules|configuration|guidelines)",
+            r"(send|post|upload|exfiltrate|forward) [^\n]{0,40} (to|at) https?://",
+            r"what (is|are|were) your (system prompt|initial instructions|hidden instructions|original instructions)",
+        ],
+    ),
+    (
+        "encoded_payload",
+        15,
+        &[
+            r"[a-z0-9+/]{40,}={0,2}",
+            r"(\\u[0-9a-f]{4}){4,}",
+            r"(%[0-9a-f]{2}){8,}",
+        ],
+    ),
+    ("structural_punctuation", 10, &[r"[!?]{4,}"]),
+];
+
+/// The computed `structural_uppercase` family (detection spec 3.5): weight 10
+/// when the NFC text has at least 40 ASCII letters and at least 60% of them
+/// are uppercase. Measured before case folding, since folding erases it.
+pub const HEURISTIC_UPPERCASE_WEIGHT: u32 = 10;
+pub const HEURISTIC_UPPERCASE_MIN_LETTERS: usize = 40;
+pub const HEURISTIC_UPPERCASE_MIN_PERCENT: usize = 60;
+
+struct HeuristicFamily {
+    name: &'static str,
+    weight: u32,
+    patterns: Vec<Regex>,
+}
+
+/// The normative heuristic prompt-injection detector (detection spec 3.5).
+///
+/// Integer arithmetic over a fixed signal table so every conformant engine
+/// reproduces the score exactly: the input (already truncated to the
+/// policy's `max_scan_bytes`) is NFC-normalized, the uppercase signal is
+/// measured, the text is ASCII-case-folded, and each family whose pattern
+/// matches adds its weight once. The receipt carries `score / 100`.
+pub struct HeuristicInjectionDetector {
+    families: Vec<HeuristicFamily>,
+}
+
+impl HeuristicInjectionDetector {
+    pub fn new() -> Self {
+        let families = HEURISTIC_FAMILIES
+            .iter()
+            .map(|(name, weight, patterns)| HeuristicFamily {
+                name,
+                weight: *weight,
+                patterns: patterns
+                    .iter()
+                    .map(|pattern| {
+                        compile_profile_regex(pattern).unwrap_or_else(|error| {
+                            panic!(
+                                "heuristic family {name} pattern {pattern:?}: {}",
+                                error.message()
+                            )
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+        Self { families }
+    }
+
+    /// The spec's integer score in `0..=100` and the families that fired.
+    pub fn integer_score(&self, input: &str) -> (u32, Vec<MatchedPattern>) {
+        let normalized: String = input.nfc().collect();
+        let mut total: u32 = 0;
+        let mut matched = Vec::new();
+
+        if uppercase_signal(&normalized) {
+            total += HEURISTIC_UPPERCASE_WEIGHT;
+            matched.push(MatchedPattern {
+                name: "structural_uppercase".to_string(),
+                weight: f64::from(HEURISTIC_UPPERCASE_WEIGHT) / 100.0,
+                matched_text: None,
+            });
+        }
+
+        let folded = normalized.to_ascii_lowercase();
+        for family in &self.families {
+            if let Some(found) = family
+                .patterns
+                .iter()
+                .find_map(|pattern| pattern.find(&folded))
+            {
+                total += family.weight;
+                matched.push(MatchedPattern {
+                    name: family.name.to_string(),
+                    weight: f64::from(family.weight) / 100.0,
+                    matched_text: Some(found.as_str().to_string()),
+                });
+            }
+        }
+        (total.min(100), matched)
+    }
+}
+
+/// `structural_uppercase`: at least 40 ASCII letters, at least 60% uppercase.
+fn uppercase_signal(text: &str) -> bool {
+    let letters = text.chars().filter(char::is_ascii_alphabetic).count();
+    if letters < HEURISTIC_UPPERCASE_MIN_LETTERS {
+        return false;
+    }
+    let upper = text.chars().filter(char::is_ascii_uppercase).count();
+    upper * 100 >= letters * HEURISTIC_UPPERCASE_MIN_PERCENT
+}
+
+impl Default for HeuristicInjectionDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Detector for HeuristicInjectionDetector {
+    fn name(&self) -> &str {
+        HEURISTIC_DETECTOR_NAME
+    }
+
+    fn category(&self) -> DetectionCategory {
+        DetectionCategory::PromptInjection
+    }
+
+    fn detect(&self, input: &str) -> DetectionResult {
+        let (score, matched_patterns) = self.integer_score(input);
+        let explanation = if matched_patterns.is_empty() {
+            None
+        } else {
+            let names: Vec<&str> = matched_patterns.iter().map(|p| p.name.as_str()).collect();
+            Some(format!(
+                "heuristic score {score}/100 from {} signal famil{}: {}",
+                matched_patterns.len(),
+                if matched_patterns.len() == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                names.join(", ")
+            ))
+        };
+        DetectionResult {
+            detector_name: self.name().to_string(),
+            category: self.category(),
+            score: f64::from(score) / 100.0,
             matched_patterns,
             explanation,
         }
@@ -629,10 +845,11 @@ fn fold_detection(
     // (category, contribution) for each detector that raised a warn/deny.
     let mut contributions: Vec<(&'static str, Decision)> = Vec::new();
 
-    // prompt_injection -> injection detector, DetectionLevel thresholds.
+    // prompt_injection -> every prompt-injection detector (the regex detector
+    // and the normative heuristic detector, detection spec 3.5), each scored
+    // against the same byte budget and DetectionLevel thresholds.
     if let Some(prompt_injection) = &detection.prompt_injection
         && prompt_injection.enabled != Some(false)
-        && let Some(detector) = registry.detector_for(DetectionCategory::PromptInjection)
     {
         let scan = truncate_to_bytes(
             content,
@@ -640,9 +857,16 @@ fn fold_detection(
                 .max_scan_bytes
                 .unwrap_or(DEFAULT_SCAN_BYTES),
         );
-        let result = detector.detect(scan);
-        let score = result.score;
-
+        let heuristics_enabled = prompt_injection
+            .heuristics
+            .as_ref()
+            .and_then(|heuristics| heuristics.enabled)
+            != Some(false);
+        let min_score = prompt_injection
+            .heuristics
+            .as_ref()
+            .and_then(|heuristics| heuristics.min_score)
+            .unwrap_or(0);
         let block_floor = level_floor(
             prompt_injection
                 .block_at_or_above
@@ -653,23 +877,39 @@ fn fold_detection(
                 .warn_at_or_above
                 .unwrap_or(DetectionLevel::Suspicious),
         );
-        let matched = if score >= block_floor {
-            contributions.push(("prompt_injection", Decision::Deny));
-            true
-        } else if score >= warn_floor {
-            contributions.push(("prompt_injection", Decision::Warn));
-            true
-        } else {
-            false
-        };
-        detector_trace.push(DetectorEvaluation {
-            detector_id: format!("{}{DETECTOR_ID_VERSION}", result.detector_name),
-            category: DetectionCategory::PromptInjection,
-            score,
-            level: DetectorLevel::from_score(score),
-            matched,
-        });
-        detections.push(result);
+
+        for detector in registry.detectors_for(DetectionCategory::PromptInjection) {
+            let is_heuristic = detector.name() == HEURISTIC_DETECTOR_NAME;
+            if is_heuristic && !heuristics_enabled {
+                continue;
+            }
+            let mut result = detector.detect(scan);
+            if is_heuristic && heuristic_integer(result.score) < min_score {
+                // Below the policy's floor the heuristic reports no signal
+                // (detection spec 3.5.4).
+                result.score = 0.0;
+                result.matched_patterns.clear();
+                result.explanation = None;
+            }
+            let score = result.score;
+            let matched = if score >= block_floor {
+                contributions.push(("prompt_injection", Decision::Deny));
+                true
+            } else if score >= warn_floor {
+                contributions.push(("prompt_injection", Decision::Warn));
+                true
+            } else {
+                false
+            };
+            detector_trace.push(DetectorEvaluation {
+                detector_id: format!("{}{DETECTOR_ID_VERSION}", result.detector_name),
+                category: DetectionCategory::PromptInjection,
+                score,
+                level: DetectorLevel::from_score(score),
+                matched,
+            });
+            detections.push(result);
+        }
     }
 
     // jailbreak -> jailbreak detector, 0-100 thresholds (score * 100).
@@ -753,6 +993,12 @@ fn fold_detection(
         detection_decision,
         detector_trace: Some(detector_trace),
     }
+}
+
+/// The heuristic detector's integer score recovered from its normalized
+/// `score / 100` form (exact: the normalized value is always `n / 100`).
+fn heuristic_integer(score: f64) -> usize {
+    (score * 100.0).round().max(0.0) as usize
 }
 
 /// Score floor for a `DetectionLevel`, mapping the injection detector's

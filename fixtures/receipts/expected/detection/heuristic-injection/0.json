@@ -10,9 +10,8 @@
     "runtime": "hushspec-conformance/0.2"
   },
   "policy": {
-    "name": "threat-intel-declared",
-    "spec_version": "0.2.0",
-    "content_hash": "sha256:3df6edd91e9723283afd04942ed462138e9bfbc29976f6d6ac728f3a3e01887c"
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:9c89d7089c04c532a6c247019611015911d23ad6eae22d0abbba569be711028b"
   },
   "action": {
     "type": "tool_call",

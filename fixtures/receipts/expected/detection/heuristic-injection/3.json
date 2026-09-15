@@ -1,6 +1,6 @@
 {
   "receipt_version": "0.2",
-  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
   "timestamp": "2026-09-15T12:00:00.000Z",
   "time_source": "trusted",
   "actor": {
@@ -10,19 +10,18 @@
     "runtime": "hushspec-conformance/0.2"
   },
   "policy": {
-    "name": "threat-intel-declared",
-    "spec_version": "0.2.0",
-    "content_hash": "sha256:3df6edd91e9723283afd04942ed462138e9bfbc29976f6d6ac728f3a3e01887c"
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:9c89d7089c04c532a6c247019611015911d23ad6eae22d0abbba569be711028b"
   },
   "action": {
     "type": "tool_call",
     "target": "chat",
-    "content_hash": "sha256:cbf060e76dbf2a41dfd91e378a60630e0ca9711fd247114a929cd6ac8399f3b1",
-    "content_size": 34
+    "content_hash": "sha256:a2733d03b40ac2e542bc142f1657c973eee810e9d520786c95bc84793462c9d7",
+    "content_size": 63
   },
-  "decision": "allow",
-  "matched_rule": "rules.tool_access.allow",
-  "reason": "tool is explicitly allowed",
+  "decision": "deny",
+  "matched_rule": "detection",
+  "reason": "content flagged by prompt_injection detection",
   "rule_trace": [
     {
       "rule_block": "tool_access",
@@ -49,13 +48,13 @@
     {
       "detector_id": "heuristic_injection@1",
       "category": "prompt_injection",
-      "score": 0.0,
-      "level": "none",
-      "matched": false
+      "score": 0.7,
+      "level": "high",
+      "matched": true
     }
   ],
   "enforcement": {
     "mode": "enforce",
-    "outcome": "allowed"
+    "outcome": "blocked"
   }
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "0.2.0",
-  "generated_at": "2026-09-15T19:28:20Z",
+  "generated_at": "2026-09-15T20:13:13Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -83,6 +83,27 @@
     {
       "path": "fixtures/core/evaluation/computer-use.test.yaml",
       "sha256": "2bc7e9094e6f799f5bcb011262c15a6cca40a865ca6b742e10f103b9e8da398b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml",
+      "sha256": "47763d5f53b910d755ade92c50aaece6732f21f6f8579bbeee710aa43f5da2c1",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-capability.test.yaml",
+      "sha256": "0a15315787dfe6920addb2f07fbd85df5d629c1f57c5ffa88ad5e4c137ff8cc2",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-rate.test.yaml",
+      "sha256": "aa77256ffc3e421dc13b1266f7227fe4f1492d7bfc3d3956c4c0b06c6fc82301",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -676,6 +697,76 @@
       "level": 1
     },
     {
+      "path": "fixtures/core/invalid/when-capability-bad-name.expect.yaml",
+      "sha256": "2c8f0e141f5a540fbe07ee7ffd336d6fa8c1de68a5323b8c07fa6ea2b9f2184b",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-capability-bad-name.yaml",
+      "sha256": "b80689f1a4d1aa4788d450ae4240f93bbb44157154f8485790513098064df015",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-bad-comparison.expect.yaml",
+      "sha256": "8229d9eb4705752974b0f82167fde59ddf50475fa00d724e1a4aecbd975f12d1",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-bad-comparison.yaml",
+      "sha256": "4bd1e8d5ba3c9d021f81a7765dd8a71c4f1f8badc29ff68465a3dabfaf5f8359",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-bad-counter.expect.yaml",
+      "sha256": "34ebcff1f5866db60846624d9bf00f932661fff8d6d81ab16532c73f277b4679",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-bad-counter.yaml",
+      "sha256": "df7ea85f26b60372264a856aeed5545902f5012ac6eb31f69a199d0d6e819554",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-missing-threshold.expect.yaml",
+      "sha256": "5bb4ab513c7d86960153550310c2fe78d1ce145557526bcb1c4b5136aa827ac3",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-missing-threshold.yaml",
+      "sha256": "8183a3d3d41d639c2c352758bf416e816de1e2b46a48c866e4aface3f6a0bc5e",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-negative-threshold.expect.yaml",
+      "sha256": "402abc99828e1e62009948eb955de7e68a2aa36dbe9895a0b8db14e758497e7f",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-rate-negative-threshold.yaml",
+      "sha256": "d97ea4ff9c22bc28eed2904ecd48988008e6bb1121ade4b082b82be2b55b08b1",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
       "path": "fixtures/core/invalid/when-too-deep.expect.yaml",
       "sha256": "aa4050a288a73a5223a8db72478bcf77bb5f40fca2436b7f2b3cbe429c0d44be",
       "category": "expect",
@@ -1082,6 +1173,27 @@
       "level": 1
     },
     {
+      "path": "fixtures/detection/evaluation/heuristic-injection-disabled.test.yaml",
+      "sha256": "1312b13ac70dc3e384fd83df36e1fa6e409ce2c43ad777b664fc371bf110b0ad",
+      "category": "evaluation",
+      "module": "detection",
+      "level": 3
+    },
+    {
+      "path": "fixtures/detection/evaluation/heuristic-injection-min-score.test.yaml",
+      "sha256": "ade89b92080cbcf34116dd2d9201d23320e83864658f7c2ffc62c8f73620b7b2",
+      "category": "evaluation",
+      "module": "detection",
+      "level": 3
+    },
+    {
+      "path": "fixtures/detection/evaluation/heuristic-injection.test.yaml",
+      "sha256": "c0ba96488dc0741d21835dcecb8522b1740c05135d9e9baa94be81d8f543b0dc",
+      "category": "evaluation",
+      "module": "detection",
+      "level": 3
+    },
+    {
       "path": "fixtures/detection/evaluation/jailbreak.test.yaml",
       "sha256": "2ca171e69e77ff073c8de3768ec16009ef15638d2cb4f2162c62d86ba802829c",
       "category": "evaluation",
@@ -1446,6 +1558,13 @@
       "level": 3
     },
     {
+      "path": "fixtures/posture/evaluation/transition-priority.test.yaml",
+      "sha256": "170c3ef21b3d9d5a81e32df1c928f2c4a041954d42b16fe8c80501ee7e0fd108",
+      "category": "evaluation",
+      "module": "posture",
+      "level": 3
+    },
+    {
       "path": "fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml",
       "sha256": "081525dd1ec7e638ebc0c90d38de2a15fe0f240b599ab382f746b12d844fc524",
       "category": "evaluation",
@@ -1665,6 +1784,83 @@
     {
       "path": "fixtures/receipts/expected/core/computer-use/2.json",
       "sha256": "7beb1017cb016eb7d147478969c7d7e723464cb94eb2574838b91b8d7fd7458f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-capability-unevaluable/0.json",
+      "sha256": "1735f0fee0c2f5dad490698a2fe988e7e1c0afe51ef0403cf2b94260d1f15831",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-capability-unevaluable/1.json",
+      "sha256": "fb943bec9858105ee54e7e4e3913e307daa740baf9dd11746bd5779546382d90",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-capability/0.json",
+      "sha256": "21d49766e2c85f2afb060c6a62f305fd91c8d1b9b4c198b32fb62a505d7c690b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-capability/1.json",
+      "sha256": "910d9d725589ecdd1311c40210a2ec818f33b4b67f8da9872740d38e3f4843fc",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-capability/2.json",
+      "sha256": "ef4dd29bc87db41406b08a0cee67a9fb5a523714d853800bf41fbd3c3d2d06d0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/0.json",
+      "sha256": "259946d9020371f3a2b29754541a79aa3b464a912c569b54c9921b0821914526",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/1.json",
+      "sha256": "83ecfaae7eec33aa6107e23dd48afd7c62193cee4b74317008eff89858c5a482",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/2.json",
+      "sha256": "a62e26eeae6c590d8169d4dca64a5984064da1d9b3ada91142c28b0bb99e06c9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/3.json",
+      "sha256": "020cd462a4e80e1392054c424084f5cd1b588b40cddaa5b52f8763ad207df810",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/4.json",
+      "sha256": "3e35dcd36b5dcf67c853190b0b92aaf974513c87b917f4c5245f8e8694b931a7",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-rate/5.json",
+      "sha256": "df4e472b1d6acf0d7ad2a8e8393ec3ca516d531db4682555b96e4c20f27ae64a",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
@@ -2909,6 +3105,139 @@
       "level": 4
     },
     {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection-disabled/0.json",
+      "sha256": "b2e3d94b2a90982e624e691a347a99a0cbe9c6a323e59601a02d59b69ff74190",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection-disabled/1.json",
+      "sha256": "6191cbc30470ab81397ebfd4a32a0e1a693b50a63facce80873deb3dfdf17d9a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection-min-score/0.json",
+      "sha256": "029d56917732a0aacaa2dc7797f5a2d5c4f0db6561ed38f89e65c262cdcebe53",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection-min-score/1.json",
+      "sha256": "e638d324ba49fb4862df3c43b5ddad8f74bd9a8e891b399c29147dea1a2083a4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/0.json",
+      "sha256": "1d17d867ebe908733a7f63206914818321277daf4ec19d9f88f384b0daee18cf",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/1.json",
+      "sha256": "a6527b7461cec716eebd3753939683a6885dcc2df8dd5e3220f88fb8a3636017",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/10.json",
+      "sha256": "294ae43b8545d17e846445e6865090961ea8e80eaa55e704afcdd09ef4975888",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/11.json",
+      "sha256": "249b6b895a49cb6f78812828d67f62560e05bb7810fbbd2f368da8829282f8bb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/12.json",
+      "sha256": "1d31a67b0f1b70808c619727b188ed43178c25c723a82202175fd5ef2258a8e5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/13.json",
+      "sha256": "f84a64d1b111dcd0977b05599480f2406cf5a3fddb00e3d8fc589e42e2ab4f95",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/14.json",
+      "sha256": "a5e965244fdf0a8170439b577be1e8cfacd70f08dae493bb942f4e7a1e3cf9bf",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/2.json",
+      "sha256": "f05d740ccdcc2b3b4814a8c06fb9802a180c0d4b13b66f87109ee4096de886da",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/3.json",
+      "sha256": "82e6f30ed311f51179297625d01496a730165f5a4771f456e58946222363e0ce",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/4.json",
+      "sha256": "0422556887c89a173557d8dea4f65317fb2021072b647677aff2e89e3bd98d10",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/5.json",
+      "sha256": "874869462cde1ba5dea0449a187e790c9b889639258b114dfdaa182f6668acc3",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/6.json",
+      "sha256": "f57dfe5a3ea6c66604694f28d51eca7dbbd67c7761f8d53544f7dea1239c2864",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/7.json",
+      "sha256": "f7c82b8da22768f66bc1601bcc31d503b6fce2acd44eaac8537fbc5a3e6fae63",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/8.json",
+      "sha256": "b86e5378eaac5ee26b507723df257d74e387c1d4acb62b8315c55ed08dc3b01e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/heuristic-injection/9.json",
+      "sha256": "4eb9888d1487c62a90663bd11599a4f96e136ffd45cec024e459e4d866626848",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
       "path": "fixtures/receipts/expected/detection/jailbreak/0.json",
       "sha256": "c2c08ada4ed5e73624e9f922dbcedb21e9f98e2f5ab7c43e4c212f6ac06f10d8",
       "category": "receipt-expected",
@@ -2931,56 +3260,56 @@
     },
     {
       "path": "fixtures/receipts/expected/detection/prompt-injection/0.json",
-      "sha256": "1d9a580eb002eceedd40ab78af3c80821a3bb6a8af19a3bbbeb4dc6c6066f6ef",
+      "sha256": "ba92ad0ba615f85552a2ea76162a3933a0b020a13f95aac25f5e3e9ab71c162a",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/prompt-injection/1.json",
-      "sha256": "5fbc8d58317a998ee63fa072235bf01ed2424ecca10914148714eb1013e2c56a",
+      "sha256": "8ad0765414ebbe6094201c90f156f3ce994ebe7ba36cc0ba7cbe4b9e504a832f",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/prompt-injection/2.json",
-      "sha256": "5a9d4d3fa702887a23014de54ae49711a8247cbee83652499d976cf6673ba212",
+      "sha256": "443996cdeeb16c70f24c63bd43859fc304bd94762460dddbc48ccfed45e39af7",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/threat-intel/0.json",
-      "sha256": "cd0d59b84d8172c157274f39e901ad8214df9e07f670724843ec222ccc7a9329",
+      "sha256": "136f33b83a03ed99c32b77965e4407ab2bd47bc5ed547ae516c4f3e66dda1161",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/threat-intel/1.json",
-      "sha256": "3a3f5765f5137ae2b37bb7d2e266ecb5ad215495d55eb5c5b6b7b6f48a51c981",
+      "sha256": "308d6337fab36027cb450dc774efb7340d98b912603b5798d57e1bbabef0df23",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/threat-intel/2.json",
-      "sha256": "55d79ba87dab10a5567709526f507ab5dea444ba051c7f3d4b6cb5f7c3631f94",
+      "sha256": "8ef8632e9b4af1a2368216b18a9228838e82956b12727fa0de2bddb4e554dd7d",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/threat-intel/3.json",
-      "sha256": "84b2709e05d6610146c2373cfa51a7da955aaf308738a4848bcc2660bbb486a9",
+      "sha256": "e3a82728af10efd2fe4712b3ba0af648034fa40c5ce89fe5e78448a71b32e860",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/detection/threat-intel/4.json",
-      "sha256": "b27821a373aab20850bef9db75b1c0f2e3358549cff48a172b77414f1ed86269",
+      "sha256": "495a890ebbe6920c4d9686db6907ddbeb3d92aba3146fcdf09b037bcd52fd3b5",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
@@ -3156,6 +3485,20 @@
     {
       "path": "fixtures/receipts/expected/posture/posture-transitions/2.json",
       "sha256": "0c61e0bf3759472a461688c24df327039acd069d0a989687e441d7b0590ad702",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/transition-priority/0.json",
+      "sha256": "5aed3adc63f0396e713a2161e1ee0c8f23e914a81e581aeace36fa14d49f698e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/transition-priority/1.json",
+      "sha256": "4615cd49dd8b8d389bb069449ab6beb02051f293c5838efa9221cad6225d2c4f",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

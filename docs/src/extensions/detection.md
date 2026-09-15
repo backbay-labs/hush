@@ -24,6 +24,9 @@ extensions:
       warn_at_or_above: "suspicious"
       block_at_or_above: "high"
       max_scan_bytes: 500000
+      heuristics:          # the normative heuristic_injection@1 detector (spec 3.5)
+        enabled: true
+        min_score: 0
 
     jailbreak:
       enabled: true

@@ -45,6 +45,13 @@
       "score": 0.8,
       "level": "critical",
       "matched": true
+    },
+    {
+      "detector_id": "heuristic_injection@1",
+      "category": "prompt_injection",
+      "score": 0.75,
+      "level": "critical",
+      "matched": true
     }
   ],
   "enforcement": {

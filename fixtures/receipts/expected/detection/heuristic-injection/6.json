@@ -1,6 +1,6 @@
 {
   "receipt_version": "0.2",
-  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "receipt_id": "01a0a4f0-3200-7006-8000-000000000000",
   "timestamp": "2026-09-15T12:00:00.000Z",
   "time_source": "trusted",
   "actor": {
@@ -10,15 +10,14 @@
     "runtime": "hushspec-conformance/0.2"
   },
   "policy": {
-    "name": "threat-intel-declared",
-    "spec_version": "0.2.0",
-    "content_hash": "sha256:3df6edd91e9723283afd04942ed462138e9bfbc29976f6d6ac728f3a3e01887c"
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:9c89d7089c04c532a6c247019611015911d23ad6eae22d0abbba569be711028b"
   },
   "action": {
     "type": "tool_call",
     "target": "chat",
-    "content_hash": "sha256:cbf060e76dbf2a41dfd91e378a60630e0ca9711fd247114a929cd6ac8399f3b1",
-    "content_size": 34
+    "content_hash": "sha256:f8d382d352ec925e57f98550457c29ee17e20fa62eea44593ccdf79c83443cd4",
+    "content_size": 86
   },
   "decision": "allow",
   "matched_rule": "rules.tool_access.allow",
@@ -49,8 +48,8 @@
     {
       "detector_id": "heuristic_injection@1",
       "category": "prompt_injection",
-      "score": 0.0,
-      "level": "none",
+      "score": 0.15,
+      "level": "low",
       "matched": false
     }
   ],
