@@ -240,6 +240,31 @@ async function readResponseText(
   return body;
 }
 
+/**
+ * Refuse a URL whose host resolves to anything on a private or link-local
+ * network (SSRF, including the cloud metadata endpoint). Shared by the policy
+ * loader and the signature fetcher so a `.sig` URL can never reach somewhere
+ * the policy URL could not.
+ */
+async function assertPublicHost(url: URL): Promise<void> {
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  try {
+    const resolved = await lookup(hostname, { all: true });
+    for (const addr of resolved) {
+      if (isPrivateIp(addr.address)) {
+        throw new Error(
+          `SSRF protection: host '${hostname}' resolves to private IP ${addr.address}`,
+        );
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('SSRF protection')) {
+      throw err;
+    }
+    throw new Error(`failed to resolve host '${hostname}': ${err}`);
+  }
+}
+
 export function createHttpLoader(
   config?: HttpLoaderConfig,
 ): (reference: string, from?: string) => Promise<LoadedSpec> {
@@ -249,24 +274,7 @@ export function createHttpLoader(
   const cacheDir = config?.cacheDir;
 
   return async (reference: string, _from?: string): Promise<LoadedSpec> => {
-    const url = validateUrl(reference);
-
-    const hostname = url.hostname.replace(/^\[|\]$/g, '');
-    try {
-      const resolved = await lookup(hostname, { all: true });
-      for (const addr of resolved) {
-        if (isPrivateIp(addr.address)) {
-          throw new Error(
-            `SSRF protection: host '${hostname}' resolves to private IP ${addr.address}`,
-          );
-        }
-      }
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('SSRF protection')) {
-        throw err;
-      }
-      throw new Error(`failed to resolve host '${hostname}': ${err}`);
-    }
+    await assertPublicHost(validateUrl(reference));
 
     const cached = cacheDir ? readCache(cacheDir, reference) : null;
 
@@ -349,4 +357,48 @@ export function createSyncHttpLoader(
         'use the async HTTP loader or pre-cache the policy',
     );
   };
+}
+
+/**
+ * Fetch a detached signature envelope (Signing specification section 7.1) over
+ * HTTPS, under the same URL and SSRF rules as the policy loader.
+ *
+ * A missing sidecar is `null`, not an error: "this policy is unsigned" is a
+ * fact the caller decides what to do with -- `requireSignature` turns it into
+ * a refusal, opportunistic verification just records nothing. Every *other*
+ * failure (a 500, a redirect, an oversized body) throws, because those say
+ * nothing about whether a signature exists.
+ */
+export async function fetchSignature(
+  url: string,
+  config?: HttpLoaderConfig,
+): Promise<string | null> {
+  const timeoutMs = config?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxSize = config?.maxSize ?? DEFAULT_MAX_SIZE;
+
+  await assertPublicHost(validateUrl(url));
+
+  const headers: Record<string, string> = {};
+  if (config?.authHeader) {
+    headers['Authorization'] = config.authHeader;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers, signal: controller.signal, redirect: 'error' });
+  } catch (err) {
+    throw new Error(`HTTP request to '${url}' failed: ${err}`);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (response.status === 404 || response.status === 410) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`HTTP request to '${url}' returned status ${response.status}`);
+  }
+  return readResponseText(response, url, maxSize);
 }

@@ -86,9 +86,40 @@ export {
   type KeyringDocument,
   type GeneratedKeypair,
 } from './signing.js';
-export { resolve, resolveFromFile, createCompositeLoader, createBuiltinLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
+export {
+  resolve,
+  resolveFromFile,
+  resolveWithOptions,
+  resolveWithOptionsAsync,
+  resolveFromFileWithOptions,
+  createCompositeLoader,
+  createBuiltinLoader,
+  defaultSignatureLocator,
+  defaultAsyncSignatureLocator,
+  splitDigestPin,
+  PolicyVerificationError,
+  INLINE_POLICY_SOURCE,
+  type LoadedSpec,
+  type Loader,
+  type AsyncLoader,
+  type ResolveInput,
+  type AsyncResolveInput,
+  type ResolveOptions,
+  type ResolveResult,
+  type Resolution,
+  type ChainLink,
+  type SignatureStatus,
+  type SignatureLocator,
+  type VerifyClockOptions,
+  type LoadReasonCode,
+} from './resolve.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
-export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';
+export {
+  createHttpLoader,
+  createSyncHttpLoader,
+  fetchSignature,
+  type HttpLoaderConfig,
+} from './http-loader.js';
 export {
   evaluate,
   evaluateTraced,
@@ -130,6 +161,8 @@ export {
   HushSpecDenied,
   matchesRulePathPrefix,
   resolvePolicyOrThrow,
+  resolvePolicyResolution,
+  POLICY_SIGNATURE_RULE,
   type WarnHandler,
   type EnforcementConfig,
   type GateOutcome,
@@ -182,8 +215,13 @@ export {
   type EvaluationWithDetection,
 } from './detection.js';
 export { PolicyWatcher, type WatcherOptions } from './watcher.js';
-export { PolicyPoller, type PollerOptions } from './poller.js';
-export { type PolicyProvider, FileProvider, HttpProvider } from './policy-provider.js';
+export { PolicyPoller, type PollerOptions, type PolicySnapshot } from './poller.js';
+export {
+  type PolicyProvider,
+  type ProviderResolveOptions,
+  FileProvider,
+  HttpProvider,
+} from './policy-provider.js';
 export {
   ObservableEvaluator,
   JsonLineObserver,
