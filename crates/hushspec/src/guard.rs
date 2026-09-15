@@ -49,7 +49,7 @@
 //! clone one `Arc` and a hot swap never blocks an in-flight decision.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::compiled::CompiledPolicy;
 use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, PANIC_RULE};
@@ -508,6 +508,7 @@ impl HushGuardBuilder {
 
         let guard = HushGuard {
             policy: RwLock::new(Arc::new(policy)),
+            swapping: Mutex::new(()),
             enforcement,
             sink,
             observers,
@@ -533,6 +534,11 @@ impl HushGuardBuilder {
 /// An enforcement point. See the module documentation.
 pub struct HushGuard {
     policy: RwLock<Arc<GuardPolicy>>,
+    /// Serializes whole swaps, so two of them cannot interleave their
+    /// `policy_swapped` records. Held only by [`HushGuard::swap_policy`];
+    /// an evaluation never touches it, so a slow sink delays the next swap
+    /// rather than the next decision.
+    swapping: Mutex<()>,
     enforcement: EnforcementConfig,
     sink: Option<Box<dyn ReceiptSink>>,
     observers: ObservableEvaluator,
@@ -801,6 +807,17 @@ impl HushGuard {
         let name = next.name().map(str::to_string);
         let content_hash = summary.content_hash.clone();
 
+        // One swap at a time, all the way through the record. Without this,
+        // two swaps could take the write lock in one order and reach the sink
+        // in the other, and a reader walking back from a receipt to the
+        // nearest policy event would name the wrong policy (log spec 6).
+        // A poisoned lock means a previous swap panicked mid-record; the
+        // policy behind the `RwLock` is still one whole `Arc`, so continue.
+        let _serialized = match self.swapping.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
         let previous_hash = {
             let mut slot = match self.policy.write() {
                 Ok(slot) => slot,
@@ -974,7 +991,6 @@ mod tests {
         ErrorEvent, EvaluationCompletedEvent, MetricsCollector, PolicyLoadedEvent,
     };
     use crate::sink::{NullSink, SinkError};
-    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const EGRESS_POLICY: &str = r#"
@@ -1608,6 +1624,54 @@ rules:
         for handle in handles {
             handle.join().expect("no thread panicked");
         }
+    }
+
+    #[test]
+    fn concurrent_swaps_record_a_consistent_chain_of_policy_events() {
+        let sink = Arc::new(RecordingSink::default());
+        let guard = Arc::new(
+            HushGuard::builder()
+                .sink(Box::new(SharedSink(sink.clone())))
+                .build_from_policy(policy(EGRESS_POLICY))
+                .expect("builds"),
+        );
+        let first = guard.content_hash();
+
+        let mut handles = Vec::new();
+        for index in 0..4 {
+            let guard = guard.clone();
+            handles.push(std::thread::spawn(move || {
+                for round in 0..5 {
+                    let yaml = format!(
+                        "hushspec: \"0.1.0\"\nname: swap-{index}-{round}\nrules:\n  egress:\n    allow: [\"*.example.com\"]\n    default: block\n"
+                    );
+                    let resolution = crate::resolve::Resolution::from_resolved(
+                        &crate::HushSpec::parse(&yaml).expect("parses"),
+                        None,
+                    )
+                    .expect("resolves");
+                    guard.swap_policy(resolution).expect("swaps");
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().expect("no thread panicked");
+        }
+
+        let events = sink.events.lock().expect("lock");
+        assert_eq!(events.len(), 21, "one load plus twenty swaps");
+        // Every swap names the hash the previous record put in force, so a
+        // reader can walk the chain back without gaps or crossings.
+        let mut expected = first;
+        for event in &events[1..] {
+            assert_eq!(
+                event.previous_content_hash.as_deref(),
+                Some(expected.as_str()),
+                "policy events crossed: a receipt would map to the wrong policy"
+            );
+            expected = event.policy.content_hash.clone();
+        }
+        assert_eq!(guard.content_hash(), expected);
     }
 
     #[test]
