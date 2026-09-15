@@ -77,9 +77,33 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: sha256sum h2h-*.tar.gz > SHA256SUMS
+      - name: Verify every release asset is covered by the attestation
+        run: |
+          # This job's workspace contains exactly the files that get uploaded
+          # to the release (no checkout happens here), so anything present but
+          # outside the attestation's subject-path would ship unattested.
+          shopt -s nullglob
+          attested=(h2h-*.tar.gz SHA256SUMS)
+          echo "attested subjects (${#attested[@]}):"
+          printf '  %s\n' "${attested[@]}"
+          status=0
+          for f in *; do
+            [ -f "$f" ] || continue
+            case " ${attested[*]} " in
+              *" $f "*) ;;
+              *) echo "::error::release asset '$f' is not covered by subject-path"; status=1 ;;
+            esac
+          done
+          exit "$status"
+      # Attest every file the "Upload to release" step publishes -- the platform
+      # tarballs *and* SHA256SUMS. Attesting only the tarballs would leave the
+      # checksum file, which is what installers (Homebrew, scripted installs)
+      # actually trust, unverifiable.
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "h2h-*.tar.gz"
+          subject-path: |
+            h2h-*.tar.gz
+            SHA256SUMS
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
