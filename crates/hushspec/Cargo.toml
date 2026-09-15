@@ -29,6 +29,7 @@ rand = { version = "0.8", optional = true }
 pretty_assertions = "1"
 criterion = "0.5"
 jsonschema = { version = "0.18", features = ["draft202012"] }
+proptest = "1"
 
 [[bench]]
 name = "evaluation"

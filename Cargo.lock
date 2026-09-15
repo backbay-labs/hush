@@ -888,6 +888,7 @@ dependencies = [
  "ed25519-dalek",
  "jsonschema",
  "pretty_assertions",
+ "proptest",
  "rand 0.8.7",
  "regex",
  "reqwest",
