@@ -40,6 +40,22 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   `verified_at`, an in-memory leaf resolves as `memory`, and a matching digest pin now
   satisfies `require_signature` for that hop.
 
+### Added (RFC 09 Wave 4, Go)
+
+- The evidence chain in the Go SDK, matching the Rust reference byte for byte. Receipt format
+  0.2: `EvaluateAudited(resolution, action, config, ctx)` (and `EvaluateAuditedSpec`) records
+  the actor, the canonical `policy.content_hash`, `extends_chain`, the signature outcome, the
+  evaluator's recorded rule trace under the schema's closed `rule_block` ids, the detection
+  trace, and the required enforcement disposition, with UUID v7 ids and millisecond
+  timestamps; `ParseReceipt` accepts exactly what the 0.2 schema accepts, and
+  `ComputePolicyHash` now returns the canonical `sha256:` hash. Hash-linked log:
+  `ChainedFileSink` (fsync and an exclusive `flock` per append, rotation carrying `prev_hash`
+  through a `log_started` entry, optional per-entry signatures), `PolicyEvent` records through
+  the new `PolicyEventSink` interface, and `VerifyLog` / `VerifyLogs` / `VerifyLogFiles`
+  reporting the first break by file and line. Receipt signing: `SignReceipt`, `VerifyReceipt`,
+  `SignedReceipt`. `SignatureStatus.SignedAt` is renamed `VerifiedAt` (`verified_at`) to match
+  the schema, and an in-memory leaf is recorded in the chain as `memory`.
+
 ### Added
 
 - Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,

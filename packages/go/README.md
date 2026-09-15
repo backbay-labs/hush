@@ -144,14 +144,23 @@ shell, and patch rules can inspect it.
 
 ### Decision receipts
 
-`EvaluateAudited` wraps `Evaluate` with timing, a per-rule trace, and a hash of
-the policy that produced the decision, returning a `DecisionReceipt` suitable
-for an audit log. With `AuditConfig{Enabled: false}` it takes a zero-overhead
-fast path and returns just the decision.
+`EvaluateAudited` evaluates an action against a resolved policy and records a
+format 0.2 `DecisionReceipt` (`spec/hushspec-receipt.md`): who acted, the
+resolved policy's canonical content hash, the action minus its content, the
+decision, the rule blocks and detectors that actually ran, and what the
+enforcement point did with it. With `AuditConfig{Enabled: false}` it skips
+timing and the trace; the decision and the policy identity are always correct.
 
 ```go
-config := hushspec.DefaultAuditConfig() // Enabled + rule trace + content redaction
-receipt := hushspec.EvaluateAudited(spec, action, &config)
+resolution, err := hushspec.ResolveFileWithOptions("policy.yaml", hushspec.ResolveOptions{})
+if err != nil {
+	log.Fatal(err)
+}
+
+config := hushspec.DefaultAuditConfig()
+receipt := hushspec.EvaluateAudited(resolution, action, &config, &hushspec.AuditContext{
+	Actor: &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
+})
 
 fmt.Println(receipt.ReceiptID, receipt.Decision, receipt.Policy.ContentHash)
 
@@ -162,8 +171,67 @@ if err := sink.Send(&receipt); err != nil {
 }
 ```
 
+`EvaluateAuditedSpec` does the same for a document you already hold in memory.
 Sinks are composable: `NewMultiSink` fans out to several, `NewFilteredSink`
 selects by decision, and `NewCallbackSink` forwards to your own function.
+
+### Evidence chain
+
+A receipt proves one evaluation. A **hash-linked log**
+(`spec/hushspec-log.md`) proves a sequence of them: that nothing was removed,
+inserted, edited or reordered, and which policy was in force at every point.
+
+`ChainedFileSink` is a `ReceiptSink` that appends JSON Lines entries, each
+naming the previous entry's hash and carrying its own hash over its RFC 8785
+canonical form. Every line is fsynced under an exclusive file lock before the
+append returns.
+
+```go
+sink, err := hushspec.OpenChainedFileSink("./audit.jsonl")
+if err != nil {
+	log.Fatal(err)
+}
+sink.WithSigner(privateKeyPEM) // optional: sign every entry (Ed25519)
+
+// Write which policy is in force before the first receipt under it.
+event := hushspec.NewPolicyLoadedEvent(resolution, hushspec.EnforcementModeEnforce, hushspec.SdkInfo{})
+if err := sink.RecordPolicyEvent(&event); err != nil {
+	log.Fatal(err)
+}
+if err := sink.Send(&receipt); err != nil {
+	log.Fatal(err)
+}
+
+seq, head := sink.Head() // publish the head hash to make truncation detectable
+```
+
+`sink.Rotate("./audit-2.jsonl")` starts a new file whose first entry carries
+the previous file's last hash, so the chain survives rotation.
+
+Verification reports the first break by file and line:
+
+```go
+report, err := hushspec.VerifyLogFiles(
+	[]string{"./audit.jsonl", "./audit-2.jsonl"},
+	&hushspec.LogVerifyOptions{RequireSignatures: true, Keyring: keyring},
+)
+if err != nil {
+	log.Fatalf("log broken: %v", err) // e.g. "audit.jsonl:3: prev_hash ... does not link"
+}
+fmt.Println(report.Entries, report.VerifiedSignatures, report.LastEntryHash)
+```
+
+Individual receipts can also be signed on their own, over the receipt hash so
+that the receipt stays byte-stable whoever signs it:
+
+```go
+signed, err := hushspec.SignReceipt(&receipt, privateKeyPEM, hushspec.SignOptions{})
+result := hushspec.VerifyReceipt(signed, hushspec.VerifyOptions{Keyring: keyring})
+```
+
+`ParseReceipt` accepts exactly what the 0.2 schema accepts -- unknown members,
+open enums, non-millisecond timestamps and bare-hex hashes are all rejected --
+so a receipt that parses is a receipt an auditor can rely on.
 
 ### Panic mode
 

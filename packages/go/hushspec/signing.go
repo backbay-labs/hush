@@ -758,6 +758,44 @@ func SignPolicy(spec *HushSpec, privateKeyPEM []byte, opts SignOptions) (*Envelo
 	if spec == nil {
 		return nil, errors.New("cannot sign a nil HushSpec document")
 	}
+	resolved, err := resolveForHashing(spec)
+	if err != nil {
+		return nil, fmt.Errorf("cannot sign: %w", err)
+	}
+	if result := Validate(resolved); !result.IsValid() {
+		return nil, fmt.Errorf("cannot sign an invalid policy: %s", summarizeValidationErrors(result))
+	}
+	contentHash, err := ContentHash(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("cannot sign: %w", err)
+	}
+
+	// `policy_name` and `policy_version` default to the policy's own
+	// (spec section 4.2); SignOptions overrides either.
+	if opts.PolicyName == "" {
+		opts.PolicyName = resolved.Name
+	}
+	if opts.PolicyVersion == nil &&
+		resolved.Metadata != nil && resolved.Metadata.PolicyVersion != nil {
+		version := int64(*resolved.Metadata.PolicyVersion)
+		opts.PolicyVersion = &version
+	}
+	return SignContentHash(contentHash, privateKeyPEM, opts)
+}
+
+// SignContentHash signs a content hash that is already in hand: the canonical
+// hash of a resolved policy, a receipt hash (receipt spec 6), or a log entry's
+// `entry_hash` (log spec 7). The envelope is produced exactly as spec section
+// 4.2 describes, whatever the hash covers.
+//
+// Prefer [SignPolicy] for a policy: it computes the hash the way a verifier
+// will, and refuses to sign a document that does not resolve or validate.
+func SignContentHash(contentHash string, privateKeyPEM []byte, opts SignOptions) (*Envelope, error) {
+	if !signingDigestPattern.MatchString(contentHash) {
+		return nil, fmt.Errorf(
+			"cannot sign: content_hash %q is not \"sha256:\" followed by 64 lowercase hex digits",
+			contentHash)
+	}
 	private, err := ParsePrivateKeyPEM(privateKeyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("cannot sign: %w", err)
@@ -767,18 +805,6 @@ func SignPolicy(spec *HushSpec, privateKeyPEM []byte, opts SignOptions) (*Envelo
 		return nil, errors.New("cannot sign: private key does not carry an Ed25519 public key")
 	}
 	keyID, err := keyIDFromKey(public)
-	if err != nil {
-		return nil, fmt.Errorf("cannot sign: %w", err)
-	}
-
-	resolved, err := resolveForHashing(spec)
-	if err != nil {
-		return nil, fmt.Errorf("cannot sign: %w", err)
-	}
-	if result := Validate(resolved); !result.IsValid() {
-		return nil, fmt.Errorf("cannot sign an invalid policy: %s", summarizeValidationErrors(result))
-	}
-	contentHash, err := ContentHash(resolved)
 	if err != nil {
 		return nil, fmt.Errorf("cannot sign: %w", err)
 	}
@@ -817,15 +843,8 @@ func SignPolicy(spec *HushSpec, privateKeyPEM []byte, opts SignOptions) (*Envelo
 		env.ExpiresAt = expiresAtText
 	}
 
-	if env.PolicyName == "" {
-		env.PolicyName = resolved.Name
-	}
-	switch {
-	case opts.PolicyVersion != nil:
+	if opts.PolicyVersion != nil {
 		version := *opts.PolicyVersion
-		env.PolicyVersion = &version
-	case resolved.Metadata != nil && resolved.Metadata.PolicyVersion != nil:
-		version := int64(*resolved.Metadata.PolicyVersion)
 		env.PolicyVersion = &version
 	}
 
@@ -893,6 +912,54 @@ func VerifyPolicyBytes(spec *HushSpec, envelopeJSON []byte, opts VerifyOptions) 
 // working directory. A policy that extends a file by relative path should
 // therefore be resolved by the caller first.
 func VerifyPolicy(spec *HushSpec, env *Envelope, opts VerifyOptions) VerifyResult {
+	return verifyEnvelope(env, opts, policyContent(spec))
+}
+
+// VerifyContentHash verifies an envelope whose claim is a content hash the
+// caller already holds: a receipt hash (receipt spec 6) or a log entry's
+// `entry_hash` (log spec 7), as well as a resolved policy the caller hashed
+// itself.
+//
+// It runs the same ten ordered checks as [VerifyPolicy]; check 9 compares the
+// supplied hash instead of re-resolving a document. An empty contentHash means
+// the caller had nothing to compare -- a receipt that would not canonicalize,
+// say -- which the specification folds into [ReasonContentHashMismatch], there
+// being no hash to compare.
+func VerifyContentHash(env *Envelope, contentHash string, opts VerifyOptions) VerifyResult {
+	return verifyEnvelope(env, opts, func() (*HushSpec, string, string) {
+		if contentHash == "" {
+			return nil, "", "no content hash was available to compare"
+		}
+		return nil, contentHash, ""
+	})
+}
+
+// envelopeContent supplies check 9's input: the resolved document (when there
+// was one), its content hash, and a human-readable failure when no hash could
+// be produced at all.
+type envelopeContent func() (resolved *HushSpec, contentHash string, failure string)
+
+// policyContent resolves, validates and hashes a policy for check 9. A policy
+// that no longer resolves or validates has no hash to compare, which the
+// specification folds into the same reason code.
+func policyContent(spec *HushSpec) envelopeContent {
+	return func() (*HushSpec, string, string) {
+		resolved, err := resolveForHashing(spec)
+		if err != nil {
+			return nil, "", "the policy could not be resolved: " + err.Error()
+		}
+		if validation := Validate(resolved); !validation.IsValid() {
+			return nil, "", "the policy is not valid: " + summarizeValidationErrors(validation)
+		}
+		contentHash, err := ContentHash(resolved)
+		if err != nil {
+			return resolved, "", "the policy could not be hashed: " + err.Error()
+		}
+		return resolved, contentHash, ""
+	}
+}
+
+func verifyEnvelope(env *Envelope, opts VerifyOptions, content envelopeContent) VerifyResult {
 	if env == nil {
 		return VerifyResult{Reason: ReasonMalformedEnvelope, Detail: "no signature envelope was supplied"}
 	}
@@ -1017,25 +1084,19 @@ func VerifyPolicy(spec *HushSpec, env *Envelope, opts VerifyOptions) VerifyResul
 			"the signature does not verify under key %s over the envelope's claims", env.KeyID)
 	}
 
-	// 9. Content. A policy that no longer resolves or validates has no hash
-	// to compare, which the specification folds into the same reason code.
-	resolved, err := resolveForHashing(spec)
-	if err != nil {
-		return fail(ReasonContentHashMismatch, "the policy could not be resolved: %s", err)
-	}
-	if validation := Validate(resolved); !validation.IsValid() {
-		return fail(ReasonContentHashMismatch,
-			"the policy is not valid: %s", summarizeValidationErrors(validation))
-	}
-	contentHash, err := ContentHash(resolved)
-	if err != nil {
-		return fail(ReasonContentHashMismatch, "the policy could not be hashed: %s", err)
-	}
+	// 9. Content. A document that no longer resolves, validates or
+	// canonicalizes has no hash to compare, which the specification folds into
+	// the same reason code.
+	resolved, contentHash, failure := content()
 	result.Resolved = resolved
 	result.ContentHash = contentHash
+	if failure != "" {
+		return fail(ReasonContentHashMismatch, "%s", failure)
+	}
 	if contentHash != env.ContentHash {
 		return fail(ReasonContentHashMismatch,
-			"the policy hashes to %s but the envelope claims %s", contentHash, env.ContentHash)
+			"the signed content hashes to %s but the envelope claims %s",
+			contentHash, env.ContentHash)
 	}
 
 	// 10. Rollback. Only meaningful when the verifier remembers a version for

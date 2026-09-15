@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Policy resolution, verification on load, and digest pinning
@@ -104,18 +105,29 @@ type ResolveOptions struct {
 }
 
 // SignatureStatus is the outcome of signature verification for one document,
-// shaped for `receipt.policy.signature` (spec/hushspec-receipt.md section 4.2).
+// shaped for `receipt.policy.signature` (spec/hushspec-receipt.md section 4.2
+// and $defs.SignatureStatus of the 0.2 receipt schema).
 //
 // Verified is true only when an envelope was present, its key was in the
 // trusted keyring, and every check of signing section 6.2 passed. Reason
 // carries the first failed check's code and is empty exactly when Verified is
-// true. SignedAt echoes the envelope's claim and is informational: it is a
-// claim of the signer, trustworthy only once Verified is true.
+// true.
+//
+// VerifiedAt records when the *verifier* ran, not when the signer signed: the
+// envelope's own `signed_at` is a claim of the signer, trustworthy only once
+// Verified is true, so the schema records the verifier's clock instead. It is
+// set only on success, mirroring the Rust reference.
 type SignatureStatus struct {
-	KeyID    string `json:"key_id,omitempty"`
-	Verified bool   `json:"verified"`
-	Reason   string `json:"reason,omitempty"`
-	SignedAt string `json:"signed_at,omitempty"`
+	Verified   bool   `json:"verified"`
+	KeyID      string `json:"key_id,omitempty"`
+	VerifiedAt string `json:"verified_at,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// FailedSignature is the status recorded for a document whose verification
+// failed at the check named by reason.
+func FailedSignature(reason, keyID string) SignatureStatus {
+	return SignatureStatus{Verified: false, KeyID: keyID, Reason: reason}
 }
 
 // ChainLink is one document of a resolved `extends` chain, shaped for
@@ -147,6 +159,138 @@ type Resolution struct {
 	ContentHash string
 	Chain       []ChainLink
 	Signature   *SignatureStatus
+}
+
+// MemorySource is the source recorded for a document that was not loaded from
+// anywhere -- one the caller built or parsed in memory. The resolve vectors
+// (fixtures/core/resolve) pin it as the leaf's chain source, so every SDK
+// spells an in-memory leaf the same way.
+const MemorySource = "memory"
+
+// NewResolutionFromResolved wraps a document that is already resolved (no
+// `extends`) as a single-link resolution, which is what a receipt builder
+// needs for a policy it did not load through the resolver. source names the
+// document in the chain; "" means [MemorySource].
+//
+// It mirrors Rust's Resolution::from_resolved.
+func NewResolutionFromResolved(spec *HushSpec, source string) (*Resolution, error) {
+	if spec == nil {
+		return nil, errors.New("cannot resolve a nil HushSpec document")
+	}
+	if source == "" {
+		source = MemorySource
+	}
+	contentHash, err := ContentHash(spec)
+	if err != nil {
+		return nil, fmt.Errorf("no canonical form for %s: %w", describeSource(source), err)
+	}
+	return &Resolution{
+		Spec:        spec,
+		ContentHash: contentHash,
+		Chain:       []ChainLink{{Source: source, ContentHash: contentHash}},
+	}, nil
+}
+
+// HadExtends reports whether the policy was produced by merging an `extends`
+// chain. A receipt records `extends_chain` only then (receipt spec 4.2).
+func (r *Resolution) HadExtends() bool {
+	return r != nil && len(r.Chain) > 1
+}
+
+// OwnContentHash is the content hash of a single chain document on its own,
+// canonicalized with its `extends` and `merge_strategy` stripped (receipt spec
+// 4.2) -- the value a `#sha256:` digest pin names (core spec 2.3).
+func OwnContentHash(spec *HushSpec) (string, error) {
+	return hopContentHash(spec)
+}
+
+// Resolver-level reason codes. spec/hushspec-signing.md section 6.4 enumerates
+// the envelope checks; these name the failures resolution itself can report,
+// and are the vocabulary the fixtures/core/resolve vectors use.
+const (
+	// ReasonInvalidPin is a `#...` fragment on an `extends` reference that is
+	// not a well-formed `sha256:<64 lowercase hex>` digest.
+	ReasonInvalidPin = "invalid_pin"
+	// ReasonNotFound is a reference no loader could serve.
+	ReasonNotFound = "not_found"
+	// ReasonCycle is an extends chain that revisits a document.
+	ReasonCycle = "cycle"
+	// ReasonMaxDepth is an extends chain longer than [maxExtendsDepth].
+	ReasonMaxDepth = "max_depth"
+	// ReasonSignatureRequired is a hop that required a signature and had none
+	// that verified. [SignatureRequiredError.Status] carries the finer code.
+	ReasonSignatureRequired = "signature_required"
+)
+
+// InvalidPinError reports an `extends` reference whose digest-pin fragment is
+// not a well-formed content hash. It is raised before anything is loaded: a
+// fragment that looks like a pin but is malformed must never be guessed at.
+type InvalidPinError struct {
+	Reference string
+	Message   string
+}
+
+func (e *InvalidPinError) Error() string {
+	return fmt.Sprintf("invalid digest pin on %q: %s", e.Reference, e.Message)
+}
+
+// NotFoundError reports a reference no loader could serve. A dangling
+// `extends` is never resolved as the leaf alone -- that would silently enforce
+// a policy missing everything its base contributed.
+type NotFoundError struct {
+	Reference string
+	Message   string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("could not resolve reference %q: %s", e.Reference, e.Message)
+}
+
+// CycleError reports an extends chain that revisits a document.
+type CycleError struct {
+	Chain string
+}
+
+func (e *CycleError) Error() string {
+	return "circular extends detected: " + e.Chain
+}
+
+// MaxDepthError reports an extends chain longer than the depth cap.
+type MaxDepthError struct{}
+
+func (e *MaxDepthError) Error() string {
+	return fmt.Sprintf("extends chain exceeds maximum depth of %d", maxExtendsDepth)
+}
+
+// ResolveReason maps a resolution failure onto its reason code, so a vector
+// runner or a CLI reports the same vocabulary the spec uses. It reports false
+// for an error that carries no code of its own (an I/O or parse failure).
+func ResolveReason(err error) (string, bool) {
+	var digestErr *DigestMismatchError
+	if errors.As(err, &digestErr) {
+		return ReasonDigestMismatch, true
+	}
+	var pinErr *InvalidPinError
+	if errors.As(err, &pinErr) {
+		return ReasonInvalidPin, true
+	}
+	var notFoundErr *NotFoundError
+	if errors.As(err, &notFoundErr) {
+		return ReasonNotFound, true
+	}
+	var cycleErr *CycleError
+	if errors.As(err, &cycleErr) {
+		return ReasonCycle, true
+	}
+	var depthErr *MaxDepthError
+	if errors.As(err, &depthErr) {
+		return ReasonMaxDepth, true
+	}
+	var signatureErr *SignatureRequiredError
+	if errors.As(err, &signatureErr) {
+		return ReasonSignatureRequired, true
+	}
+	return "", false
 }
 
 // SignatureRequiredError reports the first chain hop that [ResolveOptions]
@@ -256,6 +400,7 @@ func ResolveWithOptions(spec *HushSpec, source string, loader ResolveLoader, opt
 func DefaultSignatureLocator(source string) ([]byte, bool, error) {
 	switch {
 	case source == "",
+		source == MemorySource,
 		strings.HasPrefix(source, "builtin:"),
 		strings.HasPrefix(source, "https://"),
 		strings.HasPrefix(source, "http://"):
@@ -294,7 +439,10 @@ func createCompositeLoader() ResolveLoader {
 		if strings.HasPrefix(reference, "builtin:") {
 			spec, ok := LoadBuiltin(reference)
 			if !ok {
-				return nil, fmt.Errorf("unknown builtin ruleset %q", reference)
+				return nil, &NotFoundError{
+					Reference: reference,
+					Message:   "unknown builtin ruleset",
+				}
 			}
 			return &LoadedSpec{Source: reference, Spec: spec}, nil
 		}
@@ -421,12 +569,12 @@ func resolveChain(
 // root first, leaf last. It enforces cycle detection and the depth cap before
 // anything is hashed or verified.
 func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolveHop, error) {
+	if source == "" {
+		source = MemorySource
+	}
 	hops := []resolveHop{{source: source, spec: spec}}
 
-	stack := make([]string, 0, 4)
-	if source != "" {
-		stack = append(stack, source)
-	}
+	stack := []string{source}
 
 	current, currentSource := spec, source
 	for depth := 0; current.Extends != ""; depth++ {
@@ -435,15 +583,21 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 		// closed with a clean error before doing any further loading once the
 		// cap is hit.
 		if depth >= maxExtendsDepth {
-			return nil, fmt.Errorf("extends chain exceeds maximum depth of %d", maxExtendsDepth)
+			return nil, &MaxDepthError{}
 		}
 
 		reference, pin, err := splitDigestPin(current.Extends)
 		if err != nil {
-			return nil, fmt.Errorf("invalid extends reference in %s: %w", describeSource(currentSource), err)
+			return nil, err
 		}
 
-		loaded, err := loader(reference, currentSource)
+		// A document built in memory resolves relative references against the
+		// process's working directory, exactly as an empty source did.
+		from := currentSource
+		if from == MemorySource {
+			from = ""
+		}
+		loaded, err := loader(reference, from)
 		if err != nil {
 			return nil, err
 		}
@@ -454,7 +608,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 		for index, entry := range stack {
 			if entry == loaded.Source {
 				cycle := append(slices.Clone(stack[index:]), loaded.Source)
-				return nil, fmt.Errorf("circular extends detected: %s", joinChain(cycle))
+				return nil, &CycleError{Chain: joinChain(cycle)}
 			}
 		}
 
@@ -492,15 +646,28 @@ func verifyHopSignature(
 	env, parseErr := ParseEnvelope(data)
 	if parseErr != nil {
 		result := VerifyPolicyBytes(resolved, data, opts)
-		return &SignatureStatus{KeyID: result.KeyID, Reason: result.Reason}, nil
+		status := FailedSignature(result.Reason, result.KeyID)
+		return &status, nil
 	}
 	result := VerifyPolicy(resolved, env, opts)
+	if !result.OK {
+		status := FailedSignature(result.Reason, result.KeyID)
+		return &status, nil
+	}
 	return &SignatureStatus{
-		KeyID:    result.KeyID,
-		Verified: result.OK,
-		Reason:   result.Reason,
-		SignedAt: env.SignedAt,
+		Verified:   true,
+		KeyID:      result.KeyID,
+		VerifiedAt: FormatTimestamp(verifierClock(opts)),
 	}, nil
+}
+
+// verifierClock is the instant a verification outcome is stamped with: the
+// verifier's configured clock, or now when it has none.
+func verifierClock(opts VerifyOptions) time.Time {
+	if opts.Now.IsZero() {
+		return time.Now()
+	}
+	return opts.Now
 }
 
 // verifyOptions folds ResolveOptions.Keyring into the verifier inputs and
@@ -555,13 +722,17 @@ func splitDigestPin(reference string) (string, string, error) {
 		return reference, "", nil
 	}
 	if !digestPinPattern.MatchString(fragment) {
-		return "", "", fmt.Errorf(
-			"unsupported digest pin %q: only \"sha256:\" followed by 64 lowercase hex digits is defined",
-			fragment,
-		)
+		return "", "", &InvalidPinError{
+			Reference: reference,
+			Message: fmt.Sprintf(
+				"%q is not \"sha256:\" followed by 64 lowercase hex digits", fragment),
+		}
 	}
 	if ref == "" {
-		return "", "", fmt.Errorf("digest pin %q has no reference to pin", fragment)
+		return "", "", &InvalidPinError{
+			Reference: reference,
+			Message:   fmt.Sprintf("digest pin %q has no reference to pin", fragment),
+		}
 	}
 	return ref, fragment, nil
 }
@@ -614,7 +785,7 @@ func loadFromFilesystem(reference string, from string) (*LoadedSpec, error) {
 // describeSource names a document in an error message. A document built in
 // memory has no source, and "" reads as a missing word.
 func describeSource(source string) string {
-	if source == "" {
+	if source == "" || source == MemorySource {
 		return "the in-memory policy document"
 	}
 	return source

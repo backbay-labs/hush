@@ -11,6 +11,31 @@ type ReceiptSink interface {
 	Send(receipt *DecisionReceipt) error
 }
 
+// PolicyEventSink is a sink that can also record which policy is in force
+// (RFC 09 P2-10, log spec 6).
+//
+// It is a separate, optional interface rather than a second method on
+// [ReceiptSink] so that every sink written against the 0.1 API keeps
+// compiling; [RecordPolicyEvent] routes an event to a sink that implements it
+// and drops it for one that does not.
+type PolicyEventSink interface {
+	ReceiptSink
+	RecordPolicyEvent(event *PolicyEvent) error
+}
+
+// RecordPolicyEvent writes a policy-in-effect record to sink when it can carry
+// one, and reports whether it did. A plain [ReceiptSink] -- stderr, a filter,
+// a callback over receipts -- has nowhere to put the event and is not an
+// error: only a hash-linked log needs the record to tie receipts to the policy
+// that produced them.
+func RecordPolicyEvent(sink ReceiptSink, event *PolicyEvent) (bool, error) {
+	target, ok := sink.(PolicyEventSink)
+	if !ok {
+		return false, nil
+	}
+	return true, target.RecordPolicyEvent(event)
+}
+
 // FileReceiptSink appends receipts as JSON Lines to a file.
 type FileReceiptSink struct {
 	path string
@@ -79,6 +104,14 @@ func (s *FilteredSink) Send(receipt *DecisionReceipt) error {
 	return nil
 }
 
+// RecordPolicyEvent forwards the event whatever the filter is: the filter
+// selects which *decisions* are worth keeping, and a policy event is what ties
+// the kept receipts to the policy that produced them.
+func (s *FilteredSink) RecordPolicyEvent(event *PolicyEvent) error {
+	_, err := RecordPolicyEvent(s.inner, event)
+	return err
+}
+
 // MultiSink fans out to all sinks. Returns the first error but always
 // attempts every sink.
 type MultiSink struct {
@@ -93,6 +126,20 @@ func (s *MultiSink) Send(receipt *DecisionReceipt) error {
 	var firstErr error
 	for _, sink := range s.sinks {
 		if err := sink.Send(receipt); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+// RecordPolicyEvent fans the event out to every sink that can carry one,
+// returning the first error but always attempting each sink.
+func (s *MultiSink) RecordPolicyEvent(event *PolicyEvent) error {
+	var firstErr error
+	for _, sink := range s.sinks {
+		if _, err := RecordPolicyEvent(sink, event); err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -118,5 +165,11 @@ func (s *CallbackSink) Send(receipt *DecisionReceipt) error {
 type NullSink struct{}
 
 func (s *NullSink) Send(receipt *DecisionReceipt) error {
+	return nil
+}
+
+// RecordPolicyEvent discards the event, like everything else a NullSink is
+// handed.
+func (s *NullSink) RecordPolicyEvent(event *PolicyEvent) error {
 	return nil
 }

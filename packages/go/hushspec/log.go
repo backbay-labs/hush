@@ -1,0 +1,705 @@
+package hushspec
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Hash-linked receipt log (spec/hushspec-log.md, format 0.1).
+//
+// A log is a JSON Lines file of [LogEntry] records. Each entry carries a
+// sequence number, the hash of the previous entry, its own hash over its
+// canonical form, and optionally an Ed25519 signature over that hash. A
+// verifier can therefore detect a line that was edited, deleted, inserted, or
+// reordered, without any other source of truth.
+//
+// Entries wrap a [DecisionReceipt] or a [PolicyEvent] (which policy was loaded
+// or swapped in, with its provenance) so the log proves not only what was
+// decided but what was in force when.
+
+// LogVersion is the log-entry format this file writes and verifies.
+const LogVersion = "0.1"
+
+// GenesisHash is the `prev_hash` of the first entry of a log that continues
+// nothing: "sha256:" and 64 zeros.
+const GenesisHash = contentHashPrefix +
+	"0000000000000000000000000000000000000000000000000000000000000000"
+
+// ReasonEntryUnsigned is reported for an unsigned entry when the verifier
+// requires signatures (log spec 7).
+const ReasonEntryUnsigned = "entry_unsigned"
+
+// SDKName is the name this SDK writes into a log entry's `sdk` member.
+const SDKName = "hushspec-go"
+
+// LogLockTimeout is how long an append waits for another writer's lock before
+// failing. A lock this SDK cannot acquire is an error, never something to
+// bypass: two writers appending to one file interleave chains and corrupt
+// both (log spec 9).
+const LogLockTimeout = 5 * time.Second
+
+// --------------------------------------------------------------------------
+// Wire types
+// --------------------------------------------------------------------------
+
+// EntryType says which payload member an entry carries.
+type EntryType string
+
+const (
+	EntryTypeReceipt       EntryType = "receipt"
+	EntryTypePolicyLoaded  EntryType = "policy_loaded"
+	EntryTypePolicySwapped EntryType = "policy_swapped"
+	EntryTypeLogStarted    EntryType = "log_started"
+)
+
+// SdkInfo names the SDK that wrote an entry.
+type SdkInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// ThisSDK is this package's own identity.
+func ThisSDK() SdkInfo {
+	return SdkInfo{Name: SDKName, Version: Version}
+}
+
+// PolicyEventKind distinguishes a policy first taking effect from one
+// replacing another.
+type PolicyEventKind string
+
+const (
+	PolicyEventLoaded  PolicyEventKind = "loaded"
+	PolicyEventSwapped PolicyEventKind = "swapped"
+)
+
+// PolicyEvent is a policy-in-effect record (log spec 6): what was enforced
+// from this moment on, with the same identity a receipt carries.
+//
+// An enforcement point MUST write one when it starts enforcing a policy and
+// when it replaces one, before any receipt evaluated under the new policy, so
+// a reader can map every receipt to the exact policy in force by walking back
+// to the nearest policy event.
+type PolicyEvent struct {
+	Event PolicyEventKind `json:"event"`
+	// Timestamp is RFC 3339 UTC with millisecond precision.
+	Timestamp       string          `json:"timestamp"`
+	Policy          PolicySummary   `json:"policy"`
+	EnforcementMode EnforcementMode `json:"enforcement_mode"`
+	SDK             SdkInfo         `json:"sdk"`
+	// SpecVersion is the HushSpec version the engine implements.
+	SpecVersion string `json:"spec_version"`
+	// PreviousContentHash is, for a swap, the content hash of the policy that
+	// was replaced.
+	PreviousContentHash string `json:"previous_content_hash,omitempty"`
+}
+
+// NewPolicyLoadedEvent is the `policy_loaded` record for a resolution, stamped
+// now. It is the record an enforcement point writes before the first receipt
+// it evaluates under that policy.
+//
+// A zero sdk means [ThisSDK].
+func NewPolicyLoadedEvent(
+	resolution *Resolution,
+	enforcement EnforcementMode,
+	sdk SdkInfo,
+) PolicyEvent {
+	if sdk.Name == "" && sdk.Version == "" {
+		sdk = ThisSDK()
+	}
+	if enforcement == "" {
+		enforcement = EnforcementModeEnforce
+	}
+	return PolicyEvent{
+		Event:           PolicyEventLoaded,
+		Timestamp:       FormatTimestamp(time.Now()),
+		Policy:          NewPolicySummary(resolution),
+		EnforcementMode: enforcement,
+		SDK:             sdk,
+		SpecVersion:     Version,
+	}
+}
+
+// NewPolicySwappedEvent is the `policy_swapped` record for a policy replacing
+// the one whose content hash is previousContentHash (a hot reload, or the
+// panic policy taking over).
+func NewPolicySwappedEvent(
+	resolution *Resolution,
+	enforcement EnforcementMode,
+	sdk SdkInfo,
+	previousContentHash string,
+) PolicyEvent {
+	event := NewPolicyLoadedEvent(resolution, enforcement, sdk)
+	event.Event = PolicyEventSwapped
+	event.PreviousContentHash = previousContentHash
+	return event
+}
+
+// LogStarted is the first entry of a rotated file: where the chain came from
+// (log spec 5).
+type LogStarted struct {
+	Timestamp    string `json:"timestamp"`
+	PreviousFile string `json:"previous_file,omitempty"`
+	// PreviousEntryHash is the last `entry_hash` of the previous file; it
+	// equals this entry's `prev_hash`.
+	PreviousEntryHash string `json:"previous_entry_hash,omitempty"`
+}
+
+// LogSignature is an entry signature: the 0.2 signature envelope (signing spec
+// 4) whose `content_hash` is the entry's `entry_hash`. It is exactly an
+// [Envelope] -- the same members, produced and checked the same way -- so the
+// alias lets the signing code work on it unchanged.
+type LogSignature = Envelope
+
+// LogEntry is one line of a log.
+type LogEntry struct {
+	LogVersion string `json:"log_version"`
+	// Seq starts at 1 in every file and increases by exactly 1.
+	Seq uint64 `json:"seq"`
+	// PrevHash is the previous entry's `entry_hash`, or [GenesisHash].
+	PrevHash  string    `json:"prev_hash"`
+	EntryType EntryType `json:"entry_type"`
+
+	Receipt     *DecisionReceipt `json:"receipt,omitempty"`
+	PolicyEvent *PolicyEvent     `json:"policy_event,omitempty"`
+	LogStarted  *LogStarted      `json:"log_started,omitempty"`
+
+	// EntryHash is "sha256:" over the canonical form of this entry with
+	// `entry_hash` and `signature` removed.
+	EntryHash string        `json:"entry_hash"`
+	Signature *LogSignature `json:"signature,omitempty"`
+}
+
+// ComputeEntryHash recomputes the hash this entry should carry: "sha256:" over
+// the RFC 8785 canonical form of the entry with `entry_hash` and `signature`
+// removed (log spec 4).
+//
+// Because `prev_hash` is inside the hashed content, every entry's hash commits
+// to the entire history before it.
+func (e *LogEntry) ComputeEntryHash() (string, error) {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return "", fmt.Errorf("cannot serialize the log entry: %w", err)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(data, &object); err != nil {
+		return "", fmt.Errorf("cannot re-read the log entry: %w", err)
+	}
+	delete(object, "entry_hash")
+	delete(object, "signature")
+	canonical, err := canonicalJSONValue(object)
+	if err != nil {
+		return "", fmt.Errorf("the log entry has no canonical form: %w", err)
+	}
+	return DigestOf(canonical), nil
+}
+
+// PayloadMatchesType reports whether exactly the payload named by `entry_type`
+// is present (log spec 8, step 4).
+func (e *LogEntry) PayloadMatchesType() bool {
+	receipt, event, started := e.Receipt != nil, e.PolicyEvent != nil, e.LogStarted != nil
+	switch e.EntryType {
+	case EntryTypeReceipt:
+		return receipt && !event && !started
+	case EntryTypePolicyLoaded:
+		return !receipt && !started && event && e.PolicyEvent.Event == PolicyEventLoaded
+	case EntryTypePolicySwapped:
+		return !receipt && !started && event && e.PolicyEvent.Event == PolicyEventSwapped
+	case EntryTypeLogStarted:
+		return started && !receipt && !event
+	default:
+		return false
+	}
+}
+
+// LogPayload is what an entry wraps when appending: exactly one member is
+// non-nil.
+type LogPayload struct {
+	Receipt     *DecisionReceipt
+	PolicyEvent *PolicyEvent
+	LogStarted  *LogStarted
+}
+
+func (p LogPayload) entryType() (EntryType, error) {
+	set := 0
+	entryType := EntryType("")
+	if p.Receipt != nil {
+		set++
+		entryType = EntryTypeReceipt
+	}
+	if p.PolicyEvent != nil {
+		set++
+		switch p.PolicyEvent.Event {
+		case PolicyEventSwapped:
+			entryType = EntryTypePolicySwapped
+		default:
+			entryType = EntryTypePolicyLoaded
+		}
+	}
+	if p.LogStarted != nil {
+		set++
+		entryType = EntryTypeLogStarted
+	}
+	if set != 1 {
+		return "", fmt.Errorf("a log entry wraps exactly one payload, got %d", set)
+	}
+	return entryType, nil
+}
+
+// --------------------------------------------------------------------------
+// Chained sink
+// --------------------------------------------------------------------------
+
+// ChainedFileSink appends hash-linked entries to a JSON Lines file, syncing
+// each one to durable storage before reporting it written (log spec 3).
+//
+// Opening an existing file continues its chain from the last entry. Appends
+// are serialized in-process by a mutex and across processes by an exclusive
+// lock on the file itself (flock where the platform has it, a `<path>.lock`
+// file elsewhere); a lock held longer than [LogLockTimeout] is reported as an
+// error rather than bypassed. [ChainedFileSink.Rotate] carries the chain into
+// a new file through a `log_started` entry.
+type ChainedFileSink struct {
+	mu       sync.Mutex
+	path     string
+	seq      uint64
+	prevHash string
+	// clock fixes `log_started` timestamps and signature `signed_at` for
+	// conformance vectors; production sinks use the wall clock.
+	clock     func() time.Time
+	signerPEM []byte
+}
+
+// OpenChainedFileSink opens (or creates) the log at path and continues its
+// chain from the last entry. A file whose last line is not a log entry is an
+// error: appending to it would produce a chain nothing can verify.
+func OpenChainedFileSink(path string) (*ChainedFileSink, error) {
+	sink := &ChainedFileSink{path: path, prevHash: GenesisHash}
+	last, err := lastLogEntry(path)
+	if err != nil {
+		return nil, err
+	}
+	if last != nil {
+		sink.seq, sink.prevHash = last.Seq, last.EntryHash
+	}
+	return sink, nil
+}
+
+// WithSigner signs every appended entry with an Ed25519 private key in PEM
+// PKCS#8 form (signing spec 4, over `entry_hash`). It returns the sink so it
+// can be chained onto [OpenChainedFileSink].
+func (s *ChainedFileSink) WithSigner(privateKeyPEM []byte) *ChainedFileSink {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.signerPEM = privateKeyPEM
+	return s
+}
+
+// WithClock uses a fixed clock for `log_started` timestamps and entry
+// signatures, so a conformance vector is byte-stable. Nil restores the wall
+// clock.
+func (s *ChainedFileSink) WithClock(clock func() time.Time) *ChainedFileSink {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock = clock
+	return s
+}
+
+// Path is the file currently being written.
+func (s *ChainedFileSink) Path() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.path
+}
+
+// Head is the last sequence number and entry hash written, or 0 and
+// [GenesisHash] for an empty log. Writers SHOULD publish the head hash
+// periodically: it is the external anchor that makes truncation detectable
+// (log spec 9).
+func (s *ChainedFileSink) Head() (uint64, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seq, s.prevHash
+}
+
+func (s *ChainedFileSink) now() time.Time {
+	if s.clock != nil {
+		return s.clock()
+	}
+	return time.Now()
+}
+
+// Append writes one entry, linked to the previous one, and returns it.
+func (s *ChainedFileSink) Append(payload LogPayload) (*LogEntry, error) {
+	entryType, err := payload.entryType()
+	if err != nil {
+		return nil, fmt.Errorf("log: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry := &LogEntry{
+		LogVersion:  LogVersion,
+		Seq:         s.seq + 1,
+		PrevHash:    s.prevHash,
+		EntryType:   entryType,
+		Receipt:     payload.Receipt,
+		PolicyEvent: payload.PolicyEvent,
+		LogStarted:  payload.LogStarted,
+	}
+	entry.EntryHash, err = entry.ComputeEntryHash()
+	if err != nil {
+		return nil, fmt.Errorf("log: %w", err)
+	}
+	if len(s.signerPEM) > 0 {
+		signedAt := s.now()
+		envelope, err := SignContentHash(entry.EntryHash, s.signerPEM, SignOptions{SignedAt: &signedAt})
+		if err != nil {
+			return nil, fmt.Errorf("log: cannot sign entry %d: %w", entry.Seq, err)
+		}
+		entry.Signature = envelope
+	}
+
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return nil, fmt.Errorf("log: cannot serialize entry %d: %w", entry.Seq, err)
+	}
+	if err := appendLine(s.path, append(line, '\n')); err != nil {
+		return nil, err
+	}
+
+	s.seq, s.prevHash = entry.Seq, entry.EntryHash
+	return entry, nil
+}
+
+// Send appends a decision receipt, satisfying [ReceiptSink].
+func (s *ChainedFileSink) Send(receipt *DecisionReceipt) error {
+	_, err := s.Append(LogPayload{Receipt: receipt})
+	return err
+}
+
+// RecordPolicyEvent appends a policy-in-effect record, satisfying
+// [PolicyEventSink].
+func (s *ChainedFileSink) RecordPolicyEvent(event *PolicyEvent) error {
+	_, err := s.Append(LogPayload{PolicyEvent: event})
+	return err
+}
+
+// Rotate starts writing to newPath, whose first entry is a `log_started`
+// record naming the file this chain continues from and its last hash
+// (log spec 5). Sequence numbers restart at 1 in the new file; `prev_hash`
+// carries over, so a verifier given both files in order sees one chain.
+//
+// The new file must not already exist.
+func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
+	if _, err := os.Stat(newPath); err == nil {
+		return nil, fmt.Errorf("log: cannot rotate into the existing file %s", newPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("log: cannot rotate into %s: %w", newPath, err)
+	}
+
+	s.mu.Lock()
+	// Only the file name: logs are moved between hosts, and a path would leak
+	// the writer's layout for no verification benefit.
+	previousFile := filepath.Base(s.path)
+	previousHash := s.prevHash
+	s.path, s.seq = newPath, 0
+	started := &LogStarted{
+		Timestamp:    FormatTimestamp(s.now()),
+		PreviousFile: previousFile,
+	}
+	if previousHash != GenesisHash {
+		started.PreviousEntryHash = previousHash
+	}
+	s.mu.Unlock()
+
+	return s.Append(LogPayload{LogStarted: started})
+}
+
+// lastLogEntry reads the last non-empty line of path as an entry, or nil for a
+// missing or empty file.
+func lastLogEntry(path string) (*LogEntry, error) {
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("log: cannot open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	last := ""
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineBytes)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) != "" {
+			last = scanner.Text()
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("log: cannot read %s: %w", path, err)
+	}
+	if last == "" {
+		return nil, nil
+	}
+	var entry LogEntry
+	if err := strictUnmarshalJSON([]byte(last), &entry); err != nil {
+		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %w", path, err)
+	}
+	return &entry, nil
+}
+
+// maxLogLineBytes caps one JSON Lines record. A receipt is a few kilobytes; a
+// megabyte is generous and keeps a corrupt file from exhausting memory.
+const maxLogLineBytes = 1 << 20
+
+// appendLine writes one whole line under an exclusive lock and fsyncs it
+// before returning (log spec 3).
+func appendLine(path string, line []byte) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("log: cannot open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	unlock, err := lockLogFile(file, path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	if _, err := file.Write(line); err != nil {
+		return fmt.Errorf("log: cannot write to %s: %w", path, err)
+	}
+	if err := file.Sync(); err != nil {
+		return fmt.Errorf("log: cannot flush %s: %w", path, err)
+	}
+	return nil
+}
+
+// --------------------------------------------------------------------------
+// Verification (log spec 8)
+// --------------------------------------------------------------------------
+
+// LogVerifyOptions is what a verifier trusts and demands.
+type LogVerifyOptions struct {
+	// RequireSignatures makes an unsigned entry a break
+	// ([ReasonEntryUnsigned]), and a signed entry that cannot be checked
+	// because no keyring was supplied a break too.
+	RequireSignatures bool
+	// Keyring is the set of keys entry signatures are verified against. Nil
+	// counts signed entries without checking them, which is an error only
+	// under RequireSignatures.
+	Keyring *Keyring
+	// Verify carries the remaining verifier inputs: Now and
+	// MaxClockSkewSeconds (signing spec 6.1).
+	Verify VerifyOptions
+}
+
+// LogVerifyReport summarizes a verified log.
+type LogVerifyReport struct {
+	Files              int    `json:"files"`
+	Entries            int    `json:"entries"`
+	Receipts           int    `json:"receipts"`
+	PolicyEvents       int    `json:"policy_events"`
+	Signed             int    `json:"signed"`
+	VerifiedSignatures int    `json:"verified_signatures"`
+	LastSeq            uint64 `json:"last_seq"`
+	LastEntryHash      string `json:"last_entry_hash"`
+}
+
+// LogError says why a log did not verify. File and Line locate the first
+// break; Line is 0 for a whole-file condition.
+type LogError struct {
+	File    string
+	Line    int
+	Message string
+}
+
+func (e *LogError) Error() string {
+	return fmt.Sprintf("%s:%d: %s", e.File, e.Line, e.Message)
+}
+
+// LogFile is one named log text, for verifying a rotation in order without
+// touching the filesystem.
+type LogFile struct {
+	Name string
+	Text string
+}
+
+// VerifyLog verifies one log file's text.
+func VerifyLog(name, text string, options *LogVerifyOptions) (*LogVerifyReport, error) {
+	return VerifyLogs([]LogFile{{Name: name, Text: text}}, options)
+}
+
+// VerifyLogFiles verifies the log files at paths, in order.
+func VerifyLogFiles(paths []string, options *LogVerifyOptions) (*LogVerifyReport, error) {
+	files := make([]LogFile, 0, len(paths))
+	for _, path := range paths {
+		text, err := os.ReadFile(path)
+		if err != nil {
+			return nil, &LogError{File: path, Line: 0, Message: "cannot read: " + err.Error()}
+		}
+		files = append(files, LogFile{Name: path, Text: string(text)})
+	}
+	return VerifyLogs(files, options)
+}
+
+// VerifyLogs verifies a sequence of rotated log files in order: each file
+// after the first must start with a `log_started` entry whose
+// `previous_entry_hash` is the previous file's last hash (log spec 5).
+//
+// It runs the ordered checks of log spec 8 and stops at the first failure,
+// returning a [LogError] that names the file and line of the break.
+func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, error) {
+	effective := LogVerifyOptions{}
+	if options != nil {
+		effective = *options
+	}
+	report := &LogVerifyReport{LastEntryHash: GenesisHash}
+	carriedHash := ""
+	haveCarried := false
+
+	for index, file := range files {
+		report.Files++
+		expectedSeq := uint64(1)
+		prevHash := GenesisHash
+		if haveCarried {
+			prevHash = carriedHash
+		}
+		sawEntry := false
+
+		for lineIndex, line := range strings.Split(file.Text, "\n") {
+			lineNo := lineIndex + 1
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			fail := func(format string, args ...any) *LogError {
+				return &LogError{
+					File:    file.Name,
+					Line:    lineNo,
+					Message: fmt.Sprintf(format, args...),
+				}
+			}
+
+			// 1. Parse; unknown fields are a break.
+			var entry LogEntry
+			if err := strictUnmarshalJSON([]byte(line), &entry); err != nil {
+				return nil, fail("not a log entry: %s", err)
+			}
+			// 2. Format version.
+			if entry.LogVersion != LogVersion {
+				return nil, fail(
+					"unsupported log_version %q, expected %q", entry.LogVersion, LogVersion)
+			}
+			// 3. Sequence.
+			if entry.Seq != expectedSeq {
+				return nil, fail("sequence gap: expected seq %d, found %d", expectedSeq, entry.Seq)
+			}
+			// 4. Exactly the payload the entry type names.
+			if !entry.PayloadMatchesType() {
+				return nil, fail("payload does not match entry_type %q", entry.EntryType)
+			}
+			// 5. A continued file links to the previous file's last hash.
+			if expectedSeq == 1 && index > 0 {
+				if entry.LogStarted == nil {
+					return nil, fail("a continued file must start with a log_started entry")
+				}
+				if entry.LogStarted.PreviousEntryHash != carriedHash {
+					return nil, fail(
+						"log_started.previous_entry_hash does not match the previous file's last hash")
+				}
+			}
+			// The first file of a set may itself continue an earlier file the
+			// verifier was not given; its prev_hash must then be that file's
+			// last hash, which it carries in log_started.
+			if expectedSeq == 1 && index == 0 && entry.LogStarted != nil &&
+				entry.LogStarted.PreviousEntryHash != "" {
+				prevHash = entry.LogStarted.PreviousEntryHash
+			}
+			// 6. The link itself.
+			if entry.PrevHash != prevHash {
+				return nil, fail(
+					"prev_hash %s does not link to the previous entry %s", entry.PrevHash, prevHash)
+			}
+			// 7. The entry's own hash.
+			recomputed, err := entry.ComputeEntryHash()
+			if err != nil {
+				return nil, fail("cannot canonicalize entry: %s", err)
+			}
+			if recomputed != entry.EntryHash {
+				return nil, fail(
+					"entry_hash %s does not match the entry's canonical form (%s)",
+					entry.EntryHash, recomputed)
+			}
+			// 8. A receipt payload is a format 0.2 receipt.
+			if entry.Receipt != nil {
+				if entry.Receipt.ReceiptVersion != ReceiptVersion {
+					return nil, fail("receipt_version %q is not %q",
+						entry.Receipt.ReceiptVersion, ReceiptVersion)
+				}
+				report.Receipts++
+			}
+			if entry.PolicyEvent != nil {
+				report.PolicyEvents++
+			}
+			// 9. The entry signature, when there is one.
+			if err := verifyEntrySignature(&entry, &effective, report, fail); err != nil {
+				return nil, err
+			}
+
+			prevHash = entry.EntryHash
+			expectedSeq++
+			sawEntry = true
+			report.Entries++
+			report.LastSeq = entry.Seq
+			report.LastEntryHash = entry.EntryHash
+		}
+
+		if !sawEntry && index > 0 {
+			return nil, &LogError{File: file.Name, Line: 0, Message: "continued file is empty"}
+		}
+		carriedHash, haveCarried = prevHash, true
+	}
+	return report, nil
+}
+
+// verifyEntrySignature runs log spec 8 step 9 for one entry.
+func verifyEntrySignature(
+	entry *LogEntry,
+	options *LogVerifyOptions,
+	report *LogVerifyReport,
+	fail func(string, ...any) *LogError,
+) error {
+	if entry.Signature == nil {
+		if options.RequireSignatures {
+			return fail("%s: signatures are required", ReasonEntryUnsigned)
+		}
+		return nil
+	}
+	report.Signed++
+	if entry.Signature.ContentHash != entry.EntryHash {
+		return fail("signature.content_hash does not name this entry's entry_hash")
+	}
+	if options.Keyring == nil {
+		if options.RequireSignatures {
+			return fail("no_keyring: cannot verify a required signature")
+		}
+		return nil
+	}
+	verify := options.Verify
+	verify.Keyring = options.Keyring
+	result := VerifyContentHash(entry.Signature, entry.EntryHash, verify)
+	if !result.OK {
+		return fail("signature: %s: %s", result.Reason, result.Detail)
+	}
+	report.VerifiedSignatures++
+	return nil
+}
