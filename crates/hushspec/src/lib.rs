@@ -51,6 +51,7 @@ pub mod merge;
 pub mod observer;
 pub mod panic;
 pub mod policy;
+pub mod provider;
 pub mod receipt;
 pub mod regex_profile;
 pub mod report;
@@ -110,6 +111,11 @@ pub use panic::{
     panic_policy,
 };
 pub use policy::{Policy, PolicyError};
+#[cfg(feature = "http")]
+pub use provider::HttpProvider;
+pub use provider::{
+    FileProvider, PolicyHandle, PolicyPoller, PolicyProvider, PolicyWatcher, ProviderError,
+};
 pub use receipt::{
     ActionSummary, Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode,
     EnforcementOutcome, EnforcementSummary, POLICY_UNVERIFIED_RULE, PolicySummary, RECEIPT_VERSION,
