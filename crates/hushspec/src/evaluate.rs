@@ -27,7 +27,7 @@ use crate::regex_profile::compile_profile_regex;
 use crate::rules::{
     BrowserAutomationRule, CodeExecutionRule, ComputerUseMode, ComputerUseRule, DefaultAction,
     EgressRule, InputInjectionRule, PatchIntegrityRule, RemoteDesktopChannelsRule,
-    SecretPatternsRule, Severity, ToolAccessRule,
+    SecretPatternsRule, Severity, ShellCommandsRule, ToolAccessRule,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -693,6 +693,7 @@ impl Evaluator<'_> {
                 self.activity(index, rule.enabled)?;
                 let compiled = compiled.shell_commands(rule);
                 Ok(evaluate_shell_commands(
+                    rule,
                     compiled,
                     action.target.as_deref().unwrap_or_default(),
                 ))
@@ -882,6 +883,27 @@ fn evaluate_path_allowlist(
     }
 }
 
+/// Guard the one invariant the compiled matchers rest on: a block's compiled
+/// pattern list is positionally parallel to the one the document declares.
+///
+/// It holds by construction -- the matchers are compiled from the same
+/// document the rule is read from -- so this only fires on a future refactor
+/// that broke that. It fails closed rather than iterating the shorter of the
+/// two, which would silently stop consulting patterns the policy declared.
+fn pattern_count_mismatch(block: &str, declared: usize, compiled: usize) -> Option<BlockDecision> {
+    if declared == compiled {
+        return None;
+    }
+    debug_assert_eq!(
+        declared, compiled,
+        "compiled pattern count for {block} does not match the document"
+    );
+    Some(BlockDecision::deny(
+        block,
+        "the compiled pattern set does not match the policy",
+    ))
+}
+
 fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Warn => 1,
@@ -903,6 +925,14 @@ fn evaluate_secret_patterns(
             Some("rules.secret_patterns.skip_paths"),
             Some("path is excluded from secret scanning"),
         );
+    }
+
+    if let Some(denied) = pattern_count_mismatch(
+        "rules.secret_patterns.patterns",
+        rule.patterns.len(),
+        compiled.patterns.len(),
+    ) {
+        return denied;
     }
 
     let mut best: Option<(u8, &crate::rules::SecretPattern)> = None;
@@ -950,6 +980,13 @@ fn evaluate_patch_integrity(
     compiled: &[CompiledRegex],
     content: &str,
 ) -> BlockDecision {
+    if let Some(denied) = pattern_count_mismatch(
+        "rules.patch_integrity.forbidden_patterns",
+        rule.forbidden_patterns.len(),
+        compiled.len(),
+    ) {
+        return denied;
+    }
     for (index, pattern) in compiled.iter().enumerate() {
         let regex = match pattern {
             Ok(regex) => regex,
@@ -1004,7 +1041,18 @@ fn evaluate_patch_integrity(
     BlockDecision::allow(None, Some("patch passed integrity checks"))
 }
 
-fn evaluate_shell_commands(compiled: &[CompiledRegex], command: &str) -> BlockDecision {
+fn evaluate_shell_commands(
+    rule: &ShellCommandsRule,
+    compiled: &[CompiledRegex],
+    command: &str,
+) -> BlockDecision {
+    if let Some(denied) = pattern_count_mismatch(
+        "rules.shell_commands.forbidden_patterns",
+        rule.forbidden_patterns.len(),
+        compiled.len(),
+    ) {
+        return denied;
+    }
     for (index, pattern) in compiled.iter().enumerate() {
         let regex = match pattern {
             Ok(regex) => regex,
@@ -1373,6 +1421,13 @@ fn evaluate_browser_automation(
                     &format!("typed input matched built-in credential detector '{name}'"),
                 );
             }
+        }
+        if let Some(denied) = pattern_count_mismatch(
+            "rules.browser_automation.extra_credential_patterns",
+            rule.extra_credential_patterns.len(),
+            compiled.extra_credential_patterns.len(),
+        ) {
+            return denied;
         }
         for (index, pattern) in compiled.extra_credential_patterns.iter().enumerate() {
             let regex = match pattern {
