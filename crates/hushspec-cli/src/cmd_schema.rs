@@ -79,8 +79,17 @@ fn print_list(format: SchemaOutputFormat) {
             }
         }
         SchemaOutputFormat::Text => {
+            // Width is computed, not fixed: a schema name longer than the old
+            // hard-coded 16 columns (`framework-registry`) ran into the file
+            // name. Padding is applied to the plain name -- a ColoredString
+            // pads to the width of its escape sequences, not its visible text.
+            let width = entries
+                .iter()
+                .map(|entry| entry.name.chars().count())
+                .max()
+                .unwrap_or(0);
             for entry in &entries {
-                println!("{:<16} {}", entry.name.bold(), entry.file);
+                println!("{:<width$} {}", entry.name, entry.file);
             }
         }
     }
