@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   evaluateCondition,
-  evaluateWithContext,
+  timezoneIsKnown,
+  validateCondition,
+  validateConditions,
   type Condition,
   type RuntimeContext,
 } from '../src/conditions.js';
+import { evaluateWithContext } from '../src/evaluate.js';
 import type { HushSpec } from '../src/schema.js';
 
 // ---------------------------------------------------------------------------
@@ -292,7 +295,9 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctxWithTime('2026-01-17T03:00:00Z'))).toBe(true);
     });
 
-    it('fails closed for unknown timezone identifiers', () => {
+    it('keeps the block active when the timezone cannot be resolved (D15)', () => {
+      // Core spec 3.13: a window the engine cannot evaluate must not switch a
+      // control off, so an unresolvable zone leaves the rule block ACTIVE.
       const cond: Condition = {
         time_window: {
           start: '09:00',
@@ -300,7 +305,21 @@ describe('evaluateCondition', () => {
           timezone: 'America/NeYork',
         },
       };
-      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(false);
+      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(true);
+    });
+
+    it('keeps the block active when current_time cannot be parsed', () => {
+      const cond: Condition = {
+        time_window: { start: '09:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, { current_time: 'not-a-timestamp' })).toBe(true);
+    });
+
+    it('keeps the block active for a malformed HH:MM that escaped validation', () => {
+      const cond: Condition = {
+        time_window: { start: '25:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(true);
     });
   });
 
@@ -398,13 +417,14 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition({}, {})).toBe(true);
     });
 
-    it('max nesting depth exceeded fails closed', () => {
-      // Build deeply nested condition
-      let cond: Condition = { context: { environment: 'production' } };
+    it('keeps the block active past the nesting cap (D15)', () => {
+      // Validation rejects this at parse time; at evaluation time a condition
+      // the engine cannot evaluate must leave the block ACTIVE (core spec 3.13).
+      let cond: Condition = { context: { environment: 'nowhere' } };
       for (let i = 0; i < 12; i++) {
         cond = { all_of: [cond] };
       }
-      expect(evaluateCondition(cond, ctxWithEnv('production'))).toBe(false);
+      expect(evaluateCondition(cond, ctxWithEnv('production'))).toBe(true);
     });
   });
 });
@@ -516,5 +536,109 @@ describe('evaluateWithContext', () => {
     const partialCtx: RuntimeContext = { environment: 'production' };
     const result2 = evaluateWithContext(spec, action, partialCtx, conditions);
     expect(result2.decision).toBe('allow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Parse-time validation (D15, core spec 3.13)
+// ---------------------------------------------------------------------------
+
+describe('validateCondition', () => {
+  it('accepts every well-formed condition form', () => {
+    const condition: Condition = {
+      time_window: {
+        start: '22:00',
+        end: '06:00',
+        timezone: 'America/New_York',
+        days: ['mon', 'TUE', 'wed'],
+      },
+      any_of: [
+        { context: { 'user.role': 'contractor' } },
+        { all_of: [{ context: { 'deployment.region': 'eu-west-1' } }, { not: { context: { 'agent.type': 'batch' } } }] },
+      ],
+    };
+    expect(validateCondition(condition, 'rules.egress.when')).toEqual([]);
+  });
+
+  it('rejects an out-of-range HH:MM time', () => {
+    const errors = validateCondition(
+      { time_window: { start: '25:00', end: '06:00' } },
+      'rules.shell_commands.when',
+    );
+    expect(errors).toEqual([
+      'rules.shell_commands.when.time_window.start: "25:00" is not a valid HH:MM time',
+    ]);
+  });
+
+  it('rejects an unknown timezone but accepts a fixed offset', () => {
+    expect(
+      validateCondition(
+        { time_window: { start: '09:00', end: '17:00', timezone: 'Mars/Olympus_Mons' } },
+        'rules.egress.when',
+      ),
+    ).toEqual([
+      'rules.egress.when.time_window.timezone: "Mars/Olympus_Mons" is neither an IANA time zone nor a fixed offset',
+    ]);
+    expect(
+      validateCondition(
+        { time_window: { start: '09:00', end: '17:00', timezone: '+05:30' } },
+        'rules.egress.when',
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects a day outside mon..sun', () => {
+    const errors = validateCondition(
+      { time_window: { start: '09:00', end: '17:00', days: ['mon', 'funday'] } },
+      'rules.egress.when',
+    );
+    expect(errors).toEqual([
+      'rules.egress.when.time_window.days: "funday" is not one of mon, tue, wed, thu, fri, sat, sun',
+    ]);
+  });
+
+  it('rejects nesting deeper than eight levels', () => {
+    let condition: Condition = { context: { environment: 'production' } };
+    for (let i = 0; i < 9; i++) {
+      condition = { not: condition };
+    }
+    const errors = validateCondition(condition, 'rules.shell_commands.when');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('conditions nest deeper than the maximum of 8 levels');
+  });
+
+  it('accepts nesting at exactly the cap', () => {
+    let condition: Condition = { context: { environment: 'production' } };
+    for (let i = 0; i < 8; i++) {
+      condition = { not: condition };
+    }
+    expect(validateCondition(condition, 'rules.shell_commands.when')).toEqual([]);
+  });
+});
+
+describe('validateConditions', () => {
+  it('reports each offending rule block by path', () => {
+    const errors = validateConditions({
+      egress: { when: { time_window: { start: '09:00', end: '99:00' } } },
+      shell_commands: { when: { time_window: { start: '09:00', end: '17:00', days: ['xyz'] } } },
+      tool_access: { when: { context: { environment: 'production' } } },
+    });
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('rules.egress.when.time_window.end');
+    expect(errors[1]).toContain('rules.shell_commands.when.time_window.days');
+  });
+});
+
+describe('timezoneIsKnown', () => {
+  it('accepts IANA zones, UTC aliases and fixed offsets', () => {
+    for (const zone of ['UTC', 'GMT', 'Etc/UTC', 'America/New_York', 'Europe/London', '+05:30', '-08:00', 'IST']) {
+      expect(timezoneIsKnown(zone), zone).toBe(true);
+    }
+  });
+
+  it('rejects identifiers no engine can resolve', () => {
+    for (const zone of ['Mars/Olympus_Mons', 'Not/AZone', '+99:00', '']) {
+      expect(timezoneIsKnown(zone), zone).toBe(false);
+    }
   });
 });
