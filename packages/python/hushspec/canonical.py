@@ -39,6 +39,7 @@ from hushspec.generated_contract import (
     BRIDGE_POLICY_KEYS,
     BRIDGE_TARGET_KEYS,
     BROWSER_AUTOMATION_KEYS,
+    CHANGELOG_ENTRY_KEYS,
     CODE_EXECUTION_KEYS,
     COMPUTER_USE_KEYS,
     CONDITION_KEYS,
@@ -220,7 +221,11 @@ _CONDITION.children = {
 _SECRET_PATTERN = _Obj(SECRET_PATTERN_KEYS, required=("name", "pattern", "severity"))
 _CONTROL_MAPPING = _Obj(CONTROL_MAPPING_KEYS, required=("framework", "control_id", "rule_paths"))
 _GOVERNANCE_METADATA = _Obj(GOVERNANCE_METADATA_KEYS)
-_GOVERNANCE_METADATA.children = {"controls": _ArrayOf(_CONTROL_MAPPING)}
+_CHANGELOG_ENTRY = _Obj(CHANGELOG_ENTRY_KEYS, required=("version", "date", "summary"))
+_GOVERNANCE_METADATA.children = {
+    "controls": _ArrayOf(_CONTROL_MAPPING),
+    "changelog": _ArrayOf(_CHANGELOG_ENTRY),
+}
 
 
 def _rule(keys: frozenset[str], defaults: dict[str, Any]) -> _Obj:
@@ -325,16 +330,16 @@ _POSTURE_ROOT.children = {
 
 # -- origins extension (schemas/hushspec-origins.v0.schema.json) ------------ #
 #
-# The presence-significant fields of spec section 3.3: `match: {}` is the
-# explicit default profile (an absent `match` never matches), and an overlay
-# field written empty overrides the base block where an absent one inherits.
+# `match` is the one presence-significant field of spec section 3.3: `match: {}`
+# is the explicit default profile, where an absent `match` never matches. The
+# overlay lists are not presence-significant -- an absent overlay list inherits
+# the base block and an empty one contributes nothing, which evaluate the same
+# (origins spec section 4) -- so an empty one is omitted like any other
+# no-default empty container.
 
 _ORIGIN_MATCH = _Obj(ORIGIN_MATCH_KEYS)
-_ORIGIN_TOOL_ACCESS = _Obj(
-    ORIGIN_TOOL_ACCESS_OVERLAY_KEYS,
-    preserve_empty=("allow", "block", "require_confirmation"),
-)
-_ORIGIN_EGRESS = _Obj(ORIGIN_EGRESS_OVERLAY_KEYS, preserve_empty=("allow", "block"))
+_ORIGIN_TOOL_ACCESS = _Obj(ORIGIN_TOOL_ACCESS_OVERLAY_KEYS)
+_ORIGIN_EGRESS = _Obj(ORIGIN_EGRESS_OVERLAY_KEYS)
 _ORIGIN_DATA = _Obj(
     ORIGIN_DATA_KEYS,
     defaults={
@@ -442,10 +447,9 @@ def project(spec: Any) -> dict[str, Any]:
 def _as_document(spec: Any) -> Mapping[str, Any]:
     """Accept a raw resolved mapping or a parsed ``HushSpec``.
 
-    A raw mapping is preferred (spec section 6): the typed model cannot express
-    the absent/empty distinction that section 3.3 preserves for origins overlay
-    fields, so a document that wrote ``tool_access: {allow: []}`` inside an
-    origins profile canonicalizes differently through the two entry points.
+    A raw mapping is the form spec section 6 recommends, but both reach the same
+    projection: the one presence-significant property (``OriginProfile.match``)
+    is an optional mapping in the typed model, so the two agree.
     """
     if isinstance(spec, Mapping):
         return spec

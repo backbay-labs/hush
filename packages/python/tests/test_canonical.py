@@ -1,7 +1,7 @@
 """Unit tests for the canonical projection and RFC 8785 serializer.
 
 The normative vectors live in ``test_canonical_vectors.py``. These cover the
-rules the 13 vectors cannot pin down on their own: ES6 exponent formatting,
+rules the 14 vectors cannot pin down on their own: ES6 exponent formatting,
 UTF-16 key order where it actually differs from code-point order, and the
 errors that keep an unresolved or unknown-field document from being hashed.
 """
@@ -176,7 +176,13 @@ def test_absent_rule_block_is_not_invented() -> None:
     assert canonical_json({"hushspec": "0.1.0", "rules": {}}) == '{"hushspec":"0.1.0"}'
 
 
-def test_origins_overlay_empties_are_presence_significant() -> None:
+def test_origins_overlay_empties_are_omitted() -> None:
+    """Spec section 3.3: only ``OriginProfile.match`` is presence-significant.
+
+    An absent overlay list inherits the base block and an empty one contributes
+    nothing -- the same evaluation result (origins spec section 4) -- so an
+    empty one is omitted, and the overlay it emptied is dropped in turn.
+    """
     written_empty = {
         "hushspec": "0.1.0",
         "extensions": {
@@ -187,8 +193,25 @@ def test_origins_overlay_empties_are_presence_significant() -> None:
         "hushspec": "0.1.0",
         "extensions": {"origins": {"profiles": [{"id": "p", "match": {}, "egress": {}}]}},
     }
-    assert '"egress":{"allow":[]}' in canonical_json(written_empty)
-    assert canonical_json(written_empty) != canonical_json(absent)
+    expected = (
+        '{"extensions":{"origins":{"default_behavior":"deny",'
+        '"profiles":[{"id":"p","match":{}}]}},"hushspec":"0.1.0"}'
+    )
+    assert canonical_json(written_empty) == expected
+    assert canonical_json(absent) == expected
+
+
+def test_origin_match_stays_presence_significant() -> None:
+    with_match = {
+        "hushspec": "0.1.0",
+        "extensions": {"origins": {"profiles": [{"id": "p", "match": {}}]}},
+    }
+    without_match = {
+        "hushspec": "0.1.0",
+        "extensions": {"origins": {"profiles": [{"id": "p"}]}},
+    }
+    assert '"match":{}' in canonical_json(with_match)
+    assert canonical_json(with_match) != canonical_json(without_match)
 
 
 def test_parsed_model_and_raw_mapping_agree() -> None:

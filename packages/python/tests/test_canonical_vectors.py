@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import yaml
 
-from hushspec import canonical_json, content_hash
+from hushspec import canonical_json, content_hash, validate
 from hushspec.parse import CoreSafeLoader
 from hushspec.resolve import create_builtin_loader, resolve
 from hushspec.schema import HushSpec
@@ -71,9 +71,22 @@ def _diff(expected: str, actual: str) -> str:
 
 
 def test_vector_directory_is_populated() -> None:
-    assert len(VECTOR_FILES) == 13, (
-        f"expected the 13 normative vectors in {VECTOR_DIR}, found {len(VECTOR_FILES)}"
+    assert len(VECTOR_FILES) == 14, (
+        f"expected the 14 normative vectors in {VECTOR_DIR}, found {len(VECTOR_FILES)}"
     )
+
+
+@pytest.mark.parametrize("path", VECTOR_FILES, ids=lambda path: path.stem)
+def test_vector_policy_is_a_valid_document(path: Path) -> None:
+    """Only valid documents have a canonical form (spec section 2.3).
+
+    A vector whose policy no conformant engine accepts would pin a hash no
+    engine can ever produce.
+    """
+    policy = _resolved_policy(path, _load_vector(path)["policy"])
+    spec = policy if isinstance(policy, HushSpec) else HushSpec.from_dict(policy)
+    result = validate(spec)
+    assert result.is_valid, f"{path.name}: {[str(error) for error in result.errors]}"
 
 
 @pytest.mark.parametrize("path", VECTOR_FILES, ids=lambda path: path.stem)

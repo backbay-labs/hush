@@ -112,11 +112,9 @@ def main() -> int:
     # has no resolved document and so no entry.
     #
     # This hashes the *parsed model*, not the raw tree, because that is the only
-    # form a resolved `extends` chain exists in. The typed model cannot express
-    # the absent/empty distinction canonical spec section 3.3 preserves for
-    # origins overlay fields, so the four SDKs agree here only as long as their
-    # models are lossy in the same way -- which is exactly what this comparison
-    # is for.
+    # form a resolved `extends` chain exists in. Both reach the same projection:
+    # the one presence-significant property canonical spec section 3.3 keeps,
+    # `OriginProfile.match`, is an optional mapping in every SDK's model.
     hashes: dict[str, str] = {}
     for group in bundle["groups"]:
         spec = None
