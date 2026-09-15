@@ -109,6 +109,9 @@ type OTLPReceiptSink struct {
 	endpoint string
 	headers  map[string]string
 	client   *http.Client
+	// timeout bounds one export request through a per-request context, so it
+	// applies to a caller-supplied Client as well as to the default one.
+	timeout time.Duration
 
 	batchSize     int
 	flushInterval time.Duration
@@ -183,6 +186,7 @@ func NewOTLPReceiptSink(options OTLPOptions) (*OTLPReceiptSink, error) {
 		endpoint:      endpoint,
 		headers:       headers,
 		client:        client,
+		timeout:       timeout,
 		batchSize:     batchSize,
 		flushInterval: flushInterval,
 		maxRetries:    maxRetries,
@@ -383,7 +387,9 @@ func (s *OTLPReceiptSink) export(batch []otlpLogRecord) []otlpLogRecord {
 // network error, a 429, or a 5xx. A 4xx is the collector rejecting the payload
 // and retrying it would only repeat the rejection.
 func (s *OTLPReceiptSink) post(body []byte) (retriable bool, err error) {
-	request, err := http.NewRequest(http.MethodPost, s.endpoint, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.endpoint, bytes.NewReader(body))
 	if err != nil {
 		return false, err
 	}

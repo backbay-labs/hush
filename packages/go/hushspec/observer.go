@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -746,9 +747,12 @@ type WebhookOptions struct {
 // the event, increments [WebhookObserver.Dropped] and reports through OnError.
 // Close drains what is queued and stops the goroutine.
 type WebhookObserver struct {
-	url      string
-	headers  map[string]string
-	client   *http.Client
+	url     string
+	headers map[string]string
+	client  *http.Client
+	// timeout bounds one POST through a per-request context, so it applies to
+	// a caller-supplied Client as well as to the default one.
+	timeout  time.Duration
 	onError  func(error)
 	denyOnly bool
 
@@ -785,6 +789,7 @@ func NewWebhookObserver(options WebhookOptions) (*WebhookObserver, error) {
 		url:      options.URL,
 		headers:  headers,
 		client:   client,
+		timeout:  timeout,
 		onError:  options.OnError,
 		denyOnly: options.DenyOnly,
 		queue:    make(chan ObserverEvent, maxQueue),
@@ -821,7 +826,9 @@ func (o *WebhookObserver) post(event ObserverEvent) {
 		o.report(fmt.Errorf("webhook observer: marshal %s: %w", event.Type, err))
 		return
 	}
-	request, err := http.NewRequest(http.MethodPost, o.url, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url, bytes.NewReader(body))
 	if err != nil {
 		o.report(fmt.Errorf("webhook observer: build request: %w", err))
 		return
