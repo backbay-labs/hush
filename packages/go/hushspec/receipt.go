@@ -141,6 +141,13 @@ func EvaluateAudited(spec *HushSpec, action *EvaluationAction, config *AuditConf
 }
 
 // ComputePolicyHash returns the SHA-256 hex digest of the JSON-serialized spec.
+//
+// Deprecated for policy identity: this digest covers Go's own struct
+// serialization, so the same document hashes differently in each SDK. The
+// portable policy identity is [ContentHash], the "sha256:"-prefixed digest of
+// the canonical form defined by spec/hushspec-canonical.md. Receipts keep this
+// legacy bare-hex digest until they move to the v0.2 schema (RFC 09 P2-04),
+// which switches PolicySummary.ContentHash to the canonical digest.
 func ComputePolicyHash(spec *HushSpec) string {
 	jsonBytes, err := json.Marshal(spec)
 	if err != nil {
