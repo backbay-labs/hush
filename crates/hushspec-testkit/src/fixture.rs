@@ -19,6 +19,8 @@ pub enum FixtureCategory {
     Evaluation,
     /// Canonical-form vector (spec/hushspec-canonical.md section 7).
     Hash,
+    /// Resolution vector (core spec 2.3: digest pins and chain provenance).
+    Resolve,
     PostureValid,
     PostureInvalid,
     OriginsValid,
@@ -36,6 +38,7 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("core/invalid", FixtureCategory::InvalidCore),
         ("core/evaluation", FixtureCategory::Evaluation),
         ("core/hash", FixtureCategory::Hash),
+        ("core/resolve", FixtureCategory::Resolve),
         ("core/merge", FixtureCategory::MergeBase), // categorized further below
         ("posture/evaluation", FixtureCategory::Evaluation),
         ("posture/merge", FixtureCategory::MergeBase),

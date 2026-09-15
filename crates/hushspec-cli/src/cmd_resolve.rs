@@ -17,6 +17,9 @@ pub struct ResolveArgs {
     /// states, ...) on the resolved document as failures
     #[arg(long)]
     strict: bool,
+
+    #[command(flatten)]
+    verify: crate::verify_opts::VerifyOnLoadArgs,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -26,7 +29,11 @@ enum ResolveOutputFormat {
 }
 
 pub fn run(args: ResolveArgs) -> i32 {
-    let resolved = match load(&args.policy) {
+    let options = match args.verify.to_options() {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    let resolved = match load_with(&args.policy, &options).map(|r| r.spec) {
         Ok(spec) => spec,
         Err(LoadError::NotFound(msg)) => {
             eprintln!("{} {msg}", "error".red());
@@ -89,8 +96,16 @@ pub(crate) enum LoadError {
 }
 
 /// Resolve a policy from a builtin reference or a filesystem path, consuming
-/// the whole `extends` chain.
+/// the whole `extends` chain, with no verification.
 pub(crate) fn load(reference: &str) -> Result<HushSpec, LoadError> {
+    load_with(reference, &hushspec::ResolveOptions::default()).map(|r| r.spec)
+}
+
+/// Resolve with full provenance and the given verify-on-load options.
+pub(crate) fn load_with(
+    reference: &str,
+    options: &hushspec::ResolveOptions,
+) -> Result<hushspec::Resolution, LoadError> {
     if let Some(yaml) = hushspec::load_builtin(reference) {
         let unresolved = HushSpec::parse(yaml).map_err(|e| {
             LoadError::Failed(format!("failed to parse builtin '{reference}': {e}"))
@@ -101,7 +116,7 @@ pub(crate) fn load(reference: &str) -> Result<HushSpec, LoadError> {
             format!("builtin:{reference}")
         };
         let loader = hushspec::create_composite_loader();
-        return hushspec::resolve_with_loader(&unresolved, Some(&source), &loader)
+        return hushspec::resolve_with_options(&unresolved, Some(&source), &loader, options)
             .map_err(|e| LoadError::Failed(format!("failed to resolve '{reference}': {e}")));
     }
 
@@ -110,7 +125,7 @@ pub(crate) fn load(reference: &str) -> Result<HushSpec, LoadError> {
         return Err(LoadError::NotFound(format!("file not found: {reference}")));
     }
 
-    hushspec::resolve_from_path_with_builtins(path)
+    hushspec::resolve_path_with_options(path, options)
         .map_err(|e| LoadError::Failed(format!("failed to resolve {reference}: {e}")))
 }
 

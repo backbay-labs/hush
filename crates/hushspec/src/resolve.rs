@@ -1,6 +1,10 @@
-use crate::{HushSpec, merge};
+use crate::{HushSpec, canonical, merge};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+#[cfg(feature = "signing")]
+use crate::signing::{Envelope, Keyring, VerifyOptions, verify_content_hash};
 
 /// Maximum depth of an `extends` chain. Beyond this the resolver fails closed
 /// rather than recursing until the stack overflows. Shipped policies are depth
@@ -29,6 +33,457 @@ pub enum ResolveError {
     Http { message: String },
     #[error("could not resolve reference '{reference}': {message}")]
     NotFound { reference: String, message: String },
+    /// The `#sha256:` fragment on an `extends` reference is not a well-formed
+    /// digest (core spec 2.3).
+    #[error("invalid digest pin on '{reference}': {message}")]
+    InvalidPin { reference: String, message: String },
+    /// The loaded base document's own content hash does not match the pin the
+    /// child declared (core spec 2.3, reason `digest_mismatch`).
+    #[error(
+        "digest_mismatch: '{document}' hashes to {actual}, but the extends reference pins {expected}"
+    )]
+    DigestMismatch {
+        document: String,
+        expected: String,
+        actual: String,
+    },
+    /// A document in the chain has no canonical form, so it cannot be hashed
+    /// or verified.
+    #[error("no canonical form for '{document}': {message}")]
+    Canonical { document: String, message: String },
+    /// `require_signature` was set and a document in the chain did not carry
+    /// a signature that verifies (signing spec 6.5). `status.reason` says why.
+    #[error("signature required for '{document}': {}", status.reason.as_deref().unwrap_or("unverified"))]
+    SignatureRequired {
+        document: String,
+        status: SignatureStatus,
+    },
+}
+
+// --------------------------------------------------------------------------
+// Verify-on-load and chain provenance (signing spec 6.5, receipt spec 4.2)
+// --------------------------------------------------------------------------
+
+/// Outcome of signature verification for one document at load time.
+///
+/// Mirrors `SignatureStatus` in the receipt schema: `verified` is true only
+/// when an envelope was present, its key was in the keyring, and every check
+/// of the signing spec passed. `reason` is the signing-spec reason code, or one
+/// of the load-time conditions `signature_missing`, `no_keyring`,
+/// `signing_unavailable`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignatureStatus {
+    pub verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl SignatureStatus {
+    /// A failed outcome carrying a reason code.
+    #[must_use]
+    pub fn failed(reason: &str, key_id: Option<String>) -> Self {
+        Self {
+            verified: false,
+            key_id,
+            verified_at: None,
+            reason: Some(reason.to_string()),
+        }
+    }
+}
+
+/// One document of a resolved `extends` chain, root first.
+///
+/// `content_hash` is the document canonicalized **on its own**, with its
+/// `extends` and `merge_strategy` stripped (receipt spec 4.2), so an auditor
+/// can check that a specific base was in force without re-resolving.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChainLink {
+    pub source: String,
+    pub content_hash: String,
+    /// Verification outcome for this document, when verification was
+    /// attempted. Builtins are never verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<SignatureStatus>,
+}
+
+/// A resolved policy with its provenance.
+#[derive(Clone, Debug)]
+pub struct Resolution {
+    /// The merged document (`extends` consumed).
+    pub spec: HushSpec,
+    /// Content hash of `spec` (canonical spec 5).
+    pub content_hash: String,
+    /// Every document that was merged, root first, leaf last. A policy with
+    /// no `extends` has exactly one link: itself.
+    pub chain: Vec<ChainLink>,
+    /// The leaf's verification outcome (the same value as the last link's).
+    pub signature: Option<SignatureStatus>,
+}
+
+impl Resolution {
+    /// Wrap a document that is already resolved (no `extends`) as a
+    /// single-link resolution. `source` names it in the chain (`"memory"`
+    /// when the caller has no better name).
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveError::Canonical`] when the document has no canonical form,
+    /// including when it still declares `extends`.
+    pub fn from_resolved(spec: &HushSpec, source: Option<&str>) -> Result<Self, ResolveError> {
+        let source = source.unwrap_or(MEMORY_SOURCE).to_string();
+        let content_hash =
+            canonical::content_hash(spec).map_err(|error| ResolveError::Canonical {
+                document: source.clone(),
+                message: error.to_string(),
+            })?;
+        Ok(Self {
+            spec: spec.clone(),
+            content_hash: content_hash.clone(),
+            chain: vec![ChainLink {
+                source,
+                content_hash,
+                signature: None,
+            }],
+            signature: None,
+        })
+    }
+
+    /// Whether the policy was produced by merging an `extends` chain (the
+    /// receipt then records the chain as `extends_chain`).
+    #[must_use]
+    pub fn had_extends(&self) -> bool {
+        self.chain.len() > 1
+    }
+}
+
+/// Source name recorded for a document that was not loaded from anywhere.
+pub const MEMORY_SOURCE: &str = "memory";
+
+/// Finds the detached signature for a source: the envelope's JSON bytes, or
+/// `None` when the source has no signature the locator knows how to find.
+pub type SignatureLocator = dyn Fn(&str) -> Result<Option<Vec<u8>>, ResolveError> + Send + Sync;
+
+/// How to resolve: whether signatures are required, which keys are trusted,
+/// and how to find detached envelopes.
+///
+/// The default resolves with no verification at all, which is what
+/// [`resolve_with_loader`] and the `resolve_from_path*` helpers do.
+#[derive(Default)]
+pub struct ResolveOptions {
+    /// Refuse to resolve unless every document loaded from an untrusted
+    /// source (anything but `builtin:`) either carries a `#sha256:` pin that
+    /// matches or a detached envelope that verifies against `keyring`
+    /// (signing spec 6.5). Fail-closed: without a keyring nothing verifies.
+    pub require_signature: bool,
+    /// Trusted keys. When set and `require_signature` is false, verification
+    /// runs opportunistically and its outcome is recorded.
+    #[cfg(feature = "signing")]
+    pub keyring: Option<Keyring>,
+    /// Clock, skew, and rollback inputs for verification.
+    #[cfg(feature = "signing")]
+    pub verify: Option<VerifyOptions>,
+    /// Where to look for detached envelopes. `None` uses the default: a file
+    /// source tries `<path>.sig` then `<stem>.sig` (signing spec 7.1); other
+    /// sources have no default location.
+    pub signature_locator: Option<Box<SignatureLocator>>,
+}
+
+impl std::fmt::Debug for ResolveOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_struct("ResolveOptions");
+        debug.field("require_signature", &self.require_signature);
+        #[cfg(feature = "signing")]
+        {
+            debug.field("keyring", &self.keyring.as_ref().map(|k| k.keys.len()));
+        }
+        debug
+            .field("signature_locator", &self.signature_locator.is_some())
+            .finish()
+    }
+}
+
+impl ResolveOptions {
+    /// Options that verify every non-builtin document against `keyring` and
+    /// refuse to resolve when one does not verify.
+    #[cfg(feature = "signing")]
+    #[must_use]
+    pub fn requiring(keyring: Keyring) -> Self {
+        Self {
+            require_signature: true,
+            keyring: Some(keyring),
+            verify: None,
+            signature_locator: None,
+        }
+    }
+}
+
+/// Split `reference#sha256:<hex>` into the reference and its pin.
+///
+/// # Errors
+///
+/// [`ResolveError::InvalidPin`] for a fragment that is present but is not a
+/// well-formed `sha256:` digest.
+pub fn split_digest_pin(reference: &str) -> Result<(&str, Option<&str>), ResolveError> {
+    let Some((base, fragment)) = reference.rsplit_once('#') else {
+        return Ok((reference, None));
+    };
+    let invalid = |message: &str| ResolveError::InvalidPin {
+        reference: reference.to_string(),
+        message: message.to_string(),
+    };
+    let Some(hex) = fragment.strip_prefix("sha256:") else {
+        return Err(invalid(
+            "expected a fragment of the form #sha256:<64 lowercase hex>",
+        ));
+    };
+    if hex.len() != 64 || !hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+        return Err(invalid("digest must be 64 lowercase hex characters"));
+    }
+    if base.is_empty() {
+        return Err(invalid("reference before the pin is empty"));
+    }
+    Ok((base, Some(fragment)))
+}
+
+/// The content hash of a document canonicalized on its own, with `extends`
+/// and `merge_strategy` stripped (receipt spec 4.2; the value a digest pin
+/// names, core spec 2.3).
+///
+/// # Errors
+///
+/// [`ResolveError::Canonical`] when the document has no canonical form.
+pub fn own_content_hash(spec: &HushSpec, source: &str) -> Result<String, ResolveError> {
+    let mut own = spec.clone();
+    own.extends = None;
+    own.merge_strategy = None;
+    canonical::content_hash(&own).map_err(|error| ResolveError::Canonical {
+        document: source.to_string(),
+        message: error.to_string(),
+    })
+}
+
+/// Default detached-envelope lookup for file sources (signing spec 7.1).
+#[cfg(feature = "signing")]
+fn default_locate_signature(source: &str) -> Result<Option<Vec<u8>>, ResolveError> {
+    if source.starts_with("builtin:")
+        || source == MEMORY_SOURCE
+        || source.starts_with("https://")
+        || source.starts_with("http://")
+    {
+        return Ok(None);
+    }
+    let path = Path::new(source);
+    let candidates = [
+        PathBuf::from(format!("{source}.sig")),
+        path.with_extension("sig"),
+    ];
+    for candidate in candidates {
+        if candidate.is_file() {
+            let bytes = fs::read(&candidate).map_err(|error| ResolveError::Read {
+                path: candidate.display().to_string(),
+                message: error.to_string(),
+            })?;
+            return Ok(Some(bytes));
+        }
+    }
+    Ok(None)
+}
+
+/// Verify one document of the chain against its resolved content hash.
+///
+/// Returns `Ok(None)` when verification was not attempted (builtins; no
+/// keyring and no requirement), `Ok(Some(status))` when it was, and
+/// `Err(SignatureRequired)` when `require_signature` is set and neither a
+/// matching pin nor a valid signature vouches for the document.
+fn verify_hop(
+    source: &str,
+    resolved_hash: &str,
+    options: &ResolveOptions,
+    pinned: bool,
+) -> Result<Option<SignatureStatus>, ResolveError> {
+    if source.starts_with("builtin:") {
+        return Ok(None);
+    }
+    let required = options.require_signature && !pinned;
+
+    #[cfg(feature = "signing")]
+    {
+        if options.keyring.is_none() && !options.require_signature {
+            return Ok(None);
+        }
+        let located = match &options.signature_locator {
+            Some(locator) => locator(source)?,
+            None => default_locate_signature(source)?,
+        };
+        let status = match (located, &options.keyring) {
+            (None, _) => SignatureStatus::failed("signature_missing", None),
+            (Some(_), None) => SignatureStatus::failed("no_keyring", None),
+            (Some(bytes), Some(keyring)) => {
+                let text = String::from_utf8_lossy(&bytes);
+                match Envelope::parse(&text) {
+                    Err(error) => SignatureStatus::failed(error.reason_code(), None),
+                    Ok(envelope) => {
+                        let verify = options.verify.clone().unwrap_or_default();
+                        match verify_content_hash(&envelope, Some(resolved_hash), keyring, &verify)
+                        {
+                            Ok(verified) => SignatureStatus {
+                                verified: true,
+                                key_id: Some(verified.key_id),
+                                verified_at: Some(
+                                    verify
+                                        .now
+                                        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                                ),
+                                reason: None,
+                            },
+                            Err(error) => SignatureStatus::failed(
+                                error.reason_code(),
+                                Some(envelope.key_id.clone()),
+                            ),
+                        }
+                    }
+                }
+            }
+        };
+        if required && !status.verified {
+            return Err(ResolveError::SignatureRequired {
+                document: source.to_string(),
+                status,
+            });
+        }
+        Ok(Some(status))
+    }
+
+    #[cfg(not(feature = "signing"))]
+    {
+        let _ = resolved_hash;
+        if required {
+            return Err(ResolveError::SignatureRequired {
+                document: source.to_string(),
+                status: SignatureStatus::failed("signing_unavailable", None),
+            });
+        }
+        Ok(None)
+    }
+}
+
+/// Resolve a parsed spec with verify-on-load and digest pinning.
+///
+/// `chain` is root first; each hop is pinned, verified, or both according to
+/// `options` (signing spec 6.5, core spec 2.3). A `#sha256:` pin is checked
+/// **always**, whether or not signatures are required.
+///
+/// Resolution walks the chain leaf to root (loading, cycle- and pin-checking
+/// each document), then folds root to leaf: merge, hash the merged document,
+/// and verify the document's own signature against that hash. The walk is
+/// iterative so the depth cap, not the native stack, bounds a long chain.
+///
+/// # Errors
+///
+/// The loader's errors, [`ResolveError::Cycle`], [`ResolveError::MaxDepth`],
+/// [`ResolveError::InvalidPin`], [`ResolveError::DigestMismatch`],
+/// [`ResolveError::Canonical`], or [`ResolveError::SignatureRequired`].
+pub fn resolve_with_options<F>(
+    spec: &HushSpec,
+    source: Option<&str>,
+    loader: &F,
+    options: &ResolveOptions,
+) -> Result<Resolution, ResolveError>
+where
+    F: Fn(&str, Option<&str>) -> Result<LoadedSpec, ResolveError>,
+{
+    struct Hop {
+        source: String,
+        spec: HushSpec,
+        pinned: bool,
+    }
+
+    // 1. Walk leaf -> root.
+    let leaf_source = source.unwrap_or(MEMORY_SOURCE).to_string();
+    let mut hops: Vec<Hop> = vec![Hop {
+        source: leaf_source.clone(),
+        spec: spec.clone(),
+        pinned: false,
+    }];
+    let mut seen: Vec<String> = source.map(str::to_string).into_iter().collect();
+    loop {
+        let current = hops.last().expect("at least the leaf");
+        let Some(reference) = current.spec.extends.as_deref() else {
+            break;
+        };
+        // Fail closed on unbounded (acyclic) chains.
+        if hops.len() > MAX_EXTENDS_DEPTH {
+            return Err(ResolveError::MaxDepth);
+        }
+        let (reference, pin) = split_digest_pin(reference)?;
+        let from = (current.source != MEMORY_SOURCE).then_some(current.source.as_str());
+        let loaded = loader(reference, from)?;
+        if let Some(index) = seen.iter().position(|entry| entry == &loaded.source) {
+            let mut cycle = seen[index..].to_vec();
+            cycle.push(loaded.source);
+            return Err(ResolveError::Cycle {
+                chain: cycle.join(" -> "),
+            });
+        }
+        if let Some(pin) = pin {
+            let actual = own_content_hash(&loaded.spec, &loaded.source)?;
+            if actual != pin {
+                return Err(ResolveError::DigestMismatch {
+                    document: loaded.source,
+                    expected: pin.to_string(),
+                    actual,
+                });
+            }
+        }
+        seen.push(loaded.source.clone());
+        hops.push(Hop {
+            source: loaded.source,
+            spec: loaded.spec,
+            pinned: pin.is_some(),
+        });
+    }
+
+    // 2. Fold root -> leaf.
+    let mut resolved: Option<HushSpec> = None;
+    let mut chain = Vec::with_capacity(hops.len());
+    let mut signature = None;
+    for hop in hops.iter().rev() {
+        let merged = match resolved.take() {
+            None => hop.spec.clone(),
+            Some(parent) => merge(&parent, &hop.spec),
+        };
+        let resolved_hash =
+            canonical::content_hash(&merged).map_err(|error| ResolveError::Canonical {
+                document: hop.source.clone(),
+                message: error.to_string(),
+            })?;
+        let status = verify_hop(&hop.source, &resolved_hash, options, hop.pinned)?;
+        chain.push(ChainLink {
+            source: hop.source.clone(),
+            content_hash: own_content_hash(&hop.spec, &hop.source)?,
+            signature: status.clone(),
+        });
+        signature = status;
+        resolved = Some(merged);
+    }
+    let resolved = resolved.expect("at least the leaf");
+    let content_hash =
+        canonical::content_hash(&resolved).map_err(|error| ResolveError::Canonical {
+            document: leaf_source,
+            message: error.to_string(),
+        })?;
+    Ok(Resolution {
+        spec: resolved,
+        content_hash,
+        chain,
+        signature,
+    })
 }
 
 /// Embedded built-in ruleset YAML strings.
@@ -567,7 +1022,8 @@ pub fn create_composite_loader() -> impl Fn(&str, Option<&str>) -> Result<Loaded
     }
 }
 
-/// Resolve a parsed spec using a caller-provided loader.
+/// Resolve a parsed spec using a caller-provided loader, with no
+/// verification (see [`resolve_with_options`] for verify-on-load).
 pub fn resolve_with_loader<F>(
     spec: &HushSpec,
     source: Option<&str>,
@@ -576,11 +1032,7 @@ pub fn resolve_with_loader<F>(
 where
     F: Fn(&str, Option<&str>) -> Result<LoadedSpec, ResolveError>,
 {
-    let mut stack = Vec::new();
-    if let Some(source) = source {
-        stack.push(source.to_string());
-    }
-    resolve_inner(spec, source, loader, &mut stack, 0)
+    resolve_with_options(spec, source, loader, &ResolveOptions::default()).map(|r| r.spec)
 }
 
 pub fn resolve_from_path(path: impl AsRef<Path>) -> Result<HushSpec, ResolveError> {
@@ -593,45 +1045,24 @@ pub fn resolve_from_path(path: impl AsRef<Path>) -> Result<HushSpec, ResolveErro
 ///
 /// This supports `extends: builtin:default` in addition to filesystem paths.
 pub fn resolve_from_path_with_builtins(path: impl AsRef<Path>) -> Result<HushSpec, ResolveError> {
+    resolve_path_with_options(path, &ResolveOptions::default()).map(|r| r.spec)
+}
+
+/// Resolve the policy file at `path` with the composite loader and full
+/// provenance: chain links, content hash, and verification outcome.
+///
+/// # Errors
+///
+/// As [`resolve_with_options`], plus [`ResolveError::Read`] and
+/// [`ResolveError::Parse`] for the leaf file itself.
+pub fn resolve_path_with_options(
+    path: impl AsRef<Path>,
+    options: &ResolveOptions,
+) -> Result<Resolution, ResolveError> {
     let path = canonical_path(path.as_ref())?;
     let spec = load_spec_from_file(&path)?;
     let loader = create_composite_loader();
-    resolve_with_loader(&spec, Some(&path.to_string_lossy()), &loader)
-}
-
-fn resolve_inner<F>(
-    spec: &HushSpec,
-    source: Option<&str>,
-    loader: &F,
-    stack: &mut Vec<String>,
-    depth: usize,
-) -> Result<HushSpec, ResolveError>
-where
-    F: Fn(&str, Option<&str>) -> Result<LoadedSpec, ResolveError>,
-{
-    let Some(reference) = spec.extends.as_deref() else {
-        return Ok(spec.clone());
-    };
-
-    // Fail closed on unbounded (acyclic) chains before the native stack blows up.
-    if depth >= MAX_EXTENDS_DEPTH {
-        return Err(ResolveError::MaxDepth);
-    }
-
-    let loaded = loader(reference, source)?;
-    if let Some(index) = stack.iter().position(|entry| entry == &loaded.source) {
-        let mut cycle = stack[index..].to_vec();
-        cycle.push(loaded.source);
-        return Err(ResolveError::Cycle {
-            chain: cycle.join(" -> "),
-        });
-    }
-
-    stack.push(loaded.source.clone());
-    let resolved_parent =
-        resolve_inner(&loaded.spec, Some(&loaded.source), loader, stack, depth + 1)?;
-    stack.pop();
-    Ok(merge(&resolved_parent, spec))
+    resolve_with_options(&spec, Some(&path.to_string_lossy()), &loader, options)
 }
 
 fn load_from_filesystem(reference: &str, from: Option<&str>) -> Result<LoadedSpec, ResolveError> {

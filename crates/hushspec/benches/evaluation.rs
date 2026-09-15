@@ -1,6 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use hushspec::receipt::compute_policy_hash;
-use hushspec::{AuditConfig, EvaluationAction, HushSpec, evaluate, evaluate_audited};
+use hushspec::{
+    AuditConfig, AuditContext, EvaluationAction, HushSpec, Resolution, evaluate, evaluate_audited,
+};
 use std::hint::black_box;
 
 /// The embedded `default` ruleset (generated from rulesets/default.yaml by
@@ -49,17 +50,33 @@ fn bench_audited(c: &mut Criterion) {
     let disabled = AuditConfig {
         enabled: false,
         include_rule_trace: false,
-        redact_content: true,
+        record_duration: false,
     };
+    let resolution = Resolution::from_resolved(&spec, None).expect("resolved");
+    let ctx = AuditContext::default();
 
     c.bench_function("evaluate_audited/enabled/default/tool_call", |b| {
-        b.iter(|| evaluate_audited(black_box(&spec), black_box(&tool), black_box(&enabled)))
+        b.iter(|| {
+            evaluate_audited(
+                black_box(&resolution),
+                black_box(&tool),
+                black_box(&enabled),
+                black_box(&ctx),
+            )
+        })
     });
     c.bench_function("evaluate_audited/disabled/default/tool_call", |b| {
-        b.iter(|| evaluate_audited(black_box(&spec), black_box(&tool), black_box(&disabled)))
+        b.iter(|| {
+            evaluate_audited(
+                black_box(&resolution),
+                black_box(&tool),
+                black_box(&disabled),
+                black_box(&ctx),
+            )
+        })
     });
     c.bench_function("policy_hash/default", |b| {
-        b.iter(|| compute_policy_hash(black_box(&spec)))
+        b.iter(|| hushspec::content_hash(black_box(&spec)))
     });
 }
 

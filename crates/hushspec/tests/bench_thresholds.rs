@@ -5,7 +5,9 @@
 //! Ignored by default (cargo test --workspace stays fast); CI runs:
 //!   cargo test -p hushspec --release --test bench_thresholds -- --ignored --nocapture
 
-use hushspec::{AuditConfig, EvaluationAction, HushSpec, evaluate, evaluate_audited};
+use hushspec::{
+    AuditConfig, AuditContext, EvaluationAction, HushSpec, Resolution, evaluate, evaluate_audited,
+};
 use std::time::Instant;
 
 const BATCHES: usize = 60;
@@ -56,17 +58,21 @@ fn receipt_overhead_within_budget() {
     let disabled = AuditConfig {
         enabled: false,
         include_rule_trace: false,
-        redact_content: true,
+        record_duration: false,
     };
+    // Identity and provenance come from the resolution, computed once at load
+    // time; the per-receipt cost excludes hashing (receipt spec 5).
+    let resolution = Resolution::from_resolved(&spec, None).expect("resolved");
+    let ctx = AuditContext::default();
 
     let t_eval = median_iteration_us(|| {
         std::hint::black_box(evaluate(&spec, &action));
     });
     let t_disabled = median_iteration_us(|| {
-        std::hint::black_box(evaluate_audited(&spec, &action, &disabled));
+        std::hint::black_box(evaluate_audited(&resolution, &action, &disabled, &ctx));
     });
     let t_enabled = median_iteration_us(|| {
-        std::hint::black_box(evaluate_audited(&spec, &action, &enabled));
+        std::hint::black_box(evaluate_audited(&resolution, &action, &enabled, &ctx));
     });
 
     let disabled_overhead = (t_disabled - t_eval).max(0.0);

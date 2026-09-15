@@ -23,6 +23,12 @@ pub struct HashArgs {
     /// Treat validation warnings on the resolved document as failures
     #[arg(long)]
     strict: bool,
+
+    /// Hash the document on its own, with `extends` and `merge_strategy`
+    /// stripped and no resolution: the value a `#sha256:` digest pin names
+    /// and a receipt records for a chain link (core spec 2.3)
+    #[arg(long)]
+    own: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -53,6 +59,19 @@ pub fn run(args: HashArgs) -> i32 {
             return 1;
         }
     };
+
+    if args.own {
+        return match hushspec::own_content_hash(&spec, &args.policy) {
+            Ok(digest) => {
+                println!("{digest}");
+                0
+            }
+            Err(error) => {
+                eprintln!("{} {}", "error".red(), error);
+                1
+            }
+        };
+    }
 
     // Only resolved documents have a canonical form (canonical spec 2.1).
     // A document that declares `extends` goes through the same resolution

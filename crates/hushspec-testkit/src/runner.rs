@@ -36,6 +36,8 @@ pub fn run_conformance(fixtures: &[TestFixture]) -> Vec<TestResult> {
 
             FixtureCategory::Hash => test_hash_fixture(fixture),
 
+            FixtureCategory::Resolve => test_resolve_fixture(fixture),
+
             FixtureCategory::MergeBase
             | FixtureCategory::MergeChild
             | FixtureCategory::MergeExpected => {
@@ -278,6 +280,129 @@ fn test_hash_fixture(fixture: &TestFixture) -> TestResult {
         category: fixture.category,
         passed: true,
         message: format!("OK ({digest})"),
+    }
+}
+
+/// A resolution vector (core spec 2.3, receipt spec 4.2): an inline leaf
+/// whose `extends` references builtins, expected to resolve to a given
+/// content hash and chain, or to be rejected with a given reason.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveVector {
+    hushspec_resolve: String,
+    #[allow(dead_code)]
+    description: String,
+    policy: serde_json::Value,
+    expect: ResolveExpect,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveExpect {
+    #[serde(default)]
+    #[allow(dead_code)]
+    resolves: Option<bool>,
+    #[serde(default)]
+    content_hash: Option<String>,
+    #[serde(default)]
+    chain: Option<Vec<ResolveLink>>,
+    #[serde(default)]
+    rejects: Option<String>,
+}
+
+#[derive(serde::Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+struct ResolveLink {
+    source: String,
+    content_hash: String,
+}
+
+fn resolve_reason(error: &hushspec::ResolveError) -> &'static str {
+    use hushspec::ResolveError as E;
+    match error {
+        E::DigestMismatch { .. } => "digest_mismatch",
+        E::InvalidPin { .. } => "invalid_pin",
+        E::Cycle { .. } => "cycle",
+        E::MaxDepth => "max_depth",
+        E::NotFound { .. } => "not_found",
+        E::SignatureRequired { .. } => "signature_required",
+        _ => "error",
+    }
+}
+
+fn test_resolve_fixture(fixture: &TestFixture) -> TestResult {
+    let path = fixture.path.display().to_string();
+    let fail = |message: String| TestResult {
+        fixture_path: path.clone(),
+        category: fixture.category,
+        passed: false,
+        message,
+    };
+    let vector: ResolveVector = match serde_yaml::from_str(&fixture.content) {
+        Ok(vector) => vector,
+        Err(error) => return fail(format!("Invalid resolve vector: {error}")),
+    };
+    if vector.hushspec_resolve != "0.1.0" {
+        return fail(format!(
+            "Unsupported hushspec_resolve version: {}",
+            vector.hushspec_resolve
+        ));
+    }
+    let yaml = match serde_yaml::to_string(&vector.policy) {
+        Ok(yaml) => yaml,
+        Err(error) => return fail(format!("Failed to re-encode the policy: {error}")),
+    };
+    let spec = match HushSpec::parse(&yaml) {
+        Ok(spec) => spec,
+        Err(error) => return fail(format!("Policy failed to parse: {error}")),
+    };
+    let loader = hushspec::create_composite_loader();
+    let result =
+        hushspec::resolve_with_options(&spec, None, &loader, &hushspec::ResolveOptions::default());
+    match (&vector.expect.rejects, result) {
+        (Some(expected), Err(error)) if resolve_reason(&error) == expected => TestResult {
+            fixture_path: path,
+            category: fixture.category,
+            passed: true,
+            message: format!("Correctly rejected: {expected}"),
+        },
+        (Some(expected), Err(error)) => fail(format!(
+            "Expected rejection {expected}, got {}: {error}",
+            resolve_reason(&error)
+        )),
+        (Some(expected), Ok(_)) => fail(format!("Expected rejection {expected}, but it resolved")),
+        (None, Err(error)) => fail(format!("Expected to resolve: {error}")),
+        (None, Ok(resolution)) => {
+            if let Some(expected) = &vector.expect.content_hash
+                && expected != &resolution.content_hash
+            {
+                return fail(format!(
+                    "content_hash mismatch: expected {expected}, got {}",
+                    resolution.content_hash
+                ));
+            }
+            if let Some(expected) = &vector.expect.chain {
+                let actual: Vec<ResolveLink> = resolution
+                    .chain
+                    .iter()
+                    .map(|link| ResolveLink {
+                        source: link.source.clone(),
+                        content_hash: link.content_hash.clone(),
+                    })
+                    .collect();
+                if &actual != expected {
+                    return fail(format!(
+                        "chain mismatch: expected {expected:?}, got {actual:?}"
+                    ));
+                }
+            }
+            TestResult {
+                fixture_path: path,
+                category: fixture.category,
+                passed: true,
+                message: format!("OK ({} link(s))", resolution.chain.len()),
+            }
+        }
     }
 }
 
