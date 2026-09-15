@@ -47,7 +47,7 @@ describe('version acceptance (D14)', () => {
   it('reports the supported minors when rejecting a version', () => {
     const result = validate({ hushspec: '0.9.0' });
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('unsupported_version');
+    expect(result.errors[0].code).toBe('E002');
     expect(result.errors[0].message).toBe(
       'unsupported hushspec version: 0.9.0 (this engine accepts minor versions 0.1, 0.2)',
     );

@@ -195,13 +195,24 @@ describe('shared fixture corpus', () => {
 
   for (const dir of invalidDirs) {
     for (const fixturePath of listYamlFiles(dir)) {
-      it(`rejects ${path.relative(fixturesRoot, fixturePath)}`, () => {
-        const result = parse(readFileSync(fixturePath, 'utf8'));
-        if (!result.ok) {
-          expect(result.ok).toBe(false);
-          return;
+      const relative = path.relative(fixturesRoot, fixturePath);
+      it(`rejects ${relative}`, () => {
+        const refusal = refuse(fixturePath);
+        expect(refusal, `${relative} was accepted`).not.toBeUndefined();
+        if (refusal === undefined) return;
+
+        // Every `invalid/` vector carries a sidecar naming the registered
+        // code its rejection must carry (core spec 8 Level 1), so "the
+        // document was rejected" is checked as "rejected for this reason".
+        const expected = loadSidecar(fixturePath);
+        expect(expected, `${relative} has no .expect.yaml sidecar`).not.toBeUndefined();
+        if (expected === undefined) return;
+
+        expect(expected.reject, `${relative}: a sidecar describes a refusal`).toBe(true);
+        expect(refusal.code, `${relative}: ${refusal.message}`).toBe(expected.code);
+        if (expected.message_contains != null) {
+          expect(refusal.message).toContain(expected.message_contains);
         }
-        expect(validate(result.value).valid).toBe(false);
       });
     }
   }
@@ -288,6 +299,33 @@ describe('shared fixture corpus', () => {
   }
 });
 
+/** A `<name>.expect.yaml` sidecar (`schemas/hushspec-error-codes.v0.schema.json`). */
+interface ExpectedError {
+  reject: boolean;
+  /** The registered code (`spec/registries/error-codes.yaml`). */
+  code: string;
+  /** Literal substring the diagnostic must contain, where the code alone is broad. */
+  message_contains?: string;
+}
+
+function loadSidecar(fixturePath: string): ExpectedError | undefined {
+  const sidecar = fixturePath.replace(/\.(ya?ml)$/, '.expect.yaml');
+  if (!existsSync(sidecar)) return undefined;
+  return YAML.parse(readFileSync(sidecar, 'utf8')) as ExpectedError;
+}
+
+/**
+ * Parse then validate an `invalid/` vector, reporting the refusal -- whichever
+ * layer produced it -- as the code and message a user would see.
+ */
+function refuse(fixturePath: string): { code: string; message: string } | undefined {
+  const parsed = parse(readFileSync(fixturePath, 'utf8'));
+  if (!parsed.ok) return { code: parsed.code, message: parsed.error };
+  const result = validate(parsed.value);
+  if (result.valid) return undefined;
+  return { code: result.errors[0].code, message: result.errors[0].message };
+}
+
 function listYamlFiles(subdir: string): string[] {
   return listYamlFilesIn(path.join(fixturesRoot, subdir));
 }
@@ -295,10 +333,15 @@ function listYamlFiles(subdir: string): string[] {
 function listYamlFilesIn(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
-    .filter(file => file.endsWith('.yaml') || file.endsWith('.yml'))
+    // `<name>.expect.yaml` is a vector's sidecar, never a vector.
+    .filter(file => (file.endsWith('.yaml') || file.endsWith('.yml'))
+      && !file.endsWith(SIDECAR_SUFFIX))
     .sort()
     .map(file => path.join(dir, file));
 }
+
+/** The expected-error sidecar extension. */
+const SIDECAR_SUFFIX = '.expect.yaml';
 
 /**
  * Every directory under `root` that is a merge fixture: one holding a

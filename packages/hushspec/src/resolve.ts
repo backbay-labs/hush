@@ -21,7 +21,18 @@ export interface LoadedSpec {
 
 export type ResolveResult =
   | { ok: true; value: HushSpec }
-  | { ok: false; error: string };
+  | {
+    ok: false;
+    error: string;
+    /**
+     * The registered code for a refused chain: always `E010`
+     * (`spec/registries/error-codes.yaml`), whatever the reason -- a
+     * reference no loader serves, a digest pin that does not match, a cycle,
+     * a chain past the depth cap, or a hop that fails a required signature
+     * check.
+     */
+    code: 'E010';
+  };
 
 /** Synchronous `extends` loader. */
 export type Loader = (reference: string, from?: string) => LoadedSpec;
@@ -289,7 +300,7 @@ export function resolve(spec: HushSpec, options: ResolveInput = {}): ResolveResu
     enforcePins(hops);
     return { ok: true, value: foldChain(hops)[hops.length - 1]! };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: error instanceof Error ? error.message : String(error), code: 'E010' };
   }
 }
 
@@ -324,7 +335,7 @@ export function resolveFromFile(filePath: string): ResolveResult {
   try {
     ({ source, spec } = readPolicyFile(filePath));
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    return { ok: false, error: error instanceof Error ? error.message : String(error), code: 'E010' };
   }
   return resolve(spec, { source, loader: createCompositeLoader() });
 }

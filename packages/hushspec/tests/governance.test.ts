@@ -105,7 +105,7 @@ describe('governance metadata', () => {
     expect(result.valid).toBe(false);
     expect(result.valid).toBe(false);
     expect(result.errors.map(e => e.message).join('\n')).toContain(
-      'metadata.changelog[0].date is required',
+      'metadata.changelog[0]: missing field `date`',
     );
   });
 

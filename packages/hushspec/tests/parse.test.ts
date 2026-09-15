@@ -16,7 +16,7 @@ describe('parse', () => {
     const result = parse('hushspec: "0.1.0"\nunknown_field: true\n');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown top-level field');
+      expect(result.error).toContain('unknown field `unknown_field`');
     }
   });
 
@@ -24,7 +24,7 @@ describe('parse', () => {
     const result = parse('hushspec: "0.1.0"\nrules:\n  nonexistent_rule:\n    enabled: true\n');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown rule');
+      expect(result.error).toContain('rules: unknown field `nonexistent_rule`');
     }
   });
 
@@ -38,7 +38,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.egress');
+      expect(result.error).toContain('rules.egress: unknown field `extra_field`');
     }
   });
 
@@ -76,7 +76,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.browser_automation');
+      expect(result.error).toContain('rules.browser_automation: unknown field `extra_field`');
     }
   });
 
@@ -117,7 +117,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.code_execution');
+      expect(result.error).toContain('rules.code_execution: unknown field `extra_field`');
     }
   });
 
@@ -247,7 +247,7 @@ describe('validate', () => {
     const spec = parseOrThrow('hushspec: "99.0.0"\n');
     const result = validate(spec);
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('unsupported_version');
+    expect(result.errors[0].code).toBe('E002');
   });
 
   it('rejects duplicate secret pattern names', () => {

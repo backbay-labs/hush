@@ -50,7 +50,13 @@ export {
   MAX_NODE_COUNT,
   type ParseResult,
 } from './parse.js';
-export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
+export {
+  validate,
+  isSafeRegex,
+  type ValidationResult,
+  type ValidationError,
+  type ErrorCode,
+} from './validate.js';
 export { merge } from './merge.js';
 export {
   canonicalJson,

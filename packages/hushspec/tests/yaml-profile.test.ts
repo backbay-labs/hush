@@ -63,7 +63,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('must be a boolean');
+    expect(result.error).toContain('expected a boolean');
   });
 
   it('rejects duplicate mapping keys', () => {
@@ -73,7 +73,7 @@ name: second
 `);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('unique');
+    expect(result.error).toContain('duplicate entry with key "name"');
   });
 
   it('rejects tabs used as indentation', () => {

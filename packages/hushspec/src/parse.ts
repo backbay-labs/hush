@@ -1,10 +1,20 @@
-import YAML from 'yaml';
+import YAML, { isScalar } from 'yaml';
 import type { HushSpec } from './schema.js';
-import { validateForParse } from './validate.js';
+import { validateForParse, type ErrorCode } from './validate.js';
 
 export type ParseResult =
   | { ok: true; value: HushSpec }
-  | { ok: false; error: string };
+  | {
+    ok: false;
+    error: string;
+    /**
+     * The registered code for this refusal
+     * (`spec/registries/error-codes.yaml`). Every shape, type, profile and
+     * syntax failure is `E001`; a document whose `hushspec` names a version
+     * this engine does not accept is `E002`.
+     */
+    code: ErrorCode;
+  };
 
 /** Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default). */
 export const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -24,54 +34,54 @@ export const MAX_NODE_COUNT = 100_000;
  */
 export function parse(yaml: string): ParseResult {
   if (byteLength(yaml) > MAX_DOCUMENT_BYTES) {
-    return {
-      ok: false,
-      error: `YAML parse error: document exceeds the maximum size of ${MAX_DOCUMENT_BYTES} bytes`,
-    };
+    return parseError(`document exceeds the maximum size of ${MAX_DOCUMENT_BYTES} bytes`);
   }
 
   const violation = yamlProfileViolation(yaml);
   if (violation != null) {
-    return { ok: false, error: `YAML parse error: ${violation}` };
+    return parseError(violation);
   }
 
   let doc: unknown;
+  // A duplicate mapping key is reported by the `yaml` package without naming
+  // the key; this records it so the diagnostic can say which one, the way the
+  // reference engine's deserializer does.
+  let duplicateKey: string | undefined;
   try {
     doc = YAML.parse(yaml, {
       version: '1.2',
       schema: 'core',
-      uniqueKeys: true,
+      uniqueKeys: (a, b) => {
+        const equal = a === b || (isScalar(a) && isScalar(b) && a.value === b.value);
+        if (equal && duplicateKey === undefined) {
+          duplicateKey = isScalar(a) ? String(a.value) : String(a);
+        }
+        return equal;
+      },
       // Anchors and aliases are rejected by the pre-scan above; refuse to
       // expand any that slip past it rather than silently duplicating nodes.
       maxAliasCount: 0,
       merge: false,
     });
   } catch (error) {
-    return {
-      ok: false,
-      error: `YAML parse error: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return parseError(describeYamlError(error, duplicateKey));
   }
 
   const measured = measure(doc, 1);
   if (measured.depth > MAX_DOCUMENT_DEPTH) {
-    return {
-      ok: false,
-      error: `YAML parse error: document nesting exceeds the maximum depth of ${MAX_DOCUMENT_DEPTH}`,
-    };
+    return parseError(`document nesting exceeds the maximum depth of ${MAX_DOCUMENT_DEPTH}`);
   }
   if (measured.nodes > MAX_NODE_COUNT) {
-    return {
-      ok: false,
-      error: `YAML parse error: document exceeds the maximum node count of ${MAX_NODE_COUNT}`,
-    };
+    return parseError(`document exceeds the maximum node count of ${MAX_NODE_COUNT}`);
   }
 
   const result = validateForParse(doc);
   if (!result.valid) {
+    const first = result.errors[0];
     return {
       ok: false,
-      error: result.errors[0]?.message ?? 'invalid HushSpec document',
+      error: first?.message ?? 'invalid HushSpec document',
+      code: first?.code ?? 'E001',
     };
   }
 
@@ -85,6 +95,24 @@ export function parseOrThrow(yaml: string): HushSpec {
     throw new Error(result.error);
   }
   return result.value;
+}
+
+/** A refusal at the YAML layer: always E001 (error-code registry). */
+function parseError(detail: string): ParseResult {
+  return { ok: false, error: `YAML parse error: ${detail}`, code: 'E001' };
+}
+
+/**
+ * The `yaml` package's diagnostic, with a duplicate-key failure respelled to
+ * name the key -- `Map keys must be unique` says which line but not which key,
+ * and the key is what an author needs.
+ */
+function describeYamlError(error: unknown, duplicateKey: string | undefined): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (duplicateKey === undefined) return message;
+  const position = /at line (\d+), column (\d+)/.exec(message);
+  const where = position == null ? '' : ` at line ${position[1]} column ${position[2]}`;
+  return `duplicate entry with key ${JSON.stringify(duplicateKey)}${where}`;
 }
 
 function byteLength(value: string): number {
