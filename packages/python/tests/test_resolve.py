@@ -196,3 +196,43 @@ class TestExtendsDepthCap:
         assert resolved.rules is not None
         assert resolved.rules.tool_access is not None
         assert resolved.rules.tool_access.default.value == "block"
+
+
+class TestLibraryBuiltins:
+    """The vertical library ships as built-ins under `library/<vertical>/<name>`.
+
+    The prefix is a location, not a rename: each document keeps its own
+    ``name``. A policy can therefore extend a library policy with no file
+    system, which is what the library test suites do.
+    """
+
+    def test_every_builtin_name_loads(self):
+        from hushspec.builtins import BUILTIN_NAMES, load_builtin
+
+        assert len(BUILTIN_NAMES) > 6
+        library = [name for name in BUILTIN_NAMES if name.startswith("library/")]
+        assert len(library) == 8, library
+        for name in BUILTIN_NAMES:
+            spec = load_builtin(name)
+            assert spec is not None, name
+            assert spec.name == name.rsplit("/", 1)[-1], name
+
+    def test_a_library_policy_resolves_through_extends(self):
+        from hushspec.builtins import load_builtin
+        from hushspec.resolve import create_composite_loader, resolve
+
+        leaf = load_builtin("builtin:library/healthcare/hipaa-base")
+        assert leaf is not None
+        assert leaf.extends == "builtin:strict"
+
+        parsed = parse_or_raise(
+            'hushspec: "0.1.0"\n'
+            "name: leaf\n"
+            'extends: "builtin:library/healthcare/hipaa-base"\n'
+        )
+        ok, resolved = resolve(parsed, loader=create_composite_loader())
+        assert ok, resolved
+        names = {
+            pattern.name for pattern in resolved.rules.secret_patterns.patterns
+        }
+        assert "medical_record_number" in names

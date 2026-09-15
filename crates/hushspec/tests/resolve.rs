@@ -117,16 +117,38 @@ rules:
     assert_eq!(egress.default, hushspec::DefaultAction::Block);
 }
 
+/// Every embedded policy loads and parses, and names itself.
+///
+/// A `rulesets/` preset is named for the file (`strict`); a library policy is
+/// embedded under `library/<vertical>/<name>` and names itself with the last
+/// segment (`hipaa-base`), because the prefix is a location, not a rename.
 #[test]
-fn builtin_loader_resolves_all_six_rulesets() {
+fn builtin_loader_resolves_every_embedded_policy() {
+    assert!(
+        BUILTIN_NAMES.len() > 6,
+        "the vertical library should be embedded alongside the presets"
+    );
     for name in BUILTIN_NAMES {
         let yaml = load_builtin(name);
         assert!(yaml.is_some(), "builtin '{name}' should be available");
         let spec = hushspec::HushSpec::parse(yaml.unwrap());
         assert!(spec.is_ok(), "builtin '{name}' should parse without error");
         let spec = spec.unwrap();
-        assert_eq!(spec.name.as_deref(), Some(*name));
+        let expected = name.rsplit('/').next().unwrap();
+        assert_eq!(spec.name.as_deref(), Some(expected));
     }
+}
+
+/// The library is reachable by the reference an `extends` would use.
+#[test]
+fn builtin_loader_resolves_the_library_by_prefixed_name() {
+    let yaml = load_builtin("builtin:library/healthcare/hipaa-base")
+        .expect("the library is embedded as a builtin");
+    let spec = hushspec::HushSpec::parse(yaml).expect("the library policy parses");
+    assert_eq!(spec.name.as_deref(), Some("hipaa-base"));
+    // The embedded leaf still declares its own base, so resolving it is what
+    // materializes the full document.
+    assert_eq!(spec.extends.as_deref(), Some("builtin:strict"));
 }
 
 #[test]

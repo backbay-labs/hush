@@ -477,6 +477,28 @@ Ready-to-use policies live in [`rulesets/`](./rulesets/):
 | `remote-desktop` | Computer use agent sessions |
 | `panic` | Deny-all emergency override |
 
+The compliance-mapped [vertical library](./library/) is embedded the same way,
+under `builtin:library/<vertical>/<name>`:
+
+```yaml
+extends: "builtin:library/healthcare/hipaa-base"
+```
+
+| Builtin | Frameworks |
+|---------|------------|
+| `library/healthcare/hipaa-base` | `hipaa-2013` |
+| `library/finance/soc2-base` | `soc2-tsc-2017` |
+| `library/finance/pci-dss` | `pci-dss-4.0` |
+| `library/government/fedramp-base` | `nist-800-53-r5` |
+| `library/education/ferpa-student` | `ferpa` |
+| `library/devops/cicd-hardened` | `owasp-llm-top10-2025`, `iso-27001-2022` |
+| `library/general/air-gapped` | `iso-27001-2022`, `owasp-llm-top10-2025` |
+| `library/general/recommended` | `owasp-llm-top10-2025`, `nist-ai-rmf-1.0` |
+
+Each carries a control-tagged test suite under
+[`fixtures/library/`](./fixtures/library/) that CI runs with 100% rule
+coverage required.
+
 ### Using with Clawdstrike
 
 HushSpec documents load natively in [Clawdstrike](https://github.com/backbay-labs/clawdstrike):

@@ -28,6 +28,15 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   numbers in the JSON report's new `coverage` member and in a `rule coverage` JUnit suite.
   `--fail-on-uncovered` exits non-zero when a declared path was never hit.
 
+### Added (RFC 09 P3-03, vertical library)
+
+- The eight `library/` policies are embedded as built-ins in all four SDKs under
+  `builtin:library/<vertical>/<name>`, so `extends: "builtin:library/finance/pci-dss"`
+  resolves with no file system and no checkout. The four builtin generators now walk
+  `library/` alongside `rulesets/`; the existing `rulesets/` names are unchanged, and the
+  Go SDK gains an exported `BuiltinNames`. A library policy keeps its own document `name`
+  (`pci-dss`): the prefix is a location, not a rename.
+
 ### Changed (RFC 09 P3-02)
 
 - `h2h test --format json` now prints an object (`passed`, `failed`, `fixtures[]`, `coverage`)

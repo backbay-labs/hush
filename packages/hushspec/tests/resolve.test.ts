@@ -148,12 +148,29 @@ name: parent
   });
 });
 
+/**
+ * A `rulesets/` preset is named for its file (`strict`); a library policy is
+ * embedded under `library/<vertical>/<name>` and names itself with the last
+ * segment (`hipaa-base`), because the prefix is a location, not a rename.
+ */
+function builtinDocumentName(builtin: string): string {
+  return builtin.slice(builtin.lastIndexOf('/') + 1);
+}
+
+/** The canonical file a builtin name was generated from. */
+function builtinSourcePath(builtin: string): string {
+  return builtin.startsWith('library/')
+    ? `../../../${builtin}.yaml`
+    : `../../../rulesets/${builtin}.yaml`;
+}
+
 describe('builtin loader', () => {
-  it('resolves all 6 built-in rulesets', () => {
+  it('resolves every embedded policy', () => {
+    expect(BUILTIN_NAMES.length).toBeGreaterThan(6);
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(name);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
       expect(spec!.hushspec).toBe('0.1.0');
     }
   });
@@ -162,8 +179,17 @@ describe('builtin loader', () => {
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(`builtin:${name}`);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
     }
+  });
+
+  it('embeds the vertical library under its library/ prefix', () => {
+    const spec = loadBuiltin('builtin:library/healthcare/hipaa-base');
+    expect(spec).not.toBeNull();
+    expect(spec!.name).toBe('hipaa-base');
+    // The embedded leaf still declares its own base; resolving is what
+    // materializes the full document.
+    expect(spec!.extends).toBe('builtin:strict');
   });
 
   it('returns null for unknown builtins', () => {
@@ -189,7 +215,7 @@ describe('builtin loader', () => {
   it('matches the canonical built-in ruleset YAML', () => {
     for (const name of BUILTIN_NAMES) {
       const expected = YAML.parse(
-        readFileSync(new URL(`../../../rulesets/${name}.yaml`, import.meta.url), 'utf8'),
+        readFileSync(new URL(builtinSourcePath(name), import.meta.url), 'utf8'),
       );
       expect(loadBuiltin(name)).toEqual(expected);
     }

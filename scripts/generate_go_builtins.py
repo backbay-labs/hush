@@ -23,6 +23,36 @@ BUILTIN_NAMES = [
 ]
 
 
+LIBRARY_DIR = ROOT / "library"
+
+
+def library_names() -> list[str]:
+    """Every vertical-library policy, as `library/<vertical>/<name>`.
+
+    The library ships as built-ins alongside `rulesets/` so that
+    `extends: "builtin:library/healthcare/hipaa-base"` resolves with no file
+    system, in every SDK. Discovered rather than listed, so adding a policy to
+    `library/` is one commit; the `library/` prefix keeps the existing
+    `rulesets/` names unchanged.
+    """
+    return sorted(
+        f"library/{path.parent.name}/{path.stem}"
+        for path in LIBRARY_DIR.glob("*/*.yaml")
+    )
+
+
+def all_builtin_names() -> list[str]:
+    """`rulesets/` first (historical order), then the library."""
+    return BUILTIN_NAMES + library_names()
+
+
+def builtin_yaml(name: str) -> str:
+    """The canonical YAML for a built-in name."""
+    if name.startswith("library/"):
+        return (ROOT / f"{name}.yaml").read_text()
+    return (RULESETS_DIR / f"{name}.yaml").read_text()
+
+
 def render() -> str:
     # json.dumps(ensure_ascii=False) produces a double-quoted string escaping
     # only the structural chars (\n \t \r \" \\ and control chars) while
@@ -43,13 +73,30 @@ def render() -> str:
     # is padded with spaces so every value starts one column past the widest
     # `"key":`. Replicate that here so the output is gofmt-clean without needing
     # gofmt on PATH (the Generated Sources CI job has only Python).
-    key_col = {name: len(json.dumps(name)) + 1 for name in BUILTIN_NAMES}  # +1 for ':'
+    names = all_builtin_names()
+    key_col = {name: len(json.dumps(name)) + 1 for name in names}  # +1 for ':'
     value_col = max(key_col.values()) + 1
 
-    for name in BUILTIN_NAMES:
-        yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
+    for name in names:
         pad = " " * (value_col - key_col[name])
-        lines.append(f"\t{json.dumps(name)}:{pad}{json.dumps(yaml_content, ensure_ascii=False)},")
+        lines.append(
+            f"\t{json.dumps(name)}:{pad}"
+            f"{json.dumps(builtin_yaml(name), ensure_ascii=False)},"
+        )
+
+    lines.extend(
+        [
+            "}",
+            "",
+            "// BuiltinNames are the canonical names of the embedded policies:",
+            '// the rulesets/ presets, then the vertical library as',
+            '// "library/<vertical>/<name>".',
+            "var BuiltinNames = []string{",
+        ]
+    )
+
+    for name in names:
+        lines.append(f"\t{json.dumps(name)},")
 
     lines.extend(
         [
