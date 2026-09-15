@@ -1,6 +1,5 @@
 from hushspec import (
     DetectionLevel,
-    HushSpec,
     OriginDefaultBehavior,
     PostureContext,
     compile_policy,

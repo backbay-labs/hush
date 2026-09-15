@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Callable, Optional
+from functools import wraps
+from typing import Any, Callable, Optional
 
 from hushspec.evaluate import EvaluationAction
 from hushspec.middleware import HushGuard
@@ -24,19 +25,20 @@ def secure_tool(
     If ``tool_name`` is omitted the wrapped function's ``__name__`` is used.
     Raises :class:`~hushspec.middleware.HushSpecDenied` when the policy denies
     the action.
+
+    The wrapper keeps the wrapped function's signature and annotations, which
+    is what a framework reads to build the tool's argument schema.
     """
 
     def decorator(func: Callable) -> Callable:
         name = tool_name or getattr(func, "__name__", "unknown")
 
-        def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             action = EvaluationAction(type=action_type, target=name)
             guard.enforce(action)
             return func(*args, **kwargs)
 
-        wrapper.__name__ = func.__name__  # type: ignore[attr-defined]
-        wrapper.__doc__ = func.__doc__
-        wrapper.__wrapped__ = func  # type: ignore[attr-defined]
         return wrapper
 
     return decorator

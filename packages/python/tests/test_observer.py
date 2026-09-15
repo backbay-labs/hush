@@ -1,9 +1,7 @@
 import io
 import json
 
-import pytest
-
-from hushspec.evaluate import Decision, EvaluationAction, evaluate
+from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.middleware import HushGuard
 from hushspec.observer import (
     ConsoleObserver,

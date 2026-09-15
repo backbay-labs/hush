@@ -46,7 +46,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from hushspec.canonical import CanonicalError, canonical_json_value, content_hash
+from hushspec.canonical import (
+    CanonicalError,
+    canonical_json_value,
+    content_hash,
+    is_content_hash,
+)
 
 __all__ = [
     "Envelope",
@@ -104,7 +109,6 @@ REASON_CODES = (
     "policy_version_rollback",
 )
 
-_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _TIMESTAMP_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$")
 _SIGNATURE_RE = re.compile(r"^[A-Za-z0-9_-]{86}$")
 
@@ -396,7 +400,7 @@ def _load_trusted_key(raw: Any, index: int) -> TrustedKey:
             "is defined in 0.2)"
         )
     declared = raw["key_id"]
-    if not isinstance(declared, str) or not _HASH_RE.match(declared):
+    if not is_content_hash(declared):
         raise KeyringError(f"{where}: key_id must match sha256:<64 lowercase hex>")
     public_key = raw["public_key"]
     try:
@@ -562,10 +566,10 @@ def _parse_envelope_shape(obj: Any) -> Envelope:
         raise MalformedEnvelope("algorithm must be a non-empty string")
 
     key_id = obj["key_id"]
-    if not isinstance(key_id, str) or not _HASH_RE.match(key_id):
+    if not is_content_hash(key_id):
         raise MalformedEnvelope("key_id must match sha256:<64 lowercase hex>")
     hash_value = obj["content_hash"]
-    if not isinstance(hash_value, str) or not _HASH_RE.match(hash_value):
+    if not is_content_hash(hash_value):
         raise MalformedEnvelope("content_hash must match sha256:<64 lowercase hex>")
     signature = obj["signature"]
     if not isinstance(signature, str) or not _SIGNATURE_RE.match(signature):
@@ -674,10 +678,13 @@ def _load_private_key(private_key_pem: str | bytes):
 
 def public_key_from_private_key(private_key_pem: str | bytes) -> str:
     """Return the SPKI PEM of the public half of a PKCS#8 Ed25519 private key."""
+    return _public_key_pem(_load_private_key(private_key_pem))
+
+
+def _public_key_pem(private_key: Any) -> str:
     from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-    key = _load_private_key(private_key_pem)
-    return key.public_key().public_bytes(
+    return private_key.public_key().public_bytes(
         Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
     ).decode("ascii")
 
@@ -777,7 +784,7 @@ def sign_content_hash(
     ``sha256:`` digest, and :class:`SigningUnavailable` without the
     ``cryptography`` extra.
     """
-    if not _HASH_RE.match(content_hash_value or ""):
+    if not is_content_hash(content_hash_value):
         raise MalformedEnvelope(
             f"content_hash {content_hash_value!r} is not sha256:<64 lowercase hex>"
         )
@@ -786,7 +793,7 @@ def sign_content_hash(
     expiry = _coerce_moment(expires_at, "expires_at")
 
     envelope = Envelope(
-        key_id=key_id_from_public_key(public_key_from_private_key(private_key_pem)),
+        key_id=key_id_from_public_key(_public_key_pem(key)),
         signed_at=format_timestamp(moment),
         content_hash=content_hash_value,
         signature="",
@@ -796,11 +803,7 @@ def sign_content_hash(
         signer=signer,
     )
     raw = key.sign(signing_input(envelope.claims()))
-    return _replace_signature(envelope, _b64url_nopad(raw))
-
-
-def _replace_signature(envelope: Envelope, signature: str) -> Envelope:
-    return replace(envelope, signature=signature)
+    return replace(envelope, signature=_b64url_nopad(raw))
 
 
 def _as_mapping(spec: Any) -> Mapping[str, Any] | None:

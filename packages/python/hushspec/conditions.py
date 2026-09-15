@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from hushspec.generated_contract import (
@@ -35,6 +35,9 @@ from hushspec.generated_contract import (
     TIME_WINDOW_KEYS,
 )
 from hushspec.schema import HushSpec
+
+if TYPE_CHECKING:
+    from hushspec.evaluate import EvaluationResult
 
 #: Maximum allowed nesting depth for compound conditions (core spec 3.13).
 MAX_NESTING_DEPTH = 8
@@ -862,10 +865,10 @@ def _match_value(actual: Any, expected: Any) -> bool:
 
 def evaluate_with_context(
     spec: HushSpec,
-    action: "Any",
+    action: Any,
     context: RuntimeContext,
     conditions: dict[str, Condition],
-):
+) -> "EvaluationResult":
     """Evaluate with an explicit runtime context and out-of-band conditions.
 
     The explicit *context* replaces ``action.context``; each entry in

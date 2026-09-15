@@ -12,7 +12,9 @@ from hushspec.evaluate import (
     EvaluationAction,
     EvaluationResult,
     TracedEvaluation,
+    compiled_policy,
 )
+from hushspec.evaluate import _scan_prefix
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import DetectionLevel
 from hushspec.regex_profile import compile_profile_regex
@@ -711,26 +713,14 @@ _DEFAULT_JAILBREAK_BLOCK_THRESHOLD = 80
 # process and every evaluation reads them from there rather than recompiling
 # their patterns.
 
-#: Detection escalation ordering: detection can only raise a decision, never
-#: weaken it. Kept separate from the rule-block ranks, which start at 1.
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 0,
-    Decision.WARN: 1,
-    Decision.DENY: 2,
-}
-
-
 def _truncate_to_bytes(content: str, max_bytes: int) -> str:
     """Truncate *content* to at most *max_bytes* UTF-8 bytes.
 
-    Slices on the UTF-8 byte boundary and discards a possibly-incomplete
-    trailing multi-byte sequence (rather than raising), so truncation always
-    yields a valid ``str``.
+    The same operation the rule-block scanners apply to their own byte caps:
+    the cut is backed off to a character boundary, so a truncated prefix is
+    always a valid ``str``.
     """
-    encoded = content.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return content
-    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return _scan_prefix(content, max_bytes)
 
 
 def evaluate_with_detection(
@@ -778,18 +768,3 @@ def evaluate_with_detection_traced(
         action, context, conditions
     )
 
-
-_compiled_policy = None
-
-
-def compiled_policy(spec: HushSpec):
-    """The cached compiled form of *spec* (see :mod:`hushspec.compiled`).
-
-    Imported lazily: :mod:`hushspec.compiled` builds on this module.
-    """
-    global _compiled_policy
-    if _compiled_policy is None:
-        from hushspec.compiled import compiled_for_spec
-
-        _compiled_policy = compiled_for_spec
-    return _compiled_policy(spec)

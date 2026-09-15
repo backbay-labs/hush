@@ -14,7 +14,6 @@ reconstructed from the decision afterwards.
 
 from __future__ import annotations
 
-import hashlib
 import time
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -22,7 +21,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, Union
 
-from hushspec.canonical import canonical_json_value, content_hash
+from hushspec.canonical import canonical_json_value, content_hash, digest
+
+# Re-exported: a receipt timestamp and an envelope timestamp are the same
+# format (receipt spec section 4.1, signing spec section 4), so there is one
+# renderer for both.
+from hushspec.signing import format_timestamp
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.detection import DetectorEvaluation, DetectorLevel
 from hushspec.evaluate import (
@@ -85,9 +89,6 @@ ORIGIN_PROFILE_BLOCK = "origin_profile"
 #: ``matched_rule`` of a receipt for an action refused because the policy did
 #: not verify (receipt spec 4.5).
 POLICY_UNVERIFIED_RULE = "__hushspec_policy_unverified__"
-
-_HASH_PREFIX = "sha256:"
-
 
 # --------------------------------------------------------------------------- #
 # Wire types
@@ -415,11 +416,6 @@ def receipt_hash(receipt: Union[DecisionReceipt, dict[str, Any]]) -> str:
     return digest(canonical_json(receipt))
 
 
-def digest(canonical: str) -> str:
-    """SHA-256 of already-canonical text, in the ``sha256:`` wire form."""
-    return _HASH_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def parse_receipt(data: Union[str, bytes, dict[str, Any]]) -> DecisionReceipt:
     """Parse a receipt object, rejecting a version this module does not implement.
 
@@ -600,19 +596,6 @@ class AuditContext:
     context: Optional[RuntimeContext] = None
     #: Out-of-band conditions keyed by rule-block name.
     conditions: dict[str, Condition] = field(default_factory=dict)
-
-
-def format_timestamp(instant: datetime) -> str:
-    """Format an instant the way receipts and envelopes spell it.
-
-    RFC 3339 UTC, exactly three fractional digits, ``Z`` suffix. Truncating
-    (never rounding) keeps the stamp from naming an instant later than the one
-    it describes.
-    """
-    if instant.tzinfo is None:
-        instant = instant.replace(tzinfo=timezone.utc)
-    moment = instant.astimezone(timezone.utc)
-    return f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{moment.microsecond // 1000:03d}Z"
 
 
 def deterministic_uuid_v7(unix_millis: int, seed: int) -> str:

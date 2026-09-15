@@ -6,7 +6,6 @@ from hushspec import (
     Extensions,
     GovernanceMetadata,
     HushSpec,
-    MergeStrategy,
     PatchIntegrityRule,
     PostureExtension,
     PostureState,

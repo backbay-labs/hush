@@ -183,12 +183,6 @@ _OUTCOME_OF: dict[Decision, RuleOutcome] = {
     Decision.DENY: RuleOutcome.DENY,
 }
 
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 1,
-    Decision.WARN: 2,
-    Decision.DENY: 3,
-}
-
 _SEVERITY_RANK: dict[Severity, int] = {
     Severity.WARN: 1,
     Severity.ERROR: 2,
@@ -2021,7 +2015,10 @@ class CompiledPolicy:
             detector = default_detector_registry().detector_for(
                 DetectionCategory.JAILBREAK
             )
-            assert detector is not None  # the built-in registry always has one
+            if detector is None:
+                raise CompileError(
+                    "the built-in detector registry has no jailbreak detector"
+                )
             result = detector.detect(_truncate_to_bytes(content, max_bytes))
             score = result.score
             percent = score * 100.0

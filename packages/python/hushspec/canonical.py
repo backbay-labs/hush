@@ -77,7 +77,14 @@ from hushspec.generated_contract import (
     TOP_LEVEL_KEYS,
 )
 
-__all__ = ["CanonicalError", "canonical_json", "canonical_json_value", "content_hash"]
+__all__ = [
+    "CanonicalError",
+    "canonical_json",
+    "canonical_json_value",
+    "content_hash",
+    "digest",
+    "is_content_hash",
+]
 
 #: Self-describing prefix of a content hash (spec section 5).
 HASH_PREFIX = "sha256:"
@@ -620,11 +627,32 @@ def canonical_json_value(value: Any) -> str:
     return _jcs(_plain(value))
 
 
+def digest(canonical: str) -> str:
+    """``sha256:`` + 64 lowercase hex over the UTF-8 bytes of *canonical*.
+
+    The one place a content hash is computed: a receipt hash, a log entry
+    hash, a bundle subject digest and a policy hash are all this function over
+    different canonical text.
+    """
+    return HASH_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def is_content_hash(value: Any) -> bool:
+    """Whether *value* is a wire content hash: ``sha256:`` + 64 lowercase hex.
+
+    The spelling is normative (spec section 5), so an upper-case or
+    wrong-length digest is not one.
+    """
+    if not isinstance(value, str) or not value.startswith(HASH_PREFIX):
+        return False
+    hex_part = value[len(HASH_PREFIX):]
+    return len(hex_part) == 64 and all(c in "0123456789abcdef" for c in hex_part)
+
+
 def content_hash(spec: Any) -> str:
     """Return ``sha256:<64 lowercase hex>`` over the canonical form (spec section 5).
 
     The prefix is part of the wire value everywhere a content hash appears, so a
     verifier can reject an algorithm it does not implement instead of guessing.
     """
-    digest = hashlib.sha256(canonical_json(spec).encode("utf-8")).hexdigest()
-    return HASH_PREFIX + digest
+    return digest(canonical_json(spec))

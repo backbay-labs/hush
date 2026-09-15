@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from hushspec import is_safe_regex, parse, parse_or_raise, validate
+from hushspec import is_safe_regex, parse, validate
 
 
 

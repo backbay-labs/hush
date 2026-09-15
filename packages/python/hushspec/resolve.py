@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hushspec.builtins import load_builtin
-from hushspec.canonical import CanonicalError, content_hash
+from hushspec.canonical import CanonicalError, content_hash, is_content_hash
 from hushspec.error_codes import ERROR_EXTENDS, ERROR_IO, ErrorMessage, code_of
 from hushspec.merge import merge
 from hushspec.parse import parse
@@ -103,7 +103,6 @@ DIGEST_PIN_MARKER = "#sha256:"
 # Greedy on the reference so the *last* `#sha256:` wins: a path may legally
 # contain a `#`, but a pin is always the trailing fragment.
 _PIN_RE = re.compile(r"^(?P<ref>.+)#(?P<digest>sha256:[^#]*)$")
-_CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 #: A digest pin was present and the hop hashed to something else. Always fatal.
 REASON_DIGEST_MISMATCH = "digest_mismatch"
@@ -600,7 +599,7 @@ def _content_hash_or_fail(spec: HushSpec, source: str | None) -> str:
 
 
 def _label(source: str | None) -> str:
-    return source if source is not None else INLINE_SOURCE
+    return source if source is not None else MEMORY_SOURCE
 
 
 def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | None]:
@@ -613,7 +612,7 @@ def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | No
     if DIGEST_PIN_MARKER not in reference:
         return reference, None
     match = _PIN_RE.match(reference)
-    if match is None or not _CONTENT_HASH_RE.match(match.group("digest")):
+    if match is None or not is_content_hash(match.group("digest")):
         raise PolicyVerificationError(
             f"malformed digest pin in 'extends: {reference}' at {_label(source)}: "
             "expected '<reference>#sha256:<64 lowercase hex>'",
@@ -737,7 +736,7 @@ def default_signature_locator(source: str) -> bytes | None:
     that fetched the policy, and it belongs in a caller-supplied
     :data:`SignatureLocator`.
     """
-    if source.startswith(("builtin:", "http://", "https://")) or source == INLINE_SOURCE:
+    if source.startswith(("builtin:", "http://", "https://")) or source == MEMORY_SOURCE:
         return None
 
     candidates = [Path(f"{source}.sig")]
