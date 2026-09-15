@@ -1,0 +1,11 @@
+# Exemptions from scripts/check_comment_hygiene.py, one `path:pattern` per
+# line. `pattern` is the regex source exactly as PATTERNS spells it, or `*` for
+# every pattern. An entry that stops matching anything fails the check, so this
+# file cannot quietly rot.
+#
+# Keep this list as short as you can. A planning reference in published text is
+# nearly always a sentence that should have described the behavior instead.
+
+# The check itself is the one file that has to spell every pattern out, which
+# is what lets the rule be written down at all.
+scripts/check_comment_hygiene.py:*

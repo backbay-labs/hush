@@ -60,6 +60,8 @@ jobs:
       # signer as well as a staleness guard.
       - name: Check derived bundle vectors
         run: python3 scripts/generate_bundle_vectors.py --check
+      - name: Comment hygiene
+        run: python3 scripts/check_comment_hygiene.py --check
 
   rust:
     name: Rust
