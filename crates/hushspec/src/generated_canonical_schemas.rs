@@ -677,7 +677,8 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "approval_date": {
           "type": "string",
-          "description": "ISO 8601 date when the policy was approved."
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) when the policy was approved."
         },
         "classification": {
           "type": "string",
@@ -700,11 +701,36 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "effective_date": {
           "type": "string",
-          "description": "ISO 8601 date when the policy becomes effective."
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) when the policy becomes effective."
         },
         "expiry_date": {
           "type": "string",
-          "description": "ISO 8601 date when the policy expires."
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) when the policy expires."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Identity accountable for the policy over its lifetime (e.g., a team or distribution list). Distinct from 'author', who wrote this revision."
+        },
+        "reviewers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Identities who reviewed the policy. Advisory only; separation of duties is checked by tooling, never by an engine."
+        },
+        "next_review_date": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) by which the policy is due for its next review."
+        },
+        "changelog": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ChangelogEntry" },
+          "description": "Revision history, newest first. Declarative only: entries never influence evaluation."
+        },
+        "supersedes": {
+          "type": "string",
+          "description": "The 'policy_version' this document replaces. A document MUST NOT supersede its own version."
         },
         "controls": {
           "type": "array",
@@ -741,6 +767,33 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         "notes": {
           "type": "string",
           "description": "Free-text rationale explaining how the mapped paths satisfy the control."
+        }
+      }
+    },
+    "ChangelogEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "date", "summary"],
+      "description": "One revision of the policy. Advisory metadata: it has no effect on evaluation.",
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The 'policy_version' this entry describes, as a string."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO 8601 calendar date (YYYY-MM-DD) the revision was made."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What changed in this revision."
+        },
+        "author": {
+          "type": "string",
+          "description": "Identity that made the revision."
         }
       }
     }
