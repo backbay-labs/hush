@@ -1,5 +1,7 @@
 use clap::CommandFactory;
 use clap_complete::Shell;
+use colored::Colorize;
+use std::io::Write;
 
 #[derive(clap::Args)]
 pub struct CompletionsArgs {
@@ -11,8 +13,23 @@ pub struct CompletionsArgs {
 pub fn run(args: CompletionsArgs) -> i32 {
     let mut command = crate::Cli::command();
     let name = command.get_name().to_string();
-    clap_complete::generate(args.shell, &mut command, name, &mut std::io::stdout());
-    0
+
+    // Render into a buffer rather than straight to stdout: completion scripts
+    // are big enough to outrun a pipe buffer, and writing directly would panic
+    // inside clap_complete on the broken pipe from `h2h completions zsh | head`.
+    let mut script: Vec<u8> = Vec::new();
+    clap_complete::generate(args.shell, &mut command, name, &mut script);
+
+    let mut stdout = std::io::stdout();
+    match stdout.write_all(&script).and_then(|()| stdout.flush()) {
+        Ok(()) => 0,
+        // A closed downstream pipe is the reader's choice, not an error.
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => 0,
+        Err(e) => {
+            eprintln!("{} failed to write completion script: {e}", "error".red());
+            1
+        }
+    }
 }
 
 #[cfg(test)]
