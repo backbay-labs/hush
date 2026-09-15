@@ -4,7 +4,7 @@ The full normative specification is at [`spec/hushspec-canonical.md`](https://gi
 
 Every resolved HushSpec policy has exactly one canonical form and one content hash, the same in every SDK:
 
-1. **Projection.** Start from the resolved document (no `extends`, no `merge_strategy`). Inside every object that is present, materialize the JSON Schema defaults of absent fields. Omit empty containers for fields that have no default and where emptiness means the same as absence (a short list of origins fields where presence matters is preserved).
+1. **Projection.** Start from the resolved document (no `extends`, no `merge_strategy`). Inside every object that is present, materialize the JSON Schema defaults of absent fields. Omit empty containers for fields that have no default and where emptiness means the same as absence (an origins profile's `match: {}` is the one field where presence matters and is preserved).
 2. **Serialization.** RFC 8785 (JCS): keys sorted by UTF-16 code units, no whitespace, ECMAScript number formatting (`10.0` becomes `10`), JCS string escapes.
 3. **Hash.** `sha256:` followed by the lowercase hex SHA-256 of the UTF-8 canonical bytes.
 

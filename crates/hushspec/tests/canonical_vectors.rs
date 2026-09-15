@@ -6,7 +6,7 @@
 //! Rust half of the four-SDK conformance requirement.
 
 use hushspec::canonical::{canonical_json_value, content_hash_value, digest};
-use hushspec::{HushSpec, create_composite_loader, resolve_with_loader};
+use hushspec::{HushSpec, create_composite_loader, resolve_with_loader, validate};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ const VECTOR_VERSION: &str = "0.1.0";
 
 /// Every vector in `fixtures/core/hash/`; keep in step with the table in
 /// `fixtures/core/hash/README.md`.
-const EXPECTED_VECTOR_COUNT: usize = 13;
+const EXPECTED_VECTOR_COUNT: usize = 14;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +85,20 @@ fn resolved_policy(path: &Path, policy: &serde_json::Value) -> serde_json::Value
         .unwrap_or_else(|error| panic!("{}: failed to re-encode: {error}", path.display()))
 }
 
+/// Canonical spec 2.3: canonicalization presupposes validity. A vector whose
+/// policy no conformant engine would accept could pin a hash no engine can
+/// ever produce, so the suite refuses one.
+fn assert_valid(path: &Path, document: &serde_json::Value) {
+    let spec = parse_policy(path, document);
+    let result = validate(&spec);
+    assert!(
+        result.is_valid(),
+        "{}: vector policy is not a valid document: {:?}",
+        path.display(),
+        result.errors
+    );
+}
+
 fn parse_policy(path: &Path, policy: &serde_json::Value) -> HushSpec {
     let yaml = serde_yaml::to_string(policy)
         .unwrap_or_else(|error| panic!("{}: failed to re-encode: {error}", path.display()));
@@ -128,6 +142,9 @@ fn every_vector_reproduces_its_canonical_form_and_content_hash() {
 
     for (path, vector) in &vectors {
         let document = resolved_policy(path, &vector.policy);
+        // Only valid documents have a canonical form (canonical spec 2.3), so
+        // every vector's policy must survive parse and validation first.
+        assert_valid(path, &document);
 
         let canonical = canonical_json_value(&document)
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));

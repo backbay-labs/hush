@@ -31,10 +31,10 @@
 //! distinction the projection cares about.
 //!
 //! [`canonical_json`] and [`content_hash`] take the typed [`HushSpec`], which
-//! is what a caller holds after `resolve`. Typed models in every SDK conflate
-//! "absent" with "empty" for the origins overlay lists, so the typed entry
-//! point deliberately treats those as absent (see [`TYPED_LOSSY`]); every
-//! other field projects identically through both entry points.
+//! is what a caller holds after `resolve`. They serialize it into the same
+//! value tree and run the same projection, so both entry points always agree:
+//! the one field whose emptiness is significant ([`PRESERVE_EMPTY`]) is an
+//! optional object in the typed model, which represents it faithfully.
 
 use crate::generated_canonical_schemas::{
     CORE_SCHEMA, CORE_SCHEMA_NAME, EXTENSION_SCHEMAS, ORIGINS_SCHEMA_NAME,
@@ -65,40 +65,10 @@ const MAX_REF_DEPTH: usize = 16;
 /// Fields whose *presence* changes meaning even when the value is empty
 /// (canonical spec 3.3), keyed by `(schema file, $defs name, property)`.
 /// Everything else that is an empty container with no schema default is
-/// equivalent to absence and is omitted.
-const PRESERVE_EMPTY: &[(&str, &str, &str)] = &[
-    (ORIGINS_SCHEMA_NAME, "OriginProfile", "match"),
-    (ORIGINS_SCHEMA_NAME, "ToolAccessRule", "allow"),
-    (ORIGINS_SCHEMA_NAME, "ToolAccessRule", "block"),
-    (
-        ORIGINS_SCHEMA_NAME,
-        "ToolAccessRule",
-        "require_confirmation",
-    ),
-    (ORIGINS_SCHEMA_NAME, "EgressRule", "allow"),
-    (ORIGINS_SCHEMA_NAME, "EgressRule", "block"),
-];
-
-/// The subset of [`PRESERVE_EMPTY`] a typed model cannot express.
-///
-/// The origins overlay lists are plain `Vec<String>` in the generated models
-/// (and plain lists in the TypeScript, Python, and Go models), so an absent
-/// field and one written as `[]` are the same value by the time the document
-/// has been parsed. The typed entry points therefore project both as absent,
-/// which is the reading every SDK's model can reproduce. `OriginProfile.match`
-/// stays presence-significant on both paths because every SDK models it as an
-/// optional object.
-const TYPED_LOSSY: &[(&str, &str, &str)] = &[
-    (ORIGINS_SCHEMA_NAME, "ToolAccessRule", "allow"),
-    (ORIGINS_SCHEMA_NAME, "ToolAccessRule", "block"),
-    (
-        ORIGINS_SCHEMA_NAME,
-        "ToolAccessRule",
-        "require_confirmation",
-    ),
-    (ORIGINS_SCHEMA_NAME, "EgressRule", "allow"),
-    (ORIGINS_SCHEMA_NAME, "EgressRule", "block"),
-];
+/// equivalent to absence and is omitted -- the origins profile overlay lists
+/// included, because an absent overlay list and an empty one evaluate
+/// identically (origins spec 4).
+const PRESERVE_EMPTY: &[(&str, &str, &str)] = &[(ORIGINS_SCHEMA_NAME, "OriginProfile", "match")];
 
 /// Why a document has no canonical form. Every variant is fail-closed: the
 /// caller gets an error instead of a digest that would identify the wrong
@@ -131,20 +101,10 @@ pub enum CanonicalError {
     Schema(String, String),
 }
 
-/// Where the value tree being projected came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Source {
-    /// The document itself, which can express every distinction the
-    /// projection makes.
-    Document,
-    /// A typed [`HushSpec`], which cannot (see [`TYPED_LOSSY`]).
-    Typed,
-}
-
 /// The canonical JSON text of a resolved document (canonical spec 4).
 ///
-/// Prefer [`canonical_json_value`] when the raw document tree is at hand; see
-/// the module docs for the difference.
+/// A thin wrapper over [`canonical_json_value`]: the typed document is
+/// serialized into the JSON data model and projected there.
 ///
 /// # Errors
 ///
@@ -156,7 +116,7 @@ pub fn canonical_json(spec: &HushSpec) -> Result<String, CanonicalError> {
     }
     let value =
         serde_json::to_value(spec).map_err(|error| CanonicalError::Serialize(error.to_string()))?;
-    canonicalize(&value, Source::Typed)
+    canonicalize(&value)
 }
 
 /// The content hash of a resolved document: `sha256:<64 lowercase hex>`
@@ -171,15 +131,15 @@ pub fn content_hash(spec: &HushSpec) -> Result<String, CanonicalError> {
 
 /// The canonical JSON text of a resolved document supplied as a JSON value.
 ///
-/// This is the normative path (canonical spec 6): a value tree preserves the
-/// absent/empty distinctions that typed models lose.
+/// This is the normative path (canonical spec 6): a value tree represents
+/// every distinction the projection makes.
 ///
 /// # Errors
 ///
 /// As [`canonical_json`], plus [`CanonicalError::ExpectedObject`] when the
 /// document is not a JSON object.
 pub fn canonical_json_value(document: &Value) -> Result<String, CanonicalError> {
-    canonicalize(document, Source::Document)
+    canonicalize(document)
 }
 
 /// The content hash of a resolved document supplied as a JSON value.
@@ -202,11 +162,11 @@ pub fn digest(canonical: &str) -> String {
     format!("{CONTENT_HASH_PREFIX}{:x}", hasher.finalize())
 }
 
-fn canonicalize(document: &Value, source: Source) -> Result<String, CanonicalError> {
+fn canonicalize(document: &Value) -> Result<String, CanonicalError> {
     let Some(object) = document.as_object() else {
         return Err(CanonicalError::ExpectedObject("document".to_string()));
     };
-    let projected = project(object, source)?;
+    let projected = project(object)?;
     let mut out = String::new();
     write_value(&projected, &mut out)?;
     Ok(out)
@@ -246,7 +206,7 @@ fn load_schemas() -> Result<SchemaSet, (String, String)> {
 // Projection (canonical spec 3)
 // --------------------------------------------------------------------------
 
-fn project(document: &Map<String, Value>, source: Source) -> Result<Value, CanonicalError> {
+fn project(document: &Map<String, Value>) -> Result<Value, CanonicalError> {
     if document.contains_key("extends") {
         return Err(CanonicalError::Unresolved);
     }
@@ -271,7 +231,6 @@ fn project(document: &Map<String, Value>, source: Source) -> Result<Value, Canon
         None,
         "$",
         &RESOLUTION_FIELDS,
-        source,
     )?;
 
     if let Some(extensions) = extensions {
@@ -287,14 +246,8 @@ fn project(document: &Map<String, Value>, source: Source) -> Result<Value, Canon
             else {
                 return Err(CanonicalError::UnknownExtension(name.clone()));
             };
-            let value = project_value(
-                block,
-                schema,
-                schema,
-                file,
-                &format!("$.extensions.{name}"),
-                source,
-            )?;
+            let value =
+                project_value(block, schema, schema, file, &format!("$.extensions.{name}"))?;
             if is_empty_container(&value) {
                 continue;
             }
@@ -309,7 +262,6 @@ fn project(document: &Map<String, Value>, source: Source) -> Result<Value, Canon
 }
 
 /// Project a JSON object against a schema object (canonical spec 3.2 and 3.3).
-#[allow(clippy::too_many_arguments)]
 fn project_object(
     value: &Map<String, Value>,
     schema: &Value,
@@ -318,7 +270,6 @@ fn project_object(
     def_name: Option<&str>,
     path: &str,
     skip_defaults: &[&str],
-    source: Source,
 ) -> Result<Map<String, Value>, CanonicalError> {
     static NO_PROPERTIES: OnceLock<Map<String, Value>> = OnceLock::new();
     let properties = schema
@@ -345,14 +296,8 @@ fn project_object(
             continue;
         };
 
-        let projected = project_value(
-            present,
-            property,
-            root,
-            root_name,
-            &format!("{path}.{key}"),
-            source,
-        )?;
+        let projected =
+            project_value(present, property, root, root_name, &format!("{path}.{key}"))?;
 
         // Canonical spec 3.3: a present-but-empty container for a property
         // with no schema default, not required, and not presence-significant
@@ -360,7 +305,7 @@ fn project_object(
         if property.get("default").is_none()
             && !is_required(schema, key)
             && is_empty_container(&projected)
-            && !preserves_empty(root_name, def_name, key, source)
+            && !preserves_empty(root_name, def_name, key)
         {
             continue;
         }
@@ -375,7 +320,6 @@ fn project_value(
     root: &Value,
     root_name: &str,
     path: &str,
-    source: Source,
 ) -> Result<Value, CanonicalError> {
     let (schema, def_name) = resolve_ref(root, schema, 0)?;
 
@@ -390,7 +334,6 @@ fn project_value(
             def_name,
             path,
             &[],
-            source,
         )?));
     }
 
@@ -408,7 +351,6 @@ fn project_value(
                 root,
                 root_name,
                 &format!("{path}[{index}]"),
-                source,
             )?);
         }
         return Ok(Value::Array(out));
@@ -431,7 +373,6 @@ fn project_value(
                     root,
                     root_name,
                     &format!("{path}.{key}"),
-                    source,
                 )?,
             );
         }
@@ -490,17 +431,13 @@ fn is_empty_container(value: &Value) -> bool {
     }
 }
 
-fn preserves_empty(root_name: &str, def_name: Option<&str>, key: &str, source: Source) -> bool {
+fn preserves_empty(root_name: &str, def_name: Option<&str>, key: &str) -> bool {
     let Some(def_name) = def_name else {
         return false;
     };
-    let entry = (root_name, def_name, key);
-    let matches = |table: &[(&str, &str, &str)]| {
-        table
-            .iter()
-            .any(|(schema, def, property)| (*schema, *def, *property) == entry)
-    };
-    matches(PRESERVE_EMPTY) && !(source == Source::Typed && matches(TYPED_LOSSY))
+    PRESERVE_EMPTY
+        .iter()
+        .any(|(schema, def, property)| (*schema, *def, *property) == (root_name, def_name, key))
 }
 
 // --------------------------------------------------------------------------
@@ -832,25 +769,27 @@ mod tests {
         assert_eq!(literal, "\"\u{e9}\u{20ac}\u{7f}\u{a0}\u{2028}\u{1F600}/\"");
     }
 
-    /// Canonical spec 3.3: the origins overlay lists are presence-significant
-    /// in the document, but a typed model cannot tell absent from empty, so
-    /// the typed entry point reads both as absent.
+    /// Canonical spec 3.3: an overlay list written empty means what an absent
+    /// one means (origins spec 4), so it is omitted -- and an overlay left
+    /// empty by that omission is dropped in turn. `match: {}` is the one
+    /// presence-significant field and survives. Both entry points agree.
     #[test]
-    fn origins_overlay_empties_are_preserved_only_on_the_document_path() {
+    fn origins_overlay_empties_are_omitted_and_match_is_preserved() {
         let document = json!({
             "hushspec": "0.1.0",
             "extensions": {"origins": {"profiles": [
-                {"id": "fallback", "match": {}, "tool_access": {"allow": []}},
+                {"id": "fallback", "match": {}, "tool_access": {"allow": []}, "egress": {"block": []}},
             ]}},
         });
-        assert!(canonical(&document).contains(r#""tool_access":{"allow":[]}"#));
+        let expected = concat!(
+            r#"{"extensions":{"origins":{"default_behavior":"deny","#,
+            r#""profiles":[{"id":"fallback","match":{}}]}},"hushspec":"0.1.0"}"#,
+        );
+        assert_eq!(canonical(&document), expected);
 
         let yaml = serde_yaml::to_string(&document).expect("re-encodes");
         let spec = HushSpec::parse(&yaml).expect("parses");
-        let typed = canonical_json(&spec).expect("canonicalizes");
-        assert!(!typed.contains("tool_access"), "{typed}");
-        // `match: {}` stays presence-significant on both paths.
-        assert!(typed.contains(r#""match":{}"#), "{typed}");
+        assert_eq!(canonical_json(&spec).expect("canonicalizes"), expected);
     }
 
     #[test]

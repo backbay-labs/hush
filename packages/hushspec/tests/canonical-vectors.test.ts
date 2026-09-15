@@ -12,6 +12,7 @@ import {
   type SchemaNode,
 } from '../src/canonical.js';
 import { createBuiltinLoader, resolve } from '../src/resolve.js';
+import { validate } from '../src/validate.js';
 import type { HushSpec } from '../src/schema.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -76,7 +77,7 @@ function describeDifference(actual: string, expected: string): string {
 
 describe('canonical form vectors (spec/hushspec-canonical.md section 7)', () => {
   it('finds the full vector set', () => {
-    expect(vectorFiles.length).toBe(13);
+    expect(vectorFiles.length).toBe(14);
   });
 
   for (const file of vectorFiles) {
@@ -85,6 +86,11 @@ describe('canonical form vectors (spec/hushspec-canonical.md section 7)', () => 
       expect(vector.hushspec_hash_vector).toBe(VECTOR_VERSION);
 
       const policy = resolvedPolicy(vector);
+      // Only valid documents have a canonical form (spec section 2.3): a
+      // vector no conformant engine accepts would pin an unreachable hash.
+      const validation = validate(policy);
+      expect(validation.errors, `${file}: vector policy is not valid`).toEqual([]);
+
       const canonical = canonicalJson(policy);
       if (canonical !== vector.canonical) {
         throw new Error(`${file}: ${describeDifference(canonical, vector.canonical)}`);

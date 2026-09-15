@@ -12,6 +12,10 @@ import (
 // understands (schemas/hushspec-hash-vector.v0.schema.json).
 const hashVectorVersion = "0.1.0"
 
+// expectedHashVectors is the size of the normative vector set; keep it in step
+// with the table in fixtures/core/hash/README.md.
+const expectedHashVectors = 14
+
 // hashVector mirrors schemas/hushspec-hash-vector.v0.schema.json. `source` is
 // informational -- it records the unresolved document `policy` came from -- so
 // it is not decoded here.
@@ -30,8 +34,9 @@ type hashVector struct {
 func TestCanonicalHashVectors(t *testing.T) {
 	repoRoot := fixtureRepoRoot(t)
 	files := fixtureFiles(t, repoRoot, "core/hash")
-	if len(files) == 0 {
-		t.Fatalf("no canonical hash vectors found under %s", filepath.Join(repoRoot, "fixtures", "core", "hash"))
+	if len(files) != expectedHashVectors {
+		t.Fatalf("expected %d canonical hash vectors under %s, found %d", expectedHashVectors,
+			filepath.Join(repoRoot, "fixtures", "core", "hash"), len(files))
 	}
 
 	for _, path := range files {
@@ -45,6 +50,13 @@ func TestCanonicalHashVectors(t *testing.T) {
 			}
 
 			spec := parseVectorPolicy(t, path, vector.Policy)
+
+			// Only valid documents have a canonical form (spec section 2.3);
+			// a vector no conformant engine accepts would pin a hash no engine
+			// can produce.
+			if result := Validate(spec); !result.IsValid() {
+				t.Fatalf("%s: vector policy is not a valid document: %v", path, result.Errors)
+			}
 
 			canonical, err := CanonicalJSON(spec)
 			if err != nil {

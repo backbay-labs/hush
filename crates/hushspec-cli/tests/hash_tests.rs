@@ -149,39 +149,21 @@ fn exit_codes_match_validate() {
     h2h().arg(SUBCOMMAND).arg(&dangling).assert().code(1);
 }
 
-/// Every vector in `fixtures/core/hash/` whose policy is a *valid* document
-/// is reproduced by the CLI, which is the surface a CI pipeline calls.
+/// Every vector in `fixtures/core/hash/` is reproduced by the CLI, which is
+/// the surface a CI pipeline calls.
 ///
-/// Two vectors are deliberately excluded. `h2h` validates before it
-/// canonicalizes, because an invalid document has no canonical form
-/// (canonical spec 2.3), and these two policies do not validate: the reference
-/// canonicalizer that generated the vectors performs no validation (a
-/// documented limit of `scripts/canonical_json.py`), so it accepted them. The
-/// canonicalizer itself still reproduces all thirteen -- see
-/// `crates/hushspec/tests/canonical_vectors.rs`, which projects the document
-/// tree directly as canonical spec 6 recommends.
-const INVALID_DOCUMENT_VECTORS: &[(&str, &str)] = &[
-    // `PostureTransition.on` accepts seven triggers; this vector uses
-    // `secret_detected` and `operator_reset`, which are not among them.
-    ("extension-posture.yaml", "unknown variant"),
-    // A profile names `posture: elevated` with no `extensions.posture` block.
-    (
-        "extension-origins.yaml",
-        "requires extensions.posture to be defined",
-    ),
-];
-
+/// `h2h` validates before it canonicalizes, because an invalid document has no
+/// canonical form (canonical spec 2.3), so this also pins that every vector
+/// policy is a document a conformant engine accepts.
 #[test]
 fn reproduces_the_canonical_form_vectors() {
     let vectors = workspace_root().join("fixtures").join("core").join("hash");
     let mut checked = 0;
-    let mut skipped = 0;
     for entry in fs::read_dir(&vectors).unwrap().filter_map(Result::ok) {
         let path = entry.path();
         if path.extension().is_none_or(|ext| ext != "yaml") {
             continue;
         }
-        let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let vector: serde_yaml::Value =
             serde_yaml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let policy = vector.get("policy").expect("vector has a policy");
@@ -197,20 +179,6 @@ fn reproduces_the_canonical_form_vectors() {
         let tmp = TempDir::new().unwrap();
         let policy_path = tmp.path().join("policy.yaml");
         fs::write(&policy_path, serde_yaml::to_string(policy).unwrap()).unwrap();
-
-        if let Some((_, expected_error)) = INVALID_DOCUMENT_VECTORS
-            .iter()
-            .find(|(vector_name, _)| *vector_name == name)
-        {
-            h2h()
-                .arg(SUBCOMMAND)
-                .arg(&policy_path)
-                .assert()
-                .code(1)
-                .stderr(predicate::str::contains(*expected_error));
-            skipped += 1;
-            continue;
-        }
 
         h2h()
             .arg(SUBCOMMAND)
@@ -228,10 +196,8 @@ fn reproduces_the_canonical_form_vectors() {
             .stdout(format!("{expected_canonical}\n"));
         checked += 1;
     }
-    assert_eq!(skipped, INVALID_DOCUMENT_VECTORS.len());
     assert_eq!(
-        checked + skipped,
-        13,
-        "expected 13 canonical-form vectors in fixtures/core/hash/"
+        checked, 14,
+        "expected 14 canonical-form vectors in fixtures/core/hash/"
     );
 }
