@@ -65,3 +65,6 @@ venv/
 # Package manager
 .npm/
 .yarn/
+
+# Claude Code agent worktrees
+.claude/worktrees/

@@ -43,6 +43,10 @@ jobs:
 
       - name: Check generated Go builtins
         run: python3 scripts/generate_go_builtins.py --check
+      - name: Check generated Rust builtins
+        run: python3 scripts/generate_rust_builtins.py --check
+      - name: Check generated CLI schemas
+        run: python3 scripts/generate_cli_schemas.py --check
 
   rust:
     name: Rust

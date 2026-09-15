@@ -2,6 +2,7 @@
 name = "hushspec"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Agentic compliance as code: portable policy spec for AI agent security controls"
 repository = "https://github.com/backbay-labs/hush"
