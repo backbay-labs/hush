@@ -74,7 +74,7 @@ from hushspec.generated_contract import (
     TOP_LEVEL_KEYS,
 )
 
-__all__ = ["CanonicalError", "canonical_json", "content_hash"]
+__all__ = ["CanonicalError", "canonical_json", "canonical_json_value", "content_hash"]
 
 #: Self-describing prefix of a content hash (spec section 5).
 HASH_PREFIX = "sha256:"
@@ -587,6 +587,19 @@ def canonical_json(spec: Any) -> str:
     extension is present, or if a value has no canonical JSON form.
     """
     return _jcs(project(spec))
+
+
+def canonical_json_value(value: Any) -> str:
+    """Return the RFC 8785 canonical JSON text of an arbitrary JSON value.
+
+    This is the serializer of spec section 4 on its own, with no HushSpec
+    projection (spec section 3) applied. It exists for the objects the
+    companion specifications canonicalize that are *not* policy documents --
+    today the signature envelope of ``spec/hushspec-signing.md`` section 4.1,
+    which has no schema defaults to materialize. Pass a policy through
+    :func:`canonical_json` instead; it projects first.
+    """
+    return _jcs(_plain(value))
 
 
 def content_hash(spec: Any) -> str:
