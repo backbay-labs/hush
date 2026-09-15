@@ -30,6 +30,7 @@ import type {
   TimeSource,
 } from './receipt.js';
 import {
+  POLICY_UNVERIFIED_RULE,
   DEFAULT_AUDIT_CONFIG,
   RECEIPT_VERSION,
   formatTimestamp,
@@ -118,7 +119,12 @@ export interface HushGuardOptions {
  * *obtained*) because this one means the policy was obtained and rejected --
  * the receipt has to be able to say which.
  */
-export const POLICY_SIGNATURE_RULE = '__hushspec_policy_signature__';
+/**
+ * Rule id reported for actions refused because the policy failed verification.
+ * One spelling across SDKs and across the in-memory result and the receipt:
+ * the receipt spec's reserved `__hushspec_policy_unverified__`.
+ */
+export const POLICY_SIGNATURE_RULE: string = POLICY_UNVERIFIED_RULE;
 
 /** The policy-loading half of {@link HushGuardOptions}. */
 export type PolicyResolveOptions = Pick<
