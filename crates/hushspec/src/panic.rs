@@ -239,11 +239,13 @@ mod tests {
 
     #[test]
     fn panic_mode_denies_all_action_types() {
-        let _guard = TEST_LOCK.lock().unwrap();
-        deactivate_panic();
-        activate_panic();
-
+        // A scoped latch, so this test neither reads nor writes the shared one.
         let spec = panic_policy();
+        let policy = crate::CompiledPolicy::compile(&spec)
+            .expect("panic policy compiles")
+            .with_panic_state(PanicState::new());
+        policy.panic_state().activate();
+
         let action_types = [
             "tool_call",
             "egress",
@@ -261,7 +263,7 @@ mod tests {
                 target: Some("anything".to_string()),
                 ..Default::default()
             };
-            let result = crate::evaluate(&spec, &action);
+            let result = policy.evaluate(&action);
             assert_eq!(
                 result.decision,
                 crate::Decision::Deny,
@@ -273,8 +275,6 @@ mod tests {
                 Some("emergency panic mode is active")
             );
         }
-
-        deactivate_panic();
     }
 
     #[test]

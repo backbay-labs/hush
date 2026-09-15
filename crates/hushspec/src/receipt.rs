@@ -414,6 +414,35 @@ pub fn evaluate_audited(
         &ctx.conditions,
     );
     let duration_us = start.map(|s| s.elapsed().as_micros() as u64);
+    finish_receipt(resolution, action, config, ctx, detected, duration_us)
+}
+
+/// [`CompiledPolicy::evaluate_audited`], routed here so the compiled and the
+/// compile-on-the-fly paths build identical receipts.
+///
+/// [`CompiledPolicy::evaluate_audited`]: crate::CompiledPolicy::evaluate_audited
+pub(crate) fn record_receipt(
+    policy: &crate::compiled::CompiledPolicy,
+    resolution: &Resolution,
+    action: &EvaluationAction,
+    config: &AuditConfig,
+    ctx: &AuditContext,
+) -> DecisionReceipt {
+    let start = (config.enabled && config.record_duration).then(Instant::now);
+    let detected =
+        policy.evaluate_with_detection_traced(action, ctx.context.as_ref(), &ctx.conditions);
+    let duration_us = start.map(|s| s.elapsed().as_micros() as u64);
+    finish_receipt(resolution, action, config, ctx, detected, duration_us)
+}
+
+fn finish_receipt(
+    resolution: &Resolution,
+    action: &EvaluationAction,
+    config: &AuditConfig,
+    ctx: &AuditContext,
+    detected: crate::detection::TracedEvaluationWithDetection,
+    duration_us: Option<u64>,
+) -> DecisionReceipt {
     let result = detected.evaluation;
 
     let rule_trace = if config.enabled && config.include_rule_trace {

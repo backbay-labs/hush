@@ -39,7 +39,6 @@ name = "evaluation"
 harness = false
 
 [features]
-default = ["std"]
-std = []
+default = []
 http = ["dep:reqwest", "dep:url"]
 signing = ["dep:ed25519-dalek", "dep:base64", "dep:rand"]

@@ -13,20 +13,26 @@
 //! normalized as specified in Section 3.14 before any pattern is consulted.
 
 use crate::HushSpec;
+use crate::compiled::{
+    CompiledBrowserAutomation, CompiledEgress, CompiledForbiddenPaths, CompiledMatchers,
+    CompiledPathAllowlist, CompiledRegex, CompiledSecretPatterns,
+};
 use crate::conditions::{Condition, RuntimeContext, evaluate_condition};
 use crate::extensions::{
     OriginEgressOverlay, OriginProfile, OriginToolAccessOverlay, PostureExtension,
     TransitionTrigger,
 };
+use crate::panic::PanicState;
 use crate::regex_profile::compile_profile_regex;
 use crate::rules::{
     BrowserAutomationRule, CodeExecutionRule, ComputerUseMode, ComputerUseRule, DefaultAction,
-    EgressRule, ForbiddenPathsRule, InputInjectionRule, PatchIntegrityRule, PathAllowlistRule,
-    RemoteDesktopChannelsRule, SecretPatternsRule, Severity, ShellCommandsRule, ToolAccessRule,
+    EgressRule, InputInjectionRule, PatchIntegrityRule, RemoteDesktopChannelsRule,
+    SecretPatternsRule, Severity, ToolAccessRule,
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
 /// `matched_rule` reported when the action type is unknown to the specification.
@@ -182,6 +188,10 @@ pub struct TracedEvaluation {
 ///
 /// `when` conditions are evaluated against `action.context` (an empty context
 /// and the engine clock when absent).
+///
+/// This compiles the document's patterns on every call. Evaluating repeatedly
+/// against one policy should go through
+/// [`CompiledPolicy`](crate::CompiledPolicy), which compiles them once.
 pub fn evaluate(spec: &HushSpec, action: &EvaluationAction) -> EvaluationResult {
     evaluate_traced(spec, action, None, &HashMap::new()).result
 }
@@ -190,6 +200,10 @@ pub fn evaluate(spec: &HushSpec, action: &EvaluationAction) -> EvaluationResult 
 /// of conditions keyed by rule-block name. The explicit `context` replaces
 /// `action.context`; out-of-band conditions are ANDed with each block's own
 /// `when` (core spec 3.13).
+///
+/// Compiles on the fly; see [`CompiledPolicy::evaluate_with_context`].
+///
+/// [`CompiledPolicy::evaluate_with_context`]: crate::CompiledPolicy::evaluate_with_context
 pub fn evaluate_with_context(
     spec: &HushSpec,
     action: &EvaluationAction,
@@ -200,8 +214,34 @@ pub fn evaluate_with_context(
 }
 
 /// Full evaluation with the recorded rule trace (used by receipts and `h2h explain`).
+///
+/// Compiles on the fly; see [`CompiledPolicy::evaluate_traced`].
+///
+/// [`CompiledPolicy::evaluate_traced`]: crate::CompiledPolicy::evaluate_traced
 pub fn evaluate_traced(
     spec: &HushSpec,
+    action: &EvaluationAction,
+    context: Option<&RuntimeContext>,
+    conditions: &HashMap<String, Condition>,
+) -> TracedEvaluation {
+    let matchers = CompiledMatchers::lazy(spec);
+    run_evaluation(
+        spec,
+        &matchers,
+        &PanicState::shared(),
+        action,
+        context,
+        conditions,
+    )
+}
+
+/// The one evaluation path. Both [`CompiledPolicy`](crate::CompiledPolicy) and
+/// the free functions above reach the evaluator through here; the only
+/// difference is whether the matchers were compiled once or per call.
+pub(crate) fn run_evaluation(
+    spec: &HushSpec,
+    matchers: &CompiledMatchers,
+    panic: &PanicState,
     action: &EvaluationAction,
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
@@ -212,9 +252,12 @@ pub fn evaluate_traced(
         .unwrap_or(&default_context);
     Evaluator {
         spec,
+        matchers,
+        panic,
         action,
         context,
         conditions,
+        active: Vec::new(),
         trace: Vec::new(),
     }
     .run()
@@ -289,17 +332,31 @@ impl Inactive {
     }
 }
 
+/// Whether a block's conditions hold, decided once per evaluation from the
+/// runtime context rather than at each block's turn.
+#[derive(Clone, Copy, Default)]
+struct BlockActivity {
+    when_false: bool,
+    oob_false: bool,
+}
+
 struct Evaluator<'a> {
     spec: &'a HushSpec,
+    matchers: &'a CompiledMatchers,
+    panic: &'a PanicState,
     action: &'a EvaluationAction,
     context: &'a RuntimeContext,
     conditions: &'a HashMap<String, Condition>,
+    /// Active-block mask, parallel to the action type's applicable blocks.
+    /// Empty when no applicable block carries a condition at all, which is
+    /// the common case and costs nothing.
+    active: Vec<BlockActivity>,
     trace: Vec<RuleEvaluation>,
 }
 
 impl Evaluator<'_> {
     fn run(mut self) -> TracedEvaluation {
-        if crate::panic::is_panic_active() {
+        if self.panic.is_active() {
             self.record(
                 "panic",
                 RuleOutcome::Deny,
@@ -335,13 +392,17 @@ impl Evaluator<'_> {
             );
         };
 
+        self.active = self.active_mask(blocks);
+
         // Origins guard: select a profile or apply default_behavior.
         let origins = self
             .spec
             .extensions
             .as_ref()
             .and_then(|extensions| extensions.origins.as_ref());
-        let matched_profile = select_origin_profile(self.spec, self.action.origin.as_ref());
+        let matched_index = select_origin_profile(self.spec, self.action.origin.as_ref());
+        let matched_profile =
+            matched_index.and_then(|index| origins.and_then(|origins| origins.profiles.get(index)));
         let origin_profile_id = matched_profile.map(|profile| profile.id.clone());
         if let Some(origins) = origins
             && matched_profile.is_none()
@@ -406,8 +467,14 @@ impl Evaluator<'_> {
         // Block evaluation and aggregation (core spec 6.1).
         let normalized_path = self.action.target.as_deref().map(normalize_path);
         let mut decisions: Vec<BlockDecision> = Vec::new();
-        for block in blocks {
-            match self.evaluate_block(block, matched_profile, normalized_path.as_deref()) {
+        for (index, block) in blocks.iter().enumerate() {
+            match self.evaluate_block(
+                index,
+                block,
+                matched_index,
+                matched_profile,
+                normalized_path.as_deref(),
+            ) {
                 Ok(decision) => {
                     self.record(
                         block,
@@ -483,25 +550,64 @@ impl Evaluator<'_> {
         }
     }
 
+    /// A block's own `when`, as declared in the document.
+    fn block_when(&self, block: &str) -> Option<&Condition> {
+        let rules = self.spec.rules.as_ref()?;
+        match block {
+            "forbidden_paths" => rules.forbidden_paths.as_ref()?.when.as_ref(),
+            "path_allowlist" => rules.path_allowlist.as_ref()?.when.as_ref(),
+            "secret_patterns" => rules.secret_patterns.as_ref()?.when.as_ref(),
+            "patch_integrity" => rules.patch_integrity.as_ref()?.when.as_ref(),
+            "shell_commands" => rules.shell_commands.as_ref()?.when.as_ref(),
+            "tool_access" => rules.tool_access.as_ref()?.when.as_ref(),
+            "egress" => rules.egress.as_ref()?.when.as_ref(),
+            "computer_use" => rules.computer_use.as_ref()?.when.as_ref(),
+            "remote_desktop_channels" => rules.remote_desktop_channels.as_ref()?.when.as_ref(),
+            "input_injection" => rules.input_injection.as_ref()?.when.as_ref(),
+            "browser_automation" => rules.browser_automation.as_ref()?.when.as_ref(),
+            "code_execution" => rules.code_execution.as_ref()?.when.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Decide, once per evaluation, which of the action type's applicable
+    /// blocks the runtime context leaves active. Returns an empty mask -- read
+    /// as "every block active" -- when no applicable block carries a condition,
+    /// so a policy without `when` pays nothing.
+    fn active_mask(&self, blocks: &[&str]) -> Vec<BlockActivity> {
+        let any_condition = !self.conditions.is_empty()
+            || blocks.iter().any(|block| self.block_when(block).is_some());
+        if !any_condition {
+            return Vec::new();
+        }
+        blocks
+            .iter()
+            .map(|block| BlockActivity {
+                when_false: self
+                    .block_when(block)
+                    .is_some_and(|condition| !evaluate_condition(condition, self.context)),
+                oob_false: self
+                    .conditions
+                    .get(*block)
+                    .is_some_and(|condition| !evaluate_condition(condition, self.context)),
+            })
+            .collect()
+    }
+
     /// Whether a present block is active: enabled, and its `when` plus any
-    /// out-of-band condition hold for the runtime context.
-    fn activity(
-        &self,
-        block: &str,
-        enabled: bool,
-        when: Option<&Condition>,
-    ) -> Result<(), Inactive> {
+    /// out-of-band condition hold for the runtime context (read off the mask
+    /// computed in [`Evaluator::active_mask`]).
+    fn activity(&self, index: usize, enabled: bool) -> Result<(), Inactive> {
         if !enabled {
             return Err(Inactive::Disabled);
         }
-        if let Some(condition) = when
-            && !evaluate_condition(condition, self.context)
-        {
+        let Some(activity) = self.active.get(index) else {
+            return Ok(());
+        };
+        if activity.when_false {
             return Err(Inactive::ConditionFalse);
         }
-        if let Some(condition) = self.conditions.get(block)
-            && !evaluate_condition(condition, self.context)
-        {
+        if activity.oob_false {
             return Err(Inactive::OutOfBandConditionFalse);
         }
         Ok(())
@@ -509,11 +615,14 @@ impl Evaluator<'_> {
 
     fn evaluate_block(
         &self,
+        index: usize,
         block: &str,
+        matched_index: Option<usize>,
         matched_profile: Option<&OriginProfile>,
         normalized_path: Option<&str>,
     ) -> Result<BlockDecision, Inactive> {
         let rules = self.spec.rules.as_ref();
+        let compiled = self.matchers;
         let action = self.action;
         let content = action.content.as_deref();
         match block {
@@ -521,9 +630,10 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.forbidden_paths.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.forbidden_paths(rule);
                 Ok(evaluate_forbidden_paths(
-                    rule,
+                    compiled,
                     normalized_path.unwrap_or_default(),
                 ))
             }
@@ -531,14 +641,15 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.path_allowlist.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.path_allowlist(rule);
                 let operation = match action.action_type.as_str() {
                     "file_read" => PathOperation::Read,
                     "patch_apply" => PathOperation::Patch,
                     _ => PathOperation::Write,
                 };
                 Ok(evaluate_path_allowlist(
-                    rule,
+                    compiled,
                     normalized_path.unwrap_or_default(),
                     operation,
                 ))
@@ -553,10 +664,12 @@ impl Evaluator<'_> {
                 if !path_bearing && content.is_none() {
                     return Err(Inactive::Absent);
                 }
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.secret_patterns(rule);
                 let skip_path = if path_bearing { normalized_path } else { None };
                 Ok(evaluate_secret_patterns(
                     rule,
+                    compiled,
                     skip_path,
                     content.unwrap_or_default(),
                 ))
@@ -565,16 +678,22 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.patch_integrity.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
-                Ok(evaluate_patch_integrity(rule, content.unwrap_or_default()))
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.patch_integrity(rule);
+                Ok(evaluate_patch_integrity(
+                    rule,
+                    compiled,
+                    content.unwrap_or_default(),
+                ))
             }
             "shell_commands" => {
                 let rule = rules
                     .and_then(|rules| rules.shell_commands.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.shell_commands(rule);
                 Ok(evaluate_shell_commands(
-                    rule,
+                    compiled,
                     action.target.as_deref().unwrap_or_default(),
                 ))
             }
@@ -590,7 +709,7 @@ impl Evaluator<'_> {
                     return Err(Inactive::Absent);
                 }
                 if let Some(rule) = base {
-                    self.activity(block, rule.enabled, rule.when.as_ref())?;
+                    self.activity(index, rule.enabled)?;
                 }
                 Ok(evaluate_tool_access(base, overlay, action))
             }
@@ -606,16 +725,26 @@ impl Evaluator<'_> {
                     return Err(Inactive::Absent);
                 }
                 if let Some(rule) = base {
-                    self.activity(block, rule.enabled, rule.when.as_ref())?;
+                    self.activity(index, rule.enabled)?;
                 }
+                let base_compiled = base.map(|rule| compiled.egress(rule));
+                let overlay_compiled = matched_index
+                    .zip(overlay)
+                    .and_then(|(position, (_, overlay))| compiled.origin_egress(position, overlay));
                 let host = action.target.as_deref().and_then(normalize_host);
-                Ok(evaluate_egress(base, overlay, host.as_deref()))
+                Ok(evaluate_egress(
+                    base,
+                    base_compiled,
+                    overlay,
+                    overlay_compiled,
+                    host.as_deref(),
+                ))
             }
             "computer_use" => {
                 let rule = rules
                     .and_then(|rules| rules.computer_use.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
                 Ok(evaluate_computer_use(
                     rule,
                     action.target.as_deref().unwrap_or_default(),
@@ -625,7 +754,7 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.remote_desktop_channels.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
                 evaluate_remote_desktop_channels(rule, action.target.as_deref().unwrap_or_default())
                     .ok_or(Inactive::Absent)
             }
@@ -633,7 +762,7 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.input_injection.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
                 Ok(evaluate_input_injection(
                     rule,
                     action.target.as_deref().unwrap_or_default(),
@@ -643,14 +772,15 @@ impl Evaluator<'_> {
                 let rule = rules
                     .and_then(|rules| rules.browser_automation.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
-                Ok(evaluate_browser_automation(rule, action))
+                self.activity(index, rule.enabled)?;
+                let compiled = compiled.browser_automation(rule);
+                Ok(evaluate_browser_automation(rule, compiled, action))
             }
             "code_execution" => {
                 let rule = rules
                     .and_then(|rules| rules.code_execution.as_ref())
                     .ok_or(Inactive::Absent)?;
-                self.activity(block, rule.enabled, rule.when.as_ref())?;
+                self.activity(index, rule.enabled)?;
                 Ok(evaluate_code_execution(rule, action))
             }
             _ => Err(Inactive::Absent),
@@ -719,14 +849,14 @@ impl Evaluator<'_> {
 // Rule blocks
 // ---------------------------------------------------------------------------
 
-fn evaluate_forbidden_paths(rule: &ForbiddenPathsRule, path: &str) -> BlockDecision {
-    if any_path_glob_matches(&rule.exceptions, path) {
+fn evaluate_forbidden_paths(compiled: &CompiledForbiddenPaths, path: &str) -> BlockDecision {
+    if compiled.exceptions.matches(path) {
         return BlockDecision::allow(
             Some("rules.forbidden_paths.exceptions"),
             Some("path matched an explicit exception"),
         );
     }
-    if any_path_glob_matches(&rule.patterns, path) {
+    if compiled.patterns.matches(path) {
         return BlockDecision::deny(
             "rules.forbidden_paths.patterns",
             "path matched a forbidden pattern",
@@ -736,22 +866,16 @@ fn evaluate_forbidden_paths(rule: &ForbiddenPathsRule, path: &str) -> BlockDecis
 }
 
 fn evaluate_path_allowlist(
-    rule: &PathAllowlistRule,
+    compiled: &CompiledPathAllowlist,
     path: &str,
     operation: PathOperation,
 ) -> BlockDecision {
     let patterns = match operation {
-        PathOperation::Read => &rule.read,
-        PathOperation::Write => &rule.write,
-        PathOperation::Patch => {
-            if rule.patch.is_empty() {
-                &rule.write
-            } else {
-                &rule.patch
-            }
-        }
+        PathOperation::Read => &compiled.read,
+        PathOperation::Write => &compiled.write,
+        PathOperation::Patch => compiled.patch(),
     };
-    if any_path_glob_matches(patterns, path) {
+    if patterns.matches(path) {
         BlockDecision::allow(Some("rules.path_allowlist"), Some("path matched allowlist"))
     } else {
         BlockDecision::deny("rules.path_allowlist", "path did not match allowlist")
@@ -768,11 +892,12 @@ fn severity_rank(severity: Severity) -> u8 {
 
 fn evaluate_secret_patterns(
     rule: &SecretPatternsRule,
+    compiled: &CompiledSecretPatterns,
     skip_path: Option<&str>,
     content: &str,
 ) -> BlockDecision {
     if let Some(path) = skip_path
-        && any_path_glob_matches(&rule.skip_paths, path)
+        && compiled.skip_paths.matches(path)
     {
         return BlockDecision::allow(
             Some("rules.secret_patterns.skip_paths"),
@@ -781,10 +906,10 @@ fn evaluate_secret_patterns(
     }
 
     let mut best: Option<(u8, &crate::rules::SecretPattern)> = None;
-    for pattern in &rule.patterns {
+    for (pattern, compiled) in rule.patterns.iter().zip(&compiled.patterns) {
         // Fail closed: a pattern that will not compile under the HushSpec regex
         // profile denies the action rather than being skipped (core spec 3.14.3).
-        let regex = match compile_profile_regex(&pattern.pattern) {
+        let regex = match compiled {
             Ok(regex) => regex,
             Err(error) => {
                 return BlockDecision::deny(
@@ -820,9 +945,13 @@ fn evaluate_secret_patterns(
     }
 }
 
-fn evaluate_patch_integrity(rule: &PatchIntegrityRule, content: &str) -> BlockDecision {
-    for (index, pattern) in rule.forbidden_patterns.iter().enumerate() {
-        let regex = match compile_profile_regex(pattern) {
+fn evaluate_patch_integrity(
+    rule: &PatchIntegrityRule,
+    compiled: &[CompiledRegex],
+    content: &str,
+) -> BlockDecision {
+    for (index, pattern) in compiled.iter().enumerate() {
+        let regex = match pattern {
             Ok(regex) => regex,
             Err(error) => {
                 return BlockDecision::deny(
@@ -875,9 +1004,9 @@ fn evaluate_patch_integrity(rule: &PatchIntegrityRule, content: &str) -> BlockDe
     BlockDecision::allow(None, Some("patch passed integrity checks"))
 }
 
-fn evaluate_shell_commands(rule: &ShellCommandsRule, command: &str) -> BlockDecision {
-    for (index, pattern) in rule.forbidden_patterns.iter().enumerate() {
-        let regex = match compile_profile_regex(pattern) {
+fn evaluate_shell_commands(compiled: &[CompiledRegex], command: &str) -> BlockDecision {
+    for (index, pattern) in compiled.iter().enumerate() {
+        let regex = match pattern {
             Ok(regex) => regex,
             Err(error) => {
                 return BlockDecision::deny(
@@ -1039,32 +1168,36 @@ fn default_rule_path(
 
 fn evaluate_egress(
     base: Option<&EgressRule>,
+    base_compiled: Option<&CompiledEgress>,
     overlay: Option<(&str, &OriginEgressOverlay)>,
+    overlay_compiled: Option<&CompiledEgress>,
     host: Option<&str>,
 ) -> BlockDecision {
     let prefix = overlay.map(|(id, _)| format!("extensions.origins.profiles.{id}.egress"));
     let overlay = overlay.map(|(_, overlay)| overlay);
 
     // 1. block: union of both lists.
-    if base.is_some_and(|rule| any_host_pattern_matches(&rule.block, host)) {
+    if base.is_some() && base_compiled.is_some_and(|compiled| compiled.block.matches(host)) {
         return BlockDecision::deny("rules.egress.block", "domain is explicitly blocked");
     }
-    if let (Some(rule), Some(prefix)) = (overlay, prefix.as_ref())
-        && any_host_pattern_matches(&rule.block, host)
+    if let (Some(_), Some(prefix)) = (overlay, prefix.as_ref())
+        && overlay_compiled.is_some_and(|compiled| compiled.block.matches(host))
     {
         return BlockDecision::deny(&format!("{prefix}.block"), "domain is explicitly blocked");
     }
 
     // 2. allow: intersection when both lists are non-empty.
     let base_allow = base
-        .map(|rule| rule.allow.as_slice())
+        .zip(base_compiled)
+        .map(|(_, compiled)| &compiled.allow)
         .filter(|list| !list.is_empty());
     let overlay_allow = overlay
-        .map(|rule| rule.allow.as_slice())
+        .zip(overlay_compiled)
+        .map(|(_, compiled)| &compiled.allow)
         .filter(|list| !list.is_empty());
     if base_allow.is_some() || overlay_allow.is_some() {
-        let base_ok = base_allow.is_none_or(|list| any_host_pattern_matches(list, host));
-        let overlay_ok = overlay_allow.is_none_or(|list| any_host_pattern_matches(list, host));
+        let base_ok = base_allow.is_none_or(|list| list.matches(host));
+        let overlay_ok = overlay_allow.is_none_or(|list| list.matches(host));
         if base_ok && overlay_ok {
             let matched_rule = match (overlay_allow, prefix.as_ref()) {
                 (Some(_), Some(prefix)) => format!("{prefix}.allow"),
@@ -1184,8 +1317,20 @@ pub const BUILTIN_CREDENTIAL_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
+/// The built-in credential detectors, compiled once per process. A detector
+/// whose pattern will not compile is `None` and matches nothing, exactly as
+/// the per-call `compile_profile_regex(..).is_ok_and(..)` did.
+static BUILTIN_CREDENTIAL_REGEXES: LazyLock<Vec<(&'static str, Option<Regex>)>> =
+    LazyLock::new(|| {
+        BUILTIN_CREDENTIAL_PATTERNS
+            .iter()
+            .map(|(name, pattern)| (*name, compile_profile_regex(pattern).ok()))
+            .collect()
+    });
+
 fn evaluate_browser_automation(
     rule: &BrowserAutomationRule,
+    compiled: &CompiledBrowserAutomation,
     action: &EvaluationAction,
 ) -> BlockDecision {
     let verb = action.target.as_deref().unwrap_or_default();
@@ -1201,14 +1346,14 @@ fn evaluate_browser_automation(
     // 2. destination host.
     if let Some(url) = action.url.as_deref() {
         let host = normalize_host(url);
-        if any_host_pattern_matches(&rule.blocked_domains, host.as_deref()) {
+        if compiled.blocked_domains.matches(host.as_deref()) {
             return BlockDecision::deny(
                 "rules.browser_automation.blocked_domains",
                 "destination host is explicitly blocked",
             );
         }
-        if !rule.allowed_domains.is_empty()
-            && !any_host_pattern_matches(&rule.allowed_domains, host.as_deref())
+        if !compiled.allowed_domains.is_empty()
+            && !compiled.allowed_domains.matches(host.as_deref())
         {
             return BlockDecision::deny(
                 "rules.browser_automation.allowed_domains",
@@ -1221,16 +1366,16 @@ fn evaluate_browser_automation(
     if rule.credential_detection
         && let Some(content) = action.content.as_deref()
     {
-        for (name, pattern) in BUILTIN_CREDENTIAL_PATTERNS {
-            if compile_profile_regex(pattern).is_ok_and(|regex| regex.is_match(content)) {
+        for (name, regex) in BUILTIN_CREDENTIAL_REGEXES.iter() {
+            if regex.as_ref().is_some_and(|regex| regex.is_match(content)) {
                 return BlockDecision::deny(
                     "rules.browser_automation.credential_detection",
                     &format!("typed input matched built-in credential detector '{name}'"),
                 );
             }
         }
-        for (index, pattern) in rule.extra_credential_patterns.iter().enumerate() {
-            let regex = match compile_profile_regex(pattern) {
+        for (index, pattern) in compiled.extra_credential_patterns.iter().enumerate() {
+            let regex = match pattern {
                 Ok(regex) => regex,
                 Err(error) => {
                     return BlockDecision::deny(
@@ -1390,10 +1535,10 @@ fn next_posture_state(posture: &PostureExtension, current: &str, signal: &str) -
 /// with a `match` object every present field of which is satisfied; a
 /// `space_id` match wins outright, then the greatest matched-field count,
 /// then document order.
-fn select_origin_profile<'a>(
-    spec: &'a HushSpec,
-    origin: Option<&OriginContext>,
-) -> Option<&'a OriginProfile> {
+///
+/// Returns the winning profile's *position*, which also indexes the compiled
+/// overlays a [`CompiledPolicy`](crate::CompiledPolicy) built for it.
+fn select_origin_profile(spec: &HushSpec, origin: Option<&OriginContext>) -> Option<usize> {
     let origin = origin?;
     let profiles = spec
         .extensions
@@ -1401,8 +1546,8 @@ fn select_origin_profile<'a>(
         .and_then(|extensions| extensions.origins.as_ref())
         .map(|origins| origins.profiles.as_slice())?;
 
-    let mut best: Option<(u32, &OriginProfile)> = None;
-    for profile in profiles {
+    let mut best: Option<(u32, usize)> = None;
+    for (position, profile) in profiles.iter().enumerate() {
         let Some(rules) = profile.match_rules.as_ref() else {
             continue;
         };
@@ -1410,13 +1555,13 @@ fn select_origin_profile<'a>(
             continue;
         };
         if rules.space_id.is_some() {
-            return Some(profile);
+            return Some(position);
         }
         if best.is_none_or(|(best_count, _)| matched_fields > best_count) {
-            best = Some((matched_fields, profile));
+            best = Some((matched_fields, position));
         }
     }
-    best.map(|(_, profile)| profile)
+    best.map(|(_, position)| position)
 }
 
 /// Number of `match` fields satisfied by `origin`, or `None` when any present
@@ -1523,7 +1668,10 @@ pub fn normalize_path(target: &str) -> String {
 }
 
 /// Compile a path glob (core spec 3.14.1) into an anchored regex.
-fn path_glob_regex(pattern: &str) -> Option<Regex> {
+///
+/// [`CompiledPolicy`](crate::CompiledPolicy) calls this once per declared glob
+/// and keeps the automaton; `None` (an uncompilable glob) matches nothing.
+pub(crate) fn path_glob_regex(pattern: &str) -> Option<Regex> {
     let chars: Vec<char> = pattern.nfc().collect();
     let mut regex = String::from("^");
     let mut index = 0;
@@ -1557,15 +1705,13 @@ pub fn path_glob_matches(pattern: &str, path: &str) -> bool {
     path_glob_regex(pattern).is_some_and(|regex| regex.is_match(path))
 }
 
-fn any_path_glob_matches(patterns: &[String], path: &str) -> bool {
-    patterns
-        .iter()
-        .any(|pattern| path_glob_matches(pattern, path))
-}
-
 /// Match a raw path target against a path glob, normalizing the target first.
-/// Kept for callers outside the evaluator (lint, diff); prefer
-/// [`path_glob_matches`] with an already-normalized path.
+///
+/// Kept only for the `h2h lint` code that has to agree with the evaluator's
+/// glob semantics pattern by pattern; it compiles the glob on every call.
+/// Everything that evaluates actions goes through
+/// [`CompiledPolicy`](crate::CompiledPolicy) instead.
+#[doc(hidden)]
 pub fn glob_matches(pattern: &str, target: &str) -> bool {
     path_glob_matches(pattern, &normalize_path(target))
 }
@@ -1651,7 +1797,7 @@ fn normalize_host_label(label: &str) -> Option<String> {
 }
 
 /// Normalize a host pattern (steps 5-7 of core spec 3.14.2), preserving `*`.
-fn normalize_host_pattern(pattern: &str) -> String {
+pub(crate) fn normalize_host_pattern(pattern: &str) -> String {
     let pattern = pattern.trim();
     let pattern = pattern.strip_suffix('.').unwrap_or(pattern);
     if pattern.starts_with('[') {
@@ -1681,20 +1827,20 @@ fn is_ipv4_literal(host: &str) -> bool {
         })
 }
 
-fn is_ip_literal(host: &str) -> bool {
+pub(crate) fn is_ip_literal(host: &str) -> bool {
     host.starts_with('[') || is_ipv4_literal(host)
 }
 
-/// Whether a normalized host matches a host pattern (core spec 3.14.2):
-/// `*` is one or more non-dot characters, `**` one or more characters
-/// including dots, everything else literal. IP literals match only exactly.
-pub fn host_pattern_matches(pattern: &str, host: &str) -> bool {
-    let pattern = normalize_host_pattern(pattern);
-    if is_ip_literal(host) {
-        return pattern == host;
-    }
+/// Compile an already-normalized host pattern (core spec 3.14.2) into an
+/// anchored regex: `*` is one or more non-dot characters, `**` one or more
+/// characters including dots, everything else literal.
+///
+/// The IP-literal rule is *not* in the automaton: an IP-literal host matches
+/// only a byte-equal pattern, which the caller checks first (see
+/// [`host_pattern_matches`] and the compiled host sets).
+pub(crate) fn host_pattern_regex(normalized_pattern: &str) -> Option<Regex> {
     let mut regex = String::from("^");
-    let chars: Vec<char> = pattern.chars().collect();
+    let chars: Vec<char> = normalized_pattern.chars().collect();
     let mut index = 0;
     while index < chars.len() {
         if chars[index] == '*' {
@@ -1711,16 +1857,21 @@ pub fn host_pattern_matches(pattern: &str, host: &str) -> bool {
         index += 1;
     }
     regex.push('$');
-    Regex::new(&regex).is_ok_and(|regex| regex.is_match(host))
+    Regex::new(&regex).ok()
 }
 
-fn any_host_pattern_matches(patterns: &[String], host: Option<&str>) -> bool {
-    let Some(host) = host else {
-        return false;
-    };
-    patterns
-        .iter()
-        .any(|pattern| host_pattern_matches(pattern, host))
+/// Whether a normalized host matches a host pattern (core spec 3.14.2):
+/// `*` is one or more non-dot characters, `**` one or more characters
+/// including dots, everything else literal. IP literals match only exactly.
+///
+/// Compiles the pattern on every call; evaluation goes through the host sets a
+/// [`CompiledPolicy`](crate::CompiledPolicy) built once.
+pub fn host_pattern_matches(pattern: &str, host: &str) -> bool {
+    let pattern = normalize_host_pattern(pattern);
+    if is_ip_literal(host) {
+        return pattern == host;
+    }
+    host_pattern_regex(&pattern).is_some_and(|regex| regex.is_match(host))
 }
 
 /// RFC 3492 punycode encoding of one label (without the `xn--` prefix).

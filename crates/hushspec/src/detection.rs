@@ -2,9 +2,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::conditions::{Condition, RuntimeContext};
-use crate::evaluate::{
-    Decision, EvaluationAction, EvaluationResult, TracedEvaluation, evaluate_traced,
-};
+use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, TracedEvaluation};
 use crate::extensions::DetectionLevel;
 use crate::schema::HushSpec;
 use std::collections::HashMap;
@@ -87,6 +85,22 @@ impl DetectorRegistry {
 impl Default for DetectorRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::fmt::Debug for DetectorRegistry {
+    /// Detectors are opaque trait objects; list the ids instead.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DetectorRegistry")
+            .field(
+                "detectors",
+                &self
+                    .detectors
+                    .iter()
+                    .map(|detector| detector.name())
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
     }
 }
 
@@ -527,13 +541,54 @@ pub fn evaluate_with_detection(
 
 /// [`evaluate_with_detection`] with the recorded rule trace and per-detector
 /// receipt entries (used by receipts).
+///
+/// Compiles the policy on every call; see
+/// [`CompiledPolicy::evaluate_with_detection_traced`].
+///
+/// [`CompiledPolicy::evaluate_with_detection_traced`]:
+///     crate::CompiledPolicy::evaluate_with_detection_traced
 pub fn evaluate_with_detection_traced(
     spec: &HushSpec,
     action: &EvaluationAction,
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
 ) -> TracedEvaluationWithDetection {
-    let traced = evaluate_traced(spec, action, context, conditions);
+    let matchers = crate::compiled::CompiledMatchers::lazy(spec);
+    let traced = crate::evaluate::run_evaluation(
+        spec,
+        &matchers,
+        &crate::panic::PanicState::shared(),
+        action,
+        context,
+        conditions,
+    );
+    fold_detection(spec, traced, action, None)
+}
+
+/// [`CompiledPolicy::evaluate_with_detection_traced`], routed here so the
+/// compiled and the compile-on-the-fly paths share one implementation.
+///
+/// [`CompiledPolicy::evaluate_with_detection_traced`]:
+///     crate::CompiledPolicy::evaluate_with_detection_traced
+pub(crate) fn run_detection(
+    policy: &crate::compiled::CompiledPolicy,
+    action: &EvaluationAction,
+    context: Option<&RuntimeContext>,
+    conditions: &HashMap<String, Condition>,
+) -> TracedEvaluationWithDetection {
+    let traced = policy.evaluate_traced(action, context, conditions);
+    fold_detection(policy.spec(), traced, action, policy.detectors())
+}
+
+/// Fold the policy's `detection:` extension into an evaluation that already
+/// ran. `registry` is the policy's own detector registry; `None` falls back to
+/// the process-wide built-in registry, which is built once.
+fn fold_detection(
+    spec: &HushSpec,
+    traced: crate::evaluate::TracedEvaluation,
+    action: &EvaluationAction,
+    registry: Option<&DetectorRegistry>,
+) -> TracedEvaluationWithDetection {
     let base = traced.result.clone();
 
     let Some(detection) = spec
@@ -561,7 +616,14 @@ pub fn evaluate_with_detection_traced(
         };
     }
 
-    let registry = DetectorRegistry::with_defaults();
+    let shared;
+    let registry = match registry {
+        Some(registry) => registry,
+        None => {
+            shared = crate::compiled::default_detector_registry();
+            &shared
+        }
+    };
     let mut detections: Vec<DetectionResult> = Vec::new();
     let mut detector_trace: Vec<DetectorEvaluation> = Vec::new();
     // (category, contribution) for each detector that raised a warn/deny.

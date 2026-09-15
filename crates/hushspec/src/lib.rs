@@ -1,6 +1,39 @@
+//! HushSpec: portable security policy for the tool boundary of AI agent
+//! runtimes.
+//!
+//! # Getting started
+//!
+//! [`CompiledPolicy`] is the evaluation entry point: compile a resolved,
+//! validated document once and evaluate many actions against it, so each
+//! action costs only the matching, never the pattern compilation.
+//!
+//! ```
+//! use hushspec::{CompiledPolicy, EvaluationAction, HushSpec};
+//!
+//! let spec = HushSpec::parse("hushspec: \"0.1.0\"\n")?;
+//! let policy = CompiledPolicy::compile(&spec)?;
+//! let action = EvaluationAction {
+//!     action_type: "tool_call".to_string(),
+//!     target: Some("read_file".to_string()),
+//!     ..Default::default()
+//! };
+//! let decision = policy.evaluate(&action);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! The free functions ([`evaluate`], [`evaluate_with_detection`],
+//! [`evaluate_audited`], ...) stay available and behave identically, but
+//! compile the policy on every call.
+//!
+//! Panic mode is carried by a [`PanicState`] handle, not a process global, so
+//! a multi-tenant host can arm one tenant's kill switch alone. A policy
+//! compiled without an explicit handle holds the process-wide one, which
+//! [`panic::activate_panic`] and the `h2h panic` sentinel drive.
+
 #[cfg(feature = "signing")]
 pub mod bundle;
 pub mod canonical;
+pub mod compiled;
 pub mod conditions;
 pub mod detection;
 pub mod evaluate;
@@ -35,6 +68,7 @@ pub use canonical::{
     CONTENT_HASH_PREFIX, CanonicalError, canonical_json, canonical_json_value, canonical_value,
     canonical_value_of, content_hash, content_hash_value, serialize_jcs,
 };
+pub use compiled::{CompileError, CompiledPolicy, default_detector_registry};
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{
     DetectionCategory, DetectionResult, Detector, DetectorEvaluation, DetectorLevel,
@@ -72,7 +106,12 @@ pub use resolve::{
     resolve_from_path, resolve_from_path_with_builtins, resolve_path_with_options,
     resolve_with_loader, resolve_with_options, split_digest_pin,
 };
-pub use rules::*;
+pub use rules::{
+    BrowserAutomationRule, CodeExecutionRule, ComputerUseMode, ComputerUseRule, DefaultAction,
+    EgressRule, ForbiddenPathsRule, InputInjectionRule, PatchIntegrityRule, PathAllowlistRule,
+    RemoteDesktopChannelsRule, Rules, SecretPattern, SecretPatternsRule, Severity,
+    ShellCommandsRule, ToolAccessRule,
+};
 pub use schema::HushSpec;
 pub use sink::{
     CallbackSink, FileReceiptSink, FilteredSink, MultiSink, NullSink, ReceiptSink, SinkError,
