@@ -261,6 +261,217 @@ result := hushspec.VerifyReceipt(signed, hushspec.VerifyOptions{Keyring: keyring
 open enums, non-millisecond timestamps and bare-hex hashes are all rejected --
 so a receipt that parses is a receipt an auditor can rely on.
 
+### Enforcement point: `Guard`
+
+`Guard` is the piece that sits at the tool boundary: it holds a compiled
+policy, applies the enforcement mode, records a receipt, and answers whether
+the action may proceed. `Check` gates, `Evaluate` records without gating, and
+`SwapPolicy` replaces the policy in force without stopping in-flight
+evaluations. It is safe to share across goroutines.
+
+```go
+guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
+	Actor:  &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
+	Sink:   sink,                      // receipts and policy_loaded / policy_swapped
+	OnWarn: confirmWithOperator,       // nil denies every warn (D16)
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+decision, err := guard.Check(ctx, &hushspec.EvaluationAction{
+	Type:   "egress",
+	Target: "api.github.com",
+})
+if err != nil {
+	// A cancelled context, or a sink that would not take the receipt.
+	log.Printf("hushspec: %v", err)
+}
+if !decision.Allowed() {
+	return fmt.Errorf("blocked by %s: %s", decision.Result.MatchedRule, decision.Result.Reason)
+}
+```
+
+`GuardDecision` carries the policy's `Result`, the `Receipt` (when a sink is
+configured), the `Enforcement` disposition that was recorded, and `Enforced` --
+false exactly when monitor mode let a warn or deny through as `would_block`.
+
+**Monitor mode.** `EnforcementMode: hushspec.EnforcementModeMonitor` records
+what would have been blocked and lets it proceed; `RuleOverrides` narrows that
+to one rule path, longest matching prefix first:
+
+```go
+hushspec.GuardOptions{
+	EnforcementMode: hushspec.EnforcementModeMonitor,
+	RuleOverrides: map[string]hushspec.EnforcementMode{
+		"rules.egress": hushspec.EnforcementModeEnforce, // still blocked for real
+	},
+	Sink: sink,
+}
+```
+
+Monitor mode without a sink or an observer is rejected at construction: a
+shadow decision nobody can see is not a control. Panic mode and a policy that
+did not verify always enforce, whatever the mode says.
+
+**Verify on load.** With `RequireSignature` the guard refuses a chain that does
+not verify, rather than failing to exist: it keeps the document, reports
+`Refused()`, and denies every action with `__hushspec_policy_unverified__` and
+a receipt recording `policy.signature.verified: false` and the verifier's
+reason (signing spec 6.5).
+
+```go
+guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
+	RequireSignature: true,
+	Keyring:          keyring,
+	Sink:             sink,
+})
+if refused, status := guard.Refused(); refused {
+	log.Printf("policy unverified (%s): every action is denied", status.Reason)
+}
+```
+
+### Observers
+
+An `EvaluationObserver` is told about every decision and every policy load, and
+can change neither. Observers that panic are recovered; they never break
+enforcement.
+
+```go
+metrics := hushspec.NewMetricsCollector()
+guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
+	Observer: hushspec.NewObservableEvaluator(
+		metrics,
+		hushspec.NewJSONLineObserver(os.Stdout),
+		hushspec.NewDenyOnlyStderrObserver(),
+	),
+})
+
+// GET /metrics
+fmt.Fprint(w, metrics.RenderPrometheus())
+```
+
+- `JSONLineObserver` writes one JSON object per event (`evaluation.completed`,
+  `policy.loaded`, `policy.reloaded`, `error`). Action content is never
+  written -- only the hash and size a receipt records.
+- `StderrObserver` writes a human-readable line; `NewDenyOnlyStderrObserver`
+  limits evaluation lines to denials.
+- `MetricsCollector` counts by decision and action type, by rule block, and by
+  policy load outcome, with a latency histogram. `Snapshot()` copies the
+  counters; `RenderPrometheus()` renders `hushspec_evaluate_total`,
+  `hushspec_evaluate_duration_us`, `hushspec_rule_match_total` and
+  `hushspec_policy_load_total`.
+- `WebhookObserver` POSTs each event to an HTTP endpoint from a background
+  goroutine, with a bounded queue: a slow endpoint drops events rather than
+  slowing an evaluation.
+
+### Providers and hot reload
+
+A `PolicyProvider` is where the policy comes from; `FileProvider` reads one
+from disk, resolving and verifying its `extends` chain against the file's own
+directory. `PolicyWatcher` polls that file's modification time and content hash
+and swaps a changed policy into the guard; `PolicyPoller` does the same for any
+provider on a fixed interval.
+
+```go
+provider := hushspec.NewFileProvider("policy.yaml", hushspec.ResolveOptions{
+	RequireSignature: true,
+	Keyring:          keyring,
+})
+guard, err := hushspec.NewGuardFromProvider(provider, hushspec.GuardOptions{Sink: sink})
+
+watcher, err := hushspec.NewPolicyWatcher(provider, hushspec.ReloadOptions{
+	Guard:         guard,
+	Interval:      2 * time.Second,
+	PanicSentinel: "/etc/hushspec/PANIC", // checked on every tick
+	OnChange:      func(r *hushspec.Resolution) { log.Printf("policy %s in force", r.ContentHash) },
+	OnError:       func(err error) { log.Printf("reload failed: %v", err) },
+})
+if err := watcher.Start(ctx); err != nil {
+	log.Fatal(err)
+}
+defer watcher.Stop()
+```
+
+A reload that cannot be read, resolved, verified or compiled leaves the
+previous policy in force and goes to `OnError` (and to the guard's observer):
+a policy nobody checked must never take effect just because it arrived second.
+A document whose content hash is unchanged is not a swap. `CheckOnce()` is the
+whole of one tick, exposed so a test can drive reload deterministically instead
+of waiting on a ticker.
+
+### Agent framework adapters
+
+The adapters map a runtime's tool call onto an `EvaluationAction`. The mapping
+is the security-relevant part: a call evaluated as a bare `tool_call` meets
+`tool_access` alone, while the same call mapped to `file_read` also meets
+`forbidden_paths` and `path_allowlist`.
+
+```go
+action := hushspec.MapAnthropicToolUse("bash", input)          // shell_command
+action = hushspec.MapMCPToolCall("fetch", args)                // egress, host only
+action = hushspec.MapOpenAIToolCall("get_weather", arguments)  // tool_call + args size
+```
+
+`MapAnthropicToolUse` recognizes `bash` and `terminal`, the text editor tools
+(dated revisions included -- a `view` reads, anything else writes and carries
+its payload as content), `computer`, and `web_fetch`; an
+`mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
+policy names the tool rather than the transport. `MapMCPToolCall` recognizes
+the file, command and fetch tools. Anything unrecognized is a `tool_call`
+against the tool's own name: guessing wrong would consult the wrong rule block,
+which is worse than not guessing.
+
+`GuardedToolHandler` (and the per-runtime `GuardedAnthropicToolHandler`,
+`GuardedOpenAIToolHandler`, `GuardedMCPToolHandler`) wraps a handler so the
+check happens before the tool runs; a refused call returns a `*ToolDeniedError`
+and the handler is never invoked.
+
+```go
+handler := hushspec.GuardedMCPToolHandler(guard, runTool)
+
+result, err := handler(ctx, "write_file", map[string]any{
+	"path":    "/etc/shadow",
+	"content": payload,
+})
+var denied *hushspec.ToolDeniedError
+if errors.As(err, &denied) {
+	return denied.Result.Reason // the tool never ran
+}
+```
+
+### OTLP export
+
+`OTLPReceiptSink` exports receipts and policy events to an OpenTelemetry
+collector as OTLP/HTTP JSON logs -- one log record per entry, POSTed to
+`<endpoint>/v1/logs`. The body is the receipt's canonical JSON (the exact bytes
+its receipt hash covers) and the decision, action type, matched rule, policy
+hash, receipt hash and enforcement disposition are attributes, so a query never
+has to parse the body. Severity is `INFO` for an allow, `WARN` for a warn and
+`ERROR` for a deny.
+
+```go
+otlp, err := hushspec.NewOTLPReceiptSink(hushspec.OTLPOptions{
+	Endpoint:      "http://localhost:4318",
+	Headers:       map[string]string{"Authorization": "Bearer " + token},
+	ServiceName:   "agent-runtime",
+	BatchSize:     64,
+	FlushInterval: 5 * time.Second,
+	OnError:       func(err error) { log.Printf("otlp: %v", err) },
+})
+defer otlp.Close()
+
+// Export is best-effort: pair it with a log when the audit trail must be complete.
+guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
+	Sink: hushspec.NewMultiSink([]hushspec.ReceiptSink{chained, otlp}),
+})
+```
+
+Export happens on a background goroutine, batched and retried with backoff on a
+429, a 5xx or a network error. `Send` never blocks an evaluation: a full queue
+drops the record, counts it in `Dropped()` and reports through `OnError`.
+`Flush(ctx)` waits for what is queued, and `Close()` flushes and stops.
+
 ### Panic mode
 
 `ActivatePanic()` flips a process-wide kill switch: every later `Evaluate` call

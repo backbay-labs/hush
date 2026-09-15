@@ -55,6 +55,22 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   read structurally.
 - `hushspec.log.policy_event_to_dict()`: the one spelling of a policy event, shared by log
   entries and the OTLP sink.
+### Added (RFC 09 P6-02, Go SDK runtime integration)
+
+- Go SDK parity for the runtime-integration surface. `Guard` (`hushspec.NewGuard`,
+  `NewGuardFromFile`, `NewGuardFromProvider`) is the enforcement point: compiled policy,
+  enforce/monitor mode with longest-prefix `RuleOverrides`, warn confirmation through `OnWarn`
+  (nil denies), receipts and `policy_loaded` / `policy_swapped` records through a sink,
+  `SwapPolicy` that keeps the last good policy on failure, and a refused state that denies every
+  action with `__hushspec_policy_unverified__` and an unverified-policy receipt when
+  `RequireSignature` cannot be satisfied. Observers (`EvaluationObserver`, `ObservableEvaluator`,
+  `JSONLineObserver`, `StderrObserver`, `MetricsCollector` with Prometheus exposition,
+  `WebhookObserver`) see every decision and can change none. `PolicyProvider` / `FileProvider`
+  with `PolicyWatcher` (mtime + content hash) and `PolicyPoller` hot-swap a policy into a guard,
+  checking the panic sentinel every tick. Adapters map Anthropic, OpenAI and MCP tool calls onto
+  actions, with `GuardedToolHandler` wrappers that check before the tool runs. `OTLPReceiptSink`
+  exports receipts and policy events as OTLP/HTTP JSON logs, batched and retried on a background
+  goroutine, with the same wire mapping as the other SDKs.
 
 ### Added (RFC 09 Wave 5, Integrations)
 
