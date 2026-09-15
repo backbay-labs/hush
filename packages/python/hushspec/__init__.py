@@ -144,6 +144,12 @@ from hushspec.sinks import (
     ReceiptSink,
     StderrReceiptSink,
 )
+from hushspec.otlp import (
+    OtlpError,
+    OtlpExportError,
+    OtlpQueueFullError,
+    OtlpReceiptSink,
+)
 from hushspec.provider import (
     DEFAULT_PANIC_SENTINEL,
     DEFAULT_POLL_INTERVAL_S,
@@ -411,6 +417,10 @@ __all__ = [
     "MultiSink",
     "CallbackSink",
     "NullSink",
+    "OtlpReceiptSink",
+    "OtlpError",
+    "OtlpExportError",
+    "OtlpQueueFullError",
     "PolicyProvider",
     "FileProvider",
     "CallbackProvider",
