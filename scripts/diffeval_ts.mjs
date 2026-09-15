@@ -82,7 +82,7 @@ function auditContext(position) {
  * deny with an empty trace). Hashed with this SDK's own receipt canonicalizer,
  * so a disagreement means the policy identity our receipts would record --
  * name, version, spec_version, content_hash, extends_chain, signature --
- * differs from the oracle's, independently of any one action.
+ * differs from the reference implementation's, independently of any one action.
  */
 function policyIdentityHash(spec) {
   return receiptHash({
@@ -102,7 +102,7 @@ const results = {};
 // Canonical content hash per group (spec/hushspec-canonical.md section 5),
 // keyed by group id alongside the per-action `results`. Only groups whose
 // policy survived parse -> resolve -> validate have one: the canonical form is
-// defined for resolved, valid documents only, and the oracle has nothing to
+// defined for resolved, valid documents only, and the reference implementation has nothing to
 // compare against for a rejected policy.
 const groups = {};
 // Position of the next case in the bundle, counting every action of every
@@ -148,7 +148,7 @@ for (const group of bundle.groups) {
     try {
       const hash = contentHash(spec);
       // A canonicalization failure is a divergence to report, not a silently
-      // missing key: the oracle hashes every accepted policy.
+      // missing key: the reference implementation hashes every accepted policy.
       if (typeof hash === 'string' && hash.startsWith('sha256:')) entry.content_hash = hash;
     } catch {
       /* leave content_hash absent: reported as a divergence */
