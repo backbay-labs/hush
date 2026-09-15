@@ -22,6 +22,11 @@ pub struct SignArgs {
     /// Output path for the .sig file (defaults to <POLICY>.sig)
     #[arg(short, long)]
     output: Option<PathBuf>,
+
+    /// Sign a policy whose lifecycle_state is not approved or deployed
+    /// (development only -- the signature then attests an unreviewed policy)
+    #[arg(long)]
+    allow_unapproved: bool,
 }
 
 pub fn run(args: SignArgs) -> i32 {
@@ -37,6 +42,10 @@ pub fn run(args: SignArgs) -> i32 {
             return 1;
         }
     };
+
+    if !args.allow_unapproved && !lifecycle_gate_passes(&content) {
+        return 1;
+    }
 
     // Read the private key
     let key_content = match std::fs::read_to_string(&args.key) {
@@ -91,6 +100,57 @@ pub fn run(args: SignArgs) -> i32 {
         Err(e) => {
             eprintln!("{} Failed to write signature file: {e}", "ERROR".red());
             1
+        }
+    }
+}
+
+/// A signature is a durable attestation that this exact policy was approved, so
+/// only a policy that says it *was* approved may be signed. Anything else -- a
+/// draft, a policy still in review, one that is deprecated or archived, or one
+/// with no `metadata.lifecycle_state` at all -- is refused unless the caller
+/// passes `--allow-unapproved`. Fail-closed: a policy that will not parse is
+/// refused too, because its lifecycle state cannot be established.
+fn lifecycle_gate_passes(content: &[u8]) -> bool {
+    use hushspec::governance::LifecycleState;
+
+    let Ok(text) = std::str::from_utf8(content) else {
+        eprintln!("{} Policy file is not valid UTF-8", "ERROR".red());
+        return false;
+    };
+
+    let spec = match hushspec::HushSpec::parse(text) {
+        Ok(spec) => spec,
+        Err(e) => {
+            eprintln!(
+                "{} Refusing to sign an unparseable policy: {e}",
+                "ERROR".red()
+            );
+            return false;
+        }
+    };
+
+    let state = spec
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.lifecycle_state);
+
+    match state {
+        Some(LifecycleState::Approved | LifecycleState::Deployed) => true,
+        other => {
+            let label = other
+                .and_then(|state| {
+                    serde_json::to_value(state)
+                        .ok()
+                        .and_then(|v| v.as_str().map(|s| format!("'{s}'")))
+                })
+                .unwrap_or_else(|| "not set".to_string());
+            eprintln!(
+                "{} Refusing to sign {}: metadata.lifecycle_state is {label}, expected 'approved' or 'deployed'.",
+                "ERROR".red(),
+                "an unapproved policy".bold()
+            );
+            eprintln!("  Pass --allow-unapproved to sign it anyway (development only).");
+            false
         }
     }
 }

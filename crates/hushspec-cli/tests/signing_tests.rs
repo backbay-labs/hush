@@ -282,3 +282,261 @@ fn sign_with_a_bogus_key_exits_1() {
         .code(1)
         .stderr(predicate::str::contains("Invalid private key"));
 }
+
+const DRAFT_POLICY: &str = r#"hushspec: "0.1.0"
+name: draft
+metadata:
+  author: "security@example.com"
+  lifecycle_state: draft
+rules:
+  egress:
+    allow:
+      - "api.github.com"
+    block: []
+    default: block
+"#;
+
+const SOD_VIOLATION_POLICY: &str = r#"hushspec: "0.2.0"
+name: self-approved
+metadata:
+  author: "security@example.com"
+  approved_by: "Security@Example.com"
+  approval_date: "2025-01-15"
+  classification: internal
+  lifecycle_state: deployed
+  policy_version: 2
+  expiry_date: "2099-01-01"
+rules:
+  egress:
+    allow:
+      - "api.github.com"
+    block: []
+    default: block
+"#;
+
+#[test]
+fn audit_reports_a_separation_of_duties_finding() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(tmp.path(), "sod.yaml", SOD_VIOLATION_POLICY);
+
+    h2h()
+        .arg("audit")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GOV_SOD_VIOLATION"))
+        .stdout(predicate::str::contains("metadata.approved_by"));
+}
+
+#[test]
+fn audit_findings_carry_code_severity_and_path_in_json() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(tmp.path(), "sod.yaml", SOD_VIOLATION_POLICY);
+
+    let output = h2h()
+        .arg("audit")
+        .arg("--format")
+        .arg("json")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let finding = report["findings"]
+        .as_array()
+        .and_then(|findings| {
+            findings
+                .iter()
+                .find(|f| f["code"] == "GOV_SOD_VIOLATION")
+                .cloned()
+        })
+        .unwrap_or_else(|| panic!("expected a SoD finding in {report:#}"));
+    assert_eq!(finding["severity"], "warning");
+    assert_eq!(finding["path"], "metadata.approved_by");
+}
+
+#[test]
+fn audit_strict_fails_on_a_separation_of_duties_violation() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(tmp.path(), "sod.yaml", SOD_VIOLATION_POLICY);
+
+    // Advisory by default...
+    h2h()
+        .arg("audit")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .success();
+
+    // ...fatal under --strict.
+    h2h()
+        .arg("audit")
+        .arg("--strict")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn audit_strict_fails_on_an_overdue_review() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(
+        tmp.path(),
+        "overdue.yaml",
+        &GOVERNED_POLICY.replace(
+            "  change_ticket: \"SEC-1234\"\n",
+            "  change_ticket: \"SEC-1234\"\n  next_review_date: \"2020-01-01\"\n",
+        ),
+    );
+
+    h2h()
+        .arg("audit")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("GOV_REVIEW_OVERDUE"));
+
+    h2h()
+        .arg("audit")
+        .arg("--strict")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn audit_fails_without_strict_on_an_error_severity_finding() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(
+        tmp.path(),
+        "self-supersedes.yaml",
+        &GOVERNED_POLICY.replace(
+            "  policy_version: 3\n",
+            "  policy_version: 3\n  supersedes: \"3\"\n",
+        ),
+    );
+
+    h2h()
+        .arg("audit")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("GOV_SELF_SUPERSEDES"));
+}
+
+#[test]
+fn audit_reports_no_findings_for_a_clean_policy() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(tmp.path(), "clean.yaml", GOVERNED_POLICY);
+
+    h2h()
+        .arg("audit")
+        .arg(policy.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Governance findings:"))
+        .stdout(predicate::str::contains("none"));
+}
+
+#[test]
+fn sign_refuses_a_policy_that_is_not_approved() {
+    let tmp = TempDir::new().unwrap();
+    let (private_key, _) = keygen(tmp.path());
+    let policy = write_policy(tmp.path(), "draft.yaml", DRAFT_POLICY);
+
+    h2h()
+        .arg("sign")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(private_key.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("lifecycle_state is 'draft'"));
+
+    assert!(
+        !tmp.path().join("draft.yaml.sig").exists(),
+        "a refused signature must not be written"
+    );
+}
+
+#[test]
+fn sign_refuses_a_policy_with_no_lifecycle_state() {
+    let tmp = TempDir::new().unwrap();
+    let (private_key, _) = keygen(tmp.path());
+    let policy = write_policy(
+        tmp.path(),
+        "bare.yaml",
+        "hushspec: \"0.1.0\"\nname: bare\nrules:\n  egress:\n    default: block\n",
+    );
+
+    h2h()
+        .arg("sign")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(private_key.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("not set"));
+}
+
+#[test]
+fn sign_allows_an_unapproved_policy_with_the_override() {
+    let tmp = TempDir::new().unwrap();
+    let (private_key, public_key) = keygen(tmp.path());
+    let policy = write_policy(tmp.path(), "draft.yaml", DRAFT_POLICY);
+
+    h2h()
+        .arg("sign")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(private_key.to_str().unwrap())
+        .arg("--allow-unapproved")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Signed"));
+
+    h2h()
+        .arg("verify")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(public_key.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+#[test]
+fn sign_signs_an_approved_policy() {
+    let tmp = TempDir::new().unwrap();
+    let (private_key, _) = keygen(tmp.path());
+    let policy = write_policy(
+        tmp.path(),
+        "approved.yaml",
+        &GOVERNED_POLICY.replace("lifecycle_state: deployed", "lifecycle_state: approved"),
+    );
+
+    h2h()
+        .arg("sign")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(private_key.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+#[test]
+fn sign_refuses_an_unparseable_policy() {
+    let tmp = TempDir::new().unwrap();
+    let (private_key, _) = keygen(tmp.path());
+    let policy = write_policy(tmp.path(), "broken.yaml", "hushspec: \"0.1.0\"\nbogus: 1\n");
+
+    h2h()
+        .arg("sign")
+        .arg(policy.to_str().unwrap())
+        .arg("--key")
+        .arg(private_key.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("unparseable"));
+}
