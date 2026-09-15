@@ -52,7 +52,6 @@ rules:
     exceptions:
       - "**/.env.example"
       - "**/.env.template"
-      - "**/test/fixtures/**"
 
   # --- 34 CFR 99.33: Limitations on redisclosure ---
   egress:

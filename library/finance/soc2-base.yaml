@@ -71,7 +71,6 @@ rules:
       - "github.com"
       - "*.githubusercontent.com"
       # Package registries
-      - "registry.npmjs.org"
       - "*.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
@@ -157,7 +156,8 @@ rules:
     require_balance: true
     max_imbalance_ratio: 5.0
     forbidden_patterns:
-      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls|audit|logging|monitoring)"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls)"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(audit|logging|monitoring)"
       - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check|audit|test)"
       - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "(?i)chmod[ \\t\\n\\r\\f]+777"

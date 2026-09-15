@@ -122,10 +122,29 @@ jobs:
           fi
 
   # ── PyPI: publish hushspec ─────────────────────────────────────────
+  # ── PyPI: publish hushspec via trusted publishing (OIDC) ───────────
+  #
+  # No API token is used or stored. PyPI mints a short-lived credential from
+  # this job's OIDC identity, which requires a trusted publisher configured on
+  # the PyPI project "hushspec":
+  #
+  #   Owner:             backbay-labs
+  #   Repository:        hush
+  #   Workflow filename: publish.yml
+  #   Environment:       (none)
+  #
+  # See https://docs.pypi.org/trusted-publishers/. Until that publisher exists
+  # on PyPI, this job will fail at the upload step -- it will NOT silently fall
+  # back to a token. If the job is ever moved or renamed, the PyPI trusted
+  # publisher must be updated to match.
   pypi:
     name: Publish Python package
     needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to mint the OIDC token PyPI exchanges for an upload credential.
+      id-token: write
     if: >-
       contains(github.event.inputs.packages, 'pypi') ||
       contains(github.event.inputs.packages, 'all')
@@ -143,15 +162,16 @@ jobs:
         working-directory: packages/python
         run: python -m build
 
-      - name: Publish to PyPI
+      - name: Check distributions
         working-directory: packages/python
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            twine check dist/*
-            echo "Dry run — skipping upload"
-          else
-            twine upload dist/*
-          fi
+        run: twine check dist/*
+
+      - name: Publish to PyPI
+        if: github.event.inputs.dry_run != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/python/dist
+
+      - name: Dry run — skipping upload
+        if: github.event.inputs.dry_run == 'true'
+        run: echo "Dry run — distributions built and checked, upload skipped"

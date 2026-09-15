@@ -1,0 +1,19 @@
+# Link-check exclusions for the docs "Link Check" job (.github/workflows/docs.yml).
+#
+# Each line is a regex matched against the URL. Keep this list short and keep
+# every entry justified -- an exclusion is a link nobody is checking. Verified
+# against lychee 0.24: with this file the check reports 0 errors, and without
+# it exactly the entry below fails.
+
+# npmjs.com answers 403 to any client without a browser user agent, whether or
+# not the package exists, so checking it only ever produces a false positive.
+# The npm version badge beside this link is served by shields.io and is checked.
+^https://www\.npmjs\.com/package/
+
+# Not listed here on purpose:
+#   - https://hushspec.dev/... appears only in `$schema=` comments inside
+#     example policies. lychee does not read code blocks (no --include-verbatim),
+#     so those are never requested. If verbatim checking is ever turned on, that
+#     host must be live or excluded here.
+#   - https://crates.io/crates/hushspec resolves today; leave it checked so the
+#     link breaks loudly if the crate is ever unpublished or renamed.
