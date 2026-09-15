@@ -39,7 +39,7 @@ export type {
 export { parse, parseOrThrow } from './parse.js';
 export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
 export { merge } from './merge.js';
-export { resolve, resolveFromFile, createCompositeLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
+export { resolve, resolveFromFile, createCompositeLoader, createBuiltinLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';
 export { evaluate, activatePanic, deactivatePanic, isPanicActive, panicPolicy, type EvaluationAction, type EvaluationResult, type Decision, type OriginContext, type PostureContext, type PostureResult } from './evaluate.js';
@@ -48,10 +48,12 @@ export {
   HushGuard,
   HushSpecDenied,
   matchesRulePathPrefix,
+  resolvePolicyOrThrow,
   type WarnHandler,
   type EnforcementConfig,
   type GateOutcome,
   type HushGuardOptions,
+  type PolicyResolveOptions,
 } from './middleware.js';
 export { mapClaudeToolToAction, createSecureToolHandler } from './adapters/anthropic.js';
 export { mapOpenAIToolCall, createOpenAIGuard } from './adapters/openai.js';

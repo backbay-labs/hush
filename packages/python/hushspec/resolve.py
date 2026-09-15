@@ -90,6 +90,37 @@ def _resolve_inner(
     return True, merge(parent, spec)
 
 
+def create_builtin_loader() -> Resolver:
+    """Loader that serves only ``builtin:<name>`` (and bare builtin names) from
+    the embedded rulesets and refuses everything else.
+
+    The default for callers with no filesystem root to resolve relative
+    references against -- ``HushGuard.from_yaml()``, a provider handing back an
+    already-parsed spec. Refusing (rather than guessing a root, or silently
+    dropping the base) keeps those paths fail-closed: a policy whose base
+    cannot be loaded is never evaluated as if the base said nothing.
+    """
+
+    def _loader(reference: str, _source: str | None = None) -> LoadedSpec:
+        spec = load_builtin(reference)
+        if spec is not None:
+            source = reference if reference.startswith("builtin:") else f"builtin:{reference}"
+            return LoadedSpec(source=source, spec=spec)
+        if reference.startswith("builtin:"):
+            raise ValueError(f"unknown builtin ruleset '{reference}'")
+        raise ValueError(
+            f"cannot resolve 'extends: {reference}': this loader only serves builtin "
+            "rulesets (pass a `base_dir` to resolve relative paths, or a custom `loader`)"
+        )
+
+    return _loader
+
+
+def create_composite_loader() -> Resolver:
+    """Public alias for the builtin + filesystem loader (mirrors the TS SDK)."""
+    return _create_composite_loader()
+
+
 def _create_composite_loader() -> Resolver:
     """Loader that serves `builtin:<name>` references from the embedded
     rulesets and everything else from the filesystem (mirrors the Rust/TS

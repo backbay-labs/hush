@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional, TYPE_CHECKING
 
 from hushspec.detection import evaluate_with_detection
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
+from hushspec.resolve import Resolver, create_builtin_loader, create_composite_loader, resolve
 from hushspec.schema import HushSpec
 
 if TYPE_CHECKING:
@@ -113,6 +115,43 @@ def _apply_detection(
     receipt.reason = detected.reason
 
 
+def resolve_policy_or_raise(
+    policy: HushSpec,
+    *,
+    loader: Optional[Resolver] = None,
+    base_dir: Optional[str] = None,
+) -> HushSpec:
+    """Resolve a policy's ``extends`` chain, or raise.
+
+    Every entry point into :class:`HushGuard` funnels through this: the guard
+    must never hold a spec whose ``extends`` is still set. An unresolved leaf
+    silently drops every rule block its base declares -- ``library/general/
+    recommended.yaml`` extends ``builtin:default`` and declares no
+    ``forbidden_paths``, so evaluating it unresolved would allow reads of
+    ``~/.ssh/id_rsa`` -- and hashes the wrong document into every receipt.
+    Fail closed: if the base cannot be loaded, no evaluation happens at all.
+    """
+    if policy.extends is None:
+        return policy
+
+    if loader is None:
+        loader = create_composite_loader() if base_dir is not None else create_builtin_loader()
+    # `resolve()` treats `source` as the *file* a relative reference resolves
+    # from, so point it at a placeholder inside base_dir.
+    source = str(Path(base_dir).resolve() / "<policy>") if base_dir is not None else None
+
+    ok, result = resolve(policy, source=source, loader=loader)
+    if not ok:
+        raise ValueError(f"failed to resolve policy 'extends: {policy.extends}': {result}")
+    assert isinstance(result, HushSpec)
+    if result.extends is not None:
+        raise ValueError(
+            f"failed to resolve policy 'extends: {policy.extends}': "
+            "resolver returned an unresolved policy"
+        )
+    return result
+
+
 class HushSpecDenied(Exception):
     def __init__(self, result: EvaluationResult) -> None:
         self.result = result
@@ -131,6 +170,8 @@ class HushGuard:
         enforcement: Optional[EnforcementConfig] = None,
         sink: Optional["ReceiptSink"] = None,
         audit: Optional["AuditConfig"] = None,
+        loader: Optional[Resolver] = None,
+        base_dir: Optional[str] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
         _validate_enforcement_config(config, observer is not None or sink is not None)
@@ -141,7 +182,11 @@ class HushGuard:
             from hushspec.receipt import AuditConfig
             audit = AuditConfig()
         self._audit = audit
-        self._policy = policy
+        self._resolve_loader = loader
+        self._resolve_base_dir = base_dir
+        # Resolve before anything else touches the spec: a guard never holds an
+        # unresolved document, and the receipt hash covers the resolved policy.
+        self._policy = resolve_policy_or_raise(policy, loader=loader, base_dir=base_dir)
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
         self._policy_hash: Optional[str] = None
@@ -152,8 +197,8 @@ class HushGuard:
                 redact_content=self._audit.redact_content
             )
             self._observable_evaluator.add_observer(observer)
-            self._policy_hash = compute_policy_hash(policy)
-            self._observable_evaluator.notify_policy_loaded(policy.name, self._policy_hash)
+            self._policy_hash = compute_policy_hash(self._policy)
+            self._observable_evaluator.notify_policy_loaded(self._policy.name, self._policy_hash)
 
     @classmethod
     def from_file(
@@ -164,11 +209,28 @@ class HushGuard:
         enforcement: Optional[EnforcementConfig] = None,
         sink: Optional["ReceiptSink"] = None,
         audit: Optional["AuditConfig"] = None,
+        loader: Optional[Resolver] = None,
+        base_dir: Optional[str] = None,
     ) -> HushGuard:
+        """Load a policy file and resolve its ``extends`` chain.
+
+        Relative references resolve against the policy file's own directory
+        (overridable with ``base_dir``/``loader``); ``builtin:`` references come
+        from the embedded rulesets. Raises if the chain cannot be resolved.
+        """
         with open(path) as f:
             spec = parse_or_raise(f.read())
+        if base_dir is None:
+            base_dir = str(Path(path).resolve().parent)
         return cls(
-            spec, on_warn, observer=observer, enforcement=enforcement, sink=sink, audit=audit
+            spec,
+            on_warn,
+            observer=observer,
+            enforcement=enforcement,
+            sink=sink,
+            audit=audit,
+            loader=loader,
+            base_dir=base_dir,
         )
 
     @classmethod
@@ -180,10 +242,25 @@ class HushGuard:
         enforcement: Optional[EnforcementConfig] = None,
         sink: Optional["ReceiptSink"] = None,
         audit: Optional["AuditConfig"] = None,
+        loader: Optional[Resolver] = None,
+        base_dir: Optional[str] = None,
     ) -> HushGuard:
+        """Parse a policy document and resolve its ``extends`` chain.
+
+        ``builtin:`` references resolve out of the box; file references need an
+        explicit ``base_dir`` (or ``loader``) since a YAML string has no
+        directory of its own. Raises if the chain cannot be resolved.
+        """
         spec = parse_or_raise(yaml_str)
         return cls(
-            spec, on_warn, observer=observer, enforcement=enforcement, sink=sink, audit=audit
+            spec,
+            on_warn,
+            observer=observer,
+            enforcement=enforcement,
+            sink=sink,
+            audit=audit,
+            loader=loader,
+            base_dir=base_dir,
         )
 
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
@@ -337,13 +414,18 @@ class HushGuard:
         return EvaluationAction(type="shell_command", target=command)
 
     def swap_policy(self, new_policy: HushSpec) -> None:
+        # Hot-reload is a policy load like any other: an unresolved document is
+        # rejected here rather than swapped in, leaving the policy in force.
+        resolved = resolve_policy_or_raise(
+            new_policy, loader=self._resolve_loader, base_dir=self._resolve_base_dir
+        )
         previous_hash = self._policy_hash
-        self._policy = new_policy
+        self._policy = resolved
         if self._observable_evaluator is not None:
             from hushspec.receipt import compute_policy_hash
-            self._policy_hash = compute_policy_hash(new_policy)
+            self._policy_hash = compute_policy_hash(resolved)
             self._observable_evaluator.notify_policy_reloaded(
-                new_policy.name,
+                resolved.name,
                 self._policy_hash,
                 previous_hash,
             )

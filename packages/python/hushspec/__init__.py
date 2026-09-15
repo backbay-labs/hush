@@ -87,7 +87,14 @@ from hushspec.conditions import (
 )
 from hushspec.parse import parse, parse_or_raise
 from hushspec.builtins import BUILTIN_NAMES, load_builtin
-from hushspec.resolve import LoadedSpec, resolve, resolve_file, resolve_or_raise
+from hushspec.resolve import (
+    LoadedSpec,
+    create_builtin_loader,
+    create_composite_loader,
+    resolve,
+    resolve_file,
+    resolve_or_raise,
+)
 from hushspec.rules import (
     ComputerUseMode,
     ComputerUseRule,
@@ -157,6 +164,8 @@ __all__ = [
     "ValidationError",
     "is_safe_regex",
     "merge",
+    "create_builtin_loader",
+    "create_composite_loader",
     "resolve",
     "resolve_file",
     "resolve_or_raise",

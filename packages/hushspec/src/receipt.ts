@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { HushSpec } from './schema.js';
 import type { PostureResult } from './evaluate.js';
 import { evaluate } from './evaluate.js';
+import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import { HUSHSPEC_VERSION } from './version.js';
 import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js';
 
@@ -124,8 +125,29 @@ export function evaluateAudited(
   };
 }
 
+/**
+ * Hash of the *resolved* policy -- the document evaluation actually runs
+ * against.
+ *
+ * Hashing an unresolved leaf would make the receipt's `content_hash` identify
+ * a document that is not what was enforced (every block inherited from the
+ * base is missing from it), so an `extends` still present here is resolved
+ * against the embedded builtins first and, if that is impossible, rejected
+ * rather than hashed. Guards resolve on load, so this is a backstop for
+ * direct callers.
+ */
 export function computePolicyHash(spec: HushSpec): string {
-  const json = JSON.stringify(spec);
+  let resolved = spec;
+  if (spec.extends != null) {
+    const result = resolveSpec(spec, { load: createBuiltinLoader() });
+    if (!result.ok) {
+      throw new Error(
+        `cannot hash an unresolved policy (extends: ${spec.extends}): ${result.error}`,
+      );
+    }
+    resolved = result.value;
+  }
+  const json = JSON.stringify(resolved);
   return createHash('sha256').update(json).digest('hex');
 }
 
