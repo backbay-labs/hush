@@ -4,6 +4,10 @@ import json
 
 import pytest
 
+from hushspec.adapters.anthropic import (
+    create_secure_tool_handler,
+    map_claude_tool_to_action,
+)
 from hushspec.adapters.openai import map_openai_tool_call, create_openai_guard
 from hushspec.adapters.mcp import map_mcp_tool_call, extract_domain, create_mcp_guard
 from hushspec.adapters.crewai import secure_tool
@@ -304,3 +308,158 @@ class TestSecureTool:
 
         with pytest.raises(HushSpecDenied):
             dangerous()
+
+
+
+# Anthropic adapter
+
+
+
+class _ToolUseBlock:
+    """An SDK-shaped block: attributes, not keys."""
+
+    def __init__(self, name: str, input: dict) -> None:
+        self.type = "tool_use"
+        self.id = "toolu_01ABC"
+        self.name = name
+        self.input = input
+
+
+def _block(name: str, tool_input: dict | None = None) -> dict:
+    return {
+        "type": "tool_use",
+        "id": "toolu_01ABC",
+        "name": name,
+        "input": tool_input if tool_input is not None else {},
+    }
+
+
+class TestMapClaudeToolToAction:
+    def test_maps_bash_to_shell_command(self):
+        action = map_claude_tool_to_action(_block("bash", {"command": "rm -rf /"}))
+        assert action.type == "shell_command"
+        assert action.target == "rm -rf /"
+
+    def test_maps_dated_tool_versions(self):
+        action = map_claude_tool_to_action(_block("bash_20250124", {"command": "ls"}))
+        assert action.type == "shell_command"
+        assert action.target == "ls"
+
+    def test_maps_editor_view_to_file_read(self):
+        action = map_claude_tool_to_action(
+            _block(
+                "text_editor_20250429",
+                {"command": "view", "path": "/home/dev/.ssh/id_rsa"},
+            )
+        )
+        assert action.type == "file_read"
+        assert action.target == "/home/dev/.ssh/id_rsa"
+
+    def test_maps_editor_str_replace_to_file_write_with_content(self):
+        action = map_claude_tool_to_action(
+            _block(
+                "str_replace_editor",
+                {
+                    "command": "str_replace",
+                    "path": "/app/config.py",
+                    "old_str": "a",
+                    "new_str": "SECRET = 'x'",
+                },
+            )
+        )
+        assert action.type == "file_write"
+        assert action.target == "/app/config.py"
+        assert action.content == "SECRET = 'x'"
+
+    def test_maps_editor_create_to_file_write_with_file_text(self):
+        action = map_claude_tool_to_action(
+            _block(
+                "str_replace_based_edit_tool",
+                {"command": "create", "path": "/app/new.py", "file_text": "print(1)"},
+            )
+        )
+        assert action.type == "file_write"
+        assert action.content == "print(1)"
+
+    def test_maps_computer_to_computer_use(self):
+        action = map_claude_tool_to_action(_block("computer", {"action": "screenshot"}))
+        assert action.type == "computer_use"
+        assert action.target == "screenshot"
+
+    def test_maps_web_fetch_to_egress_on_the_host(self):
+        action = map_claude_tool_to_action(
+            _block("web_fetch", {"url": "https://evil.example.com/a/b?c=d"})
+        )
+        assert action.type == "egress"
+        assert action.target == "evil.example.com"
+
+    def test_maps_fetch_to_egress(self):
+        action = map_claude_tool_to_action(
+            _block("fetch", {"url": "http://api.example.com/v1"})
+        )
+        assert action.type == "egress"
+        assert action.target == "api.example.com"
+
+    def test_unparseable_url_is_still_evaluated(self):
+        action = map_claude_tool_to_action(_block("web_fetch", {"url": "not a url"}))
+        assert action.type == "egress"
+        assert action.target == "not a url"
+
+    def test_maps_mcp_tools_to_their_inner_name(self):
+        action = map_claude_tool_to_action(
+            _block("mcp__github__create_issue", {"title": "x"})
+        )
+        assert action.type == "tool_call"
+        assert action.target == "create_issue"
+        assert action.args_size == len(json.dumps({"title": "x"}))
+
+    def test_maps_an_unknown_tool_to_a_tool_call(self):
+        args = {"query": "select 1"}
+        action = map_claude_tool_to_action(_block("run_query", args))
+        assert action.type == "tool_call"
+        assert action.target == "run_query"
+        assert action.args_size == len(json.dumps(args))
+
+    def test_reads_sdk_objects_structurally(self):
+        action = map_claude_tool_to_action(_ToolUseBlock("bash", {"command": "whoami"}))
+        assert action.type == "shell_command"
+        assert action.target == "whoami"
+
+    def test_a_block_with_no_input_is_still_mapped(self):
+        action = map_claude_tool_to_action({"name": "bash"})
+        assert action.type == "shell_command"
+        assert action.target == ""
+
+    def test_a_nameless_block_is_an_opaque_tool_call(self):
+        action = map_claude_tool_to_action({})
+        assert action.type == "tool_call"
+        assert action.target == ""
+
+
+class TestCreateSecureToolHandler:
+    def test_runs_an_allowed_tool(self):
+        guard = HushGuard.from_yaml(DENY_POLICY)
+        calls: list[dict] = []
+        handler = create_secure_tool_handler(
+            guard, lambda block: calls.append(block) or "ok"
+        )
+
+        assert handler(_block("safe_tool", {})) == "ok"
+        assert len(calls) == 1
+
+    def test_a_denied_tool_never_runs(self):
+        guard = HushGuard.from_yaml(DENY_POLICY)
+        calls: list[dict] = []
+        handler = create_secure_tool_handler(guard, lambda block: calls.append(block))
+
+        with pytest.raises(HushSpecDenied):
+            handler(_block("bash", {"command": "rm -rf /tmp"}))
+        assert calls == []
+
+    def test_passes_extra_arguments_through(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+        handler = create_secure_tool_handler(
+            guard, lambda block, suffix: f"{block['name']}{suffix}"
+        )
+
+        assert handler(_block("anything", {}), "!") == "anything!"
