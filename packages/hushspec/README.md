@@ -1,6 +1,6 @@
 # @hushspec/core
 
-Portable specification types for AI agent security rules.
+Agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under.
 
 `@hushspec/core` is the TypeScript SDK for the [HushSpec](https://github.com/backbay-labs/hush) open policy format. Parse, validate, evaluate, and enforce security rules for AI agent runtimes.
 

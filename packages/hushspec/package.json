@@ -1,7 +1,7 @@
 {
   "name": "@hushspec/core",
   "version": "0.1.1",
-  "description": "Portable specification types for AI agent security rules",
+  "description": "Agentic compliance as code: portable policy spec for AI agent security controls",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

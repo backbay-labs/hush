@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hushspec"
 version = "0.1.1"
-description = "Portable specification for AI agent security rules"
+description = "Agentic compliance as code: portable policy spec for AI agent security controls"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 readme = "README.md"

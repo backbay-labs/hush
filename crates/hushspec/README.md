@@ -1,6 +1,6 @@
 # hushspec
 
-Portable specification types for AI agent security rules.
+Agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under.
 
 `hushspec` is the Rust reference implementation of the [HushSpec](https://github.com/backbay-labs/hush) open policy format. It provides parsing, validation, evaluation, resolution, detection, signing, and audit trail capabilities for HushSpec policy documents.
 

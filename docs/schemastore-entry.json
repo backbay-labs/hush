@@ -1,6 +1,6 @@
 {
   "name": "HushSpec",
-  "description": "Portable security rules for AI agent runtimes",
+  "description": "Agentic compliance as code: portable policy spec for AI agent security controls",
   "url": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json",
   "fileMatch": [
     "hushspec.yaml",

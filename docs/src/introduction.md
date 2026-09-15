@@ -1,6 +1,6 @@
 # HushSpec
 
-HushSpec is a portable, open specification for declaring security rules at the tool boundary of AI agent runtimes. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced.
+HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced.
 
 ## Why HushSpec?
 
