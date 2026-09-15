@@ -30,6 +30,31 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   fields and `instanceof`, with `invoke`, `call` and a `DynamicTool`'s `func` gated) and
   `createLangChainCallbackHandler()`, which gates every tool an executor starts.
   Both adapters are structurally typed: neither imports the framework it adapts.
+### Added (RFC 09 Wave 5, Python SDK parity)
+
+- Python `hushspec.provider`: a `PolicyProvider` protocol (`load() -> Resolution`, `source`)
+  with `FileProvider` (carrying its `ResolveOptions`, so `require_signature` applies to every
+  reload), `CallbackProvider`, and hot reload through `PolicyWatcher` (mtime + content hash) and
+  `PolicyPoller` (any provider) -- daemon threads, context managers, an explicit `check_once()`
+  tick, and optional panic-sentinel checking per tick. `HushGuard.from_provider(...)` builds a
+  guard from a provider and can attach either loop; `HushGuard.swap_resolution()` swaps in an
+  already-resolved policy without re-resolving it. A reload that cannot be read, parsed,
+  resolved, verified or compiled leaves the policy in force untouched and is reported through
+  `on_error`, then retried.
+- Python `hushspec.otlp.OtlpReceiptSink`: exports receipts and policy events to an OTLP/HTTP
+  collector as log records (`POST <endpoint>/v1/logs`) over `urllib` alone -- canonical JSON
+  body, `INFO`/`WARN`/`ERROR` severity by decision, and the `hushspec.*` attributes and resource
+  attributes shared with the Rust, TypeScript and Go sinks. Background thread, bounded queue
+  (drop + counter + `on_error` on overflow), batching, retry with backoff on `429`/`5xx`/network
+  errors, `flush()` and `close()`; `send()` never blocks on I/O.
+- Python `hushspec.adapters.anthropic`: `map_claude_tool_to_action()` maps a Claude `tool_use`
+  block onto the action a policy evaluates (`bash` -> `shell_command`, text editor -> `file_read`
+  / `file_write` with content, `computer` -> `computer_use`, `web_fetch` -> `egress` on the host,
+  `mcp__server__tool` -> the inner tool name, date-suffixed tool versions included), and
+  `create_secure_tool_handler()` enforces before the tool runs. No `anthropic` import: blocks are
+  read structurally.
+- `hushspec.log.policy_event_to_dict()`: the one spelling of a policy event, shared by log
+  entries and the OTLP sink.
 
 ### Added (RFC 09 Wave 5, Integrations)
 

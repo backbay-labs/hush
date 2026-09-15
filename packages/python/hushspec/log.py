@@ -57,6 +57,7 @@ __all__ = [
     "LogVerifyReport",
     "ChainedFileSink",
     "compute_entry_hash",
+    "policy_event_to_dict",
     "verify_log",
     "verify_logs",
     "verify_log_files",
@@ -254,7 +255,7 @@ class LogEntry:
                 else receipt_to_dict(self.receipt)
             )
         if self.policy_event is not None:
-            data["policy_event"] = _plain(self.policy_event)
+            data["policy_event"] = policy_event_to_dict(self.policy_event)
         if self.log_started is not None:
             data["log_started"] = _plain(self.log_started)
         if self.entry_hash:
@@ -270,6 +271,16 @@ class LogEntry:
     def payload_matches_type(self) -> bool:
         """Whether exactly the payload named by ``entry_type`` is present."""
         return _payload_matches_type(self.to_dict())
+
+
+def policy_event_to_dict(event: PolicyEvent) -> dict[str, Any]:
+    """The JSON object a log entry's ``policy_event`` member carries.
+
+    The one spelling of a policy event: a log entry embeds it, and a telemetry
+    sink exports exactly these bytes, so both say the same thing about the same
+    load.
+    """
+    return _plain(event)
 
 
 def compute_entry_hash(entry: dict[str, Any]) -> str:
