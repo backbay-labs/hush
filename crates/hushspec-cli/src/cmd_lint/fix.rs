@@ -44,7 +44,7 @@ const CODE_SHADOWED_EXCEPTION: &str = "L003";
 /// Whether `code` is one this engine ever attempts to fix. Necessary but not
 /// sufficient per finding -- see [`finding_is_fixable`] for the precise,
 /// per-finding answer used to populate the JSON `fixable` field.
-pub(crate) fn is_fixable(code: &str) -> bool {
+fn is_fixable(code: &str) -> bool {
     matches!(
         code,
         CODE_DUPLICATE | CODE_OVERLAP | CODE_SHADOWED_EXCEPTION
