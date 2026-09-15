@@ -66,11 +66,14 @@ __all__ = [
     "load_keyring",
     "parse_envelope",
     "public_key_from_private_key",
+    "SignedReceipt",
     "sign_content_hash",
     "sign_policy",
+    "sign_receipt",
     "signing_input",
     "verify_content_hash",
     "verify_policy",
+    "verify_receipt",
 ]
 
 #: The only envelope format this implementation accepts (spec section 4).
@@ -1039,3 +1042,123 @@ def verify_content_hash(
             )
 
     return VerifyResult.ok(parsed)
+
+
+# --------------------------------------------------------------------------- #
+# Receipt signing (receipt spec section 6)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class SignedReceipt:
+    """A decision receipt together with a signature over its receipt hash.
+
+    The receipt is untouched: the signature sits *outside* it, so the receipt's
+    own hash is the same whether or not it was ever signed, and the same value
+    a log entry links (receipt spec section 6).
+    """
+
+    receipt: Any
+    #: A 0.2 envelope whose ``content_hash`` is the receipt hash.
+    signature: Envelope
+
+    def to_dict(self) -> dict[str, Any]:
+        from hushspec.receipt import receipt_to_dict
+
+        receipt = self.receipt
+        return {
+            "receipt": dict(receipt)
+            if isinstance(receipt, Mapping)
+            else receipt_to_dict(receipt),
+            "signature": self.signature.to_dict(),
+        }
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False) + "\n"
+
+    @classmethod
+    def from_dict(cls, obj: Any) -> "SignedReceipt":
+        """Parse a signed receipt, fail-closed on shape and receipt version."""
+        from hushspec.receipt import parse_receipt
+
+        if isinstance(obj, (str, bytes)):
+            obj = json.loads(obj)
+        if not isinstance(obj, Mapping):
+            raise MalformedEnvelope("a signed receipt must be a JSON object")
+        unknown = sorted(set(obj) - {"receipt", "signature"})
+        if unknown:
+            raise MalformedEnvelope(f"unknown field {unknown[0]!r} in signed receipt")
+        if "receipt" not in obj or "signature" not in obj:
+            raise MalformedEnvelope("a signed receipt needs 'receipt' and 'signature'")
+        return cls(
+            receipt=parse_receipt(dict(obj["receipt"])),
+            signature=parse_envelope(obj["signature"]),
+        )
+
+
+def sign_receipt(
+    receipt: Any,
+    private_key_pem: str | bytes,
+    *,
+    signed_at: datetime | str | None = None,
+    expires_at: datetime | str | None = None,
+    policy_version: int | None = None,
+    policy_name: str | None = None,
+    signer: str | None = None,
+) -> SignedReceipt:
+    """Sign a receipt: the envelope's ``content_hash`` is the receipt hash
+    (receipt spec section 6), so the signature covers every field.
+
+    ``policy_name`` and ``policy_version`` are left unset unless given; a
+    receipt already names its policy. Raises :class:`SigningUnavailable`
+    without the ``cryptography`` extra, exactly as policy signing does.
+    """
+    from hushspec.receipt import receipt_hash
+
+    envelope = sign_content_hash(
+        receipt_hash(receipt),
+        private_key_pem,
+        signed_at=signed_at,
+        expires_at=expires_at,
+        policy_version=policy_version,
+        policy_name=policy_name,
+        signer=signer,
+    )
+    return SignedReceipt(receipt=receipt, signature=envelope)
+
+
+def verify_receipt(
+    signed: Any,
+    *,
+    keyring: Any = None,
+    public_key_pem: str | None = None,
+    now: datetime | str | None = None,
+    max_clock_skew_seconds: int = DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+    last_seen_version: int | None = None,
+) -> VerifyResult:
+    """Verify a receipt signature: the ten checks of spec section 6.2 with the
+    receipt hash as the content hash.
+
+    ``signed`` is a :class:`SignedReceipt`, or anything
+    :meth:`SignedReceipt.from_dict` accepts (a parsed object or JSON text). A
+    receipt that cannot be canonicalized is a ``content_hash_mismatch``.
+    """
+    from hushspec.receipt import receipt_hash
+
+    if not isinstance(signed, SignedReceipt):
+        signed = SignedReceipt.from_dict(signed)
+    try:
+        actual: str | None = receipt_hash(signed.receipt)
+        detail: str | None = None
+    except (CanonicalError, ValueError, TypeError) as exc:
+        actual, detail = None, f"the receipt has no content hash: {exc}"
+    return verify_content_hash(
+        signed.signature,
+        actual,
+        keyring=keyring,
+        public_key_pem=public_key_pem,
+        now=now,
+        max_clock_skew_seconds=max_clock_skew_seconds,
+        last_seen_version=last_seen_version,
+        missing_hash_detail=detail,
+    )
