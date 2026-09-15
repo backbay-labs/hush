@@ -413,6 +413,15 @@ action = hushspec.MapMCPToolCall("fetch", args)                // egress, host o
 action = hushspec.MapOpenAIToolCall("get_weather", arguments)  // tool_call + args size
 ```
 
+`MapAnthropicToolUse` recognizes `bash` and `terminal`, the text editor tools
+(dated revisions included -- a `view` reads, anything else writes and carries
+its payload as content), `computer`, and `web_fetch`; an
+`mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
+policy names the tool rather than the transport. `MapMCPToolCall` recognizes
+the file, command and fetch tools. Anything unrecognized is a `tool_call`
+against the tool's own name: guessing wrong would consult the wrong rule block,
+which is worse than not guessing.
+
 `GuardedToolHandler` (and the per-runtime `GuardedAnthropicToolHandler`,
 `GuardedOpenAIToolHandler`, `GuardedMCPToolHandler`) wraps a handler so the
 check happens before the tool runs; a refused call returns a `*ToolDeniedError`

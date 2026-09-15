@@ -64,10 +64,30 @@ func TestMapAnthropicToolUse(t *testing.T) {
 			},
 		},
 		{
+			name:  "a dated editor revision is still the editor",
+			tool:  "text_editor_20250124",
+			input: `{"command":"view","path":"/etc/passwd"}`,
+			want:  EvaluationAction{Type: "file_read", Target: "/etc/passwd"},
+		},
+		{
+			name:  "editor create carries the whole file",
+			tool:  "str_replace_based_edit_tool",
+			input: `{"command":"create","path":"/app/x.env","file_text":"AKIA0123"}`,
+			want: EvaluationAction{
+				Type: "file_write", Target: "/app/x.env", Content: text("AKIA0123"),
+			},
+		},
+		{
 			name:  "computer use",
 			tool:  "computer",
 			input: `{"action":"screenshot"}`,
 			want:  EvaluationAction{Type: "computer_use", Target: "screenshot"},
+		},
+		{
+			name:  "web fetch is egress against the host",
+			tool:  "web_fetch",
+			input: `{"url":"https://evil.example.com/x"}`,
+			want:  EvaluationAction{Type: "egress", Target: "evil.example.com"},
 		},
 		{
 			name:  "mcp tools are evaluated under the inner tool name",

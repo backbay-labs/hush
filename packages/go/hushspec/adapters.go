@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -18,31 +19,49 @@ import (
 // the fail-safe reading: an unrecognized tool is still gated, just by the
 // rules that apply to every tool.
 
+// datedToolSuffix is the date Anthropic stamps on a versioned tool name
+// (`text_editor_20250429`). A policy is written against the tool, not the
+// revision, so the suffix is stripped before the name is matched.
+var datedToolSuffix = regexp.MustCompile(`_20[0-9]{6}$`)
+
 // MapAnthropicToolUse maps a Claude `tool_use` block onto an action.
 //
 // Recognized: `bash` and `terminal` (shell_command), the text editor tools
-// (file_read for `view`, file_write otherwise), and `computer` (computer_use).
-// An `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
+// (file_read for `view`, file_write otherwise), `computer` (computer_use), and
+// `web_fetch` / `fetch` (egress against the URL's host). An
+// `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
 // policy names the tool rather than the transport. Everything else is a
 // `tool_call` carrying the serialized size of its input.
 func MapAnthropicToolUse(name string, input json.RawMessage) EvaluationAction {
 	fields, argsSize := decodeToolArguments(input)
 
-	switch name {
+	switch datedToolSuffix.ReplaceAllString(name, "") {
 	case "bash", "terminal":
 		return EvaluationAction{Type: "shell_command", Target: stringField(fields, "command")}
-	case "str_replace_editor", "str_replace_based_edit_tool",
-		"text_editor_20250124", "text_editor_20250429":
+	case "str_replace_editor", "str_replace_based_edit_tool", "text_editor":
 		if stringField(fields, "command") == "view" {
 			return EvaluationAction{Type: "file_read", Target: stringField(fields, "path")}
 		}
 		action := EvaluationAction{Type: "file_write", Target: stringField(fields, "path")}
-		if content, ok := optionalStringField(fields, "new_str"); ok {
+		// `create` carries the whole file under `file_text`; an edit carries
+		// the replacement under `new_str`. Either way the payload goes through
+		// as content, so secret_patterns and the detection pipeline see what is
+		// about to be written.
+		content, ok := optionalStringField(fields, "new_str")
+		if !ok {
+			content, ok = optionalStringField(fields, "file_text")
+		}
+		if ok {
 			action.Content = &content
 		}
 		return action
 	case "computer":
 		return EvaluationAction{Type: "computer_use", Target: stringField(fields, "action")}
+	case "web_fetch", "fetch":
+		return EvaluationAction{
+			Type:   "egress",
+			Target: ExtractDomain(stringField(fields, "url")),
+		}
 	}
 
 	target := name
