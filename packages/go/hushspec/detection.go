@@ -375,6 +375,76 @@ type EvaluationWithDetection struct {
 	DetectionDecision Decision
 }
 
+// DetectorLevel is the level a normalized detector score maps to in a
+// receipt's `detection_trace` (receipt spec 4.6).
+//
+// none is a zero score, low is a non-zero score below every policy threshold
+// floor, and the rest follow the DetectionLevel floors of the prompt-injection
+// thresholds (0.25 / 0.5 / 0.75) applied to every detector's normalized score.
+type DetectorLevel string
+
+const (
+	DetectorLevelNone       DetectorLevel = "none"
+	DetectorLevelLow        DetectorLevel = "low"
+	DetectorLevelSuspicious DetectorLevel = "suspicious"
+	DetectorLevelHigh       DetectorLevel = "high"
+	DetectorLevelCritical   DetectorLevel = "critical"
+)
+
+// DetectorLevelFromScore maps a normalized score in [0, 1] to its level.
+func DetectorLevelFromScore(score float64) DetectorLevel {
+	switch {
+	case score <= 0:
+		return DetectorLevelNone
+	case score < detectionLevelFloor(DetectionLevelSuspicious):
+		return DetectorLevelLow
+	case score < detectionLevelFloor(DetectionLevelHigh):
+		return DetectorLevelSuspicious
+	case score < detectionLevelFloor(DetectionLevelCritical):
+		return DetectorLevelHigh
+	default:
+		return DetectorLevelCritical
+	}
+}
+
+// DetectorIDVersion is the version suffix appended to a built-in detector's
+// name to form the stable `detector_id` a receipt records.
+const DetectorIDVersion = "@1"
+
+// DetectorEvaluation is one detector's contribution, recorded as it ran
+// (receipt spec 4.6).
+type DetectorEvaluation struct {
+	// DetectorID is the stable detector identifier with a version suffix,
+	// e.g. "regex_injection@1".
+	DetectorID string            `json:"detector_id"`
+	Category   DetectionCategory `json:"category"`
+	// Score is the detector's normalized score in [0, 1].
+	Score float64       `json:"score"`
+	Level DetectorLevel `json:"level"`
+	// Matched is true when the finding met the policy's warn or block
+	// threshold and so contributed to the decision.
+	Matched bool `json:"matched"`
+}
+
+// TracedEvaluationWithDetection is an [EvaluationWithDetection] with the
+// evaluator's recorded rule trace and the per-detector receipt entries.
+//
+// DetectorTrace is nil when the pipeline did not run (the policy has no
+// `detection:` extension) and a pointer to an empty slice when it ran but no
+// detector was enabled or there was no content to scan -- the distinction the
+// receipt schema draws between an absent and an empty `detection_trace`.
+type TracedEvaluationWithDetection struct {
+	// Traced is the rule-block evaluation and its recorded trace, before
+	// detection.
+	Traced TracedEvaluation
+	// Evaluation is the final decision callers act on (the base evaluation,
+	// possibly escalated by detection).
+	Evaluation        EvaluationResult
+	Detections        []DetectionResult
+	DetectionDecision Decision
+	DetectorTrace     *[]DetectorEvaluation
+}
+
 // defaultInjectionDetector and defaultJailbreakDetector are process-wide
 // singletons. The built-in pattern sets are static, so EvaluateWithDetection
 // reuses one compiled instance of each rather than recompiling every regex
@@ -449,21 +519,48 @@ func mergeDetectionDecision(
 // gets matched_rule "detection" and a reason naming the category (the first
 // detector that forced the escalation to the final level).
 func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationWithDetection {
-	base := Evaluate(spec, action)
+	traced := EvaluateWithDetectionTraced(spec, action, nil, nil)
+	return EvaluationWithDetection{
+		Evaluation:        traced.Evaluation,
+		Detections:        traced.Detections,
+		DetectionDecision: traced.DetectionDecision,
+	}
+}
 
-	if spec.Extensions == nil || spec.Extensions.Detection == nil {
-		return EvaluationWithDetection{Evaluation: base}
+// EvaluateWithDetectionTraced is [EvaluateWithDetection] with the evaluator's
+// recorded rule trace and the per-detector entries a receipt records. The
+// explicit context replaces action.Context and out-of-band conditions keyed by
+// rule-block name are ANDed with each block's own `when` (core spec 3.13).
+//
+// It is the call receipts are built from, so the decision an enforcement point
+// acts on and the evidence recorded for it can never disagree.
+func EvaluateWithDetectionTraced(
+	spec *HushSpec,
+	action *EvaluationAction,
+	context *RuntimeContext,
+	conditions map[string]*Condition,
+) TracedEvaluationWithDetection {
+	traced := EvaluateTraced(spec, action, context, conditions)
+	base := traced.Result
+
+	if spec == nil || spec.Extensions == nil || spec.Extensions.Detection == nil {
+		return TracedEvaluationWithDetection{Traced: traced, Evaluation: base}
 	}
 	// Detection is emptiness-gated, not presence-gated: Rust reads
 	// `content.unwrap_or_default()` and returns the base evaluation when the
 	// result is empty, so an explicitly empty payload is a no-op here (unlike
-	// secret_patterns, where presence alone makes the block applicable).
+	// secret_patterns, where presence alone makes the block applicable). The
+	// pipeline still counts as having run, so the trace is empty, not absent.
 	if action.ContentOrEmpty() == "" {
-		return EvaluationWithDetection{Evaluation: base}
+		empty := []DetectorEvaluation{}
+		return TracedEvaluationWithDetection{
+			Traced: traced, Evaluation: base, DetectorTrace: &empty,
+		}
 	}
 	det := spec.Extensions.Detection
 
 	var detections []DetectionResult
+	detectorTrace := []DetectorEvaluation{}
 	decision := Decision("")
 	category := DetectionCategory("")
 
@@ -484,11 +581,22 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 			warnLevel = *pi.WarnAtOrAbove
 		}
 
-		if result.Score >= detectionLevelFloor(blockLevel) {
+		matched := true
+		switch {
+		case result.Score >= detectionLevelFloor(blockLevel):
 			decision, category = mergeDetectionDecision(decision, category, DecisionDeny, DetectionCategoryPromptInjection)
-		} else if result.Score >= detectionLevelFloor(warnLevel) {
+		case result.Score >= detectionLevelFloor(warnLevel):
 			decision, category = mergeDetectionDecision(decision, category, DecisionWarn, DetectionCategoryPromptInjection)
+		default:
+			matched = false
 		}
+		detectorTrace = append(detectorTrace, DetectorEvaluation{
+			DetectorID: result.DetectorName + DetectorIDVersion,
+			Category:   DetectionCategoryPromptInjection,
+			Score:      result.Score,
+			Level:      DetectorLevelFromScore(result.Score),
+			Matched:    matched,
+		})
 	}
 
 	if jb := det.Jailbreak; jb != nil && (jb.Enabled == nil || *jb.Enabled) {
@@ -509,11 +617,22 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 		}
 
 		scaled := result.Score * 100.0
-		if scaled >= blockThreshold {
+		matched := true
+		switch {
+		case scaled >= blockThreshold:
 			decision, category = mergeDetectionDecision(decision, category, DecisionDeny, DetectionCategoryJailbreak)
-		} else if scaled >= warnThreshold {
+		case scaled >= warnThreshold:
 			decision, category = mergeDetectionDecision(decision, category, DecisionWarn, DetectionCategoryJailbreak)
+		default:
+			matched = false
 		}
+		detectorTrace = append(detectorTrace, DetectorEvaluation{
+			DetectorID: result.DetectorName + DetectorIDVersion,
+			Category:   DetectionCategoryJailbreak,
+			Score:      result.Score,
+			Level:      DetectorLevelFromScore(result.Score),
+			Matched:    matched,
+		})
 	}
 
 	// threat_intel: intentionally not auto-wired -- see doc comment above.
@@ -530,9 +649,11 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 		}
 	}
 
-	return EvaluationWithDetection{
+	return TracedEvaluationWithDetection{
+		Traced:            traced,
 		Evaluation:        final,
 		Detections:        detections,
 		DetectionDecision: decision,
+		DetectorTrace:     &detectorTrace,
 	}
 }

@@ -388,8 +388,11 @@ rules:
 	if resolution.Signature.KeyID != env.KeyID {
 		t.Fatalf("SignatureStatus.KeyID = %q, want %q", resolution.Signature.KeyID, env.KeyID)
 	}
-	if resolution.Signature.SignedAt != env.SignedAt {
-		t.Fatalf("SignatureStatus.SignedAt = %q, want %q", resolution.Signature.SignedAt, env.SignedAt)
+	// VerifiedAt records when the verifier ran, not the signer's claim: the
+	// envelope's own signed_at is trustworthy only once Verified is true.
+	if !receiptTimeRE.MatchString(resolution.Signature.VerifiedAt) {
+		t.Fatalf("SignatureStatus.VerifiedAt = %q, want a millisecond timestamp",
+			resolution.Signature.VerifiedAt)
 	}
 	if resolution.Chain[0].Signature != nil {
 		t.Fatal("a builtin: hop is embedded in the engine and needs no signature of its own")
@@ -615,8 +618,9 @@ rules:
 		if resolution.Signature.Reason != ReasonContentHashMismatch {
 			t.Fatalf("expected %s, got %q", ReasonContentHashMismatch, resolution.Signature.Reason)
 		}
-		if resolution.Signature.SignedAt == "" {
-			t.Fatal("a failed check still records the envelope's signed_at claim")
+		if resolution.Signature.VerifiedAt != "" {
+			t.Fatalf("a failed check records no verified_at, got %q",
+				resolution.Signature.VerifiedAt)
 		}
 	})
 }
