@@ -120,6 +120,19 @@ from hushspec.signing import (
     signing_input,
     verify_policy,
 )
+from hushspec.bundle import (
+    BUNDLE_REASON_CODES,
+    BUNDLE_VERSION,
+    PAYLOAD_TYPE,
+    PREDICATE_TYPE,
+    STATEMENT_TYPE,
+    BundleError,
+    BundleVerifyResult,
+    DsseEnvelope,
+    DsseSignature,
+    parse_bundle,
+    verify_bundle,
+)
 from hushspec.merge import merge
 from hushspec.middleware import (
     POLICY_SIGNATURE_RULE,
@@ -385,6 +398,17 @@ __all__ = [
     "KeyringError",
     "MalformedEnvelope",
     "REASON_CODES",
+    "verify_bundle",
+    "parse_bundle",
+    "BundleVerifyResult",
+    "BundleError",
+    "DsseEnvelope",
+    "DsseSignature",
+    "BUNDLE_REASON_CODES",
+    "BUNDLE_VERSION",
+    "PAYLOAD_TYPE",
+    "PREDICATE_TYPE",
+    "STATEMENT_TYPE",
     "ENVELOPE_FORMAT_VERSION",
     "SIGNATURE_ALGORITHM",
     "KEYRING_VERSION",
