@@ -15,6 +15,7 @@ mod cmd_validate;
 mod cmd_verify;
 mod cmd_version;
 mod generated_schemas;
+mod input;
 
 use clap::{Parser, Subcommand};
 

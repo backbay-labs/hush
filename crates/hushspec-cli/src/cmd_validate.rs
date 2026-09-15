@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 #[derive(clap::Args)]
 pub struct ValidateArgs {
-    /// Policy YAML files to validate
+    /// Policy YAML files to validate; "-" reads the document from stdin
     #[arg(required = true)]
     files: Vec<PathBuf>,
 
@@ -45,37 +45,38 @@ pub fn run(args: ValidateArgs) -> i32 {
     let mut results: Vec<FileResult> = Vec::new();
 
     for path in &args.files {
-        if !path.exists() {
-            any_not_found = true;
-            let result = FileResult {
-                file: path.display().to_string(),
-                valid: false,
-                errors: vec![ErrorEntry {
-                    code: "E000".into(),
-                    message: format!("file not found: {}", path.display()),
-                }],
-                warnings: Vec::new(),
-            };
-            match args.format {
-                OutputFormat::Text => {
-                    eprintln!("{} {}", "\u{2717}".red(), path.display());
-                    eprintln!(
-                        "  {}",
-                        format!("error[E000]: file not found: {}", path.display()).red()
-                    );
-                }
-                OutputFormat::Json => {}
-            }
-            results.push(result);
-            continue;
-        }
+        let display = crate::input::display(path);
 
-        let content = match std::fs::read_to_string(path) {
+        let content = match crate::input::read_policy(path) {
             Ok(c) => c,
-            Err(e) => {
+            Err(crate::input::ReadError::NotFound) => {
+                any_not_found = true;
+                let result = FileResult {
+                    file: display.clone(),
+                    valid: false,
+                    errors: vec![ErrorEntry {
+                        code: "E000".into(),
+                        message: format!("file not found: {display}"),
+                    }],
+                    warnings: Vec::new(),
+                };
+                match args.format {
+                    OutputFormat::Text => {
+                        eprintln!("{} {display}", "\u{2717}".red());
+                        eprintln!(
+                            "  {}",
+                            format!("error[E000]: file not found: {display}").red()
+                        );
+                    }
+                    OutputFormat::Json => {}
+                }
+                results.push(result);
+                continue;
+            }
+            Err(crate::input::ReadError::Io(e)) => {
                 any_invalid = true;
                 let result = FileResult {
-                    file: path.display().to_string(),
+                    file: display.clone(),
                     valid: false,
                     errors: vec![ErrorEntry {
                         code: "E000".into(),
@@ -85,7 +86,7 @@ pub fn run(args: ValidateArgs) -> i32 {
                 };
                 match args.format {
                     OutputFormat::Text => {
-                        eprintln!("{} {}", "\u{2717}".red(), path.display());
+                        eprintln!("{} {display}", "\u{2717}".red());
                         eprintln!(
                             "  {}",
                             format!("error[E000]: failed to read file: {e}").red()
@@ -107,12 +108,12 @@ pub fn run(args: ValidateArgs) -> i32 {
         match args.format {
             OutputFormat::Text => {
                 if valid {
-                    println!("{} {}", "\u{2713}".green(), path.display());
+                    println!("{} {display}", "\u{2713}".green());
                     for w in &warnings {
                         println!("  {}", format!("warn: {w}").yellow());
                     }
                 } else {
-                    println!("{} {}", "\u{2717}".red(), path.display());
+                    println!("{} {display}", "\u{2717}".red());
                     for err in &errors {
                         println!(
                             "  {}",
@@ -128,7 +129,7 @@ pub fn run(args: ValidateArgs) -> i32 {
         }
 
         results.push(FileResult {
-            file: path.display().to_string(),
+            file: display,
             valid,
             errors,
             warnings,
@@ -182,12 +183,23 @@ fn validate_content(
         warnings.push(w.clone());
     }
 
-    // Layer 3: strict extends resolution
-    if strict && let Err(error) = resolve_from_path_with_builtins(path) {
-        errors.push(ErrorEntry {
-            code: "E010".into(),
-            message: format!("extends resolution failed: {error}"),
-        });
+    // Layer 3: strict extends resolution. A document read from stdin has no
+    // path to resolve relative `extends` against, so relative references are
+    // resolved from the working directory instead (builtins still work).
+    if strict {
+        let resolved = if crate::input::is_stdin(path) {
+            let loader = hushspec::create_composite_loader();
+            hushspec::resolve_with_loader(&spec, None, &loader).map(|_| ())
+        } else {
+            resolve_from_path_with_builtins(path).map(|_| ())
+        };
+
+        if let Err(error) = resolved {
+            errors.push(ErrorEntry {
+                code: "E010".into(),
+                message: format!("extends resolution failed: {error}"),
+            });
+        }
     }
 
     (errors.is_empty(), errors, warnings)
