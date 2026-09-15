@@ -20,6 +20,9 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-keyring.v0.schema.json` | Trusted keyring consumed by verify-on-load and `h2h verify --keyring` |
 | `hushspec-bundle.v0.schema.json` | Policy bundle attestation (DSSE envelope with an in-toto statement) produced by `h2h bundle create` |
 | `hushspec-framework-registry.v0.schema.json` | Schema for [`spec/registries/frameworks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/frameworks.yaml), the compliance frameworks `metadata.controls[].framework` may name |
+| `hushspec-error-codes.v0.schema.json` | Schema for [`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml) and for the `<name>.expect.yaml` sidecars that pin the code each `invalid/` vector is rejected with |
+| `hushspec-merge-vector.v0.schema.json` | The merge-vector directory convention under `fixtures/*/merge/` (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, optional `fixture.yaml`) |
+| `hushspec-conformance-report.v0.schema.json` | Conformance report emitted by `hushspec-testkit --report`; see [Conformance Levels](conformance.md) |
 
 Every schema is embedded in the `h2h` binary; `h2h schema --list` prints the names and `h2h schema <name>` prints one to stdout.
 

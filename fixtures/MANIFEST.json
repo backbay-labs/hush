@@ -1,0 +1,2982 @@
+{
+  "manifest_version": "0.1",
+  "fixtures_version": "0.2.0",
+  "generated_at": "2026-09-15T18:45:31Z",
+  "files": [
+    {
+      "path": "fixtures/bundle/README.md",
+      "sha256": "4ad6e305cf6e58af965240c45b1ad4330ea41257fe19cad4caf81d0053349e09",
+      "category": "doc",
+      "module": "bundle",
+      "level": 0
+    },
+    {
+      "path": "fixtures/bundle/bundles/malformed-predicate-type.bundle.json",
+      "sha256": "f695b0bacda24d80f643bc7169da5d84f96d006748ded1b955801f8797ca86ac",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/bundles/subject-digest-mismatch.bundle.json",
+      "sha256": "45831caba4bb99a91dd61ab518eb8d771d14829ca3a3602e4d4dda60596cd6a9",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/bundles/tampered-payload.bundle.json",
+      "sha256": "e375500e81808b7a76cd39a70e377fd0dacf54ceb520eefd49ff7f016d270ca3",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/bundles/unsigned.bundle.json",
+      "sha256": "1b2cb63ba47ba0e3adb71797bcad1682dfd056f3631e612bcd57ccfff8e5f2b7",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/bundles/valid.bundle.json",
+      "sha256": "6e967dcf08b7519a76ae4b326bddc1c218de2dabe86552a1cd532f4c03ce224f",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/bundles/wrong-key.bundle.json",
+      "sha256": "eee55842a8cb8a5fd47d2ced86f1e358575db768ae2da3bb36b7c2a378b10fb0",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/bundle/vectors.yaml",
+      "sha256": "3236f1de9f5a102841dcfdf4ef249f964462949fb5de30d20fee5b4face25d1b",
+      "category": "bundle",
+      "module": "bundle",
+      "level": 5
+    },
+    {
+      "path": "fixtures/core/evaluation/browser-automation.test.yaml",
+      "sha256": "aa12df34041abdb1a5acedee08ed53c76c8ff03b76051b080c87b216238b5fd2",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/code-execution.test.yaml",
+      "sha256": "7a74be93a477a9debd0ef65f927ac248ad5d4ab6183defb1d480ce5aa4637f75",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml",
+      "sha256": "530b4be51c60477e872430ad1ba68a301abcdc5734a1b001dc68968d4881b740",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/computer-use.test.yaml",
+      "sha256": "2bc7e9094e6f799f5bcb011262c15a6cca40a865ca6b742e10f103b9e8da398b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions.test.yaml",
+      "sha256": "4c5fe13fdcc794aade1c22c3c02592b011de23b4d8da748abeefbf4de0ab2e2b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/content-scan-egress-tool.test.yaml",
+      "sha256": "9a117a2502f8ed350c77412af7ae902ac66d0a706ce0ccaef5643ed3a4914e9b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/custom-action-capability.test.yaml",
+      "sha256": "0cd87feb402898aa962cd7e8ad5358c76db34922f74173234c432982bcdf4b49",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/decision-precedence.test.yaml",
+      "sha256": "a7723d5dc1653e68f3ace6ea28df939f8690cee091015e260b0c42fab60927fa",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/egress-default-fail-closed.test.yaml",
+      "sha256": "f5e79ef9ec17d37b691287df4ee5ea1f04b79f378cee774fd9711f456f7fa1f5",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/egress-host-normalization.test.yaml",
+      "sha256": "b80bb94dea561d5216a1f912e87619344aad481455c7c0a3ebb445b782545ac8",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/egress-normalization.test.yaml",
+      "sha256": "865ea80c6d933b096196c2ce90f0f1ea7976147c57056b597e045ddd25bd78c0",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/egress.test.yaml",
+      "sha256": "0774e4e9eb2128e58c6edb640dd5aa88d49230cebb5c2c7ded1d4131666becd4",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/forbidden-paths-leading-globstar.test.yaml",
+      "sha256": "5695de8431a08372d27fa044d303d567b8907f06bb6e9ffccb483719c82b2d5b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/forbidden-paths.test.yaml",
+      "sha256": "c3ad5ec8444f5eb16eb054775651111569e28bfbcc7803601f15ecb62d6f9362",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/input-injection.test.yaml",
+      "sha256": "4c34f4889219c109a985bb7c8079ecf230550503bffa7b1a4cf60ce6a21e0c02",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/no-early-return.test.yaml",
+      "sha256": "bccd7bfb2df2d734d76ccee61245f623143a7efb70e9260c0563b05632da1d91",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/patch-balance-zero.test.yaml",
+      "sha256": "d7b42cccfb120456abeb8e1b21d23bd703f75cefda4e175c2986c8e85f1dcf03",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/patch-balance.test.yaml",
+      "sha256": "1dacc2fb66a7acbc45416994772c8df5027df5186fefcc8c9cbe5de9b01b29f5",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/patch-integrity-defaults.test.yaml",
+      "sha256": "43f243d2df8523d50b2799cba33369e4d615cac717d9e58cb8086fcef083c8a3",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/patch-integrity.test.yaml",
+      "sha256": "3efdcba0c48c680a2a1414d5fa2cd3fab1fed8cf51e28cbc613c7ca9251b432a",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/path-normalization-lexical.test.yaml",
+      "sha256": "a248275622432069c26982378e1478b14980c56131ca06bf42b4f72674452e13",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/path-normalization.test.yaml",
+      "sha256": "98cd82f2608579b2ed59df03682cd897bb633a6b57bc6f4da9a26a3db06190be",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/regex-ascii-classes.test.yaml",
+      "sha256": "f45cb16efab5cd267e2de3466d316178a5644981439c15a110bac2284a86fdf3",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/regex-dialect.test.yaml",
+      "sha256": "6ce76e23b991e020fe007018b84d0b713371bc0c2c2a4f88ae7daf154b4b117b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/secret-patterns-content-presence.test.yaml",
+      "sha256": "97bcabfb888e947a7c3f99a329aeea87430a5d88471d88f1ffd9f028cc3c4d2b",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/secret-patterns.test.yaml",
+      "sha256": "cab7df77539eda8e891a0b2725588d84057c0d9d7a2c04ff99b75e7d20234259",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/severity-mapping.test.yaml",
+      "sha256": "1e0c54c04bc9ff72e7bd87d0c528d278b5929972f366a5de7b8bc9577a9e8daa",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/severity-precedence.test.yaml",
+      "sha256": "1df04d27e0f51146c01943bdefeaa0b3c6a2fb362cd8b0d74c56cd20f29915aa",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/shell-commands.test.yaml",
+      "sha256": "5c65b0ff34d9ec8559779cc521a1ef64b784e89134ba726b84697aed4abf6368",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/tool-access.test.yaml",
+      "sha256": "6813d881a1cfb6db1f7d87a4ae2503691735738d3d30c6d5c8b499696fdd1993",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/tool-allowlist-deny.test.yaml",
+      "sha256": "996143bc9f855f7089a4c26c30eff471c92c0511d4dc6982f2561046b12a880c",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/tool-exact-match.test.yaml",
+      "sha256": "b79a037f0fc15a8899456b0af14a2b24320051e14b3ba62b6f0146637b12b0a6",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/tool-glob-literal.test.yaml",
+      "sha256": "f3c35ceb8e9dbc87e8bef0803125332b681475dc1b770138d04eb1fb44e51780",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/unknown-action.test.yaml",
+      "sha256": "baadcd20f8f466f2a8a940e456bebdb83435b51894a70462bed289ee0629c4d8",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/hash/README.md",
+      "sha256": "4bb7ddbc283705640ef55d80d4433e57fbffb3afd226a35983c3ad5b68fbcbe6",
+      "category": "doc",
+      "module": "core",
+      "level": 0
+    },
+    {
+      "path": "fixtures/core/hash/all-rule-blocks-defaults.yaml",
+      "sha256": "9c3c9cf72c1c5c289bc92f3599281a82e978b55b3da368e78861cca855584cda",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/defaults-partial.yaml",
+      "sha256": "d91f2610c7138ca4b832878bb20930f7b7d751417d1171a8e6c0e7eb15ff45c1",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/empty-containers.yaml",
+      "sha256": "06693cdb24090054027814cc43f4ed12b1e4c28d28e71b3ab77d68a9ab31f5e2",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/extends-resolved.yaml",
+      "sha256": "fd99de36ed0bad2fdd6467609698bf0b427075b46e3e9a383489dd4d1ee26c40",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/extension-detection.yaml",
+      "sha256": "c2f364dcf172be72a018c90c6900af4fa66e9630f9fb1bc82e4ef7c3e599d638",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/extension-origins.yaml",
+      "sha256": "de1f0bac5cc0deb573f833393cb9d224aa6d373cb8917f6d1d9aa52a8825e2d8",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/extension-posture.yaml",
+      "sha256": "70609cdaab8e1cef335ffefebd8d63f6a847e77ffb8fb1554a9a7e111fba037b",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/key-order-utf16.yaml",
+      "sha256": "a95da251f27dfbbcadee739cd9534ce19bfeeed6f1bd44a52ea9d99f66925304",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/metadata-governance.yaml",
+      "sha256": "a29fbe3ec6486ac49e503c5c891ab9f4c9c7f797bb5af075af16d8008a0d9386",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/minimal.yaml",
+      "sha256": "e697644dc111ee3b9fab7645f59aaff12cd3684d524e1d0fcb25a755c75ef2ab",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/numbers.yaml",
+      "sha256": "8aa7f7a99c506d37ee688e67c15f39558fa331a851e650b33bfe6624cbd06e8a",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/origins-overlay-empties.yaml",
+      "sha256": "8b06df1ba7c731452732980f1c2d8b8503944f2c2a16cc7b4377ee1fc64e2b32",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/strings-escapes.yaml",
+      "sha256": "8e6b0fa7f70424f9682b86b81919eea06913d3dc803d6dc6b88913640d5df7db",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/when-conditions.yaml",
+      "sha256": "43091e4e1272c803ebd07b25853eef2f853b94634c5a4a5af8640d5db93228f4",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/invalid/bad-default-action.expect.yaml",
+      "sha256": "8a44acd84893f389685e2850be1fb216fea0259eab393e5df0c6c47c57422d1e",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/bad-default-action.yaml",
+      "sha256": "58fe8078169b3a05f45f66942d91f200be1d69f33e48c417eae83cd68b8760ba",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/bad-severity.expect.yaml",
+      "sha256": "3378b303af8efe71c6087b236178076981df4b13842d2bf2eda89262047ddadc",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/bad-severity.yaml",
+      "sha256": "c3413495466d5717bafabd82642897df0b9793a77af9642d23da354480c9a5df",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/duplicate-pattern-names.expect.yaml",
+      "sha256": "a31e987a736dca02f6d0b3b3e1a63e45b39a1f502a05777dfc2c2698c2ccba66",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/duplicate-pattern-names.yaml",
+      "sha256": "ff0e69cbb119ed1b60a993e57c475331254cd71c77b38640fbcb17f158dafe78",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/float-version.expect.yaml",
+      "sha256": "dcd320b3cfa87f0bf316639070ca04d4a007221b122252def6e4e342f9813760",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/float-version.yaml",
+      "sha256": "1a6dfaf0a9cf937a94c4c8b88b1145d7317d9d5cbd7cd05841b909b0dd55e64d",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-bad-date.expect.yaml",
+      "sha256": "5acf60a2016661e21ea53d53869690485da15691ca4faa7e7f59a9c7893064a8",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-bad-date.yaml",
+      "sha256": "5a2f5679d9e62f46cade36d5dcb556b0bfb66d1f2b6c1ec0b4c4ca75f748d2fb",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-changelog-unknown-key.expect.yaml",
+      "sha256": "64ef13f1a3903baa7ac1fd94e3d3ba131484504aae7e339fd8de72613361eff4",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-changelog-unknown-key.yaml",
+      "sha256": "6f22d53f4819837c6be76efdde3268ea5574005b6781801d6b0a68025b153584",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-bad-framework-id.expect.yaml",
+      "sha256": "8dee77f19af63e8c0ab47e6603e95ceb52fa39db1199509f5665025a915701f4",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-bad-framework-id.yaml",
+      "sha256": "7a49209f6deab5813ec26953f14c5f8db0f955ca0e6a11a1e6146f5b9fb91038",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-empty-paths.expect.yaml",
+      "sha256": "214d0121b246f61c757bf5522281ace84dcec90ecb9489abbb3b5715ddd29bee",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-empty-paths.yaml",
+      "sha256": "aad4c3657e7c6fb8711d40b8c47007cf325f058f5bedbf0f78c835081f589aa1",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-unknown-key.expect.yaml",
+      "sha256": "d2277d1eb485c49c48c0387bcd4973a54750811cfff350dcb6e71a4d408a9ac3",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/metadata-controls-unknown-key.yaml",
+      "sha256": "85d1ab61e2650187dcb997a46c0d5999d935d9e5e88c424c589dcd1260e2ade2",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/missing-version.expect.yaml",
+      "sha256": "f342d5681128433d3a627cf2b082d8a46aa4088cf10bfd98d9bb14761f5399c4",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/missing-version.yaml",
+      "sha256": "c2d6416091a1ff6ce6d2da572bd811cbe5420119d9b3099d0201ae2ed4fadd99",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/regex-mid-pattern-flag.expect.yaml",
+      "sha256": "f84d2312766a55db3dd629ba50b0f10f795a1df14e92ade7b60ab060aac46b67",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/regex-mid-pattern-flag.yaml",
+      "sha256": "150b62665af606f941c91a7b6e4b757b454220a0f2ecde0e53fc2adce4e5de46",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/unknown-rule.expect.yaml",
+      "sha256": "85e3fe2a56c93fbf4ef3da631eb22847639b3b7632479156b622eb3a5f5709bb",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/unknown-rule.yaml",
+      "sha256": "03a60184217c30efadda3707540c350c144adc812764a9151ced3d866bb2610b",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/unknown-top-level.expect.yaml",
+      "sha256": "03e8d1a5859eb32c4e21dd46d1e0369b2598bb01c5830c25e5ad6e8fb5113474",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/unknown-top-level.yaml",
+      "sha256": "b16ed5ceee6253a65127790b01e98f7127f550461ad20d44f9d22c1bd74c05a6",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-day.expect.yaml",
+      "sha256": "e106d58ed470a9266525b8206216db17e552d663518e5452b3ff94a65e753992",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-day.yaml",
+      "sha256": "93458d8b042f26a4bb0c6b54910b66e147f291a7bb2064dc6ae503f7a9de828a",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-time.expect.yaml",
+      "sha256": "4721b5d89ce6669701b39dfde2e6bf5c50a66f54c69d5e98f1bd5312aaab7a3c",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-time.yaml",
+      "sha256": "3597bc33ffbec902f4895765af65670ceedb585ea1fd397afd6e2dbbf11d5ba3",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-timezone.expect.yaml",
+      "sha256": "1e793bfcf98625787e5ea80cc2d4f10d80501fbd5913a4df2512a80fdaed0188",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-bad-timezone.yaml",
+      "sha256": "f8e7559792a1ee7f234f7e44fefa5f79e663d093518e39fdd034aa0c93594abd",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-too-deep.expect.yaml",
+      "sha256": "aa4050a288a73a5223a8db72478bcf77bb5f40fca2436b7f2b3cbe429c0d44be",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-too-deep.yaml",
+      "sha256": "93c09e0ca8fc3e9e528809321a0c6ed42a4eaf6b7876ea872c8eb8800986a6be",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-unknown-key.expect.yaml",
+      "sha256": "c5dc7cc57744dffd88c61fb561e5adf7400148f9aa4dc92edd278af4a733e95a",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-unknown-key.yaml",
+      "sha256": "a3698de2530d3abdd96390d62cd46dac2612844c122bb1617c72befb7f7cf9b4",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-alias.expect.yaml",
+      "sha256": "0e25cfaa12c2b520657281a36af6eadf884ed226bb9520e94844372ff6c6d444",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-alias.yaml",
+      "sha256": "0ecd51f2ec239d8fafa19f9b885b3a24b34019ab66555d95bd5eb54f3eee1e5c",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-bool-yes.expect.yaml",
+      "sha256": "435530e7e2942b2efec91ec08b4fff4e0b3e6ad66a25eb64dfb9c40e3236b125",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-bool-yes.yaml",
+      "sha256": "76bc9b6791aa42919d34814e92ede4a05a0739e778948afcfaab9a65e9968ec4",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-duplicate-key.expect.yaml",
+      "sha256": "aa4c626de7ddd30b2836b433b67bfbd2b75fc0ed23120185a59d908a59ec685e",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-duplicate-key.yaml",
+      "sha256": "3ab4e1a51b8d16b2ba897f09a376094376d30c413d85f54946094ff6396166b1",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-merge-key.expect.yaml",
+      "sha256": "063862deccd8ae3ed401512eb524258b962254da45fdbaeab587890430da286c",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-merge-key.yaml",
+      "sha256": "40ed2b39914dc9f70d13bc0eca645e4f6a06967d23c9b0a06d4454632f84e4fa",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-multi-doc.expect.yaml",
+      "sha256": "aa1f67cdd52a5f743d908925bd79236d39fe3a6c61d99b9094a11fd67a9b3a59",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/yaml-multi-doc.yaml",
+      "sha256": "bf512f7ade0bb6420cb742b7ad3b07a610127df71e7580be9db16706a2b7e2a6",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/merge/base.yaml",
+      "sha256": "14406cce474ef6e3ac96a8ac9c69da781a3075217c99235962423c4909222766",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/child-deep-merge.yaml",
+      "sha256": "43a5db982a436d07aaf547c7f5c218d33070e9783e7b0f7ec284094631238a64",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/child-replace.yaml",
+      "sha256": "785c6e242224dd9e8c34657882487ebcb917ce836e7c116a6b70981d3c12a647",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/expected-deep-merge.yaml",
+      "sha256": "6f55e6f089523196ca1a19d8b358506074e1232dccb103b0a9fe081bd50341d8",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/expected-replace.yaml",
+      "sha256": "c00d02a44e7d048dc2ae38c88490936298f50eaa2a492be316ba8e54bbbc932a",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/resolve/chain-builtin.yaml",
+      "sha256": "cbb620d46f60002715897ffebabb4095794224003334d7332ad7d80fbed7f774",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/chain-two-hops.yaml",
+      "sha256": "6881996644dfbce2e4e4610d9f919f513f74b84e5674b7a3b0388cea197bbb1b",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/no-extends.yaml",
+      "sha256": "7e6dad2d10725f857d5b1beac627ea858e9629e14468fade0cbfd1cb9832399e",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/pin-malformed.yaml",
+      "sha256": "3cd26f51fa4d6f548c4be3c5d8cf6a6b106d0e31e549b54700661e8aac3079dd",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/pin-mismatch.yaml",
+      "sha256": "25e45bcf02b10c148c0d81744cfce908c29743ad703e9de61ca7b0688eabb6d3",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/pin-valid.yaml",
+      "sha256": "252843a42f9b12395a4c14881fa8797fee05776d80d5c88144e2d2650e0fa429",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/unknown-builtin.yaml",
+      "sha256": "452c79f06960ef737796fb8e4d0e95b47686f8b007ff779303197b1794053589",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/valid/browser-automation-rule.yaml",
+      "sha256": "acfa661c1fcd3fac0ea754cd4f87f57cf19ab635722878b471e47bb311d4b8a6",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/code-execution-rule.yaml",
+      "sha256": "08baab44aad01ff2b14494c6224c53d3a299babd46222fecb795280c22c80811",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/computer-use-rule.yaml",
+      "sha256": "7d0bcd72f086ce689af1d6070b67dca629083c4256e8e50d71944efc68f3166a",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/egress-only.yaml",
+      "sha256": "ea914a183f6e2904c63e07ba33471d53a2d09c3b8b06c3658cfe5048866a3703",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/extends-basic.yaml",
+      "sha256": "f2d5ec01a5d1ff04319e59c56285ebd5892a9baee168a56ddeb1dc866b994a1e",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/full-rules.yaml",
+      "sha256": "9c7a3c82765557608a4bfd86629a79c7d6c299e8cb8f99743baddf5c5c49926d",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/input-injection-rule.yaml",
+      "sha256": "b347bdde666759d2bb6607bb84e227923397b924fb3965d6b238834c5325f1c3",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/metadata-controls.yaml",
+      "sha256": "df242bc3194f60605148e05d8fab26329a45385549742026950e6bc8bb1734e1",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/metadata-governance-full.yaml",
+      "sha256": "e5db0febf0957bc820a623854431b90793189835ce7442943b95f4c529a2d108",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/metadata.yaml",
+      "sha256": "3a973a9680c76cd6dc7383d38a3f2b0a636afa8cee0f62188e87cb3d2d7f8477",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/minimal.yaml",
+      "sha256": "c3bf2b516558f19a36f0d2898e16e1f082b9d625b92432d4ee1667b1909dde78",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/named.yaml",
+      "sha256": "52da90ce28f3fff8c51b79d1294b82eef45531edba09db9878a2f1a03aabc615",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/remote-desktop-channels-rule.yaml",
+      "sha256": "090f4a33099cc06ba71ca4fc1317e4e2928613a96c5fdcbe688610d809e9a64b",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/rules-and-extensions.yaml",
+      "sha256": "93338536d240c98482b27c80a17755c9a39804cc07429f5eb536edae598477f5",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/version-patch-accept.yaml",
+      "sha256": "d3a4aab50fe0f70169cc7569fd82be3a4977ec5e25f0ac775b7b96ab6105a8ef",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/when-conditions.yaml",
+      "sha256": "2d2647b2a7ebd8a766666a303c18798d0791850989719cb597b71a6bc651bb68",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/evaluation/jailbreak.test.yaml",
+      "sha256": "2ca171e69e77ff073c8de3768ec16009ef15638d2cb4f2162c62d86ba802829c",
+      "category": "evaluation",
+      "module": "detection",
+      "level": 3
+    },
+    {
+      "path": "fixtures/detection/evaluation/prompt-injection.test.yaml",
+      "sha256": "75b60b4cf1f4888462f2175d04ef7a7bccf6293546db114ddb954203596e7cad",
+      "category": "evaluation",
+      "module": "detection",
+      "level": 3
+    },
+    {
+      "path": "fixtures/detection/invalid/bad-similarity.expect.yaml",
+      "sha256": "78b0130d7d740b29a18347cb3048c14709dea9e0a7690f88c0fb87c68c01dde5",
+      "category": "expect",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/invalid/bad-similarity.yaml",
+      "sha256": "1acb30adc1345351c54a11049d69fcf160d17441ed403682cba4fd2348b9d27c",
+      "category": "invalid",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/merge/base.yaml",
+      "sha256": "cf0c8d00ee5349a9bb5a51c2c7ba01bf4d093e1a3184d4f274efc3a0a8efe469",
+      "category": "merge",
+      "module": "detection",
+      "level": 2
+    },
+    {
+      "path": "fixtures/detection/merge/child-deep-merge.yaml",
+      "sha256": "4562ccb19513b82d85defc2ad17f8f503c9914c41f1343523b713982af8f1d5f",
+      "category": "merge",
+      "module": "detection",
+      "level": 2
+    },
+    {
+      "path": "fixtures/detection/merge/child-merge.yaml",
+      "sha256": "601185d75c07109731768ee14f3997bba3b2d7b52a4215f3a978450ee80ee925",
+      "category": "merge",
+      "module": "detection",
+      "level": 2
+    },
+    {
+      "path": "fixtures/detection/merge/expected-deep-merge.yaml",
+      "sha256": "6689046c1b12776aba55740173b5bbb089dedbb49e36ac9f98c6479c3572e26d",
+      "category": "merge",
+      "module": "detection",
+      "level": 2
+    },
+    {
+      "path": "fixtures/detection/merge/expected-merge.yaml",
+      "sha256": "7b5dd13007fe1ca66fa8c90d9d8ae70e7f209271bb32c3a6da30066beb9fa86d",
+      "category": "merge",
+      "module": "detection",
+      "level": 2
+    },
+    {
+      "path": "fixtures/detection/valid/full-detection.yaml",
+      "sha256": "1df8779b090070adae8d9ae88d4125e08971d32edb37034d95d2da0449e88bdd",
+      "category": "valid",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/log/README.md",
+      "sha256": "90c92dc41099e3dd6286cb55122fc08580a65cbeee29d320dc337ea3aad3c29e",
+      "category": "doc",
+      "module": "log",
+      "level": 0
+    },
+    {
+      "path": "fixtures/log/invalid/bad-prev-hash-line-2.jsonl",
+      "sha256": "c6962a11a3e1e2e0c91ecac24f9c6186f6d7d19fbbbd1ac778517bf243e961b9",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/invalid/bad-signature-line-4.jsonl",
+      "sha256": "590d0675615672f0c084e00b9f2396db32483b8ca2bfa88f6a34e849f8843eb9",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/invalid/deleted-line-2.jsonl",
+      "sha256": "7a11e568e671ca28a7ba71d3b60b45fcef3851b30027a369cd7cdb9227f5c053",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/invalid/reordered-line-2.jsonl",
+      "sha256": "d648b062b25a7798425aff27f8cc69c8f0eef01431c43f888c4d8befaa284a0a",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/invalid/tampered-line-3.jsonl",
+      "sha256": "732c803a57f2cecf9eea0bff881abffbbd09c831853d22794e3bcc3207221b90",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/valid/basic.jsonl",
+      "sha256": "bf86ce1805dfeedb52160c9a13810f64de0f53d83bfa4023932c0ce808d331fa",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/valid/rotated-1.jsonl",
+      "sha256": "bf86ce1805dfeedb52160c9a13810f64de0f53d83bfa4023932c0ce808d331fa",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/valid/rotated-2.jsonl",
+      "sha256": "9c335f2f4be5d2be362425f49277f3c2d40cfbedfb1d4bec39085675afb3ec53",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/valid/signed.jsonl",
+      "sha256": "a6497de5a2f2a472bd4bca756cc2ac3f4361392e720135c5e42010eaaaeb092b",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/origins/evaluation/default-behavior-deny.test.yaml",
+      "sha256": "64960714f02c0a8c593bba07e9352b8b12395dc712b03afcfc3ae2ce9b97c54a",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/evaluation/match-presence.test.yaml",
+      "sha256": "f9090589c45f3672912dead895dcb79d8f91303a5b303d5100788f8451325ba3",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/evaluation/origin-matching.test.yaml",
+      "sha256": "aa9c8a1006b5b382b431bdb889034d9732cf2c0f1447193138ab00fbfc3e71fc",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/evaluation/origin-priority.test.yaml",
+      "sha256": "220f2c8647d007735dad4b4ef12f128c1767d399d10c0a41811314d75019c4b0",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/evaluation/tied-profiles.test.yaml",
+      "sha256": "babecf5592f012ee3673497cfc7923a97edd338118ef067c93630d92a399b5c1",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/evaluation/tri-state-overlay.test.yaml",
+      "sha256": "258ba8ca480d5cc4cf7fbba3f5e4b0fb3bf6e4ba93d3582c1332191a7e3f3c7e",
+      "category": "evaluation",
+      "module": "origins",
+      "level": 3
+    },
+    {
+      "path": "fixtures/origins/invalid/bad-match-enum.expect.yaml",
+      "sha256": "3cca55812e710a4c5432fb41717d2179ff7c858fa16a49ff67718e09b7d65920",
+      "category": "expect",
+      "module": "origins",
+      "level": 1
+    },
+    {
+      "path": "fixtures/origins/invalid/bad-match-enum.yaml",
+      "sha256": "aae7cd2f6423fb1fe7824235ae45cd845f0acc2676bbf9f8e3f77c22d88439f7",
+      "category": "invalid",
+      "module": "origins",
+      "level": 1
+    },
+    {
+      "path": "fixtures/origins/invalid/duplicate-ids.expect.yaml",
+      "sha256": "6f4b006e9f6f6d263ec49dec7f64008c3fd7523d9f712105c907c665a88fc178",
+      "category": "expect",
+      "module": "origins",
+      "level": 1
+    },
+    {
+      "path": "fixtures/origins/invalid/duplicate-ids.yaml",
+      "sha256": "fd6f671b6e556a6500b66115128ef3f6ac0692a799f3343f3a74176e071e9587",
+      "category": "invalid",
+      "module": "origins",
+      "level": 1
+    },
+    {
+      "path": "fixtures/origins/merge/base.yaml",
+      "sha256": "d1631d41e4737aa1946feb2738c55222643aa611b7af41e542e2c54531a66612",
+      "category": "merge",
+      "module": "origins",
+      "level": 2
+    },
+    {
+      "path": "fixtures/origins/merge/child-deep-merge.yaml",
+      "sha256": "e9ece937cce6a5bd353c071fdabdf4f8eafe5bdd2775623bc1e69dc37d88effb",
+      "category": "merge",
+      "module": "origins",
+      "level": 2
+    },
+    {
+      "path": "fixtures/origins/merge/child-merge.yaml",
+      "sha256": "b0c7f566ea8e7c6de2ae5b808b98a72529c5f181a83376cc8b6dc99025e17a9a",
+      "category": "merge",
+      "module": "origins",
+      "level": 2
+    },
+    {
+      "path": "fixtures/origins/merge/expected-deep-merge.yaml",
+      "sha256": "3f67395730671b9a8349af73df7e2860f2c004d797fb28b45f2509eeb68fd16c",
+      "category": "merge",
+      "module": "origins",
+      "level": 2
+    },
+    {
+      "path": "fixtures/origins/merge/expected-merge.yaml",
+      "sha256": "e1708ae1f535f85db27104691551d12de8048349eafead40c9cccec2dd7e705e",
+      "category": "merge",
+      "module": "origins",
+      "level": 2
+    },
+    {
+      "path": "fixtures/origins/valid/multi-profile.yaml",
+      "sha256": "a35218f03987a3572b274a1802420afbd9e5fd4e8cfe1d6abda52ffd4cfe7771",
+      "category": "valid",
+      "module": "origins",
+      "level": 1
+    },
+    {
+      "path": "fixtures/posture/evaluation/empty-capabilities.test.yaml",
+      "sha256": "780ce5d92b4d9e3f0100b497ed0758c60482550a386afb34bd65c9c38d0f2cc3",
+      "category": "evaluation",
+      "module": "posture",
+      "level": 3
+    },
+    {
+      "path": "fixtures/posture/evaluation/posture-transitions.test.yaml",
+      "sha256": "b2faf45e74f2f4d65e6a073345b3271eb96194cc59c92edc974d74c94177cb68",
+      "category": "evaluation",
+      "module": "posture",
+      "level": 3
+    },
+    {
+      "path": "fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml",
+      "sha256": "081525dd1ec7e638ebc0c90d38de2a15fe0f240b599ab382f746b12d844fc524",
+      "category": "evaluation",
+      "module": "posture",
+      "level": 3
+    },
+    {
+      "path": "fixtures/posture/invalid/bad-initial.expect.yaml",
+      "sha256": "e6c3a9cad142b5d35cdf33fb9c3de0921ff24196c9b54bf4a16aebcc8d6af603",
+      "category": "expect",
+      "module": "posture",
+      "level": 1
+    },
+    {
+      "path": "fixtures/posture/invalid/bad-initial.yaml",
+      "sha256": "9986b8e9737ab41db4505f26ff6ed6d8df9a3ad370bcdc0be56f748421243309",
+      "category": "invalid",
+      "module": "posture",
+      "level": 1
+    },
+    {
+      "path": "fixtures/posture/invalid/timeout-no-after.expect.yaml",
+      "sha256": "5942ac0293f75342a6c34327a215ff7cd9ef87964b48bbef38adea771c8e483e",
+      "category": "expect",
+      "module": "posture",
+      "level": 1
+    },
+    {
+      "path": "fixtures/posture/invalid/timeout-no-after.yaml",
+      "sha256": "8ca3a720ac80706931ff1bc92ffaab1bf9bce26d3692633f7665a6bceaa8d18c",
+      "category": "invalid",
+      "module": "posture",
+      "level": 1
+    },
+    {
+      "path": "fixtures/posture/merge/base.yaml",
+      "sha256": "108e037ad9405b9503e3492af9aa3482f6dd3928ce8ced3812ad5bc384531016",
+      "category": "merge",
+      "module": "posture",
+      "level": 2
+    },
+    {
+      "path": "fixtures/posture/merge/child-deep-merge.yaml",
+      "sha256": "1e15a9a6320be6161565211f77f3c0617c90bfd5b07c28eaef3ee34cb6fcfdaf",
+      "category": "merge",
+      "module": "posture",
+      "level": 2
+    },
+    {
+      "path": "fixtures/posture/merge/child-merge.yaml",
+      "sha256": "4c59d362d52e7e098eff7a6c4f1ca284d2c7bdd891586d1a294ebbe118b49306",
+      "category": "merge",
+      "module": "posture",
+      "level": 2
+    },
+    {
+      "path": "fixtures/posture/merge/expected-deep-merge.yaml",
+      "sha256": "3c77579db4fca1dc4842335ee3ba5055fd2545fe5a22d4205a58924b7dad6812",
+      "category": "merge",
+      "module": "posture",
+      "level": 2
+    },
+    {
+      "path": "fixtures/posture/merge/expected-merge.yaml",
+      "sha256": "d43c762bd34e52e38ae4b1a173f8120043a915c7fa0d5d0b461c106e71997567",
+      "category": "merge",
+      "module": "posture",
+      "level": 2
+    },
+    {
+      "path": "fixtures/posture/valid/three-state.yaml",
+      "sha256": "5ee6e4044b0912e00a25005d4ae2b9d9e2a4036488ccf45958fada5fcb218f1b",
+      "category": "valid",
+      "module": "posture",
+      "level": 1
+    },
+    {
+      "path": "fixtures/receipts/README.md",
+      "sha256": "16ae43cbbbb8736ecb7b464a4e6e45eddd7d8d8631a95fb5f747607ec4195128",
+      "category": "doc",
+      "module": "receipts",
+      "level": 0
+    },
+    {
+      "path": "fixtures/receipts/expected/README.md",
+      "sha256": "5086cceb0d47e3d527998b25191a255e2840225c7c3e360fe0f278621f7c8cc9",
+      "category": "doc",
+      "module": "receipts",
+      "level": 0
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/0.json",
+      "sha256": "60a36186afcdb488f476409cd80386e47d4feee1fbf6fd7728e4e65cbc4637e2",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/1.json",
+      "sha256": "5ef2367a7276506b1c3b5ca080cb17164dcc30dcb64989efe5fbba8f1a5ed7b5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/2.json",
+      "sha256": "6f9c52ad97f87265ffbfff265b085b484570e9171ce226ceca50618e335cd4f9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/3.json",
+      "sha256": "c83a539bd28a5b79523719d5e95b31214ae9a65d2614b271a0dc334504ea84ef",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/4.json",
+      "sha256": "280bce97ca27af62084f85d0f73c6dea8808d2f3f69368629ab611cf8834c604",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/browser-automation/5.json",
+      "sha256": "4721cf227b4eb03e14e078c4b2bbfd4633fa3b748792e695045bf6feb6828317",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/0.json",
+      "sha256": "f396997817a329390d5b47276e4973eda5ef52267819eafd8d666ae3caad25da",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/1.json",
+      "sha256": "c04feb81babcd801017234863228c9361b4ea8556b180022b4faf463a1944e24",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/2.json",
+      "sha256": "f0c25584af425e2742841cc1399a4cd1cc1c224c4392d1c854fc37055f873025",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/3.json",
+      "sha256": "ddb275fb5264a749826ad8d973ec94701bd7f9bcec86d8020a1c1bcea9001f87",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/4.json",
+      "sha256": "bbee9086c5e9630db1847ead04788c00f35c841463570de2609239a62d33e58f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/code-execution/5.json",
+      "sha256": "aa559388a277f9e65e1a20918462e35b224c5fe01e96db09e05c37911dac060b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/computer-use-guardrail-deny/0.json",
+      "sha256": "fbe24203f99d4c68e2bcb04236683fc05af8d7e0d45f6960ef767b6de97a9a38",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/computer-use-guardrail-deny/1.json",
+      "sha256": "71a40253985cb8b715f4ba6618185dcb30d8684084a5a2864dabe104af272496",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/computer-use/0.json",
+      "sha256": "e457f60f870cffcb3cfba227c181059b6f1ebe462043ae4744841da7fce08e14",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/computer-use/1.json",
+      "sha256": "da25f18facb5b3c4b9780ba8b6130cc931dab4e02cad237f229cdf1472de918d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/computer-use/2.json",
+      "sha256": "7beb1017cb016eb7d147478969c7d7e723464cb94eb2574838b91b8d7fd7458f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions/0.json",
+      "sha256": "9a09c2cb272718b669bf3319bfa7b9a11acbf345e7415c42ea38489cbfe9f81e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions/1.json",
+      "sha256": "93fa36ce1caf4dc2d23c06dcd4dd854b60c51bad2594415af61a73de3c92f349",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions/2.json",
+      "sha256": "5f1744645eb847cc2837dbfc78ef4e14511c792c9101fe564ef052052133221d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions/3.json",
+      "sha256": "46962ccf85f52705db9192dd8cdc197937b3a0bd30cf054868837fa7720621fa",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions/4.json",
+      "sha256": "22098b6521b3bbd2c9bd6605b3574248aaa98aec0b6ab15795778bec8db25153",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/content-scan-egress-tool/0.json",
+      "sha256": "c5e3f43401a7d34ad6232bab93f83d5b3aa7c828451ac6a7da1054caffd91be8",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/content-scan-egress-tool/1.json",
+      "sha256": "9156039589162bfafc2e4d205fab2a20bb9095a8443268e9a56df11f5dac9fdb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/content-scan-egress-tool/2.json",
+      "sha256": "ed6edebc1395a0e41a6b83ae697df9f6acb2c7dd774644ad4c203b437576e421",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/content-scan-egress-tool/3.json",
+      "sha256": "ba6595cd1801754743de4f48ee348370895ba45f35efa2edca6924ab62b8ae1d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/custom-action-capability/0.json",
+      "sha256": "666455c91758de310895abd3bf2b7b59a98aea1a4a9da601639e89044eb780d9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/custom-action-capability/1.json",
+      "sha256": "528490e9a4272e5ab6953362e285004f9ccf9e54ecf6e80b0d15ddb4c91c55b1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/decision-precedence/0.json",
+      "sha256": "2f62484f33f627ed5bb79f859bd27a22e296e4428417e3b95f9967a50c4bc70f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/decision-precedence/1.json",
+      "sha256": "308e571ec322b0c1d931d0f5c30eb98edab9d80a99d78b95e9ad084c8156013c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/decision-precedence/2.json",
+      "sha256": "5605ed81ebafa723171a8553d54f2caee450489f3f859e5a14895cf29007649c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-default-fail-closed/0.json",
+      "sha256": "976bd45900236299288d3c3611b599ad778159853249dff0f02a384d43895180",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-default-fail-closed/1.json",
+      "sha256": "3eba36a77d367001207b396422a8a6e4f022ef8a5ca7f150c6359f7b92190c9a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-default-fail-closed/2.json",
+      "sha256": "e2b23fcd5b21947f7e05c0cebbf89d53d4646aae8bbae0170137262a4dc59b94",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/0.json",
+      "sha256": "9e4f05b5e3bf2c1c9c20abeaa27bc03989acd7ac500ed191994a2eb2c5a0a4d8",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/1.json",
+      "sha256": "87391760c7fd09a017ee1c482491aa33b4af0acdc50eab8abe257be3e7e228d2",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/10.json",
+      "sha256": "f02a3d075593178eb36fd5255ecd2e392df43d02519b9974912dd23bcf1ad826",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/2.json",
+      "sha256": "af9a4f4581281e1462fa3bb27ec4234205d177c741aec27645b73bb8a9ce7e05",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/3.json",
+      "sha256": "ad915a3e3f8570d1d2bc2f239efdcb0f1a49a890f42e913ab318d633a40eda07",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/4.json",
+      "sha256": "9aa2e184d3795f2f2b419a50b62bd5ee39af97fddc81be13b8612367b6c867df",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/5.json",
+      "sha256": "f319fa84a7b4604e58b075ae2b4fd8f172518b78267d93d7c06ad348344b4111",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/6.json",
+      "sha256": "9016c04d0979d9026957bc94c2744cf1d2560874dba2c5a90cefa9ebeebd2e87",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/7.json",
+      "sha256": "6a2ac66509c0682398e131ddbc177311cfe9879e3f79ce9f168170016a5da7fb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/8.json",
+      "sha256": "ce9bf9d603910ff580447ca8a52f77db95458f4dd878a7d6eb8eb957a367a111",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-normalization/9.json",
+      "sha256": "69feb2c7693fb2385b30651422449bf61be961a824ad887580062cdce7d1224b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/0.json",
+      "sha256": "d387b09850cf5c2e6c39c2c372b169fcf5c2015541e9b53050c98c2784cbd12c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/1.json",
+      "sha256": "0daf54a7026ec0e76156dd5e6ce241c3a637fd82be598f2abdff51c890e1aef4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/2.json",
+      "sha256": "9f249cb3a194802b27e38c3f68271a3511b31cd73716f6f708563c46760f23cb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/3.json",
+      "sha256": "81feb5863303f619f25668db0332cda4ddc4ba92c9f3e4a6e67d74121037a7ea",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/4.json",
+      "sha256": "007fa2ca4ad578ba684cb1af6e4af3cfe1c8ec840a8ca2f65ac22fcaf8138f28",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/5.json",
+      "sha256": "0987c42061d9b3221406e24e2e45a2ca5d72406067f030b269d40d4a0f993373",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-normalization/6.json",
+      "sha256": "5451d4f60bc7629049c6f154f6803524b0150dbce7e704f0111a3579e997e49d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress/0.json",
+      "sha256": "3d9d51e0fe011523006f83e4c22f37abb522990e33d95631a749581550d94775",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress/1.json",
+      "sha256": "0ec9a3ce49cc3703f8ed0fc774509fb86658a0bedc7e05c9df6476ac568def09",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress/2.json",
+      "sha256": "b30f0048c3ba32af28167bacc4cf8d9701c0a15bbb9de6e987852d7af0dde657",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress/3.json",
+      "sha256": "8409c3e07e75715cf927ed62f05a691f152059f38794f4328e871be72165f967",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress/4.json",
+      "sha256": "11b868c31900a581cc53fccbeec9c0843fe1b72fc40f349ff03604f6e190f595",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths-leading-globstar/0.json",
+      "sha256": "15e25cd7c7f09c9eb928aa9eb956c51ccec3a04f108c44bb3e9e345043c3a50f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths-leading-globstar/1.json",
+      "sha256": "7c0e26affd65475fd39c43fb1f952f20476e9342a8e7247f77a283c218bbd617",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths-leading-globstar/2.json",
+      "sha256": "a4d09bffbb038f9dfc5b75d515abfa1091bed2b063cd68fa48fdb34876722e92",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths-leading-globstar/3.json",
+      "sha256": "f65d1c57c9f8ad26d03f6be6e8ca0d4b3250b4a331c6823bff3e16141235f85e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths-leading-globstar/4.json",
+      "sha256": "56ef028e5f36741208cee5234739637f25a03d306059d758c54fca59e917e477",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths/0.json",
+      "sha256": "c84ad2245a0d9a0bec249859917e9fbc742d072eb09f853ff9bd6ea97d192065",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths/1.json",
+      "sha256": "3a0d78cfcd39e9671ff73827b58643511194f2d95f50922cae778164474dc093",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths/2.json",
+      "sha256": "6adb469e7beddefbd75355795a620ffc03de820cc5a4b45eab752c714133b6cf",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths/3.json",
+      "sha256": "75eb2435908c075e8b6ed7abcfe4d785662a464a074733edd010b0a97db4856e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/forbidden-paths/4.json",
+      "sha256": "76492f7cdbfcd6285857e73a255f9a7e06533ae82ba8f4c2cb7659f43a346418",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/input-injection/0.json",
+      "sha256": "fd35205a08d2482100745b127c8b81b672ae8c353467e3784ea67e643913083f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/input-injection/1.json",
+      "sha256": "67c20a42fed3dd677d44423e6275f2ea9c52323040caa6445c0d77056e314ad4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/0.json",
+      "sha256": "23f94cf0274df084bde6bc187669fa1e3db33f23051e3d4646f956b4e7b5732e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/1.json",
+      "sha256": "88e66d8e722c402d09a48cf1fceb93f5eddcc3815e02ad819f6b6d46343b4c0a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/2.json",
+      "sha256": "06d8d6dbfdd7a7e924c109f308177e830cdbfc4d1464990fbccdb9f83fead42b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/3.json",
+      "sha256": "37929e1ecec1c04eae1cd76f3222f8e048d9b3b7a66a74b801c3dbfa63f32d52",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/4.json",
+      "sha256": "dc6a96f826ec1515660e18a7daf026f41aaef7ed33199efe3048dc514364928c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/no-early-return/5.json",
+      "sha256": "b60a8692915a4c0f2303f262b5adc0a0bd5b2f1bb614f595c0f2efedb2504ce8",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance-zero/0.json",
+      "sha256": "1f700ef839af3962694a6f122d75759f470302b5c5c0934dd110a3656addcc1e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance-zero/1.json",
+      "sha256": "7906ce9f3a4c41da73cd4e27869ff542190518c4cf0dd2c521fc25ce62f66256",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance-zero/2.json",
+      "sha256": "3173dfef5808b5f0edbe4310960b2249d58e3802d56ecd07a9daed051e8a9c42",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance/0.json",
+      "sha256": "8b29ac1f81ee1bfa4617c92beb1e7ce9be52c406d12f3c1c1e6edf3d845e85db",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance/1.json",
+      "sha256": "6527c9d6f3752c04f2c9e041a097806c9bca5c7ea0faada1e0509e1db7e95026",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance/2.json",
+      "sha256": "431323e4176e430b41e335e7fc845ebdb81ff9675e7c4749e9e1538599506e3f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance/3.json",
+      "sha256": "34b398ea0825ab9a631abc2e3dafb6e0840b086d71333377e837a2b0de267c63",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-integrity-defaults/0.json",
+      "sha256": "731fe29f6ee43cf98e0afe71716f97e6f399fed1815387a11f9c6f145240f73b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-integrity-defaults/1.json",
+      "sha256": "9de7ac65c519c0392149c470befef8abc7cd7110faf5641f2b97e1aab33bdeac",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-integrity/0.json",
+      "sha256": "c66f8a7f6a070a9f8cdd237e999070598ea88b17292952a4b24b2d92c0ad3937",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-integrity/1.json",
+      "sha256": "42e71749905a5236bc54412a2148d4dc4dde0af2500ad72d4bb4a85417ef08c7",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-integrity/2.json",
+      "sha256": "1076640e5dcd68790dde8752fcaf04c839eee3a66124633693408a892cba861f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/0.json",
+      "sha256": "d447968f6cf9c69bd8068e2bd26da81a2c73614cb47accf47b19172dc9d505ba",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/1.json",
+      "sha256": "d7e5fef1001236e0f1a396cfe30c5fe4ff0793911a232da19b71a436ad2027c5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/2.json",
+      "sha256": "3208f5783b815679d9469f93d111c631faa0f23c8e8d2cbb68636b28c4461502",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/3.json",
+      "sha256": "be7185a9b5430ca5fe0cb2a305f056d0a48643be4575f9f69c2c258c5fd974b6",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/4.json",
+      "sha256": "e8b05efceb42340fdaff6e4ab62f9cbbe9c6f62a572c602dd30fe1a82cc37099",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/5.json",
+      "sha256": "2db0c56ca1ee1fc6298977a8e76f401736e7c35cb7b499a8dade70a642f50797",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization-lexical/6.json",
+      "sha256": "97b3fd3de0e06b7bc5101eeb93a3130c8adff6cc9c8cdc977df7d32ad4c37f30",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/0.json",
+      "sha256": "2c5f87f0f3960442b3b4cbe0801894f9c8a195d4f3016886dcf02438f2f5bf12",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/1.json",
+      "sha256": "6ce19627cc8166b61445282d29c35069954679b4a97301c324fbb9ff099391a3",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/2.json",
+      "sha256": "7fb9688fd6bb4411df66f964c2e86acf97166a9f8616b340a9059b0f195ec932",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/3.json",
+      "sha256": "161db5e75545c691605e556d28d7df91d665a643495507dd78f2899536019241",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/4.json",
+      "sha256": "17b0b38a20c5b5c52d58daeadd037b6fe408433f698b71f1ce107a4df53bff31",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/5.json",
+      "sha256": "4622edb7d83bc1d8c9ece09d424875fe1addf08d783280bbfda049af3bceba97",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/path-normalization/6.json",
+      "sha256": "85678a58e66a9ead9b1304f3aa69f5091efffa059f85efa8f4e7dac55922f413",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-ascii-classes/0.json",
+      "sha256": "d8b85fa16ab9ac6b13555a4fba4d32fc95c100589defb150ff9e68bd99e171d6",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-ascii-classes/1.json",
+      "sha256": "ea24d5249d2bcfc4ea3b850fa0b86b982c5bfd4e760a1f77fc6d8867f095db36",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-ascii-classes/2.json",
+      "sha256": "71fd19819b7a85ca657ef0810abfbc89d9346ee2eede0b28cc20356fe3dae721",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-ascii-classes/3.json",
+      "sha256": "e39b7c59d686d30570d9016d5f9c8a9c15b20f663bacd2f7520fa29538c2b031",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/0.json",
+      "sha256": "8ff7e7e480b77eecfaec147368c2be0a5bacea7c8e7bd81a1f38006eb11b86fd",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/1.json",
+      "sha256": "1fa45cd660959d30e84c733ee882c43e454e76c7b3050fa874908cece4724972",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/2.json",
+      "sha256": "efbc032622319e2575d495b1be230caf5c846beacfeab06c41336c6a4ab2425a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/3.json",
+      "sha256": "a8733d963f20d19b4543e0d1fa1c30498107d72ed79c78fc3b5cc43490d61fe2",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/4.json",
+      "sha256": "25756d3d4dc1c329d9e845ac52fd05a77b94e8c7559d5fa6d9b365a55ee2d9c7",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/5.json",
+      "sha256": "1f9c5f9595479efbe13f83c15d0b87186111374b440e971b21550778b5c29c4b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/6.json",
+      "sha256": "327f1825a11969b1bd64885f33203014f457c7ab2290021f84edf12a6111f60d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/7.json",
+      "sha256": "6e4f85064ac1bb50fc0a50d8651403112d0b04febf733867374f68e86d1744f7",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/8.json",
+      "sha256": "d5e464908cd1a65c6238602669c5a226314b1e34bcad892372e51cd23aa535c3",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/regex-dialect/9.json",
+      "sha256": "24476f12b72753ba696a259a76b3c1cd3a5d34b2f4341ba89be641adaf2cbb61",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns-content-presence/0.json",
+      "sha256": "ef1ca90063c148fc71eec032cfea7e2d1dcb91742681d93953e4f45dbc1671c0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns-content-presence/1.json",
+      "sha256": "0a48ee62f55706b2d48ebe3415b6caa6963ab8204094973e3222955f5afd4a0c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns-content-presence/2.json",
+      "sha256": "4d998524e512efa72895e82b10f57f312539e4cae43ca3759ebb40993aa9e606",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns-content-presence/3.json",
+      "sha256": "9659743b7420aa40ee491e268381138fd549162770d6fae7e6552618049ea8b5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns-content-presence/4.json",
+      "sha256": "eafd2d3576a0d9c0652a19de2a3769c2de1421e0f6d648b82ea9ff66387ff81e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns/0.json",
+      "sha256": "be15a7a0e581cb69e8346f136137c6a65a2ea22a308d3a2b814f82ecae47746a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns/1.json",
+      "sha256": "86ffe345e22fb5069c9c8c4aff4ab10dae96a753fed6a5817f56d39eb1ad35c4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns/2.json",
+      "sha256": "cf48e70fec5d8fd938009ac10c268d02f4cab254835c71190276baa103f0a89f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/secret-patterns/3.json",
+      "sha256": "2126e44039de0feb064d8c1f874690d4f50df09d2a1e629beb08fa0f9a0f62da",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-mapping/0.json",
+      "sha256": "8e8378d09bdd5f2d7fce1988b47316b8e9e09578e1e57db47651bfb5fa6a6c49",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-mapping/1.json",
+      "sha256": "be9c1dfa0318e61fae2c221be8c9e308ba533cb4a666d33f7b7d92fb9e804071",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-mapping/2.json",
+      "sha256": "8416294dab8de25253b86dfea5332c0a02ffaebe6d0b76908c9da259000d3465",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-mapping/3.json",
+      "sha256": "252ccb65726195b80dbcf5a9356177a09d8ca3cd4c277da52c4c1c75e1d96c41",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-precedence/0.json",
+      "sha256": "0f5bad6f92b79a9d4a63c211e350c76d6f09fa479339d9a1c471856b825b9ce1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-precedence/1.json",
+      "sha256": "3970738bb3e141aa9728b9ffc78e1f97742ca136ead47b7142e3259c4a619019",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-precedence/2.json",
+      "sha256": "31803cf2c5d2a8118cc43b3e5327f02c64bf74409906e749d410722d7b7df44c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/severity-precedence/3.json",
+      "sha256": "921c9a672aff8ffe212e9bc16fc1eec3094fc76a7947dcb6929dd2f99161299e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/shell-commands/0.json",
+      "sha256": "fc1016b8588d214d8153177cbb4407c3e3cfd19b578c9ffc783ef84509271052",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/shell-commands/1.json",
+      "sha256": "2f34b3cf2bc543137720090b06f535f1935d82f29f36179bd11d31e478b09ba4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/shell-commands/2.json",
+      "sha256": "bee96f843e238ddb7618d09734a208d662c03061eceb2503b6eaf69281f7c431",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/shell-commands/3.json",
+      "sha256": "06533028ff7c60b0fe3f41b3b9b017aede4b368e1db0909256594c08e9b592f9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/shell-commands/4.json",
+      "sha256": "e27465dd880df2968372405a4cf00b6379e5f6e65288dad35566b206b4e193ef",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-access/0.json",
+      "sha256": "d4721d4687fe746788317afcd21702b7bf1b902ba70bced1e0eaba0ad772ee1f",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-access/1.json",
+      "sha256": "8acf1dc7bd8d1ae0cc46e7f698af65bb00a72a664e9c6627f2d7c04c4250b67c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-access/2.json",
+      "sha256": "1cf902fc941baf59e40ab6e9f4fa10cb508c17fe30c9c10b7cfe07d177c8192e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-access/3.json",
+      "sha256": "e43e3556e444b42935c33f3d4bc5c562c4f8667bc551d61951ccccaf1a75d36d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-access/4.json",
+      "sha256": "80cfe8214126bd2c597adf006a81c168fe05bed87a6a052e4f73d1506392bed5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-allowlist-deny/0.json",
+      "sha256": "1ebc9d37fa76b12cdf7bd5e09897d95273c8ab196b0fc3dbc33df7225362fd12",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-allowlist-deny/1.json",
+      "sha256": "84bceca741f0d75967e68750e66b5f103fd605853080ad5f52a97bf9bd39c235",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/0.json",
+      "sha256": "b2c3c8bdc3508ecd473c54598c1f16d3ada6cbd337e58cf3e91995337301b05c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/1.json",
+      "sha256": "32c5122c673f432c2b33d55717d833053f3864ddf6feb4bb91dc67ce8bf20294",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/2.json",
+      "sha256": "2ad1e7d2e8e8f759c577ec3a4cdff0a5e7cbe3d50abc6eed2cad105cf96e78e1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/3.json",
+      "sha256": "788bcca83e2be1de372eb4522273201fdd618a0b543a6225302cd4f66ff6bb61",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/4.json",
+      "sha256": "106aafc9aba97e16069116531e30b7cfa2a10af0a0091a5f09bb28398a251e9e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-exact-match/5.json",
+      "sha256": "d13d30686f97724d86e57d69c78514f8f2fec2393067a1a49f3b6016c53efaa1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-glob-literal/0.json",
+      "sha256": "c738acee8f476d52f80bac9a5d53a0e1d8d6a273eb13212828d9263ea371d955",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/tool-glob-literal/1.json",
+      "sha256": "4871a63d7cee0b5290264384f45d4c93a6209b4c7b5be13bcea2430beb06cdb0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/unknown-action/0.json",
+      "sha256": "9a4746ac51d9f5525fb901b4769d62dd818ef0da47100d845611547b7bd8a04a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/unknown-action/1.json",
+      "sha256": "4373f5989291a382e53fd71ef8f418152158d80c165c4cd7fd98aefd6a5e2572",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/jailbreak/0.json",
+      "sha256": "c2c08ada4ed5e73624e9f922dbcedb21e9f98e2f5ab7c43e4c212f6ac06f10d8",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/jailbreak/1.json",
+      "sha256": "ae7d00532b4a4c5d575974fb4a70e500c0f958fc291f64d1b85b8760515cc5e6",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/jailbreak/2.json",
+      "sha256": "7dbf0985e798493b023a424cf52b5f9145b3bb7bb8e45f859400f24368c31459",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/prompt-injection/0.json",
+      "sha256": "1d9a580eb002eceedd40ab78af3c80821a3bb6a8af19a3bbbeb4dc6c6066f6ef",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/prompt-injection/1.json",
+      "sha256": "5fbc8d58317a998ee63fa072235bf01ed2424ecca10914148714eb1013e2c56a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/detection/prompt-injection/2.json",
+      "sha256": "5a9d4d3fa702887a23014de54ae49711a8247cbee83652499d976cf6673ba212",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/default-behavior-deny/0.json",
+      "sha256": "728dc26caf2ca5193f0e902c40ec2079d68959cb6b2162011309f3c143597b11",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/default-behavior-deny/1.json",
+      "sha256": "745888a766fd5ab6441c9e27f3019227f656822ffce6f20848d99cf4daee3f09",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/default-behavior-deny/2.json",
+      "sha256": "9aeeec24e2923d86287ae659e1a265c714c45b04c358c30e95829f3ef72b9ba1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/match-presence/0.json",
+      "sha256": "a44c867c73575efb94824e6834e9030a7305573df0dfc7b90601c3a1cca6a843",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/match-presence/1.json",
+      "sha256": "7324e55e72a76864c6b6a3c3ba7383f9c3059189820c012607e573dbed5df688",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/match-presence/2.json",
+      "sha256": "5e4f243e217d980fb19593572b6a7bd69a4443d553531e617377286e99a0f275",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/origin-matching/0.json",
+      "sha256": "a6bc0a6085d3716934c45921243b9fc006baabaa7e68ac8d63a303262a9f0821",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/origin-matching/1.json",
+      "sha256": "086af7503627f5738a1f201bbbae6e45a53fcbbb57719b10237409ab8736b678",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/origin-priority/0.json",
+      "sha256": "c717236c2b54a4e84f168495bc2e5a742f6a9e8fac49cd62468c7309b4b983cf",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/origin-priority/1.json",
+      "sha256": "0be89d76bf574235cfed68cfa3850e65874181e9eb70c686715f03bed620b216",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/tied-profiles/0.json",
+      "sha256": "3c0db7c331364006eadc686f67fa4316de1ced8d37e2495e9ee58764657d016d",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/tied-profiles/1.json",
+      "sha256": "3d318c0ed6d6ee1882938680452aee10fc23a7da9e810075f2702f021eca372c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/tri-state-overlay/0.json",
+      "sha256": "1018a254139e32a6dc6904509c2d623dc95df34a36a6baa50974e1d28c32768e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/origins/tri-state-overlay/1.json",
+      "sha256": "a109a9cf0e37ec798c59331cd762b123b087be0857580e361802c0fb9e8f59a5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/0.json",
+      "sha256": "5dd2bb606d799a9e220bed287b77615b0c67ec6d8b96979885550158d1dc8b74",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/1.json",
+      "sha256": "1852b7367347397a34464736949acee0b29b67bc4aa9b7f56e146fa22cafbe02",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/2.json",
+      "sha256": "67d5e98a85c71416b5e40903c91d937e626b66437c7bb33c87381b99774d5948",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/3.json",
+      "sha256": "0cf6653cdeb97b4c9af7501f011eb3c3747427bff004eeff292f62f7c1078c01",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/4.json",
+      "sha256": "0d4489f6d8b3a192f5952e2d23e11c1cb5171333ad45711bd4ddc84579d430a5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/5.json",
+      "sha256": "89a8f0ecf93f69237e2883603401398ce6c908d1db94c1ab5279d26d8a4a1928",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/6.json",
+      "sha256": "2ac26f47d592c02fc5d2f0ccbb1ea2314a918042d16d45990363c7a4940525e1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/empty-capabilities/7.json",
+      "sha256": "62a1065d4872dac0e4c21ab1e543aacc450332fa57f347e99a27198f1e641249",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/posture-transitions/0.json",
+      "sha256": "54d20ad46446ffa7b4c04d13412928b448b2da39d4a14a60325b4919db7c8adb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/posture-transitions/1.json",
+      "sha256": "7291aba52c335f7778145789f4d98b61c27f36e2733c16cc981bf77bde0a652c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/posture-transitions/2.json",
+      "sha256": "0c61e0bf3759472a461688c24df327039acd069d0a989687e441d7b0590ad702",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/0.json",
+      "sha256": "092d9f2e346acd71a227c57fc79698e4ccab842c96ff33007584a72f42c038d9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/1.json",
+      "sha256": "3ceb5a50b5d5f495df4fbebccecc9b3a2efd8499807469b9a75b20526fbbe239",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/action-carries-content.json",
+      "sha256": "8794abcacc96c0348c08dc1b62e12b2d2891ba293a12a8224e8d0abe486797d6",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/bare-hex-content-hash.json",
+      "sha256": "eb0c6dcca5b84d1d2cfa7ebbd0cae75f317e909f1a880164cc88a9e121e28b70",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/missing-enforcement.json",
+      "sha256": "96c44fa0370081527cad5eac2edb519a66ecc8c7f5ca89c4cc51776f225c1905",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/missing-receipt-version.json",
+      "sha256": "dadcf5d59d5699264b9677398f1e215dae778bf8efdffd150c566c13a4971afb",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/open-enum-outcome.json",
+      "sha256": "ea3e0007994351bea5766c717018d9d31c8590309294637d19829a0f551a96ee",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/open-enum-time-source.json",
+      "sha256": "cc9e64224b3f2db3bf7167f1f49dc1c1da701e47715d7451d76db863098a239b",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/policy-version-not-integer.json",
+      "sha256": "77ad6a748435f352f62e41d06ccc4b02e3cdb253e7cca027888f326376487e37",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/receipt-id-uuid-v4.json",
+      "sha256": "d4c2142b5cb4bfafc8c87beaca0e7ec70bd7e05c507a7ca47292062457de31c1",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/rule-block-with-prefix.json",
+      "sha256": "40001f3b145dd033776d906f55a988433c793091c53dd308de4c1ceaf01b2eb6",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/timestamp-microsecond-precision.json",
+      "sha256": "0cea94eadcf8b66b7a55026c91c9d65dee18024325e3f883791f02022f7f1c10",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/timestamp-second-precision.json",
+      "sha256": "eb4fc0b20e5e57558f017e216be29f227e04762c67e3cd6e7855ce81194020df",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/unknown-field-legacy-version.json",
+      "sha256": "32af865b4a957f582e6e02ae6dd45ee3933197aafc93f57b86e349b920e76fd7",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/unknown-hash-algorithm.json",
+      "sha256": "3fa5715f9c15293f538721a6513b5a23242a52de477543e2c02a8f408dd975b2",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/unsupported-receipt-version.json",
+      "sha256": "e61bcbd02e36ebbada6842e204a273eb0c1bbc7b7952d9e86da78817dbdef292",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/signed/invalid/tampered-after-signing.signed.json",
+      "sha256": "c0597202cb701d8651f6c6e5e8c6b78211e14f89cb9a42ed4a319b71f707d1d1",
+      "category": "receipt-signed",
+      "module": "receipts",
+      "level": 5
+    },
+    {
+      "path": "fixtures/receipts/signed/invalid/untrusted-key.signed.json",
+      "sha256": "a6205465a7612e3edd9646fc9051390ef5834162536fa21fee35eb5cf3403c2d",
+      "category": "receipt-signed",
+      "module": "receipts",
+      "level": 5
+    },
+    {
+      "path": "fixtures/receipts/signed/valid/allow-egress.signed.json",
+      "sha256": "31bc4caf05d16fa0565656c0bbfbb7b5b4edc4c6510bb1912c8a3113fca1a69b",
+      "category": "receipt-signed",
+      "module": "receipts",
+      "level": 5
+    },
+    {
+      "path": "fixtures/receipts/valid/allow-egress.json",
+      "sha256": "0edd62901a78952bcb49961ca19e55b97f0be9ddf77f5d8e0e4d8b1768cac6a9",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/custom-action-denied.json",
+      "sha256": "0180c6596e744d29f64d9771cf279c3f138f079f2665499d157e2227e6586f29",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/default-allow-no-rule.json",
+      "sha256": "c2983f8cf6f6809fc55f112283835365b298bc24e4b4a5f75d0c784a6bc152ae",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/deny-secret-in-file-write.json",
+      "sha256": "62084c9d3f5dd4cf8b72364e022ed1bdfc52fe994ffbb5a952093bdd5eddedd0",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/detection-trace-injection.json",
+      "sha256": "bdf601686d7ba867f09eb116ad762a1c79df128640361e16b999ee86cfb03d7e",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/extends-chain-signed.json",
+      "sha256": "ba60e60cf480110237901f90d6e5fb7aec68d0498c2f78929d7138908f95c2ed",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/minimal-required-only.json",
+      "sha256": "13c28096e3f81807708b4bfe5243995a376c743ef99e9ba1a14a99ab2a8e4c1a",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/monitor-would-block.json",
+      "sha256": "d00728f46b6c5f418e69c0dd8f9e1db42837bb96159a5da6eefaad2e9a50aad6",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/origins-posture-context.json",
+      "sha256": "cbc885373cfd568163ec25f666bf5d39f2844434235d60084b3638cb89f98bbc",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/panic-mode.json",
+      "sha256": "231cc0116992790715c61643ad49b84b6a9e3eaf4e7387fbe071ae771455cc5c",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/signature-failed.json",
+      "sha256": "f9778711418f9f685d26ba90e78686c938f110190092c8a0fee8d9a1b78891b6",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/valid/warn-confirmed-tool-call.json",
+      "sha256": "0ead1ba991371198b6d410858cf1dcfdc44776148fd23083bb69df1b55fb04ff",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/signing/README.md",
+      "sha256": "b467758753a82e22972895655b99953aa716c1453cf52fc164df1f1a814df63c",
+      "category": "doc",
+      "module": "signing",
+      "level": 0
+    },
+    {
+      "path": "fixtures/signing/keys/keyring-retired.json",
+      "sha256": "00f8044f8547a8b191d88cf88d7a8a4e3c11a8c610eb9b50f028db582717f5a9",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/keyring-revoked.json",
+      "sha256": "de98384088569b479f8f1790b04346f379f7845acaed94a39124ada8110db913",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/keyring.json",
+      "sha256": "7bb1d05b7848f0738aed14c45895b6f15239ef02751a891f44db613bb702fed0",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/test-signing.key.pem",
+      "sha256": "2966b374dffbe6d5167a5bfef1223b9d846ccbca0cd371b6f3ce10bb423a8d1e",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/test-signing.pub.pem",
+      "sha256": "599b7a4cee23ab9ddef59b84138f88c7d23e9bc30bfe2cdcebbef053cab32137",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/test-untrusted.key.pem",
+      "sha256": "00b8ec3ddf032b8bb5ab12750a6fee056bf5cd87bb9dc15ecf14a042a81867fc",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/keys/test-untrusted.pub.pem",
+      "sha256": "2ebfe2242a19183b149b295ec0b67c46b30c6cdda1a1ca4d8aed1fb33c4b21a6",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/bad-algorithm.sig",
+      "sha256": "08e7a5e1c2829a80dc72447532818c40d05bb715c6fab09bb5420828513bd6d2",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/bad-format-version.sig",
+      "sha256": "c24d8fa50e0c37d45d00608f2bc9010dd0cd4665dd5cfd30016cd549da7f6789",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/basic.sig",
+      "sha256": "773a0bb74dda8c19ada33a2a530a9b8cf0aea2568d36c6977f50e382e47a9ead",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/basic.yaml",
+      "sha256": "b0aaa13dd22427db799115fb72c2988382036532fd4659478729868b749ef204",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/corrupt-signature.sig",
+      "sha256": "013e5ade7d6c1a5ed8e0bd80f959fb832e8a757752206c87d525dd8543d4ae74",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/edited-envelope.sig",
+      "sha256": "1d21338ff9642462633aed2c6a0f35ae537ea7bfe189bb1f4ba68b89ad6acb09",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/expired.sig",
+      "sha256": "a57a2923e072ece2ca9f37a2f047c72fdc7f0aeb62373346bd149e1e13f91cd3",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/extends-child.resolved.json",
+      "sha256": "558e56fc8fbdba2b377af636ee6ec3dfa1097de0d99f16be8a85619b5e77fb15",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/extends-child.sig",
+      "sha256": "21c5fe9d086f2409ae7ca494eaa804571ff374ce5d33e83d3c5a85d64e2133fb",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/extends-child.yaml",
+      "sha256": "96256c57781c407f9465fc05f5b20284198507ceccacca0a86bb431e129408a3",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/raw-bytes-hash.sig",
+      "sha256": "359785ef02e787c01938f433a5e88d0145585a28576322ebb0b87bed50e54e1f",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/reformatted.sig",
+      "sha256": "773a0bb74dda8c19ada33a2a530a9b8cf0aea2568d36c6977f50e382e47a9ead",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/reformatted.yaml",
+      "sha256": "6e6f021a6ce409309c78f682c287947c80c9568e3fb495575ff3fba759e0cec6",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/rollback.sig",
+      "sha256": "9d22820c9cdd29c97bf90b32c60424828a73b3041c8a5f9d2e7c2e4d52f83773",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/signed-in-future.sig",
+      "sha256": "4dea6b5e33b0f3a2916ba5a32bf50b348be6f42af91e39c4233e672d70f1fbe3",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/tampered.sig",
+      "sha256": "773a0bb74dda8c19ada33a2a530a9b8cf0aea2568d36c6977f50e382e47a9ead",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/tampered.yaml",
+      "sha256": "8527dc8f9d16f4ae76c9d1972118eadcbb33f27f9cd2b5b0a1d86f14e785cb3f",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/policies/untrusted-key.sig",
+      "sha256": "f3283c849dbbad412ee254d5fa00e1ce72a8699e86747236b62d82d377970705",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
+      "path": "fixtures/signing/vectors.yaml",
+      "sha256": "096c9df748d0232964121c9b53a066bb7fbde06df71fc3fbe4efc4b11a4ac5f7",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    }
+  ]
+}
