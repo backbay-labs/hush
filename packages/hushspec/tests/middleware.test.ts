@@ -630,10 +630,10 @@ describe('detection matched_rule normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Detection extension wiring: gate()/check()/enforce()/evaluate() now route
-// through evaluateWithDetection(), so a policy's `extensions.detection`
-// block is honored end-to-end through the public API (not just when calling
-// evaluateWithDetection() directly).
+// Detection extension wiring: gate(), check(), enforce() and evaluate() all
+// route through the detection pipeline, so a policy's `extensions.detection`
+// block is honoured through the public API and not only when
+// evaluateWithDetection() is called directly.
 // ---------------------------------------------------------------------------
 
 describe('HushGuard honors a policy detection extension', () => {
@@ -861,14 +861,11 @@ describe('receipt sink integration', () => {
 // ---------------------------------------------------------------------------
 // Sink-only guard on provider failure (no observer)
 //
-// Regression test: HushGuard.gate()'s provider-failure branch used to call
-// record(action, policy, 0, enforcement, undefined) with an undefined
-// receipt. record() only forwards to the sink `if (receipt)`, so a guard
-// configured with a `sink` but no `observer` (monitor mode accepts either,
-// per validateEnforcementConfig) produced ZERO audit output on a provider
-// outage -- violating "a monitored block is never silent". gate() now builds
-// a minimal receipt (buildFailureReceipt) whenever a sink is configured, so
-// the sink always gets a record here too.
+// record() forwards to the sink only when a receipt is present, so gate()'s
+// provider-failure branch builds one (buildFailureReceipt) whenever a sink
+// is configured. Without it a guard holding a `sink` but no `observer` --
+// monitor mode accepts either -- would produce no audit output at all on a
+// provider outage, and a monitored block is never silent.
 // ---------------------------------------------------------------------------
 
 describe('sink-only guard on provider failure', () => {

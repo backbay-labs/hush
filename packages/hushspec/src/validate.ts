@@ -103,15 +103,14 @@ type UnknownRecord = Record<string, unknown>;
 /**
  * Whether `key` is present on `obj` *with a value*.
  *
- * `key in obj` alone counts `{ extends: undefined }` as present. In
- * TypeScript an optional property explicitly set to `undefined` is
- * indistinguishable from an absent one -- and setting it is exactly what
- * `merge()` (and therefore `resolve()`) does for the fields it clears, while
- * the Rust, Python and Go SDKs drop those fields outright. Treating
- * `undefined` as present made a resolved document valid in three SDKs and
- * invalid in this one ("extends must be a string"). YAML never yields
- * `undefined` -- an empty scalar parses as `null`, which still reaches the
- * type checks below -- so this only forgives the in-memory spelling.
+ * `key in obj` alone counts `{ extends: undefined }` as present, but in
+ * TypeScript an optional property explicitly set to `undefined` is the
+ * in-memory spelling of an absent one -- and setting it is exactly what
+ * `merge()` (and therefore `resolve()`) does for the fields it clears. Reading
+ * it as present would make a resolved document fail with "extends must be a
+ * string". YAML never yields `undefined` -- an empty scalar parses as `null`,
+ * which still reaches the type checks below -- so this forgives nothing a
+ * document can express.
  */
 function hasValue(obj: unknown, key: string): boolean {
   return isRecord(obj) && key in obj && obj[key] !== undefined;
@@ -123,9 +122,9 @@ interface ValidationContext {
   checkSupportedVersion: boolean;
   includeWarnings: boolean;
   /**
-   * Semantic `when` checks (HH:MM, IANA zone, day names, nesting depth). The
-   * reference engine performs these in `validate()`, not at parse time, where
-   * only the structural shape is enforced.
+   * Semantic `when` checks (HH:MM, IANA zone, day names, nesting depth).
+   * These belong to `validate()`; parse time enforces only the structural
+   * shape (core spec 2.4, 3.13).
    */
   checkConditionSemantics: boolean;
 }
@@ -570,10 +569,10 @@ function validateOriginsExtension(
         const provider = validateOptionalString(profile.match, 'provider', ctx, `${profilePath}.match.provider`);
         const tenantId = validateOptionalString(profile.match, 'tenant_id', ctx, `${profilePath}.match.tenant_id`);
         const spaceId = validateOptionalString(profile.match, 'space_id', ctx, `${profilePath}.match.space_id`);
-        // `space_type` and `visibility` are plain strings in the reference
-        // model, checked against their module's set at validation time: a
-        // value outside it is a constraint violation (E004), not the parse
-        // refusal an enum-typed field would produce.
+        // `space_type` and `visibility` are open strings in the model and are
+        // checked against their module's set here: a value outside it is a
+        // constraint violation (E004), not the parse refusal a closed enum
+        // would produce.
         validateOptionalMatchEnum(profile.match, 'space_type', ctx, `${profilePath}.match`, ORIGIN_SPACE_TYPES_SET);
         validateOptionalMatchEnum(profile.match, 'visibility', ctx, `${profilePath}.match`, ORIGIN_VISIBILITIES_SET);
         validateOptionalBoolean(profile.match, 'external_participants', ctx, `${profilePath}.match.external_participants`);
@@ -581,13 +580,10 @@ function validateOriginsExtension(
         const sensitivity = validateOptionalString(profile.match, 'sensitivity', ctx, `${profilePath}.match.sensitivity`);
         const actorRole = validateOptionalString(profile.match, 'actor_role', ctx, `${profilePath}.match.actor_role`);
 
-        // Cross-SDK parity fix (spec item S2): a present-but-empty free-text
-        // match field (e.g. `provider: ""`) is an unsatisfiable constraint
-        // that Go's plain-string model can't distinguish from an absent
-        // field; Go's raw validator already rejects it, so reject it here
-        // too to restore fail-closed accept/reject parity across the SDKs
-        // (mirrors Rust `validate_origins`). The enum fields above already
-        // reject "" as an invalid enum value, so they're excluded here.
+        // A present-but-empty free-text match field (`provider: ""`) is an
+        // unsatisfiable constraint indistinguishable from an absent one, so
+        // it is refused rather than silently never matching. The enum fields
+        // above already reject "" as an invalid value.
         const freeTextMatchFields: Array<[string, string | undefined]> = [
           ['provider', provider],
           ['tenant_id', tenantId],
@@ -671,7 +667,7 @@ function validateOriginsExtension(
 }
 
 /**
- * Tri-state tool-access overlay on an origin profile (origins spec 4, D12).
+ * Tri-state tool-access overlay on an origin profile (origins spec 4).
  * An overlay is not a rule block: it carries no `enabled` and no `when`, and
  * an omitted `default` / `max_args_size` stays absent rather than inheriting
  * the base rule's materialized default.
@@ -685,7 +681,7 @@ function validateOriginToolAccessOverlay(obj: UnknownRecord, ctx: ValidationCont
   validateOptionalInteger(obj, 'max_args_size', ctx, `${path}.max_args_size`, { min: 1 });
 }
 
-/** Tri-state egress overlay on an origin profile (origins spec 4, D12). */
+/** Tri-state egress overlay on an origin profile (origins spec 4). */
 function validateOriginEgressOverlay(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, ORIGIN_EGRESS_OVERLAY_KEYS_SET, ctx, `${path}`);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
@@ -694,10 +690,9 @@ function validateOriginEgressOverlay(obj: UnknownRecord, ctx: ValidationContext,
 }
 
 /**
- * Validate a rule block's `when` condition (core spec 3.13, D15): the
- * structural shape always, the semantics (HH:MM, IANA zone, day names,
- * nesting depth) only in full `validate()`, mirroring the reference engine
- * where serde enforces the shape at parse time and `validate` the rest.
+ * Validate a rule block's `when` condition (core spec 3.13): the structural
+ * shape always, the semantics (HH:MM, IANA zone, day names, nesting depth)
+ * only in full `validate()`.
  */
 function validateWhen(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   if (!hasValue(obj, 'when')) return;
@@ -1040,9 +1035,8 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
     validateOptionalRuleObject(section, 'heuristics', sectionCtx, (heuristics, heuristicsCtx, heuristicsPath) => {
       rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, `${heuristicsPath}`);
       validateOptionalBoolean(heuristics, 'enabled', heuristicsCtx, `${heuristicsPath}.enabled`);
-      // A floor the reference engine spells `usize`: a negative value is a
-      // type error, and the upper bound is left to the detector (a floor
-      // above 100 simply silences it).
+      // An unsigned floor: a negative value is a type error, and the upper
+      // bound is left to the detector (a floor above 100 simply silences it).
       if (hasValue(heuristics, 'min_score')) {
         const minScore = heuristics.min_score;
         if (typeof minScore !== 'number' || !Number.isInteger(minScore) || minScore < 0) {
@@ -1075,8 +1069,8 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
     rejectUnknownKeys(section, THREAT_INTEL_KEYS_SET, sectionCtx, `${sectionPath}`);
     validateOptionalBoolean(section, 'enabled', sectionCtx, `${sectionPath}.enabled`);
     validateOptionalString(section, 'pattern_db', sectionCtx, `${sectionPath}.pattern_db`);
-    // Spelled the way the reference engine spells it: one range constraint
-    // rather than a separate floor and ceiling.
+    // One range constraint rather than a separate floor and ceiling, so the
+    // message names the interval the value has to fall in.
     const similarity = validateOptionalNumber(section, 'similarity_threshold', sectionCtx, `${sectionPath}.similarity_threshold`);
     if (similarity != null && (similarity < 0 || similarity > 1)) {
       addError(
@@ -1171,8 +1165,8 @@ function validateRequiredEnum(
 }
 
 /**
- * A required non-negative integer -- the shape the reference engine spells as
- * `u64`, where a negative value is a *type* error rather than a range one.
+ * A required non-negative integer. The field is unsigned, so a negative value
+ * is a *type* error (E001) rather than a range one.
  */
 function validateRequiredInteger(
   obj: UnknownRecord,
@@ -1229,9 +1223,9 @@ function validateOptionalEnum(
 }
 
 /**
- * An origins `match` field the reference model holds as a plain string: a
- * value outside its module's set is refused by `validate` (E004), spelled the
- * way the reference engine spells it.
+ * An origins `match` field the model holds as an open string: any string
+ * parses, and a value outside its module's set is refused by `validate` as a
+ * constraint violation (E004).
  */
 function validateOptionalMatchEnum(
   obj: UnknownRecord,
@@ -1332,9 +1326,8 @@ function validateEnumValue(
 }
 
 /**
- * Every integer field of the HushSpec model is unsigned in the reference
- * engine, so a negative value is a *type* refusal (E001) there rather than a
- * range one -- as is a non-integer.
+ * Every integer field of the HushSpec model is unsigned, so a negative value
+ * is a *type* refusal (E001) rather than a range one -- as is a non-integer.
  */
 function validateIntegerValue(
   value: unknown,
@@ -1411,9 +1404,9 @@ function validateRegex(pattern: string, ctx: ValidationContext, path: string): v
 }
 
 /**
- * Every HushSpec object denies unknown keys (core spec 2.4), so an unrecognized
- * member is a parse-time refusal: E001, spelled the way the reference engine's
- * deserializer spells it.
+ * Every HushSpec object denies unknown keys (core spec 2.4), so an
+ * unrecognized member is a parse-time refusal: E001, with the message naming
+ * the members that were expected.
  */
 function rejectUnknownKeys(
   obj: UnknownRecord,
@@ -1436,8 +1429,7 @@ function at(path: string | undefined): string {
 
 /**
  * A required member that is absent, reported against its *parent* -- the
- * object the member is missing from -- as the reference deserializer reports
- * it.
+ * object the member is missing from, which is where an author has to add it.
  */
 function missingField(ctx: ValidationContext, key: string, path: string): void {
   const suffix = `.${key}`;

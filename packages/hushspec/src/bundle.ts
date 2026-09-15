@@ -32,7 +32,7 @@ import type { HushSpec } from './schema.js';
  * internally inconsistent statement -- a bundler bug -- rather than tampering.
  *
  * The normative vectors live in `fixtures/bundle/`;
- * `tests/bundle-vectors.test.ts` runs all eight of them.
+ * `tests/bundle-vectors.test.ts` runs them all.
  *
  * [DSSE]: https://github.com/secure-systems-lab/dsse
  * [in-toto Statement v1]: https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md

@@ -9,15 +9,15 @@ import type { ReceiptSink } from './sinks.js';
 import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from './version.js';
 
 /**
- * OTLP/HTTP receipt sink (RFC 09 P6-02).
+ * OTLP/HTTP receipt sink.
  *
  * Exports decision receipts and policy-in-effect events to an OpenTelemetry
  * collector as OTLP/HTTP **logs** in JSON encoding (`POST <endpoint>/v1/logs`),
  * using only `node:http` / `node:https` -- the SDK takes no OpenTelemetry
  * dependency, and an application that already runs the OTel SDK is unaffected.
  *
- * The wire mapping is the one the Rust, Python and Go sinks emit, so a
- * collector cannot tell which SDK produced an entry:
+ * The wire mapping is the one every HushSpec SDK emits, so a collector cannot
+ * tell which produced an entry:
  *
  * - one `logRecord` per receipt or policy event;
  * - `timeUnixNano` from the entry's own timestamp (not the export time --

@@ -281,14 +281,14 @@ function checkTimeWindow(
 function parseHHMM(s: string): [number, number] | undefined {
   const parts = s.split(':');
   if (parts.length !== 2) return undefined;
-  // Reject any token that is not purely digits (Rust parses each part as u8;
-  // "09.9" / "09xx" must fail rather than truncate).
+  // Both halves must be purely digits: `09.9` and `09xx` are malformed times
+  // rather than values to truncate to 9.
   if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
     return undefined;
   }
   const hour = parseInt(parts[0], 10);
   const minute = parseInt(parts[1], 10);
-  if (isNaN(hour) || isNaN(minute) || hour > 23 || minute > 59 || hour < 0 || minute < 0) {
+  if (hour > 23 || minute > 59) {
     return undefined;
   }
   return [hour, minute];
@@ -306,8 +306,9 @@ function resolveCurrentTime(
   let date: Date;
 
   if (context.current_time != null) {
-    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is interpreted
-    // as UTC to match Rust/Python/Go, not the host's local time.
+    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is read as
+    // UTC rather than as the host's local time, so the same context evaluates
+    // the same way wherever the engine runs.
     const raw = context.current_time;
     const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
     const normalized = !hasTimezone && raw.includes('T') ? `${raw}Z` : raw;
@@ -320,9 +321,8 @@ function resolveCurrentTime(
   }
 
   const tz = timezone ?? 'UTC';
-  // Order mirrors Rust: the IANA database (chrono-tz there, Intl here) is
-  // consulted before the fixed-offset table, so `US/Eastern` keeps its DST
-  // rules rather than collapsing to a fixed -05:00.
+  // The IANA database is consulted before the fixed-offset table, so
+  // `US/Eastern` keeps its DST rules rather than collapsing to a fixed -05:00.
   const utcOffset = parseUtcOrNumericOffsetMinutes(tz);
   if (utcOffset != null) {
     const adjusted = new Date(date.getTime() + utcOffset * 60_000);
@@ -378,9 +378,9 @@ function utcDateParts(date: Date): [number, number, number] {
 }
 
 /**
- * Fixed-offset aliases accepted by the reference engine (Rust
- * `parse_timezone_offset`). Consulted only after the IANA database, so a name
- * the platform knows (e.g. `EST`, `CET`, `US/Eastern`) keeps its real rules.
+ * Legacy zone names accepted as fixed offsets. Consulted only after the IANA
+ * database, so a name the platform knows (`EST`, `CET`, `US/Eastern`) keeps
+ * its real rules and only an unknown one falls back to the offset here.
  */
 const FIXED_OFFSET_ALIASES: Record<string, number> = {
   'US/Eastern': -5 * 60,
@@ -431,7 +431,7 @@ export function timezoneIsKnown(tz: string): boolean {
   if (parseUtcOrNumericOffsetMinutes(tz) != null) return true;
   if (Object.prototype.hasOwnProperty.call(FIXED_OFFSET_ALIASES, tz)) return true;
   try {
-    // Intl throws RangeError on an unknown time zone.
+    // `Intl` throws RangeError on an unknown time zone.
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
     return true;
   } catch {
@@ -481,10 +481,9 @@ function resolveContextValue(
 }
 
 /**
- * Typed scalar equality with no cross-type coercion -- mirrors Rust's
- * `values_equal` (crates/hushspec/src/conditions.rs). A number is never
- * equal to a boolean or a string even if JS's `==` would agree (`1 == true`),
- * because `===` (used below) already enforces matching types.
+ * Typed scalar equality with no cross-type coercion (core spec 3.13): a number
+ * is never equal to a boolean or a string even where JavaScript's `==` would
+ * agree (`1 == true`), because `===` already enforces matching types.
  */
 function valuesEqual(actual: unknown, expected: unknown): boolean {
   if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
@@ -494,9 +493,8 @@ function valuesEqual(actual: unknown, expected: unknown): boolean {
 }
 
 /**
- * Mirrors Rust's `matches_scalar_or_membership`: if `actual` is an array,
- * true iff any element equals `expected` (membership); otherwise a direct
- * scalar comparison.
+ * If `actual` is an array, true when any element equals `expected`
+ * (membership); otherwise a direct scalar comparison.
  */
 function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(actual)) {
@@ -506,8 +504,8 @@ function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean 
 }
 
 /**
- * Mirrors Rust's `match_value`. Missing/null context fields fail closed. A
- * scalar `expected` (string/bool/number) matches via
+ * One `context` predicate (core spec 3.13). Missing or null context fields
+ * fail closed. A scalar `expected` (string/bool/number) matches via
  * `matchesScalarOrMembership`, which covers both scalar-vs-scalar equality
  * and scalar-vs-array membership (in either direction: a number/bool/string
  * `expected` matches an `actual` array containing it, and vice versa). An

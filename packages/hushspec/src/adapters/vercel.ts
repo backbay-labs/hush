@@ -3,7 +3,7 @@ import type { HushGuard } from '../middleware.js';
 import { mapWellKnownTool } from './tool-mapping.js';
 
 /**
- * Vercel AI SDK adapter (RFC 09 P6-02).
+ * Vercel AI SDK adapter.
  *
  * Structural typing only: nothing here imports `ai`, so the adapter costs no
  * dependency and works across the AI SDK 4 (`args`) and 5 (`input`) tool-call

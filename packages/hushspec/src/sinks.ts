@@ -6,7 +6,7 @@ export interface ReceiptSink {
   send(receipt: DecisionReceipt): void;
 
   /**
-   * Record a policy-in-effect event (RFC 09 P2-10). Sinks that only carry
+   * Record a policy-in-effect event (log spec 6). Sinks that only carry
    * receipts leave it unimplemented; the hash-linked log writes it as an
    * entry (`ChainedFileSink`).
    */
@@ -28,9 +28,9 @@ export class ConsoleReceiptSink implements ReceiptSink {
 }
 
 /**
- * The name the Rust, Python and Go SDKs give this sink. It is the same class:
- * receipts go to stderr, so that a receipt stream and a program's own stdout
- * never interleave.
+ * The name every HushSpec SDK gives this sink, as an alias for the same class:
+ * receipts go to stderr, so a receipt stream and a program's own stdout never
+ * interleave.
  */
 export const StderrReceiptSink = ConsoleReceiptSink;
 /** @see {@link StderrReceiptSink} */

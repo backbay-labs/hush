@@ -1,7 +1,7 @@
 /**
  * HushSpec specification version support.
  *
- * Version acceptance follows core spec 2.2 (D14): an engine that supports a
+ * Version acceptance follows core spec 2.2: an engine that supports a
  * minor version `X.Y` accepts every `X.Y.Z` document, because patch versions
  * carry only clarifications and errata. This engine implements the 0.2.0
  * semantics and also accepts 0.1.x documents (evaluated under 0.2 semantics).
@@ -29,8 +29,7 @@ export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2'] as const;
  * Representative full versions for each supported minor (display only; use
  * {@link isSupported} for acceptance, which accepts every patch level).
  *
- * Spelled as the Rust and Python SDKs spell it, so the three name the same
- * constant.
+ * Spelled identically in every HushSpec SDK, so they all name one constant.
  */
 export const HUSHSPEC_SUPPORTED_VERSIONS = ['0.1.0', '0.2.0'] as const;
 

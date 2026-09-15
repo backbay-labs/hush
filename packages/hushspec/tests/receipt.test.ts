@@ -354,7 +354,7 @@ describe('rule trace for different action types', () => {
     expect(toolTrace!.rule_path).toBeUndefined();
   });
 
-  it('records an unknown action type under the unknown_action_type stage (D1)', () => {
+  it('records an unknown action type under the unknown_action_type stage', () => {
     const spec: HushSpec = { hushspec: '0.1.0' };
     const action: EvaluationAction = { type: 'unknown_action', target: 'test' };
     const receipt = evaluateAuditedSpec(spec, action, enabledConfig());
@@ -611,7 +611,7 @@ describe('formatTimestamp', () => {
 });
 
 describe('impliedEnforcement', () => {
-  it('follows D16: a warn with no confirmation channel blocks', () => {
+  it('reports a warn with no confirmation channel as blocked (core spec 6)', () => {
     expect(impliedEnforcement('allow', 'enforce')).toEqual({
       mode: 'enforce',
       outcome: 'allowed',

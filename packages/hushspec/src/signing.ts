@@ -43,7 +43,7 @@ import { validate } from './validate.js';
  * ```
  *
  * The normative vectors live in `fixtures/signing/`; `tests/signing-vectors.test.ts`
- * runs all sixteen of them.
+ * runs them all.
  */
 
 // --------------------------------------------------------------------------
@@ -1020,7 +1020,7 @@ function signatureMatches(envelope: Envelope, publicKey: KeyObject): boolean {
 }
 
 // --------------------------------------------------------------------------
-// Receipt signing (RFC 09 P2-06, receipt spec 6)
+// Receipt signing (receipt spec 6)
 // --------------------------------------------------------------------------
 
 /** A receipt together with a signature over its receipt hash. */

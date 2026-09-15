@@ -13,10 +13,10 @@ import {
 import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
 
-// D14 (core spec 2.2): an engine that supports minor version X.Y accepts every
+// Core spec 2.2: an engine that supports minor version X.Y accepts every
 // X.Y.Z document.
 
-describe('version acceptance (D14)', () => {
+describe('version acceptance', () => {
   it('writes 0.2.0 and supports the 0.1 and 0.2 minors', () => {
     expect(HUSHSPEC_VERSION).toBe('0.2.0');
     expect([...HUSHSPEC_SUPPORTED_MINORS]).toEqual(['0.1', '0.2']);

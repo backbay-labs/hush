@@ -3,7 +3,7 @@ import type { HushGuard } from '../middleware.js';
 import { mapWellKnownTool } from './tool-mapping.js';
 
 /**
- * LangChain.js adapter (RFC 09 P6-02).
+ * LangChain.js adapter.
  *
  * Structural typing only: nothing here imports `@langchain/core`, so the
  * adapter costs no dependency and survives the framework's class hierarchy

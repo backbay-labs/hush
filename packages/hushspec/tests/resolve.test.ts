@@ -107,9 +107,9 @@ name: parent
     }
   });
 
-  // Parity fix (v3, item S2): a long *acyclic* extends chain used to recurse
-  // unbounded (cycle detection only catches exact repeats). The resolver now
-  // caps the chain at depth 32 and fails closed with a clean error.
+  // Cycle detection only catches exact repeats, so a long *acyclic* chain
+  // would recurse unbounded. The resolver caps it at depth 32 and fails
+  // closed with a clean error.
   it('errors cleanly on an extends chain deeper than the cap (40 levels)', () => {
     const depth = 40;
     const load = (reference: string) => {
@@ -317,10 +317,8 @@ describe('resolved documents validate', () => {
   // `merge()` clears the fields it consumes by setting them to `undefined`
   // rather than deleting them, so a resolved document reaches `validate()` as
   // `{ ..., extends: undefined }`. `key in obj` counts that as present, which
-  // made `validate(resolve(spec))` fail with "extends must be a string" in
-  // TypeScript while Rust, Python and Go all accepted the same document --
-  // found by the cross-SDK differential fuzzer once it started generating
-  // `extends: builtin:*` (P1-12).
+  // would make `validate(resolve(spec))` fail with "extends must be a
+  // string" for a document every other SDK accepts.
   it('accepts a document whose extends chain has just been flattened', () => {
     const spec = parseOrThrow('hushspec: "0.2.0"\nextends: "builtin:default"\n');
     const resolved = resolve(spec);
