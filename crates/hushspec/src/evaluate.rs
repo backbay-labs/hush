@@ -1,6 +1,7 @@
 use crate::HushSpec;
 use crate::conditions::{Condition, RuntimeContext, evaluate_condition};
 use crate::extensions::{OriginProfile, PostureExtension, TransitionTrigger};
+use crate::regex_profile::compile_profile_regex;
 use crate::rules::{
     ComputerUseMode, ComputerUseRule, DefaultAction, ForbiddenPathsRule, InputInjectionRule,
     PatchIntegrityRule, PathAllowlistRule, RemoteDesktopChannelsRule, SecretPatternsRule,
@@ -707,10 +708,29 @@ fn evaluate_secret_patterns(
     }
 
     for pattern in &rule.patterns {
-        if Regex::new(&pattern.pattern)
-            .map(|regex| regex.is_match(content))
-            .unwrap_or(false)
-        {
+        // Fail closed: a pattern that will not compile under the HushSpec regex
+        // profile denies the action rather than being skipped, and the deny
+        // carries the offending rule path. Validation uses the same compile, so
+        // this is unreachable for a document that passed `validate`.
+        let regex = match compile_profile_regex(&pattern.pattern) {
+            Ok(regex) => regex,
+            Err(error) => {
+                return deny_result(
+                    Some(format!(
+                        "rules.secret_patterns.patterns.{}.pattern",
+                        pattern.name
+                    )),
+                    Some(format!(
+                        "secret pattern '{}' is invalid: {}",
+                        pattern.name,
+                        error.message()
+                    )),
+                    origin_profile_id,
+                    posture,
+                );
+            }
+        };
+        if regex.is_match(content) {
             return deny_result(
                 Some(format!("rules.secret_patterns.patterns.{}", pattern.name)),
                 Some(format!("content matched secret pattern '{}'", pattern.name)),
@@ -734,10 +754,22 @@ fn evaluate_patch_integrity(
     }
 
     for (index, pattern) in rule.forbidden_patterns.iter().enumerate() {
-        if Regex::new(pattern)
-            .map(|regex| regex.is_match(content))
-            .unwrap_or(false)
-        {
+        // Fail closed on an uncompilable pattern (see evaluate_secret_patterns).
+        let regex = match compile_profile_regex(pattern) {
+            Ok(regex) => regex,
+            Err(error) => {
+                return deny_result(
+                    Some(format!("rules.patch_integrity.forbidden_patterns[{index}]")),
+                    Some(format!(
+                        "patch forbidden pattern is invalid: {}",
+                        error.message()
+                    )),
+                    origin_profile_id,
+                    posture,
+                );
+            }
+        };
+        if regex.is_match(content) {
             return deny_result(
                 Some(format!("rules.patch_integrity.forbidden_patterns[{index}]")),
                 Some("patch content matched a forbidden pattern".to_string()),
@@ -790,10 +822,22 @@ fn evaluate_shell_rule(
     }
 
     for (index, pattern) in rule.forbidden_patterns.iter().enumerate() {
-        if Regex::new(pattern)
-            .map(|regex| regex.is_match(target))
-            .unwrap_or(false)
-        {
+        // Fail closed on an uncompilable pattern (see evaluate_secret_patterns).
+        let regex = match compile_profile_regex(pattern) {
+            Ok(regex) => regex,
+            Err(error) => {
+                return deny_result(
+                    Some(format!("rules.shell_commands.forbidden_patterns[{index}]")),
+                    Some(format!(
+                        "shell forbidden pattern is invalid: {}",
+                        error.message()
+                    )),
+                    origin_profile_id,
+                    posture,
+                );
+            }
+        };
+        if regex.is_match(target) {
             return deny_result(
                 Some(format!("rules.shell_commands.forbidden_patterns[{index}]")),
                 Some("shell command matched a forbidden pattern".to_string()),
