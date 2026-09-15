@@ -10,6 +10,19 @@ Every resolved HushSpec policy has exactly one canonical form and one content ha
 
 The content hash is how receipts and signatures identify a policy. Reformatting a YAML file does not change it; changing a base policy in the `extends` chain does.
 
+Computing it:
+
+```bash
+h2h hash policy.yaml                      # sha256:<64 hex>
+h2h hash policy.yaml --format canonical   # the RFC 8785 text the digest covers
+```
+
+```rust
+use hushspec::{canonical_json, content_hash};
+// Both take a *resolved* document and refuse one that still declares `extends`.
+let digest = content_hash(&resolved)?;
+```
+
 Reference implementation and vectors:
 
 ```bash
