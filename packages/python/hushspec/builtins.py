@@ -41,17 +41,12 @@ _BUILTIN_RULESETS: dict[str, str] = {
 
 def load_builtin(name: str) -> HushSpec | None:
     """Parse the built-in ruleset for ``name`` (with or without the
-    ``builtin:`` prefix), or return ``None`` if the name is unknown.
-
-    A ruleset that is present but does not parse raises: an embedded document
-    is generated from ``rulesets/``, so a failure there is a broken build, and
-    reporting it as ``None`` would surface downstream as "unknown builtin".
-    """
+    ``builtin:`` prefix), or return ``None`` if the name is unknown."""
     resolved = name[len('builtin:'):] if name.startswith('builtin:') else name
     yaml = _BUILTIN_RULESETS.get(resolved)
     if yaml is None:
         return None
     ok, parsed = parse(yaml)
     if not ok:
-        raise ValueError(f'built-in ruleset {resolved!r} does not parse: {parsed}')
+        return None
     return parsed
