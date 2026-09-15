@@ -56,7 +56,6 @@ from hushspec.detection import (
     _DEFAULT_PROMPT_INJECTION_BLOCK_AT,
     _DEFAULT_PROMPT_INJECTION_WARN_AT,
     _LEVEL_FLOORS,
-    _jailbreak_detector,
     default_detector_registry,
     heuristic_integer,
     _truncate_to_bytes,
@@ -2018,7 +2017,11 @@ class CompiledPolicy:
         config = detection.jailbreak
         if config is not None:
             max_bytes, block_threshold, warn_threshold = config
-            result = _jailbreak_detector.detect(_truncate_to_bytes(content, max_bytes))
+            detector = default_detector_registry().detector_for(
+                DetectionCategory.JAILBREAK
+            )
+            assert detector is not None  # the built-in registry always has one
+            result = detector.detect(_truncate_to_bytes(content, max_bytes))
             score = result.score
             percent = score * 100.0
             contribution = None

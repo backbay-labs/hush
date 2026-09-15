@@ -711,11 +711,10 @@ _DEFAULT_PROMPT_INJECTION_BLOCK_AT = DetectionLevel.HIGH
 _DEFAULT_JAILBREAK_WARN_THRESHOLD = 50
 _DEFAULT_JAILBREAK_BLOCK_THRESHOLD = 80
 
-# Stateless singletons: detect() is a pure function of its input string, so
-# the built-in detectors' compiled regex patterns are shared across every
-# evaluate_with_detection() call instead of being recompiled each time.
-_injection_detector = RegexInjectionDetector()
-_jailbreak_detector = RegexJailbreakDetector()
+# The detectors themselves are stateless -- detect() is a pure function of its
+# input string -- so `default_detector_registry()` builds them once for the
+# process and every evaluation reads them from there rather than recompiling
+# their patterns.
 
 #: Detection escalation ordering: detection can only raise a decision, never
 #: weaken it. Kept separate from the rule-block ranks, which start at 1.
