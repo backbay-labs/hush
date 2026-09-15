@@ -27,6 +27,15 @@ export class ConsoleReceiptSink implements ReceiptSink {
   }
 }
 
+/**
+ * The name the Rust, Python and Go SDKs give this sink. It is the same class:
+ * receipts go to stderr, so that a receipt stream and a program's own stdout
+ * never interleave.
+ */
+export const StderrReceiptSink = ConsoleReceiptSink;
+/** @see {@link StderrReceiptSink} */
+export type StderrReceiptSink = ConsoleReceiptSink;
+
 export class FilteredSink implements ReceiptSink {
   constructor(
     private inner: ReceiptSink,

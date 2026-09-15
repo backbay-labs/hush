@@ -28,8 +28,17 @@ export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2'] as const;
 /**
  * Representative full versions for each supported minor (display only; use
  * {@link isSupported} for acceptance, which accepts every patch level).
+ *
+ * Spelled as the Rust and Python SDKs spell it, so the three name the same
+ * constant.
  */
-export const SUPPORTED_VERSIONS = ['0.1.0', '0.2.0'] as const;
+export const HUSHSPEC_SUPPORTED_VERSIONS = ['0.1.0', '0.2.0'] as const;
+
+/**
+ * This package's original name for {@link HUSHSPEC_SUPPORTED_VERSIONS}, kept
+ * so existing callers keep working.
+ */
+export const SUPPORTED_VERSIONS = HUSHSPEC_SUPPORTED_VERSIONS;
 
 const DIGITS = /^[0-9]+$/;
 
