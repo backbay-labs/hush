@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hushspec import LoadedSpec, parse_or_raise, resolve, resolve_file
+from hushspec import (
+    ERROR_EXTENDS,
+    LoadedSpec,
+    create_composite_loader,
+    parse_or_raise,
+    resolve,
+    resolve_file,
+    resolve_with_options,
+)
 
 
 class TestResolve:
@@ -141,7 +149,7 @@ name: parent
 
 class TestExtendsDepthCap:
     def test_long_acyclic_chain_errors_at_depth_cap(self):
-        # S2: an acyclic `extends` chain longer than the cap (32) must fail
+        # An acyclic `extends` chain longer than the cap (32) must fail
         # closed with a clean error rather than recurse until a stack overflow.
         # 40 distinct specs, each extending the next; the 40th is terminal.
         total = 40
@@ -236,3 +244,28 @@ class TestLibraryBuiltins:
             pattern.name for pattern in resolved.rules.secret_patterns.patterns
         }
         assert "medical_record_number" in names
+
+
+class TestResolveWithOptionsDefaults:
+    def test_omitting_options_still_produces_a_content_hash(self):
+        # A Resolution with no content hash would put a policy.content_hash of
+        # "" into every receipt built from it -- evidence naming no policy.
+        spec = parse_or_raise('hushspec: "0.1.0"\nname: leaf\n')
+        ok, resolution = resolve_with_options(spec)
+        assert ok is True
+        assert resolution.content_hash.startswith("sha256:")
+        assert resolution.chain
+
+
+class TestResolveFailureCodes:
+    def test_a_refusal_keeps_the_extends_registry_code(self):
+        spec = parse_or_raise('hushspec: "0.1.0"\nextends: "builtin:nope"\n')
+        ok, err = resolve_with_options(spec, loader=create_composite_loader())
+        assert ok is False
+        assert err.code == ERROR_EXTENDS
+
+    def test_the_merge_only_path_keeps_it_too(self):
+        spec = parse_or_raise('hushspec: "0.1.0"\nextends: "builtin:nope"\n')
+        ok, err = resolve(spec, loader=create_composite_loader())
+        assert ok is False
+        assert err.code == ERROR_EXTENDS

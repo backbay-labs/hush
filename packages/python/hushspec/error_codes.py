@@ -97,7 +97,10 @@ class ErrorMessage(str):
     __slots__ = ("code",)
 
     def __new__(cls, message: str, code: str = ERROR_PARSE) -> "ErrorMessage":
-        assert code in ERROR_CODES, f"{code!r} is not a registered error code"
+        # A real check, not an `assert`: the closed registry is a guarantee to
+        # every consumer of a failure message, and `python -O` strips asserts.
+        if code not in ERROR_CODES:
+            raise ValueError(f"{code!r} is not a registered error code")
         self = super().__new__(cls, message)
         self.code = code
         return self

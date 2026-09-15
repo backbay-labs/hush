@@ -11,9 +11,7 @@ RE2) agree on syntax but disagree on semantics, so the profile is reached by
 dialect before compiling it. The same translation runs in ``validate`` and in
 ``evaluate``, so the two can never disagree about what a pattern means.
 
-Profile (normative summary; keep in sync with
-``crates/hushspec/src/regex_profile.rs``, ``packages/hushspec/src/regex.ts``,
-and ``packages/go/hushspec/regex_profile.go``):
+Profile (normative summary; every SDK implements the same one):
 
 1. Syntax is RE2-class -- lookaround, backreferences, possessive quantifiers,
    atomic/conditional/recursive groups and nested unbounded quantifiers are
@@ -26,7 +24,7 @@ and ``packages/go/hushspec/regex_profile.go``):
    ``\\w`` = ``[0-9A-Za-z_]``, ``\\s`` = ``[\\t\\n\\v\\f\\r ]`` (includes the
    vertical tab, excludes NBSP and the Unicode space separators), and
    ``\\b``/``\\B`` are boundaries under that ASCII ``\\w`` -- which is what
-   ``re.ASCII`` gives us here. They are translated, not rejected, including
+   ``re.ASCII`` gives. They are translated, not rejected, including
    inside character classes (``[\\d_]`` -> ``[0-9_]``). The negated shorthands
    ``\\D \\W \\S`` and the boundaries ``\\b \\B`` are rejected *inside* a
    class, where they cannot be expressed as members.

@@ -102,15 +102,13 @@ class TestContextConditions:
 
 
 
-# S1 parity: array-vs-array intersection and number/bool array membership
-#
-# Rust's `matches_scalar_or_membership`/`match_value` (crates/hushspec/src/
-# evaluate.rs) is the cross-SDK reference: expected-array vs actual-array
-# matches iff the sets intersect, and expected-array vs actual-scalar matches
-# for any scalar type (string/number/bool), not just strings.
+# Array-vs-array intersection and number/bool array membership (core spec
+# 3.13): an expected array matches an actual array iff the two sets intersect,
+# and an expected array matches an actual scalar for any scalar type
+# (string/number/bool), not just strings.
 
 
-class TestArrayMembershipParity:
+class TestArrayMembership:
     def test_array_vs_array_matches_on_intersection(self):
         ctx = RuntimeContext(user={"groups": ["engineering", "ml-team"]})
         cond = Condition(context={"user.groups": ["ml-team", "sales"]})
@@ -282,7 +280,7 @@ class TestTimeWindowConditions:
         assert evaluate_condition(cond, ctx_with_time("2026-01-17T03:00:00Z")) is True
 
     def test_invalid_timezone_keeps_block_active(self):
-        # D15 (core 3.13): an unresolvable time zone cannot be evaluated, and
+        # Core spec 3.13: an unresolvable time zone cannot be evaluated, and
         # an unevaluable condition MUST NOT switch a security control off, so
         # the window is treated as satisfied. Validation rejects the zone at
         # parse time.
@@ -379,7 +377,7 @@ class TestEdgeCases:
         assert evaluate_condition(Condition(), RuntimeContext()) is True
 
     def test_max_nesting_depth_exceeded(self):
-        # D15 (core 3.13): validation rejects the document; if such a condition
+        # Core spec 3.13: validation rejects the document; if such a condition
         # still reaches evaluation (out-of-band map) it cannot be evaluated,
         # and an unevaluable condition leaves the block active.
         cond = Condition(context={"environment": "production"})
@@ -486,7 +484,7 @@ class TestEvaluateWithContext:
         assert result2.decision == Decision.ALLOW
 
 
-# D15 (core 3.13): `when` is a document field, decoded and validated at parse
+# Core spec 3.13: `when` is a document field, decoded and validated at parse
 # and validate time.
 
 
@@ -657,7 +655,7 @@ class TestDocumentWhenValidation:
         assert "rules.shell_commands.when.time_window.start" in str(result.errors[0])
 
 
-# The `capability` and `rate` leaf predicates (D19, core spec 3.13)
+# The `capability` and `rate` leaf predicates (core spec 3.13)
 
 
 class TestCapabilityPredicate:
@@ -890,3 +888,31 @@ class TestConditionsAgainstThePostureState:
 
     def test_a_non_granting_state_makes_the_block_inert(self):
         assert self._decide("restricted") == Decision.ALLOW
+
+
+class TestTimezoneOffsetStrictness:
+    """A fixed ``+HH:MM`` offset is ASCII digits and nothing else.
+
+    A zone the engine cannot resolve leaves the rule block active (core spec
+    3.13). Accepting an offset another engine refuses would resolve the zone
+    here, evaluate the window, and let it switch the block off.
+    """
+
+    def test_a_plain_offset_resolves(self):
+        assert timezone_is_known("+09:30")
+        assert timezone_is_known("-05:00")
+
+    def test_an_offset_with_inner_whitespace_is_unknown(self):
+        assert not timezone_is_known("+ 9")
+        assert not timezone_is_known("+09: 30")
+
+    def test_an_offset_with_an_underscore_separator_is_unknown(self):
+        assert not timezone_is_known("+1_2")
+
+    def test_a_non_ascii_digit_offset_is_unknown(self):
+        assert not timezone_is_known("+\u0661\u0662")
+        assert not timezone_is_known("+\uff10\uff19")
+
+    def test_an_out_of_range_offset_is_unknown(self):
+        assert not timezone_is_known("+24:00")
+        assert not timezone_is_known("+09:60")

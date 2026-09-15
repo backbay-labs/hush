@@ -1,8 +1,7 @@
 """Governance metadata parity (core spec 2.5).
 
-Every warning and error asserted here is produced verbatim by the Rust,
-TypeScript and Go validators too -- the wording is the contract, not an
-implementation detail.
+Every warning and error asserted here is produced verbatim by every SDK --
+the wording is the contract, not an implementation detail.
 """
 
 from __future__ import annotations
@@ -131,4 +130,42 @@ class TestLineage:
             '  owner: "platform-security@example.com"\n'
             '  reviewers:\n    - "appsec@example.com"\n'
         )
+        assert result.valid
+
+
+class TestChangelogOrdering:
+    """A changelog runs newest first (core spec 2.5)."""
+
+    def _changelog(self, *entries: tuple[str, str]) -> str:
+        body = "  changelog:\n"
+        for version, day in entries:
+            body += (
+                f'    - version: "{version}"\n'
+                f'      date: "{day}"\n'
+                '      summary: "an entry"\n'
+            )
+        return body
+
+    def test_descending_integer_versions_are_accepted(self):
+        assert check(self._changelog(("3", "2026-02-01"), ("2", "2026-01-01"))).valid
+
+    def test_ascending_integer_versions_warn(self):
+        result = check(self._changelog(("2", "2026-01-01"), ("3", "2026-02-01")))
+        assert (
+            "changelog entries are not in descending version/date order at entry 1"
+            in result.warnings
+        )
+
+    def test_a_non_ascii_digit_version_compares_lexicographically(self):
+        # Only an ASCII digit run compares numerically. A superscript is a
+        # `str.isdigit()` character that `int()` refuses outright, so treating
+        # it as a number would fail the whole document with a ValueError
+        # instead of validating it.
+        result = check(self._changelog(("\u00b2", "2026-02-01"), ("1", "2026-01-01")))
+        assert result.valid
+
+    def test_an_arabic_indic_digit_version_compares_lexicographically(self):
+        # `int()` parses these, but no shared vector says what value they
+        # carry, so they are ordered as text like any other non-integer tag.
+        result = check(self._changelog(("\u0661\u0662", "2026-02-01"), ("1", "2026-01-01")))
         assert result.valid

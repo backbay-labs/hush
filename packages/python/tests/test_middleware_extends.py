@@ -43,7 +43,7 @@ def test_from_file_resolves_library_policy_against_builtin_base():
     assert on_disk.rules is not None and on_disk.rules.forbidden_paths is None
 
     guard = HushGuard.from_file(str(path))
-    spec = guard._policy
+    spec = guard.policy
 
     assert spec.extends is None
     # A rule block the leaf policy does not define at all.
@@ -58,11 +58,11 @@ def test_from_file_resolves_library_policy_against_builtin_base():
 def test_from_file_resolves_hipaa_base_and_hashes_resolved_document():
     path = REPO_ROOT / "library/healthcare/hipaa-base.yaml"
     guard = HushGuard.from_file(str(path))
-    assert guard._policy.extends is None
+    assert guard.policy.extends is None
 
     ok, resolved = resolve_file(path)
     assert ok
-    assert compute_policy_hash(guard._policy) == compute_policy_hash(resolved)
+    assert compute_policy_hash(guard.policy) == compute_policy_hash(resolved)
 
 
 def test_from_file_resolves_relative_extends_against_policy_directory(tmp_path):
@@ -73,7 +73,7 @@ def test_from_file_resolves_relative_extends_against_policy_directory(tmp_path):
     )
 
     guard = HushGuard.from_file(str(tmp_path / "child.yaml"))
-    assert guard._policy.extends is None
+    assert guard.policy.extends is None
     assert guard.evaluate(EvaluationAction(type="tool_call", target="read_file")).decision == (
         Decision.ALLOW
     )
@@ -84,7 +84,7 @@ def test_from_file_resolves_relative_extends_against_policy_directory(tmp_path):
 
 def test_from_yaml_resolves_builtin_references_by_default():
     guard = HushGuard.from_yaml(BUILTIN_CHILD)
-    spec = guard._policy
+    spec = guard.policy
     assert spec.extends is None
     assert spec.rules is not None and spec.rules.forbidden_paths is not None
     assert "/etc/shadow" in spec.rules.forbidden_paths.patterns
@@ -109,7 +109,7 @@ def test_from_yaml_resolves_file_base_with_base_dir(tmp_path):
         'hushspec: "0.1.0"\nextends: "./base.yaml"\nname: leaf\n',
         base_dir=str(tmp_path),
     )
-    assert guard._policy.extends is None
+    assert guard.policy.extends is None
     assert guard.evaluate(
         EvaluationAction(type="tool_call", target="read_file")
     ).decision == Decision.ALLOW
@@ -152,4 +152,4 @@ def test_compute_policy_hash_refuses_unresolvable_policy():
 def test_compute_policy_hash_resolves_builtin_base():
     leaf = parse_or_raise(BUILTIN_CHILD)
     guard = HushGuard.from_yaml(BUILTIN_CHILD)
-    assert compute_policy_hash(leaf) == compute_policy_hash(guard._policy)
+    assert compute_policy_hash(leaf) == compute_policy_hash(guard.policy)

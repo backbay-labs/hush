@@ -15,7 +15,7 @@ Requires Python 3.10+.
 ## Quick Start
 
 ```python
-from hushspec import parse_or_raise, validate, evaluate
+from hushspec import Decision, EvaluationAction, evaluate, parse_or_raise, validate
 
 policy = parse_or_raise("""
 hushspec: "0.1.0"
@@ -32,8 +32,8 @@ result = validate(policy)
 assert result.is_valid
 
 # Evaluate an action
-decision = evaluate(policy, {"type": "egress", "target": "api.github.com"})
-assert decision.decision == "allow"
+outcome = evaluate(policy, EvaluationAction(type="egress", target="api.github.com"))
+assert outcome.decision == Decision.ALLOW
 ```
 
 ## HushGuard Middleware
@@ -41,18 +41,25 @@ assert decision.decision == "allow"
 `HushGuard` wraps policy loading and evaluation behind a simple interface.
 
 ```python
-from hushspec import HushGuard
+from hushspec import Decision, EvaluationAction, HushGuard
 
 guard = HushGuard.from_file("./policy.yaml")
 
-# Check without raising
-result = guard.check({"type": "tool_call", "target": "bash"})
-if result.decision == "deny":
-    print(f"Blocked: {result.reason}")
+# May the action proceed? `check` answers yes or no ...
+if not guard.check(EvaluationAction(type="tool_call", target="bash")):
+    print("Blocked")
+
+# ... `gate` answers with the decision and what an enforcement point did
+outcome = guard.gate(HushGuard.map_tool_call("bash"))
+if outcome.result.decision == Decision.DENY:
+    print(f"Blocked: {outcome.result.reason}")
 
 # Or enforce (raises HushSpecDenied on deny)
-guard.enforce({"type": "egress", "target": "api.openai.com"})
+guard.enforce(HushGuard.map_egress("api.openai.com"))
 ```
+
+`HushGuard.map_egress`, `map_tool_call`, `map_file_read`, `map_file_write` and
+`map_shell_command` build the action for the common cases.
 
 ### Shadow / monitor mode
 
@@ -102,7 +109,7 @@ guard.resolution.chain                # root first, leaf last, one hash per hop
 ```
 
 If verification fails the guard does not raise -- it *refuses*: every
-evaluation denies with `matched_rule` `__hushspec_policy_signature__` and
+evaluation denies with `matched_rule` `__hushspec_policy_unverified__` and
 `guard.refusal.reason` carries the reason code (`missing_signature`,
 `unknown_key_id`, `content_hash_mismatch`, ...). Without `require_signature` a
 keyring still buys opportunistic verification, recorded in
@@ -140,8 +147,9 @@ guard.watcher.stop()
 `PolicyWatcher` stats the file each tick and reloads only when its bytes
 actually change; `PolicyPoller` reloads on a fixed interval from any provider
 (`CallbackProvider` wraps a callable for sources that are not files). Both run
-on a daemon thread, work as context managers, and expose `check_once()` for a
-single deterministic tick.
+on a daemon thread, work as context managers, and expose `check_once()` to
+drive a tick by hand. Ticks are serialized, so a manual one and the loop's own
+never interleave; `stop()` reports whether the thread actually finished.
 
 Reload fails **safe**: a document that cannot be read, parsed, resolved,
 verified, or compiled leaves the policy already in force untouched and is
@@ -174,11 +182,11 @@ them import their SDK: blocks and calls are read structurally.
 ### Evaluation
 
 ```python
-from hushspec import parse_or_raise, evaluate
+from hushspec import EvaluationAction, evaluate, parse_or_raise
 
 spec = parse_or_raise(policy_yaml)
-result = evaluate(spec, {"type": "egress", "target": "evil.example.com"})
-# result.decision: "allow" | "warn" | "deny"
+result = evaluate(spec, EvaluationAction(type="egress", target="evil.example.com"))
+# result.decision: Decision.ALLOW | Decision.WARN | Decision.DENY
 # result.matched_rule: "rules.egress.default"
 ```
 
@@ -246,13 +254,21 @@ result = evaluate_with_detection(spec, action)
 Route decision receipts to files, stderr, or custom callbacks.
 
 ```python
-from hushspec import FileReceiptSink, FilteredSink, MultiSink
+from hushspec import FileReceiptSink, FilteredSink, MultiSink, StderrReceiptSink
 
-sink = MultiSink([
-    FileReceiptSink("/var/log/hushspec-receipts.jsonl"),
-    FilteredSink(stderr_sink, lambda r: r.decision == "deny"),
-])
+sink = MultiSink(
+    [
+        FileReceiptSink("/var/log/hushspec-receipts.jsonl"),
+        FilteredSink.deny_only(StderrReceiptSink()),
+    ],
+    on_error=lambda sink, exc: log.warning("receipt sink %r failed: %s", sink, exc),
+)
 ```
+
+`FilteredSink(inner, ["deny", "warn"])` passes on the decisions you name;
+`deny_only` is the common case. A sink that raises never breaks enforcement:
+`MultiSink` counts the loss in `sink.dropped` and reports it through
+`on_error`.
 
 ### OTLP export
 
@@ -343,10 +359,11 @@ deactivate_panic()
 
 ## CLI
 
-The `h2h` CLI tool provides validate, lint, test, diff, format, sign, and more:
+`h2h` -- validate, lint, test, diff, format, sign and more -- is a separate
+distribution, not a console script of this package. See the
+[repository](https://github.com/backbay-labs/hush) for the install options.
 
 ```bash
-cargo install hushspec-cli
 h2h validate policy.yaml
 h2h lint policy.yaml
 ```

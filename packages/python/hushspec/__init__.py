@@ -285,6 +285,10 @@ from hushspec.version import (
     supported_minor,
 )
 
+#: The HushSpec *specification* version this engine implements, not the
+#: version of this distribution -- that is what
+#: ``importlib.metadata.version("hushspec")`` reports, and what a log entry
+#: and an OTLP resource attribute carry as the SDK version.
 __version__ = HUSHSPEC_VERSION
 
 __all__ = [

@@ -14,6 +14,14 @@ from hushspec.error_codes import (
     ErrorMessage,
 )
 from hushspec.regex_profile import compile_profile_regex
+# The regex-portability scanners are shared with hushspec.validate rather
+# than copied: a pattern parse() refuses and one validate() refuses can then
+# never drift apart.
+from hushspec.validate import (
+    _RE2_DISALLOWED,
+    _disallowed_regex_feature,
+    _has_nested_quantifier,
+)
 from hushspec.generated_contract import (
     BROWSER_AUTOMATION_KEYS,
     CODE_EXECUTION_KEYS,
@@ -71,8 +79,8 @@ FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """Structural check of a rule block's ``when`` condition (core spec 3.13).
 
-    Unknown keys and wrong types inside a condition are *parse* errors (they
-    are rejected by serde in the Rust reference); the semantic checks --
+    Unknown keys and wrong types inside a condition are *parse* errors; the
+    semantic checks --
     ``HH:MM`` values, timezone, day names, nesting depth -- belong to
     ``validate`` and live in hushspec.validate.validate_conditions.
     """
@@ -88,9 +96,9 @@ def _constraint(message: str) -> ErrorMessage:
     """A core Section 7 / extension-module constraint violation (E004).
 
     Everything else this module reports is a parse-time refusal (E001): the
-    shape, type, enum and unknown-key checks serde performs for the Rust
-    reference. Only the semantic constraints Rust checks in `validate` are
-    tagged, so the two implementations name the same code for the same vector.
+    shape, type, enum and unknown-key checks a document must pass before it
+    decodes at all. Only the semantic constraints are tagged, so every SDK
+    names the same registry code for the same vector.
     """
     return ErrorMessage(message, ERROR_CONSTRAINT_VIOLATION)
 
@@ -643,12 +651,12 @@ def _validate_origins(
                 _validate_optional_string(match, "sensitivity", errors, f"{profile_path}.match.sensitivity")
                 _validate_optional_string(match, "actor_role", errors, f"{profile_path}.match.actor_role")
 
-                # S2: a present-but-empty free-text match field (e.g.
-                # `provider: ""`) is a degenerate, unrepresentable-consistently
-                # constraint -- reject it (parity with Go's raw validator,
-                # which already does this). `space_type`/`visibility` are
-                # enums and already reject "" as an invalid enum value via
-                # `_validate_optional_enum` above, so they are excluded here.
+                # A present-but-empty free-text match field (e.g.
+                # `provider: ""`) is a degenerate constraint with no
+                # consistent meaning, so it is rejected. `space_type` and
+                # `visibility` are enums and already reject "" as an invalid
+                # enum value via `_validate_optional_enum` above, so they are
+                # excluded here.
                 for match_field in (
                     "provider",
                     "tenant_id",
@@ -822,11 +830,10 @@ def _validate_detection_heuristics(
 ) -> None:
     """``prompt_injection.heuristics`` (detection spec 3.5.1).
 
-    ``min_score`` is a non-negative integer, the range Rust's ``usize`` field
-    enforces at parse time; the schema's upper bound of 100 is not checked
-    here, because a floor above the clamp is harmless (nothing ever reaches
-    it) and rejecting one where the reference accepts it would be a
-    conformance divergence.
+    ``min_score`` is a non-negative integer. The schema's upper bound of 100
+    is not enforced here: a floor above the clamp is harmless (nothing ever
+    reaches it), and refusing a document other engines accept would itself be
+    a conformance divergence.
     """
     _reject_unknown_keys(obj, PROMPT_INJECTION_HEURISTICS_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
@@ -1025,8 +1032,8 @@ def _reject_empty_match_string(
     obj: dict[str, Any], key: str, path: str, errors: list[str]
 ) -> None:
     """Reject a present free-text origin-match field whose value is the empty
-    string (S2). An absent field is untouched -- an all-absent match still
-    matches every origin. Type errors are reported separately by
+    string. An absent field is untouched -- an all-absent match still matches
+    every origin. Type errors are reported separately by
     `_validate_optional_string`, so a non-string value here is ignored."""
     value = obj.get(key)
     if isinstance(value, str) and value == "":
@@ -1100,101 +1107,11 @@ def _validate_number_value(
     return value
 
 
-# Pattern that detects regex features outside the RE2 subset.
-# See hushspec/validate.py for full documentation. Kept identical to that
-# module's `_RE2_DISALLOWED`. Possessive quantifiers (including possessive
-# braces {n}+/{n,}+/{n,m}+), \Z/\z anchors, and empty character classes ([],
-# [^]) are checked by the escape/class-aware `_disallowed_regex_feature`
-# scanner below instead of this substring regex -- a raw substring match
-# over-rejects those constructs inside a character class or as an escaped
-# literal (see `_disallowed_regex_feature`'s docstring in validate.py).
-_RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
-    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
-)
-
-
-# Shared rejection message for possessive quantifiers. Kept identical to the
-# copy in hushspec/validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
-_POSSESSIVE_MESSAGE = (
-    "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
-    "across the HushSpec SDK regex engines"
-)
-
-
-# Portability pre-check: reject regex constructs that are unsupported by, or
-# behave differently across, the four SDK engines (possessive quantifiers,
-# \Z/\z end-anchors, empty character classes []/[^]) so a pattern validates
-# identically everywhere. See hushspec/validate.py's `_disallowed_regex_
-# feature` for full documentation. Kept identical to that module's copy and
-# to the Rust/Go implementations.
-def _disallowed_regex_feature(pattern: str) -> str | None:
-    chars = list(pattern)
-    n = len(chars)
-    in_class = False
-    i = 0
-    while i < n:
-        c = chars[i]
-        if c == "\\":
-            # \Z / \z are end-anchors only outside a character class; inside
-            # one they are an escaped literal letter, so ignore them there.
-            if not in_class and i + 1 < n and chars[i + 1] in ("Z", "z"):
-                return (
-                    "\\Z and \\z end-anchors are not portable across the "
-                    "HushSpec SDK regex engines; anchor with $"
-                )
-            i += 2  # skip the escaped char
-            continue
-        if in_class:
-            if c == "]":
-                in_class = False
-            i += 1
-            continue
-        if c == "[":
-            # Empty class [] or negated-empty [^] (JS matches none/any; the
-            # other engines reject the bare form).
-            j = i + 1
-            if j < n and chars[j] == "^":
-                j += 1
-            if j < n and chars[j] == "]":
-                return (
-                    "empty character classes [] and [^] are not portable "
-                    "across the HushSpec SDK regex engines"
-                )
-            in_class = True
-            i += 1
-            continue
-        if c in ("*", "+", "?"):
-            # A quantifier immediately followed by + is possessive.
-            if i + 1 < n and chars[i + 1] == "+":
-                return _POSSESSIVE_MESSAGE
-            i += 1
-            continue
-        if c == "{":
-            # Treat {...} as a quantifier only when it parses as one; a
-            # literal { is scanned through. A quantifier brace followed by +
-            # is possessive ({n}+, {n,}+, {n,m}+).
-            j = i + 1
-            while j < n and chars[j] != "}":
-                j += 1
-            if j < n:
-                inner = "".join(chars[i + 1 : j])
-                if _brace_kind(inner) != "none":
-                    if j + 1 < n and chars[j + 1] == "+":
-                        return _POSSESSIVE_MESSAGE
-                    i = j + 1
-                    continue
-            i += 1
-            continue
-        i += 1
-    return None
-
-
 def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
     # Portability pre-check, RE2-feature check and nested-quantifier (ReDoS)
     # heuristic first, all reported with the shared "not in the RE2 subset"
-    # message. This module keeps its own copies of the two scanners on purpose
-    # (see their docstrings) so parse() and validate() cannot silently drift.
+    # message. These are hushspec.validate's own scanners, so what parse()
+    # refuses and what validate() refuses cannot drift apart.
     if (
         _disallowed_regex_feature(pattern) is not None
         or _RE2_DISALLOWED.search(pattern)
@@ -1228,101 +1145,6 @@ def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
 # itself immediately followed by an unbounded quantifier (e.g. ``(a+)+``).
 # Escaped parens and character-class contents are ignored; bounded quantifiers
 # (``(a{1,3}){1,3}``, ``(abc)+``) are accepted.
-def _has_nested_quantifier(pattern: str) -> bool:
-    chars = list(pattern)
-    n = len(chars)
-    stack: list[bool] = []
-    in_class = False
-    i = 0
-    while i < n:
-        c = chars[i]
-        if c == "\\":
-            i += 2
-            continue
-        if in_class:
-            if c == "]":
-                in_class = False
-            i += 1
-            continue
-        if c == "[":
-            in_class = True
-            i += 1
-            continue
-        if c == "(":
-            stack.append(False)
-            i += 1
-            continue
-        if c == ")":
-            closed_unbounded = stack.pop() if stack else False
-            kind, qlen = _classify_quantifier(chars, i + 1)
-            if kind == "unbounded":
-                if closed_unbounded:
-                    return True
-                if stack:
-                    stack[-1] = True
-                i += 1 + qlen
-            else:
-                i += 1
-            continue
-        kind, qlen = _classify_quantifier(chars, i)
-        if kind == "unbounded":
-            if stack:
-                stack[-1] = True
-            i += qlen
-        elif kind == "bounded":
-            i += qlen
-        else:
-            i += 1
-    return False
-
-
-def _classify_quantifier(chars: list[str], pos: int) -> tuple[str, int]:
-    if pos >= len(chars):
-        return ("none", 0)
-    c = chars[pos]
-    if c in ("*", "+"):
-        return ("unbounded", 2 if _marker_follows(chars, pos + 1) else 1)
-    if c == "?":
-        return ("bounded", 2 if _marker_follows(chars, pos + 1) else 1)
-    if c == "{":
-        j = pos + 1
-        while j < len(chars) and chars[j] != "}":
-            j += 1
-        if j >= len(chars):
-            return ("none", 0)
-        inner = "".join(chars[pos + 1 : j])
-        kind = _brace_kind(inner)
-        if kind == "none":
-            return ("none", 0)
-        length = (j - pos + 1) + (1 if _marker_follows(chars, j + 1) else 0)
-        return (kind, length)
-    return ("none", 0)
-
-
-def _marker_follows(chars: list[str], pos: int) -> bool:
-    return pos < len(chars) and chars[pos] in ("?", "+")
-
-
-def _is_ascii_digits(value: str) -> bool:
-    return len(value) > 0 and all("0" <= ch <= "9" for ch in value)
-
-
-def _brace_kind(inner: str) -> str:
-    if not inner:
-        return "none"
-    commas = inner.count(",")
-    if commas == 0:
-        return "bounded" if _is_ascii_digits(inner) else "none"
-    if commas == 1:
-        lo, hi = inner.split(",")
-        lo_ok = lo == "" or _is_ascii_digits(lo)
-        hi_ok = hi == "" or _is_ascii_digits(hi)
-        if not lo_ok or not hi_ok or (lo == "" and hi == ""):
-            return "none"
-        return "unbounded" if hi == "" else "bounded"
-    return "none"
-
-
 def _reject_unknown_keys(
     obj: dict[str, Any], allowed: frozenset[str] | set[str], errors: list[str], path: str
 ) -> None:

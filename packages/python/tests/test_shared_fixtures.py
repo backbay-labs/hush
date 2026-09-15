@@ -114,7 +114,7 @@ def expects_rejection(child_path: Path) -> bool:
     """Whether a merge fixture is expected to be rejected rather than merged.
 
     Two conventions are honoured, so a digest-pin vector lands correctly under
-    whichever one the Rust reference chose when it added the fixtures:
+    whichever one its fixture uses:
 
     * a marker file -- `child-x.yaml.expect-reject`, `child-x.expect-reject`,
       or a directory-wide `expect-reject`;
@@ -166,12 +166,17 @@ def _declares_rejection(meta: dict[str, Any], names: set[str]) -> bool:
 
 class TestSharedFixtures:
     def test_valid_documents(self):
+        checked = 0
         for subdir in VALID_DIRS:
             for fixture_path in iter_yaml_files(subdir):
                 ok, result = parse(fixture_path.read_text())
                 assert ok, f"{fixture_path}: {result}"
                 validation = validate(result)
                 assert validation.is_valid, f"{fixture_path}: {validation.errors}"
+                checked += 1
+        # A renamed or missing directory yields no files, and a loop over
+        # nothing passes: count, so that shows up as a failure.
+        assert checked > 0, "no valid vectors were found"
 
     def test_invalid_documents(self):
         """Every `invalid/` vector is refused, for the reason its sidecar names.
@@ -211,6 +216,7 @@ class TestSharedFixtures:
         assert checked > 0, "no invalid vectors were found"
 
     def test_merge_fixtures(self):
+        checked = 0
         for subdir in MERGE_DIRS:
             for directory in iter_fixture_dirs(subdir):
                 base_path = directory / "base.yaml"
@@ -222,6 +228,8 @@ class TestSharedFixtures:
                     if not child_path.stem.startswith("child-"):
                         continue
                     self._run_merge_fixture(base, child_path)
+                    checked += 1
+        assert checked > 0, "no merge vectors were found"
 
     def _run_merge_fixture(self, base, child_path: Path) -> None:
         """Merge (or resolve) one `child-*.yaml` and compare with its expectation.
@@ -262,8 +270,10 @@ class TestSharedFixtures:
         ), f"{child_path}: merged output differed from {expected_path.name}"
 
     def test_evaluator_fixtures(self):
+        checked = 0
         for subdir in EVALUATION_DIRS:
             for fixture_path in iter_yaml_files(subdir):
+                checked += 1
                 # YAML 1.2 Core (the HushSpec profile): `on:`/`yes:` stay
                 # strings, so the policy survives the re-dump below.
                 raw = yaml.load(fixture_path.read_text(), Loader=CoreSafeLoader)
@@ -324,7 +334,7 @@ class TestSharedFixtures:
                             )
                         if "receipt" in expect:
                             _assert_receipt_members(expect["receipt"], receipt, label)
-
+        assert checked > 0, "no evaluator vectors were found"
 
 
 def _fixed_receipt(
@@ -400,10 +410,10 @@ def _assert_receipt_members(
 def _reject(fixture_path: Path) -> tuple[str | None, str]:
     """``(registry code, message)`` for a refused document, ``(None, "")`` otherwise.
 
-    Parsing and validating are one refusal from a caller's point of view: the
-    Rust reference rejects some of these at parse time and some at validate
-    time, and which side of that line a given check falls on is an
-    implementation detail the registry code deliberately abstracts over.
+    Parsing and validating are one refusal from a caller's point of view: some
+    checks refuse at parse time and others at validate time, and which side of
+    that line a given check falls on is an implementation detail the registry
+    code deliberately abstracts over.
     """
     ok, result = parse(fixture_path.read_text())
     if not ok:
@@ -438,10 +448,9 @@ def parse_raw_or_fail(path: Path) -> dict[str, Any] | None:
 class TestMergeFixtureConventions:
     """The runner's handling of digest-pinned and expected-to-reject vectors.
 
-    The pinned merge vectors themselves are added to ``fixtures/`` by the Rust
-    reference; these build the same shapes in a temp directory so the runner is
-    proven independently of when those files land, and so a vector written in
-    either marker convention is known to be honoured.
+    These build the same shapes in a temp directory, so the runner is covered
+    independently of which vectors ``fixtures/`` happens to carry, and a vector
+    written in either marker convention is known to be honoured.
     """
 
     MERGE_BASE = 'hushspec: "0.1.0"\nname: base\nrules:\n  egress:\n    allow: ["a.com"]\n    default: block\n'
@@ -515,7 +524,8 @@ class TestMergeFixtureConventions:
         )
 
         assert not expects_rejection(child_path)
-        with pytest.raises(AssertionError):
+        # The mismatching pin, not some other assertion inside the runner.
+        with pytest.raises(AssertionError, match="expected rejection|digest pin"):
             TestSharedFixtures()._run_merge_fixture(base, child_path)
 
     def test_a_vector_marked_reject_that_resolves_is_a_failure(self, tmp_path):
@@ -561,8 +571,8 @@ def _action_from_case(
     Field names are shared verbatim with schemas/hushspec-evaluator-test.v0
     .schema.json's Action/Origin/PostureInput/RuntimeContext $defs, so this is
     a direct keyword-argument passthrough per sub-object. The case-level
-    ``context`` (core spec 3.13) rides on the action, exactly as the Rust
-    reference threads it through ``EvaluationAction.context``.
+    ``context`` (core spec 3.13) rides on the action, in
+    ``EvaluationAction.context``.
     """
     origin = OriginContext(**raw["origin"]) if raw.get("origin") is not None else None
     posture = PostureContext(**raw["posture"]) if raw.get("posture") is not None else None

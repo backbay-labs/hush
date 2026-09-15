@@ -42,10 +42,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -54,6 +53,8 @@ from hushspec.canonical import (
     CanonicalError,
     canonical_json_value,
     content_hash,
+    digest,
+    is_content_hash,
 )
 from hushspec.signing import (
     MalformedEnvelope,
@@ -294,7 +295,13 @@ def parse_bundle(obj: Any) -> DsseEnvelope:
     if isinstance(obj, DsseEnvelope):
         return obj
     if isinstance(obj, (bytes, bytearray)):
-        obj = bytes(obj).decode("utf-8", errors="replace")
+        # Strictly: repairing invalid UTF-8 into U+FFFD would silently change
+        # the bytes a signature covers, so a bundle that is not UTF-8 is
+        # refused rather than mended.
+        try:
+            obj = bytes(obj).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BundleError(f"bundle is not valid UTF-8: {exc}") from exc
     if isinstance(obj, str):
         try:
             obj = json.loads(obj)
@@ -323,7 +330,7 @@ def parse_bundle(obj: Any) -> DsseEnvelope:
             raise BundleError(f"{label} must be an object")
         _reject_unknown(entry, _SIGNATURE_KEYS, label)
         keyid = _required_str(entry, "keyid", label)
-        if not _is_content_hash(keyid):
+        if not is_content_hash(keyid):
             raise BundleError(f"{label}.keyid must be sha256:<64 hex>, got {keyid!r}")
         signatures.append(
             DsseSignature(keyid=keyid, sig=_required_str(entry, "sig", label))
@@ -473,7 +480,7 @@ def _parse_policy_identity(value: Any) -> PolicyIdentity:
         raise BundleError("predicate.policy must be an object")
     _reject_unknown(value, _POLICY_KEYS, "predicate.policy")
     hash_value = _required_str(value, "content_hash", "predicate.policy")
-    if not _is_content_hash(hash_value):
+    if not is_content_hash(hash_value):
         raise BundleError(
             f"predicate.policy.content_hash must be sha256:<64 hex>, got {hash_value!r}"
         )
@@ -513,7 +520,7 @@ def _parse_chain_link(value: Any, index: int) -> BundleChainLink:
     if not source:
         raise BundleError(f"{label}.source must not be empty")
     hash_value = _required_str(value, "content_hash", label)
-    if not _is_content_hash(hash_value):
+    if not is_content_hash(hash_value):
         raise BundleError(
             f"{label}.content_hash must be sha256:<64 hex>, got {hash_value!r}"
         )
@@ -633,7 +640,7 @@ def verify_bundle(
             REASON_SUBJECT_DIGEST_MISMATCH,
             f"predicate.resolved has no canonical form: {exc}",
         )
-    recomputed = _digest(canonical)
+    recomputed = digest(canonical)
     if recomputed != predicate.policy.content_hash:
         return BundleVerifyResult.fail(
             REASON_SUBJECT_DIGEST_MISMATCH,
@@ -780,11 +787,6 @@ def _policy_parts(policy: Any) -> tuple[Any, Sequence[Any]]:
 # --------------------------------------------------------------------------- #
 
 
-def _digest(canonical: str) -> str:
-    """``sha256:`` + 64 lowercase hex over the canonical UTF-8 bytes."""
-    return HASH_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def _coerce_now(value: datetime | str) -> datetime:
     if isinstance(value, datetime):
         return value
@@ -800,10 +802,6 @@ def _is_array(value: Any) -> bool:
 
 def _is_hex_digest(value: str) -> bool:
     return len(value) == 64 and all(c in "0123456789abcdef" for c in value)
-
-
-def _is_content_hash(value: str) -> bool:
-    return value.startswith(HASH_PREFIX) and _is_hex_digest(value[len(HASH_PREFIX):])
 
 
 def _reject_unknown(obj: Mapping[Any, Any], allowed: frozenset[str], label: str) -> None:

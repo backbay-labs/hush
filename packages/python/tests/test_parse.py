@@ -1,12 +1,13 @@
 import time
 
+import pytest
+
 from hushspec import (
     DefaultAction,
     DetectionExtension,
     Extensions,
     GovernanceMetadata,
     HushSpec,
-    MergeStrategy,
     PatchIntegrityRule,
     PostureExtension,
     PostureState,
@@ -49,11 +50,8 @@ name: test
 hushspec: "0.1.0"
 unknown_field: true
 """
-        try:
+        with pytest.raises(ValueError, match="unknown field `unknown_field`"):
             parse_or_raise(yaml)
-            assert False, "Expected ValueError"
-        except ValueError as e:
-            assert "unknown field `unknown_field`" in str(e)
 
 
 class TestParseWithRules:
@@ -292,10 +290,10 @@ rules:
         assert "max_imbalance_ratio must be > 0" in err
 
     def test_validate_imbalance_ratio_nan_rejected(self):
-        # YAML `.nan` fails every `<= 0` / `> 0` bounds check (NaN comparisons
-        # are always false), so without an explicit isfinite check this used
-        # to pass validation and then make `require_balance` fail OPEN
-        # (`ratio > NaN` is also always false).
+        # YAML `.nan` passes every `<= 0` / `> 0` bounds check (NaN
+        # comparisons are always false), so a bounds check alone would admit
+        # it and then make `require_balance` fail open (`ratio > NaN` is also
+        # always false). An explicit isfinite check is what rejects it.
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -308,9 +306,9 @@ rules:
         assert "finite" in err
 
     def test_validate_imbalance_ratio_infinity_rejected(self):
-        # +Infinity is a distinct silent-pass bug from NaN: this field has no
-        # upper bound (only `min_exclusive=0`), and `Infinity <= 0` is False,
-        # so +Infinity used to slip through validation entirely.
+        # +Infinity passes for a different reason than NaN: the field has no
+        # upper bound (only `min_exclusive=0`) and `Infinity <= 0` is False,
+        # so only the isfinite check refuses it.
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -460,8 +458,8 @@ hushspec: "0.1.0"
         assert merged.name == "base-name"
 
     def test_merge_metadata_child_over_parent(self):
-        # S1: metadata must merge child-over-parent like every other field
-        # (it was previously dropped from the merged result entirely).
+        # Metadata merges child-over-parent like every other field
+        # (core spec 2.3).
         base = parse_or_raise("""
 hushspec: "0.1.0"
 name: base
@@ -532,14 +530,12 @@ rules:
 
 
 
-# Phase-gated guards: browser_automation / code_execution raw validation
+# browser_automation / code_execution raw validation
 #
-# raw_validate.py previously had no validator for these two rule blocks (only
-# RULE_KEYS listed them as known top-level keys), so malformed content --
-# wrong-typed fields, out-of-range bounds, unsafe regex in
-# extra_credential_patterns -- sailed through parse()'s pre-check and landed
-# untype-checked in the dataclass via from_dict(). These mirror the checks
-# already applied to every other rule block.
+# Both rule blocks get the same pre-decode treatment as every other block:
+# wrong-typed fields, out-of-range bounds and unsafe regex in
+# extra_credential_patterns are refused by parse()'s pre-check rather than
+# reaching the dataclass unchecked via from_dict().
 
 
 class TestBrowserAutomationValidation:
@@ -680,12 +676,11 @@ rules:
 
 
 
-# D11: posture transition duration must be ASCII-digit only
+# A posture transition duration is ASCII digits only.
 #
-# `^\d+[smhd]$` used Python's Unicode-aware \d, so a fullwidth or
-# Arabic-indic digit run (e.g. "４s", "٤s") was wrongly accepted as a valid
-# duration -- TS (JS \d is ASCII-only) and Go (RE2 \d is ASCII-only by
-# default) already rejected these. [0-9] makes Python agree.
+# Python's `\d` is Unicode-aware, so `^\d+[smhd]$` would accept a fullwidth or
+# Arabic-indic digit run (e.g. "４s", "٤s") as a well-formed duration. The
+# pattern spells the digit class `[0-9]`, so only ASCII digits are accepted.
 
 
 class TestDurationAsciiOnly:
@@ -768,19 +763,19 @@ extensions:
         assert any("must match" in str(e) for e in result.errors)
 
 
-# YAML loader robustness (parity with the Rust/TS/Go SDKs)
+# YAML loader robustness
 #
-# PyYAML's `safe_load` is more permissive than the YAML parsers behind the
-# other three SDKs in three ways that a fail-closed parser must not tolerate:
-# it silently accepts duplicate mapping keys (last-wins), has no alias/anchor
-# expansion cap (a "billion laughs" bomb blows up our post-parse tree walks),
-# and lets deeply nested flow YAML surface an uncaught RecursionError instead
-# of a clean parse error. `parse()` now hardens all three.
+# PyYAML's `safe_load` is more permissive than the HushSpec YAML profile
+# (core spec 2.4) in three ways a fail-closed parser must not tolerate: it
+# silently accepts duplicate mapping keys (last-wins), has no alias/anchor
+# expansion cap (a "billion laughs" bomb would blow up the post-parse tree
+# walks), and lets deeply nested flow YAML surface an uncaught RecursionError
+# instead of a clean parse error. `parse()` closes all three.
 
 
 class TestYamlRobustness:
     def test_rejects_duplicate_top_level_keys(self):
-        # PyYAML would keep the last value; Rust/TS/Go reject duplicates.
+        # PyYAML would keep the last value; the profile rejects duplicates.
         ok, err = parse('hushspec: "0.1.0"\nname: a\nname: b\n')
         assert ok is False
         assert isinstance(err, str)
@@ -831,7 +826,7 @@ rules:
         assert isinstance(err, str)
 
     def test_anchors_are_rejected_by_the_yaml_profile(self):
-        # D17 (core 2.4): anchors are outside the HushSpec YAML profile, even
+        # Core spec 2.4: anchors are outside the HushSpec YAML profile, even
         # in a small non-malicious document, so every SDK rejects them.
         yaml = """
 hushspec: "0.1.0"
@@ -849,7 +844,7 @@ rules:
 
 
 class TestYamlProfile:
-    """D17 (core 2.4): the accepted YAML dialect."""
+    """Core spec 2.4: the accepted YAML dialect."""
 
     def test_rejects_aliases(self):
         ok, err = parse(
@@ -948,7 +943,7 @@ class TestYamlProfile:
 
 
 class TestVersionAcceptance:
-    """D14 (core 2.2): an engine supporting minor X.Y accepts every X.Y.Z."""
+    """Core spec 2.2: an engine supporting minor X.Y accepts every X.Y.Z."""
 
     def test_accepts_every_patch_of_a_supported_minor(self):
         for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"):

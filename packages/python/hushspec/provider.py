@@ -24,7 +24,15 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol, Union, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    TypeVar,
+    Union,
+    runtime_checkable,
+)
 
 from hushspec.evaluate import check_panic_sentinel
 from hushspec.middleware import resolve_policy_resolution
@@ -168,6 +176,11 @@ class CallbackProvider:
         return f"CallbackProvider({self.source!r})"
 
 
+#: So ``with PolicyWatcher(...) as watcher`` types as a ``PolicyWatcher``
+#: from the one ``__enter__`` both subclasses share.
+_LoopT = TypeVar("_LoopT", bound="_ReloadLoop")
+
+
 class _ReloadLoop:
     """The shared body of the watcher and the poller.
 
@@ -204,6 +217,11 @@ class _ReloadLoop:
         self._on_panic = on_panic
         self._panic_reported = False
         self._lock = threading.RLock()
+        #: Serializes whole ticks. Reentrant so a tick may be driven from an
+        #: ``on_change`` callback without deadlocking; across threads it stops
+        #: two ticks from loading at once and the slower one from
+        #: overwriting the newer policy.
+        self._tick_lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._current: Optional[Resolution] = None
@@ -261,9 +279,16 @@ class _ReloadLoop:
         Never raises: a failed tick is reported through ``on_error`` and changes
         nothing, because an enforcement point that loses its policy on a bad
         edit is worse than one running a slightly stale good policy.
+
+        Ticks are serialized, so driving one by hand while the loop is running
+        cannot interleave two loads and let the slower one win.
         """
-        self._check_panic()
+        with self._tick_lock:
+            return self._tick()
+
+    def _tick(self) -> Optional[Resolution]:
         try:
+            self._check_panic()
             fingerprint = self._stat_fingerprint()
             with self._lock:
                 unchanged = (
@@ -317,15 +342,14 @@ class _ReloadLoop:
         if self._panic_sentinel is None:
             return
         active = check_panic_sentinel(self._panic_sentinel)
-        if active and not self._panic_reported:
-            self._panic_reported = True
-            if self._on_panic is not None:
-                try:
-                    self._on_panic()
-                except Exception as exc:  # noqa: BLE001
-                    self._report(exc)
-        elif not active:
-            self._panic_reported = False
+        with self._lock:
+            announce = active and not self._panic_reported
+            self._panic_reported = active
+        if announce and self._on_panic is not None:
+            try:
+                self._on_panic()
+            except Exception as exc:  # noqa: BLE001
+                self._report(exc)
 
     def _report(self, exc: Exception) -> None:
         with self._lock:
@@ -361,21 +385,45 @@ class _ReloadLoop:
         self._thread.start()
         return initial
 
-    def stop(self, timeout: Optional[float] = 5.0) -> None:
-        """Stop ticking. Safe to call more than once, and from any thread."""
+    def stop(self, timeout: Optional[float] = 5.0) -> bool:
+        """Stop ticking. Safe to call more than once, and from any thread.
+
+        Returns whether the loop thread is gone. A join that times out keeps
+        the thread reference rather than dropping it: forgetting a thread that
+        is still inside a tick would make :attr:`running` report ``False`` and
+        let a later :meth:`start` run a second loop alongside the first.
+        Calling this from inside a tick returns ``False`` -- the loop exits when
+        that tick returns, but a thread cannot join itself.
+        """
         self._stop.set()
         thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout)
-        self._thread = None
+        if thread is None:
+            return True
+        if thread is threading.current_thread():
+            return False
+        thread.join(timeout)
+        if thread.is_alive():
+            return False
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
+        return True
 
     def _run(self) -> None:
         # wait() returns True only when stop() set the event, so this both
         # sleeps between ticks and wakes immediately on shutdown.
         while not self._stop.wait(self._interval_s):
-            self.check_once()
+            try:
+                self.check_once()
+            except BaseException as exc:  # noqa: BLE001
+                # check_once() reports its own failures, so reaching here means
+                # something outside a tick's control failed. The loop must
+                # survive it: a dead reload thread silently freezes the policy.
+                if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                    raise
+                self._report(exc)
 
-    def __enter__(self) -> "_ReloadLoop":
+    def __enter__(self: _LoopT) -> _LoopT:
         self.start()
         return self
 
@@ -420,11 +468,6 @@ class PolicyWatcher(_ReloadLoop):
             on_panic=on_panic,
         )
 
-    def __enter__(self) -> "PolicyWatcher":
-        self.start()
-        return self
-
-
 class PolicyPoller(_ReloadLoop):
     """Reloads from any provider on a fixed interval.
 
@@ -435,6 +478,3 @@ class PolicyPoller(_ReloadLoop):
 
     _use_fingerprint = False
 
-    def __enter__(self) -> "PolicyPoller":
-        self.start()
-        return self

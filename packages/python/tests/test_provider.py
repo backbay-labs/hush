@@ -16,7 +16,6 @@ import pytest
 from hushspec.evaluate import (
     Decision,
     EvaluationAction,
-    deactivate_panic,
     is_panic_active,
 )
 from hushspec.middleware import HushGuard
@@ -145,7 +144,7 @@ class TestFileProvider:
         path = tmp_path / "policy.yaml"
         path.write_text("hushspec: '0.1.0'\nname: x\nnot_a_field: 1\n")
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="unknown field `not_a_field`"):
             FileProvider(path).load()
 
     def test_raises_on_a_missing_file(self, tmp_path: Path):
@@ -157,7 +156,10 @@ class TestFileProvider:
         # returning a policy nobody proved.
         provider = FileProvider(policy_file, ResolveOptions(require_signature=True))
 
-        with pytest.raises(ValueError):
+        # Specifically the signature refusal: a bare ValueError would also be
+        # raised by a document that simply failed to parse, which would let the
+        # test pass with require_signature dropped entirely.
+        with pytest.raises(ValueError, match="require_signature needs a keyring"):
             provider.load()
 
     def test_fingerprint_moves_with_the_file(self, policy_file: Path):
@@ -313,12 +315,6 @@ class TestPolicyWatcher:
 
 
 class TestPanicSentinel:
-    @pytest.fixture(autouse=True)
-    def _reset_panic(self):
-        deactivate_panic()
-        yield
-        deactivate_panic()
-
     def test_tick_activates_panic_when_the_sentinel_appears(
         self, tmp_path: Path, policy_file: Path
     ):
@@ -509,3 +505,27 @@ class TestGuardFromProvider:
         with pytest.raises(ValueError):
             guard.swap_resolution(bogus)
         assert guard.check(READ_FILE)
+
+
+class TestGuardLifecycle:
+    """A guard that owns a reload loop can be closed."""
+
+    def test_close_stops_the_watcher(self, policy_file: Path):
+        guard = HushGuard.from_provider(FileProvider(policy_file), watch=True)
+        assert guard.watcher is not None
+        assert guard.watcher.running is True
+
+        guard.close()
+        assert guard.watcher.running is False
+
+    def test_close_is_safe_without_a_watcher(self):
+        guard = HushGuard.from_yaml(ALLOW_POLICY)
+        assert guard.watcher is None
+        guard.close()
+        guard.close()
+
+    def test_the_guard_is_a_context_manager(self, policy_file: Path):
+        with HushGuard.from_provider(FileProvider(policy_file), watch=True) as guard:
+            watcher = guard.watcher
+            assert watcher.running is True
+        assert watcher.running is False

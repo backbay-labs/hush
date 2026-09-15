@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from hushspec import is_safe_regex, parse, parse_or_raise, validate
+from hushspec import is_safe_regex, parse, validate
 
 
 
@@ -110,15 +110,13 @@ class TestIsSafeRegex:
 
 
 
-# S3: escape/character-class-aware portability scanner
+# Escape- and character-class-aware portability scanner
 #
-# The old `_RE2_DISALLOWED` raw-substring checks for possessive quantifiers
-# and \Z/\z anchors over-rejected patterns where the possessive-looking
-# characters sit inside a character class, or where \Z/\z is actually an
-# escaped backslash followed by a literal Z/z. `_disallowed_regex_feature`
-# (ported from Rust's `disallowed_regex_feature` in
-# crates/hushspec/src/validate.rs) is escape-aware and character-class-aware
-# and must ACCEPT/REJECT the identical shared list across all four SDKs.
+# A raw-substring scan for possessive quantifiers and \Z/\z anchors
+# over-rejects patterns where the possessive-looking characters sit inside a
+# character class, or where \Z/\z is an escaped backslash followed by a
+# literal Z/z. `_disallowed_regex_feature` tracks escapes and character
+# classes instead, and must accept and reject exactly this list in every SDK.
 
 
 class TestRegexPortabilityScanner:
@@ -135,8 +133,9 @@ class TestRegexPortabilityScanner:
         "[^]",
     ]
 
-    # Previously (wrongly) rejected by the raw-substring check; must now be
-    # accepted, same as Rust/Go already did.
+    # A raw-substring check rejects these wrongly: the possessive-looking
+    # characters sit inside a character class, and \\Z/\\z is an escaped
+    # backslash followed by a literal letter.
     ACCEPT = [
         "[*+]",
         "[?+]",

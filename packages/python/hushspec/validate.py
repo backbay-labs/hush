@@ -14,8 +14,9 @@ from hushspec.error_codes import (
     ERROR_INVALID_REGEX,
     ERROR_UNSUPPORTED_VERSION,
 )
-from hushspec.extensions import DetectionLevel, TransitionTrigger
+from hushspec.extensions import DetectionLevel, Extensions, TransitionTrigger
 from hushspec.regex_profile import compile_profile_regex
+from hushspec.rules import Rules
 from hushspec.schema import Classification, HushSpec, LifecycleState
 from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported
 
@@ -40,8 +41,7 @@ _DETECTION_LEVEL_ORDER = {
 #: Which registry code each validation check reports. Every check not listed
 #: here is a core Section 7 / extension-module constraint violation, which is
 #: what E004 covers, so only the four the registry names separately need an
-#: entry. Mirrors the Rust reference's mapping, which names the same four
-#: ValidationError variants and folds the rest into E004.
+#: entry.
 _REGISTRY_CODES: dict[str, str] = {
     "unsupported_version": ERROR_UNSUPPORTED_VERSION,
     "duplicate_pattern_name": ERROR_DUPLICATE_PATTERN_NAME,
@@ -126,11 +126,7 @@ def validate(spec: HushSpec) -> ValidationResult:
     return ValidationResult(errors=errors, warnings=warnings)
 
 
-def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
-    from hushspec.rules import Rules
-
-    assert isinstance(rules, Rules)
-
+def _validate_rules(rules: Rules, errors: list[ValidationError]) -> None:
     if rules.secret_patterns is not None:
         seen: set[str] = set()
         for pattern in rules.secret_patterns.patterns:
@@ -249,11 +245,9 @@ def validate_conditions(rules: object, errors: list[ValidationError]) -> None:
             errors.append(ValidationError("invalid_condition", message))
 
 
-def _validate_posture(ext: object, errors: list[ValidationError], warnings: list[str]) -> None:
-    from hushspec.extensions import Extensions
-
-    assert isinstance(ext, Extensions)
-
+def _validate_posture(
+    ext: Extensions, errors: list[ValidationError], warnings: list[str]
+) -> None:
     if ext.posture is None:
         return
 
@@ -345,11 +339,7 @@ def _validate_posture(ext: object, errors: list[ValidationError], warnings: list
                 )
 
 
-def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
-    from hushspec.extensions import Extensions
-
-    assert isinstance(ext, Extensions)
-
+def _validate_origins(ext: Extensions, errors: list[ValidationError]) -> None:
     if ext.origins is None:
         return
 
@@ -399,12 +389,8 @@ def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
 
 
 def _validate_detection(
-    ext: object, errors: list[ValidationError], warnings: list[str]
+    ext: Extensions, errors: list[ValidationError], warnings: list[str]
 ) -> None:
-    from hushspec.extensions import Extensions
-
-    assert isinstance(ext, Extensions)
-
     if ext.detection is None:
         return
 
@@ -521,8 +507,8 @@ _RE2_DISALLOWED = re.compile(
 )
 
 
-# Shared rejection message for possessive quantifiers. Must stay identical to
-# the copy in raw_validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+# Shared rejection message for possessive quantifiers. The wording is part of
+# the contract, so it must read the same in every SDK.
 _POSSESSIVE_MESSAGE = (
     "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
     "across the HushSpec SDK regex engines"
@@ -544,8 +530,10 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
       * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
         the others reject them).
 
-    Must stay byte-identical to the Rust, TypeScript, and Go implementations,
-    and to the copy of this function in raw_validate.py.
+    The accepted set is normative: every SDK must reject exactly these
+    constructs. ``hushspec.raw_validate`` runs this same function, so a
+    pattern refused at parse time and one refused at validate time cannot
+    disagree.
     """
     chars = list(pattern)
     n = len(chars)
@@ -640,8 +628,8 @@ def _has_nested_quantifier(pattern: str) -> bool:
     escaped parens and character-class contents -- and returns ``True`` when a
     group whose body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) is
     itself immediately followed by an unbounded quantifier. Bounded quantifiers
-    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. Must stay identical to the
-    Rust, TypeScript, and Go implementations.
+    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. The over-approximation is
+    normative: every SDK must flag exactly the same patterns.
     """
     chars = list(pattern)
     n = len(chars)
@@ -796,8 +784,14 @@ def _is_iso_date(value: str) -> bool:
 
 
 def _compare_changelog_versions(left: str, right: str) -> int:
-    """Numeric when both versions are plain integers, lexicographic otherwise."""
-    if left.strip().isdigit() and right.strip().isdigit():
+    """Numeric when both versions are plain integers, lexicographic otherwise.
+
+    ``str.isdigit`` is not the test: it holds for superscripts and other
+    Unicode digits that ``int()`` either refuses outright or reads with a
+    value no other engine agrees on. Only an ASCII digit run compares
+    numerically.
+    """
+    if _is_ascii_digits(left.strip()) and _is_ascii_digits(right.strip()):
         a, b = int(left), int(right)
         return 0 if a == b else (-1 if a < b else 1)
     return 0 if left == right else (-1 if left < right else 1)

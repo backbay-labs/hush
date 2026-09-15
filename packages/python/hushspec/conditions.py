@@ -25,7 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
 from enum import Enum
-from typing import Any, Optional, Sequence
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from hushspec.generated_contract import (
@@ -34,6 +35,9 @@ from hushspec.generated_contract import (
     TIME_WINDOW_KEYS,
 )
 from hushspec.schema import HushSpec
+
+if TYPE_CHECKING:
+    from hushspec.evaluate import EvaluationResult
 
 #: Maximum allowed nesting depth for compound conditions (core spec 3.13).
 MAX_NESTING_DEPTH = 8
@@ -88,11 +92,10 @@ class RateCondition:
     def from_dict(cls, data: Any) -> RateCondition:
         """Decode a ``when.rate`` mapping.
 
-        Shape violations are *parse* errors (core spec 3.13; the Rust
-        reference reports them from serde, code E001), so every one of them
-        raises rather than being collected as a constraint violation. The
-        wording mirrors serde's so a shared fixture's ``message_contains``
-        holds in every SDK.
+        Shape violations are *parse* errors (core spec 3.13, registry code
+        E001), so every one of them raises rather than being collected as a
+        constraint violation. The wording is part of the contract: a shared
+        fixture's ``message_contains`` must hold in every SDK.
         """
         if not isinstance(data, dict):
             raise ValueError("when.rate: invalid type, expected an object")
@@ -110,8 +113,8 @@ class RateCondition:
             )
 
         threshold = data["threshold"]
-        # `bool` is an `int` subclass in Python but never a threshold; Rust's
-        # u64 rejects both a boolean and a negative integer at parse time.
+        # `bool` is an `int` subclass in Python but is never a threshold; a
+        # boolean and a negative integer are both refused at parse time.
         if isinstance(threshold, bool) or not isinstance(threshold, int):
             raise ValueError(
                 f"when.rate.threshold: invalid type: {threshold!r}, "
@@ -625,9 +628,8 @@ def _parse_strict_uint(s: str) -> Optional[int]:
     """Parse *s* as a base-10 non-negative integer of pure ASCII digits.
 
     Unlike ``int()``, this rejects underscores, surrounding whitespace, and
-    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``),
-    matching Rust's and Go's strict numeric-string parsing
-    (``str::parse::<u8>`` / ``strconv.Atoi``).
+    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``), so
+    a malformed numeric field is refused rather than silently coerced.
     """
     if s == "" or not all("0" <= ch <= "9" for ch in s):
         return None
@@ -693,7 +695,15 @@ _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {
 }
 
 
+@lru_cache(maxsize=256)
 def _resolve_timezone(tz: str) -> Optional[tzinfo]:
+    """The ``tzinfo`` for an IANA name or a fixed ``+HH:MM`` offset.
+
+    Cached: this runs once per conditional rule block per action, and the
+    names zoneinfo cannot resolve (fixed offsets, the short aliases below)
+    each pay a tzpath walk and an exception before reaching the fallback.
+    Both branches return immutable objects, so sharing one is safe.
+    """
     if not isinstance(tz, str):
         return None
     try:
@@ -719,17 +729,23 @@ def _resolve_timezone(tz: str) -> Optional[tzinfo]:
 
 
 def _parse_offset_value(s: str) -> Optional[int]:
+    """Minutes for a ``+HH``/``+HH:MM`` offset body, or ``None``.
+
+    The digits are parsed strictly. A zone that cannot be resolved leaves
+    the rule block active (core spec 3.13), so tolerating whitespace,
+    underscores or non-ASCII digits here would resolve a zone another
+    engine refuses and could switch a control off.
+    """
     if ":" in s:
         hours_str, minutes_str = s.split(":", 1)
     else:
         hours_str = s
         minutes_str = "0"
-    try:
-        hours = int(hours_str)
-        minutes = int(minutes_str)
-    except ValueError:
+    hours = _parse_strict_uint(hours_str)
+    minutes = _parse_strict_uint(minutes_str)
+    if hours is None or minutes is None:
         return None
-    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+    if hours > 23 or minutes > 59:
         return None
     return hours * 60 + minutes
 
@@ -772,14 +788,13 @@ def _resolve_context_value(path: str, context: RuntimeContext) -> Any:
         return None
 
 
-# f64::EPSILON: the exact tolerance Rust's `match_value` uses when comparing
-# a float-shaped `expected` against `actual` (see `_values_equal` below).
+# One double-precision epsilon: the tolerance a float-shaped `expected` is
+# compared against `actual` with (see `_values_equal` below).
 _F64_EPSILON = 2.220446049250313e-16
 
 
 def _values_equal(actual: Any, expected: Any) -> bool:
-    """Leaf-level scalar equality, byte-identical to Rust's `values_equal`
-    (crates/hushspec/src/conditions.rs).
+    """Leaf-level scalar equality for a ``when.context`` predicate.
 
     ``expected`` is always a non-array scalar (str/bool/int/float) here --
     array unwrapping happens one level up, in ``_matches_scalar_or_membership``.
@@ -790,25 +805,22 @@ def _values_equal(actual: Any, expected: Any) -> bool:
         return isinstance(actual, str) and actual == expected
 
     if isinstance(expected, bool):
-        # bool is not numeric: Rust's `Value::Bool` only compares equal to
-        # another `Value::Bool` via `as_bool()`, never to a `Value::Number`.
+        # A boolean is not numeric: it compares equal only to another
+        # boolean, never to a number.
         return isinstance(actual, bool) and actual == expected
 
     if isinstance(expected, int):
-        # Integer-shaped expected, mirroring `serde_json::Number::as_i64`:
-        # actual must also be integer-shaped (not bool, not float) with an
-        # equal value. A float actual (even one with an integral value, e.g.
-        # 5.0) does NOT match, exactly as Rust's `as_i64()` returns `None`
-        # for a float-shaped `serde_json::Number`.
+        # Integer-shaped expected: actual must also be integer-shaped (not
+        # bool, not float) with an equal value. A float actual does not match
+        # even when its value is integral (e.g. 5.0) -- JSON number shape,
+        # not numeric value, decides the comparison.
         if isinstance(actual, bool) or not isinstance(actual, int):
             return False
         return actual == expected
 
     if isinstance(expected, float):
-        # Float-shaped expected, mirroring `serde_json::Number::as_f64`:
-        # actual may be integer- or float-shaped (both convert to f64 via
-        # `as_f64()`), compared with the same `f64::EPSILON` tolerance Rust
-        # uses.
+        # Float-shaped expected: actual may be integer- or float-shaped
+        # (both widen to a double), compared within one epsilon.
         if isinstance(actual, bool) or not isinstance(actual, (int, float)):
             return False
         return abs(float(actual) - float(expected)) < _F64_EPSILON
@@ -817,16 +829,16 @@ def _values_equal(actual: Any, expected: Any) -> bool:
 
 
 def _matches_scalar_or_membership(actual: Any, expected: Any) -> bool:
-    """Byte-identical to Rust's `matches_scalar_or_membership`: if ``actual``
-    is an array, match iff any element equals ``expected``; otherwise compare
-    the two scalars directly."""
+    """Scalar-or-membership comparison: if ``actual`` is an array, match iff
+    any element equals ``expected``; otherwise compare the two scalars
+    directly."""
     if isinstance(actual, list):
         return any(_values_equal(item, expected) for item in actual)
     return _values_equal(actual, expected)
 
 
 def _match_value(actual: Any, expected: Any) -> bool:
-    """Byte-identical to Rust's `match_value`.
+    """Match a ``when.context`` value against the value the rule expects.
 
     Matching rules:
     - Missing context field (``actual is None``) -> fail-closed ``False``.
@@ -853,10 +865,10 @@ def _match_value(actual: Any, expected: Any) -> bool:
 
 def evaluate_with_context(
     spec: HushSpec,
-    action: "Any",
+    action: Any,
     context: RuntimeContext,
     conditions: dict[str, Condition],
-):
+) -> "EvaluationResult":
     """Evaluate with an explicit runtime context and out-of-band conditions.
 
     The explicit *context* replaces ``action.context``; each entry in

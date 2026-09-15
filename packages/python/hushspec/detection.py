@@ -12,7 +12,9 @@ from hushspec.evaluate import (
     EvaluationAction,
     EvaluationResult,
     TracedEvaluation,
+    compiled_policy,
 )
+from hushspec.evaluate import _scan_prefix
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import DetectionLevel
 from hushspec.regex_profile import compile_profile_regex
@@ -508,28 +510,25 @@ class RegexExfiltrationDetector(Detector):
         self._patterns: list[_DetectionPattern] = [
             _DetectionPattern(
                 name="ssn",
-                # ASCII non-digit boundaries rather than \b: \b is a Unicode
-                # word boundary in Python's re engine, so "café123-45-6789"
-                # (a non-ASCII, non-digit char abutting the run) would fail
-                # to match while it matches on RE2 (Go/Rust) and JS's \b
-                # (both ASCII-only). Explicit (?:^|[^0-9])...(?:[^0-9]|$)
-                # boundaries make ASCII-vs-Unicode word-boundary semantics
-                # irrelevant and keep all four SDKs byte-identical. Must stay
-                # lookaround-free (RE2 has none) -- see is_safe_regex.
+                # ASCII non-digit boundaries rather than \b, which is a
+                # Unicode word boundary in some regex engines and ASCII-only
+                # in others: a non-ASCII char abutting the run (e.g.
+                # "café123-45-6789") would then match in some engines and not
+                # in others. Explicit (?:^|[^0-9])...(?:[^0-9]|$) boundaries
+                # make word-boundary semantics irrelevant. The pattern must
+                # stay lookaround-free -- see is_safe_regex.
                 #
                 # The body uses [0-9] rather than \d for the same reason: \d
-                # is Unicode-aware in Python's re (matching fullwidth/Arabic-
-                # indic/etc. digits), while Go RE2 and JS RegExp's \d are
-                # ASCII-only. [0-9] keeps all four SDKs agreeing that a
-                # Unicode-digit run never matches "ssn".
+                # is Unicode-aware in some engines, so a fullwidth or
+                # Arabic-indic digit run would score as an SSN. It is not one.
                 regex=re.compile(r"(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)"),
                 weight=0.8,
                 category=DetectionCategory.DATA_EXFILTRATION,
             ),
             _DetectionPattern(
                 name="credit_card",
-                # Same ASCII-boundary fix as "ssn" above, and for the same
-                # cross-engine \b-divergence reason.
+                # Explicit ASCII boundaries, as for "ssn" above and for the
+                # same reason.
                 regex=re.compile(
                     r"(?:^|[^0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?:[^0-9]|$)"
                 ),
@@ -538,12 +537,10 @@ class RegexExfiltrationDetector(Detector):
             ),
             _DetectionPattern(
                 name="email_address",
-                # Same ASCII-boundary fix as "ssn"/"credit_card" above: \b is
-                # a Unicode word boundary in Python's re, so a non-ASCII
-                # letter abutting the address (e.g. "café user@example.com"
-                # with no space) could disagree with Go RE2 / JS's ASCII-only
-                # \b. Explicit (?:^|[^local-part-chars])...(?:[^domain-chars]
-                # |$) boundaries make all four SDKs byte-identical.
+                # Explicit ASCII boundaries, as for "ssn"/"credit_card"
+                # above: under a Unicode \b, a non-ASCII letter abutting the
+                # address (e.g. "café user@example.com" with no space) forms
+                # no boundary, so the match would depend on the engine.
                 regex=re.compile(
                     r"(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"
                     r"\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)"
@@ -716,26 +713,14 @@ _DEFAULT_JAILBREAK_BLOCK_THRESHOLD = 80
 # process and every evaluation reads them from there rather than recompiling
 # their patterns.
 
-#: Detection escalation ordering: detection can only raise a decision, never
-#: weaken it. Kept separate from the rule-block ranks, which start at 1.
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 0,
-    Decision.WARN: 1,
-    Decision.DENY: 2,
-}
-
-
 def _truncate_to_bytes(content: str, max_bytes: int) -> str:
     """Truncate *content* to at most *max_bytes* UTF-8 bytes.
 
-    Slices on the UTF-8 byte boundary and discards a possibly-incomplete
-    trailing multi-byte sequence (rather than raising), so truncation always
-    yields a valid ``str``.
+    The same operation the rule-block scanners apply to their own byte caps:
+    the cut is backed off to a character boundary, so a truncated prefix is
+    always a valid ``str``.
     """
-    encoded = content.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return content
-    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+    return _scan_prefix(content, max_bytes)
 
 
 def evaluate_with_detection(
@@ -783,18 +768,3 @@ def evaluate_with_detection_traced(
         action, context, conditions
     )
 
-
-_compiled_policy = None
-
-
-def compiled_policy(spec: HushSpec):
-    """The cached compiled form of *spec* (see :mod:`hushspec.compiled`).
-
-    Imported lazily: :mod:`hushspec.compiled` builds on this module.
-    """
-    global _compiled_policy
-    if _compiled_policy is None:
-        from hushspec.compiled import compiled_for_spec
-
-        _compiled_policy = compiled_for_spec
-    return _compiled_policy(spec)

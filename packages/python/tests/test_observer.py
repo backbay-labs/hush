@@ -1,9 +1,7 @@
 import io
 import json
 
-import pytest
-
-from hushspec.evaluate import Decision, EvaluationAction, evaluate
+from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.middleware import HushGuard
 from hushspec.observer import (
     ConsoleObserver,
@@ -70,7 +68,7 @@ class TestObservableEvaluator:
         assert event["type"] == "evaluation.completed"
         assert event["action"] is action
         assert event["result"] is result
-        assert event["duration_us"] >= 0
+        assert isinstance(event["duration_us"], int)
         assert "T" in event["timestamp"]
 
     def test_emits_correct_decision_for_denied_tool(self):
@@ -375,16 +373,16 @@ class TestHushGuardObserverIntegration:
 
 
 class TestExports:
-    def test_observer_types_importable_from_top_level(self):
-        from hushspec import (
-            EvaluationObserver,
-            ObservableEvaluator,
-            JsonLineObserver,
-            ConsoleObserver,
-            MetricsCollector,
-        )
-        assert ObservableEvaluator is not None
-        assert EvaluationObserver is not None
-        assert JsonLineObserver is not None
-        assert ConsoleObserver is not None
-        assert MetricsCollector is not None
+    def test_the_top_level_names_are_the_observer_module_s_own(self):
+        import hushspec
+        from hushspec import observer as observer_module
+
+        for name in (
+            "EvaluationObserver",
+            "ObservableEvaluator",
+            "JsonLineObserver",
+            "ConsoleObserver",
+            "MetricsCollector",
+        ):
+            assert name in hushspec.__all__
+            assert getattr(hushspec, name) is getattr(observer_module, name)

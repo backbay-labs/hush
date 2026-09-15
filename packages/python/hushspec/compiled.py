@@ -183,12 +183,6 @@ _OUTCOME_OF: dict[Decision, RuleOutcome] = {
     Decision.DENY: RuleOutcome.DENY,
 }
 
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 1,
-    Decision.WARN: 2,
-    Decision.DENY: 3,
-}
-
 _SEVERITY_RANK: dict[Severity, int] = {
     Severity.WARN: 1,
     Severity.ERROR: 2,
@@ -1027,7 +1021,8 @@ class _ComputerUseStep(_Step):
             if rule.mode == ComputerUseMode.OBSERVE
             else None
         )
-        # guardrail and fail_closed have identical reference semantics (D9).
+        # `guardrail` and its alias `fail_closed` both deny an unlisted
+        # computer-use action (core spec 3.8).
         self._deny = _deny(
             "rules.computer_use.mode", "unlisted computer-use action is denied"
         )
@@ -1644,7 +1639,7 @@ class CompiledPolicy:
             signal = posture.signal
 
         if signal is not None:
-            # D18 (posture spec 5.3): a transition whose `from` names the
+            # Posture spec 5.3: a transition whose `from` names the
             # current state outranks one whose `from` is `"*"`; among equals,
             # document order. Two passes rather than one scan with a
             # best-so-far, so the named pass short-circuits on its first hit.
@@ -2020,7 +2015,10 @@ class CompiledPolicy:
             detector = default_detector_registry().detector_for(
                 DetectionCategory.JAILBREAK
             )
-            assert detector is not None  # the built-in registry always has one
+            if detector is None:
+                raise CompileError(
+                    "the built-in detector registry has no jailbreak detector"
+                )
             result = detector.detect(_truncate_to_bytes(content, max_bytes))
             score = result.score
             percent = score * 100.0

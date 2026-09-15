@@ -1,6 +1,6 @@
 """HushSpec specification version support.
 
-Version acceptance follows core spec 2.2 (D14): an engine that supports a
+Version acceptance follows core spec 2.2: an engine that supports a
 minor version ``X.Y`` accepts every ``X.Y.Z`` document, because patch versions
 carry only clarifications and errata. This engine implements the 0.2.0
 semantics and also accepts 0.1.x documents (evaluated under 0.2 semantics).
