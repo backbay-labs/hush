@@ -1,0 +1,12 @@
+{
+  "keyring_version": "0.2",
+  "keys": [
+    {
+      "key_id": "sha256:1187bb3ca0fd60b25cb90390812fb3a90823466b499e9c29effcc9f3c4ce6142",
+      "algorithm": "ed25519",
+      "public_key": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAoe42nUGYC2vRO56gfvX8YOl50EwsnCsN5tBwtwdULpo=\n-----END PUBLIC KEY-----\n",
+      "name": "retired",
+      "not_after": "2026-09-15T00:00:00.000Z"
+    }
+  ]
+}

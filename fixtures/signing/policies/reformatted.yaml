@@ -1,0 +1,12 @@
+# Same policy as basic.yaml, reformatted: key order, quoting and spacing differ.
+rules:
+  shell_commands:
+    forbidden_patterns: ["mkfs"]
+  egress:
+    allow:
+      - "api.example.com"
+metadata:
+  author: security@example.com
+  policy_version: 4
+name: "signed-basic"
+hushspec: "0.2.0"
