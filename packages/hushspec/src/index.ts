@@ -124,6 +124,31 @@ export {
   type LoadReasonCode,
   type ResolveReasonCode,
 } from './resolve.js';
+export {
+  verifyBundle,
+  parseBundle,
+  bundleStatement,
+  pae,
+  BundleError,
+  BUNDLE_REASONS,
+  BUNDLE_VERSION,
+  BUNDLE_PAYLOAD_TYPE,
+  BUNDLE_STATEMENT_TYPE,
+  BUNDLE_PREDICATE_TYPE,
+  type DsseEnvelope,
+  type DsseSignature,
+  type BundleStatement,
+  type BundleSubject,
+  type SubjectDigest,
+  type BundleResolver,
+  type BundlePolicyIdentity,
+  type PolicyBundlePredicate,
+  type BundleReason,
+  type BundleVerified,
+  type BundleVerificationFailure,
+  type BundleVerificationOutcome,
+  type VerifyBundleOptions,
+} from './bundle.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export {
   createHttpLoader,
