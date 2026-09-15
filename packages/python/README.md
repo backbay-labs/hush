@@ -117,6 +117,58 @@ extends: "./base.yaml#sha256:9f2c...<64 hex>"
 A pin that no longer matches is always fatal, signatures configured or not.
 `resolve_with_options()` exposes the same machinery without a guard.
 
+### Policy providers and hot reload
+
+A `PolicyProvider` is where a guard's policy comes from: `load()` returns a
+`Resolution` -- the resolved document *and* the evidence gathered resolving it
+-- so the chain hashes and signature outcome the provider proved are what every
+receipt carries. `FileProvider` reads a file and resolves it against its own
+directory, applying the `ResolveOptions` it was built with (including
+`require_signature`) to **every** reload.
+
+```python
+from hushspec import FileProvider, HushGuard, ResolveOptions
+
+provider = FileProvider("./policy.yaml", ResolveOptions(require_signature=True,
+                                                        keyring=ring))
+guard = HushGuard.from_provider(provider, watch=True, interval_s=1.0,
+                                on_error=log.warning)
+...
+guard.watcher.stop()
+```
+
+`PolicyWatcher` stats the file each tick and reloads only when its bytes
+actually change; `PolicyPoller` reloads on a fixed interval from any provider
+(`CallbackProvider` wraps a callable for sources that are not files). Both run
+on a daemon thread, work as context managers, and expose `check_once()` for a
+single deterministic tick.
+
+Reload fails **safe**: a document that cannot be read, parsed, resolved,
+verified, or compiled leaves the policy already in force untouched and is
+reported through `on_error`, then retried on the next tick. Pass
+`panic_sentinel=".hushspec_panic"` to consult the kill switch on every tick
+(`h2h panic activate` writes that file).
+
+### Agent adapters
+
+`hushspec.adapters` maps a runtime's tool calls onto actions a policy can
+evaluate, so built-in tools are checked against the rules that actually protect
+the machine rather than as opaque tool calls:
+
+```python
+from hushspec.adapters import create_secure_tool_handler, map_claude_tool_to_action
+
+action = map_claude_tool_to_action(block)   # a Claude `tool_use` content block
+# bash -> shell_command, text editor -> file_read / file_write (with content),
+# computer -> computer_use, web_fetch -> egress on the host, mcp__s__t -> tool_call
+
+run_tool = create_secure_tool_handler(guard, my_handler)   # raises HushSpecDenied
+```
+
+Adapters for OpenAI (`map_openai_tool_call`), MCP (`map_mcp_tool_call`),
+LangChain (`hush_tool`) and CrewAI (`secure_tool`) ship alongside it. None of
+them import their SDK: blocks and calls are read structurally.
+
 ## Features
 
 ### Evaluation
@@ -201,6 +253,40 @@ sink = MultiSink([
     FilteredSink(stderr_sink, lambda r: r.decision == "deny"),
 ])
 ```
+
+### OTLP export
+
+`OtlpReceiptSink` ships receipts and policy events to any OpenTelemetry
+collector as OTLP/HTTP log records (`POST <endpoint>/v1/logs`), using only the
+standard library. The body of each record is the entry's *canonical* JSON --
+the exact bytes its hash covers -- so evidence stays verifiable after the trip,
+and the facts a dashboard filters on are lifted into attributes.
+
+```python
+from hushspec import HushGuard, OtlpReceiptSink
+
+sink = OtlpReceiptSink(
+    "http://localhost:4318",
+    headers={"x-api-key": "..."},
+    service_name="checkout-agent",
+)
+guard = HushGuard.from_file("policy.yaml", sink=sink)
+...
+sink.close()      # flushes what is queued
+```
+
+| Field | Value |
+|---|---|
+| `severityText` | `INFO` allow, `WARN` warn, `ERROR` deny (`INFO` for policy events) |
+| `body.stringValue` | canonical JSON of the receipt or policy event |
+| attributes | `hushspec.entry_type` (`receipt`/`policy_loaded`/`policy_swapped`), `hushspec.receipt_version`, `hushspec.decision`, `hushspec.action_type`, `hushspec.matched_rule`, `hushspec.policy.content_hash`, `hushspec.receipt_hash`, `hushspec.enforcement.mode`, `hushspec.enforcement.outcome` |
+| resource | `service.name`, `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |
+
+Export runs on a daemon thread: `send()` never blocks on I/O, batches are
+retried with backoff on network errors and `5xx`, and when the bounded queue
+(`max_queue`) fills, records are dropped, counted in `sink.dropped`, and
+reported through `on_error` -- telemetry is never allowed to stall enforcement.
+The same mapping ships in all four SDKs.
 
 ### Evidence chain
 
