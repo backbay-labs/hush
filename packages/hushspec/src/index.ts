@@ -190,6 +190,22 @@ export { mapClaudeToolToAction, createSecureToolHandler } from './adapters/anthr
 export { mapOpenAIToolCall, createOpenAIGuard } from './adapters/openai.js';
 export { mapMCPToolCall, extractDomain, createMCPGuard } from './adapters/mcp.js';
 export {
+  mapVercelToolCall,
+  createVercelGuard,
+  type VercelToolCall,
+  type VercelTool,
+  type VercelGuard,
+} from './adapters/vercel.js';
+export {
+  mapLangChainToolCall,
+  wrapLangChainTool,
+  createLangChainCallbackHandler,
+  createLangChainGuard,
+  type LangChainToolLike,
+  type LangChainSerializedTool,
+  type LangChainCallbackHandler,
+} from './adapters/langchain.js';
+export {
   HUSHSPEC_VERSION,
   SDK_NAME,
   SDK_VERSION,

@@ -248,15 +248,63 @@ const result = evaluateWithDetection(spec, action, registry, {
 
 ### Framework Adapters
 
-Prebuilt adapters for Claude, OpenAI, and MCP tool calls.
+Adapters map a framework's tool call onto an `EvaluationAction` so a policy
+sees file, shell and egress actions rather than an opaque tool name. All of
+them are structurally typed -- no adapter imports the framework it adapts, so
+none of them is a dependency.
+
+| Framework | Mapping | Enforcement |
+|---|---|---|
+| Anthropic | `mapClaudeToolToAction(name, input)` | `createSecureToolHandler(guard)` |
+| OpenAI | `mapOpenAIToolCall(name, args)` | `createOpenAIGuard(guard)` |
+| MCP | `mapMCPToolCall(name, args)` | `createMCPGuard(guard)` |
+| Vercel AI SDK | `mapVercelToolCall(toolCall)` | `createVercelGuard(guard).wrapTools(tools)` |
+| LangChain.js | `mapLangChainToolCall(name, input)` | `wrapLangChainTool(tool, guard)`, `createLangChainCallbackHandler(guard)` |
 
 ```typescript
 import { HushGuard, mapClaudeToolToAction } from '@hushspec/core';
 
 const guard = HushGuard.fromFile('./policy.yaml');
-const action = mapClaudeToolToAction(toolUseBlock);
-guard.enforce(action);
+guard.enforce(mapClaudeToolToAction(block.name, block.input));
 ```
+
+**Vercel AI SDK.** `wrapTools` returns the tool set with each tool's `execute`
+gated: the guard runs before the tool body, a denial throws `HushSpecDenied`
+so the model sees a tool error instead of a side effect, and a warn is put to
+the guard's `onWarn` handler. Tools without an `execute` (provider-executed)
+are returned untouched. Both the AI SDK 4 (`args`) and 5 (`input`) tool-call
+shapes are accepted.
+
+```typescript
+import { HushGuard, createVercelGuard } from '@hushspec/core';
+import { generateText } from 'ai';
+
+const { wrapTools } = createVercelGuard(HushGuard.fromFile('./policy.yaml'));
+
+await generateText({ model, prompt, tools: wrapTools({ readFile, writeFile, bash }) });
+```
+
+**LangChain.js.** Wrap one tool -- the result is a proxy, so the tool keeps its
+prototype, its fields and its `instanceof`, and `invoke`, `call` and a
+`DynamicTool`'s `func` are all gated -- or hand an agent executor the callback
+handler, which gates every tool it starts from `handleToolStart`.
+
+```typescript
+import { HushGuard, wrapLangChainTool, createLangChainCallbackHandler } from '@hushspec/core';
+
+const guard = HushGuard.fromFile('./policy.yaml');
+
+const tools = [readFileTool, bashTool].map(tool => wrapLangChainTool(tool, guard));
+
+await executor.invoke({ input }, { callbacks: [createLangChainCallbackHandler(guard)] });
+```
+
+Recognized tool names (`readFile`, `write_file`, `bash`, `fetch`, ...) map onto
+`file_read`, `file_write`, `shell_command` and `egress`; anything else is a
+`tool_call` against the tool's own name, with `args_size` recorded so a receipt
+carries the payload's size and not the payload. The adapters guess only where
+the mapping is unambiguous: a wrong action type would consult the wrong rule
+block.
 
 ### Hot Reload
 

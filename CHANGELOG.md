@@ -23,6 +23,14 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   batching by size or timer, retries with exponential backoff on 5xx/429/network errors,
   `flush()` and `close()`, and overflow that drops, counts (`sink.dropped`) and reports
   through `onError` rather than silently losing evidence.
+- Vercel AI SDK adapter: `mapVercelToolCall()` (AI SDK 4 `args` and 5 `input` shapes) and
+  `createVercelGuard(guard).wrapTools(tools)`, which gates each tool's `execute` -- deny
+  throws `HushSpecDenied` before the tool body runs, warn goes to the guard's `onWarn`.
+- LangChain.js adapter: `wrapLangChainTool()` (a proxy, so the tool keeps its prototype,
+  fields and `instanceof`, with `invoke`, `call` and a `DynamicTool`'s `func` gated) and
+  `createLangChainCallbackHandler()`, which gates every tool an executor starts.
+  Both adapters are structurally typed: neither imports the framework it adapts.
+
 ### Added (RFC 09 Wave 5, Integrations)
 
 - GitHub composite Action (`action.yml`, `backbay-labs/hush@<ref>`): installs `h2h` --
