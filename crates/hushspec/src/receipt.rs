@@ -170,7 +170,16 @@ fn build_policy_summary(spec: &HushSpec) -> PolicySummary {
     }
 }
 
-/// SHA-256 hex digest of the canonical JSON serialization. Deterministic.
+/// SHA-256 hex digest of serde's JSON serialization. Deterministic within an
+/// SDK, but **not** the portable policy identity: this is the HushSpec 0.1
+/// bare-hex form, computed over whatever shape this SDK's serializer happens
+/// to produce, so the four SDKs disagree on it (canonical spec appendix A).
+///
+/// The portable identity is [`crate::canonical::content_hash`], which projects
+/// the document against the published schemas, serializes it with RFC 8785,
+/// and returns the self-describing `sha256:<hex>` wire form. Receipts move to
+/// it in P2-04, together with the receipt v0.2 schema promotion; until then
+/// this function stays as-is so receipt fixtures keep their current digests.
 pub fn compute_policy_hash(spec: &HushSpec) -> String {
     let json = serde_json::to_string(spec).unwrap_or_default();
     let mut hasher = Sha256::new();

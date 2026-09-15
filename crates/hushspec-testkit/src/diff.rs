@@ -128,12 +128,41 @@ impl From<EvaluationResult> for NormalizedResult {
     }
 }
 
-/// One SDK's verdicts for a whole bundle, keyed "gNNNN/aNNNN".
+/// One SDK's verdicts for a whole bundle, keyed "gNNNN/aNNNN", plus the
+/// per-group policy identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SdkReport {
     pub sdk: String,
     pub results: BTreeMap<String, CaseVerdict>,
+    /// Per-group data that is not per-action, keyed by the bundle's group id.
+    ///
+    /// Defaulted rather than required so an older harness's report still
+    /// deserializes; its empty map then compares as a missing `content_hash`
+    /// against the oracle's populated one, which is exactly the divergence a
+    /// stale harness should produce rather than a silent pass.
+    #[serde(default)]
+    pub groups: BTreeMap<String, GroupReport>,
+}
+
+/// What an SDK reports about a bundle group's policy, as opposed to about one
+/// action evaluated against it.
+///
+/// **Harness contract.** Alongside `results`, a harness emits
+/// `"groups": {"<group id>": {"content_hash": "sha256:<64 hex>"}}`, one entry
+/// per group in the bundle, in the same pass that evaluates the group. The
+/// hash is its SDK's canonical content hash (spec/hushspec-canonical.md
+/// section 5) of the **resolved** policy it evaluated -- computed after
+/// `parse -> resolve`, before evaluation. A group whose policy the SDK
+/// rejected (parse, resolve, or validate) reports `content_hash: null`, or
+/// omits the key, which is the same thing: there is no policy to identify.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupReport {
+    /// `sha256:<64 lowercase hex>` over the canonical form of the resolved
+    /// policy, or `None` when the policy never resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 pub trait CaseEvaluator {
@@ -152,8 +181,21 @@ impl CaseEvaluator for InProcessEvaluator {
 
     fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
         let mut results = BTreeMap::new();
+        let mut groups = BTreeMap::new();
         for group in &bundle.groups {
             let parsed = parse_policy(&group.policy);
+            // The identity of the policy this group is actually evaluated
+            // under: the resolved document, never the unresolved fragment
+            // (canonical spec 2.1). A rejected policy has no identity.
+            groups.insert(
+                group.id.clone(),
+                GroupReport {
+                    content_hash: parsed
+                        .as_ref()
+                        .ok()
+                        .and_then(|spec| hushspec::content_hash(spec).ok()),
+                },
+            );
             for case in &group.actions {
                 let key = format!("{}/{}", group.id, case.id);
                 let verdict = match &parsed {
@@ -166,6 +208,7 @@ impl CaseEvaluator for InProcessEvaluator {
         Ok(SdkReport {
             sdk: "rust".to_string(),
             results,
+            groups,
         })
     }
 }
@@ -245,6 +288,10 @@ pub enum DivergenceKind {
     OriginProfile,
     Posture,
     RuleTrace,
+    /// The SDKs disagree on the policy's canonical content hash, or the
+    /// harness did not report one. Same policy, same identity -- otherwise
+    /// receipts and signatures made by different SDKs cannot be compared.
+    ContentHash,
     MissingCase,
     /// The harness answered for a case key the oracle (and therefore the
     /// bundle) never produced. Both the oracle and every SDK evaluate the
@@ -269,6 +316,10 @@ pub struct CompareOptions {
     /// Escape hatch for bisecting a trace-only regression; off by default so
     /// the fuzzer compares the whole trace, not just the final verdict.
     pub ignore_rule_trace: bool,
+    /// Escape hatch for running against harnesses that predate the
+    /// `content_hash` group key; off by default so a harness that omits it is
+    /// a divergence rather than a silent pass.
+    pub ignore_content_hash: bool,
 }
 
 /// Compare an SDK report against the Rust oracle. First difference wins per
@@ -278,6 +329,10 @@ pub struct CompareOptions {
 /// therefore the bundle) never produced is `PhantomCase`. Neither direction
 /// is allowed to pass silently -- a buggy harness that fabricates extra
 /// case keys must be exposed exactly like one that drops cases.
+///
+/// After the per-case verdicts, each group's canonical content hash is
+/// compared as well (`ContentHash`), so the SDKs are held to one policy
+/// identity and not only to one decision.
 pub fn compare_reports(
     oracle: &SdkReport,
     observed: &SdkReport,
@@ -320,7 +375,58 @@ pub fn compare_reports(
             });
         }
     }
+    if !options.ignore_content_hash {
+        divergences.extend(compare_content_hashes(oracle, observed));
+    }
     divergences
+}
+
+/// Every group the oracle or the harness knows about must carry the same
+/// policy identity. A group the harness left out of `groups` has no hash,
+/// which diverges against the oracle's -- fail-closed, exactly like a case
+/// missing from `results`. The divergence is keyed by the group id, which has
+/// no `/` and therefore is never mistaken for a case key.
+fn compare_content_hashes(oracle: &SdkReport, observed: &SdkReport) -> Vec<Divergence> {
+    let mut divergences = Vec::new();
+    let mut group_ids: Vec<&String> = oracle.groups.keys().collect();
+    group_ids.extend(
+        observed
+            .groups
+            .keys()
+            .filter(|id| !oracle.groups.contains_key(*id)),
+    );
+    for group_id in group_ids {
+        let expected = oracle
+            .groups
+            .get(group_id)
+            .and_then(|g| g.content_hash.as_ref());
+        let actual = observed
+            .groups
+            .get(group_id)
+            .and_then(|g| g.content_hash.as_ref());
+        if expected == actual {
+            continue;
+        }
+        divergences.push(Divergence {
+            case_key: group_id.clone(),
+            sdk: observed.sdk.clone(),
+            kind: DivergenceKind::ContentHash,
+            oracle: content_hash_verdict(expected),
+            observed: content_hash_verdict(actual),
+        });
+    }
+    divergences
+}
+
+/// A group-level hash rendered into the per-case shape `Divergence` carries,
+/// so the JSON report and the terminal summary need no special case.
+fn content_hash_verdict(hash: Option<&String>) -> CaseVerdict {
+    CaseVerdict::Error {
+        message: match hash {
+            Some(hash) => format!("content_hash {hash}"),
+            None => "no content_hash reported".to_string(),
+        },
+    }
 }
 
 fn verdict_divergence(
@@ -467,6 +573,7 @@ pub struct DifftestConfig {
     pub bundles_dir: std::path::PathBuf,
     pub ignore_reason: bool,
     pub ignore_rule_trace: bool,
+    pub ignore_content_hash: bool,
     pub repo_root: std::path::PathBuf,
     /// Replay an existing bundle instead of generating (single chunk).
     pub bundle_path: Option<std::path::PathBuf>,
@@ -564,6 +671,7 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
             let options = CompareOptions {
                 ignore_reason: config.ignore_reason,
                 ignore_rule_trace: config.ignore_rule_trace,
+                ignore_content_hash: config.ignore_content_hash,
             };
             for divergence in compare_reports(&oracle_report, &report, &options) {
                 if config.minimize {
@@ -629,6 +737,7 @@ fn handle_divergence(
         &CompareOptions {
             ignore_reason: config.ignore_reason,
             ignore_rule_trace: config.ignore_rule_trace,
+            ignore_content_hash: config.ignore_content_hash,
         },
         &crate::minimize::MinimizeConfig::default(),
     ) {
@@ -778,6 +887,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            groups: report.groups.clone(),
         };
         let divergences = compare_reports(&report, &observed, &CompareOptions::default());
         assert_eq!(divergences.len(), 1);
@@ -785,10 +895,95 @@ mod tests {
 
         // ...and --ignore-rule-trace suppresses exactly that.
         let options = CompareOptions {
-            ignore_reason: false,
             ignore_rule_trace: true,
+            ..CompareOptions::default()
         };
         assert!(compare_reports(&report, &observed, &options).is_empty());
+    }
+
+    /// The oracle reports one canonical content hash per group, over the
+    /// *resolved* policy. A harness that reports a different hash -- or none
+    /// at all -- is a divergence, because a receipt or signature made by that
+    /// SDK would name a policy the others cannot recognize.
+    #[test]
+    fn content_hashes_are_compared_per_group_and_missing_ones_diverge() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0", "extends": "builtin:default"}),
+            serde_json::json!({"type": "tool_call", "target": "shell_exec"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+
+        // The identity is the resolved policy's, not the two-line fragment's.
+        let expected = report.groups["g0001"]
+            .content_hash
+            .clone()
+            .expect("the oracle hashes an accepted policy");
+        assert!(expected.starts_with("sha256:"), "{expected}");
+        let resolved = parse_policy(&bundle.groups[0].policy).expect("policy resolves");
+        assert_eq!(expected, hushspec::content_hash(&resolved).expect("hashes"));
+        assert_ne!(
+            expected,
+            hushspec::canonical::content_hash_value(&bundle.groups[0].policy).unwrap_or_default(),
+            "an unresolved document must not hash to the resolved identity"
+        );
+
+        let agreeing = SdkReport {
+            sdk: "go".to_string(),
+            ..report.clone()
+        };
+        assert!(compare_reports(&report, &agreeing, &CompareOptions::default()).is_empty());
+
+        // A harness that never learned the group key reports nothing.
+        let silent = SdkReport {
+            sdk: "go".to_string(),
+            groups: BTreeMap::new(),
+            ..report.clone()
+        };
+        let divergences = compare_reports(&report, &silent, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::ContentHash);
+        assert_eq!(divergences[0].case_key, "g0001");
+
+        // A harness that computes a different identity is the real bug this
+        // comparison exists to catch.
+        let mut wrong = report.clone();
+        wrong.sdk = "python".to_string();
+        wrong.groups.insert(
+            "g0001".to_string(),
+            GroupReport {
+                content_hash: Some(format!("{}0", &expected[..expected.len() - 1])),
+            },
+        );
+        let divergences = compare_reports(&report, &wrong, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::ContentHash);
+
+        // ...and --ignore-content-hash suppresses exactly that.
+        let options = CompareOptions {
+            ignore_content_hash: true,
+            ..CompareOptions::default()
+        };
+        assert!(compare_reports(&report, &wrong, &options).is_empty());
+        assert!(compare_reports(&report, &silent, &options).is_empty());
+    }
+
+    /// A policy the oracle rejects has no identity to report, and a harness
+    /// that rejects it too must agree by also reporting none.
+    #[test]
+    fn a_rejected_policy_reports_no_content_hash() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0", "not_a_field": true}),
+            serde_json::json!({"type": "tool_call", "target": "read_file"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        assert_eq!(report.groups["g0001"].content_hash, None);
+        let observed = SdkReport {
+            sdk: "typescript".to_string(),
+            ..report.clone()
+        };
+        assert!(compare_reports(&report, &observed, &CompareOptions::default()).is_empty());
     }
 
     /// `extends` must be resolved before evaluation, or a policy whose rules
@@ -934,6 +1129,7 @@ mod tests {
                 .iter()
                 .map(|(key, verdict)| ((*key).to_string(), verdict.clone()))
                 .collect(),
+            groups: BTreeMap::new(),
         }
     }
 
@@ -1023,6 +1219,7 @@ mod tests {
         let observed = report_of("py", &[("k", ok_verdict("allow", None, Some("b")))]);
         let options = CompareOptions {
             ignore_rule_trace: false,
+            ignore_content_hash: false,
             ignore_reason: true,
         };
         assert!(compare_reports(&oracle, &observed, &options).is_empty());
@@ -1213,6 +1410,7 @@ EOF
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
             ignore_rule_trace: false,
+            ignore_content_hash: true,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -1249,6 +1447,7 @@ EOF
             bundles_dir: std::env::temp_dir().join("hushspec-difftest-empty"),
             ignore_reason: false,
             ignore_rule_trace: false,
+            ignore_content_hash: true,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,
@@ -1296,6 +1495,7 @@ EOF
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
             ignore_rule_trace: false,
+            ignore_content_hash: true,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -1392,6 +1592,7 @@ EOF
             bundles_dir: dir.path().join("bundles"),
             ignore_reason: false,
             ignore_rule_trace: false,
+            ignore_content_hash: true,
             repo_root: dir.path().to_path_buf(),
             bundle_path: Some(bundle_path),
             harness_override: Some(vec![
@@ -1478,6 +1679,7 @@ EOF
             bundles_dir: std::env::temp_dir().join("hushspec-difftest-panic-guard"),
             ignore_reason: false,
             ignore_rule_trace: false,
+            ignore_content_hash: true,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,

@@ -1,8 +1,10 @@
+pub mod canonical;
 pub mod conditions;
 pub mod detection;
 pub mod evaluate;
 pub mod extensions;
 mod generated_builtins;
+mod generated_canonical_schemas;
 mod generated_contract;
 mod generated_models;
 pub mod governance;
@@ -19,6 +21,10 @@ pub mod sink;
 pub mod validate;
 pub mod version;
 
+pub use canonical::{
+    CONTENT_HASH_PREFIX, CanonicalError, canonical_json, canonical_json_value, content_hash,
+    content_hash_value,
+};
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{
     DetectionCategory, DetectionResult, Detector, DetectorRegistry, EvaluationWithDetection,

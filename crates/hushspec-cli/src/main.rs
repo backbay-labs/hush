@@ -3,6 +3,7 @@ mod cmd_completions;
 mod cmd_diff;
 mod cmd_eval;
 mod cmd_fmt;
+mod cmd_hash;
 mod cmd_init;
 mod cmd_keygen;
 mod cmd_lint;
@@ -56,6 +57,8 @@ enum Commands {
     Diff(cmd_diff::DiffArgs),
     /// Format policy files canonically
     Fmt(cmd_fmt::FmtArgs),
+    /// Print the content hash of a policy's canonical form
+    Hash(cmd_hash::HashArgs),
     /// Manage emergency panic mode (deny-all kill switch)
     Panic(cmd_panic::PanicArgs),
     /// Sign a policy file with an Ed25519 key
@@ -86,6 +89,7 @@ fn main() {
         Commands::Lint(args) => cmd_lint::run(args),
         Commands::Diff(args) => cmd_diff::run(args),
         Commands::Fmt(args) => cmd_fmt::run(args),
+        Commands::Hash(args) => cmd_hash::run(args),
         Commands::Panic(args) => cmd_panic::run(args),
         Commands::Sign(args) => cmd_sign::run(args),
         Commands::Verify(args) => cmd_verify::run(args),

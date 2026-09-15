@@ -81,7 +81,7 @@ pub fn run(args: ResolveArgs) -> i32 {
     }
 }
 
-enum LoadError {
+pub(crate) enum LoadError {
     /// The policy reference names a file that does not exist (exit 2).
     NotFound(String),
     /// Parsing or extends resolution failed (exit 1).
@@ -90,7 +90,7 @@ enum LoadError {
 
 /// Resolve a policy from a builtin reference or a filesystem path, consuming
 /// the whole `extends` chain.
-fn load(reference: &str) -> Result<HushSpec, LoadError> {
+pub(crate) fn load(reference: &str) -> Result<HushSpec, LoadError> {
     if let Some(yaml) = hushspec::load_builtin(reference) {
         let unresolved = HushSpec::parse(yaml).map_err(|e| {
             LoadError::Failed(format!("failed to parse builtin '{reference}': {e}"))
