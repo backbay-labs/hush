@@ -384,7 +384,7 @@ fn generate_log(dir: &Path) -> String {
 /// Regenerate a vector, or report that the committed one drifted.
 fn check_vector(name: &str, generated: &str) {
     let path = vectors_dir().join(name);
-    if std::env::var("HUSHSPEC_UPDATE_REPORT_VECTORS").is_ok() {
+    if update_requested("HUSHSPEC_UPDATE_REPORT_VECTORS") {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, generated).unwrap();
         return;
@@ -881,4 +881,12 @@ metadata:
     assert_eq!(row["control_id"], "CC6.1");
     assert_eq!(row["receipts"], 0);
     assert!(row["last_seen"].is_null());
+}
+
+/// Whether the caller asked for the committed vectors to be regenerated.
+///
+/// Only `1` and `true` count: `is_ok()` would make `VAR=0` regenerate, which
+/// silently turns a verifying run into a rubber stamp.
+fn update_requested(var: &str) -> bool {
+    matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
 }

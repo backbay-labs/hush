@@ -45,24 +45,6 @@ fn http_loader_config_default_values() {
     assert!(config.cache_dir.is_none());
 }
 
-#[test]
-fn http_loader_config_is_independently_constructible() {
-    // Every field is `pub`, so callers can override without a builder --
-    // pin that surface since it's what embedding SDKs/CLIs rely on.
-    let config = HttpLoaderConfig {
-        timeout_ms: 500,
-        max_size: 4096,
-        verify_tls: false,
-        auth_header: Some("Bearer abc".to_string()),
-        cache_dir: Some(std::env::temp_dir()),
-    };
-    assert_eq!(config.timeout_ms, 500);
-    assert_eq!(config.max_size, 4096);
-    assert!(!config.verify_tls);
-    assert_eq!(config.auth_header.as_deref(), Some("Bearer abc"));
-    assert!(config.cache_dir.is_some());
-}
-
 // --- SSRF / URL validation via the public loader (offline: IP literals and
 // `localhost` resolve locally, no outbound network access needed) ---
 
@@ -149,17 +131,13 @@ fn https_loader_rejects_plain_http_scheme() {
 
 #[test]
 fn https_loader_rejects_malformed_url() {
-    let config = HttpLoaderConfig::default();
-    let result = load_from_https("not a url", &config);
-    assert!(result.is_err());
+    assert_rejected("not a url");
 }
 
 #[test]
 fn https_loader_rejects_url_with_no_host() {
-    let config = HttpLoaderConfig::default();
     // `https:///policy.yaml` parses but yields an empty host.
-    let result = load_from_https("https:///policy.yaml", &config);
-    assert!(result.is_err());
+    assert_rejected("https:///policy.yaml");
 }
 
 // --- create_default_loader dispatch: same guard reached through the

@@ -101,7 +101,7 @@ fn expected_dir(fixture: &Path) -> PathBuf {
 
 #[test]
 fn expected_receipts_match_the_committed_vectors() {
-    let update = std::env::var("HUSHSPEC_UPDATE_EXPECTED").is_ok();
+    let update = update_requested("HUSHSPEC_UPDATE_EXPECTED");
     let config = AuditConfig {
         enabled: true,
         include_rule_trace: true,
@@ -149,4 +149,12 @@ fn expected_receipts_match_the_committed_vectors() {
         "expected receipts drifted (run with HUSHSPEC_UPDATE_EXPECTED=1 after a deliberate change):\n{}",
         mismatches.join("\n")
     );
+}
+
+/// Whether the caller asked for the committed vectors to be regenerated.
+///
+/// Only `1` and `true` count: `is_ok()` would make `VAR=0` regenerate, which
+/// silently turns a verifying run into a rubber stamp.
+fn update_requested(var: &str) -> bool {
+    matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
 }

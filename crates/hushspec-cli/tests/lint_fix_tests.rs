@@ -5,11 +5,12 @@
 //!   a `change_type` of "unchanged" or one of "tightened"/"relaxed"/
 //!   "escalated"/"demoted" -- there is no top-level `"changes"` wrapper).
 //! - Idempotence: running `--fix` a second time is a byte-for-byte no-op.
-//! - The shipped corpus (below) happens to be fully clean today, so its loop
-//!   alone never actually exercises a fix -- every `--fix` call in it is a
-//!   no-op and the assertions that follow check nothing.
-//!   `fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied`
-//!   covers that gap using a fixture with a genuine fixable duplicate.
+//!
+//! Over the shipped corpus this pins that `--fix` never rewrites a policy that
+//! has nothing to fix. A corpus entry that *does* acquire a fixable finding
+//! would start exercising the neutrality check too, and until then
+//! `fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied` drives
+//! it from a fixture with a genuine fixable duplicate.
 use assert_cmd::Command;
 
 #[test]
@@ -21,11 +22,19 @@ fn fix_is_decision_neutral_and_idempotent_for_all_shipped_policies() {
         let copy = dir.path().join(&name);
         std::fs::copy(&entry, &copy).unwrap();
 
+        // The exit code carries the remaining semantic findings, which a
+        // shipped policy is allowed to have; what must hold is that `--fix`
+        // left the bytes alone.
         let _ = Command::cargo_bin("h2h")
             .unwrap()
             .args(["lint", copy.to_str().unwrap(), "--fix"])
-            .assert(); // exit code may be nonzero if semantic findings remain -- that's fine
+            .assert();
 
+        assert_eq!(
+            std::fs::read(&entry).unwrap(),
+            std::fs::read(&copy).unwrap(),
+            "{name} has a fixable finding: the shipped corpus must be fix-clean"
+        );
         assert_neutral_and_idempotent(&name, &entry, &copy);
     }
 }
@@ -267,10 +276,11 @@ fn never_rewrites_a_file_that_failed_to_parse() {
     .unwrap();
     let before = std::fs::read(&policy).unwrap();
 
-    let _ = Command::cargo_bin("h2h")
+    Command::cargo_bin("h2h")
         .unwrap()
         .args(["lint", policy.to_str().unwrap(), "--fix"])
-        .assert();
+        .assert()
+        .failure();
 
     assert_eq!(
         before,

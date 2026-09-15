@@ -427,7 +427,7 @@ fn expected_break_line(name: &str) -> usize {
 
 #[test]
 fn log_vectors_are_current_and_behave() {
-    let update = std::env::var("HUSHSPEC_UPDATE_LOG_VECTORS").is_ok();
+    let update = update_requested("HUSHSPEC_UPDATE_LOG_VECTORS");
     let generated = generate_vectors();
     if update {
         for (name, text) in &generated {
@@ -485,4 +485,12 @@ fn log_vectors_are_current_and_behave() {
         count >= 5,
         "expected at least 5 invalid vectors, found {count}"
     );
+}
+
+/// Whether the caller asked for the committed vectors to be regenerated.
+///
+/// Only `1` and `true` count: `is_ok()` would make `VAR=0` regenerate, which
+/// silently turns a verifying run into a rubber stamp.
+fn update_requested(var: &str) -> bool {
+    matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
 }
