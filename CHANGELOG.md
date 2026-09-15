@@ -8,6 +8,17 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 P3-02, test-as-evidence)
+
+- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v0.schema.json`,
+  same file name): a case may declare `controls: [{framework, control_id}]` -- the controls it
+  is evidence for -- and free-form `tags`, and its `expect` may assert `rule_trace` (the
+  recorded trace of receipt spec 4.3, compared in order and in full, with `rule_path` compared
+  only where it is spelled) and `receipt` (a partial format 0.2 receipt whose members must equal
+  the receipt produced under the fixed inputs of `fixtures/receipts/expected/README.md`;
+  `actor`, `timestamp` and `receipt_id` are ignored, nested objects are compared member-wise).
+  `hushspec_test` now accepts `0.1.0` and `0.2.0`, so every existing fixture stays valid.
+
 ### Added (RFC 09 Wave 4, Rust)
 
 - Receipt format 0.2 in the Rust SDK: `evaluate_audited` now takes a `Resolution` and an
