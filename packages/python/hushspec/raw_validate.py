@@ -7,9 +7,9 @@ from typing import Any, Callable
 from hushspec.conditions import Condition
 from hushspec.error_codes import (
     ERROR_CONSTRAINT_VIOLATION,
-    ERROR_PARSE,
     ERROR_DUPLICATE_PATTERN_NAME,
     ERROR_INVALID_REGEX,
+    ERROR_PARSE,
     ERROR_UNSUPPORTED_VERSION,
     ErrorMessage,
 )
