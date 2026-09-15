@@ -514,8 +514,8 @@ class HushGuard:
         for sources that are not files. Either one calls :meth:`swap_resolution`
         on every change and leaves the policy in force untouched when a reload
         fails, reporting the failure through ``on_error``. The loop is available
-        as :attr:`watcher` and must be stopped by the caller (or used as a
-        context manager) when the guard is done.
+        as :attr:`watcher`; close the guard (or use it as a context manager)
+        when it is done, which stops the loop.
 
         The *first* load is not caught: whatever the provider raises propagates,
         because a guard with no policy at all has nothing to enforce.
@@ -577,6 +577,23 @@ class HushGuard:
         daemon thread that would otherwise keep reloading.
         """
         return self._watcher
+
+    def close(self, timeout: Optional[float] = 5.0) -> None:
+        """Stop the hot-reload loop, if :meth:`from_provider` attached one.
+
+        Safe to call more than once, and on a guard with no loop. The loop
+        holds a reference back to this guard, so dropping the guard alone
+        neither stops the thread nor lets the guard be collected.
+        """
+        watcher = self._watcher
+        if watcher is not None:
+            watcher.stop(timeout)
+
+    def __enter__(self) -> "HushGuard":
+        return self
+
+    def __exit__(self, *exc_info: Any) -> None:
+        self.close()
 
     @property
     def enforcement_mode(self) -> str:

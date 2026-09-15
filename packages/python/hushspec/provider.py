@@ -24,7 +24,15 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol, Union, runtime_checkable
+from typing import (
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    TypeVar,
+    Union,
+    runtime_checkable,
+)
 
 from hushspec.evaluate import check_panic_sentinel
 from hushspec.middleware import resolve_policy_resolution
@@ -166,6 +174,11 @@ class CallbackProvider:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"CallbackProvider({self.source!r})"
+
+
+#: So ``with PolicyWatcher(...) as watcher`` types as a ``PolicyWatcher``
+#: from the one ``__enter__`` both subclasses share.
+_LoopT = TypeVar("_LoopT", bound="_ReloadLoop")
 
 
 class _ReloadLoop:
@@ -410,7 +423,7 @@ class _ReloadLoop:
                     raise
                 self._report(exc)
 
-    def __enter__(self) -> "_ReloadLoop":
+    def __enter__(self: _LoopT) -> _LoopT:
         self.start()
         return self
 
@@ -455,11 +468,6 @@ class PolicyWatcher(_ReloadLoop):
             on_panic=on_panic,
         )
 
-    def __enter__(self) -> "PolicyWatcher":
-        self.start()
-        return self
-
-
 class PolicyPoller(_ReloadLoop):
     """Reloads from any provider on a fixed interval.
 
@@ -470,6 +478,3 @@ class PolicyPoller(_ReloadLoop):
 
     _use_fingerprint = False
 
-    def __enter__(self) -> "PolicyPoller":
-        self.start()
-        return self

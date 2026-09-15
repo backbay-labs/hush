@@ -505,3 +505,27 @@ class TestGuardFromProvider:
         with pytest.raises(ValueError):
             guard.swap_resolution(bogus)
         assert guard.check(READ_FILE)
+
+
+class TestGuardLifecycle:
+    """A guard that owns a reload loop can be closed."""
+
+    def test_close_stops_the_watcher(self, policy_file: Path):
+        guard = HushGuard.from_provider(FileProvider(policy_file), watch=True)
+        assert guard.watcher is not None
+        assert guard.watcher.running is True
+
+        guard.close()
+        assert guard.watcher.running is False
+
+    def test_close_is_safe_without_a_watcher(self):
+        guard = HushGuard.from_yaml(ALLOW_POLICY)
+        assert guard.watcher is None
+        guard.close()
+        guard.close()
+
+    def test_the_guard_is_a_context_manager(self, policy_file: Path):
+        with HushGuard.from_provider(FileProvider(policy_file), watch=True) as guard:
+            watcher = guard.watcher
+            assert watcher.running is True
+        assert watcher.running is False
