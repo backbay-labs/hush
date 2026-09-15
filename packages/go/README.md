@@ -142,6 +142,34 @@ Other action types follow the same shape: `tool_call`, `file_read`,
 `input_inject`. Pass file or command content in `Content` so the secret,
 shell, and patch rules can inspect it.
 
+### Compile a policy once
+
+`CompilePolicy` builds every matcher a policy needs up front -- its regexes,
+path globs, host patterns, tool name lists, and the detectors its `detection`
+extension wires -- so evaluating an action does matching and nothing else. An
+enforcement point that evaluates many actions against one policy should hold a
+`*CompiledPolicy`; it is immutable and safe to share across goroutines.
+
+```go
+policy, err := hushspec.CompilePolicy(spec)
+if err != nil {
+	// A pattern outside the HushSpec regex profile: fail closed.
+	log.Fatalf("policy does not compile: %v", err)
+}
+
+result := policy.Evaluate(action)
+receipt := policy.EvaluateAudited(resolution, action, nil, nil)
+```
+
+`CompiledPolicy` mirrors the free functions minus the document argument:
+`Evaluate`, `EvaluateTraced`, `EvaluateWithContext`, `EvaluateWithDetection`,
+`EvaluateWithDetectionTraced`, and `EvaluateAudited`, plus a cached
+`ContentHash`. The decisions, traces, and receipts are identical either way --
+the free functions compile on the fly and memoize the result, so existing code
+needs no change. Compilation is stricter in one direction only: a pattern the
+regex profile rejects is a `*CompileError` naming its rule path, where
+evaluation reports it as a deny on that rule.
+
 ### Decision receipts
 
 `EvaluateAudited` evaluates an action against a resolved policy and records a

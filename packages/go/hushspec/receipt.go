@@ -464,6 +464,26 @@ func EvaluateAudited(
 	config *AuditConfig,
 	ctx *AuditContext,
 ) DecisionReceipt {
+	var spec *HushSpec
+	if resolution != nil {
+		spec = resolution.Spec
+	}
+	return cachedCompile(spec).EvaluateAudited(resolution, action, config, ctx)
+}
+
+// EvaluateAudited is [EvaluateAudited] against a compiled policy.
+//
+// resolution supplies the policy identity the receipt records (content hash,
+// signature, `extends` chain) and must wrap the document this policy was
+// compiled from. A nil resolution records the compiled policy's own identity,
+// with its cached content hash and no provenance -- what [EvaluateAuditedSpec]
+// reports, without re-canonicalizing the document per action.
+func (p *CompiledPolicy) EvaluateAudited(
+	resolution *Resolution,
+	action *EvaluationAction,
+	config *AuditConfig,
+	ctx *AuditContext,
+) DecisionReceipt {
 	effective := DefaultAuditConfig()
 	if config != nil {
 		effective = *config
@@ -480,11 +500,7 @@ func EvaluateAudited(
 	if ctx != nil {
 		contextOverride, conditions = ctx.Context, ctx.Conditions
 	}
-	var spec *HushSpec
-	if resolution != nil {
-		spec = resolution.Spec
-	}
-	detected := EvaluateWithDetectionTraced(spec, action, contextOverride, conditions)
+	detected := p.EvaluateWithDetectionTraced(action, contextOverride, conditions)
 
 	var durationUs *int64
 	if timed {
@@ -498,13 +514,18 @@ func EvaluateAudited(
 		ruleTrace = buildRuleTrace(detected.Traced.Trace, result.OriginProfile)
 	}
 
+	policy := NewPolicySummary(resolution)
+	if resolution == nil {
+		policy = p.policySummary()
+	}
+
 	return DecisionReceipt{
 		ReceiptVersion: ReceiptVersion,
 		ReceiptID:      ctx.receiptID(),
 		Timestamp:      FormatTimestamp(ctx.now()),
 		TimeSource:     ctx.timeSource(),
 		Actor:          ctx.actor(),
-		Policy:         NewPolicySummary(resolution),
+		Policy:         policy,
 		Action:         NewActionSummary(action),
 		Decision:       result.Decision,
 		MatchedRule:    result.MatchedRule,
@@ -561,6 +582,29 @@ func UnverifiedPolicyReceipt(
 		RuleTrace:      []RuleTraceEntry{},
 		Enforcement:    ctx.enforcement(DecisionDeny),
 	}
+}
+
+// policySummary is the policy identity of a compiled policy that was not
+// resolved through the resolver: name, version and the cached content hash,
+// with no chain and no signature.
+func (p *CompiledPolicy) policySummary() PolicySummary {
+	if p == nil || p.spec == nil {
+		return PolicySummary{}
+	}
+	hash, err := p.ContentHash()
+	if err != nil {
+		hash = ""
+	}
+	summary := PolicySummary{
+		Name:        p.spec.Name,
+		SpecVersion: p.spec.HushSpecVersion,
+		ContentHash: hash,
+	}
+	if p.spec.Metadata != nil && p.spec.Metadata.PolicyVersion != nil {
+		version := int64(*p.spec.Metadata.PolicyVersion)
+		summary.Version = &version
+	}
+	return summary
 }
 
 // NewPolicySummary is the policy identity a receipt carries, taken from the
