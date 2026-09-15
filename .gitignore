@@ -37,6 +37,11 @@ yarn-error.log*
 
 # Test & coverage
 coverage/
+coverage-out/
+coverage.xml
+coverage.out
+rust-summary.json
+.coverage
 lcov.info
 *.profraw
 *.profdata
