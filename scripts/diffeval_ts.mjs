@@ -112,5 +112,12 @@ for (const group of bundle.groups) {
 }
 
 process.stdout.write(
-  `${JSON.stringify({ sdk: 'typescript', results, content_hash: contentHashes })}\n`,
+  `${JSON.stringify({
+    sdk: 'typescript',
+    results,
+    // Difftest contract: per-group data lives under `groups`; a rejected policy reports null.
+    groups: Object.fromEntries(
+      Object.entries(contentHashes).map(([g, h]) => [g, { content_hash: typeof h === 'string' && h.startsWith('sha256:') ? h : null }]),
+    ),
+  })}\n`,
 );

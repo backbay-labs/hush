@@ -172,7 +172,12 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001 - report per-case, never crash
                 results[key] = {"status": "error", "message": str(error)}
 
-    print(json.dumps({"sdk": "python", "results": results, "content_hash": hashes}))
+    # Difftest contract: per-group data lives under "groups"; a rejected policy reports null.
+    groups = {
+        gid: {"content_hash": h if isinstance(h, str) and h.startswith("sha256:") else None}
+        for gid, h in hashes.items()
+    }
+    print(json.dumps({"sdk": "python", "results": results, "groups": groups}))
     return 0
 
 
