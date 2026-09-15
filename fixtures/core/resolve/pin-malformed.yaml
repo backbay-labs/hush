@@ -1,0 +1,9 @@
+hushspec_resolve: 0.1.0
+description: 'core 2.3: a fragment that is not sha256:<64 lowercase hex> is rejected before anything is loaded'
+policy:
+  hushspec: 0.1.0
+  name: badpin
+  extends: builtin:default#sha256:ABC
+expect:
+  resolves: false
+  rejects: invalid_pin

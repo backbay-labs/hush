@@ -1,0 +1,45 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:78e68ad3929cf9183d5c9e6ea4b0a7891efc85817c856177f5a2cd8329ab0854"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "send_message",
+    "content_hash": "sha256:457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3",
+    "content_size": 20
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.aws",
+  "reason": "content matched secret pattern 'aws'",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.default",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool matched default allow"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.aws",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'aws'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

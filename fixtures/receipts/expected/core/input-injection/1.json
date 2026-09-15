@@ -1,0 +1,36 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:370f6138896fecbe1fac28f7604247affee9514318c0afd10f38d00739c6f3cd"
+  },
+  "action": {
+    "type": "input_inject",
+    "target": "mouse_click"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.input_injection.allowed_types",
+  "reason": "input injection type is not allowed",
+  "rule_trace": [
+    {
+      "rule_block": "input_injection",
+      "rule_path": "rules.input_injection.allowed_types",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "input injection type is not allowed"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

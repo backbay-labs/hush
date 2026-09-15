@@ -1,0 +1,9 @@
+hushspec_resolve: 0.1.0
+description: 'core 2.3: a pin that does not match the base''s own content hash is rejected with digest_mismatch, whether or not signatures are required'
+policy:
+  hushspec: 0.1.0
+  name: mispinned
+  extends: builtin:default#sha256:0000000000000000000000000000000000000000000000000000000000000000
+expect:
+  resolves: false
+  rejects: digest_mismatch

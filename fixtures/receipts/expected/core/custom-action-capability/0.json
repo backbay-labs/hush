@@ -1,0 +1,37 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:4c7bb06403531da30702b4178cac4908181de77a4dc687be3db7cb514952ac98"
+  },
+  "action": {
+    "type": "custom",
+    "target": "engine-defined"
+  },
+  "decision": "allow",
+  "rule_trace": [
+    {
+      "rule_block": "posture_capability",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "posture capabilities satisfied"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "posture": {
+    "current": "open",
+    "next": "open"
+  }
+}

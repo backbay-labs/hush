@@ -1,0 +1,56 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:28428016da478de199bd5aa1507dab61f70c2d547935dd785d11c4adbf70bc1e"
+  },
+  "action": {
+    "type": "patch_apply",
+    "target": "/src/main.rs",
+    "content_hash": "sha256:5a77c4c8e7dbf8d02a3c7b2916f30437296c1151f9a0a0345ecc4c3cac66c7df",
+    "content_size": 79
+  },
+  "decision": "deny",
+  "matched_rule": "rules.patch_integrity.max_imbalance_ratio",
+  "reason": "patch has changes on only one side; the imbalance ratio is infinite",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "patch_integrity",
+      "rule_path": "rules.patch_integrity.max_imbalance_ratio",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "patch has changes on only one side; the imbalance ratio is infinite"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

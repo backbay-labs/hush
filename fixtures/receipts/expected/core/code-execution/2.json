@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1e63e39c015d01182296a25e82ba120dc26e9cf70b5edb8d9b38de8279af7517"
+  },
+  "action": {
+    "type": "code_exec",
+    "target": "python",
+    "content_hash": "sha256:f205c57b58e9d130b985d5bf6b432dc5bc20cf2ebef00f60a81b3a86495ca8b8",
+    "content_size": 40
+  },
+  "decision": "deny",
+  "matched_rule": "rules.code_execution.module_denylist",
+  "reason": "code references denied module 'subprocess'",
+  "rule_trace": [
+    {
+      "rule_block": "code_execution",
+      "rule_path": "rules.code_execution.module_denylist",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "code references denied module 'subprocess'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

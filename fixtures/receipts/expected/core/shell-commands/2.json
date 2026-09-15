@@ -1,0 +1,36 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:63eb71238912f21bb3a36522fc13eca69a37168b0a41a145bf17443565c3abf2"
+  },
+  "action": {
+    "type": "shell_command",
+    "target": "chmod 777 /etc/passwd"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.shell_commands.forbidden_patterns[3]",
+  "reason": "shell command matched a forbidden pattern",
+  "rule_trace": [
+    {
+      "rule_block": "shell_commands",
+      "rule_path": "rules.shell_commands.forbidden_patterns[3]",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "shell command matched a forbidden pattern"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:e5fc5a29ed33a3d21ade7a8ad48c797e013b7565cb11637cd71bb1c2f74b7059"
+  },
+  "action": {
+    "type": "file_read",
+    "target": "/proj/a.txt"
+  },
+  "decision": "deny",
+  "matched_rule": "extensions.posture.states.locked.capabilities",
+  "reason": "posture 'locked' does not allow capability 'file_access'",
+  "rule_trace": [
+    {
+      "rule_block": "posture_capability",
+      "rule_path": "extensions.posture.states.locked.capabilities",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "posture 'locked' does not allow capability 'file_access'"
+    },
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "short-circuited by posture deny"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "short-circuited by posture deny"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  },
+  "posture": {
+    "current": "locked",
+    "next": "locked"
+  }
+}

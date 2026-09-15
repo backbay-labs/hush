@@ -1,0 +1,19 @@
+hushspec_resolve: 0.1.0
+description: a builtin that itself extends a builtin yields three links, root first
+policy:
+  hushspec: 0.1.0
+  name: grandchild
+  extends: builtin:ai-agent
+  rules:
+    tool_access:
+      block:
+      - deploy
+      default: allow
+expect:
+  resolves: true
+  content_hash: sha256:8cb06670f64eab9325b264bcfb5b501a3b29bf012dd45e510831e056db0411ac
+  chain:
+  - source: builtin:ai-agent
+    content_hash: sha256:cb52d7b6d7720ebc959eb329a8d6a7d43718e18ace047b6652344b0d9faa4fc3
+  - source: memory
+    content_hash: sha256:cd5589059961374b9c881e3723deb7825bb8d5190656022e8428c182c20a705d
