@@ -67,6 +67,23 @@ export interface ValidationResult {
 
 type UnknownRecord = Record<string, unknown>;
 
+/**
+ * Whether `key` is present on `obj` *with a value*.
+ *
+ * `key in obj` alone counts `{ extends: undefined }` as present. In
+ * TypeScript an optional property explicitly set to `undefined` is
+ * indistinguishable from an absent one -- and setting it is exactly what
+ * `merge()` (and therefore `resolve()`) does for the fields it clears, while
+ * the Rust, Python and Go SDKs drop those fields outright. Treating
+ * `undefined` as present made a resolved document valid in three SDKs and
+ * invalid in this one ("extends must be a string"). YAML never yields
+ * `undefined` -- an empty scalar parses as `null`, which still reaches the
+ * type checks below -- so this only forgives the in-memory spelling.
+ */
+function hasValue(obj: unknown, key: string): boolean {
+  return isRecord(obj) && key in obj && obj[key] !== undefined;
+}
+
 interface ValidationContext {
   errors: ValidationError[];
   warnings: string[];
@@ -158,7 +175,7 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   validateOptionalString(obj, 'extends', ctx, 'extends');
   validateOptionalEnum(obj, 'merge_strategy', ctx, 'merge_strategy', MERGE_STRATEGIES_SET);
 
-  if ('rules' in obj) {
+  if (hasValue(obj, 'rules')) {
     if (!isRecord(obj.rules)) {
       addError(ctx, 'invalid_rules', 'rules must be an object');
     } else {
@@ -168,7 +185,7 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
     ctx.warnings.push('no rules section present');
   }
 
-  if ('extensions' in obj) {
+  if (hasValue(obj, 'extensions')) {
     if (!isRecord(obj.extensions)) {
       addError(ctx, 'invalid_extensions', 'extensions must be an object');
     } else {
@@ -176,7 +193,7 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
     }
   }
 
-  if ('metadata' in obj) {
+  if (hasValue(obj, 'metadata')) {
     if (!isRecord(obj.metadata)) {
       addError(ctx, 'invalid_metadata', 'metadata must be an object');
     } else {
@@ -240,7 +257,7 @@ function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, 
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'skip_paths', ctx, `${path}.skip_paths`);
 
-  if (!('patterns' in obj)) return;
+  if (!hasValue(obj, 'patterns')) return;
   if (!Array.isArray(obj.patterns)) {
     addError(ctx, 'invalid_patterns', `${path}.patterns must be an array`);
     return;
@@ -279,7 +296,7 @@ function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, 
   validateOptionalInteger(obj, 'max_deletions', ctx, `${path}.max_deletions`, { min: 0 });
   validateOptionalBoolean(obj, 'require_balance', ctx, `${path}.require_balance`);
 
-  if ('forbidden_patterns' in obj) {
+  if (hasValue(obj, 'forbidden_patterns')) {
     const patterns = validateOptionalStringArray(obj, 'forbidden_patterns', ctx, `${path}.forbidden_patterns`);
     patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.forbidden_patterns[${index}]`));
   }
@@ -292,7 +309,7 @@ function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, p
   validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
 
-  if ('forbidden_patterns' in obj) {
+  if (hasValue(obj, 'forbidden_patterns')) {
     const patterns = validateOptionalStringArray(obj, 'forbidden_patterns', ctx, `${path}.forbidden_patterns`);
     patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.forbidden_patterns[${index}]`));
   }
@@ -344,7 +361,7 @@ function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContex
   validateOptionalStringArray(obj, 'allowed_verbs', ctx, `${path}.allowed_verbs`);
   validateOptionalBoolean(obj, 'credential_detection', ctx, `${path}.credential_detection`);
 
-  if ('extra_credential_patterns' in obj) {
+  if (hasValue(obj, 'extra_credential_patterns')) {
     const patterns = validateOptionalStringArray(obj, 'extra_credential_patterns', ctx, `${path}.extra_credential_patterns`);
     patterns?.forEach((pattern, index) => validateRegex(pattern, ctx, `${path}.extra_credential_patterns[${index}]`));
   }
@@ -407,7 +424,7 @@ function validatePostureExtension(obj: UnknownRecord, ctx: ValidationContext, pa
         }
       });
 
-      if ('budgets' in state) {
+      if (hasValue(state, 'budgets')) {
         if (!isRecord(state.budgets)) {
           addError(ctx, 'invalid_budgets', `${statePath}.budgets must be an object`);
         } else {
@@ -471,7 +488,7 @@ function validateOriginsExtension(
   rejectUnknownKeys(obj, ORIGINS_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
   validateOptionalEnum(obj, 'default_behavior', ctx, `${path}.default_behavior`, ORIGIN_DEFAULT_BEHAVIORS_SET);
 
-  if (!('profiles' in obj)) return;
+  if (!hasValue(obj, 'profiles')) return;
   if (!Array.isArray(obj.profiles)) {
     addError(ctx, 'invalid_profiles', `${path}.profiles must be an array`);
     return;
@@ -494,7 +511,7 @@ function validateOriginsExtension(
       profileIds.add(id);
     }
 
-    if ('match' in profile) {
+    if (hasValue(profile, 'match')) {
       if (!isRecord(profile.match)) {
         addError(ctx, 'invalid_match', `${profilePath}.match must be an object`);
       } else {
@@ -543,7 +560,7 @@ function validateOriginsExtension(
     validateOptionalRuleObject(profile, 'tool_access', ctx, validateOriginToolAccessOverlay, profilePath);
     validateOptionalRuleObject(profile, 'egress', ctx, validateOriginEgressOverlay, profilePath);
 
-    if ('data' in profile) {
+    if (hasValue(profile, 'data')) {
       if (!isRecord(profile.data)) {
         addError(ctx, 'invalid_data_policy', `${profilePath}.data must be an object`);
       } else {
@@ -554,7 +571,7 @@ function validateOriginsExtension(
       }
     }
 
-    if ('budgets' in profile) {
+    if (hasValue(profile, 'budgets')) {
       if (!isRecord(profile.budgets)) {
         addError(ctx, 'invalid_origin_budgets', `${profilePath}.budgets must be an object`);
       } else {
@@ -565,7 +582,7 @@ function validateOriginsExtension(
       }
     }
 
-    if ('bridge' in profile) {
+    if (hasValue(profile, 'bridge')) {
       if (!isRecord(profile.bridge)) {
         addError(ctx, 'invalid_bridge_policy', `${profilePath}.bridge must be an object`);
       } else {
@@ -573,7 +590,7 @@ function validateOriginsExtension(
         validateOptionalBoolean(profile.bridge, 'allow_cross_origin', ctx, `${profilePath}.bridge.allow_cross_origin`);
         validateOptionalBoolean(profile.bridge, 'require_approval', ctx, `${profilePath}.bridge.require_approval`);
 
-        if ('allowed_targets' in profile.bridge) {
+        if (hasValue(profile.bridge, 'allowed_targets')) {
           if (!Array.isArray(profile.bridge.allowed_targets)) {
             addError(ctx, 'invalid_bridge_targets', `${profilePath}.bridge.allowed_targets must be an array`);
           } else {
@@ -628,7 +645,7 @@ function validateOriginEgressOverlay(obj: UnknownRecord, ctx: ValidationContext,
  * where serde enforces the shape at parse time and `validate` the rest.
  */
 function validateWhen(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
-  if (!('when' in obj)) return;
+  if (!hasValue(obj, 'when')) return;
   const whenPath = `${path}.when`;
   const value = obj.when;
   if (!isRecord(value)) {
@@ -651,7 +668,7 @@ function validateConditionShape(
 ): void {
   rejectUnknownKeys(obj, CONDITION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
 
-  if ('time_window' in obj) {
+  if (hasValue(obj, 'time_window')) {
     const tw = obj.time_window;
     const twPath = `${path}.time_window`;
     if (!isRecord(tw)) {
@@ -665,7 +682,7 @@ function validateConditionShape(
     }
   }
 
-  if ('context' in obj && !isRecord(obj.context)) {
+  if (hasValue(obj, 'context') && !isRecord(obj.context)) {
     addError(ctx, 'invalid_object', `${path}.context must be an object`);
   }
 
@@ -676,7 +693,7 @@ function validateConditionShape(
   if (depth > MAX_STRUCTURAL_CONDITION_DEPTH) return;
 
   for (const key of ['all_of', 'any_of'] as const) {
-    if (!(key in obj)) continue;
+    if (!hasValue(obj, key)) continue;
     const list = obj[key];
     if (!Array.isArray(list)) {
       addError(ctx, 'invalid_array', `${path}.${key} must be an array`);
@@ -692,7 +709,7 @@ function validateConditionShape(
     });
   }
 
-  if ('not' in obj) {
+  if (hasValue(obj, 'not')) {
     const child = obj.not;
     const childPath = `${path}.not`;
     if (!isRecord(child)) {
@@ -731,11 +748,11 @@ function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext):
     }
   }
 
-  if ('approved_by' in obj && !('approval_date' in obj)) {
+  if (hasValue(obj, 'approved_by') && !hasValue(obj, 'approval_date')) {
     ctx.warnings.push('approved_by is set but approval_date is missing');
   }
 
-  if (obj.classification === 'restricted' && !('approved_by' in obj)) {
+  if (obj.classification === 'restricted' && !hasValue(obj, 'approved_by')) {
     ctx.warnings.push("classification is 'restricted' but no approved_by is set");
   }
 }
@@ -786,7 +803,7 @@ function validateOptionalRuleObject(
   validator: (value: UnknownRecord, ctx: ValidationContext, path: string) => void,
   basePath?: string,
 ): number {
-  if (!(key in obj)) return 0;
+  if (!hasValue(obj, key)) return 0;
   const value = obj[key];
   const path = basePath ? `${basePath}.${key}` : key;
   if (!isRecord(value)) {
@@ -803,7 +820,7 @@ function validateRequiredRecord(
   ctx: ValidationContext,
   path: string,
 ): UnknownRecord | undefined {
-  if (!(key in obj)) {
+  if (!hasValue(obj, key)) {
     addError(ctx, 'missing_field', `${path} is required`);
     return undefined;
   }
@@ -821,7 +838,7 @@ function validateRequiredArray(
   ctx: ValidationContext,
   path: string,
 ): unknown[] | undefined {
-  if (!(key in obj)) {
+  if (!hasValue(obj, key)) {
     addError(ctx, 'missing_field', `${path} is required`);
     return undefined;
   }
@@ -839,7 +856,7 @@ function validateRequiredString(
   ctx: ValidationContext,
   path: string,
 ): string | undefined {
-  if (!(key in obj)) {
+  if (!hasValue(obj, key)) {
     addError(ctx, 'missing_field', `${path} is required`);
     return undefined;
   }
@@ -853,7 +870,7 @@ function validateRequiredEnum(
   path: string,
   allowed: Iterable<string>,
 ): string | undefined {
-  if (!(key in obj)) {
+  if (!hasValue(obj, key)) {
     addError(ctx, 'missing_field', `${path} is required`);
     return undefined;
   }
@@ -866,7 +883,7 @@ function validateOptionalString(
   ctx: ValidationContext,
   path: string,
 ): string | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   return validateStringValue(obj[key], ctx, path);
 }
 
@@ -876,7 +893,7 @@ function validateOptionalBoolean(
   ctx: ValidationContext,
   path: string,
 ): boolean | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   const value = obj[key];
   if (typeof value !== 'boolean') {
     addError(ctx, 'invalid_type', `${path} must be a boolean`);
@@ -892,7 +909,7 @@ function validateOptionalEnum(
   path: string,
   allowed: Iterable<string>,
 ): string | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   return validateEnumValue(obj[key], ctx, path, allowed);
 }
 
@@ -903,7 +920,7 @@ function validateOptionalInteger(
   path: string,
   bounds: NumberBounds = {},
 ): number | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   return validateIntegerValue(obj[key], ctx, path, bounds);
 }
 
@@ -914,7 +931,7 @@ function validateOptionalNumber(
   path: string,
   bounds: NumberBounds = {},
 ): number | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   return validateNumberValue(obj[key], ctx, path, bounds);
 }
 
@@ -924,7 +941,7 @@ function validateOptionalStringArray(
   ctx: ValidationContext,
   path: string,
 ): string[] | undefined {
-  if (!(key in obj)) return undefined;
+  if (!hasValue(obj, key)) return undefined;
   const value = obj[key];
   if (!Array.isArray(value)) {
     addError(ctx, 'invalid_array', `${path} must be an array`);
