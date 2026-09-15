@@ -507,6 +507,25 @@ fn preserves_empty(root_name: &str, def_name: Option<&str>, key: &str, source: S
 // RFC 8785 serialization (canonical spec 4)
 // --------------------------------------------------------------------------
 
+/// RFC 8785 (JCS) serialization of an arbitrary JSON value, with **no**
+/// canonical projection (canonical spec 4).
+///
+/// The projection of canonical spec 3 is defined against the policy schemas,
+/// so it applies to policy documents only. Other signed objects -- a
+/// signature envelope (signing spec 4.1) above all -- are canonicalized by
+/// serialization alone. They share this serializer so that every HushSpec
+/// digest comes from one implementation of RFC 8785.
+///
+/// # Errors
+///
+/// [`CanonicalError::UnsafeInteger`] or [`CanonicalError::NonFiniteNumber`]
+/// for a number RFC 8785 cannot represent.
+pub fn serialize_jcs(value: &Value) -> Result<String, CanonicalError> {
+    let mut out = String::new();
+    write_value(value, &mut out)?;
+    Ok(out)
+}
+
 fn write_value(value: &Value, out: &mut String) -> Result<(), CanonicalError> {
     match value {
         Value::Null => out.push_str("null"),
