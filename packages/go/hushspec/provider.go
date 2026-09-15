@@ -156,12 +156,15 @@ func (r *policyReloader) report(err error) {
 func (r *policyReloader) reload() (bool, error) {
 	resolution, err := r.provider.Load()
 	if err != nil {
-		err = fmt.Errorf("policy reload from %s: %w", r.provider.Source(), err)
+		err = &PolicyLoadError{Source: r.provider.Source(), Err: err}
 		r.report(err)
 		return false, err
 	}
 	if resolution == nil || resolution.Spec == nil {
-		err = fmt.Errorf("policy reload from %s: provider returned no policy", r.provider.Source())
+		err = &PolicyLoadError{
+			Source: r.provider.Source(),
+			Err:    errors.New("provider returned no policy"),
+		}
 		r.report(err)
 		return false, err
 	}
@@ -175,7 +178,7 @@ func (r *policyReloader) reload() (bool, error) {
 
 	if guard := r.options.Guard; guard != nil {
 		if err := guard.SwapPolicy(resolution); err != nil {
-			err = fmt.Errorf("policy reload from %s: %w", r.provider.Source(), err)
+			err := error(&PolicyLoadError{Source: r.provider.Source(), Err: err})
 			r.report(err)
 			return false, err
 		}
@@ -291,7 +294,7 @@ func (w *PolicyWatcher) CheckOnce() (bool, error) {
 
 	info, err := os.Stat(w.path)
 	if err != nil {
-		err = fmt.Errorf("policy watcher: stat %s: %w", w.path, err)
+		err = &PolicyLoadError{Source: w.path, Err: fmt.Errorf("stat: %w", err)}
 		w.report(err)
 		return false, err
 	}

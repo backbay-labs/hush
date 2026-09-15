@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -264,12 +265,35 @@ func errorObserverEvent(err error) ObserverEvent {
 	if err != nil {
 		message = err.Error()
 	}
-	return ObserverEvent{
+	event := ObserverEvent{
 		Type:      ObserverEventError,
 		Timestamp: FormatTimestamp(time.Now()),
 		Error:     message,
 	}
+	// A policy that could not be loaded is its own event: it says which source
+	// failed, and it is what an operator alerts on -- not the same thing as a
+	// sink that would not take a receipt.
+	var loadErr *PolicyLoadError
+	if errors.As(err, &loadErr) {
+		event.Type = ObserverEventPolicyFailed
+		event.Source = loadErr.Source
+	}
+	return event
 }
+
+// PolicyLoadError is a policy that could not be obtained or adopted: a source
+// that would not read, a chain that would not resolve or verify, a document
+// that would not compile. The policy already in force is unaffected.
+type PolicyLoadError struct {
+	Source string
+	Err    error
+}
+
+func (e *PolicyLoadError) Error() string {
+	return fmt.Sprintf("policy load from %s: %v", e.Source, e.Err)
+}
+
+func (e *PolicyLoadError) Unwrap() error { return e.Err }
 
 // ---------------------------------------------------------------------------
 // JSONLineObserver

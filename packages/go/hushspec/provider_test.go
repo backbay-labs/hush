@@ -1,10 +1,13 @@
 package hushspec
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -388,5 +391,45 @@ func TestPolicyWatcherRequiresProviderAndPath(t *testing.T) {
 	}
 	if _, err := NewPolicyWatcher(&stubProvider{}, ReloadOptions{}); err != nil {
 		t.Fatalf("a non-empty source is enough to build a watcher: %v", err)
+	}
+}
+
+func TestFailedReloadIsItsOwnObserverEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	writePolicy(t, path, policyAllowingGitHub)
+
+	provider := NewFileProvider(path, ResolveOptions{})
+	var stream bytes.Buffer
+	guard, err := NewGuardFromProvider(provider, GuardOptions{
+		Observer: NewJSONLineObserver(&stream),
+	})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	watcher, err := NewPolicyWatcher(provider, ReloadOptions{Guard: guard})
+	if err != nil {
+		t.Fatalf("NewPolicyWatcher: %v", err)
+	}
+	if _, err := watcher.CheckOnce(); err != nil {
+		t.Fatalf("CheckOnce: %v", err)
+	}
+
+	writePolicy(t, path, "hushspec: \"0.2.0\"\nname: broken\nrules:\n  egress:\n    nope: true\n")
+	_, reloadErr := watcher.CheckOnce()
+	var loadErr *PolicyLoadError
+	if !errors.As(reloadErr, &loadErr) {
+		t.Fatalf("expected a PolicyLoadError, got %v", reloadErr)
+	}
+	if loadErr.Source != path {
+		t.Fatalf("the failure must name its source, got %q", loadErr.Source)
+	}
+
+	lines := strings.Split(strings.TrimSpace(stream.String()), "\n")
+	var event ObserverEvent
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &event); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if event.Type != ObserverEventPolicyFailed || event.Source != path {
+		t.Fatalf("unexpected event: %+v", event)
 	}
 }
