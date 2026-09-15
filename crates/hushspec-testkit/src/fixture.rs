@@ -17,6 +17,8 @@ pub enum FixtureCategory {
     MergeChild,
     MergeExpected,
     Evaluation,
+    /// Canonical-form vector (spec/hushspec-canonical.md section 7).
+    Hash,
     PostureValid,
     PostureInvalid,
     OriginsValid,
@@ -33,6 +35,7 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("core/valid", FixtureCategory::ValidCore),
         ("core/invalid", FixtureCategory::InvalidCore),
         ("core/evaluation", FixtureCategory::Evaluation),
+        ("core/hash", FixtureCategory::Hash),
         ("core/merge", FixtureCategory::MergeBase), // categorized further below
         ("posture/evaluation", FixtureCategory::Evaluation),
         ("posture/merge", FixtureCategory::MergeBase),

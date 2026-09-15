@@ -47,6 +47,8 @@ jobs:
         run: python3 scripts/generate_rust_builtins.py --check
       - name: Check generated CLI schemas
         run: python3 scripts/generate_cli_schemas.py --check
+      - name: Check generated canonical schemas
+        run: python3 scripts/generate_canonical_schemas.py --check
       - name: Check generated CLI frameworks
         run: python3 scripts/generate_cli_frameworks.py --check
 
