@@ -30,6 +30,15 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   with the same Ed25519 keys and `key_id` convention as policies, and are readable by generic DSSE
   and in-toto tooling. Eight vectors under `fixtures/bundle/`; every release now attaches a bundle
   for each `library/` and `rulesets/` policy, covered by `actions/attest-build-provenance`.
+- The Python SDK ports the evidence chain: receipt format 0.2 (`evaluate_audited` takes a
+  `Resolution` and an `AuditContext`; `receipt_hash`, `deterministic_uuid_v7`,
+  `unverified_policy_receipt`; `compute_policy_hash` now returns the canonical `sha256:`
+  hash), the hash-linked log (`hushspec.log`: `ChainedFileSink`, `PolicyEvent`,
+  `verify_log` / `verify_logs` / `verify_log_files`), receipt signing
+  (`sign_receipt` / `verify_receipt` / `SignedReceipt`), and `HushGuard(actor=...)` with
+  `policy_loaded` / `policy_swapped` records. `SignatureStatus.signed_at` is renamed
+  `verified_at`, an in-memory leaf resolves as `memory`, and a matching digest pin now
+  satisfies `require_signature` for that hop.
 
 ### Added
 

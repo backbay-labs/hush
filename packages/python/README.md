@@ -133,14 +133,11 @@ result = evaluate(spec, {"type": "egress", "target": "evil.example.com"})
 ### Audit Trail
 
 ```python
-from hushspec import parse_or_raise, evaluate_audited
+from hushspec import AuditConfig, Resolution, evaluate_audited, parse_or_raise
 
-receipt = evaluate_audited(spec, action, {
-    "enabled": True,
-    "include_rule_trace": True,
-    "redact_content": False,
-})
-# receipt.decision, receipt.rule_evaluations, receipt.policy_summary
+resolution = Resolution.from_resolved(spec)
+receipt = evaluate_audited(resolution, action, AuditConfig())
+# receipt.decision, receipt.rule_trace, receipt.policy.content_hash
 ```
 
 ### Detection Pipeline
@@ -172,6 +169,49 @@ sink = MultiSink([
     FilteredSink(stderr_sink, lambda r: r.decision == "deny"),
 ])
 ```
+
+### Evidence chain
+
+A receipt proves one evaluation; a hash-linked log proves a sequence of them.
+`ChainedFileSink` writes format 0.2 receipts as JSON Lines, each entry carrying
+the previous entry's hash, so an auditor can see that nothing was edited,
+deleted, inserted, or reordered. A guard also records which policy came into
+force, and when it was swapped, so every receipt maps back to the exact
+document that produced it.
+
+```python
+from hushspec import ChainedFileSink, HushGuard, verify_log_files
+from hushspec.receipt import Actor
+
+sink = ChainedFileSink.open("/var/log/hushspec.jsonl")
+guard = HushGuard.from_file(
+    "policy.yaml",
+    sink=sink,
+    actor=Actor(agent_id="deploy-bot-3", session_id="run-42"),
+)
+guard.check(HushGuard.map_egress("api.example.com"))
+
+report = verify_log_files(["/var/log/hushspec.jsonl"])
+# report.entries / .receipts / .policy_events / .last_entry_hash
+```
+
+Hold a signing key and every entry is signed too (`sink.with_signer(pem)`);
+`verify_log_files(..., LogVerifyOptions(require_signatures=True, keyring=ring))`
+then checks each one and reports the first break by line. Rotate with
+`sink.rotate("next.jsonl")`, which carries the chain across files.
+
+A receipt can also be signed on its own -- the envelope covers the receipt hash,
+so the receipt's own identity is the same whether or not it was ever signed:
+
+```python
+from hushspec.signing import sign_receipt, verify_receipt
+
+signed = sign_receipt(receipt, private_key_pem)
+result = verify_receipt(signed, keyring=keyring)   # result.valid, result.reason
+```
+
+Both need the `signing` extra (`pip install "hushspec[signing]"`); without it
+they raise `SigningUnavailable` rather than returning an unchecked answer.
 
 ### Panic Mode
 
