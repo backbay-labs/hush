@@ -1,0 +1,45 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.3: origins profile overlay lists written as empty arrays are omitted, because\
+  \ an absent overlay list and an empty one evaluate identically (origins 4); a non-empty overlay list\
+  \ and the presence-significant `match: {}` survive, and an overlay left empty by the omission is dropped\
+  \ in turn"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "tool_access":
+      "allow":
+      - "read_file"
+      - "shell_exec"
+      "require_confirmation":
+      - "shell_exec"
+    "egress":
+      "allow":
+      - "api.example.com"
+  "extensions":
+    "origins":
+      "default_behavior": "minimal_profile"
+      "profiles":
+      - "id": "inherit-everything"
+        "match": {}
+        "tool_access":
+          "allow": []
+          "block": []
+          "require_confirmation": []
+        "egress":
+          "allow": []
+          "block": []
+      - "id": "public-channel"
+        "match":
+          "provider": "slack"
+          "visibility": "public"
+        "tool_access":
+          "allow": []
+          "block":
+          - "shell_exec"
+          "require_confirmation": []
+        "egress":
+          "allow": []
+          "block":
+          - "paste.example.com"
+canonical: "{\"extensions\":{\"origins\":{\"default_behavior\":\"minimal_profile\",\"profiles\":[{\"id\":\"inherit-everything\",\"match\":{}},{\"egress\":{\"block\":[\"paste.example.com\"]},\"id\":\"public-channel\",\"match\":{\"provider\":\"slack\",\"visibility\":\"public\"},\"tool_access\":{\"block\":[\"shell_exec\"]}}]}},\"hushspec\":\"0.1.0\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true},\"tool_access\":{\"allow\":[\"read_file\",\"shell_exec\"],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"require_confirmation\":[\"shell_exec\"]}}}"
+content_hash: "sha256:28f94743dd5e3b5233385aee25c3782a1649d258c92fecf49623615c9713fcbe"

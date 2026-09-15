@@ -21,7 +21,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
   materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
   standard-library reference canonicalizer (`scripts/canonical_json.py`), the
-  `hushspec-hash-vector` schema, and 13 normative vectors under `fixtures/core/hash/`.
+  `hushspec-hash-vector` schema, and 14 normative vectors under `fixtures/core/hash/`.
 - `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
   millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
   `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
