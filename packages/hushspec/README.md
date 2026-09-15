@@ -92,6 +92,31 @@ const result = evaluate(spec, { type: 'egress', target: 'evil.example.com' });
 // result.matched_rule: 'rules.egress.default'
 ```
 
+### Compiled policies
+
+`evaluate()` compiles the document on first use and caches the compilation
+against the document object, so nothing changes for a caller that holds one
+policy. Compile explicitly to own that step -- and to learn about a pattern
+outside the [regex profile](../../spec/hushspec-core.md) before an action
+does, rather than as a fail-closed deny at evaluation time:
+
+```typescript
+import { compilePolicy, CompileError, parseOrThrow } from '@hushspec/core';
+
+const compiled = compilePolicy(parseOrThrow(policyYaml)); // throws CompileError
+compiled.evaluate({ type: 'egress', target: 'evil.example.com' });
+compiled.evaluateTraced(action);
+compiled.evaluateWithDetection(action);
+compiled.evaluateAudited(action); // a receipt, against compiled.resolution
+compiled.contentHash; // canonical `sha256:...`, computed once
+```
+
+Every regex, path glob, host pattern, tool list, `when` condition and severity
+table is built once at compile time, so an evaluation is matching and nothing
+else. `HushGuard` compiles at construction and on `swapPolicy()`, and exposes
+the result as `guard.compiled`. `npm run bench` (in `packages/hushspec`)
+measures the difference on `rulesets/default.yaml`.
+
 ### Audit Trail
 
 ```typescript

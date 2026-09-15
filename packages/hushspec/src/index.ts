@@ -131,6 +131,13 @@ export {
   type HttpLoaderConfig,
 } from './http-loader.js';
 export {
+  compilePolicy,
+  compileResolution,
+  CompiledPolicy,
+  CompileError,
+  type CompileOptions,
+} from './compiled.js';
+export {
   evaluate,
   evaluateTraced,
   evaluateWithContext,

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
+import type { CompiledPolicy } from './compiled.js';
+import { compiledForResolution } from './compiled.js';
 import { isPanicActive } from './evaluate.js';
-import { evaluateWithDetection } from './detection.js';
 import { parse } from './parse.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import nodePath from 'node:path';
@@ -31,7 +32,6 @@ import type {
 import {
   DEFAULT_AUDIT_CONFIG,
   RECEIPT_VERSION,
-  evaluateAudited,
   formatTimestamp,
   impliedEnforcement,
   policySummary,
@@ -367,6 +367,12 @@ export class HushGuard {
   private resolveOptions: PolicyResolveOptions;
   private resolutionValue: Resolution;
   /**
+   * The policy in force, compiled. Built once per policy -- at construction,
+   * on `swapPolicy()`, and when a provider hands back a document the guard has
+   * not seen -- so an action costs a match, never a compile.
+   */
+  private compiledValue: CompiledPolicy;
+  /**
    * Set when verification was required and did not pass. The guard still holds
    * the document it was handed -- so `resolution` and the policy hash report
    * what was loaded -- but every action is denied against it.
@@ -399,6 +405,7 @@ export class HushGuard {
     const resolution = this.loadResolution(policy, options?.resolution);
     this.policy = resolution.spec;
     this.resolutionValue = resolution;
+    this.compiledValue = compiledForResolution(resolution);
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
     this.policyHash = resolution.content_hash;
@@ -504,6 +511,15 @@ export class HushGuard {
   }
 
   /**
+   * The compiled form of the policy in force -- the same object the guard
+   * evaluates through. Hold it to evaluate outside the guard (a benchmark, a
+   * batch of actions) without recompiling.
+   */
+  get compiled(): CompiledPolicy {
+    return this.compiledValue;
+  }
+
+  /**
    * Load a policy, and on a verification failure under `requireSignature`
    * enter the refused state rather than throwing.
    *
@@ -534,7 +550,7 @@ export class HushGuard {
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
-    const active = this.activeResolution();
+    const active = this.activePolicy();
     if ('decision' in active) {
       // Provider-failure (or signature-refusal) deny: mirrors gate()'s
       // handling so a sink-only guard (sink, no observer -- monitor mode
@@ -601,7 +617,7 @@ export class HushGuard {
    * enforcement path: check() and enforce() delegate here.
    */
   gate(action: EvaluationAction): GateOutcome {
-    const active = this.activeResolution();
+    const active = this.activePolicy();
     if ('decision' in active) {
       // Provider failure or a policy that would not verify: no policy to run
       // evaluateAudited() against -- but the decision must still be audited.
@@ -685,7 +701,7 @@ export class HushGuard {
     return this.enforcementMode;
   }
 
-  private runEvaluation(resolution: Resolution, action: EvaluationAction): {
+  private runEvaluation(compiled: CompiledPolicy, action: EvaluationAction): {
     result: EvaluationResult;
     durationUs: number;
     receipt?: DecisionReceipt;
@@ -695,7 +711,7 @@ export class HushGuard {
       // sink-backed guard honors a policy's `detection:` extension identically
       // to the receipt-free path below -- and `detection_trace` records what
       // ran rather than being reconstructed afterwards.
-      const receipt = evaluateAudited(resolution, action, this.audit, this.auditContext());
+      const receipt = compiled.evaluateAudited(action, this.audit, this.auditContext());
       return {
         result: {
           decision: receipt.decision,
@@ -709,7 +725,7 @@ export class HushGuard {
       };
     }
     const start = performance.now();
-    const result = evaluateWithDetection(resolution.spec, action).evaluation;
+    const result = compiled.evaluateWithDetection(action).evaluation;
     const durationUs = Math.round((performance.now() - start) * 1000);
     return { result, durationUs };
   }
@@ -836,6 +852,7 @@ export class HushGuard {
     const previousHash = this.policyHash;
     this.policy = resolved;
     this.resolutionValue = next;
+    this.compiledValue = compiledForResolution(next);
     this.policyHash = next.content_hash;
     if (this.observableEvaluator) {
       this.observableEvaluator.notifyPolicyReloaded(
@@ -853,6 +870,17 @@ export class HushGuard {
         previousHash ?? undefined,
       ),
     );
+  }
+
+  /**
+   * The compiled policy every action is evaluated through, or the deny that
+   * stands in for it when there is none. Resolving the active policy is what
+   * may swap the compilation (a provider that reloaded underneath the guard);
+   * the compiled form is never rebuilt per action.
+   */
+  private activePolicy(): CompiledPolicy | EvaluationResult {
+    const active = this.activeResolution();
+    return 'decision' in active ? active : this.compiledValue;
   }
 
   /**
@@ -901,6 +929,7 @@ export class HushGuard {
         this.policy = current;
         this.resolutionValue =
           resolutionFor(this.provider, current) ?? resolutionFromResolved(current);
+        this.compiledValue = compiledForResolution(this.resolutionValue);
         this.policyHash = this.resolutionValue.content_hash;
       }
       return this.resolutionValue;

@@ -9,14 +9,10 @@ import type {
 } from './evaluate.js';
 import { UNKNOWN_ACTION_TYPE_RULE } from './evaluate.js';
 import type { Condition, RuntimeContext } from './conditions.js';
-import type { DetectorEvaluation } from './detection.js';
-import { evaluateWithDetectionTraced } from './detection.js';
+import type { DetectorEvaluation, TracedEvaluationWithDetection } from './detection.js';
+import { compiledFor, compiledForResolution } from './compiled.js';
 import type { ChainLink, Resolution, SignatureStatus } from './resolve.js';
-import {
-  createBuiltinLoader,
-  resolutionFromResolved,
-  resolve as resolveSpec,
-} from './resolve.js';
+import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
 
 /**
@@ -498,16 +494,26 @@ export function evaluateAudited(
   config: AuditConfig = DEFAULT_AUDIT_CONFIG,
   ctx: AuditContext = {},
 ): DecisionReceipt {
-  const timed = config.enabled && config.recordDuration;
-  const start = timed ? performance.now() : 0;
+  return compiledForResolution(resolution).evaluateAudited(action, config, ctx);
+}
 
-  const detected = evaluateWithDetectionTraced(
-    resolution.spec,
-    action,
-    ctx.context,
-    ctx.conditions ?? {},
-  );
-  const durationUs = timed ? Math.round((performance.now() - start) * 1000) : undefined;
+/**
+ * The receipt for an evaluation that has already run.
+ *
+ * Split out of {@link evaluateAudited} so a {@link CompiledPolicy} -- which
+ * owns the evaluation and its timing -- records the same receipt without
+ * re-entering the engine through the document. Not part of the public API.
+ *
+ * @internal
+ */
+export function receiptFromEvaluation(
+  resolution: Resolution,
+  action: EvaluationAction,
+  detected: TracedEvaluationWithDetection,
+  durationUs: number | undefined,
+  config: AuditConfig,
+  ctx: AuditContext,
+): DecisionReceipt {
   const result = detected.evaluation;
 
   const ruleTrace =
@@ -541,8 +547,9 @@ export function evaluateAudited(
 
 /**
  * {@link evaluateAudited} for a document that is already resolved and has no
- * provenance to record. The content hash is computed on every call; hold a
- * {@link Resolution} instead when evaluating repeatedly.
+ * provenance to record: the receipt names the document's own content hash and
+ * a single-link chain. Hold a {@link Resolution} instead when the policy was
+ * loaded from somewhere and the chain matters.
  *
  * @throws {CanonicalError} when the document still declares `extends` or
  * otherwise has no canonical form.
@@ -553,7 +560,7 @@ export function evaluateAuditedSpec(
   config: AuditConfig = DEFAULT_AUDIT_CONFIG,
   ctx: AuditContext = {},
 ): DecisionReceipt {
-  return evaluateAudited(resolutionFromResolved(spec), action, config, ctx);
+  return compiledFor(spec).evaluateAudited(action, config, ctx);
 }
 
 /**

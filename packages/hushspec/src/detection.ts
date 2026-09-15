@@ -1,5 +1,5 @@
 import type { HushSpec } from './schema.js';
-import { evaluateTraced } from './evaluate.js';
+import { compiledFor } from './compiled.js';
 import type {
   EvaluationAction,
   EvaluationResult,
@@ -7,7 +7,7 @@ import type {
   TracedEvaluation,
 } from './evaluate.js';
 import type { Condition, RuntimeContext } from './conditions.js';
-import type { DetectionLevel } from './extensions.js';
+import type { DetectionExtension, DetectionLevel } from './extensions.js';
 
 export type DetectionCategory = 'prompt_injection' | 'jailbreak' | 'data_exfiltration';
 
@@ -405,12 +405,7 @@ export function evaluateWithDetection(
   spec: HushSpec,
   action: EvaluationAction,
 ): EvaluationWithDetection {
-  const traced = evaluateWithDetectionTraced(spec, action);
-  return {
-    evaluation: traced.evaluation,
-    detections: traced.detections,
-    detectionDecision: traced.detectionDecision,
-  };
+  return compiledFor(spec).evaluateWithDetection(action);
 }
 
 /**
@@ -427,11 +422,88 @@ export function evaluateWithDetectionTraced(
   context?: RuntimeContext,
   conditions: Record<string, Condition> = {},
 ): TracedEvaluationWithDetection {
-  const traced = evaluateTraced(spec, action, context, conditions);
-  const base = traced.result;
+  return compiledFor(spec).evaluateWithDetectionTraced(action, context, conditions);
+}
 
-  const det = spec.extensions?.detection;
-  if (det == null) {
+/**
+ * The detection extension, compiled: thresholds resolved to the floors the
+ * pipeline compares against, so a scan reads no policy fields at all.
+ *
+ * `undefined` means the document has no `detection:` extension and the
+ * pipeline does not run; a present-but-empty configuration still runs (and
+ * reports an empty `detection_trace`), which is what distinguishes "detection
+ * found nothing" from "detection never ran".
+ */
+export interface CompiledDetection {
+  promptInjection?: CompiledPromptInjection;
+  jailbreak?: CompiledJailbreak;
+}
+
+/** Prompt-injection detection with its level floors resolved. */
+export interface CompiledPromptInjection {
+  scanBytes: number;
+  blockFloor: number;
+  warnFloor: number;
+}
+
+/** Jailbreak detection with its 0-100 thresholds resolved. */
+export interface CompiledJailbreak {
+  scanBytes: number;
+  blockThreshold: number;
+  warnThreshold: number;
+}
+
+/** Compile the `detection:` extension (a no-op when the policy has none). */
+export function compileDetection(
+  detection: DetectionExtension | undefined,
+): CompiledDetection | undefined {
+  if (detection == null) return undefined;
+
+  const compiled: CompiledDetection = {};
+
+  const promptInjection = detection.prompt_injection;
+  if (promptInjection != null && promptInjection.enabled !== false) {
+    compiled.promptInjection = {
+      scanBytes: promptInjection.max_scan_bytes ?? DEFAULT_SCAN_BYTES,
+      blockFloor: LEVEL_FLOORS[promptInjection.block_at_or_above ?? 'high'],
+      warnFloor: LEVEL_FLOORS[promptInjection.warn_at_or_above ?? 'suspicious'],
+    };
+  }
+
+  const jailbreak = detection.jailbreak;
+  if (jailbreak != null && jailbreak.enabled !== false) {
+    compiled.jailbreak = {
+      scanBytes: jailbreak.max_input_bytes ?? DEFAULT_SCAN_BYTES,
+      blockThreshold: jailbreak.block_threshold ?? 80,
+      warnThreshold: jailbreak.warn_threshold ?? 50,
+    };
+  }
+
+  // threat_intel is NOT auto-wired: the built-in engine has only regex
+  // detectors, no pattern-db / similarity model to satisfy it. Serving it
+  // requires a custom Detector registered through DetectorRegistry.
+
+  return compiled;
+}
+
+/**
+ * Run the compiled detection pipeline over an evaluation that has already
+ * happened, folding the detectors' verdict into it with a strictest-of merge
+ * (`deny > warn > allow`): detection can escalate a policy allow/warn, but a
+ * policy deny is never weakened or relabeled, and a tie (e.g. policy warn +
+ * detection warn) keeps the policy's own `matched_rule`.
+ *
+ * An exact no-op -- the base evaluation, no detections, no `detection_trace`
+ * -- when the policy has no `detection:` extension, so every existing
+ * (non-detection) evaluation fixture and policy is unaffected.
+ */
+export function runDetection(
+  detection: CompiledDetection | undefined,
+  traced: TracedEvaluation,
+  action: EvaluationAction,
+): TracedEvaluationWithDetection {
+  const base = traced.result;
+  if (detection == null) {
     return { traced, evaluation: base, detections: [] };
   }
 
@@ -445,18 +517,16 @@ export function evaluateWithDetectionTraced(
   // (category, contribution) for each detector that raised a warn/deny.
   const contributions: [DetectionCategory, Decision][] = [];
 
-  const promptInjection = det.prompt_injection;
-  if (promptInjection != null && promptInjection.enabled !== false) {
-    const scan = truncateUtf8(content, promptInjection.max_scan_bytes ?? DEFAULT_SCAN_BYTES);
+  const promptInjection = detection.promptInjection;
+  if (promptInjection != null) {
+    const scan = truncateUtf8(content, promptInjection.scanBytes);
     const result = INJECTION_DETECTOR.detect(scan);
 
-    const blockFloor = LEVEL_FLOORS[promptInjection.block_at_or_above ?? 'high'];
-    const warnFloor = LEVEL_FLOORS[promptInjection.warn_at_or_above ?? 'suspicious'];
     let matched = false;
-    if (result.score >= blockFloor) {
+    if (result.score >= promptInjection.blockFloor) {
       contributions.push(['prompt_injection', 'deny']);
       matched = true;
-    } else if (result.score >= warnFloor) {
+    } else if (result.score >= promptInjection.warnFloor) {
       contributions.push(['prompt_injection', 'warn']);
       matched = true;
     }
@@ -470,20 +540,18 @@ export function evaluateWithDetectionTraced(
     detections.push(result);
   }
 
-  const jailbreak = det.jailbreak;
-  if (jailbreak != null && jailbreak.enabled !== false) {
-    const scan = truncateUtf8(content, jailbreak.max_input_bytes ?? DEFAULT_SCAN_BYTES);
+  const jailbreak = detection.jailbreak;
+  if (jailbreak != null) {
+    const scan = truncateUtf8(content, jailbreak.scanBytes);
     const result = JAILBREAK_DETECTOR.detect(scan);
 
     // Compare directly against the 0-100 thresholds -- no rounding.
     const scaled = result.score * 100.0;
-    const blockThreshold = jailbreak.block_threshold ?? 80;
-    const warnThreshold = jailbreak.warn_threshold ?? 50;
     let matched = false;
-    if (scaled >= blockThreshold) {
+    if (scaled >= jailbreak.blockThreshold) {
       contributions.push(['jailbreak', 'deny']);
       matched = true;
-    } else if (scaled >= warnThreshold) {
+    } else if (scaled >= jailbreak.warnThreshold) {
       contributions.push(['jailbreak', 'warn']);
       matched = true;
     }
@@ -496,10 +564,6 @@ export function evaluateWithDetectionTraced(
     });
     detections.push(result);
   }
-
-  // threat_intel is NOT auto-wired: the built-in engine has only regex
-  // detectors, no pattern-db / similarity model to satisfy it. Serving it
-  // requires a custom Detector registered through DetectorRegistry.
 
   let detectionDecision: Decision | undefined;
   for (const [, decision] of contributions) {
