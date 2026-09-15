@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -487,7 +488,6 @@ type MetricsCollector struct {
 	mu           sync.Mutex
 	buckets      []float64
 	bucketCounts []uint64
-	overflow     uint64
 	sumUs        uint64
 	count        uint64
 	evaluations  map[EvaluationMetricKey]uint64
@@ -552,15 +552,10 @@ func (m *MetricsCollector) OnEvaluation(
 
 	m.count++
 	m.sumUs += uint64(micros)
-	recorded := false
 	for i, bound := range m.buckets {
 		if float64(micros) <= bound {
 			m.bucketCounts[i]++
-			recorded = true
 		}
-	}
-	if !recorded {
-		m.overflow++
 	}
 }
 
@@ -613,7 +608,7 @@ func (m *MetricsCollector) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.bucketCounts = make([]uint64, len(m.buckets))
-	m.overflow, m.sumUs, m.count, m.errors = 0, 0, 0, 0
+	m.sumUs, m.count, m.errors = 0, 0, 0
 	m.evaluations = map[EvaluationMetricKey]uint64{}
 	m.ruleMatches = map[RuleMetricKey]uint64{}
 	m.policyLoads = map[string]uint64{}
@@ -826,7 +821,7 @@ func (o *WebhookObserver) post(event ObserverEvent) {
 		o.report(fmt.Errorf("webhook observer: marshal %s: %w", event.Type, err))
 		return
 	}
-	request, err := http.NewRequest(http.MethodPost, o.url, strings.NewReader(string(body)))
+	request, err := http.NewRequest(http.MethodPost, o.url, bytes.NewReader(body))
 	if err != nil {
 		o.report(fmt.Errorf("webhook observer: build request: %w", err))
 		return

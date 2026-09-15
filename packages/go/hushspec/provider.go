@@ -104,6 +104,11 @@ type policyReloader struct {
 	provider PolicyProvider
 	options  ReloadOptions
 
+	// reloadMu serializes a whole reload -- load, swap, record -- so a manual
+	// CheckOnce and a tick cannot both decide the same document is new and
+	// deliver it twice.
+	reloadMu sync.Mutex
+
 	mu      sync.Mutex
 	current *Resolution
 	// lastHash is the content hash last delivered. It is what makes a reload
@@ -150,10 +155,17 @@ func (r *policyReloader) report(err error) {
 
 // reload loads from the provider and delivers the policy when it differs from
 // the one in force. It reports whether a new policy took effect.
+func (r *policyReloader) reload() (bool, error) {
+	r.reloadMu.Lock()
+	defer r.reloadMu.Unlock()
+	return r.reloadLocked()
+}
+
+// reloadLocked is [policyReloader.reload] with reloadMu already held.
 //
 // Every failure keeps the last good policy: an unreadable, unresolvable,
 // unverifiable or uncompilable document must never displace one that worked.
-func (r *policyReloader) reload() (bool, error) {
+func (r *policyReloader) reloadLocked() (bool, error) {
 	resolution, err := r.provider.Load()
 	if err != nil {
 		err = &PolicyLoadError{Source: r.provider.Source(), Err: err}
@@ -257,7 +269,6 @@ type PolicyWatcher struct {
 	*policyReloader
 	path string
 
-	statMu   sync.Mutex
 	lastSize int64
 	lastMod  time.Time
 	statSeen bool
@@ -292,6 +303,11 @@ func (w *PolicyWatcher) Path() string { return w.path }
 func (w *PolicyWatcher) CheckOnce() (bool, error) {
 	w.checkPanic()
 
+	// One reload at a time, stat included: two ticks must not both conclude the
+	// file is new.
+	w.reloadMu.Lock()
+	defer w.reloadMu.Unlock()
+
 	info, err := os.Stat(w.path)
 	if err != nil {
 		err = &PolicyLoadError{Source: w.path, Err: fmt.Errorf("stat: %w", err)}
@@ -299,17 +315,15 @@ func (w *PolicyWatcher) CheckOnce() (bool, error) {
 		return false, err
 	}
 
-	w.statMu.Lock()
 	changed := !w.statSeen || info.Size() != w.lastSize || !info.ModTime().Equal(w.lastMod)
 	// The stamp is updated even when the reload below fails: a broken file is
 	// reported once, and the next attempt waits for the file to change again.
 	w.lastSize, w.lastMod, w.statSeen = info.Size(), info.ModTime(), true
-	w.statMu.Unlock()
 
 	if !changed {
 		return false, nil
 	}
-	return w.reload()
+	return w.reloadLocked()
 }
 
 // Start begins watching on a background goroutine until ctx is cancelled or
