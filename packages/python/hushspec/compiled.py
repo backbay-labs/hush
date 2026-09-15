@@ -38,7 +38,7 @@ from hushspec.conditions import (
     Condition,
     RuntimeContext,
     decode_condition,
-    evaluate_condition,
+    evaluate_condition_with_capabilities,
 )
 from hushspec.detection import (
     DETECTOR_ID_VERSION,
@@ -309,7 +309,14 @@ _BUILTIN_CREDENTIAL_SEARCHES = _compile_builtin_credentials()
 class _Eval:
     """Everything a compiled step needs from the action being evaluated."""
 
-    __slots__ = ("action", "context", "conditions", "profile", "normalized_path")
+    __slots__ = (
+        "action",
+        "context",
+        "conditions",
+        "profile",
+        "normalized_path",
+        "capabilities",
+    )
 
     def __init__(
         self,
@@ -322,6 +329,10 @@ class _Eval:
         self.conditions = conditions
         self.profile: Optional[OriginProfile] = None
         self.normalized_path: str = ""
+        #: What the effective posture state grants, for `capability`
+        #: predicates (core spec 3.13): ``None`` when the policy has no
+        #: posture extension, so the predicate is unevaluable and holds.
+        self.capabilities: Optional[list[str]] = None
 
 
 #: Shared empty runtime context. Evaluation only ever reads a context, so the
@@ -354,13 +365,15 @@ class _Step:
         if not self.enabled:
             return _INACTIVE_DISABLED
         condition = self.condition
-        if condition is not None and not evaluate_condition(condition, ev.context):
+        if condition is not None and not evaluate_condition_with_capabilities(
+            condition, ev.context, ev.capabilities
+        ):
             return _INACTIVE_WHEN
         conditions = ev.conditions
         if conditions:
             out_of_band = conditions.get(self.block)
-            if out_of_band is not None and not evaluate_condition(
-                out_of_band, ev.context
+            if out_of_band is not None and not evaluate_condition_with_capabilities(
+                out_of_band, ev.context, ev.capabilities
             ):
                 return _INACTIVE_OUT_OF_BAND
         return None
@@ -1781,6 +1794,9 @@ class CompiledPolicy:
         # Block evaluation and aggregation (core spec 6.1).
         ev = _Eval(action, context, conditions)
         ev.profile = matched_profile
+        # `when` conditions read the effective posture state (core spec 3.13),
+        # which the posture guard above has already resolved.
+        ev.capabilities = self._posture_capabilities(posture)
         if plan.needs_path:
             target = action.target
             ev.normalized_path = normalize_path(target) if target is not None else ""
@@ -1832,6 +1848,21 @@ class CompiledPolicy:
             origin_profile=origin_profile_id,
             posture=posture,
         )
+
+    def _posture_capabilities(
+        self, posture: Optional[PostureResult]
+    ) -> Optional[list[str]]:
+        """What the effective posture state grants, for ``capability``
+        conditions (core spec 3.13).
+
+        ``None`` when the policy has no posture extension -- the predicate is
+        then unevaluable and holds; an unknown state grants nothing.
+        """
+        posture_extension = self._posture
+        if posture_extension is None or posture is None:
+            return None
+        state = posture_extension.states.get(posture.current)
+        return list(state.capabilities) if state is not None else []
 
     def _posture_capability_guard(
         self,

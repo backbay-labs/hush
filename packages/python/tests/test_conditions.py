@@ -4,10 +4,14 @@ from hushspec import parse, parse_or_raise, validate
 from hushspec.conditions import (
     MAX_NESTING_DEPTH,
     Condition,
+    RateComparison,
+    RateCondition,
     RuntimeContext,
     TimeWindowCondition,
     evaluate_condition,
+    evaluate_condition_with_capabilities,
     evaluate_with_context,
+    is_capability_identifier,
     timezone_is_known,
     validate_condition,
 )
@@ -509,11 +513,11 @@ class TestConditionDecoding:
         assert cond.not_ is not None
 
     def test_rejects_unknown_condition_key(self):
-        with pytest.raises(ValueError, match="unknown condition field"):
+        with pytest.raises(ValueError, match="unknown field `weekday_only`"):
             Condition.from_dict({"weekday_only": True})
 
     def test_rejects_unknown_time_window_key(self):
-        with pytest.raises(ValueError, match="unknown time_window field"):
+        with pytest.raises(ValueError, match="unknown field `tz`"):
             Condition.from_dict({"time_window": {"start": "09:00", "end": "17:00", "tz": "UTC"}})
 
     def test_round_trips_through_to_dict(self):
@@ -635,7 +639,7 @@ class TestDocumentWhenValidation:
             '    forbidden_patterns: ["mkfs"]\n'
         )
         assert ok is False
-        assert "unknown condition field" in err
+        assert "unknown field `weekday_only`" in err
 
     def test_bad_time_window_is_a_validation_error(self):
         spec = parse_or_raise(
@@ -651,3 +655,238 @@ class TestDocumentWhenValidation:
         result = validate(spec)
         assert not result.is_valid
         assert "rules.shell_commands.when.time_window.start" in str(result.errors[0])
+
+
+# The `capability` and `rate` leaf predicates (D19, core spec 3.13)
+
+
+class TestCapabilityPredicate:
+    """`capability` reads the effective posture state, and holds without one."""
+
+    CONDITION = Condition(capability="shell")
+
+    def test_holds_when_the_policy_has_no_posture_extension(self):
+        # Unevaluable, and an unevaluable condition must never switch a
+        # security control off: the block stays active.
+        assert evaluate_condition_with_capabilities(
+            self.CONDITION, RuntimeContext(), None
+        )
+        assert evaluate_condition(self.CONDITION, RuntimeContext())
+
+    def test_true_when_the_effective_state_grants_it(self):
+        assert evaluate_condition_with_capabilities(
+            self.CONDITION, RuntimeContext(), ["tool_call", "shell"]
+        )
+
+    def test_false_when_the_effective_state_does_not_grant_it(self):
+        assert not evaluate_condition_with_capabilities(
+            self.CONDITION, RuntimeContext(), ["tool_call"]
+        )
+
+    def test_an_unknown_state_grants_nothing(self):
+        # A resolved-but-unknown posture state is an empty grant list, not an
+        # absent one, so the predicate is false rather than unevaluable.
+        assert not evaluate_condition_with_capabilities(
+            self.CONDITION, RuntimeContext(), []
+        )
+
+    def test_it_is_a_leaf_inside_all_of_and_not(self):
+        nested = Condition(
+            all_of=[Condition(not_=Condition(capability="shell"))]
+        )
+        assert not evaluate_condition_with_capabilities(
+            nested, RuntimeContext(), ["shell"]
+        )
+        assert evaluate_condition_with_capabilities(nested, RuntimeContext(), [])
+
+
+class TestRatePredicate:
+    """`rate` compares an engine-supplied counter; an absent counter holds."""
+
+    GTE = Condition(
+        rate=RateCondition(
+            counter="shell_commands", threshold=5, comparison=RateComparison.GTE
+        )
+    )
+    LT = Condition(
+        rate=RateCondition(
+            counter="egress_calls", threshold=100, comparison=RateComparison.LT
+        )
+    )
+
+    @pytest.mark.parametrize(
+        ("count", "expected"), [(4, False), (5, True), (6, True)]
+    )
+    def test_gte_compares_at_the_threshold(self, count, expected):
+        context = RuntimeContext(counters={"shell_commands": count})
+        assert evaluate_condition(self.GTE, context) is expected
+
+    @pytest.mark.parametrize(
+        ("count", "expected"), [(99, True), (100, False), (101, False)]
+    )
+    def test_lt_compares_at_the_threshold(self, count, expected):
+        context = RuntimeContext(counters={"egress_calls": count})
+        assert evaluate_condition(self.LT, context) is expected
+
+    def test_an_absent_counter_is_unevaluable_and_holds(self):
+        assert evaluate_condition(self.GTE, RuntimeContext())
+        assert evaluate_condition(
+            self.GTE, RuntimeContext(counters={"egress_calls": 1})
+        )
+
+    def test_counters_decode_from_a_runtime_context_mapping(self):
+        context = RuntimeContext.from_dict({"counters": {"shell_commands": 7}})
+        assert context.counters == {"shell_commands": 7}
+        assert evaluate_condition(self.GTE, context)
+
+
+class TestRateDecoding:
+    """Rate shape violations are parse errors (core spec 3.13, code E001)."""
+
+    def test_round_trips_through_to_dict(self):
+        raw = {
+            "rate": {
+                "counter": "tool_calls",
+                "threshold": 0,
+                "comparison": "lt",
+            }
+        }
+        assert Condition.from_dict(raw).to_dict() == raw
+
+    def test_capability_round_trips_through_to_dict(self):
+        assert Condition.from_dict({"capability": "shell"}).to_dict() == {
+            "capability": "shell"
+        }
+
+    @pytest.mark.parametrize("missing", ["counter", "threshold", "comparison"])
+    def test_every_member_is_required(self, missing):
+        raw = {"counter": "a", "threshold": 1, "comparison": "gte"}
+        del raw[missing]
+        with pytest.raises(ValueError, match=f"missing field `{missing}`"):
+            Condition.from_dict({"rate": raw})
+
+    def test_an_unknown_comparison_is_rejected(self):
+        with pytest.raises(ValueError, match="unknown variant `between`"):
+            Condition.from_dict(
+                {"rate": {"counter": "a", "threshold": 1, "comparison": "between"}}
+            )
+
+    @pytest.mark.parametrize("threshold", [-1, "3", True, 1.5])
+    def test_a_threshold_that_is_not_a_non_negative_integer_is_rejected(
+        self, threshold
+    ):
+        with pytest.raises(ValueError, match="invalid type"):
+            Condition.from_dict(
+                {"rate": {"counter": "a", "threshold": threshold, "comparison": "gte"}}
+            )
+
+    def test_an_unknown_rate_member_is_rejected(self):
+        with pytest.raises(ValueError, match="unknown field `window`"):
+            Condition.from_dict(
+                {
+                    "rate": {
+                        "counter": "a",
+                        "threshold": 1,
+                        "comparison": "gte",
+                        "window": "1m",
+                    }
+                }
+            )
+
+
+class TestIdentifierGrammar:
+    """`segment(.segment)*`, `segment = [a-z][a-z0-9_]*` (core spec 3.13)."""
+
+    @pytest.mark.parametrize(
+        "name", ["shell", "a", "tool_call", "a.b", "net.egress.http2", "x_1.y_2"]
+    )
+    def test_accepts(self, name):
+        assert is_capability_identifier(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "",
+            ".",
+            "a.",
+            ".a",
+            "a..b",
+            "Shell",
+            "Shell-Access",
+            "9lives",
+            "_leading",
+            "has space",
+            "a.B",
+        ],
+    )
+    def test_rejects(self, name):
+        assert not is_capability_identifier(name)
+
+    def test_a_bad_capability_name_is_a_constraint_violation(self):
+        errors = validate_condition(
+            Condition(capability="Shell-Access"), "rules.tool_access.when"
+        )
+        assert len(errors) == 1
+        assert "is not a capability identifier" in errors[0]
+
+    def test_a_bad_counter_name_is_a_constraint_violation(self):
+        errors = validate_condition(
+            Condition(
+                rate=RateCondition(
+                    counter="9lives", threshold=1, comparison=RateComparison.GTE
+                )
+            ),
+            "rules.shell_commands.when",
+        )
+        assert len(errors) == 1
+        assert "is not a counter identifier" in errors[0]
+
+    def test_leaf_predicates_do_not_add_nesting(self):
+        # `capability` and `rate` are leaves: a condition at the depth cap
+        # carrying one is still accepted (core spec 3.13).
+        condition = Condition(capability="shell")
+        for _ in range(MAX_NESTING_DEPTH):
+            condition = Condition(not_=condition)
+        assert validate_condition(condition, "rules.tool_access.when") == []
+
+
+class TestConditionsAgainstThePostureState:
+    """End to end: the block's `when` sees the state the posture guard uses."""
+
+    POLICY = (
+        'hushspec: "0.2.0"\n'
+        "rules:\n"
+        "  tool_access:\n"
+        "    when:\n"
+        "      capability: shell\n"
+        "    block: [deploy]\n"
+        "    default: allow\n"
+        "extensions:\n"
+        "  posture:\n"
+        "    initial: standard\n"
+        "    states:\n"
+        "      standard:\n"
+        "        capabilities: [tool_call, shell]\n"
+        "      restricted:\n"
+        "        capabilities: [tool_call]\n"
+        "    transitions: []\n"
+    )
+
+    def _decide(self, current):
+        from hushspec.evaluate import PostureContext
+
+        spec = parse_or_raise(self.POLICY)
+        return evaluate(
+            spec,
+            EvaluationAction(
+                type="tool_call",
+                target="deploy",
+                posture=PostureContext(current=current),
+            ),
+        ).decision
+
+    def test_a_granting_state_leaves_the_block_active(self):
+        assert self._decide("standard") == Decision.DENY
+
+    def test_a_non_granting_state_makes_the_block_inert(self):
+        assert self._decide("restricted") == Decision.ALLOW

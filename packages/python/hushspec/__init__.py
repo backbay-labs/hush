@@ -173,10 +173,14 @@ from hushspec.detection import (
 )
 from hushspec.conditions import (
     Condition,
+    RateComparison,
+    RateCondition,
     RuntimeContext,
     TimeWindowCondition,
     evaluate_condition,
+    evaluate_condition_with_capabilities,
     evaluate_with_context,
+    is_capability_identifier,
     timezone_is_known,
     validate_condition,
 )
@@ -319,8 +323,12 @@ __all__ = [
     "LoadedSpec",
     "Condition",
     "TimeWindowCondition",
+    "RateCondition",
+    "RateComparison",
     "RuntimeContext",
     "evaluate_condition",
+    "evaluate_condition_with_capabilities",
+    "is_capability_identifier",
     "evaluate_with_context",
     "validate_condition",
     "timezone_is_known",

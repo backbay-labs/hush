@@ -64,6 +64,7 @@ from hushspec.generated_contract import (
     POSTURE_STATE_KEYS,
     POSTURE_TRANSITION_KEYS,
     PROMPT_INJECTION_KEYS,
+    RATE_CONDITION_KEYS,
     REMOTE_DESKTOP_KEYS,
     RULE_KEYS,
     SECRET_PATTERN_KEYS,
@@ -211,11 +212,15 @@ def _plain(value: Any) -> Any:
 
 _CONDITION = _Obj(CONDITION_KEYS)
 _TIME_WINDOW = _Obj(TIME_WINDOW_KEYS, defaults={"timezone": "UTC"}, required=("start", "end"))
+_RATE_CONDITION = _Obj(
+    RATE_CONDITION_KEYS, required=("counter", "threshold", "comparison")
+)
 _CONDITION.children = {
     "time_window": _TIME_WINDOW,
     "all_of": _ArrayOf(_CONDITION),
     "any_of": _ArrayOf(_CONDITION),
     "not": _CONDITION,
+    "rate": _RATE_CONDITION,
 }
 
 _SECRET_PATTERN = _Obj(SECRET_PATTERN_KEYS, required=("name", "pattern", "severity"))
