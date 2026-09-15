@@ -24,7 +24,7 @@
 //!
 //! Compile once, evaluate many: evaluation against a [`CompiledPolicy`] costs
 //! only the matching, never the pattern compilation. The free functions
-//! ([`evaluate`], [`evaluate_with_detection`], [`evaluate_audited`], ...) stay
+//! ([`evaluate()`], [`evaluate_with_detection`], [`evaluate_audited`], ...) stay
 //! available and behave identically, but compile the policy on every call.
 //!
 //! Panic mode is carried by a [`PanicState`] handle, not a process global, so

@@ -76,9 +76,9 @@ pub enum PolicyError {
 
 /// Builder for a [`CompiledPolicy`].
 ///
-/// `Policy::from_*` loads and parses; [`Policy::resolve`] and
-/// [`Policy::verify`] *configure* resolution; [`Policy::compile`] runs
-/// resolution, validation and compilation and hands back the compiled policy.
+/// `Policy::from_*` loads and parses; [`Policy::resolve`] and `verify`
+/// *configure* resolution; [`Policy::compile`] runs resolution, validation and
+/// compilation and hands back the compiled policy.
 pub struct Policy {
     spec: HushSpec,
     source: Option<String>,

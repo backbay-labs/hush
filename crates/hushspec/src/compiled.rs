@@ -407,7 +407,7 @@ pub fn default_detector_registry() -> Arc<DetectorRegistry> {
 ///
 /// Build one per policy, then evaluate many actions against it. This is the
 /// evaluation entry point the SDK is built around; the free functions
-/// ([`crate::evaluate`], [`crate::evaluate_with_detection`], ...) are thin
+/// ([`crate::evaluate()`], [`crate::evaluate_with_detection`], ...) are thin
 /// wrappers that compile on the fly and are a per-call cost.
 ///
 /// ```
