@@ -13,6 +13,8 @@ export type {
   ComputerUseMode,
   RemoteDesktopChannelsRule,
   InputInjectionRule,
+  BrowserAutomationRule,
+  CodeExecutionRule,
   Severity,
   DefaultAction,
 } from './rules.js';
@@ -25,6 +27,8 @@ export type {
   OriginsExtension,
   OriginDefaultBehavior,
   OriginProfile,
+  OriginToolAccessOverlay,
+  OriginEgressOverlay,
   OriginMatch,
   OriginDataPolicy,
   OriginBudgets,
@@ -36,14 +40,56 @@ export type {
   JailbreakDetection,
   ThreatIntelDetection,
 } from './extensions.js';
-export { parse, parseOrThrow } from './parse.js';
+export {
+  parse,
+  parseOrThrow,
+  yamlProfileViolation,
+  MAX_DOCUMENT_BYTES,
+  MAX_DOCUMENT_DEPTH,
+  MAX_NODE_COUNT,
+  type ParseResult,
+} from './parse.js';
 export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
 export { merge } from './merge.js';
 export { resolve, resolveFromFile, createCompositeLoader, createBuiltinLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';
-export { evaluate, activatePanic, deactivatePanic, isPanicActive, panicPolicy, type EvaluationAction, type EvaluationResult, type Decision, type OriginContext, type PostureContext, type PostureResult } from './evaluate.js';
-export { evaluateCondition, evaluateWithContext, type Condition, type TimeWindowCondition, type RuntimeContext } from './conditions.js';
+export {
+  evaluate,
+  evaluateTraced,
+  evaluateWithContext,
+  activatePanic,
+  deactivatePanic,
+  isPanicActive,
+  panicPolicy,
+  normalizeHost,
+  normalizePath,
+  hostPatternMatches,
+  pathGlobMatches,
+  punycodeEncode,
+  UNKNOWN_ACTION_TYPE_RULE,
+  PANIC_RULE,
+  BUILTIN_CREDENTIAL_PATTERNS,
+  type EvaluationAction,
+  type EvaluationResult,
+  type TracedEvaluation,
+  type Decision,
+  type OriginContext,
+  type PostureContext,
+  type PostureResult,
+} from './evaluate.js';
+export {
+  evaluateCondition,
+  validateCondition,
+  validateConditions,
+  timezoneIsKnown,
+  MAX_NESTING_DEPTH,
+  DAY_ABBREVIATIONS,
+  CONDITION_RULE_BLOCKS,
+  type Condition,
+  type TimeWindowCondition,
+  type RuntimeContext,
+} from './conditions.js';
 export {
   HushGuard,
   HushSpecDenied,
@@ -58,7 +104,13 @@ export {
 export { mapClaudeToolToAction, createSecureToolHandler } from './adapters/anthropic.js';
 export { mapOpenAIToolCall, createOpenAIGuard } from './adapters/openai.js';
 export { mapMCPToolCall, extractDomain, createMCPGuard } from './adapters/mcp.js';
-export { HUSHSPEC_VERSION, SUPPORTED_VERSIONS, isSupported } from './version.js';
+export {
+  HUSHSPEC_VERSION,
+  HUSHSPEC_SUPPORTED_MINORS,
+  SUPPORTED_VERSIONS,
+  isSupported,
+  supportedMinor,
+} from './version.js';
 export {
   evaluateAudited,
   computePolicyHash,

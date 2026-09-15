@@ -3,6 +3,7 @@ import type {
   DefaultActionValue,
   SeverityValue,
 } from './generated/contract.js';
+import type { Condition } from './conditions.js';
 
 export interface Rules {
   forbidden_paths?: ForbiddenPathsRule;
@@ -20,12 +21,16 @@ export interface Rules {
 }
 
 export interface ForbiddenPathsRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   patterns?: string[];
   exceptions?: string[];
 }
 
 export interface PathAllowlistRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   read?: string[];
   write?: string[];
@@ -33,6 +38,8 @@ export interface PathAllowlistRule {
 }
 
 export interface EgressRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   allow?: string[];
   block?: string[];
@@ -40,6 +47,8 @@ export interface EgressRule {
 }
 
 export interface SecretPatternsRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   patterns?: SecretPattern[];
   skip_paths?: string[];
@@ -53,6 +62,8 @@ export interface SecretPattern {
 }
 
 export interface PatchIntegrityRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   max_additions?: number;
   max_deletions?: number;
@@ -62,11 +73,15 @@ export interface PatchIntegrityRule {
 }
 
 export interface ShellCommandsRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   forbidden_patterns?: string[];
 }
 
 export interface ToolAccessRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   allow?: string[];
   block?: string[];
@@ -78,12 +93,16 @@ export interface ToolAccessRule {
 export type ComputerUseMode = ComputerUseModeValue;
 
 export interface ComputerUseRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   mode?: ComputerUseMode;
   allowed_actions?: string[];
 }
 
 export interface RemoteDesktopChannelsRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   clipboard?: boolean;
   file_transfer?: boolean;
@@ -92,12 +111,16 @@ export interface RemoteDesktopChannelsRule {
 }
 
 export interface InputInjectionRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   allowed_types?: string[];
   require_postcondition_probe?: boolean;
 }
 
 export interface BrowserAutomationRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   allowed_domains?: string[];
   blocked_domains?: string[];
@@ -107,6 +130,8 @@ export interface BrowserAutomationRule {
 }
 
 export interface CodeExecutionRule {
+  /** Gate on the runtime context (core spec 3.13). */
+  when?: Condition;
   enabled?: boolean;
   language_allowlist?: string[];
   module_denylist?: string[];

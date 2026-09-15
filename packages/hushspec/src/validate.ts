@@ -42,7 +42,9 @@ import {
   TRANSITION_TRIGGERS_SET,
 } from './generated/contract.js';
 import { compileProfileRegex, isSafeRegex } from './regex.js';
-import { isSupported } from './version.js';
+import { HUSHSPEC_SUPPORTED_MINORS, isSupported } from './version.js';
+import type { Condition } from './conditions.js';
+import { MAX_NESTING_DEPTH, validateCondition } from './conditions.js';
 
 export { isSafeRegex };
 
@@ -64,6 +66,12 @@ interface ValidationContext {
   warnings: string[];
   checkSupportedVersion: boolean;
   includeWarnings: boolean;
+  /**
+   * Semantic `when` checks (HH:MM, IANA zone, day names, nesting depth). The
+   * reference engine performs these in `validate()`, not at parse time, where
+   * only the structural shape is enforced.
+   */
+  checkConditionSemantics: boolean;
 }
 
 const DURATION_PATTERN = /^\d+[smhd]$/;
@@ -84,6 +92,7 @@ const BUDGET_NAMES = new Set([
 // generated file would desync it from `generate_sdk_contracts.py --check`,
 // which CI runs.
 const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set([
+  'when',
   'enabled',
   'allowed_domains',
   'blocked_domains',
@@ -91,7 +100,37 @@ const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set([
   'credential_detection',
   'extra_credential_patterns',
 ]);
+// `$defs.Condition` / `$defs.TimeWindow` in schemas/hushspec-core.v0.schema.json.
+const CONDITION_KEYS_SET: ReadonlySet<string> = new Set([
+  'time_window',
+  'context',
+  'all_of',
+  'any_of',
+  'not',
+]);
+/** Recursion bound for the structural condition walk; see validateConditionShape. */
+const MAX_STRUCTURAL_CONDITION_DEPTH = 64;
+const TIME_WINDOW_KEYS_SET: ReadonlySet<string> = new Set([
+  'start',
+  'end',
+  'timezone',
+  'days',
+]);
+// Origin profile overlays (origins spec 4, D12): tri-state, no `enabled`/`when`.
+const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set([
+  'allow',
+  'block',
+  'require_confirmation',
+  'default',
+  'max_args_size',
+]);
+const ORIGIN_EGRESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set([
+  'allow',
+  'block',
+  'default',
+]);
 const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set([
+  'when',
   'enabled',
   'language_allowlist',
   'module_denylist',
@@ -104,6 +143,7 @@ export function validate(spec: HushSpec): ValidationResult {
   return validateDocument(spec as unknown, {
     checkSupportedVersion: true,
     includeWarnings: true,
+    checkConditionSemantics: true,
   });
 }
 
@@ -111,12 +151,16 @@ export function validateForParse(spec: unknown): ValidationResult {
   return validateDocument(spec, {
     checkSupportedVersion: false,
     includeWarnings: false,
+    checkConditionSemantics: false,
   });
 }
 
 function validateDocument(
   spec: unknown,
-  options: Pick<ValidationContext, 'checkSupportedVersion' | 'includeWarnings'>,
+  options: Pick<
+    ValidationContext,
+    'checkSupportedVersion' | 'includeWarnings' | 'checkConditionSemantics'
+  >,
 ): ValidationResult {
   const ctx: ValidationContext = {
     errors: [],
@@ -149,7 +193,11 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   if (typeof hushspec !== 'string') {
     addError(ctx, 'missing_version', 'missing or invalid "hushspec" version field');
   } else if (ctx.checkSupportedVersion && !isSupported(hushspec)) {
-    addError(ctx, 'unsupported_version', `unsupported hushspec version: ${hushspec}`);
+    addError(
+      ctx,
+      'unsupported_version',
+      `unsupported hushspec version: ${hushspec} (this engine accepts minor versions ${HUSHSPEC_SUPPORTED_MINORS.join(', ')})`,
+    );
   }
 
   validateOptionalString(obj, 'name', ctx, 'name');
@@ -209,6 +257,7 @@ function validateRules(obj: UnknownRecord, ctx: ValidationContext): void {
 
 function validateForbiddenPathsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, FORBIDDEN_PATH_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'patterns', ctx, `${path}.patterns`);
   validateOptionalStringArray(obj, 'exceptions', ctx, `${path}.exceptions`);
@@ -216,6 +265,7 @@ function validateForbiddenPathsRule(obj: UnknownRecord, ctx: ValidationContext, 
 
 function validatePathAllowlistRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, PATH_ALLOWLIST_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'read', ctx, `${path}.read`);
   validateOptionalStringArray(obj, 'write', ctx, `${path}.write`);
@@ -224,6 +274,7 @@ function validatePathAllowlistRule(obj: UnknownRecord, ctx: ValidationContext, p
 
 function validateEgressRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, EGRESS_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
   validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
@@ -232,6 +283,7 @@ function validateEgressRule(obj: UnknownRecord, ctx: ValidationContext, path: st
 
 function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, SECRET_PATTERNS_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'skip_paths', ctx, `${path}.skip_paths`);
 
@@ -268,6 +320,7 @@ function validateSecretPatternsRule(obj: UnknownRecord, ctx: ValidationContext, 
 
 function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, PATCH_INTEGRITY_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalInteger(obj, 'max_additions', ctx, `${path}.max_additions`, { min: 0 });
   validateOptionalInteger(obj, 'max_deletions', ctx, `${path}.max_deletions`, { min: 0 });
@@ -283,6 +336,7 @@ function validatePatchIntegrityRule(obj: UnknownRecord, ctx: ValidationContext, 
 
 function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, SHELL_COMMAND_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
 
   if ('forbidden_patterns' in obj) {
@@ -293,6 +347,7 @@ function validateShellCommandsRule(obj: UnknownRecord, ctx: ValidationContext, p
 
 function validateToolAccessRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, TOOL_ACCESS_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
   validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
@@ -303,6 +358,7 @@ function validateToolAccessRule(obj: UnknownRecord, ctx: ValidationContext, path
 
 function validateComputerUseRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, COMPUTER_USE_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalEnum(obj, 'mode', ctx, `${path}.mode`, COMPUTER_USE_MODES_SET);
   validateOptionalStringArray(obj, 'allowed_actions', ctx, `${path}.allowed_actions`);
@@ -310,6 +366,7 @@ function validateComputerUseRule(obj: UnknownRecord, ctx: ValidationContext, pat
 
 function validateRemoteDesktopRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, REMOTE_DESKTOP_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalBoolean(obj, 'clipboard', ctx, `${path}.clipboard`);
   validateOptionalBoolean(obj, 'file_transfer', ctx, `${path}.file_transfer`);
@@ -319,6 +376,7 @@ function validateRemoteDesktopRule(obj: UnknownRecord, ctx: ValidationContext, p
 
 function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, INPUT_INJECTION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allowed_types', ctx, `${path}.allowed_types`);
   validateOptionalBoolean(obj, 'require_postcondition_probe', ctx, `${path}.require_postcondition_probe`);
@@ -326,6 +384,7 @@ function validateInputInjectionRule(obj: UnknownRecord, ctx: ValidationContext, 
 
 function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, BROWSER_AUTOMATION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'allowed_domains', ctx, `${path}.allowed_domains`);
   validateOptionalStringArray(obj, 'blocked_domains', ctx, `${path}.blocked_domains`);
@@ -340,6 +399,7 @@ function validateBrowserAutomationRule(obj: UnknownRecord, ctx: ValidationContex
 
 function validateCodeExecutionRule(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
   rejectUnknownKeys(obj, CODE_EXECUTION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateWhen(obj, ctx, path);
   validateOptionalBoolean(obj, 'enabled', ctx, `${path}.enabled`);
   validateOptionalStringArray(obj, 'language_allowlist', ctx, `${path}.language_allowlist`);
   validateOptionalStringArray(obj, 'module_denylist', ctx, `${path}.module_denylist`);
@@ -527,8 +587,8 @@ function validateOriginsExtension(
       }
     }
 
-    validateOptionalRuleObject(profile, 'tool_access', ctx, validateToolAccessRule, profilePath);
-    validateOptionalRuleObject(profile, 'egress', ctx, validateEgressRule, profilePath);
+    validateOptionalRuleObject(profile, 'tool_access', ctx, validateOriginToolAccessOverlay, profilePath);
+    validateOptionalRuleObject(profile, 'egress', ctx, validateOriginEgressOverlay, profilePath);
 
     if ('data' in profile) {
       if (!isRecord(profile.data)) {
@@ -583,6 +643,111 @@ function validateOriginsExtension(
 
     validateOptionalString(profile, 'explanation', ctx, `${profilePath}.explanation`);
   });
+}
+
+/**
+ * Tri-state tool-access overlay on an origin profile (origins spec 4, D12).
+ * An overlay is not a rule block: it carries no `enabled` and no `when`, and
+ * an omitted `default` / `max_args_size` stays absent rather than inheriting
+ * the base rule's materialized default.
+ */
+function validateOriginToolAccessOverlay(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
+  validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
+  validateOptionalStringArray(obj, 'require_confirmation', ctx, `${path}.require_confirmation`);
+  validateOptionalEnum(obj, 'default', ctx, `${path}.default`, DEFAULT_ACTIONS_SET);
+  validateOptionalInteger(obj, 'max_args_size', ctx, `${path}.max_args_size`, { min: 1 });
+}
+
+/** Tri-state egress overlay on an origin profile (origins spec 4, D12). */
+function validateOriginEgressOverlay(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  rejectUnknownKeys(obj, ORIGIN_EGRESS_OVERLAY_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+  validateOptionalStringArray(obj, 'allow', ctx, `${path}.allow`);
+  validateOptionalStringArray(obj, 'block', ctx, `${path}.block`);
+  validateOptionalEnum(obj, 'default', ctx, `${path}.default`, DEFAULT_ACTIONS_SET);
+}
+
+/**
+ * Validate a rule block's `when` condition (core spec 3.13, D15): the
+ * structural shape always, the semantics (HH:MM, IANA zone, day names,
+ * nesting depth) only in full `validate()`, mirroring the reference engine
+ * where serde enforces the shape at parse time and `validate` the rest.
+ */
+function validateWhen(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  if (!('when' in obj)) return;
+  const whenPath = `${path}.when`;
+  const value = obj.when;
+  if (!isRecord(value)) {
+    addError(ctx, 'invalid_object', `${whenPath} must be an object`);
+    return;
+  }
+  const shapeErrorCount = ctx.errors.length;
+  validateConditionShape(value, ctx, whenPath, 0);
+  if (!ctx.checkConditionSemantics || ctx.errors.length !== shapeErrorCount) return;
+  for (const message of validateCondition(value as Condition, whenPath)) {
+    addError(ctx, 'invalid_condition', message);
+  }
+}
+
+function validateConditionShape(
+  obj: UnknownRecord,
+  ctx: ValidationContext,
+  path: string,
+  depth: number,
+): void {
+  rejectUnknownKeys(obj, CONDITION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${path}: ${key}`);
+
+  if ('time_window' in obj) {
+    const tw = obj.time_window;
+    const twPath = `${path}.time_window`;
+    if (!isRecord(tw)) {
+      addError(ctx, 'invalid_object', `${twPath} must be an object`);
+    } else {
+      rejectUnknownKeys(tw, TIME_WINDOW_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${twPath}: ${key}`);
+      validateRequiredString(tw, 'start', ctx, `${twPath}.start`);
+      validateRequiredString(tw, 'end', ctx, `${twPath}.end`);
+      validateOptionalString(tw, 'timezone', ctx, `${twPath}.timezone`);
+      validateOptionalStringArray(tw, 'days', ctx, `${twPath}.days`);
+    }
+  }
+
+  if ('context' in obj && !isRecord(obj.context)) {
+    addError(ctx, 'invalid_object', `${path}.context must be an object`);
+  }
+
+  // The depth cap (MAX_NESTING_DEPTH) is reported by validateCondition(). This
+  // much looser bound only stops a hand-built object from exhausting the stack;
+  // it is far deeper than the document nesting cap enforced by parse(), so
+  // every condition in a parseable document is still shape-checked in full.
+  if (depth > MAX_STRUCTURAL_CONDITION_DEPTH) return;
+
+  for (const key of ['all_of', 'any_of'] as const) {
+    if (!(key in obj)) continue;
+    const list = obj[key];
+    if (!Array.isArray(list)) {
+      addError(ctx, 'invalid_array', `${path}.${key} must be an array`);
+      continue;
+    }
+    list.forEach((child, index) => {
+      const childPath = `${path}.${key}[${index}]`;
+      if (!isRecord(child)) {
+        addError(ctx, 'invalid_object', `${childPath} must be an object`);
+        return;
+      }
+      validateConditionShape(child, ctx, childPath, depth + 1);
+    });
+  }
+
+  if ('not' in obj) {
+    const child = obj.not;
+    const childPath = `${path}.not`;
+    if (!isRecord(child)) {
+      addError(ctx, 'invalid_object', `${childPath} must be an object`);
+    } else {
+      validateConditionShape(child, ctx, childPath, depth + 1);
+    }
+  }
 }
 
 function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext): void {
