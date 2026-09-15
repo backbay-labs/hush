@@ -24,11 +24,7 @@ from typing import Any, Optional, Union
 
 from hushspec.canonical import canonical_json_value, content_hash
 from hushspec.conditions import Condition, RuntimeContext
-from hushspec.detection import (
-    DetectorEvaluation,
-    DetectorLevel,
-    evaluate_with_detection_traced,
-)
+from hushspec.detection import DetectorEvaluation, DetectorLevel
 from hushspec.evaluate import (
     UNKNOWN_ACTION_TYPE_RULE,
     Decision,
@@ -654,13 +650,34 @@ def evaluate_audited(
     :class:`~hushspec.schema.HushSpec` is accepted and wrapped (its chain is
     then the single ``memory`` link), which is what 0.1 callers passed.
     """
+    from hushspec.compiled import compiled_for_spec
+
+    resolution = _as_resolution(resolution)
+    return audited_from_compiled(
+        compiled_for_spec(resolution.spec), resolution, action, config, context
+    )
+
+
+def audited_from_compiled(
+    compiled: Any,
+    resolution: Resolution,
+    action: EvaluationAction,
+    config: Optional[AuditConfig] = None,
+    context: Optional[AuditContext] = None,
+) -> DecisionReceipt:
+    """:func:`evaluate_audited` against an already-compiled policy.
+
+    *resolution* is the policy identity the receipt records; *compiled* is the
+    :class:`~hushspec.compiled.CompiledPolicy` that decides the action. A
+    caller holding both (a guard, a long-lived enforcement point) skips the
+    compile and the hash on every evaluation.
+    """
     config = config or AuditConfig()
     ctx = context or AuditContext()
-    resolution = _as_resolution(resolution)
 
     start_ns = time.perf_counter_ns() if (config.enabled and config.record_duration) else None
-    detected = evaluate_with_detection_traced(
-        resolution.spec, action, ctx.context, ctx.conditions
+    detected = compiled.evaluate_with_detection_traced(
+        action, ctx.context, ctx.conditions
     )
     duration_us = (
         (time.perf_counter_ns() - start_ns) // 1000 if start_ns is not None else None

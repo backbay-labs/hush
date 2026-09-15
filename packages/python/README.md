@@ -130,6 +130,38 @@ result = evaluate(spec, {"type": "egress", "target": "evil.example.com"})
 # result.matched_rule: "rules.egress.default"
 ```
 
+### Compiled policies
+
+`evaluate()` compiles the document on first use and reuses the result, so a
+repeated call costs no compilation. A long-lived enforcement point should hold
+the compiled policy itself:
+
+```python
+from hushspec import compile_policy, parse_or_raise
+
+compiled = compile_policy(parse_or_raise(policy_yaml))
+result = compiled.evaluate(action)
+```
+
+`compile_policy()` prepares everything that does not depend on the action --
+every regex, path glob and host matcher, the `when` conditions, the
+per-action-type rule-block plan, the origin overlays, and the detectors a
+`detection:` block enables -- and keeps the source document for receipts and
+hashing (`compiled.spec`, `compiled.content_hash`). It accepts a `Resolution`
+as well as a `HushSpec`, and carries that provenance into
+`compiled.evaluate_audited(action)`.
+
+It is strict by default: a pattern outside the [regex profile](../../spec/)
+raises `CompileError` naming the rule path, rather than waiting for the first
+action that reaches it. `compile_policy(spec, strict=False)` keeps the
+evaluator's deferred behaviour instead -- the offending pattern is recorded in
+`compiled.errors` and denies the actions that reach it.
+
+`HushGuard` compiles once at construction and on every `swap_policy()`;
+`guard.compiled` is the policy it is enforcing.
+
+`packages/python/bench/evaluate.py` measures it.
+
 ### Audit Trail
 
 ```python

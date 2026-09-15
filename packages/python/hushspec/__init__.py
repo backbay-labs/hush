@@ -22,6 +22,11 @@ from hushspec.evaluate import (
     path_glob_matches,
     punycode_encode,
 )
+from hushspec.compiled import (
+    CompileError,
+    CompiledPolicy,
+    compile_policy,
+)
 from hushspec.receipt import (
     RECEIPT_VERSION,
     ActionSummary,
@@ -304,6 +309,9 @@ __all__ = [
     "timezone_is_known",
     "evaluate",
     "evaluate_traced",
+    "compile_policy",
+    "CompiledPolicy",
+    "CompileError",
     "TracedEvaluation",
     "RuleOutcome",
     "normalize_host",

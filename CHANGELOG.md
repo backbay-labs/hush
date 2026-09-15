@@ -92,6 +92,22 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   of the new `MEMORY_SOURCE`.
 - Resolution failures throw a `ResolveError` carrying a machine-readable `reason`
   (`invalid_pin`, `not_found`, `cycle`, `max_depth`, ...) instead of a bare `Error`.
+### Changed (RFC 09 P6-01, Python)
+
+- Compiled policies in the Python SDK: `compile_policy(spec)` returns a `CompiledPolicy` that
+  prepares everything independent of the action -- every regex through the profile, every path
+  glob and host pattern, the tool-name sets, the decoded `when` conditions, the per-action-type
+  rule-block plan, the origin overlays folded into `tool_access` / `egress` per profile, and the
+  detectors a `detection:` block enables -- and keeps the source document with its content hash
+  cached for receipts. It is fail-closed in both directions: strict by default (`CompileError`
+  names the offending rule path), and `strict=False` keeps the evaluator's deferred deny. The
+  free `evaluate` / `evaluate_traced` / `evaluate_with_context` / `evaluate_with_detection` /
+  `evaluate_audited` functions are unchanged wrappers over a small compiled-policy cache, and
+  `HushGuard` compiles once at construction and at every `swap_policy()` (`guard.compiled`).
+  Pattern compilation is memoized, so policies that share a base compile once between them.
+  No change to decisions, receipts, traces, hashes or wire formats. Evaluating the mixed action
+  set of `packages/python/bench/evaluate.py` against `rulesets/default.yaml` goes from 127 us to
+  9.0 us per action.
 
 ### Added
 

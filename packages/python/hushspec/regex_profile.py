@@ -55,6 +55,7 @@ fold only ASCII.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Pattern
 
 __all__ = ["compile_profile_regex", "NESTED_QUANTIFIER_MESSAGE"]
@@ -79,8 +80,14 @@ _INLINE_FLAG_CHARS = frozenset("imsxuUaLn-")
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
+@lru_cache(maxsize=4096)
 def compile_profile_regex(pattern: str) -> Pattern[str]:
     """Compile ``pattern`` under the HushSpec regex profile.
+
+    Memoized on the pattern text: translation and compilation are pure, a
+    compiled pattern is immutable, and the same pattern recurs across rule
+    blocks, across documents that share a base, and between ``validate`` and
+    ``evaluate``. A rejection raises every time (exceptions are not cached).
 
     This is the only way policy-authored regexes are compiled in this SDK: both
     ``validate`` and ``evaluate`` route through it, so validation and evaluation
