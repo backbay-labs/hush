@@ -174,14 +174,41 @@ class TestSharedFixtures:
                 assert validation.is_valid, f"{fixture_path}: {validation.errors}"
 
     def test_invalid_documents(self):
+        """Every `invalid/` vector is refused, for the reason its sidecar names.
+
+        `<name>.expect.yaml` pins the error-code-registry `code` a conformant
+        implementation MUST report (core spec 8, Level 1) and, where the
+        wording is load-bearing, a `message_contains` fragment. Asserting the
+        code turns "the document was rejected" into "rejected for this
+        reason", which is the property that makes the vectors portable: two
+        SDKs that refuse the same file for different reasons have not agreed.
+        """
+        checked = 0
         for subdir in INVALID_DIRS:
             for fixture_path in iter_yaml_files(subdir):
-                ok, result = parse(fixture_path.read_text())
-                if ok:
-                    validation = validate(result)
-                    assert (
-                        not validation.is_valid
-                    ), f"{fixture_path}: expected rejection"
+                if fixture_path.name.endswith(".expect.yaml"):
+                    continue
+                code, message = _reject(fixture_path)
+                assert code is not None, f"{fixture_path}: expected rejection"
+
+                expected = _expected_rejection(fixture_path)
+                assert expected is not None, (
+                    f"{fixture_path}: no {fixture_path.stem}.expect.yaml sidecar"
+                )
+                assert expected.get("reject") is True, (
+                    f"{fixture_path}: sidecar does not declare `reject: true`"
+                )
+                assert code == expected["code"], (
+                    f"{fixture_path}: expected {expected['code']}, got {code}: {message}"
+                )
+                fragment = expected.get("message_contains")
+                if fragment is not None:
+                    assert fragment in message, (
+                        f"{fixture_path}: expected the message to contain "
+                        f"{fragment!r}, got {message!r}"
+                    )
+                checked += 1
+        assert checked > 0, "no invalid vectors were found"
 
     def test_merge_fixtures(self):
         for subdir in MERGE_DIRS:
@@ -368,6 +395,32 @@ def _assert_receipt_members(
             _assert_receipt_members(want, got, label, at)
             continue
         assert got == want, f"{label}: receipt.{at}: expected {want!r}, got {got!r}"
+
+
+def _reject(fixture_path: Path) -> tuple[str | None, str]:
+    """``(registry code, message)`` for a refused document, ``(None, "")`` otherwise.
+
+    Parsing and validating are one refusal from a caller's point of view: the
+    Rust reference rejects some of these at parse time and some at validate
+    time, and which side of that line a given check falls on is an
+    implementation detail the registry code deliberately abstracts over.
+    """
+    ok, result = parse(fixture_path.read_text())
+    if not ok:
+        return getattr(result, "code", None), str(result)
+    validation = validate(result)
+    if not validation.is_valid:
+        return validation.errors[0].code, str(validation.errors[0])
+    return None, ""
+
+
+def _expected_rejection(fixture_path: Path) -> dict[str, Any] | None:
+    """The `<name>.expect.yaml` sidecar beside an `invalid/` vector."""
+    sidecar = fixture_path.with_suffix(".expect.yaml")
+    if not sidecar.is_file():
+        return None
+    loaded = yaml.load(sidecar.read_text(), Loader=CoreSafeLoader)
+    return loaded if isinstance(loaded, dict) else None
 
 
 def parse_or_fail(path: Path):

@@ -133,6 +133,18 @@ from hushspec.bundle import (
     parse_bundle,
     verify_bundle,
 )
+from hushspec.error_codes import (
+    ERROR_CODES,
+    ERROR_CONSTRAINT_VIOLATION,
+    ERROR_DUPLICATE_PATTERN_NAME,
+    ERROR_EXTENDS,
+    ERROR_INVALID_DATE,
+    ERROR_INVALID_REGEX,
+    ERROR_IO,
+    ERROR_PARSE,
+    ERROR_UNSUPPORTED_VERSION,
+    ErrorMessage,
+)
 from hushspec.merge import merge
 from hushspec.middleware import (
     POLICY_SIGNATURE_RULE,
@@ -321,6 +333,16 @@ __all__ = [
     "ValidationError",
     "is_safe_regex",
     "validate_conditions",
+    "ErrorMessage",
+    "ERROR_CODES",
+    "ERROR_IO",
+    "ERROR_PARSE",
+    "ERROR_UNSUPPORTED_VERSION",
+    "ERROR_DUPLICATE_PATTERN_NAME",
+    "ERROR_CONSTRAINT_VIOLATION",
+    "ERROR_INVALID_REGEX",
+    "ERROR_EXTENDS",
+    "ERROR_INVALID_DATE",
     "merge",
     "create_builtin_loader",
     "create_composite_loader",

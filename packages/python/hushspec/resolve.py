@@ -43,6 +43,7 @@ from typing import Any, Callable
 
 from hushspec.builtins import load_builtin
 from hushspec.canonical import CanonicalError, content_hash
+from hushspec.error_codes import ERROR_EXTENDS, ERROR_IO, ErrorMessage, code_of
 from hushspec.merge import merge
 from hushspec.parse import parse
 from hushspec.schema import HushSpec
@@ -270,7 +271,14 @@ class ResolveRejected(ValueError):
     ``expect.rejects`` in ``fixtures/core/resolve/*.yaml``. It subclasses
     :class:`ValueError` so the tuple-returning entry points and every existing
     caller keep catching it.
+
+    ``error_code`` is the coarser error-code-registry identifier
+    (``spec/registries/error-codes.yaml``): every resolution refusal is E010,
+    whichever of the specific codes above named it.
     """
+
+    #: The error-code-registry identifier for a resolution refusal.
+    error_code: str = ERROR_EXTENDS
 
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
@@ -341,10 +349,16 @@ def resolve_file(path: str | Path) -> tuple[bool, HushSpec | str]:
     try:
         content = Path(source).read_text()
     except OSError as exc:
-        return False, f"failed to read HushSpec at {source}: {exc}"
+        # A transport-level failure, not a statement about the document:
+        # nothing was parsed (error-code registry, E000).
+        return False, ErrorMessage(
+            f"failed to read HushSpec at {source}: {exc}", ERROR_IO
+        )
     ok, parsed = parse(content)
     if not ok:
-        return False, f"failed to parse HushSpec at {source}: {parsed}"
+        return False, ErrorMessage(
+            f"failed to parse HushSpec at {source}: {parsed}", code_of(parsed)
+        )
     return resolve(parsed, source=source, loader=_create_composite_loader())
 
 

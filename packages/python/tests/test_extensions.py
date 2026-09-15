@@ -432,7 +432,7 @@ extensions:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "similarity_threshold must be <= 1" in err
+        assert "similarity_threshold must be between 0.0 and 1.0" in err
 
     def test_validate_detection_prompt_injection_threshold_warning(self):
         yaml = """

@@ -17,6 +17,7 @@ import re
 
 import yaml
 
+from hushspec.error_codes import ERROR_PARSE, ErrorMessage, code_of
 from hushspec.raw_validate import validate_raw_document
 from hushspec.schema import HushSpec
 
@@ -92,11 +93,9 @@ class _StrictSafeLoader(yaml.SafeLoader):
                     key_node.start_mark,
                 )
             if key in mapping:
-                raise yaml.constructor.ConstructorError(
-                    "while constructing a mapping",
-                    node.start_mark,
-                    f"found duplicate key {key!r}",
-                    key_node.start_mark,
+                raise _ProfileError(
+                    f"line {key_node.start_mark.line + 1}: duplicate entry with "
+                    f"key {key!r} (YAML profile)"
                 )
             mapping[key] = self.construct_object(value_node, deep=deep)
         return mapping
@@ -154,50 +153,71 @@ def _measure(value, depth: int) -> tuple[int, int]:
 
 
 def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
-    """Returns ``(True, spec)`` on success or ``(False, error_message)`` on failure."""
+    """Returns ``(True, spec)`` on success or ``(False, error_message)`` on failure.
+
+    The failure value is an :class:`~hushspec.error_codes.ErrorMessage`: a
+    ``str`` carrying the registry ``code`` of the refusal
+    (``spec/registries/error-codes.yaml``), so a caller can branch on the
+    reason rather than on the wording.
+    """
     if len(yaml_str.encode("utf-8")) > MAX_DOCUMENT_BYTES:
-        return (
-            False,
+        return False, _refused(
             "YAML parse error: document exceeds the maximum size of "
-            f"{MAX_DOCUMENT_BYTES} bytes",
+            f"{MAX_DOCUMENT_BYTES} bytes"
         )
 
     try:
         doc = yaml.load(yaml_str, Loader=_StrictSafeLoader)
+    except yaml.composer.ComposerError as e:
+        # PyYAML reports a second document as a compose-time surprise; the
+        # profile refuses multi-document streams outright (core spec 2.4), and
+        # the shared vectors read the diagnostic for that phrase.
+        if "single document" in str(e):
+            return False, _refused(
+                "YAML parse error: multi-document streams are not allowed "
+                "(YAML profile)"
+            )
+        return False, _refused(f"YAML parse error: {e}")
     except yaml.YAMLError as e:
-        return False, f"YAML parse error: {e}"
+        return False, _refused(f"YAML parse error: {e}")
     except RecursionError:
         # Deeply nested flow YAML overflows the interpreter stack during
         # compose; PyYAML lets that surface as an uncaught RecursionError
         # rather than a YAMLError, so catch it explicitly and fail closed.
-        return False, "YAML parse error: document nesting is too deep"
+        return False, _refused("YAML parse error: document nesting is too deep")
 
     if not isinstance(doc, dict):
-        return False, "HushSpec document must be a YAML mapping"
+        return False, _refused("HushSpec document must be a YAML mapping")
 
     depth, nodes = _measure(doc, 1)
     if depth > MAX_NESTING_DEPTH:
-        return (
-            False,
+        return False, _refused(
             "YAML parse error: document nesting exceeds the maximum depth of "
-            f"{MAX_NESTING_DEPTH}",
+            f"{MAX_NESTING_DEPTH}"
         )
     if nodes > MAX_NODE_COUNT:
-        return (
-            False,
+        return False, _refused(
             "YAML parse error: document exceeds the maximum node count of "
-            f"{MAX_NODE_COUNT}",
+            f"{MAX_NODE_COUNT}"
         )
 
     errors = validate_raw_document(doc)
     if errors:
-        return False, errors[0]
+        return False, _refused(errors[0], code_of(errors[0]))
 
     return True, HushSpec.from_dict(doc)
+
+
+def _refused(message: str, code: str = ERROR_PARSE) -> ErrorMessage:
+    return ErrorMessage(message, code)
 
 
 def parse_or_raise(yaml_str: str) -> HushSpec:
     ok, result = parse(yaml_str)
     if not ok:
-        raise ValueError(result)
+        error = ValueError(result)
+        # The code rides on the exception too, so a caller that only ever uses
+        # the raising form can still read the reason off it.
+        error.code = code_of(result)  # type: ignore[attr-defined]
+        raise error
     return result  # type: ignore[return-value]

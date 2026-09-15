@@ -5,6 +5,14 @@ import re
 from typing import Any, Callable
 
 from hushspec.conditions import Condition
+from hushspec.error_codes import (
+    ERROR_CONSTRAINT_VIOLATION,
+    ERROR_PARSE,
+    ERROR_DUPLICATE_PATTERN_NAME,
+    ERROR_INVALID_REGEX,
+    ERROR_UNSUPPORTED_VERSION,
+    ErrorMessage,
+)
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.generated_contract import (
     BROWSER_AUTOMATION_KEYS,
@@ -76,6 +84,17 @@ def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
         errors.append(f"{path}.when: {exc}")
 
 
+def _constraint(message: str) -> ErrorMessage:
+    """A core Section 7 / extension-module constraint violation (E004).
+
+    Everything else this module reports is a parse-time refusal (E001): the
+    shape, type, enum and unknown-key checks serde performs for the Rust
+    reference. Only the semantic constraints Rust checks in `validate` are
+    tagged, so the two implementations name the same code for the same vector.
+    """
+    return ErrorMessage(message, ERROR_CONSTRAINT_VIOLATION)
+
+
 def validate_raw_document(doc: Any) -> list[str]:
     errors: list[str] = []
     if not isinstance(doc, dict):
@@ -87,9 +106,21 @@ def validate_raw_document(doc: Any) -> list[str]:
 
 
 def _validate_top_level(obj: dict[str, Any], errors: list[str]) -> None:
-    _reject_unknown_keys(obj, TOP_LEVEL_KEYS, errors, "top-level field")
+    _reject_unknown_keys(obj, TOP_LEVEL_KEYS, errors, "the top level")
 
-    _validate_required_string(obj, "hushspec", errors, 'missing or invalid "hushspec" version field')
+    if "hushspec" not in obj:
+        errors.append("missing field `hushspec`")
+    elif not isinstance(obj["hushspec"], str):
+        # Present but not a version string at all -- `hushspec: 0.1` is a YAML
+        # float, not `"0.1.0"`. The reference reports that as an unsupported
+        # version rather than as a shape error.
+        errors.append(
+            ErrorMessage(
+                "unsupported hushspec version: the `hushspec` field must be a "
+                f"three-part version string, got {obj['hushspec']!r}",
+                ERROR_UNSUPPORTED_VERSION,
+            )
+        )
     _validate_optional_string(obj, "name", errors, "name")
     _validate_optional_string(obj, "description", errors, "description")
     _validate_optional_string(obj, "extends", errors, "extends")
@@ -99,25 +130,25 @@ def _validate_top_level(obj: dict[str, Any], errors: list[str]) -> None:
 
     if "rules" in obj:
         if not isinstance(obj["rules"], dict):
-            errors.append("rules must be an object")
+            errors.append("rules: invalid type, expected an object")
         else:
             _validate_rules(obj["rules"], errors)
 
     if "extensions" in obj:
         if not isinstance(obj["extensions"], dict):
-            errors.append("extensions must be an object")
+            errors.append("extensions: invalid type, expected an object")
         else:
             _validate_extensions(obj["extensions"], errors)
 
     if "metadata" in obj:
         if not isinstance(obj["metadata"], dict):
-            errors.append("metadata must be an object")
+            errors.append("metadata: invalid type, expected an object")
         else:
             _validate_governance_metadata(obj["metadata"], errors)
 
 
 def _validate_rules(obj: dict[str, Any], errors: list[str]) -> None:
-    _reject_unknown_keys(obj, RULE_KEYS, errors, "rule")
+    _reject_unknown_keys(obj, RULE_KEYS, errors, "rules")
     _validate_optional_object(obj, "forbidden_paths", errors, "rules", _validate_forbidden_paths)
     _validate_optional_object(obj, "path_allowlist", errors, "rules", _validate_path_allowlist)
     _validate_optional_object(obj, "egress", errors, "rules", _validate_egress)
@@ -170,14 +201,14 @@ def _validate_secret_patterns(obj: dict[str, Any], errors: list[str], path: str)
         return
     patterns = obj["patterns"]
     if not isinstance(patterns, list):
-        errors.append(f"{path}.patterns must be an array")
+        errors.append(f"{path}.patterns: invalid type, expected an array")
         return
 
     seen: set[str] = set()
     for index, pattern in enumerate(patterns):
         item_path = f"{path}.patterns[{index}]"
         if not isinstance(pattern, dict):
-            errors.append(f"{item_path} must be an object")
+            errors.append(f"{item_path}: invalid type, expected an object")
             continue
         _reject_unknown_keys(pattern, SECRET_PATTERN_KEYS, errors, item_path)
         name = _validate_required_string(pattern, "name", errors, f"{item_path}.name is required")
@@ -190,7 +221,12 @@ def _validate_secret_patterns(obj: dict[str, Any], errors: list[str], path: str)
         _validate_optional_string(pattern, "description", errors, f"{item_path}.description")
         if name is not None:
             if name in seen:
-                errors.append(f"duplicate secret pattern name: {name}")
+                errors.append(
+                    ErrorMessage(
+                        f"duplicate secret pattern name: {name}",
+                        ERROR_DUPLICATE_PATTERN_NAME,
+                    )
+                )
             seen.add(name)
         if regex is not None:
             _validate_regex(regex, errors, f"{item_path}.pattern")
@@ -332,13 +368,13 @@ def _validate_changelog(obj: dict[str, Any], errors: list[str], path: str) -> No
 
     changelog = obj["changelog"]
     if not isinstance(changelog, list):
-        errors.append(f"{path}.changelog must be an array")
+        errors.append(f"{path}.changelog: invalid type, expected an array")
         return
 
     for index, entry in enumerate(changelog):
         entry_path = f"{path}.changelog[{index}]"
         if not isinstance(entry, dict):
-            errors.append(f"{entry_path} must be an object")
+            errors.append(f"{entry_path}: invalid type, expected an object")
             continue
 
         _reject_unknown_keys(entry, CHANGELOG_ENTRY_KEYS, errors, entry_path)
@@ -372,13 +408,13 @@ def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str
 
     controls = obj["controls"]
     if not isinstance(controls, list):
-        errors.append(f"{path}.controls must be an array")
+        errors.append(f"{path}.controls: invalid type, expected an array")
         return
 
     for index, entry in enumerate(controls):
         entry_path = f"{path}.controls[{index}]"
         if not isinstance(entry, dict):
-            errors.append(f"{entry_path} must be an object")
+            errors.append(f"{entry_path}: invalid type, expected an object")
             continue
 
         _reject_unknown_keys(entry, CONTROL_MAPPING_KEYS, errors, entry_path)
@@ -388,7 +424,10 @@ def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str
         )
         if framework is not None and FRAMEWORK_ID_PATTERN.match(framework) is None:
             errors.append(
-                f"{entry_path}.framework {framework!r} must match ^[a-z0-9][a-z0-9.-]*$"
+                _constraint(
+                    f"{entry_path}.framework {framework!r} "
+                    "must match ^[a-z0-9][a-z0-9.-]*$"
+                )
             )
 
         control_id = _validate_required_string(
@@ -406,7 +445,9 @@ def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str
             if rule_paths is not None:
                 if not rule_paths:
                     errors.append(
-                        f"{entry_path}.rule_paths must list at least one rule path"
+                        _constraint(
+                            f"{entry_path}.rule_paths must list at least one rule path"
+                        )
                     )
                 for entry_index, rule_path in enumerate(rule_paths):
                     if rule_path == "":
@@ -418,7 +459,7 @@ def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str
 
 
 def _validate_extensions(obj: dict[str, Any], errors: list[str]) -> None:
-    _reject_unknown_keys(obj, EXTENSION_KEYS, errors, "extension")
+    _reject_unknown_keys(obj, EXTENSION_KEYS, errors, "extensions")
     _validate_optional_object(obj, "posture", errors, "extensions", _validate_posture)
     posture_states = (
         set(obj["posture"]["states"].keys())
@@ -441,11 +482,11 @@ def _validate_posture(obj: dict[str, Any], errors: list[str], path: str) -> None
 
     states = obj.get("states")
     if not isinstance(states, dict):
-        errors.append(f"{path}.states must be an object")
+        errors.append(f"{path}.states: invalid type, expected an object")
         states = None
     transitions = obj.get("transitions")
     if not isinstance(transitions, list):
-        errors.append(f"{path}.transitions must be an array")
+        errors.append(f"{path}.transitions: invalid type, expected an array")
         transitions = None
 
     state_names: set[str] = set()
@@ -459,14 +500,14 @@ def _validate_posture(obj: dict[str, Any], errors: list[str], path: str) -> None
             state_names.add(state_name)
             state_path = f"{path}.states.{state_name}"
             if not isinstance(state, dict):
-                errors.append(f"{state_path} must be an object")
+                errors.append(f"{state_path}: invalid type, expected an object")
                 continue
             _reject_unknown_keys(state, POSTURE_STATE_KEYS, errors, state_path)
             _validate_optional_string(state, "description", errors, f"{state_path}.description")
             _validate_optional_string_array(state, "capabilities", errors, f"{state_path}.capabilities")
             if "budgets" in state:
                 if not isinstance(state["budgets"], dict):
-                    errors.append(f"{state_path}.budgets must be an object")
+                    errors.append(f"{state_path}.budgets: invalid type, expected an object")
                 else:
                     for budget_key, budget_value in state["budgets"].items():
                         if not isinstance(budget_key, str):
@@ -480,13 +521,15 @@ def _validate_posture(obj: dict[str, Any], errors: list[str], path: str) -> None
                         )
 
     if initial is not None and state_names and initial not in state_names:
-        errors.append(f"posture.initial '{initial}' does not reference a defined state")
+        errors.append(
+            _constraint(f"posture.initial '{initial}' does not reference a defined state")
+        )
 
     if transitions is not None:
         for index, transition in enumerate(transitions):
             transition_path = f"{path}.transitions[{index}]"
             if not isinstance(transition, dict):
-                errors.append(f"{transition_path} must be an object")
+                errors.append(f"{transition_path}: invalid type, expected an object")
                 continue
             _reject_unknown_keys(transition, POSTURE_TRANSITION_KEYS, errors, transition_path)
             from_state = _validate_required_string(
@@ -502,24 +545,39 @@ def _validate_posture(obj: dict[str, Any], errors: list[str], path: str) -> None
 
             if from_state is not None and from_state != "*" and from_state not in state_names:
                 errors.append(
-                    f"posture.transitions[{index}].from '{from_state}' does not reference a defined state"
+                    _constraint(
+                        f"posture.transitions[{index}].from '{from_state}' "
+                        "does not reference a defined state"
+                    )
                 )
             if to_state == "*":
-                errors.append(f"posture.transitions[{index}].to cannot be '*'")
+                errors.append(
+                    _constraint(f"posture.transitions[{index}].to cannot be '*'")
+                )
             elif to_state is not None and to_state not in state_names:
                 errors.append(
-                    f"posture.transitions[{index}].to '{to_state}' does not reference a defined state"
+                    _constraint(
+                        f"posture.transitions[{index}].to '{to_state}' "
+                        "does not reference a defined state"
+                    )
                 )
 
             if on == "timeout":
                 if after is None:
                     errors.append(
-                        f"posture.transitions[{index}]: timeout trigger requires 'after' field"
+                        _constraint(
+                            f"posture.transitions[{index}]: "
+                            "timeout trigger requires 'after' field"
+                        )
                     )
                 elif not DURATION_PATTERN.match(after):
-                    errors.append(f"{transition_path}.after must match ^\\d+[smhd]$")
+                    errors.append(
+                        _constraint(f"{transition_path}.after must match ^\\d+[smhd]$")
+                    )
             elif after is not None and not DURATION_PATTERN.match(after):
-                errors.append(f"{transition_path}.after must match ^\\d+[smhd]$")
+                errors.append(
+                    _constraint(f"{transition_path}.after must match ^\\d+[smhd]$")
+                )
 
 
 def _validate_origins(
@@ -534,39 +592,41 @@ def _validate_origins(
         return
     profiles = obj["profiles"]
     if not isinstance(profiles, list):
-        errors.append(f"{path}.profiles must be an array")
+        errors.append(f"{path}.profiles: invalid type, expected an array")
         return
 
     profile_ids: set[str] = set()
     for index, profile in enumerate(profiles):
         profile_path = f"{path}.profiles[{index}]"
         if not isinstance(profile, dict):
-            errors.append(f"{profile_path} must be an object")
+            errors.append(f"{profile_path}: invalid type, expected an object")
             continue
         _reject_unknown_keys(profile, ORIGIN_PROFILE_KEYS, errors, profile_path)
         profile_id = _validate_required_string(profile, "id", errors, f"{profile_path}.id is required")
         if profile_id is not None:
             if profile_id in profile_ids:
-                errors.append(f"duplicate origin profile id: '{profile_id}'")
+                errors.append(
+                    _constraint(f"duplicate origin profile id: '{profile_id}'")
+                )
             profile_ids.add(profile_id)
 
         if "match" in profile:
             match = profile["match"]
             if not isinstance(match, dict):
-                errors.append(f"{profile_path}.match must be an object")
+                errors.append(f"{profile_path}.match: invalid type, expected an object")
             else:
                 _reject_unknown_keys(match, ORIGIN_MATCH_KEYS, errors, f"{profile_path}.match")
                 _validate_optional_string(match, "provider", errors, f"{profile_path}.match.provider")
                 _validate_optional_string(match, "tenant_id", errors, f"{profile_path}.match.tenant_id")
                 _validate_optional_string(match, "space_id", errors, f"{profile_path}.match.space_id")
-                _validate_optional_enum(
+                _validate_constraint_enum(
                     match,
                     "space_type",
                     errors,
                     f"{profile_path}.match.space_type",
                     ORIGIN_SPACE_TYPES,
                 )
-                _validate_optional_enum(
+                _validate_constraint_enum(
                     match,
                     "visibility",
                     errors,
@@ -603,9 +663,19 @@ def _validate_origins(
         posture = _validate_optional_string(profile, "posture", errors, f"{profile_path}.posture")
         if posture is not None:
             if posture_states is None:
-                errors.append(f"{profile_path}.posture requires extensions.posture to be defined")
+                errors.append(
+                    _constraint(
+                        f"{profile_path}.posture requires extensions.posture "
+                        "to be defined"
+                    )
+                )
             elif posture not in posture_states:
-                errors.append(f"{profile_path}.posture '{posture}' does not reference a defined posture state")
+                errors.append(
+                    _constraint(
+                        f"{profile_path}.posture '{posture}' does not reference "
+                        "a defined posture state"
+                    )
+                )
 
         _validate_optional_object(
             profile, "tool_access", errors, profile_path, _validate_origin_tool_access
@@ -617,7 +687,7 @@ def _validate_origins(
         if "data" in profile:
             data = profile["data"]
             if not isinstance(data, dict):
-                errors.append(f"{profile_path}.data must be an object")
+                errors.append(f"{profile_path}.data: invalid type, expected an object")
             else:
                 _reject_unknown_keys(data, ORIGIN_DATA_KEYS, errors, f"{profile_path}.data")
                 _validate_optional_bool(
@@ -636,7 +706,7 @@ def _validate_origins(
         if "budgets" in profile:
             budgets = profile["budgets"]
             if not isinstance(budgets, dict):
-                errors.append(f"{profile_path}.budgets must be an object")
+                errors.append(f"{profile_path}.budgets: invalid type, expected an object")
             else:
                 _reject_unknown_keys(budgets, ORIGIN_BUDGET_KEYS, errors, f"{profile_path}.budgets")
                 _validate_optional_int(
@@ -656,7 +726,7 @@ def _validate_origins(
         if "bridge" in profile:
             bridge = profile["bridge"]
             if not isinstance(bridge, dict):
-                errors.append(f"{profile_path}.bridge must be an object")
+                errors.append(f"{profile_path}.bridge: invalid type, expected an object")
             else:
                 _reject_unknown_keys(bridge, BRIDGE_POLICY_KEYS, errors, f"{profile_path}.bridge")
                 _validate_optional_bool(
@@ -668,16 +738,16 @@ def _validate_origins(
                 if "allowed_targets" in bridge:
                     targets = bridge["allowed_targets"]
                     if not isinstance(targets, list):
-                        errors.append(f"{profile_path}.bridge.allowed_targets must be an array")
+                        errors.append(f"{profile_path}.bridge.allowed_targets: invalid type, expected an array")
                     else:
                         for target_index, target in enumerate(targets):
                             target_path = f"{profile_path}.bridge.allowed_targets[{target_index}]"
                             if not isinstance(target, dict):
-                                errors.append(f"{target_path} must be an object")
+                                errors.append(f"{target_path}: invalid type, expected an object")
                                 continue
                             _reject_unknown_keys(target, BRIDGE_TARGET_KEYS, errors, target_path)
                             _validate_optional_string(target, "provider", errors, f"{target_path}.provider")
-                            _validate_optional_enum(
+                            _validate_constraint_enum(
                                 target,
                                 "space_type",
                                 errors,
@@ -685,7 +755,7 @@ def _validate_origins(
                                 ORIGIN_SPACE_TYPES,
                             )
                             _validate_optional_string_array(target, "tags", errors, f"{target_path}.tags")
-                            _validate_optional_enum(
+                            _validate_constraint_enum(
                                 target,
                                 "visibility",
                                 errors,
@@ -739,7 +809,9 @@ def _validate_detection_prompt(obj: dict[str, Any], errors: list[str], path: str
     _validate_optional_enum(
         obj, "block_at_or_above", errors, f"{path}.block_at_or_above", DETECTION_LEVELS
     )
-    _validate_optional_int(obj, "max_scan_bytes", errors, f"{path}.max_scan_bytes", min_value=1)
+    _validate_optional_int(
+        obj, "max_scan_bytes", errors, f"{path}.max_scan_bytes", min_value=1, code=ERROR_CONSTRAINT_VIOLATION
+    )
     _validate_optional_object(
         obj, "heuristics", errors, path, _validate_detection_heuristics,
     )
@@ -764,19 +836,37 @@ def _validate_detection_heuristics(
 def _validate_detection_jailbreak(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, JAILBREAK_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
-    _validate_optional_int(obj, "block_threshold", errors, f"{path}.block_threshold", min_value=0, max_value=100)
-    _validate_optional_int(obj, "warn_threshold", errors, f"{path}.warn_threshold", min_value=0, max_value=100)
-    _validate_optional_int(obj, "max_input_bytes", errors, f"{path}.max_input_bytes", min_value=1)
+    _validate_optional_int(
+        obj, "block_threshold", errors, f"{path}.block_threshold",
+        min_value=0, max_value=100, code=ERROR_CONSTRAINT_VIOLATION,
+    )
+    _validate_optional_int(
+        obj, "warn_threshold", errors, f"{path}.warn_threshold",
+        min_value=0, max_value=100, code=ERROR_CONSTRAINT_VIOLATION,
+    )
+    _validate_optional_int(
+        obj, "max_input_bytes", errors, f"{path}.max_input_bytes",
+        min_value=1, code=ERROR_CONSTRAINT_VIOLATION,
+    )
 
 
 def _validate_detection_threat_intel(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, THREAT_INTEL_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string(obj, "pattern_db", errors, f"{path}.pattern_db")
-    _validate_optional_number(
-        obj, "similarity_threshold", errors, f"{path}.similarity_threshold", min_value=0, max_value=1
+    if "similarity_threshold" in obj:
+        threshold = _validate_number_value(
+            obj["similarity_threshold"], errors, f"{path}.similarity_threshold"
+        )
+        if threshold is not None and not 0.0 <= threshold <= 1.0:
+            errors.append(
+                _constraint(
+                    f"{path}.similarity_threshold must be between 0.0 and 1.0"
+                )
+            )
+    _validate_optional_int(
+        obj, "top_k", errors, f"{path}.top_k", min_value=1, code=ERROR_CONSTRAINT_VIOLATION
     )
-    _validate_optional_int(obj, "top_k", errors, f"{path}.top_k", min_value=1)
 
 
 def _validate_optional_object(
@@ -791,7 +881,7 @@ def _validate_optional_object(
     value = obj[key]
     path = f"{base_path}.{key}"
     if not isinstance(value, dict):
-        errors.append(f"{path} must be an object")
+        errors.append(f"{path}: invalid type, expected an object")
         return
     validator(value, errors, path)
 
@@ -829,17 +919,43 @@ def _validate_optional_bool(
         return None
     value = obj[key]
     if not isinstance(value, bool):
-        errors.append(f"{path} must be a boolean")
+        errors.append(f"{path}: invalid type, expected a boolean")
+        return None
+    return value
+
+
+def _validate_constraint_enum(
+    obj: dict[str, Any], key: str, errors: list[str], path: str, allowed: set[str]
+) -> str | None:
+    """An enum the model carries as a free string and `validate` checks (E004).
+
+    Its diagnostic names the offending value rather than a missing variant,
+    because nothing failed to deserialize: the document parsed, and the value
+    is outside the set the module defines.
+    """
+    if key not in obj:
+        return None
+    value = obj[key]
+    if not isinstance(value, str):
+        errors.append(f"{path}: invalid type, expected a string")
+        return None
+    if value not in allowed:
+        errors.append(_constraint(f"{path} '{value}' is not valid"))
         return None
     return value
 
 
 def _validate_optional_enum(
-    obj: dict[str, Any], key: str, errors: list[str], path: str, allowed: set[str]
+    obj: dict[str, Any],
+    key: str,
+    errors: list[str],
+    path: str,
+    allowed: set[str],
+    code: str = ERROR_PARSE,
 ) -> str | None:
     if key not in obj:
         return None
-    return _validate_enum_value(obj[key], errors, path, allowed)
+    return _validate_enum_value(obj[key], errors, path, allowed, code=code)
 
 
 def _validate_optional_int(
@@ -849,10 +965,13 @@ def _validate_optional_int(
     path: str,
     min_value: int | None = None,
     max_value: int | None = None,
+    code: str = ERROR_PARSE,
 ) -> int | None:
     if key not in obj:
         return None
-    return _validate_int_value(obj[key], errors, path, min_value=min_value, max_value=max_value)
+    return _validate_int_value(
+        obj[key], errors, path, min_value=min_value, max_value=max_value, code=code
+    )
 
 
 def _validate_optional_number(
@@ -863,6 +982,7 @@ def _validate_optional_number(
     min_value: float | None = None,
     max_value: float | None = None,
     min_exclusive: float | None = None,
+    code: str = ERROR_PARSE,
 ) -> float | None:
     if key not in obj:
         return None
@@ -873,6 +993,7 @@ def _validate_optional_number(
         min_value=min_value,
         max_value=max_value,
         min_exclusive=min_exclusive,
+        code=code,
     )
 
 
@@ -883,7 +1004,7 @@ def _validate_optional_string_array(
         return None
     value = obj[key]
     if not isinstance(value, list):
-        errors.append(f"{path} must be an array")
+        errors.append(f"{path}: invalid type, expected an array")
         return None
     items: list[str] = []
     for index, item in enumerate(value):
@@ -895,7 +1016,7 @@ def _validate_optional_string_array(
 
 def _validate_string_value(value: Any, errors: list[str], path: str) -> str | None:
     if not isinstance(value, str):
-        errors.append(f"{path} must be a string")
+        errors.append(f"{path}: invalid type, expected a string")
         return None
     return value
 
@@ -913,13 +1034,20 @@ def _reject_empty_match_string(
 
 
 def _validate_enum_value(
-    value: Any, errors: list[str], path: str, allowed: set[str]
+    value: Any, errors: list[str], path: str, allowed: set[str], code: str = ERROR_PARSE
 ) -> str | None:
     if not isinstance(value, str):
-        errors.append(f"{path} must be a string")
+        # A value of the wrong type is a parse refusal whatever the field is.
+        errors.append(f"{path}: invalid type, expected a string")
         return None
     if value not in allowed:
-        errors.append(f"{path} must be one of: {', '.join(sorted(allowed))}")
+        errors.append(
+            ErrorMessage(
+                f"{path}: unknown variant `{value}`, "
+                f"expected one of: {', '.join(sorted(allowed))}",
+                code,
+            )
+        )
         return None
     return value
 
@@ -930,15 +1058,16 @@ def _validate_int_value(
     path: str,
     min_value: int | None = None,
     max_value: int | None = None,
+    code: str = ERROR_PARSE,
 ) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
-        errors.append(f"{path} must be an integer")
+        errors.append(f"{path}: invalid type, expected an integer")
         return None
     if min_value is not None and value < min_value:
-        errors.append(f"{path} must be >= {min_value}")
+        errors.append(ErrorMessage(f"{path} must be >= {min_value}", code))
         return None
     if max_value is not None and value > max_value:
-        errors.append(f"{path} must be <= {max_value}")
+        errors.append(ErrorMessage(f"{path} must be <= {max_value}", code))
         return None
     return value
 
@@ -950,22 +1079,23 @@ def _validate_number_value(
     min_value: float | None = None,
     max_value: float | None = None,
     min_exclusive: float | None = None,
+    code: str = ERROR_PARSE,
 ) -> float | None:
     if not isinstance(value, (int, float)) or isinstance(value, bool):
-        errors.append(f"{path} must be a number")
+        errors.append(f"{path}: invalid type, expected a number")
         return None
     value = float(value)
     if not math.isfinite(value):
-        errors.append(f"{path} must be a finite number")
+        errors.append(ErrorMessage(f"{path} must be a finite number", code))
         return None
     if min_value is not None and value < min_value:
-        errors.append(f"{path} must be >= {min_value}")
+        errors.append(ErrorMessage(f"{path} must be >= {min_value}", code))
         return None
     if max_value is not None and value > max_value:
-        errors.append(f"{path} must be <= {max_value}")
+        errors.append(ErrorMessage(f"{path} must be <= {max_value}", code))
         return None
     if min_exclusive is not None and value <= min_exclusive:
-        errors.append(f"{path} must be > {min_exclusive}")
+        errors.append(ErrorMessage(f"{path} must be > {min_exclusive}", code))
         return None
     return value
 
@@ -1084,7 +1214,12 @@ def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
     try:
         compile_profile_regex(pattern)
     except ValueError as exc:
-        errors.append(f"{path} must be a valid regular expression: {exc}")
+        errors.append(
+            ErrorMessage(
+                f"{path} must be a valid regular expression: {exc}",
+                ERROR_INVALID_REGEX,
+            )
+        )
 
 
 # Nested-quantifier (catastrophic backtracking / ReDoS) heuristic.
@@ -1196,11 +1331,4 @@ def _reject_unknown_keys(
             errors.append(f"{path} contains a non-string field name")
             continue
         if key not in allowed:
-            if path == "top-level field":
-                errors.append(f"unknown top-level field: {key}")
-            elif path == "rule":
-                errors.append(f"unknown rule: {key}")
-            elif path == "extension":
-                errors.append(f"unknown extension: {key}")
-            else:
-                errors.append(f"unknown field at {path}: {key}")
+            errors.append(f"unknown field `{key}` at {path}")
