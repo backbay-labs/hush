@@ -4,7 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
+	"os"
 	"strings"
 	"testing"
 )
@@ -67,34 +67,40 @@ func TestNewDefaultDetectorRegistryIsAnAlias(t *testing.T) {
 // the syntax instead.
 func packageExports(t *testing.T) map[string]bool {
 	t.Helper()
-	fileSet := token.NewFileSet()
-	packages, err := parser.ParseDir(fileSet, ".", func(info fs.FileInfo) bool {
-		return !strings.HasSuffix(info.Name(), "_test.go")
-	}, 0)
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("failed to parse the package sources: %v", err)
+		t.Fatalf("failed to list the package directory: %v", err)
 	}
+	fileSet := token.NewFileSet()
 	exported := map[string]bool{}
-	for _, pkg := range packages {
-		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				switch node := decl.(type) {
-				case *ast.FuncDecl:
-					if node.Recv == nil && node.Name.IsExported() {
-						exported[node.Name.Name] = true
-					}
-				case *ast.GenDecl:
-					for _, spec := range node.Specs {
-						switch typed := spec.(type) {
-						case *ast.TypeSpec:
-							if typed.Name.IsExported() {
-								exported[typed.Name.Name] = true
-							}
-						case *ast.ValueSpec:
-							for _, name := range typed.Names {
-								if name.IsExported() {
-									exported[name.Name] = true
-								}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		// Build-tag-gated files are parsed too, which is what is wanted here:
+		// the exported surface must be the same on every platform.
+		file, err := parser.ParseFile(fileSet, name, nil, 0)
+		if err != nil {
+			t.Fatalf("failed to parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			switch node := decl.(type) {
+			case *ast.FuncDecl:
+				if node.Recv == nil && node.Name.IsExported() {
+					exported[node.Name.Name] = true
+				}
+			case *ast.GenDecl:
+				for _, spec := range node.Specs {
+					switch typed := spec.(type) {
+					case *ast.TypeSpec:
+						if typed.Name.IsExported() {
+							exported[typed.Name.Name] = true
+						}
+					case *ast.ValueSpec:
+						for _, valueName := range typed.Names {
+							if valueName.IsExported() {
+								exported[valueName.Name] = true
 							}
 						}
 					}
