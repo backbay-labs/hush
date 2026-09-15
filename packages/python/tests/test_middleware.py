@@ -629,15 +629,19 @@ class TestReceiptSinkIntegration:
         assert receipt.enforcement is not None
         assert receipt.enforcement.mode == "monitor"
         assert receipt.enforcement.outcome == "would_block"
-        assert len(receipt.policy.content_hash) == 64
+        assert receipt.policy.content_hash.startswith("sha256:")
+        assert len(receipt.policy.content_hash) == len("sha256:") + 64
 
-    def test_evaluate_sends_untagged_receipt(self):
+    def test_evaluate_sends_a_receipt_with_the_implied_disposition(self):
+        # `evaluate()` applies nothing, but a 0.2 receipt must still say what
+        # would happen (receipt spec 4.7): a deny under enforce is `blocked`.
         sink = _CaptureSink()
         guard = HushGuard.from_yaml(DENY_SHELL_POLICY, sink=sink)
         result = guard.evaluate(EvaluationAction(type="tool_call", target="dangerous_tool"))
         assert result.decision == Decision.DENY
         assert len(sink.receipts) == 1
-        assert sink.receipts[0].enforcement is None
+        assert sink.receipts[0].enforcement.mode == "enforce"
+        assert sink.receipts[0].enforcement.outcome == "blocked"
 
     def test_throwing_sink_never_breaks_enforcement(self):
         guard = HushGuard.from_yaml(
@@ -672,10 +676,10 @@ class TestReceiptSinkIntegration:
 # detection in the sink/audit path
 #
 # _run_evaluation()'s sink branch builds its receipt with evaluate_audited(),
-# which consults only the core rules -- so _apply_detection() folds the
-# detection extension in afterward (mirroring the Rust CLI's apply_detection),
-# making a sink-configured guard apply detection identically to the sink-free
-# path: the enforced decision AND the emitted receipt both reflect detection.
+# which routes through the detection pipeline itself, so a sink-configured
+# guard applies detection identically to the sink-free path: the enforced
+# decision AND the emitted receipt reflect it, and the receipt carries the
+# per-detector `detection_trace` of receipt spec 4.6.
 
 
 class TestDetectionInSinkPath:
@@ -702,12 +706,15 @@ class TestDetectionInSinkPath:
         receipt = sink.receipts[0]
         assert receipt.decision == Decision.DENY
         assert receipt.matched_rule == "detection"
-        detection_entries = [
-            e for e in receipt.rule_trace if e.rule_block == "detection"
-        ]
-        assert len(detection_entries) == 1
-        assert detection_entries[0].outcome == "deny"
-        assert detection_entries[0].evaluated is True
+        # `detection` is not one of the schema's closed rule_block ids: what
+        # the detectors did is recorded in `detection_trace` instead.
+        assert all(e.rule_block != "detection" for e in receipt.rule_trace)
+        assert receipt.detection_trace is not None
+        fired = [d for d in receipt.detection_trace if d.matched]
+        assert len(fired) == 1
+        assert fired[0].detector_id == "regex_injection@1"
+        assert fired[0].category == "prompt_injection"
+        assert fired[0].level in ("high", "critical")
 
     def test_sink_receipt_unchanged_for_clean_content(self):
         sink = _CaptureSink()
@@ -730,3 +737,7 @@ class TestDetectionInSinkPath:
         assert receipt.decision == Decision.ALLOW
         assert receipt.matched_rule == "rules.tool_access.allow"
         assert all(e.rule_block != "detection" for e in receipt.rule_trace)
+        # The pipeline ran, so the trace is present and nothing matched
+        # (receipt spec 4.6: absent, not empty, means it did not run).
+        assert receipt.detection_trace is not None
+        assert all(not d.matched for d in receipt.detection_trace)

@@ -10,8 +10,10 @@ from hushspec.evaluate import (
     Decision,
     EvaluationAction,
     EvaluationResult,
-    evaluate,
+    TracedEvaluation,
+    evaluate_traced,
 )
+from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import DetectionLevel, JailbreakDetection, PromptInjectionDetection
 from hushspec.schema import HushSpec
 
@@ -383,6 +385,66 @@ class EvaluationWithDetection:
     detection_decision: Optional[Decision] = None
 
 
+class DetectorLevel(str, Enum):
+    """The level a normalized detector score maps to in a receipt's
+    ``detection_trace`` (receipt spec section 4.6).
+
+    ``none`` is a zero score, ``low`` a non-zero score below every threshold
+    floor, and the rest follow the ``DetectionLevel`` floors of the
+    prompt-injection mapping (0.25 / 0.5 / 0.75), applied to every detector's
+    normalized 0-1 score whatever its own threshold spelling.
+    """
+
+    NONE = "none"
+    LOW = "low"
+    SUSPICIOUS = "suspicious"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+    @classmethod
+    def from_score(cls, score: float) -> "DetectorLevel":
+        if score <= 0.0:
+            return cls.NONE
+        if score < _LEVEL_FLOORS[DetectionLevel.SUSPICIOUS]:
+            return cls.LOW
+        if score < _LEVEL_FLOORS[DetectionLevel.HIGH]:
+            return cls.SUSPICIOUS
+        if score < _LEVEL_FLOORS[DetectionLevel.CRITICAL]:
+            return cls.HIGH
+        return cls.CRITICAL
+
+
+@dataclass
+class DetectorEvaluation:
+    """One detector's contribution, recorded as it ran (receipt spec 4.6)."""
+
+    detector_id: str
+    category: DetectionCategory
+    score: float
+    level: DetectorLevel
+    matched: bool = False
+
+
+#: Version suffix appended to a built-in detector's name to form its id.
+DETECTOR_ID_VERSION = "@1"
+
+
+@dataclass
+class TracedEvaluationWithDetection:
+    """A traced evaluation with the detection pipeline folded in."""
+
+    #: The rule-block evaluation and its recorded trace, before detection.
+    traced: "TracedEvaluation"
+    #: The decision callers act on (base evaluation, possibly escalated).
+    evaluation: EvaluationResult
+    detections: list[DetectionResult] = field(default_factory=list)
+    detection_decision: Optional[Decision] = None
+    #: Per-detector receipt entries in run order. ``None`` when the pipeline did
+    #: not run (no ``detection:`` extension); an empty list when it ran and
+    #: nothing was enabled or there was no content to scan.
+    detector_trace: Optional[list[DetectorEvaluation]] = None
+
+
 
 # evaluate_with_detection: spec-driven wiring
 #
@@ -538,17 +600,42 @@ def evaluate_with_detection(
          otherwise return ``base`` unchanged so a policy deny keeps its own
          matched_rule.
     """
-    base = evaluate(spec, action)
+    traced = evaluate_with_detection_traced(spec, action)
+    return EvaluationWithDetection(
+        evaluation=traced.evaluation,
+        detections=traced.detections,
+        detection_decision=traced.detection_decision,
+    )
+
+
+def evaluate_with_detection_traced(
+    spec: HushSpec,
+    action: EvaluationAction,
+    context: Optional[RuntimeContext] = None,
+    conditions: Optional[dict[str, Condition]] = None,
+) -> TracedEvaluationWithDetection:
+    """:func:`evaluate_with_detection` with the recorded rule trace and the
+    per-detector receipt entries a receipt's ``detection_trace`` carries.
+
+    ``detector_trace`` is ``None`` when the pipeline did not run at all (the
+    policy has no ``detection:`` extension) and a list -- possibly empty --
+    whenever it did, which is exactly the presence rule of receipt spec 4.6.
+    """
+    traced = evaluate_traced(spec, action, context, conditions)
+    base = traced.result
 
     detection = spec.extensions.detection if spec.extensions is not None else None
     if detection is None:
-        return EvaluationWithDetection(evaluation=base)
+        return TracedEvaluationWithDetection(traced=traced, evaluation=base)
 
     content = action.content or ""
     if not content:
-        return EvaluationWithDetection(evaluation=base)
+        return TracedEvaluationWithDetection(
+            traced=traced, evaluation=base, detector_trace=[]
+        )
 
     detections: list[DetectionResult] = []
+    detector_trace: list[DetectorEvaluation] = []
     # (contribution, category) pairs in detector run order, used below to
     # find "the first detector that forced the escalation".
     contributions: list[tuple[Decision, str]] = []
@@ -559,6 +646,15 @@ def evaluate_with_detection(
         detections.append(result)
         if contribution is not None:
             contributions.append((contribution, "prompt_injection"))
+        detector_trace.append(
+            DetectorEvaluation(
+                detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
+                category=DetectionCategory.PROMPT_INJECTION,
+                score=result.score,
+                level=DetectorLevel.from_score(result.score),
+                matched=contribution is not None,
+            )
+        )
 
     jb_config = detection.jailbreak
     if jb_config is not None and jb_config.enabled is not False:
@@ -566,6 +662,15 @@ def evaluate_with_detection(
         detections.append(result)
         if contribution is not None:
             contributions.append((contribution, "jailbreak"))
+        detector_trace.append(
+            DetectorEvaluation(
+                detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
+                category=DetectionCategory.JAILBREAK,
+                score=result.score,
+                level=DetectorLevel.from_score(result.score),
+                matched=contribution is not None,
+            )
+        )
 
     # threat_intel is deliberately NOT auto-wired: the built-in engine ships
     # only regex detectors and has no pattern-db / similarity model to
@@ -600,8 +705,10 @@ def evaluate_with_detection(
     else:
         evaluation = base
 
-    return EvaluationWithDetection(
+    return TracedEvaluationWithDetection(
+        traced=traced,
         evaluation=evaluation,
         detections=detections,
         detection_decision=detection_decision,
+        detector_trace=detector_trace,
     )

@@ -15,6 +15,7 @@ envelopes always cover exactly the documents under test.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ import pytest
 from hushspec.canonical import content_hash
 from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.middleware import (
+    UNVERIFIED_POLICY_HASH,
     POLICY_SIGNATURE_RULE,
     EnforcementConfig,
     HushGuard,
@@ -127,6 +129,9 @@ def sign_file(path: Path, key_pem: str = SIGNING_KEY, *, sig_path: Path | None =
 def keyring_options(**kwargs) -> ResolveOptions:
     return ResolveOptions(keyring=SIGNING_PUB, **kwargs)
 
+
+#: The receipt/envelope timestamp spelling: milliseconds, `Z`.
+TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$")
 
 # --------------------------------------------------------------------------- #
 # Chain construction (receipt spec section 4.2)
@@ -282,7 +287,8 @@ def test_a_malformed_digest_pin_is_rejected_not_ignored(tmp_path: Path) -> None:
                 source=str(leaf),
                 loader=create_composite_loader(),
             )
-        assert caught.value.reason == "malformed_digest_pin", bad
+        assert caught.value.reason == "invalid_pin", bad
+        assert caught.value.code == "invalid_pin", bad
 
 
 def test_a_pin_on_a_middle_hop_is_checked(tmp_path: Path) -> None:
@@ -331,8 +337,10 @@ def test_require_signature_admits_a_signed_leaf_over_a_builtin_base(tmp_path: Pa
     assert resolution.signature is not None
     assert resolution.signature.verified is True
     assert resolution.signature.key_id == envelope.key_id
-    assert resolution.signature.signed_at == envelope.signed_at
     assert resolution.signature.reason is None
+    # `verified_at` is the verifier's clock -- when the ten checks ran -- not
+    # the signer's `signed_at` (receipt spec 4.2).
+    assert TIMESTAMP_RE.match(resolution.signature.verified_at)
     # A builtin hop is embedded in the engine: no separate verification.
     assert resolution.chain[0].source == "builtin:strict"
     assert resolution.chain[0].signature is None
@@ -685,7 +693,13 @@ def test_a_refusal_cannot_be_downgraded_to_monitor(tmp_path: Path) -> None:
     assert refused.matched_rule == POLICY_SIGNATURE_RULE
     assert refused.rule_trace == []
     assert refused.policy.name == "standalone"
-    assert refused.policy.content_hash == ""
+    # A 0.2 receipt always carries a well-formed content hash; the guard will
+    # not vouch for the hash of a document it would not evaluate, so it records
+    # the all-zero digest and the verifier's reason instead.
+    assert refused.policy.content_hash == UNVERIFIED_POLICY_HASH
+    assert refused.policy.signature.verified is False
+    assert refused.policy.signature.reason == "missing_signature"
+    assert refused.enforcement.outcome == "blocked"
 
 
 def test_guard_refuses_an_unverifiable_base(tmp_path: Path) -> None:

@@ -21,12 +21,19 @@ from hushspec.resolve import (
     create_composite_loader,
     resolve_with_options_or_raise,
 )
+from hushspec.receipt import POLICY_UNVERIFIED_RULE
 from hushspec.schema import HushSpec
 from hushspec.signing import Keyring
 
 if TYPE_CHECKING:
     from hushspec.observer import EvaluationObserver
-    from hushspec.receipt import AuditConfig, DecisionReceipt, EnforcementSummary
+    from hushspec.receipt import (
+        Actor,
+        AuditConfig,
+        AuditContext,
+        DecisionReceipt,
+        EnforcementSummary,
+    )
     from hushspec.sinks import ReceiptSink
 
 WarnHandler = Callable[[EvaluationResult, EvaluationAction], bool]
@@ -34,10 +41,17 @@ WarnHandler = Callable[[EvaluationResult, EvaluationAction], bool]
 _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 
 #: ``matched_rule`` of the denial a guard returns while it is refusing to
-#: enforce an unverified policy (signing spec section 6.5). Like the panic
-#: sentinel it is a guard-level rule, not a policy rule, so it can never be
-#: relaxed by an enforcement override.
-POLICY_SIGNATURE_RULE = "__hushspec_policy_signature__"
+#: enforce an unverified policy (signing spec section 6.5, receipt spec 4.5).
+#: Like the panic sentinel it is a guard-level rule, not a policy rule, so it
+#: can never be relaxed by an enforcement override. It is the same reserved
+#: name the receipt carries -- one spelling per fact.
+POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
+
+#: ``policy.content_hash`` of a receipt for a load the guard refused. A 0.2
+#: receipt requires the field, but the guard will not vouch for the hash of a
+#: document it would not evaluate, so it records the all-zero digest: a
+#: well-formed content hash that joins to nothing.
+UNVERIFIED_POLICY_HASH = "sha256:" + "0" * 64
 
 
 @dataclass
@@ -95,41 +109,6 @@ def _validate_enforcement_config(config: EnforcementConfig, observable: bool) ->
             "monitor mode requires an observer or a receipt sink: "
             "shadow decisions would be unobservable"
         )
-
-
-def _apply_detection(
-    receipt: "DecisionReceipt", spec: HushSpec, action: EvaluationAction
-) -> None:
-    """Fold a policy's ``detection:`` extension into an already-built receipt.
-
-    Mirrors the Rust reference ``apply_detection``
-    (crates/hushspec-cli/src/cmd_eval.rs): ``evaluate_audited`` builds the
-    receipt from the core rules only, so when content detection escalates the
-    decision this reconciles the receipt -- overwriting decision/matched_rule/
-    reason with the detected values and appending a ``detection`` rule-trace
-    entry whose outcome is the escalated decision. A no-op when the policy has
-    no detection extension, there is no content, or detection does not
-    escalate (detection never weakens a policy decision), so receipts for
-    every non-detection policy are byte-for-byte unchanged.
-    """
-    from hushspec.receipt import RuleEvaluation, RuleOutcome
-
-    detected = evaluate_with_detection(spec, action).evaluation
-    if detected.decision == receipt.decision:
-        return
-
-    receipt.rule_trace.append(
-        RuleEvaluation(
-            rule_block="detection",
-            outcome=RuleOutcome(detected.decision.value),
-            matched_rule=detected.matched_rule,
-            reason=detected.reason,
-            evaluated=True,
-        )
-    )
-    receipt.decision = detected.decision
-    receipt.matched_rule = detected.matched_rule
-    receipt.reason = detected.reason
 
 
 def resolve_policy_resolution(
@@ -260,6 +239,7 @@ class HushGuard:
         keyring: Any = None,
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
         _validate_enforcement_config(config, observer is not None or sink is not None)
@@ -270,6 +250,9 @@ class HushGuard:
             from hushspec.receipt import AuditConfig
             audit = AuditConfig()
         self._audit = audit
+        #: Who the guard evaluates for (receipt spec 4.1). Every receipt it
+        #: emits carries it; an empty actor is omitted from receipts.
+        self._actor = actor
         self._resolve_loader = loader
         self._resolve_base_dir = base_dir
         self._resolve_source = source
@@ -299,16 +282,16 @@ class HushGuard:
             self._policy = panic_policy()
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
-        self._policy_hash: Optional[str] = None
+        self._policy_hash: Optional[str] = (
+            self._resolution.content_hash if self._resolution is not None else None
+        )
         if observer is not None:
             from hushspec.observer import ObservableEvaluator
-            from hushspec.receipt import compute_policy_hash
             self._observable_evaluator = ObservableEvaluator(
                 redact_content=self._audit.redact_content
             )
             self._observable_evaluator.add_observer(observer)
             if self._refusal is None:
-                self._policy_hash = compute_policy_hash(self._policy)
                 self._observable_evaluator.notify_policy_loaded(
                     self._policy.name, self._policy_hash
                 )
@@ -331,6 +314,7 @@ class HushGuard:
         keyring: Any = None,
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> HushGuard:
         """Load a policy file and resolve its ``extends`` chain.
 
@@ -361,6 +345,7 @@ class HushGuard:
             keyring=keyring,
             trusted_keys=trusted_keys,
             verify=verify,
+            actor=actor,
         )
 
     @classmethod
@@ -378,6 +363,7 @@ class HushGuard:
         keyring: Any = None,
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> HushGuard:
         """Parse a policy document and resolve its ``extends`` chain.
 
@@ -403,6 +389,7 @@ class HushGuard:
             keyring=keyring,
             trusted_keys=trusted_keys,
             verify=verify,
+            actor=actor,
         )
 
     def _resolve(self, policy: HushSpec) -> Resolution:
@@ -433,8 +420,16 @@ class HushGuard:
         # detection-aware the same way gate()/check()/enforce() are -- a
         # guard must not answer differently from .evaluate() than from
         # .check() for the same action against the same policy.
+        from hushspec.receipt import EnforcementSummary
+
         result, duration_us, receipt = self._run_evaluation(action)
         if receipt is not None:
+            # A 0.2 receipt always says what the enforcement point did (receipt
+            # spec 4.7). `evaluate()` applies nothing, so the disposition is the
+            # one the decision implies under this guard's effective mode.
+            receipt.enforcement = EnforcementSummary.implied(
+                result.decision, self._effective_mode(result)
+            )
             try:
                 self._sink.send(receipt)
             except Exception:
@@ -505,6 +500,14 @@ class HushGuard:
                 return best_mode
         return self._enforcement_mode
 
+    def _audit_context(self) -> "AuditContext":
+        from hushspec.receipt import AuditContext
+
+        return AuditContext(
+            actor=self._actor,
+            enforcement_mode=self._enforcement_mode,
+        )
+
     def _run_evaluation(
         self, action: EvaluationAction
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
@@ -513,14 +516,13 @@ class HushGuard:
         if self._sink is not None:
             from hushspec.receipt import evaluate_audited
 
-            # evaluate_audited() builds the receipt from the core rules only
-            # (it never consults extensions.detection), so fold detection in
-            # afterward -- exactly as the non-sink branch below routes through
-            # evaluate_with_detection() -- and build `result` from the
-            # possibly-reconciled receipt so the enforced decision honors the
-            # policy's detection extension identically to the sink-free path.
-            receipt = evaluate_audited(self._policy, action, self._audit)
-            _apply_detection(receipt, self._policy, action)
+            # evaluate_audited() routes through the detection pipeline itself,
+            # so the receipt's decision is already the one an enforcement point
+            # acts on -- identical to the sink-free path below, which is the
+            # same pipeline without the recording.
+            receipt = evaluate_audited(
+                self._resolution, action, self._audit, self._audit_context()
+            )
             result = EvaluationResult(
                 decision=receipt.decision,
                 matched_rule=receipt.matched_rule,
@@ -528,7 +530,7 @@ class HushGuard:
                 origin_profile=receipt.origin_profile,
                 posture=receipt.posture,
             )
-            return result, receipt.evaluation_duration_us, receipt
+            return result, receipt.duration_us or 0, receipt
         start_ns = time.perf_counter_ns()
         # evaluate_with_detection() is an exact no-op unless the policy
         # carries an extensions.detection block, so every non-detection
@@ -557,31 +559,17 @@ class HushGuard:
         if self._sink is None:
             return result, 0, None
 
-        import uuid
-        from datetime import datetime, timezone
+        from hushspec.receipt import PolicySummary, unverified_policy_receipt
 
-        from hushspec.receipt import ActionSummary, DecisionReceipt, PolicySummary
-        from hushspec.version import HUSHSPEC_VERSION
-
-        receipt = DecisionReceipt(
-            receipt_id=str(uuid.uuid4()),
-            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            hushspec_version=HUSHSPEC_VERSION,
-            action=ActionSummary(
-                type=action.type,
-                target=action.target,
-                content_redacted=self._audit.redact_content and action.content is not None,
-            ),
-            decision=result.decision,
-            matched_rule=result.matched_rule,
-            reason=result.reason,
-            rule_trace=[],
-            policy=PolicySummary(
+        receipt = unverified_policy_receipt(
+            PolicySummary(
                 name=self._requested_policy_name,
-                version=self._requested_policy_version,
-                content_hash="",
+                spec_version=self._requested_policy_version,
+                content_hash=UNVERIFIED_POLICY_HASH,
+                signature=self._refusal,
             ),
-            evaluation_duration_us=0,
+            action,
+            self._audit_context(),
         )
         return result, 0, receipt
 
@@ -648,9 +636,8 @@ class HushGuard:
         self._refusal = None
         self._requested_policy_name = new_policy.name
         self._requested_policy_version = new_policy.hushspec
+        self._policy_hash = resolution.content_hash
         if self._observable_evaluator is not None:
-            from hushspec.receipt import compute_policy_hash
-            self._policy_hash = compute_policy_hash(resolved)
             self._observable_evaluator.notify_policy_reloaded(
                 resolved.name,
                 self._policy_hash,

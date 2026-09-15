@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -52,6 +52,7 @@ from hushspec.signing import (
     MalformedEnvelope,
     SigningError,
     SigningUnavailable,
+    format_timestamp,
     load_keyring,
     parse_envelope,
     verify_policy,
@@ -61,7 +62,7 @@ from hushspec.signing import (
 # fail with `SigningUnavailable` *before* any hop is examined, so that a missing
 # `cryptography` can never be mistaken for a policy that simply has no signature
 # (which would otherwise be reported as `missing_signature`).
-from hushspec.signing import _ed25519
+from hushspec.signing import _coerce_moment, _ed25519
 
 
 @dataclass
@@ -86,8 +87,14 @@ _MAX_EXTENDS_DEPTH = 32
 #: Chain-link source recorded for a document that came from memory rather than
 #: from a loader (``HushGuard.from_yaml``, a provider handing back a parsed
 #: spec). It is also what a :data:`SignatureLocator` is asked about, so a caller
-#: can still supply an envelope for an in-memory policy.
-INLINE_SOURCE = "<inline>"
+#: can still supply an envelope for an in-memory policy. The spelling is
+#: normative: ``fixtures/core/resolve/`` pins the leaf of an in-memory chain as
+#: ``memory`` in every SDK.
+MEMORY_SOURCE = "memory"
+
+#: Deprecated alias of :data:`MEMORY_SOURCE`, kept so callers that imported the
+#: pre-0.2 spelling keep working.
+INLINE_SOURCE = MEMORY_SOURCE
 
 #: The fragment that turns an ``extends`` reference into a pinned one.
 DIGEST_PIN_MARKER = "#sha256:"
@@ -102,7 +109,11 @@ REASON_DIGEST_MISMATCH = "digest_mismatch"
 #: ``require_signature`` was set and the hop had neither a pin nor an envelope.
 REASON_MISSING_SIGNATURE = "missing_signature"
 #: The ``#sha256:`` fragment is not a well-formed content hash.
-REASON_MALFORMED_DIGEST_PIN = "malformed_digest_pin"
+REASON_INVALID_PIN = "invalid_pin"
+#: Deprecated spelling of :data:`REASON_INVALID_PIN`. The resolve vectors
+#: (``fixtures/core/resolve/pin-malformed.yaml``) name the rejection
+#: ``invalid_pin``, so that is the code every SDK reports.
+REASON_MALFORMED_DIGEST_PIN = REASON_INVALID_PIN
 #: An envelope was found but the Ed25519 backend is missing, so it could not be
 #: checked. Only reachable opportunistically: under ``require_signature`` the
 #: missing backend raises :class:`~hushspec.signing.SigningUnavailable`.
@@ -112,8 +123,27 @@ REASON_SIGNING_UNAVAILABLE = "signing_unavailable"
 RESOLVE_REASON_CODES = (
     REASON_DIGEST_MISMATCH,
     REASON_MISSING_SIGNATURE,
-    REASON_MALFORMED_DIGEST_PIN,
+    REASON_INVALID_PIN,
     REASON_SIGNING_UNAVAILABLE,
+)
+
+#: A reference no loader could serve.
+REJECT_NOT_FOUND = "not_found"
+#: The chain refers back to a document already on it.
+REJECT_CYCLE = "cycle"
+#: The chain is longer than :data:`_MAX_EXTENDS_DEPTH`.
+REJECT_MAX_DEPTH = "max_depth"
+#: ``require_signature`` was set and a hop could not be proven.
+REJECT_SIGNATURE_REQUIRED = "signature_required"
+#: Rejection codes reported by :attr:`ResolveRejected.code`, the vocabulary of
+#: ``fixtures/core/resolve/*.yaml``'s ``expect.rejects``.
+RESOLVE_REJECT_CODES = (
+    REASON_DIGEST_MISMATCH,
+    REASON_INVALID_PIN,
+    REJECT_NOT_FOUND,
+    REJECT_CYCLE,
+    REJECT_MAX_DEPTH,
+    REJECT_SIGNATURE_REQUIRED,
 )
 
 
@@ -165,7 +195,10 @@ class SignatureStatus:
     key_id: str | None = None
     verified: bool = False
     reason: str | None = None
-    signed_at: str | None = None
+    #: When verification ran, in the receipt's timestamp spelling. Set only when
+    #: an envelope was actually checked against a keyring; it is the verifier's
+    #: clock, never the signer's ``signed_at``.
+    verified_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,8 +235,50 @@ class Resolution:
         """The chain as a receipt records it: empty when there was no ``extends``."""
         return self.chain if len(self.chain) > 1 else []
 
+    def had_extends(self) -> bool:
+        """Whether the policy was produced by merging an ``extends`` chain.
 
-class PolicyVerificationError(ValueError):
+        A receipt records ``extends_chain`` only then (receipt spec 4.2).
+        """
+        return len(self.chain) > 1
+
+    @classmethod
+    def from_resolved(
+        cls, spec: HushSpec, source: str | None = None
+    ) -> "Resolution":
+        """Wrap an already-resolved document as a one-link resolution.
+
+        ``source`` names it in the chain; :data:`MEMORY_SOURCE` when the caller
+        has no better name. Raises :class:`~hushspec.canonical.CanonicalError`
+        when the document has no canonical form, which includes a document that
+        still declares ``extends``.
+        """
+        label = source if source is not None else MEMORY_SOURCE
+        digest = content_hash(spec)
+        return cls(
+            spec=spec,
+            content_hash=digest,
+            chain=[ChainLink(source=label, content_hash=digest)],
+            signature=None,
+        )
+
+
+class ResolveRejected(ValueError):
+    """Resolution refused the chain, with the reason code the vectors name.
+
+    ``code`` is one of :data:`RESOLVE_REJECT_CODES` -- the vocabulary of
+    ``expect.rejects`` in ``fixtures/core/resolve/*.yaml``. It subclasses
+    :class:`ValueError` so the tuple-returning entry points and every existing
+    caller keep catching it.
+    """
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        #: The rejection code (:data:`RESOLVE_REJECT_CODES`).
+        self.code = code
+
+
+class PolicyVerificationError(ResolveRejected):
     """A chain hop could not be proven to be the document it claims to be.
 
     Raised fail-closed: resolution stops, nothing is merged, and no evaluation
@@ -211,7 +286,13 @@ class PolicyVerificationError(ValueError):
     """
 
     def __init__(self, message: str, *, source: str, status: SignatureStatus) -> None:
-        super().__init__(message)
+        reason = status.reason
+        code = (
+            reason
+            if reason in (REASON_DIGEST_MISMATCH, REASON_INVALID_PIN)
+            else REJECT_SIGNATURE_REQUIRED
+        )
+        super().__init__(message, code=code)
         #: The hop that failed, as the loader reported it.
         self.source = source
         #: Why, in the form a receipt records (``verified`` is always false).
@@ -422,19 +503,25 @@ def _resolve_inner(
         resolved = spec
     else:
         if depth >= _MAX_EXTENDS_DEPTH:
-            raise ValueError(
-                f"extends chain exceeds maximum depth of {_MAX_EXTENDS_DEPTH}"
+            raise ResolveRejected(
+                f"extends chain exceeds maximum depth of {_MAX_EXTENDS_DEPTH}",
+                code=REJECT_MAX_DEPTH,
             )
 
         reference, parent_pin = _split_digest_pin(spec.extends, source)
         try:
             loaded = loader(reference, source)
-        except Exception as exc:  # pragma: no cover - exercised through public API
-            raise ValueError(str(exc)) from exc
+        except ResolveRejected:
+            raise
+        except Exception as exc:
+            # Anything a loader raises means the reference could not be served.
+            raise ResolveRejected(str(exc), code=REJECT_NOT_FOUND) from exc
 
         if loaded.source in stack:
             cycle = stack[stack.index(loaded.source) :] + [loaded.source]
-            raise ValueError(f"circular extends detected: {' -> '.join(cycle)}")
+            raise ResolveRejected(
+                f"circular extends detected: {' -> '.join(cycle)}", code=REJECT_CYCLE
+            )
 
         stack.append(loaded.source)
         parent, chain = _resolve_inner(
@@ -501,7 +588,7 @@ def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | No
             f"malformed digest pin in 'extends: {reference}' at {_label(source)}: "
             "expected '<reference>#sha256:<64 lowercase hex>'",
             source=_label(source),
-            status=SignatureStatus(verified=False, reason=REASON_MALFORMED_DIGEST_PIN),
+            status=SignatureStatus(verified=False, reason=REASON_INVALID_PIN),
         )
     return match.group("ref"), match.group("digest")
 
@@ -525,9 +612,12 @@ def _verify_hop(
 
     * With a keyring, a located envelope is always verified and its outcome
       recorded, whether or not verification is required.
-    * With ``require_signature``, the hop must end up either pin-matched or
-      ``valid``. A pin excuses a *missing* envelope; it does not excuse one that
-      is present and does not verify, which is evidence of tampering.
+    * With ``require_signature``, a hop is *required* to prove itself only when
+      it is not pinned: ``required = require_signature and not pinned``. A
+      matching digest pin is a proof about the exact bytes of the document, so
+      it satisfies the hop on its own; the envelope, when there is one, is still
+      verified opportunistically and its outcome recorded. (Same rule as the
+      Rust reference's ``verify_hop``.)
     """
     label = _label(source)
     if source is not None and source.startswith("builtin:"):
@@ -535,17 +625,17 @@ def _verify_hop(
     if prepared.keyring is None and not prepared.require_signature:
         return None
 
+    required = prepared.require_signature and not pinned
+
     status: SignatureStatus | None = None
     envelope = prepared.locator(label)
     if envelope is not None:
         status = _verify_envelope(resolved, envelope, prepared)
 
-    if not prepared.require_signature:
+    if not required:
         return status
     if status is not None and status.verified:
         return status
-    if status is None and pinned:
-        return None
 
     failure = status or SignatureStatus(verified=False, reason=REASON_MISSING_SIGNATURE)
     detail = (
@@ -572,12 +662,16 @@ def _verify_envelope(
     except (UnicodeDecodeError, ValueError):
         return SignatureStatus(verified=False, reason="malformed_envelope")
 
+    # One instant for the check and for what the receipt records, so
+    # `verified_at` names the moment the ten checks were actually run
+    # (receipt spec 4.2) rather than the signer's `signed_at`.
+    moment = _coerce_moment(prepared.verify.now, "now") or datetime.now(timezone.utc)
     try:
         result = verify_policy(
             resolved,
             parsed,
             keyring=prepared.keyring,
-            now=prepared.verify.now,
+            now=moment,
             max_clock_skew_seconds=prepared.verify.max_clock_skew_seconds,
             last_seen_version=prepared.verify.last_seen_version,
         )
@@ -592,13 +686,12 @@ def _verify_envelope(
             key_id=parsed.key_id,
             verified=False,
             reason=REASON_SIGNING_UNAVAILABLE,
-            signed_at=parsed.signed_at,
         )
     return SignatureStatus(
         key_id=result.key_id or parsed.key_id,
         verified=result.valid,
         reason=result.reason,
-        signed_at=parsed.signed_at,
+        verified_at=format_timestamp(moment) if result.valid else None,
     )
 
 

@@ -66,8 +66,10 @@ __all__ = [
     "load_keyring",
     "parse_envelope",
     "public_key_from_private_key",
+    "sign_content_hash",
     "sign_policy",
     "signing_input",
+    "verify_content_hash",
     "verify_policy",
 ]
 
@@ -726,7 +728,6 @@ def sign_policy(
     installed, and :class:`~hushspec.canonical.CanonicalError` when the
     document has no canonical form.
     """
-    key = _load_private_key(private_key_pem)
     digest = content_hash(resolved_spec)
 
     document = _as_mapping(resolved_spec)
@@ -741,13 +742,50 @@ def sign_policy(
         if isinstance(candidate, str) and candidate:
             policy_name = candidate
 
+    return sign_content_hash(
+        digest,
+        private_key_pem,
+        signed_at=signed_at,
+        expires_at=expires_at,
+        policy_version=policy_version,
+        policy_name=policy_name,
+        signer=signer,
+    )
+
+
+def sign_content_hash(
+    content_hash_value: str,
+    private_key_pem: str | bytes,
+    *,
+    signed_at: datetime | str | None = None,
+    expires_at: datetime | str | None = None,
+    policy_version: int | None = None,
+    policy_name: str | None = None,
+    signer: str | None = None,
+) -> Envelope:
+    """Sign a content hash that is already in hand (spec section 4.2).
+
+    Prefer :func:`sign_policy` for a policy, which computes the hash the way a
+    verifier will. This is the primitive the things that are *not* policies
+    sign over: a receipt hash (receipt spec section 6) and a log entry hash
+    (log spec section 7).
+
+    Raises :class:`MalformedEnvelope` when ``content_hash_value`` is not a
+    ``sha256:`` digest, and :class:`SigningUnavailable` without the
+    ``cryptography`` extra.
+    """
+    if not _HASH_RE.match(content_hash_value or ""):
+        raise MalformedEnvelope(
+            f"content_hash {content_hash_value!r} is not sha256:<64 lowercase hex>"
+        )
+    key = _load_private_key(private_key_pem)
     moment = _coerce_moment(signed_at, "signed_at") or datetime.now(timezone.utc)
     expiry = _coerce_moment(expires_at, "expires_at")
 
     envelope = Envelope(
         key_id=key_id_from_public_key(public_key_from_private_key(private_key_pem)),
         signed_at=format_timestamp(moment),
-        content_hash=digest,
+        content_hash=content_hash_value,
         signature="",
         expires_at=format_timestamp(expiry) if expiry is not None else None,
         policy_version=policy_version,
@@ -847,6 +885,45 @@ def verify_policy(
     Raises :class:`SigningUnavailable` when the ``cryptography`` extra is not
     installed: a caller must never be able to read "could not check" as valid.
     """
+    # A document with no canonical form has no hash to compare, which check 9
+    # calls a mismatch -- reported only once checks 1-8 have passed, so a forged
+    # envelope is never described in terms of the policy's own problems.
+    try:
+        actual: str | None = content_hash(resolved_spec)
+        detail: str | None = None
+    except CanonicalError as exc:
+        actual, detail = None, f"the policy has no content hash: {exc}"
+    return verify_content_hash(
+        envelope,
+        actual,
+        keyring=keyring,
+        public_key_pem=public_key_pem,
+        now=now,
+        max_clock_skew_seconds=max_clock_skew_seconds,
+        last_seen_version=last_seen_version,
+        missing_hash_detail=detail,
+    )
+
+
+def verify_content_hash(
+    envelope: Any,
+    content_hash_value: str | None,
+    *,
+    keyring: Any = None,
+    public_key_pem: str | None = None,
+    now: datetime | str | None = None,
+    max_clock_skew_seconds: int = DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+    last_seen_version: int | None = None,
+    missing_hash_detail: str | None = None,
+) -> VerifyResult:
+    """Run the ten ordered checks of spec section 6.2 against a content hash.
+
+    The primitive :func:`verify_policy` is written in terms of, and the entry
+    point for the things that are not policies: a receipt hash (receipt spec
+    section 6) and a log entry hash (log spec section 7). ``content_hash_value``
+    is ``None`` when the caller could not compute one, which check 9 reports as
+    ``content_hash_mismatch`` -- after checks 1 through 8, never before.
+    """
     _ed25519()  # fail loudly before any check can look like a verdict
 
     if keyring is None and public_key_pem is None:
@@ -934,20 +1011,19 @@ def verify_policy(
             envelope=parsed,
         )
 
-    # Check 9: the claim the signature actually makes. A document that cannot be
+    # Check 9: the claim the signature actually makes. Content that cannot be
     # canonicalized has no hash to compare, which the spec calls a mismatch.
-    try:
-        actual = content_hash(resolved_spec)
-    except CanonicalError as exc:
+    if content_hash_value is None:
         return VerifyResult.fail(
             "content_hash_mismatch",
-            f"the policy has no content hash: {exc}",
+            missing_hash_detail or "there is no content hash to compare",
             envelope=parsed,
         )
-    if actual != parsed.content_hash:
+    if content_hash_value != parsed.content_hash:
         return VerifyResult.fail(
             "content_hash_mismatch",
-            f"policy hashes to {actual}, envelope signs {parsed.content_hash}",
+            f"content hashes to {content_hash_value}, envelope signs "
+            f"{parsed.content_hash}",
             envelope=parsed,
         )
 
