@@ -21,6 +21,9 @@ const MaxNestingDepth = 8
 // DayAbbreviations are the day names accepted in time_window.days.
 var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
+// TimeWindowCondition holds a rule block active only inside a daily window,
+// optionally restricted to named days (core spec 3.13). A window the engine
+// cannot evaluate leaves the block active.
 type TimeWindowCondition struct {
 	Start    string   `yaml:"start" json:"start"`                           // HH:MM (24-hour)
 	End      string   `yaml:"end" json:"end"`                               // HH:MM (24-hour)

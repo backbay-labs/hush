@@ -12,10 +12,10 @@ import (
 
 // HushSpec regex profile (CompileProfileRegex) unit tests.
 //
-// Mirrors crates/hushspec/src/regex_profile.rs,
+// The cases below are the shared profile case list; keep them in sync with
+// crates/hushspec/src/regex_profile.rs,
 // packages/hushspec/tests/regex-profile.test.ts and
-// packages/python/tests/test_regex_profile.py: the same cases must produce the
-// same answers in all four SDKs.
+// packages/python/tests/test_regex_profile.py, which must answer identically.
 
 func profileMatches(t *testing.T, pattern, haystack string) bool {
 	t.Helper()

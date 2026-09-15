@@ -17,6 +17,7 @@ func DeactivatePanic() {
 	panicActive.Store(false)
 }
 
+// IsPanicActive reports whether panic mode is in force.
 func IsPanicActive() bool {
 	return panicActive.Load()
 }

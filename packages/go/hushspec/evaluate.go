@@ -24,12 +24,17 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// Decision is what the evaluator concluded about one action (core spec 6).
 type Decision string
 
 const (
+	// DecisionAllow permits the action.
 	DecisionAllow Decision = "allow"
-	DecisionWarn  Decision = "warn"
-	DecisionDeny  Decision = "deny"
+	// DecisionWarn permits the action pending confirmation; with no
+	// confirmation channel it is a deny (core spec 6).
+	DecisionWarn Decision = "warn"
+	// DecisionDeny refuses the action.
+	DecisionDeny Decision = "deny"
 )
 
 // UnknownActionTypeRule is the matched_rule reported when the action type is
@@ -87,6 +92,9 @@ func (a *EvaluationAction) ContentOrEmpty() string {
 	return *a.Content
 }
 
+// OriginContext describes where an action came from, for origin profile
+// selection (origins spec 3). Every field is optional; a profile's `match`
+// constrains the ones it names.
 type OriginContext struct {
 	Provider             string   `json:"provider,omitempty" yaml:"provider,omitempty"`
 	TenantID             string   `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"`
@@ -99,6 +107,8 @@ type OriginContext struct {
 	ActorRole            string   `json:"actor_role,omitempty" yaml:"actor_role,omitempty"`
 }
 
+// PostureContext is the posture state an action is evaluated under, and the
+// signal that may move it (posture spec 5).
 type PostureContext struct {
 	// Current is a pointer so an explicitly-supplied empty string ("") is
 	// distinguishable from an absent field: an empty or unknown current state
@@ -108,6 +118,8 @@ type PostureContext struct {
 	Signal  string  `json:"signal,omitempty" yaml:"signal,omitempty"`
 }
 
+// EvaluationResult is the evaluator's answer for one action: the aggregate
+// decision and the rule that produced it.
 type EvaluationResult struct {
 	Decision      Decision       `json:"decision" yaml:"decision"`
 	MatchedRule   string         `json:"matched_rule,omitempty" yaml:"matched_rule,omitempty"`
@@ -116,6 +128,8 @@ type EvaluationResult struct {
 	Posture       *PostureResult `json:"posture,omitempty" yaml:"posture,omitempty"`
 }
 
+// PostureResult is the posture state in force for an evaluation and the state
+// the action's signal moves it to.
 type PostureResult struct {
 	Current string `json:"current" yaml:"current"`
 	Next    string `json:"next" yaml:"next"`

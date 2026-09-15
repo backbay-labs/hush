@@ -89,6 +89,8 @@ func RegistryErrorCode(kind string) string {
 	return ErrorCodeConstraint
 }
 
+// ValidationResult is everything [Validate] found: refusals that make the
+// document invalid, and advisory warnings that do not.
 type ValidationResult struct {
 	Errors   []ValidationError
 	Warnings []string
@@ -139,6 +141,8 @@ func ErrorCodeOf(err error) (string, bool) {
 	return "", false
 }
 
+// IsValid reports whether the document passed validation. Warnings do not
+// make a document invalid.
 func (r *ValidationResult) IsValid() bool {
 	return len(r.Errors) == 0
 }

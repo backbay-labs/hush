@@ -10,20 +10,31 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// DetectionCategory is the threat family a detector reports on, and the
+// `category` a receipt's detection_trace records (receipt spec 4.6).
 type DetectionCategory string
 
 const (
+	// DetectionCategoryPromptInjection covers attempts to override the agent's
+	// instructions.
 	DetectionCategoryPromptInjection DetectionCategory = "prompt_injection"
-	DetectionCategoryJailbreak       DetectionCategory = "jailbreak"
-	DetectionCategoryDataExfil       DetectionCategory = "data_exfiltration"
+	// DetectionCategoryJailbreak covers attempts to escape the agent's
+	// guardrails.
+	DetectionCategoryJailbreak DetectionCategory = "jailbreak"
+	// DetectionCategoryDataExfil covers sensitive data leaving in content.
+	DetectionCategoryDataExfil DetectionCategory = "data_exfiltration"
 )
 
+// MatchedPattern is one signal a detector fired on: the pattern's name, the
+// weight it contributed, and the text that matched.
 type MatchedPattern struct {
 	Name        string  `json:"name"`
 	Weight      float64 `json:"weight"`
 	MatchedText string  `json:"matched_text,omitempty"`
 }
 
+// DetectionResult is one detector's finding for one input: a normalized score
+// in [0, 1] and the signals behind it.
 type DetectionResult struct {
 	DetectorName    string            `json:"detector_name"`
 	Category        DetectionCategory `json:"category"`
@@ -44,10 +55,14 @@ type DetectorRegistry struct {
 	detectors []Detector
 }
 
+// NewDetectorRegistry returns an empty registry. Use [WithDefaultDetectors]
+// for one pre-loaded with the built-in detectors.
 func NewDetectorRegistry() *DetectorRegistry {
 	return &DetectorRegistry{}
 }
 
+// Register appends a detector, which [DetectorRegistry.DetectAll] and
+// [DetectorRegistry.DetectorsFor] then report in registration order.
 func (r *DetectorRegistry) Register(detector Detector) {
 	r.detectors = append(r.detectors, detector)
 }
@@ -93,6 +108,8 @@ func (r *DetectorRegistry) DetectorFor(category DetectionCategory) Detector {
 	return nil
 }
 
+// DetectAll runs every registered detector against input, in registration
+// order. It applies no thresholds: the caller decides what a score means.
 func (r *DetectorRegistry) DetectAll(input string) []DetectionResult {
 	results := make([]DetectionResult, 0, len(r.detectors))
 	for _, d := range r.detectors {
@@ -149,6 +166,8 @@ type RegexInjectionDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexInjectionDetector returns the built-in prompt-injection detector
+// with its fixed pattern set compiled.
 func NewRegexInjectionDetector() *RegexInjectionDetector {
 	return &RegexInjectionDetector{
 		patterns: []detectionPattern{
@@ -204,12 +223,16 @@ func NewRegexInjectionDetector() *RegexInjectionDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexInjectionDetector) Name() string { return "regex_injection" }
 
+// Category is [DetectionCategoryPromptInjection].
 func (d *RegexInjectionDetector) Category() DetectionCategory {
 	return DetectionCategoryPromptInjection
 }
 
+// Detect scores input against the fixed injection pattern set.
 func (d *RegexInjectionDetector) Detect(input string) DetectionResult {
 	score, matched, explanation := scorePatterns(d.patterns, input, "injection")
 	return DetectionResult{
@@ -352,8 +375,11 @@ func NewHeuristicInjectionDetector() *HeuristicInjectionDetector {
 	return &HeuristicInjectionDetector{families: families}
 }
 
+// Name is [HeuristicDetectorName], which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *HeuristicInjectionDetector) Name() string { return HeuristicDetectorName }
 
+// Category is [DetectionCategoryPromptInjection].
 func (d *HeuristicInjectionDetector) Category() DetectionCategory {
 	return DetectionCategoryPromptInjection
 }
@@ -398,6 +424,8 @@ func (d *HeuristicInjectionDetector) IntegerScore(input string) (uint32, []Match
 	return total, matched
 }
 
+// Detect runs the normative signal table over input and reports the integer
+// score of [HeuristicInjectionDetector.IntegerScore] normalized to [0, 1].
 func (d *HeuristicInjectionDetector) Detect(input string) DetectionResult {
 	score, matched := d.IntegerScore(input)
 	var explanation string
@@ -454,6 +482,8 @@ type RegexJailbreakDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexJailbreakDetector returns the built-in jailbreak detector with its
+// fixed pattern set compiled.
 func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	return &RegexJailbreakDetector{
 		patterns: []detectionPattern{
@@ -469,12 +499,16 @@ func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexJailbreakDetector) Name() string { return "regex_jailbreak" }
 
+// Category is [DetectionCategoryJailbreak].
 func (d *RegexJailbreakDetector) Category() DetectionCategory {
 	return DetectionCategoryJailbreak
 }
 
+// Detect scores input against the fixed jailbreak pattern set.
 func (d *RegexJailbreakDetector) Detect(input string) DetectionResult {
 	score, matched, explanation := scorePatterns(d.patterns, input, "jailbreak")
 	return DetectionResult{
@@ -492,6 +526,8 @@ type RegexExfiltrationDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexExfiltrationDetector returns the built-in exfiltration detector with
+// its fixed pattern set compiled.
 func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	return &RegexExfiltrationDetector{
 		patterns: []detectionPattern{
@@ -544,12 +580,16 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexExfiltrationDetector) Name() string { return "regex_exfiltration" }
 
+// Category is [DetectionCategoryDataExfil].
 func (d *RegexExfiltrationDetector) Category() DetectionCategory {
 	return DetectionCategoryDataExfil
 }
 
+// Detect scores input against the fixed exfiltration pattern set.
 func (d *RegexExfiltrationDetector) Detect(input string) DetectionResult {
 	score, matched, explanation := scorePatterns(d.patterns, input, "exfiltration")
 	return DetectionResult{
@@ -580,11 +620,16 @@ type EvaluationWithDetection struct {
 type DetectorLevel string
 
 const (
-	DetectorLevelNone       DetectorLevel = "none"
-	DetectorLevelLow        DetectorLevel = "low"
+	// DetectorLevelNone is a zero score.
+	DetectorLevelNone DetectorLevel = "none"
+	// DetectorLevelLow is a non-zero score below every threshold floor.
+	DetectorLevelLow DetectorLevel = "low"
+	// DetectorLevelSuspicious is a score at or above 0.25.
 	DetectorLevelSuspicious DetectorLevel = "suspicious"
-	DetectorLevelHigh       DetectorLevel = "high"
-	DetectorLevelCritical   DetectorLevel = "critical"
+	// DetectorLevelHigh is a score at or above 0.5.
+	DetectorLevelHigh DetectorLevel = "high"
+	// DetectorLevelCritical is a score at or above 0.75.
+	DetectorLevelCritical DetectorLevel = "critical"
 )
 
 // DetectorLevelFromScore maps a normalized score in [0, 1] to its level.
