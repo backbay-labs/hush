@@ -37,6 +37,21 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   Go SDK gains an exported `BuiltinNames`. A library policy keeps its own document `name`
   (`pci-dss`): the prefix is a location, not a rename.
 
+### Added (RFC 09 P3-03, library suites)
+
+- A control-tagged evaluation suite for each of the eight library policies under
+  `fixtures/library/<vertical>/<name>.test.yaml` (198 cases): every case declares the control
+  it proves, and between them the cases hit every rule block and every named secret pattern of
+  the resolved policy. CI runs them with `--fail-on-uncovered` and uploads the JUnit report.
+  The conformance testkit discovers them too.
+
+### Fixed (RFC 09 P3-03)
+
+- `library/devops/cicd-hardened.yaml` listed `github_actions_token` (`ghs_...`) after the
+  general `github_token` (`gh[opsur]_...`) that subsumes it, so an Actions token was always
+  reported as a personal access token and the specific rule could never fire. The specific
+  pattern now comes first; the set of matched content is unchanged.
+
 ### Changed (RFC 09 P3-02)
 
 - `h2h test --format json` now prints an object (`passed`, `failed`, `fixtures[]`, `coverage`)

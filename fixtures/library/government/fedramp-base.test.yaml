@@ -1,0 +1,307 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+#
+# Control-tagged suite for library/government/fedramp-base.yaml (RFC 09 P3-03).
+# Every case names the control it is evidence for, and between them the
+# cases hit every rule block and every named secret pattern of the
+# resolved policy -- `h2h test --fail-on-uncovered` is the gate.
+#
+# The suite extends the embedded copy of the policy, so it runs against
+# exactly the bytes the SDKs ship; `scripts/generate_*_builtins.py
+# --check` is what keeps that copy equal to the file.
+hushspec_test: "0.2.0"
+description: "fedramp-base: control-tagged evaluation suite for the vertical library policy"
+policy:
+  hushspec: "0.1.0"
+  name: fedramp-base-suite
+  extends: "builtin:library/government/fedramp-base"
+cases:
+  - description: "an approved destination is allowed (fedramp.gov)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-7"
+    tags: ["allow", "egress"]
+    action:
+      type: "egress"
+      target: "fedramp.gov"
+    expect:
+      decision: allow
+      matched_rule: "rules.egress.allow"
+  - description: "a blocked destination is denied (drive.google.com)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-7"
+    tags: ["deny", "egress"]
+    action:
+      type: "egress"
+      target: "drive.google.com"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.block"
+  - description: "an unlisted destination is denied by default"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-7"
+    tags: ["deny", "egress", "fail-closed"]
+    action:
+      type: "egress"
+      target: "cdn.example.com"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.default"
+  - description: "CUI directories are unreachable"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-3"
+      - framework: nist-800-53-r5
+        control_id: "AU-9"
+    tags: ["deny", "paths"]
+    action:
+      type: "file_read"
+      target: "/srv/app/cui/contract-2026.docx"
+    expect:
+      decision: deny
+      matched_rule: "rules.forbidden_paths.patterns"
+  - description: "a declared exception is readable"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-3"
+      - framework: nist-800-53-r5
+        control_id: "AU-9"
+    tags: ["allow", "paths"]
+    action:
+      type: "file_read"
+      target: "/srv/app/.env.example"
+    expect:
+      decision: allow
+      matched_rule: "rules.forbidden_paths.exceptions"
+  - description: "a forbidden shell command is denied (scp report.pdf host:/tmp)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "CM-7"
+    tags: ["deny", "shell"]
+    action:
+      type: "shell_command"
+      target: "scp report.pdf host:/tmp"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[3]"
+  - description: "an ordinary build command is allowed (python -m pytest tests/)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "CM-7"
+    tags: ["allow", "shell"]
+    action:
+      type: "shell_command"
+      target: "python -m pytest tests/"
+    expect:
+      decision: allow
+  - description: "a patch larger than max_additions (300) is denied"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "CM-3"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+line 0\n+line 1\n+line 2\n+line 3\n+line 4\n+line 5\n+line 6\n+line 7\n+line 8\n+line 9\n+line 10\n+line 11\n+line 12\n+line 13\n+line 14\n+line 15\n+line 16\n+line 17\n+line 18\n+line 19\n+line 20\n+line 21\n+line 22\n+line 23\n+line 24\n+line 25\n+line 26\n+line 27\n+line 28\n+line 29\n+line 30\n+line 31\n+line 32\n+line 33\n+line 34\n+line 35\n+line 36\n+line 37\n+line 38\n+line 39\n+line 40\n+line 41\n+line 42\n+line 43\n+line 44\n+line 45\n+line 46\n+line 47\n+line 48\n+line 49\n+line 50\n+line 51\n+line 52\n+line 53\n+line 54\n+line 55\n+line 56\n+line 57\n+line 58\n+line 59\n+line 60\n+line 61\n+line 62\n+line 63\n+line 64\n+line 65\n+line 66\n+line 67\n+line 68\n+line 69\n+line 70\n+line 71\n+line 72\n+line 73\n+line 74\n+line 75\n+line 76\n+line 77\n+line 78\n+line 79\n+line 80\n+line 81\n+line 82\n+line 83\n+line 84\n+line 85\n+line 86\n+line 87\n+line 88\n+line 89\n+line 90\n+line 91\n+line 92\n+line 93\n+line 94\n+line 95\n+line 96\n+line 97\n+line 98\n+line 99\n+line 100\n+line 101\n+line 102\n+line 103\n+line 104\n+line 105\n+line 106\n+line 107\n+line 108\n+line 109\n+line 110\n+line 111\n+line 112\n+line 113\n+line 114\n+line 115\n+line 116\n+line 117\n+line 118\n+line 119\n+line 120\n+line 121\n+line 122\n+line 123\n+line 124\n+line 125\n+line 126\n+line 127\n+line 128\n+line 129\n+line 130\n+line 131\n+line 132\n+line 133\n+line 134\n+line 135\n+line 136\n+line 137\n+line 138\n+line 139\n+line 140\n+line 141\n+line 142\n+line 143\n+line 144\n+line 145\n+line 146\n+line 147\n+line 148\n+line 149\n+line 150\n+line 151\n+line 152\n+line 153\n+line 154\n+line 155\n+line 156\n+line 157\n+line 158\n+line 159\n+line 160\n+line 161\n+line 162\n+line 163\n+line 164\n+line 165\n+line 166\n+line 167\n+line 168\n+line 169\n+line 170\n+line 171\n+line 172\n+line 173\n+line 174\n+line 175\n+line 176\n+line 177\n+line 178\n+line 179\n+line 180\n+line 181\n+line 182\n+line 183\n+line 184\n+line 185\n+line 186\n+line 187\n+line 188\n+line 189\n+line 190\n+line 191\n+line 192\n+line 193\n+line 194\n+line 195\n+line 196\n+line 197\n+line 198\n+line 199\n+line 200\n+line 201\n+line 202\n+line 203\n+line 204\n+line 205\n+line 206\n+line 207\n+line 208\n+line 209\n+line 210\n+line 211\n+line 212\n+line 213\n+line 214\n+line 215\n+line 216\n+line 217\n+line 218\n+line 219\n+line 220\n+line 221\n+line 222\n+line 223\n+line 224\n+line 225\n+line 226\n+line 227\n+line 228\n+line 229\n+line 230\n+line 231\n+line 232\n+line 233\n+line 234\n+line 235\n+line 236\n+line 237\n+line 238\n+line 239\n+line 240\n+line 241\n+line 242\n+line 243\n+line 244\n+line 245\n+line 246\n+line 247\n+line 248\n+line 249\n+line 250\n+line 251\n+line 252\n+line 253\n+line 254\n+line 255\n+line 256\n+line 257\n+line 258\n+line 259\n+line 260\n+line 261\n+line 262\n+line 263\n+line 264\n+line 265\n+line 266\n+line 267\n+line 268\n+line 269\n+line 270\n+line 271\n+line 272\n+line 273\n+line 274\n+line 275\n+line 276\n+line 277\n+line 278\n+line 279\n+line 280\n+line 281\n+line 282\n+line 283\n+line 284\n+line 285\n+line 286\n+line 287\n+line 288\n+line 289\n+line 290\n+line 291\n+line 292\n+line 293\n+line 294\n+line 295\n+line 296\n+line 297\n+line 298\n+line 299\n+line 300\n+line 301\n+line 302\n+line 303\n+line 304\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.max_additions"
+  - description: "a patch that weakens a control is denied"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "CM-3"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+# disable fips mode\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.forbidden_patterns[0]"
+  - description: "a small balanced patch is allowed"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "CM-3"
+    tags: ["allow", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+added one\n+added two\n-removed one\n"
+    expect:
+      decision: allow
+  - description: "an allowlisted tool is allowed (read_file)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-6"
+    tags: ["allow", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+    expect:
+      decision: allow
+      matched_rule: "rules.tool_access.allow"
+  - description: "a blocked tool is denied (deploy)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-6"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "deploy"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.block"
+  - description: "a tool requiring confirmation warns (write_file)"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-6"
+    tags: ["warn", "tools"]
+    action:
+      type: "tool_call"
+      target: "write_file"
+    expect:
+      decision: warn
+      matched_rule: "rules.tool_access.require_confirmation"
+  - description: "an unlisted tool is denied in allowlist mode"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-6"
+    tags: ["deny", "tools", "fail-closed"]
+    action:
+      type: "tool_call"
+      target: "browse_web"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.allow"
+  - description: "tool arguments above max_args_size (262144) are denied"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "AC-6"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+      args_size: 262145
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.max_args_size"
+  - description: "the scanner denies aws_access_key in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "aws_access_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_access_key"
+  - description: "the scanner denies private_key in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "private_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "-----BEGIN RSA PRIVATE KEY-----"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.private_key"
+  - description: "the scanner denies piv_card_pattern in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "piv_card_pattern"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "piv_card: AB12345678"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.piv_card_pattern"
+  - description: "the scanner denies generic_api_key in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "generic_api_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "api_key: A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.generic_api_key"
+  - description: "the scanner denies ssn in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "ssn"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "member ssn: 123-45-6789"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.ssn"
+  - description: "the scanner denies cui_marking in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "cui_marking"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "FOUO - distribution limited"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.cui_marking"
+  - description: "the scanner denies connection_string in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "connection_string"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "postgres://svc:pw@mission.internal/app"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.connection_string"
+  - description: "the scanner denies github_token in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "github_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_token"
+  - description: "the scanner denies github_fine_grained_pat in written content"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["deny", "secrets", "github_fine_grained_pat"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "github_pat_11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789abcdefghij"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_fine_grained_pat"
+  - description: "a secret under a skip path is not scanned"
+    controls:
+      - framework: nist-800-53-r5
+        control_id: "SC-28"
+    tags: ["allow", "secrets"]
+    action:
+      type: "file_write"
+      target: "/srv/app/test/srv/app/fixture_keys.py"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: allow
