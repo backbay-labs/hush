@@ -43,7 +43,7 @@ use crate::schema::HushSpec;
 use crate::validate::validate;
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD as BASE64URL};
-use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use chrono::{DateTime, Duration, Utc};
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey};
 use ed25519_dalek::{Signature, Signer};
@@ -1362,28 +1362,7 @@ fn is_sha256_digest(value: &str) -> bool {
 }
 
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ`, and a real instant.
-fn is_millisecond_timestamp(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 24 {
-        return false;
-    }
-    let shape = b"####-##-##T##:##:##.###Z";
-    for (byte, expected) in bytes.iter().zip(shape) {
-        let ok = match expected {
-            b'#' => byte.is_ascii_digit(),
-            other => byte == other,
-        };
-        if !ok {
-            return false;
-        }
-    }
-    DateTime::parse_from_rfc3339(value).is_ok()
-}
-
-/// RFC 3339 UTC with millisecond precision and a `Z` suffix (signing spec 4).
-fn format_timestamp(instant: DateTime<Utc>) -> String {
-    instant.to_rfc3339_opts(SecondsFormat::Millis, true)
-}
+use crate::receipt::{format_timestamp, is_millisecond_timestamp};
 
 fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, String> {
     if !is_millisecond_timestamp(value) {

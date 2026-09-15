@@ -368,10 +368,7 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
 
             if let Some(match_rules) = &profile.match_rules {
                 if let Some(space_type) = &match_rules.space_type
-                    && !contains_allowed_value(
-                        space_type,
-                        crate::generated_contract::ORIGIN_SPACE_TYPES,
-                    )
+                    && !crate::generated_contract::ORIGIN_SPACE_TYPES.contains(&space_type.as_str())
                 {
                     errors.push(ValidationError::Custom(format!(
                         "origins.profiles[{index}].match.space_type '{space_type}' is not valid"
@@ -379,10 +376,8 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                 }
 
                 if let Some(visibility) = &match_rules.visibility
-                    && !contains_allowed_value(
-                        visibility,
-                        crate::generated_contract::ORIGIN_VISIBILITIES,
-                    )
+                    && !crate::generated_contract::ORIGIN_VISIBILITIES
+                        .contains(&visibility.as_str())
                 {
                     errors.push(ValidationError::Custom(format!(
                         "origins.profiles[{index}].match.visibility '{visibility}' is not valid"
@@ -435,10 +430,8 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
             if let Some(bridge) = &profile.bridge {
                 for (target_index, target) in bridge.allowed_targets.iter().enumerate() {
                     if let Some(space_type) = &target.space_type
-                        && !contains_allowed_value(
-                            space_type,
-                            crate::generated_contract::ORIGIN_SPACE_TYPES,
-                        )
+                        && !crate::generated_contract::ORIGIN_SPACE_TYPES
+                            .contains(&space_type.as_str())
                     {
                         errors.push(ValidationError::Custom(format!(
                             "origins.profiles[{index}].bridge.allowed_targets[{target_index}].space_type '{space_type}' is not valid"
@@ -446,10 +439,8 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                     }
 
                     if let Some(visibility) = &target.visibility
-                        && !contains_allowed_value(
-                            visibility,
-                            crate::generated_contract::ORIGIN_VISIBILITIES,
-                        )
+                        && !crate::generated_contract::ORIGIN_VISIBILITIES
+                            .contains(&visibility.as_str())
                     {
                         errors.push(ValidationError::Custom(format!(
                             "origins.profiles[{index}].bridge.allowed_targets[{target_index}].visibility '{visibility}' is not valid"
@@ -664,7 +655,7 @@ fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) 
         return;
     }
 
-    // Nested-quantifier check second: RE2 tolerates shapes like `(a+)+` that
+    // Nested-quantifier check third: RE2 tolerates shapes like `(a+)+` that
     // catastrophically backtrack on the backtracking SDK engines, so reject them
     // here to keep the safety contract identical across all four SDKs.
     if has_nested_quantifier(pattern) {
@@ -926,8 +917,4 @@ fn is_valid_duration(value: &str) -> bool {
     ) && value[..value.len() - 1]
         .bytes()
         .all(|byte| byte.is_ascii_digit())
-}
-
-fn contains_allowed_value(value: &str, allowed: &[&str]) -> bool {
-    allowed.contains(&value)
 }

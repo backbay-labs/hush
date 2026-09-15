@@ -817,10 +817,7 @@ fn rule_block_of(matched_rule: Option<&str>) -> Option<String> {
     Some(matched.trim_matches('_').to_string())
 }
 
-fn segment(path: &str) -> &str {
-    let end = path.find(['.', '[']).unwrap_or(path.len());
-    &path[..end]
-}
+use crate::guard::top_segment as segment;
 
 fn escape_label(value: &str) -> String {
     value

@@ -191,7 +191,9 @@ pub fn matches_rule_path_prefix(matched_rule: &str, key: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('.') || rest.starts_with('['))
 }
 
-fn top_segment(path: &str) -> &str {
+/// The rule-block name at the head of a rule path: `rules.egress.allow` and
+/// `rules.egress[0]` both yield `rules`.
+pub(crate) fn top_segment(path: &str) -> &str {
     &path[..path.find(['.', '[']).unwrap_or(path.len())]
 }
 

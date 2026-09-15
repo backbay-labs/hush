@@ -377,6 +377,30 @@ pub fn format_timestamp(instant: DateTime<Utc>) -> String {
     instant.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+/// Whether `value` is exactly what [`format_timestamp`] produces: RFC 3339
+/// UTC, millisecond precision, `Z` suffix.
+///
+/// The shape is checked before parsing because `parse_from_rfc3339` also
+/// accepts offsets and other sub-second precisions, which receipts and
+/// envelopes do not.
+pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shape = b"####-##-##T##:##:##.###Z";
+    if bytes.len() != shape.len() {
+        return false;
+    }
+    for (byte, expected) in bytes.iter().zip(shape) {
+        let ok = match expected {
+            b'#' => byte.is_ascii_digit(),
+            other => byte == other,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    DateTime::parse_from_rfc3339(value).is_ok()
+}
+
 /// A UUID v7 whose random bits come from `seed` instead of an RNG, so a
 /// conformance vector can name the receipt id it expects.
 #[must_use]
