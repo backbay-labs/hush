@@ -18,7 +18,10 @@ impl ValidationResult {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ValidationError {
-    #[error("unsupported hushspec version: {0}")]
+    #[error(
+        "unsupported hushspec version: {0} (this engine accepts minor versions {minors})",
+        minors = version::HUSHSPEC_SUPPORTED_MINORS.join(", ")
+    )]
     UnsupportedVersion(String),
     #[error("duplicate secret pattern name: {0}")]
     DuplicatePatternName(String),
@@ -59,6 +62,8 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
             && rules.computer_use.is_none()
             && rules.remote_desktop_channels.is_none()
             && rules.input_injection.is_none()
+            && rules.browser_automation.is_none()
+            && rules.code_execution.is_none()
         {
             warnings.push("no rules configured".to_string());
         }
@@ -133,6 +138,95 @@ fn validate_rules(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>
         errors.push(ValidationError::Custom(
             "rules.tool_access.max_args_size must be >= 1".to_string(),
         ));
+    }
+
+    if let Some(browser) = &rules.browser_automation {
+        for (index, pattern) in browser.extra_credential_patterns.iter().enumerate() {
+            validate_regex(
+                pattern,
+                &format!("rules.browser_automation.extra_credential_patterns[{index}]"),
+                errors,
+            );
+        }
+    }
+
+    if let Some(code) = &rules.code_execution
+        && matches!(code.max_scan_bytes, Some(0))
+    {
+        errors.push(ValidationError::Custom(
+            "rules.code_execution.max_scan_bytes must be >= 1".to_string(),
+        ));
+    }
+
+    validate_conditions(rules, errors);
+}
+
+/// Validate every rule block's `when` condition (core spec 3.13, 7.10).
+fn validate_conditions(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>) {
+    let blocks: [(&str, Option<&crate::conditions::Condition>); 12] = [
+        (
+            "forbidden_paths",
+            rules.forbidden_paths.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "path_allowlist",
+            rules.path_allowlist.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "egress",
+            rules.egress.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "secret_patterns",
+            rules.secret_patterns.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "patch_integrity",
+            rules.patch_integrity.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "shell_commands",
+            rules.shell_commands.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "tool_access",
+            rules.tool_access.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "computer_use",
+            rules.computer_use.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "remote_desktop_channels",
+            rules
+                .remote_desktop_channels
+                .as_ref()
+                .and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "input_injection",
+            rules.input_injection.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "browser_automation",
+            rules
+                .browser_automation
+                .as_ref()
+                .and_then(|r| r.when.as_ref()),
+        ),
+        (
+            "code_execution",
+            rules.code_execution.as_ref().and_then(|r| r.when.as_ref()),
+        ),
+    ];
+    for (name, condition) in blocks {
+        if let Some(condition) = condition {
+            for message in
+                crate::conditions::validate_condition(condition, &format!("rules.{name}.when"))
+            {
+                errors.push(ValidationError::Custom(message));
+            }
+        }
     }
 }
 
@@ -299,6 +393,14 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                         )));
                     }
                 }
+            }
+
+            if let Some(overlay) = &profile.tool_access
+                && matches!(overlay.max_args_size, Some(0))
+            {
+                errors.push(ValidationError::Custom(format!(
+                    "origins.profiles[{index}].tool_access.max_args_size must be >= 1"
+                )));
             }
 
             if let Some(posture_state) = &profile.posture {

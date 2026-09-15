@@ -226,11 +226,15 @@ h2h eval policy.yaml --action-file - --format receipt   # action from stdin
 | Flag | Description |
 |---|---|
 | `<POLICY>` | Policy file or builtin reference. |
-| `--type <TYPE>` | `file_read`, `file_write`, `patch_apply`, `shell_command`, `tool_call`, `egress`, `computer_use`, `input_inject`. |
+| `--type <TYPE>` | `file_read`, `file_write`, `patch_apply`, `shell_command`, `tool_call`, `egress`, `computer_use`, `input_inject`, `browser_action`, `code_exec`, `custom`. Any other type is denied fail-closed. |
 | `--target <TARGET>` | Path, domain, tool name, command or channel. |
 | `--content <STRING>` / `--content-file <PATH>` | Action content. |
 | `--args-size <N>` | Serialized tool-argument size in bytes. |
 | `--origin <KEY=VALUE>` | Origin context field (repeatable). |
+| `--url <URL>` | `browser_action`: navigation destination. |
+| `--network` | `code_exec`: the call requests network access. |
+| `--timeout-ms <MS>` | `code_exec`: requested execution time in milliseconds. |
+| `--context <JSON\|@PATH>` | Runtime context for `when` conditions: inline JSON object or `@PATH` to a YAML/JSON file. |
 | `--posture <STATE>` / `--signal <SIGNAL>` | Posture state and transition signal. |
 | `--action-json <JSON>` / `--action-file <PATH>` | Full action document; `-` reads stdin. |
 | `--sentinel <PATH>` | Panic sentinel to consult before evaluating. |

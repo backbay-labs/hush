@@ -37,12 +37,13 @@ pub const GOVERNANCE_METADATA_KEYS: &[&str] = &[
     "effective_date",
     "expiry_date",
 ];
-pub const FORBIDDEN_PATH_KEYS: &[&str] = &["enabled", "patterns", "exceptions"];
-pub const PATH_ALLOWLIST_KEYS: &[&str] = &["enabled", "read", "write", "patch"];
-pub const EGRESS_KEYS: &[&str] = &["enabled", "allow", "block", "default"];
-pub const SECRET_PATTERNS_KEYS: &[&str] = &["enabled", "patterns", "skip_paths"];
+pub const FORBIDDEN_PATH_KEYS: &[&str] = &["when", "enabled", "patterns", "exceptions"];
+pub const PATH_ALLOWLIST_KEYS: &[&str] = &["when", "enabled", "read", "write", "patch"];
+pub const EGRESS_KEYS: &[&str] = &["when", "enabled", "allow", "block", "default"];
+pub const SECRET_PATTERNS_KEYS: &[&str] = &["when", "enabled", "patterns", "skip_paths"];
 pub const SECRET_PATTERN_KEYS: &[&str] = &["name", "pattern", "severity", "description"];
 pub const PATCH_INTEGRITY_KEYS: &[&str] = &[
+    "when",
     "enabled",
     "max_additions",
     "max_deletions",
@@ -50,8 +51,9 @@ pub const PATCH_INTEGRITY_KEYS: &[&str] = &[
     "require_balance",
     "max_imbalance_ratio",
 ];
-pub const SHELL_COMMAND_KEYS: &[&str] = &["enabled", "forbidden_patterns"];
+pub const SHELL_COMMAND_KEYS: &[&str] = &["when", "enabled", "forbidden_patterns"];
 pub const TOOL_ACCESS_KEYS: &[&str] = &[
+    "when",
     "enabled",
     "allow",
     "block",
@@ -59,16 +61,21 @@ pub const TOOL_ACCESS_KEYS: &[&str] = &[
     "default",
     "max_args_size",
 ];
-pub const COMPUTER_USE_KEYS: &[&str] = &["enabled", "mode", "allowed_actions"];
+pub const COMPUTER_USE_KEYS: &[&str] = &["when", "enabled", "mode", "allowed_actions"];
 pub const REMOTE_DESKTOP_KEYS: &[&str] = &[
+    "when",
     "enabled",
     "clipboard",
     "file_transfer",
     "audio",
     "drive_mapping",
 ];
-pub const INPUT_INJECTION_KEYS: &[&str] =
-    &["enabled", "allowed_types", "require_postcondition_probe"];
+pub const INPUT_INJECTION_KEYS: &[&str] = &[
+    "when",
+    "enabled",
+    "allowed_types",
+    "require_postcondition_probe",
+];
 pub const POSTURE_KEYS: &[&str] = &["initial", "states", "transitions"];
 pub const POSTURE_STATE_KEYS: &[&str] = &["description", "capabilities", "budgets"];
 pub const POSTURE_TRANSITION_KEYS: &[&str] = &["from", "to", "on", "after"];

@@ -118,6 +118,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Block access to sensitive filesystem paths.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -146,6 +150,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Allowlist-based path access control.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -182,6 +190,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Network egress control by domain.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -241,6 +253,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Detect secrets in content.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -269,6 +285,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Validate patch/diff safety.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -312,6 +332,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Block dangerous shell commands.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -332,6 +356,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Control tool/MCP invocations.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": true,
@@ -379,6 +407,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Control computer use agent actions.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -405,6 +437,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Control remote desktop side channels.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -437,6 +473,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Control input injection capabilities.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -462,6 +502,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Fine-grained controls for browser-automation tool calls: domain allowlist, verb allowlist, and credential detection in type actions.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -511,6 +555,10 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "additionalProperties": false,
       "description": "Restrictions for sandboxed interpreter actions: language allowlist, dangerous module denylist, network gating, and execution-time bounds.",
       "properties": {
+        "when": {
+          "$ref": "#/$defs/Condition",
+          "description": "Condition gating whether this block is active (core spec 3.13)."
+        },
         "enabled": {
           "type": "boolean",
           "default": false,
@@ -546,6 +594,70 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "integer",
           "minimum": 1,
           "description": "Maximum bytes of code to scan for module detection."
+        }
+      }
+    },
+    "Condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Conditional rule-block gate (core spec 3.13). Present fields are combined with AND. Parsers MUST also reject nesting deeper than 8 levels.",
+      "properties": {
+        "time_window": {
+          "$ref": "#/$defs/TimeWindow"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Dot-delimited runtime-context paths that must equal the given values (JSON equality)."
+        },
+        "all_of": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "description": "Every sub-condition must hold."
+        },
+        "any_of": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "description": "At least one sub-condition must hold; an empty array is treated as absent."
+        },
+        "not": {
+          "$ref": "#/$defs/Condition",
+          "description": "The sub-condition must not hold."
+        }
+      }
+    },
+    "TimeWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "description": "Daily time window; half-open [start, end), wrapping midnight when start > end.",
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Window start, HH:MM 24-hour."
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Window end, HH:MM 24-hour."
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "IANA time zone identifier or fixed offset (+HH:MM / -HH:MM)."
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^([Mm][Oo][Nn]|[Tt][Uu][Ee]|[Ww][Ee][Dd]|[Tt][Hh][Uu]|[Ff][Rr][Ii]|[Ss][Aa][Tt]|[Ss][Uu][Nn])$"
+          },
+          "description": "Days on which the window applies (case-insensitive abbreviations); defaults to all days."
         }
       }
     },
@@ -784,8 +896,29 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "action": {
           "$ref": "#/$defs/Action"
         },
+        "context": {
+          "$ref": "#/$defs/RuntimeContext"
+        },
         "expect": {
           "$ref": "#/$defs/ExpectedResult"
+        }
+      }
+    },
+    "RuntimeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime context supplied to `when` conditions (core spec 3.13).",
+      "properties": {
+        "user": { "type": "object", "additionalProperties": true },
+        "environment": { "type": "string" },
+        "deployment": { "type": "object", "additionalProperties": true },
+        "agent": { "type": "object", "additionalProperties": true },
+        "session": { "type": "object", "additionalProperties": true },
+        "request": { "type": "object", "additionalProperties": true },
+        "custom": { "type": "object", "additionalProperties": true },
+        "current_time": {
+          "type": "string",
+          "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
         }
       }
     },
@@ -796,16 +929,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "properties": {
         "type": {
           "type": "string",
-          "enum": [
-            "file_read",
-            "file_write",
-            "patch_apply",
-            "shell_command",
-            "tool_call",
-            "egress",
-            "computer_use",
-            "input_inject"
-          ]
+          "minLength": 1,
+          "description": "Action type (core spec 5). Any string is accepted so that unknown-type vectors can assert the fail-closed deny; reference types are file_read, file_write, patch_apply, shell_command, tool_call, egress, computer_use, input_inject, browser_action, code_exec, custom."
         },
         "target": {
           "type": "string"
@@ -822,6 +947,19 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "posture": {
           "$ref": "#/$defs/PostureInput"
+        },
+        "url": {
+          "type": "string",
+          "description": "browser_action: navigation destination (core spec 3.11)."
+        },
+        "network": {
+          "type": "boolean",
+          "description": "code_exec: whether the call requests network access (core spec 3.12)."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "code_exec: requested execution time in milliseconds (core spec 3.12)."
         }
       }
     },

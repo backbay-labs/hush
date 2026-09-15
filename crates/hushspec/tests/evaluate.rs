@@ -92,7 +92,6 @@ extensions:
         match:
           provider: slack
         tool_access:
-          enabled: true
           allow:
             - "*"
           block: []
@@ -144,7 +143,6 @@ extensions:
         match:
           provider: slack
         egress:
-          enabled: true
           allow: []
           block: []
           default: allow
@@ -166,10 +164,9 @@ extensions:
     );
 
     assert_eq!(result.decision, Decision::Deny);
-    assert_eq!(
-        result.matched_rule.as_deref(),
-        Some("extensions.origins.profiles.slack.egress.default")
-    );
+    // The overlay says `default: allow` but the base says `block`; the base
+    // determined the effective default, so its path is reported.
+    assert_eq!(result.matched_rule.as_deref(), Some("rules.egress.default"));
     assert_eq!(result.origin_profile.as_deref(), Some("slack"));
 }
 
@@ -227,6 +224,10 @@ extensions:
     let result = evaluate(
         &spec,
         &EvaluationAction {
+            url: None,
+            network: None,
+            timeout_ms: None,
+            context: None,
             action_type: "file_read".into(),
             target: Some("/workspace/readme.md".into()),
             posture: Some(hushspec::PostureContext {

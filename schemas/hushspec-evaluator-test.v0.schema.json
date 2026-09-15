@@ -43,8 +43,29 @@
         "action": {
           "$ref": "#/$defs/Action"
         },
+        "context": {
+          "$ref": "#/$defs/RuntimeContext"
+        },
         "expect": {
           "$ref": "#/$defs/ExpectedResult"
+        }
+      }
+    },
+    "RuntimeContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime context supplied to `when` conditions (core spec 3.13).",
+      "properties": {
+        "user": { "type": "object", "additionalProperties": true },
+        "environment": { "type": "string" },
+        "deployment": { "type": "object", "additionalProperties": true },
+        "agent": { "type": "object", "additionalProperties": true },
+        "session": { "type": "object", "additionalProperties": true },
+        "request": { "type": "object", "additionalProperties": true },
+        "custom": { "type": "object", "additionalProperties": true },
+        "current_time": {
+          "type": "string",
+          "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
         }
       }
     },
@@ -55,16 +76,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": [
-            "file_read",
-            "file_write",
-            "patch_apply",
-            "shell_command",
-            "tool_call",
-            "egress",
-            "computer_use",
-            "input_inject"
-          ]
+          "minLength": 1,
+          "description": "Action type (core spec 5). Any string is accepted so that unknown-type vectors can assert the fail-closed deny; reference types are file_read, file_write, patch_apply, shell_command, tool_call, egress, computer_use, input_inject, browser_action, code_exec, custom."
         },
         "target": {
           "type": "string"
@@ -81,6 +94,19 @@
         },
         "posture": {
           "$ref": "#/$defs/PostureInput"
+        },
+        "url": {
+          "type": "string",
+          "description": "browser_action: navigation destination (core spec 3.11)."
+        },
+        "network": {
+          "type": "boolean",
+          "description": "code_exec: whether the call requests network access (core spec 3.12)."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "code_exec: requested execution time in milliseconds (core spec 3.12)."
         }
       }
     },

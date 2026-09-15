@@ -190,46 +190,30 @@ mod tests {
     }
 
     #[test]
-    fn build_regression_fixture_refuses_off_schema_action_type() {
+    fn build_regression_fixture_emits_unknown_action_type_as_deny_vector() {
         // The fuzz generator (gen.rs `action_strategy`) has a low-weight
-        // "unknown_action" branch specifically so the oracle's fallback arm
-        // (any unrecognized `action.type` -> Allow) gets exercised. The Rust
-        // evaluator happily evaluates it, but the evaluator-test schema's
-        // `Action.type` is a closed 8-value enum that does not include it.
+        // "unknown_action" branch so the oracle's fail-closed arm (any
+        // unrecognized `action.type` -> Deny, core spec Section 5) gets
+        // exercised. The evaluator-test schema accepts any type string for
+        // exactly this reason, so such a case is a legitimate vector.
         let mut min = minimized();
         min.action = serde_json::json!({"type": "unknown_action", "target": "shell_exec"});
         let verdict = oracle_verdict(&min);
         assert!(
             matches!(&verdict, CaseVerdict::Ok { .. }),
-            "the oracle must accept this action (that's the whole bug) -- got {verdict:?}"
+            "the oracle must evaluate this action -- got {verdict:?}"
         );
 
         let dir = tempfile::tempdir().expect("tempdir");
         let eval_dir = dir.path().join("core/evaluation");
+        let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("builds");
+        assert!(yaml.contains("__unknown_action_type__"), "{yaml}");
+        write_regression_fixture(&eval_dir, &filename, &yaml).expect("writes");
 
-        // Mirror how a caller (e.g. a future fixture-emission loop) is
-        // expected to use this API: only write a file when Ok comes back.
-        match build_regression_fixture(&min, &verdict, 1) {
-            Err(error) => {
-                let message = error.to_string();
-                assert!(
-                    message.contains("unknown_action"),
-                    "error should name the offending action type, got: {message}"
-                );
-            }
-            Ok((filename, yaml)) => {
-                write_regression_fixture(&eval_dir, &filename, &yaml).expect("writes");
-                panic!(
-                    "an action.type the evaluator-test schema doesn't recognize must be \
-                     refused, not emitted (wrote {filename})"
-                );
-            }
-        }
-
-        assert!(
-            !eval_dir.exists(),
-            "no fixture file should be written when the fixture is schema-invalid"
-        );
+        let fixtures = crate::fixture::discover_fixtures(dir.path());
+        assert_eq!(fixtures.len(), 1);
+        let results = crate::runner::run_conformance(&fixtures);
+        assert!(results[0].passed, "{}", results[0].message);
     }
 
     /// Write an emitted fixture into a fresh tempdir and assert it survives

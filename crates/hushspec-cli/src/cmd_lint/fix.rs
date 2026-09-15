@@ -283,6 +283,10 @@ mod tests {
         let findings = run_all_checks(&fixed, "t.yaml");
         apply_fixes(&mut fixed, &findings);
         let action = hushspec::EvaluationAction {
+            url: None,
+            network: None,
+            timeout_ms: None,
+            context: None,
             action_type: "file_read".into(),
             target: Some("/home/u/.ssh/id_rsa".into()),
             content: None,

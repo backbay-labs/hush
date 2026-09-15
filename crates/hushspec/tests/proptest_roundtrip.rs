@@ -99,6 +99,7 @@ fn forbidden_paths_strategy() -> impl Strategy<Value = ForbiddenPathsRule> {
     )
         .prop_map(|(enabled, patterns, exceptions)| ForbiddenPathsRule {
             enabled,
+            when: None,
             patterns,
             exceptions,
         })
@@ -113,6 +114,7 @@ fn path_allowlist_strategy() -> impl Strategy<Value = PathAllowlistRule> {
     )
         .prop_map(|(enabled, read, write, patch)| PathAllowlistRule {
             enabled,
+            when: None,
             read,
             write,
             patch,
@@ -128,6 +130,7 @@ fn egress_strategy() -> impl Strategy<Value = EgressRule> {
     )
         .prop_map(|(enabled, allow, block, default)| EgressRule {
             enabled,
+            when: None,
             allow,
             block,
             default,
@@ -156,6 +159,7 @@ fn secret_patterns_strategy() -> impl Strategy<Value = SecretPatternsRule> {
             }
             SecretPatternsRule {
                 enabled,
+                when: None,
                 patterns,
                 skip_paths,
             }
@@ -182,6 +186,7 @@ fn patch_integrity_strategy() -> impl Strategy<Value = PatchIntegrityRule> {
             )| {
                 PatchIntegrityRule {
                     enabled,
+                    when: None,
                     max_additions,
                     max_deletions,
                     forbidden_patterns,
@@ -201,6 +206,7 @@ fn shell_commands_strategy() -> impl Strategy<Value = ShellCommandsRule> {
     )
         .prop_map(|(enabled, forbidden_patterns)| ShellCommandsRule {
             enabled,
+            when: None,
             forbidden_patterns,
         })
 }
@@ -219,6 +225,7 @@ fn tool_access_strategy() -> impl Strategy<Value = ToolAccessRule> {
             |(enabled, allow, block, require_confirmation, default, max_args_size)| {
                 ToolAccessRule {
                     enabled,
+                    when: None,
                     allow,
                     block,
                     require_confirmation,
@@ -237,6 +244,7 @@ fn computer_use_strategy() -> impl Strategy<Value = ComputerUseRule> {
     )
         .prop_map(|(enabled, mode, allowed_actions)| ComputerUseRule {
             enabled,
+            when: None,
             mode,
             allowed_actions,
         })
@@ -253,6 +261,7 @@ fn remote_desktop_strategy() -> impl Strategy<Value = RemoteDesktopChannelsRule>
         .prop_map(
             |(enabled, clipboard, file_transfer, audio, drive_mapping)| RemoteDesktopChannelsRule {
                 enabled,
+                when: None,
                 clipboard,
                 file_transfer,
                 audio,
@@ -270,6 +279,7 @@ fn input_injection_strategy() -> impl Strategy<Value = InputInjectionRule> {
         .prop_map(
             |(enabled, allowed_types, require_postcondition_probe)| InputInjectionRule {
                 enabled,
+                when: None,
                 allowed_types,
                 require_postcondition_probe,
             },
@@ -295,6 +305,7 @@ fn browser_automation_strategy() -> impl Strategy<Value = BrowserAutomationRule>
                 extra_credential_patterns,
             )| BrowserAutomationRule {
                 enabled,
+                when: None,
                 allowed_domains,
                 blocked_domains,
                 allowed_verbs,
@@ -323,6 +334,7 @@ fn code_execution_strategy() -> impl Strategy<Value = CodeExecutionRule> {
                 max_scan_bytes,
             )| CodeExecutionRule {
                 enabled,
+                when: None,
                 language_allowlist,
                 module_denylist,
                 network_access,
@@ -593,6 +605,10 @@ fn action_strategy() -> impl Strategy<Value = EvaluationAction> {
     )
         .prop_map(
             |(action_type, target, content, args_size)| EvaluationAction {
+                url: None,
+                network: None,
+                timeout_ms: None,
+                context: None,
                 action_type,
                 target,
                 content,

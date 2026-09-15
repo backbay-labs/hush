@@ -47,12 +47,14 @@ var GovernanceMetadataKeys = map[string]struct{}{
 }
 
 var ForbiddenPathKeys = map[string]struct{}{
+	"when":       {},
 	"enabled":    {},
 	"patterns":   {},
 	"exceptions": {},
 }
 
 var PathAllowlistKeys = map[string]struct{}{
+	"when":    {},
 	"enabled": {},
 	"read":    {},
 	"write":   {},
@@ -60,6 +62,7 @@ var PathAllowlistKeys = map[string]struct{}{
 }
 
 var EgressKeys = map[string]struct{}{
+	"when":    {},
 	"enabled": {},
 	"allow":   {},
 	"block":   {},
@@ -67,6 +70,7 @@ var EgressKeys = map[string]struct{}{
 }
 
 var SecretPatternsKeys = map[string]struct{}{
+	"when":       {},
 	"enabled":    {},
 	"patterns":   {},
 	"skip_paths": {},
@@ -80,6 +84,7 @@ var SecretPatternKeys = map[string]struct{}{
 }
 
 var PatchIntegrityKeys = map[string]struct{}{
+	"when":                {},
 	"enabled":             {},
 	"max_additions":       {},
 	"max_deletions":       {},
@@ -89,11 +94,13 @@ var PatchIntegrityKeys = map[string]struct{}{
 }
 
 var ShellCommandKeys = map[string]struct{}{
+	"when":               {},
 	"enabled":            {},
 	"forbidden_patterns": {},
 }
 
 var ToolAccessKeys = map[string]struct{}{
+	"when":                 {},
 	"enabled":              {},
 	"allow":                {},
 	"block":                {},
@@ -103,12 +110,14 @@ var ToolAccessKeys = map[string]struct{}{
 }
 
 var ComputerUseKeys = map[string]struct{}{
+	"when":            {},
 	"enabled":         {},
 	"mode":            {},
 	"allowed_actions": {},
 }
 
 var RemoteDesktopKeys = map[string]struct{}{
+	"when":          {},
 	"enabled":       {},
 	"clipboard":     {},
 	"file_transfer": {},
@@ -117,6 +126,7 @@ var RemoteDesktopKeys = map[string]struct{}{
 }
 
 var InputInjectionKeys = map[string]struct{}{
+	"when":                        {},
 	"enabled":                     {},
 	"allowed_types":               {},
 	"require_postcondition_probe": {},

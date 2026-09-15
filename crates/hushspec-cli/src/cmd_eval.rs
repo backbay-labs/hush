@@ -14,6 +14,9 @@ const KNOWN_ACTION_TYPES: &[&str] = &[
     "egress",
     "computer_use",
     "input_inject",
+    "browser_action",
+    "code_exec",
+    "custom",
 ];
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -29,7 +32,8 @@ pub struct EvalArgs {
     policy: String,
 
     /// Action type (file_read, file_write, patch_apply, shell_command,
-    /// tool_call, egress, computer_use, input_inject)
+    /// tool_call, egress, computer_use, input_inject, browser_action,
+    /// code_exec, custom)
     #[arg(
         long = "type",
         value_name = "TYPE",
@@ -57,6 +61,23 @@ pub struct EvalArgs {
     /// Serialized tool-argument size in bytes
     #[arg(long, value_name = "N", conflicts_with_all = ["action_json", "action_file"])]
     args_size: Option<usize>,
+
+    /// browser_action: navigation destination URL
+    #[arg(long, value_name = "URL", conflicts_with_all = ["action_json", "action_file"])]
+    url: Option<String>,
+
+    /// code_exec: the call requests network access
+    #[arg(long, conflicts_with_all = ["action_json", "action_file"])]
+    network: bool,
+
+    /// code_exec: requested execution time in milliseconds
+    #[arg(long, value_name = "MS", conflicts_with_all = ["action_json", "action_file"])]
+    timeout_ms: Option<u64>,
+
+    /// Runtime context for `when` conditions: an inline JSON object, or
+    /// @PATH to read a YAML/JSON file
+    #[arg(long, value_name = "JSON|@PATH")]
+    context: Option<String>,
 
     /// Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id,
     /// space_id, space_type, visibility, external_participants, tags, sensitivity, actor_role
@@ -106,7 +127,7 @@ pub fn run(args: EvalArgs) -> i32 {
         }
     };
 
-    let action = match build_action(&args) {
+    let mut action = match build_action(&args) {
         Ok(action) => action,
         Err(message) => {
             eprintln!("{} {message}", "error:".red());
@@ -114,9 +135,19 @@ pub fn run(args: EvalArgs) -> i32 {
         }
     };
 
+    if let Some(source) = &args.context {
+        match parse_context_argument(source) {
+            Ok(context) => action.context = Some(context),
+            Err(message) => {
+                eprintln!("{} {message}", "error:".red());
+                return 2;
+            }
+        }
+    }
+
     if !KNOWN_ACTION_TYPES.contains(&action.action_type.as_str()) {
         eprintln!(
-            "{} '{}' is not a reference action type; no rules apply to it",
+            "{} '{}' is not a reference action type; it is denied fail-closed",
             "note:".yellow(),
             action.action_type
         );
@@ -281,6 +312,8 @@ fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
         "egress",
         "computer_use",
         "input_inject",
+        "browser_action",
+        "code_exec",
     ];
     if TARGET_REQUIRED.contains(&action_type.as_str()) && args.target.is_none() {
         return Err(format!("--type {action_type} requires --target"));
@@ -317,7 +350,24 @@ fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
         origin,
         posture,
         args_size: args.args_size,
+        url: args.url.clone(),
+        network: if args.network { Some(true) } else { None },
+        timeout_ms: args.timeout_ms,
+        context: None,
     })
+}
+
+/// Parse `--context`: an inline JSON object, or `@PATH` naming a YAML/JSON
+/// file. Unknown keys are rejected (fail-closed) by the RuntimeContext type.
+fn parse_context_argument(source: &str) -> Result<hushspec::RuntimeContext, String> {
+    let text = match source.strip_prefix('@') {
+        Some(path) => std::fs::read_to_string(path)
+            .map_err(|e| format!("failed to read context file {path}: {e}"))?,
+        None => source.to_string(),
+    };
+    let value: serde_json::Value =
+        serde_yaml::from_str(&text).map_err(|e| format!("invalid context document: {e}"))?;
+    serde_json::from_value(value).map_err(|e| format!("invalid context: {e}"))
 }
 
 /// Parse a full action document (YAML or JSON) via the same two-step
@@ -438,38 +488,30 @@ fn outcome_label(outcome: RuleOutcome) -> String {
     }
 }
 
-/// Rule consultation order per action type, verified against the dispatch
-/// in crates/hushspec/src/evaluate.rs. computer_use and input_inject omit
-/// "posture capabilities" because required_capability() returns None for them.
-/// file_read, file_write, and patch_apply all route through the shared
-/// evaluate_path_guards() helper, so all three must list every path-guard
-/// stage it can resolve on -- including the forbidden_paths exceptions
-/// allow, which runs before file_write/patch_apply fall through to their
-/// own rule block.
-fn precedence_note(action_type: &str) -> Option<&'static str> {
-    match action_type {
-        "tool_call" => Some(
-            "panic > posture capabilities > max_args_size > block > require_confirmation > allow > default",
-        ),
-        "egress" => Some("panic > posture capabilities > block > allow > default"),
-        "file_read" => Some(
-            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions",
-        ),
-        "file_write" => Some(
-            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions > secret_patterns",
-        ),
-        "patch_apply" => Some(
-            "panic > posture capabilities > forbidden_paths > path_allowlist > forbidden_paths exceptions > patch_integrity",
-        ),
-        "shell_command" => {
-            Some("panic > posture capabilities > forbidden_patterns (first match denies)")
+/// Evaluation order per action type (core spec Sections 5 and 6.1): the
+/// extension guards run first, then every applicable rule block is
+/// evaluated -- none short-circuits on an allow -- and the outcomes are
+/// aggregated with deny > warn > allow.
+fn precedence_note(action_type: &str) -> Option<String> {
+    let blocks = match action_type {
+        "file_read" => "forbidden_paths > path_allowlist",
+        "file_write" => "forbidden_paths > path_allowlist > secret_patterns",
+        "patch_apply" => "forbidden_paths > path_allowlist > patch_integrity > secret_patterns",
+        "shell_command" => "shell_commands",
+        "egress" => "egress > secret_patterns (when content is present)",
+        "tool_call" => "tool_access > secret_patterns (when content is present)",
+        "computer_use" => "computer_use > remote_desktop_channels",
+        "input_inject" => "input_injection",
+        "browser_action" => "browser_automation",
+        "code_exec" => "code_execution",
+        "custom" => {
+            "no rule blocks (permitted only by a posture state granting the custom capability)"
         }
-        "computer_use" => Some(
-            "panic > computer_use combined with remote_desktop_channels (more restrictive outcome wins)",
-        ),
-        "input_inject" => Some("panic > allowed_types allowlist (empty list denies all)"),
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(format!(
+        "panic > origins default_behavior > posture capabilities > {blocks}; every applicable block is evaluated and deny > warn > allow"
+    ))
 }
 
 fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
@@ -668,32 +710,32 @@ mod tests {
 
     #[test]
     fn precedence_note_covers_reference_action_types() {
+        // Every applicable block is evaluated (core spec 6.1); the note lists
+        // the Section 5 evaluation order for each reference action type.
         assert!(
             precedence_note("egress")
                 .unwrap()
-                .contains("block > allow > default")
+                .contains("egress > secret_patterns")
         );
-        // file_read, file_write, and patch_apply all route through
-        // evaluate_path_guards(), which can resolve the decision via a
-        // forbidden_paths.exceptions allow before either the file_write or
-        // patch_apply evaluator gets a chance to consult its own rule
-        // block. All three notes must mention that stage, in the order the
-        // evaluator actually consults it (after path_allowlist, before the
-        // action-specific block).
         assert!(
             precedence_note("file_read")
                 .unwrap()
-                .contains("path_allowlist > forbidden_paths exceptions")
+                .contains("forbidden_paths > path_allowlist")
         );
         assert!(
             precedence_note("file_write")
                 .unwrap()
-                .contains("path_allowlist > forbidden_paths exceptions > secret_patterns")
+                .contains("forbidden_paths > path_allowlist > secret_patterns")
         );
         assert!(
             precedence_note("patch_apply")
                 .unwrap()
-                .contains("path_allowlist > forbidden_paths exceptions > patch_integrity")
+                .contains("path_allowlist > patch_integrity > secret_patterns")
+        );
+        assert!(
+            precedence_note("code_exec")
+                .unwrap()
+                .contains("code_execution")
         );
         assert!(precedence_note("frobnicate").is_none());
     }
