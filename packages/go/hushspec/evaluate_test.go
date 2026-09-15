@@ -338,7 +338,7 @@ rules:
 	result := Evaluate(spec, &EvaluationAction{
 		Type:    "patch_apply",
 		Target:  "file.txt",
-		Content: patch,
+		Content: strPtr(patch),
 	})
 	if result.Decision != DecisionDeny {
 		t.Fatalf("expected explicit zero patch limits to deny additions, got %q (%s)", result.Decision, result.Reason)

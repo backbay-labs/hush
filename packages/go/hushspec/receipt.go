@@ -121,7 +121,7 @@ func EvaluateAudited(spec *HushSpec, action *EvaluationAction, config *AuditConf
 	actionSummary := ActionSummary{
 		Type:            action.Type,
 		Target:          action.Target,
-		ContentRedacted: config.RedactContent && action.Content != "",
+		ContentRedacted: config.RedactContent && action.HasContent(),
 	}
 
 	return DecisionReceipt{

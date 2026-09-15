@@ -454,7 +454,11 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 	if spec.Extensions == nil || spec.Extensions.Detection == nil {
 		return EvaluationWithDetection{Evaluation: base}
 	}
-	if action.Content == "" {
+	// Detection is emptiness-gated, not presence-gated: Rust reads
+	// `content.unwrap_or_default()` and returns the base evaluation when the
+	// result is empty, so an explicitly empty payload is a no-op here (unlike
+	// secret_patterns, where presence alone makes the block applicable).
+	if action.ContentOrEmpty() == "" {
 		return EvaluationWithDetection{Evaluation: base}
 	}
 	det := spec.Extensions.Detection
@@ -468,7 +472,7 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 		if pi.MaxScanBytes != nil {
 			maxBytes = *pi.MaxScanBytes
 		}
-		result := defaultInjectionDetector.Detect(truncateToBytes(action.Content, maxBytes))
+		result := defaultInjectionDetector.Detect(truncateToBytes(action.ContentOrEmpty(), maxBytes))
 		detections = append(detections, result)
 
 		blockLevel := DetectionLevelHigh
@@ -492,7 +496,7 @@ func EvaluateWithDetection(spec *HushSpec, action *EvaluationAction) EvaluationW
 		if jb.MaxInputBytes != nil {
 			maxBytes = *jb.MaxInputBytes
 		}
-		result := defaultJailbreakDetector.Detect(truncateToBytes(action.Content, maxBytes))
+		result := defaultJailbreakDetector.Detect(truncateToBytes(action.ContentOrEmpty(), maxBytes))
 		detections = append(detections, result)
 
 		blockThreshold := 80.0

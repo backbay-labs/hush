@@ -288,7 +288,7 @@ rules:
 	traced := EvaluateTraced(spec, &EvaluationAction{
 		Type:    "file_write",
 		Target:  "/proj/allowed/.env",
-		Content: "AKIAABCDEFGHIJKLMNOP",
+		Content: strPtr("AKIAABCDEFGHIJKLMNOP"),
 	}, nil, nil)
 	if traced.Result.Decision != DecisionDeny {
 		t.Fatalf("expected the secret to deny past the forbidden-path exception, got %q", traced.Result.Decision)
@@ -349,7 +349,7 @@ rules:
 	if result := Evaluate(spec, &EvaluationAction{Type: "code_exec", Target: "python", TimeoutMs: &timeout}); result.Decision != DecisionDeny {
 		t.Errorf("expected an over-limit timeout to deny, got %q", result.Decision)
 	}
-	if result := Evaluate(spec, &EvaluationAction{Type: "code_exec", Target: "python", Content: "subprocessing = 1"}); result.Decision != DecisionAllow {
+	if result := Evaluate(spec, &EvaluationAction{Type: "code_exec", Target: "python", Content: strPtr("subprocessing = 1")}); result.Decision != DecisionAllow {
 		t.Errorf("expected a denied module name inside a longer identifier not to match, got %q", result.Decision)
 	}
 }
