@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -124,7 +126,23 @@ def render() -> str:
         ]
     )
 
-    return "\n".join(lines)
+    content = "\n".join(lines)
+
+    # Run the output through rustfmt, exactly as generate_sdk_contracts.py does.
+    # Without this, `cargo fmt --all` reformats the committed file (long schema
+    # file names wrap) and `--check` then reports it as permanently stale.
+    rustfmt = shutil.which("rustfmt")
+    if rustfmt is None:
+        return content
+
+    result = subprocess.run(
+        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        input=content,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
 
 
 def main() -> int:

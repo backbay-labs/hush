@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -127,7 +129,23 @@ def render() -> str:
         ]
     )
 
-    return "\n".join(lines)
+    content = "\n".join(lines)
+
+    # Run the output through rustfmt so `cargo fmt --all` and this generator
+    # agree: otherwise a long framework name or URL wraps under cargo fmt and
+    # `--check` reports the committed file as permanently stale.
+    rustfmt = shutil.which("rustfmt")
+    if rustfmt is None:
+        return content
+
+    result = subprocess.run(
+        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        input=content,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout
 
 
 def main() -> int:
