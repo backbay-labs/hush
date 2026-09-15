@@ -41,6 +41,7 @@ from hushspec.generated_contract import (
     POSTURE_KEYS,
     POSTURE_STATE_KEYS,
     POSTURE_TRANSITION_KEYS,
+    PROMPT_INJECTION_HEURISTICS_KEYS,
     PROMPT_INJECTION_KEYS,
     REMOTE_DESKTOP_KEYS,
     RULE_KEYS,
@@ -739,6 +740,25 @@ def _validate_detection_prompt(obj: dict[str, Any], errors: list[str], path: str
         obj, "block_at_or_above", errors, f"{path}.block_at_or_above", DETECTION_LEVELS
     )
     _validate_optional_int(obj, "max_scan_bytes", errors, f"{path}.max_scan_bytes", min_value=1)
+    _validate_optional_object(
+        obj, "heuristics", errors, path, _validate_detection_heuristics,
+    )
+
+
+def _validate_detection_heuristics(
+    obj: dict[str, Any], errors: list[str], path: str
+) -> None:
+    """``prompt_injection.heuristics`` (detection spec 3.5.1).
+
+    ``min_score`` is a non-negative integer, the range Rust's ``usize`` field
+    enforces at parse time; the schema's upper bound of 100 is not checked
+    here, because a floor above the clamp is harmless (nothing ever reaches
+    it) and rejecting one where the reference accepts it would be a
+    conformance divergence.
+    """
+    _reject_unknown_keys(obj, PROMPT_INJECTION_HEURISTICS_KEYS, errors, path)
+    _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
+    _validate_optional_int(obj, "min_score", errors, f"{path}.min_score", min_value=0)
 
 
 def _validate_detection_jailbreak(obj: dict[str, Any], errors: list[str], path: str) -> None:

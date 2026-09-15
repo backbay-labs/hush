@@ -42,6 +42,7 @@ from hushspec.conditions import (
 )
 from hushspec.detection import (
     DETECTOR_ID_VERSION,
+    HEURISTIC_DETECTOR_NAME,
     DetectionCategory,
     DetectionResult,
     DetectorEvaluation,
@@ -56,7 +57,8 @@ from hushspec.detection import (
     _DEFAULT_PROMPT_INJECTION_WARN_AT,
     _LEVEL_FLOORS,
     _jailbreak_detector,
-    _injection_detector,
+    default_detector_registry,
+    heuristic_integer,
     _truncate_to_bytes,
 )
 from hushspec.evaluate import (
@@ -1319,6 +1321,7 @@ class _CompiledDetection:
         self.jailbreak = None
         config = detection.prompt_injection
         if config is not None and config.enabled is not False:
+            heuristics = config.heuristics
             self.prompt_injection = (
                 config.max_scan_bytes
                 if config.max_scan_bytes is not None
@@ -1333,6 +1336,11 @@ class _CompiledDetection:
                     if config.warn_at_or_above is not None
                     else _DEFAULT_PROMPT_INJECTION_WARN_AT
                 ],
+                # heuristics.enabled defaults to true (detection spec 3.5.1).
+                heuristics is None or heuristics.enabled is not False,
+                heuristics.min_score
+                if heuristics is not None and heuristics.min_score is not None
+                else 0,
             )
         config = detection.jailbreak
         if config is not None and config.enabled is not False:
@@ -1960,28 +1968,52 @@ class CompiledPolicy:
 
         config = detection.prompt_injection
         if config is not None:
-            max_bytes, block_floor, warn_floor = config
-            result = _injection_detector.detect(
-                _truncate_to_bytes(content, max_bytes)
-            )
-            score = result.score
-            contribution: Optional[Decision] = None
-            if score >= block_floor:
-                contribution = Decision.DENY
-            elif score >= warn_floor:
-                contribution = Decision.WARN
-            detections.append(result)
-            if contribution is not None:
-                contributions.append((contribution, "prompt_injection"))
-            detector_trace.append(
-                DetectorEvaluation(
-                    detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
-                    category=DetectionCategory.PROMPT_INJECTION,
-                    score=score,
-                    level=DetectorLevel.from_score(score),
-                    matched=contribution is not None,
+            (
+                max_bytes,
+                block_floor,
+                warn_floor,
+                heuristics_enabled,
+                min_score,
+            ) = config
+            scan = _truncate_to_bytes(content, max_bytes)
+            # Every prompt-injection detector runs -- the regex detector and
+            # the normative heuristic one (detection spec 3.5) -- each scored
+            # against the same byte budget and level floors, each recording
+            # its own trace entry.
+            registry = default_detector_registry()
+            for detector in registry.detectors_for(
+                DetectionCategory.PROMPT_INJECTION
+            ):
+                is_heuristic = detector.name == HEURISTIC_DETECTOR_NAME
+                if is_heuristic and not heuristics_enabled:
+                    continue
+                result = detector.detect(scan)
+                if is_heuristic and heuristic_integer(result.score) < min_score:
+                    # Below the policy's floor the heuristic reports no signal
+                    # (detection spec 3.5.4).
+                    result = DetectionResult(
+                        detector_name=result.detector_name,
+                        category=result.category,
+                        score=0.0,
+                    )
+                score = result.score
+                contribution: Optional[Decision] = None
+                if score >= block_floor:
+                    contribution = Decision.DENY
+                elif score >= warn_floor:
+                    contribution = Decision.WARN
+                detections.append(result)
+                if contribution is not None:
+                    contributions.append((contribution, "prompt_injection"))
+                detector_trace.append(
+                    DetectorEvaluation(
+                        detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
+                        category=DetectionCategory.PROMPT_INJECTION,
+                        score=score,
+                        level=DetectorLevel.from_score(score),
+                        matched=contribution is not None,
+                    )
                 )
-            )
 
         config = detection.jailbreak
         if config is not None:

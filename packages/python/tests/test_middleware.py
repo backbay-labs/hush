@@ -710,8 +710,10 @@ class TestDetectionInSinkPath:
         # the detectors did is recorded in `detection_trace` instead.
         assert all(e.rule_block != "detection" for e in receipt.rule_trace)
         assert receipt.detection_trace is not None
+        # Both prompt-injection detectors fire on this content: the regex one
+        # and the normative heuristic one (detection spec 3.5).
         fired = [d for d in receipt.detection_trace if d.matched]
-        assert len(fired) == 1
+        assert len(fired) == 2
         assert fired[0].detector_id == "regex_injection@1"
         assert fired[0].category == "prompt_injection"
         assert fired[0].level in ("high", "critical")

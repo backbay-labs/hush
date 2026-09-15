@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,6 +15,7 @@ from hushspec.evaluate import (
 )
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import DetectionLevel
+from hushspec.regex_profile import compile_profile_regex
 from hushspec.schema import HushSpec
 
 
@@ -75,12 +77,44 @@ class DetectorRegistry:
     def with_defaults(cls) -> "DetectorRegistry":
         registry = cls()
         registry.register(RegexInjectionDetector())
+        registry.register(HeuristicInjectionDetector())
         registry.register(RegexJailbreakDetector())
         registry.register(RegexExfiltrationDetector())
         return registry
 
     def detect_all(self, input_text: str) -> list[DetectionResult]:
         return [d.detect(input_text) for d in self._detectors]
+
+    def detector_for(self, category: DetectionCategory) -> Optional[Detector]:
+        """The first registered detector of *category*, if any."""
+        for detector in self._detectors:
+            if detector.category == category:
+                return detector
+        return None
+
+    def detectors_for(self, category: DetectionCategory) -> list[Detector]:
+        """Every registered detector of *category*, in registration order.
+
+        The prompt-injection pipeline runs all of them (the regex detector and
+        the normative heuristic detector), each against the category's byte
+        budget and thresholds.
+        """
+        return [d for d in self._detectors if d.category == category]
+
+
+def default_detector_registry() -> "DetectorRegistry":
+    """The built-in detectors, in the order their trace entries are recorded.
+
+    The shared singleton behind every detection-aware evaluation; the
+    detectors are stateless, so one registry serves the whole process.
+    """
+    global _default_registry
+    if _default_registry is None:
+        _default_registry = DetectorRegistry.with_defaults()
+    return _default_registry
+
+
+_default_registry: Optional["DetectorRegistry"] = None
 
 
 
@@ -204,6 +238,208 @@ class RegexInjectionDetector(Detector):
             matched_patterns=matched_patterns,
             explanation=explanation,
         )
+
+
+# heuristic_injection@1 -- the normative detector of detection spec 3.5
+
+
+#: Name of the normative heuristic detector (``heuristic_injection@1`` once
+#: the id version suffix is appended).
+HEURISTIC_DETECTOR_NAME = "heuristic_injection"
+
+#: The signal families of ``heuristic_injection@1``, verbatim from detection
+#: spec 3.5.3: ``(family, weight, patterns)``. Patterns are written in the
+#: HushSpec regex profile (ASCII classes, no lookaround) and matched against
+#: the NFC-normalized, ASCII-case-folded input, so they are lowercase. A
+#: family contributes its weight at most once; the sum is clamped to 100.
+#:
+#: This table and the spec's MUST stay identical; so must every SDK's copy.
+HEURISTIC_FAMILIES: tuple[tuple[str, int, tuple[str, ...]], ...] = (
+    (
+        "instruction_override",
+        40,
+        (
+            r"ignore (all |any |the |every |your )?(previous|prior|above|earlier|preceding) (instructions?|prompts?|rules|guidance)",
+            r"disregard (all |any |the |your )?(system|previous|prior|earlier|above) (prompts?|instructions?|rules)",
+            r"forget (all |everything )?(you were told|your instructions|the instructions|previous instructions|prior instructions)",
+            r"(new|updated|revised|override) instructions?[ \t]*:",
+        ),
+    ),
+    (
+        "role_switch",
+        30,
+        (
+            r"you are now (a|an|the|my|in) ",
+            r"act as (a|an|the|my|if you were) ",
+            r"pretend (to be|you are|that you are|you have) ",
+            r"from now on,? you (are|will|must|should)",
+            r"developer mode",
+            r"do anything now",
+            r"dan mode",
+        ),
+    ),
+    (
+        "delimiter_smuggling",
+        30,
+        (
+            r"<\|(im_start|im_end|system|endoftext)\|>",
+            r"\[/?inst\]",
+            r"##+[ \t]*(system|assistant|instructions)",
+            r"(begin|end) (system|hidden|secret) (prompt|instructions)",
+            r"<(system|assistant)>",
+            r"(---+|===+|```)[ \t]*(system|assistant|user)[ \t]*[:\n]",
+        ),
+    ),
+    (
+        "exfiltration_coercion",
+        35,
+        (
+            r"(reveal|print|show|output|repeat|display|dump|leak|expose) (me )?(all )?(of )?(the |your )?(hidden |initial |original |secret |system |confidential |full )?(system prompt|prompt|instructions|rules|configuration|guidelines)",
+            r"(send|post|upload|exfiltrate|forward) [^\n]{0,40} (to|at) https?://",
+            r"what (is|are|were) your (system prompt|initial instructions|hidden instructions|original instructions)",
+        ),
+    ),
+    (
+        "encoded_payload",
+        15,
+        (
+            r"[a-z0-9+/]{40,}={0,2}",
+            r"(\\u[0-9a-f]{4}){4,}",
+            r"(%[0-9a-f]{2}){8,}",
+        ),
+    ),
+    ("structural_punctuation", 10, (r"[!?]{4,}",)),
+)
+
+#: The computed ``structural_uppercase`` family (detection spec 3.5.2 step 3):
+#: weight 10 when the NFC text has at least 40 ASCII letters and at least 60%
+#: of them are uppercase. Measured before case folding, since folding erases
+#: it.
+HEURISTIC_UPPERCASE_WEIGHT = 10
+HEURISTIC_UPPERCASE_MIN_LETTERS = 40
+HEURISTIC_UPPERCASE_MIN_PERCENT = 60
+
+
+def _uppercase_signal(text: str) -> bool:
+    """``structural_uppercase``: >= 40 ASCII letters, >= 60% uppercase."""
+    letters = 0
+    upper = 0
+    for char in text:
+        if "a" <= char <= "z":
+            letters += 1
+        elif "A" <= char <= "Z":
+            letters += 1
+            upper += 1
+    if letters < HEURISTIC_UPPERCASE_MIN_LETTERS:
+        return False
+    return upper * 100 >= letters * HEURISTIC_UPPERCASE_MIN_PERCENT
+
+
+@dataclass
+class _HeuristicFamily:
+    name: str
+    weight: int
+    patterns: list[re.Pattern[str]]
+
+
+class HeuristicInjectionDetector(Detector):
+    """The normative heuristic prompt-injection detector (detection spec 3.5).
+
+    Integer arithmetic over a fixed signal table, so every conformant engine
+    reproduces the score exactly: the input (already truncated to the policy's
+    ``max_scan_bytes``) is NFC-normalized, the uppercase signal is measured,
+    the text is ASCII-case-folded, and each family whose pattern matches adds
+    its weight once. The receipt carries ``score / 100``.
+    """
+
+    def __init__(self) -> None:
+        self._families = [
+            _HeuristicFamily(
+                name=name,
+                weight=weight,
+                patterns=[compile_profile_regex(pattern) for pattern in patterns],
+            )
+            for name, weight, patterns in HEURISTIC_FAMILIES
+        ]
+
+    @property
+    def name(self) -> str:
+        return HEURISTIC_DETECTOR_NAME
+
+    @property
+    def category(self) -> DetectionCategory:
+        return DetectionCategory.PROMPT_INJECTION
+
+    def integer_score(self, input_text: str) -> tuple[int, list[MatchedPattern]]:
+        """The spec's integer score in ``0..=100`` and the families that fired."""
+        normalized = unicodedata.normalize("NFC", input_text)
+        total = 0
+        matched: list[MatchedPattern] = []
+
+        if _uppercase_signal(normalized):
+            total += HEURISTIC_UPPERCASE_WEIGHT
+            matched.append(
+                MatchedPattern(
+                    name="structural_uppercase",
+                    weight=HEURISTIC_UPPERCASE_WEIGHT / 100.0,
+                    matched_text=None,
+                )
+            )
+
+        # ASCII case folding only: `str.lower()` would fold Unicode too, which
+        # the spec does not ask for and which no other SDK does.
+        folded = _ascii_lower(normalized)
+        for family in self._families:
+            for pattern in family.patterns:
+                found = pattern.search(folded)
+                if found is None:
+                    continue
+                total += family.weight
+                matched.append(
+                    MatchedPattern(
+                        name=family.name,
+                        weight=family.weight / 100.0,
+                        matched_text=found.group(0),
+                    )
+                )
+                break  # a family contributes its weight once
+
+        return min(total, 100), matched
+
+    def detect(self, input_text: str) -> DetectionResult:
+        score, matched_patterns = self.integer_score(input_text)
+        explanation: Optional[str] = None
+        if matched_patterns:
+            names = ", ".join(p.name for p in matched_patterns)
+            plural = "y" if len(matched_patterns) == 1 else "ies"
+            explanation = (
+                f"heuristic score {score}/100 from {len(matched_patterns)} "
+                f"signal famil{plural}: {names}"
+            )
+        return DetectionResult(
+            detector_name=self.name,
+            category=self.category,
+            score=score / 100.0,
+            matched_patterns=matched_patterns,
+            explanation=explanation,
+        )
+
+
+_ASCII_FOLD = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"
+)
+
+
+def _ascii_lower(text: str) -> str:
+    """Fold ``A-Z`` to lowercase and leave every other code point alone."""
+    return text.translate(_ASCII_FOLD)
+
+
+def heuristic_integer(score: float) -> int:
+    """The heuristic detector's integer score recovered from its normalized
+    ``score / 100`` form (exact: the normalized value is always ``n / 100``).
+    """
+    return max(0, round(score * 100.0))
 
 
 class RegexJailbreakDetector(Detector):

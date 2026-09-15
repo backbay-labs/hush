@@ -63,6 +63,7 @@ from hushspec.generated_contract import (
     POSTURE_KEYS,
     POSTURE_STATE_KEYS,
     POSTURE_TRANSITION_KEYS,
+    PROMPT_INJECTION_HEURISTICS_KEYS,
     PROMPT_INJECTION_KEYS,
     RATE_CONDITION_KEYS,
     REMOTE_DESKTOP_KEYS,
@@ -375,17 +376,25 @@ _ORIGINS_ROOT.children = {"profiles": _ArrayOf(_ORIGIN_PROFILE)}
 
 # -- detection extension (schemas/hushspec-detection.v0.schema.json) -------- #
 
+_PROMPT_INJECTION = _Obj(
+    PROMPT_INJECTION_KEYS,
+    defaults={
+        "enabled": True,
+        "warn_at_or_above": "suspicious",
+        "block_at_or_above": "high",
+        "max_scan_bytes": 200000,
+    },
+)
+_PROMPT_INJECTION.children = {
+    "heuristics": _Obj(
+        PROMPT_INJECTION_HEURISTICS_KEYS,
+        defaults={"enabled": True, "min_score": 0},
+    ),
+}
+
 _DETECTION_ROOT = _Obj(DETECTION_KEYS)
 _DETECTION_ROOT.children = {
-    "prompt_injection": _Obj(
-        PROMPT_INJECTION_KEYS,
-        defaults={
-            "enabled": True,
-            "warn_at_or_above": "suspicious",
-            "block_at_or_above": "high",
-            "max_scan_bytes": 200000,
-        },
-    ),
+    "prompt_injection": _PROMPT_INJECTION,
     "jailbreak": _Obj(
         JAILBREAK_KEYS,
         defaults={
