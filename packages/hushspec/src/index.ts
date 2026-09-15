@@ -51,6 +51,7 @@ export {
 } from './parse.js';
 export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
 export { merge } from './merge.js';
+export { canonicalJson, contentHash, CanonicalError, type JsonValue } from './canonical.js';
 export { resolve, resolveFromFile, createCompositeLoader, createBuiltinLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';

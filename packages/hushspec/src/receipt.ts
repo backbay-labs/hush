@@ -129,6 +129,15 @@ export function evaluateAudited(
  * against the embedded builtins first and, if that is impossible, rejected
  * rather than hashed. Guards resolve on load, so this is a backstop for
  * direct callers.
+ *
+ * NOTE: this is the legacy 0.1 digest -- a bare 64-hex SHA-256 over
+ * `JSON.stringify` of the resolved document, which differs per SDK because
+ * each serializes differently. It is *not* the canonical content hash.
+ * {@link canonicalJson}/{@link contentHash} in `canonical.ts` implement
+ * spec/hushspec-canonical.md and produce the same `sha256:<hex>` value in
+ * every SDK; receipts switch to it in P2-04 together with the receipt v0.2
+ * schema. Until then the two must not be compared (canonical spec section 5,
+ * "Migration").
  */
 export function computePolicyHash(spec: HushSpec): string {
   let resolved = spec;
