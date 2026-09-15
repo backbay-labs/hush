@@ -1,0 +1,86 @@
+hushspec_test: "0.1.0"
+description: "HushSpec regex profile: identical dialect semantics across the four SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        # ASCII-only \\d: Rust's and Python's Unicode \\d also match
+        # Arabic-Indic digits; the profile pins \\d to [0-9].
+        - name: ascii_digits
+          pattern: "key\\d{3}"
+          severity: critical
+        # End-of-text $: Python's bare $ also matches just before a trailing
+        # newline; the profile anchors at end of text only.
+        - name: end_anchor
+          pattern: "token$"
+          severity: critical
+    shell_commands:
+      forbidden_patterns:
+        # ASCII word boundary: Rust and Python treat U+00E9 as a word character
+        # (no boundary before "foo"); under the profile's ASCII \\w the
+        # boundary is there, so the pattern matches.
+        - "\\bfoo\\b"
+        # `.` excludes only \\n -- JavaScript's `.` also excludes \\r.
+        - "a.b"
+        # ASCII whitespace including \\v and excluding NBSP: JavaScript's
+        # \\s includes NBSP, Go's RE2 \\s omits \\v.
+        - "c\\sd"
+cases:
+  - description: "allow key followed by Arabic-Indic digits (ASCII \\d does not match)"
+    action:
+      type: file_write
+      target: "/src/config.js"
+      content: "key\u0661\u0662\u0663"
+    expect:
+      decision: allow
+  - description: "deny key followed by ASCII digits"
+    action:
+      type: file_write
+      target: "/src/config.js"
+      content: "key123"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.ascii_digits
+  - description: "allow token with a trailing newline ($ is end of text, not end of line)"
+    action:
+      type: file_write
+      target: "/src/auth.js"
+      content: "token\n"
+    expect:
+      decision: allow
+  - description: "deny token at end of text"
+    action:
+      type: file_write
+      target: "/src/auth.js"
+      content: "token"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.end_anchor
+  - description: "deny non-ASCII letter before foo (ASCII word boundary matches)"
+    action:
+      type: shell_command
+      target: "\u00e9foo"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[0]
+  - description: "deny carriage return between a and b (. excludes only newline)"
+    action:
+      type: shell_command
+      target: "a\rb"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[1]
+  - description: "allow non-breaking space between c and d (\\s is ASCII)"
+    action:
+      type: shell_command
+      target: "c\u00a0d"
+    expect:
+      decision: allow
+  - description: "deny vertical tab between c and d (\\s includes \\v)"
+    action:
+      type: shell_command
+      target: "c\u000bd"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[2]
