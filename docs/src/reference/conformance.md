@@ -39,7 +39,7 @@ the schemas, the vectors, and the manifest.
 A Level 0 implementation can:
 
 - Parse valid HushSpec YAML documents into a structured representation
-- Reject syntactically invalid YAML
+- Reject syntactically invalid YAML, and input violating the YAML profile of core spec 2.4 (aliases, merge keys, duplicate keys, multi-document streams, `yes`/`no` booleans)
 - Reject documents missing the required `hushspec` field
 
 This is the minimum bar for any tool that reads HushSpec documents.
@@ -53,9 +53,11 @@ A Level 1 implementation additionally:
 - Validates enum values (`severity`, `mode`, `default`, `merge_strategy`)
 - Enforces uniqueness constraints (e.g., secret pattern `name` fields)
 - Validates numeric constraints (non-negative integers, positive ratios)
-- Validates regex syntax in pattern fields
+- Validates regex syntax in pattern fields against the profile of core spec 3.14
+- Validates `when` conditions
 - Rejects every `invalid/` vector, with the error code its `.expect.yaml`
-  sidecar names if the implementation reports codes at all
+  sidecar names -- and any `message_contains` substring it names -- if the
+  implementation reports codes at all
 
 This level is required for linters, schema validators, and policy authoring tools.
 
@@ -75,14 +77,13 @@ Without this, "the document was rejected" is a weak assertion — a vector that
 tests the YAML profile passes just as well when the engine refuses it for an
 unrelated reason.
 
-**Known gap.** The Rust reference implementation emits these codes and the Rust
-testkit asserts them. The TypeScript, Python and Go validators do not emit
-registry codes yet, so their fixture runners require only that the vector is
-rejected. Aligning them is [RFC 09](https://github.com/backbay-labs/hush/blob/main/docs/plans/09-compliance-as-code-plan.md)
-package P6-03; until it lands, a Level 1 claim for those three SDKs covers the
-rejection but not the code. The spec is written to match: an implementation
-that reports no codes conforms, one that reports codes must report the
-registered one.
+All four reference SDK fixture runners now assert the code and the
+`message_contains` substring, not merely that the vector was rejected. The
+spec's rule is the weaker one, and stays that way for third-party engines: an
+implementation that reports no codes at all conforms at this level; one that
+reports codes from the registry MUST report the registered one. Where each
+SDK's codes come from is tabulated in the
+[SDK API Contract](sdk-api.md#error-codes).
 
 ## Level 2: Merger
 
@@ -98,13 +99,13 @@ This level is required for any tool that supports policy composition.
 
 A Level 3 implementation additionally:
 
-- Accepts an action (type + context) and a resolved HushSpec document
-- Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision
-- Implements decision precedence (`deny` > `warn` > `allow`)
-- Passes the published evaluator fixtures, which are themselves versioned and schema-validated
+- Accepts an action (type + inputs) and a resolved HushSpec document
+- Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision, under the semantics of core spec sections 3, 5 and 6 -- including the normalization and matching algorithms of section 3.14
+- Implements aggregation and precedence per core spec 6.1 (`deny` > `warn` > `allow`) and denies unknown action types per section 5
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v0.schema.json`
 
-This is the full engine level: all four HushSpec SDKs and Clawdstrike are
-Level 3 implementations.
+This is the full engine level. All four HushSpec SDKs pass it, and go on to
+Levels 4 and 5; Clawdstrike is a Level 3 implementation.
 
 ## Level 4: Auditor
 
@@ -114,9 +115,9 @@ there.
 
 A Level 4 implementation additionally:
 
-- Emits [decision receipts](receipt-spec.md) at format 0.2 that validate
+- Emits [decision receipts](../receipt-spec.md) at format 0.2 that validate
   against the published schema
-- Computes `policy.content_hash` as the [canonical](canonical-spec.md) hash of
+- Computes `policy.content_hash` as the [canonical](../canonical-spec.md) hash of
   the *resolved* document, and reproduces every `fixtures/core/hash/` vector
   byte for byte
 - **Records** `rule_trace` during evaluation rather than reconstructing it
@@ -138,7 +139,7 @@ the record has been altered since.
 
 A Level 5 implementation additionally:
 
-- Is a conforming [signature](signing-spec.md) verifier: every case in
+- Is a conforming [signature](../signing-spec.md) verifier: every case in
   `fixtures/signing/vectors.yaml` returns `valid` or the exact reason code
 - Verifies **on load**, so every hop of an `extends` chain is checked against
   the keyring or its digest pin, fails closed, and records the outcome in

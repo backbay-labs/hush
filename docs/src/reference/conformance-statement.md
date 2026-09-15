@@ -136,6 +136,7 @@ The reference implementation's own statement, for the shape of a filled-in one:
 | **Report** | produced by `hushspec-testkit --fixtures fixtures --report report.json` in CI |
 
 Its "Deviations" section is `None.`, and its "Scope" says the claim covers the
-library's public API and the `h2h` CLI, both of which run the same evaluator.
-The per-SDK picture for TypeScript, Python and Go — which do not yet reach
-Level 5 — is in the [SDK Conformance Matrix](sdk-conformance.md).
+library's public API and the `h2h` CLI, both of which run the same evaluator,
+with the `signing` Cargo feature enabled. TypeScript, Python and Go reach
+Level 5 too — Python with the `signing` extra installed. The vectors behind
+each claim are in the [SDK Conformance Matrix](sdk-conformance.md).
