@@ -16,7 +16,15 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Software Development :: Libraries",
 ]
-dependencies = ["pyyaml>=6.0"]
+dependencies = [
+    "pyyaml>=6.0",
+    # conditions.py resolves `time_window.timezone` through `zoneinfo`, which
+    # reads the *system* tz database. Windows has none, and slim/distroless
+    # container images routinely omit it, so a timezone-scoped rule would fail
+    # to resolve there. `tzdata` ships the IANA database as a wheel, which
+    # zoneinfo falls back to automatically.
+    "tzdata",
+]
 
 [project.urls]
 Homepage = "https://github.com/backbay-labs/hush"
