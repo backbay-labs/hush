@@ -519,6 +519,15 @@ scripts/           Code generation and CI tooling
 
 The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for programmatic validation are in [`schemas/`](./schemas/). Full documentation is in [`docs/`](./docs/src/introduction.md).
 
+| Document | Covers |
+|---|---|
+| [`hushspec-core.md`](./spec/hushspec-core.md) | Document format, the twelve rule blocks, evaluation, conformance levels |
+| [`hushspec-posture.md`](./spec/hushspec-posture.md), [`hushspec-origins.md`](./spec/hushspec-origins.md), [`hushspec-detection.md`](./spec/hushspec-detection.md) | Extension modules |
+| [`hushspec-canonical.md`](./spec/hushspec-canonical.md) | Canonical form and `content_hash` of a resolved policy (RFC 8785) |
+| [`hushspec-receipt.md`](./spec/hushspec-receipt.md) | Decision receipt format 0.2 |
+| [`hushspec-signing.md`](./spec/hushspec-signing.md) | Policy signature envelopes, keys, keyrings, verification |
+| [`versioning.md`](./spec/versioning.md) | Versioning and stability policy |
+
 ## Project
 
 - [`CHANGELOG.md`](./CHANGELOG.md) — release history, Keep a Changelog format.
