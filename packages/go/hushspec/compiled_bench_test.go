@@ -3,7 +3,6 @@ package hushspec
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -28,11 +27,10 @@ func benchActions() []*EvaluationAction {
 
 func benchSpec(b *testing.B) *HushSpec {
 	b.Helper()
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		b.Fatal("failed to resolve test file path")
+	root, err := repoRoot()
+	if err != nil {
+		b.Fatal(err)
 	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
 	source, err := os.ReadFile(filepath.Join(root, "rulesets", "default.yaml"))
 	if err != nil {
 		b.Fatalf("read default ruleset: %v", err)

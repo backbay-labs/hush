@@ -149,7 +149,7 @@ func TestGuardEvaluateDoesNotConsultWarnHandler(t *testing.T) {
 	if called {
 		t.Fatal("Evaluate must not gate through the warn handler")
 	}
-	// Implied enforcement for a warn under enforce mode is a block (D16).
+	// Implied enforcement for a warn under enforce mode is a block (core spec 6).
 	if decision.Enforcement.Outcome != EnforcementOutcomeBlocked {
 		t.Fatalf("expected implied blocked, got %q", decision.Enforcement.Outcome)
 	}

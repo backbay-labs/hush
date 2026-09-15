@@ -12,10 +12,10 @@ import (
 
 // HushSpec regex profile (CompileProfileRegex) unit tests.
 //
-// Mirrors crates/hushspec/src/regex_profile.rs,
+// The cases below are the shared profile case list; keep them in sync with
+// crates/hushspec/src/regex_profile.rs,
 // packages/hushspec/tests/regex-profile.test.ts and
-// packages/python/tests/test_regex_profile.py: the same cases must produce the
-// same answers in all four SDKs.
+// packages/python/tests/test_regex_profile.py, which must answer identically.
 
 func profileMatches(t *testing.T, pattern, haystack string) bool {
 	t.Helper()
@@ -188,11 +188,9 @@ func TestProfileRejectsRE2UnsafePatterns(t *testing.T) {
 }
 
 // TestRegexDialectFixtureEvaluates runs fixtures/core/evaluation/
-// regex-dialect.test.yaml through Evaluate. The shared Go fixture runner in
-// fixtures_test.go currently only parses and validates each evaluator fixture
-// (wiring it to Evaluate is work package P1-12), so this test asserts the Go
-// engine's decisions on the regex-profile fixture directly, matching what the
-// Rust testkit and the TypeScript and Python fixture runners assert.
+// regex-dialect.test.yaml through Evaluate. The shared fixture runner in
+// fixtures_test.go only parses and validates each evaluator fixture, so this
+// test asserts the engine's decisions on the regex-profile fixture directly.
 func TestRegexDialectFixtureEvaluates(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {

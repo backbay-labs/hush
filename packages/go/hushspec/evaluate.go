@@ -11,27 +11,34 @@
 //
 // Unknown action types deny (`__unknown_action_type__`). Hosts and paths are
 // normalized as specified in Section 3.14 before any pattern is consulted.
+
 package hushspec
 
 import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
 )
 
+// Decision is what the evaluator concluded about one action (core spec 6).
 type Decision string
 
 const (
+	// DecisionAllow permits the action.
 	DecisionAllow Decision = "allow"
-	DecisionWarn  Decision = "warn"
-	DecisionDeny  Decision = "deny"
+	// DecisionWarn permits the action pending confirmation; with no
+	// confirmation channel it is a deny (core spec 6).
+	DecisionWarn Decision = "warn"
+	// DecisionDeny refuses the action.
+	DecisionDeny Decision = "deny"
 )
 
 // UnknownActionTypeRule is the matched_rule reported when the action type is
-// unknown to the specification (D1, core spec 5).
+// unknown to the specification (core spec 5).
 const UnknownActionTypeRule = "__unknown_action_type__"
 
 // PanicRule is the matched_rule reported when the emergency panic protocol is
@@ -50,9 +57,7 @@ type EvaluationAction struct {
 	// spec 3.4 scans `egress` and `tool_call` "only when `content` is
 	// present", so an explicitly empty payload is still scanned (and a pattern
 	// that matches the empty string still fires) while an absent one leaves
-	// the block unevaluated. The other three SDKs model this with
-	// Option<String> / `str | None` / `content?: string`; a plain string here
-	// conflated the two and made Go the odd one out.
+	// the block unevaluated. A plain string would conflate the two.
 	Content *string `json:"content,omitempty" yaml:"content,omitempty"`
 	// URL is the navigation destination of a browser_action (core spec 3.11).
 	// A nil URL skips the destination-host check entirely; a present-but-empty
@@ -87,6 +92,9 @@ func (a *EvaluationAction) ContentOrEmpty() string {
 	return *a.Content
 }
 
+// OriginContext describes where an action came from, for origin profile
+// selection (origins spec 3). Every field is optional; a profile's `match`
+// constrains the ones it names.
 type OriginContext struct {
 	Provider             string   `json:"provider,omitempty" yaml:"provider,omitempty"`
 	TenantID             string   `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"`
@@ -99,15 +107,19 @@ type OriginContext struct {
 	ActorRole            string   `json:"actor_role,omitempty" yaml:"actor_role,omitempty"`
 }
 
+// PostureContext is the posture state an action is evaluated under, and the
+// signal that may move it (posture spec 5).
 type PostureContext struct {
 	// Current is a pointer so an explicitly-supplied empty string ("") is
-	// distinguishable from an absent field, mirroring Rust's Option<String>.
-	// An empty/unknown current state is an unknown posture state (fail-closed
-	// deny), while an absent field falls back to the posture's initial state.
+	// distinguishable from an absent field: an empty or unknown current state
+	// is an unknown posture state (a fail-closed deny), while an absent field
+	// falls back to the posture's initial state.
 	Current *string `json:"current,omitempty" yaml:"current,omitempty"`
 	Signal  string  `json:"signal,omitempty" yaml:"signal,omitempty"`
 }
 
+// EvaluationResult is the evaluator's answer for one action: the aggregate
+// decision and the rule that produced it.
 type EvaluationResult struct {
 	Decision      Decision       `json:"decision" yaml:"decision"`
 	MatchedRule   string         `json:"matched_rule,omitempty" yaml:"matched_rule,omitempty"`
@@ -116,6 +128,8 @@ type EvaluationResult struct {
 	Posture       *PostureResult `json:"posture,omitempty" yaml:"posture,omitempty"`
 }
 
+// PostureResult is the posture state in force for an evaluation and the state
+// the action's signal moves it to.
 type PostureResult struct {
 	Current string `json:"current" yaml:"current"`
 	Next    string `json:"next" yaml:"next"`
@@ -579,7 +593,7 @@ func severityRank(severity Severity) int {
 }
 
 // evaluate scans content and maps the highest matched severity to a decision
-// (D8): critical and error deny, warn warns. A pattern that would not compile
+// (core spec 3.4): critical and error deny, warn warns. A pattern that would not compile
 // under the HushSpec regex profile denies the action rather than being skipped
 // (core spec 3.14.3) -- the rejection was recorded at compile time.
 func (c *compiledSecretPatterns) evaluate(skipPath *string, content string) blockDecision {
@@ -633,7 +647,7 @@ func (c *compiledPatchIntegrity) evaluate(content string) blockDecision {
 		return denyDecision("rules.patch_integrity.max_deletions", "patch deletions exceeded max_deletions")
 	}
 	if rule.RequireBalance {
-		// D10 (core 3.5 item 4): exactly one side at zero is an infinite
+		// Core spec 3.5 item 4: exactly one side at zero is an infinite
 		// imbalance ratio and denies regardless of the configured limit.
 		if (stats.additions == 0) != (stats.deletions == 0) {
 			return denyDecision(
@@ -671,7 +685,7 @@ func (c *compiledShellCommands) evaluate(command string) blockDecision {
 }
 
 // evaluateToolAccess compares tool names as exact, case-sensitive strings after
-// NFC normalization (D3, core spec 3.7); glob and regex metacharacters are
+// NFC normalization (core spec 3.7); glob and regex metacharacters are
 // literal. The policy's lists were NFC-folded at compile time, so only the
 // action's tool name is folded here.
 func evaluateToolAccess(
@@ -706,18 +720,18 @@ func evaluateToolAccess(
 	}
 
 	// 2. block: union of both lists.
-	if base != nil && containsNormalizedName(base.block, tool) {
+	if base != nil && slices.Contains(base.block, tool) {
 		return denyDecision("rules.tool_access.block", "tool is explicitly blocked")
 	}
-	if overlay != nil && containsNormalizedName(overlay.block, tool) {
+	if overlay != nil && slices.Contains(overlay.block, tool) {
 		return denyDecision(overlayPrefix+".block", "tool is explicitly blocked")
 	}
 
 	// 3. require_confirmation: union of both lists.
-	if base != nil && containsNormalizedName(base.requireConfirmation, tool) {
+	if base != nil && slices.Contains(base.requireConfirmation, tool) {
 		return warnDecision("rules.tool_access.require_confirmation", "tool requires confirmation")
 	}
-	if overlay != nil && containsNormalizedName(overlay.requireConfirmation, tool) {
+	if overlay != nil && slices.Contains(overlay.requireConfirmation, tool) {
 		return warnDecision(overlayPrefix+".require_confirmation", "tool requires confirmation")
 	}
 
@@ -725,10 +739,10 @@ func evaluateToolAccess(
 	baseAllow := base != nil && len(base.allow) > 0
 	overlayAllow := overlay != nil && len(overlay.allow) > 0
 	if baseAllow || overlayAllow {
-		if baseAllow && !containsNormalizedName(base.allow, tool) {
+		if baseAllow && !slices.Contains(base.allow, tool) {
 			return denyDecision("rules.tool_access.allow", "tool is not in the allowlist")
 		}
-		if overlayAllow && !containsNormalizedName(overlay.allow, tool) {
+		if overlayAllow && !slices.Contains(overlay.allow, tool) {
 			return denyDecision(overlayPrefix+".allow", "tool is not in the allowlist")
 		}
 		matchedRule := "rules.tool_access.allow"
@@ -852,7 +866,7 @@ func (c *compiledComputerUse) evaluate(target string) blockDecision {
 	if c.mode == ComputerUseModeObserve {
 		return allowDecision("rules.computer_use.mode", "observe mode does not block unlisted actions")
 	}
-	// guardrail and fail_closed have identical reference semantics (D9).
+	// guardrail and fail_closed have identical semantics (core spec 3.8).
 	return denyDecision("rules.computer_use.mode", "unlisted computer-use action is denied")
 }
 
@@ -921,7 +935,7 @@ type builtinCredentialPattern struct {
 	re *regexp.Regexp
 }
 
-// BuiltinCredentialPatterns are the built-in credential detectors. Documents
+// builtinCredentialPatterns are the built-in credential detectors. Documents
 // needing portable detection list their own patterns in
 // extra_credential_patterns. The set is static, so it is compiled once at
 // package initialization rather than per browser action.
@@ -1095,7 +1109,7 @@ func containsWord(text, word string) bool {
 // ---------------------------------------------------------------------------
 
 func originDefaultBehavior(origins *OriginsExtension) OriginDefaultBehavior {
-	// The reference default is deny (D12, origins 2.1).
+	// The specified default is deny (origins spec 2.1).
 	if origins.DefaultBehavior == nil {
 		return OriginDefaultBehaviorDeny
 	}
@@ -1144,8 +1158,8 @@ func resolvePosture(
 }
 
 func nextPostureState(posture *PostureExtension, current string, signal string) string {
-	// D18 (posture spec 5.3): a transition whose `from` names the current
-	// state outranks one whose `from` is "*"; among equals, document order.
+	// Posture spec 5.3: a transition whose `from` names the current state
+	// outranks one whose `from` is "*"; among equals, document order.
 	match := func(wildcard bool) (string, bool) {
 		for _, transition := range posture.Transitions {
 			fromMatches := transition.From == current
@@ -1183,7 +1197,7 @@ func postureCapabilities(extension *PostureExtension, posture *PostureResult) gr
 
 // matchOrigin returns the number of `match` fields satisfied by origin, or
 // ok=false when any present field is not satisfied. `tags` counts as one field
-// and there is no per-field weighting (D12).
+// and there is no per-field weighting (origins spec 3).
 func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 	count := 0
 	checkString := func(expected, actual string) bool {
@@ -1226,12 +1240,12 @@ func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 		}
 		count++
 	}
-	// NOTE: a match rule with all fields absent legitimately matches every
-	// origin with count 0 (the explicit `match: {}` default profile), so count
-	// 0 must NOT be read as "no match". A present-but-empty match field such as
-	// `provider: ""` -- a real, unsatisfiable constraint in the reference SDKs
-	// -- is rejected at parse (validateRawDocument) instead, because the
-	// generated Go model collapses "" and an absent field.
+	// A match rule with all fields absent legitimately matches every origin
+	// with count 0 (the explicit `match: {}` default profile), so count 0 must
+	// NOT be read as "no match". A present-but-empty match field such as
+	// `provider: ""` is a real, unsatisfiable constraint, which the generated
+	// Go model cannot tell from an absent field; validateRawDocument rejects it
+	// at parse instead.
 	return count, true
 }
 
@@ -1279,8 +1293,8 @@ func decisionRank(decision Decision) int {
 // Path globs (core spec 3.14.1)
 // ---------------------------------------------------------------------------
 
-// NormalizePath normalizes a filesystem path for matching (D6, core spec
-// 3.14.1): NFC, `\` to `/`, collapsed separators, lexical `.`/`..` resolution,
+// NormalizePath normalizes a filesystem path for matching (core spec 3.14.1):
+// NFC, `\` to `/`, collapsed separators, lexical `.`/`..` resolution,
 // no trailing `/`. It is deliberately lexical -- it never touches the
 // filesystem and never applies OS-specific rules.
 func NormalizePath(target string) string {
@@ -1354,19 +1368,12 @@ func PathGlobMatches(pattern, path string) bool {
 	return re.MatchString(path)
 }
 
-// globMatches matches a raw path target against a path glob, normalizing the
-// target first. Kept for callers outside the evaluator; prefer
-// [PathGlobMatches] with an already-normalized path.
-func globMatches(pattern, target string) bool {
-	return PathGlobMatches(pattern, NormalizePath(target))
-}
-
 // ---------------------------------------------------------------------------
 // Host patterns (core spec 3.14.2)
 // ---------------------------------------------------------------------------
 
 // NormalizeHost reduces an egress target (host, `host:port`, or URL) to a
-// normalized host (D5, core spec 3.14.2): lowercased, scheme, userinfo, path,
+// normalized host (core spec 3.14.2): lowercased, scheme, userinfo, path,
 // query, port, and trailing dot removed, non-ASCII labels in IDNA A-label
 // (punycode) form. It returns nil when the target cannot be reduced to a
 // syntactically valid host, in which case it matches nothing.
@@ -1388,11 +1395,11 @@ func NormalizeHost(target string) *string {
 
 	if strings.HasPrefix(authority, "[") {
 		rest := authority[1:]
-		close := strings.Index(rest, "]")
-		if close < 0 {
+		closing := strings.Index(rest, "]")
+		if closing < 0 {
 			return nil
 		}
-		inner := rest[:close]
+		inner := rest[:closing]
 		if inner == "" {
 			return nil
 		}
@@ -1448,8 +1455,8 @@ func isASCIIHexByte(b byte) bool {
 	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
 }
 
-// asciiLower lowercases only the ASCII letters of s, mirroring Rust's
-// to_ascii_lowercase: non-ASCII code points are left untouched.
+// asciiLower lowercases only the ASCII letters of s; non-ASCII code points are
+// left untouched, where strings.ToLower would fold them too.
 func asciiLower(s string) string {
 	var out []byte
 	for index := 0; index < len(s); index++ {
@@ -1726,8 +1733,8 @@ func computePatchStats(content string) patchStats {
 	return stats
 }
 
-// splitLines mirrors Rust's str::lines: it splits on \n, strips a trailing \r,
-// and yields no final empty line for content ending in a newline.
+// splitLines splits content on \n, strips a trailing \r from each line, and
+// yields no final empty line for content ending in a newline.
 func splitLines(content string) []string {
 	if content == "" {
 		return nil
@@ -1738,19 +1745,4 @@ func splitLines(content string) []string {
 		lines[index] = strings.TrimSuffix(line, "\r")
 	}
 	return lines
-}
-
-func imbalanceRatio(additions, deletions int) float64 {
-	if additions == 0 && deletions == 0 {
-		return 0.0
-	}
-	if additions == 0 {
-		return float64(deletions)
-	}
-	if deletions == 0 {
-		return float64(additions)
-	}
-	larger := math.Max(float64(additions), float64(deletions))
-	smaller := math.Min(float64(additions), float64(deletions))
-	return larger / smaller
 }

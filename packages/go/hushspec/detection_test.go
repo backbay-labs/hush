@@ -349,10 +349,6 @@ func withDetection(t *testing.T, spec *HushSpec, detection *DetectionExtension) 
 	return &clone
 }
 
-func boolPtr(b bool) *bool                      { return &b }
-func intPtr(i int) *int                         { return &i }
-func levelPtr(l DetectionLevel) *DetectionLevel { return &l }
-
 // evaluationResultsEqual compares two EvaluationResult values field-by-field.
 // It does not use == because Posture is a pointer: two independent Evaluate()
 // calls that agree on posture content still allocate distinct *PostureResult
@@ -830,7 +826,7 @@ func TestEvaluateWithDetection_RecordsResultForEachConfiguredDetectorEvenWithout
 }
 
 // allowAllPolicy permits every tool via `default: allow`. It deliberately
-// leaves `allow` empty: under D3/D4 tool names match exactly and a non-empty
+// leaves `allow` empty: under core spec 3.7 tool names match exactly and a non-empty
 // allow list puts the block in allowlist mode, where an unlisted tool denies
 // and `default` is never consulted.
 const allowAllPolicy = `

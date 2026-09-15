@@ -57,9 +57,8 @@ var ErrorCodes = []string{
 }
 
 // validationKindCodes maps this SDK's own symbolic error kinds onto the
-// registered codes, matching the Rust reference's mapping condition for
-// condition. Anything not listed is a constraint violation, which is what
-// E004 covers.
+// registered codes. Anything not listed is a constraint violation, which is
+// what E004 covers.
 var validationKindCodes = map[string]string{
 	// A document with no `hushspec` never reaches Validate -- Parse refuses it
 	// as a missing required field, which is a parse refusal in every SDK.
@@ -68,10 +67,10 @@ var validationKindCodes = map[string]string{
 	"DUPLICATE_PATTERN_NAME": ErrorCodeDuplicatePatternName,
 	"INVALID_REGEX":          ErrorCodeInvalidRegex,
 	"INVALID_DATE":           ErrorCodeInvalidDate,
-	// A value outside a serde-enum's closed set is an unknown variant, which
-	// the reference implementation refuses at parse time. [Parse] refuses
-	// these at parse time too (see raw_validate.go); the checks below catch a
-	// spec a caller built in memory, and must name the same code.
+	// A value outside an enum's closed set is an unknown variant, which the
+	// schema refuses at parse time. [Parse] refuses these at parse time too
+	// (see raw_validate.go); the checks below catch a document a caller built
+	// in memory, and must name the same code.
 	"INVALID_MERGE_STRATEGY":     ErrorCodeParse,
 	"INVALID_DEFAULT_ACTION":     ErrorCodeParse,
 	"INVALID_SEVERITY":           ErrorCodeParse,
@@ -90,6 +89,8 @@ func RegistryErrorCode(kind string) string {
 	return ErrorCodeConstraint
 }
 
+// ValidationResult is everything [Validate] found: refusals that make the
+// document invalid, and advisory warnings that do not.
 type ValidationResult struct {
 	Errors   []ValidationError
 	Warnings []string
@@ -140,6 +141,8 @@ func ErrorCodeOf(err error) (string, bool) {
 	return "", false
 }
 
+// IsValid reports whether the document passed validation. Warnings do not
+// make a document invalid.
 func (r *ValidationResult) IsValid() bool {
 	return len(r.Errors) == 0
 }
@@ -330,10 +333,8 @@ func changelogDisorder(entries []ChangelogEntry) int {
 // fails every `<= 0` / `< lo || > hi` bounds check (comparisons against NaN
 // are always false), so an unchecked NaN silently passes validation and
 // then makes downstream comparisons like `ratio > max_imbalance_ratio` fail
-// open. It also can't reach encoding/json, which errors on NaN/Infinity and
-// would otherwise silently blank out a receipt's content_hash. Must stay in
-// lockstep with the Rust `!x.is_finite()`, TypeScript `!Number.isFinite(x)`,
-// and Python `not math.isfinite(x)` checks.
+// open. It also cannot reach encoding/json, which errors on NaN/Infinity and
+// would otherwise silently blank out a receipt's content_hash.
 func isNonFiniteFloat(x float64) bool {
 	return math.IsNaN(x) || math.IsInf(x, 0)
 }
@@ -428,8 +429,8 @@ func validateRules(rules *Rules, result *ValidationResult) {
 		result.addError("INVALID_MAX_SCAN_BYTES", "rules.code_execution.max_scan_bytes must be >= 1")
 	}
 
-	// D15 (core 3.13): every rule block's `when` condition is validated at
-	// parse time; a bad HH:MM, timezone, day, or excessive nesting is an error.
+	// Core spec 3.13: every rule block's `when` condition is validated at parse
+	// time; a bad HH:MM, timezone, day, or excessive nesting is an error.
 	for _, message := range ValidateConditions(rules) {
 		// Every condition diagnostic is `<path>: <what is wrong>`, so the path
 		// the refusal reports is the part before the first colon.
@@ -545,8 +546,9 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 		}
 		seen[profile.ID] = true
 
-		// Profile rule blocks are tri-state overlays (D12): an absent `default`
-		// inherits the base document's, so only a present value is checked.
+		// Profile rule blocks are tri-state overlays (origins spec 4): an absent
+		// `default` inherits the base document's, so only a present value is
+		// checked.
 		if profile.ToolAccess != nil && profile.ToolAccess.Default != nil && !containsTyped(*profile.ToolAccess.Default, DefaultActions) {
 			result.addError("INVALID_DEFAULT_ACTION",
 				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, *profile.ToolAccess.Default))
@@ -727,7 +729,8 @@ const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+,
 //     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
 //   - empty character classes [] and [^] (JS accepts them; the others reject).
 //
-// Must stay byte-identical to the Rust, TypeScript, and Python implementations.
+// The rules are part of the HushSpec regex profile, so every engine must apply
+// them identically.
 func disallowedRegexFeature(pattern string) (string, bool) {
 	chars := []rune(pattern)
 	n := len(chars)
@@ -809,8 +812,9 @@ const (
 // ( ... ) group nesting -- ignoring escaped parens and character-class contents
 // -- and returns true when a group whose body contains an unbounded quantifier
 // (*, +, {n,}) is itself immediately followed by an unbounded quantifier.
-// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. Must stay identical
-// to the Rust, TypeScript, and Python implementations.
+// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. The heuristic is
+// part of the HushSpec regex profile, so every engine must apply it
+// identically.
 func hasNestedQuantifier(pattern string) bool {
 	chars := []rune(pattern)
 	n := len(chars)
@@ -980,9 +984,11 @@ func isKnownBudgetKey(value string) bool {
 	}
 }
 
+// durationPattern is the `after` grammar of a posture timeout transition.
+var durationPattern = regexp.MustCompile(`^[0-9]+[smhd]$`)
+
 func isValidDuration(value string) bool {
-	matched, _ := regexp.MatchString(`^\d+[smhd]$`, value)
-	return matched
+	return durationPattern.MatchString(value)
 }
 
 func containsTyped[T comparable](value T, allowed map[T]struct{}) bool {

@@ -113,3 +113,20 @@ func TestBuiltinNamesAreAllLoadable(t *testing.T) {
 		t.Errorf("expected the eight library policies, got %d", library)
 	}
 }
+
+// TestBuiltinsPassValidation covers the embedded copies, the library included.
+// TestBuiltInRulesetsPassValidation checks the six presets as they sit on disk;
+// what an `extends: builtin:...` actually resolves to is what is embedded here.
+func TestBuiltinsPassValidation(t *testing.T) {
+	for _, name := range BuiltinNames {
+		t.Run(name, func(t *testing.T) {
+			spec, ok := LoadBuiltin(name)
+			if !ok {
+				t.Fatalf("builtin %q does not load", name)
+			}
+			if result := Validate(spec); !result.IsValid() {
+				t.Errorf("builtin %q does not validate: %+v", name, result.Errors)
+			}
+		})
+	}
+}

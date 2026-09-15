@@ -160,8 +160,8 @@ rules:
 	}
 }
 
-// TestParseKeepsOriginProfileOverlaysTriState locks in D12: an origin profile
-// rule block is a tri-state overlay, not a rule block. It carries no `enabled`
+// TestParseKeepsOriginProfileOverlaysTriState locks in origins spec 4: an
+// origin profile rule block is a tri-state overlay, not a rule block. It carries no `enabled`
 // flag, and an omitted `default` stays unset so the base document's default is
 // inherited rather than a `block` being materialized.
 func TestParseKeepsOriginProfileOverlaysTriState(t *testing.T) {
@@ -497,11 +497,9 @@ extensions:
 	}
 }
 
-// TestMergeMetadataChildOverParent covers parity fix S1: a resolved policy's
-// top-level metadata must be the child's when the child sets any, and fall
-// back to the base's when the child has none (matching Rust's
-// `child.metadata.clone().or_else(|| base.metadata.clone())`). Go previously
-// kept the base's metadata unconditionally, ignoring the child's.
+// TestMergeMetadataChildOverParent locks in core spec 4.2: a resolved policy's
+// top-level metadata is the child's when the child sets any, and falls back to
+// the base's when the child has none.
 func TestMergeMetadataChildOverParent(t *testing.T) {
 	base := mustParse(t, `
 hushspec: "0.1.0"

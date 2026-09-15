@@ -2,7 +2,7 @@ package hushspec
 
 import "fmt"
 
-// Receipt signing (RFC 09 P2-06, receipt spec 6).
+// Receipt signing (receipt spec 6).
 //
 // A receipt on its own is not tamper-evident. Signing it from the outside --
 // over its receipt hash, never over a member added to the receipt -- keeps the

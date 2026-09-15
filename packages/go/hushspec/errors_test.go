@@ -61,8 +61,8 @@ func TestParseRefusalsCarryARegisteredCode(t *testing.T) {
 	}
 }
 
-// TestValidationErrorsCarryRegisteredCodes maps each condition onto the code
-// the Rust reference reports for it.
+// TestValidationErrorsCarryRegisteredCodes maps each condition onto its
+// registered error code (spec/registries/error-codes.yaml).
 func TestValidationErrorsCarryRegisteredCodes(t *testing.T) {
 	cases := []struct {
 		name     string

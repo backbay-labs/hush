@@ -189,8 +189,8 @@ func (r *policyReloader) reloadLocked() (bool, error) {
 	}
 
 	if guard := r.options.Guard; guard != nil {
-		if err := guard.SwapPolicy(resolution); err != nil {
-			err := error(&PolicyLoadError{Source: r.provider.Source(), Err: err})
+		if swapErr := guard.SwapPolicy(resolution); swapErr != nil {
+			err := &PolicyLoadError{Source: r.provider.Source(), Err: swapErr}
 			r.report(err)
 			return false, err
 		}
@@ -229,7 +229,17 @@ func (r *policyReloader) start(ctx context.Context, interval time.Duration, tick
 	r.cancel, r.done = cancel, done
 
 	go func() {
-		defer close(done)
+		// Clear the handles on the way out so a reloader whose context was
+		// cancelled from outside can be started again; a start that has already
+		// replaced them is left alone.
+		defer func() {
+			close(done)
+			r.startMu.Lock()
+			if r.done == done {
+				r.cancel, r.done = nil, nil
+			}
+			r.startMu.Unlock()
+		}()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -244,7 +254,8 @@ func (r *policyReloader) start(ctx context.Context, interval time.Duration, tick
 	return nil
 }
 
-// stop ends the ticker goroutine and waits for it.
+// stop ends the ticker goroutine and waits for it. It is safe to call when the
+// reloader was never started, or has already stopped on its own context.
 func (r *policyReloader) stop() {
 	r.startMu.Lock()
 	cancel, done := r.cancel, r.done

@@ -10,20 +10,31 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// DetectionCategory is the threat family a detector reports on, and the
+// `category` a receipt's detection_trace records (receipt spec 4.6).
 type DetectionCategory string
 
 const (
+	// DetectionCategoryPromptInjection covers attempts to override the agent's
+	// instructions.
 	DetectionCategoryPromptInjection DetectionCategory = "prompt_injection"
-	DetectionCategoryJailbreak       DetectionCategory = "jailbreak"
-	DetectionCategoryDataExfil       DetectionCategory = "data_exfiltration"
+	// DetectionCategoryJailbreak covers attempts to escape the agent's
+	// guardrails.
+	DetectionCategoryJailbreak DetectionCategory = "jailbreak"
+	// DetectionCategoryDataExfil covers sensitive data leaving in content.
+	DetectionCategoryDataExfil DetectionCategory = "data_exfiltration"
 )
 
+// MatchedPattern is one signal a detector fired on: the pattern's name, the
+// weight it contributed, and the text that matched.
 type MatchedPattern struct {
 	Name        string  `json:"name"`
 	Weight      float64 `json:"weight"`
 	MatchedText string  `json:"matched_text,omitempty"`
 }
 
+// DetectionResult is one detector's finding for one input: a normalized score
+// in [0, 1] and the signals behind it.
 type DetectionResult struct {
 	DetectorName    string            `json:"detector_name"`
 	Category        DetectionCategory `json:"category"`
@@ -44,10 +55,14 @@ type DetectorRegistry struct {
 	detectors []Detector
 }
 
+// NewDetectorRegistry returns an empty registry. Use [WithDefaultDetectors]
+// for one pre-loaded with the built-in detectors.
 func NewDetectorRegistry() *DetectorRegistry {
 	return &DetectorRegistry{}
 }
 
+// Register appends a detector, which [DetectorRegistry.DetectAll] and
+// [DetectorRegistry.DetectorsFor] then report in registration order.
 func (r *DetectorRegistry) Register(detector Detector) {
 	r.detectors = append(r.detectors, detector)
 }
@@ -65,8 +80,7 @@ func WithDefaultDetectors() *DetectorRegistry {
 	return r
 }
 
-// NewDefaultDetectorRegistry is [WithDefaultDetectors] under the name the
-// other SDKs use for it.
+// NewDefaultDetectorRegistry is an alias for [WithDefaultDetectors].
 func NewDefaultDetectorRegistry() *DetectorRegistry { return WithDefaultDetectors() }
 
 // DetectorsFor returns every registered detector of category, in registration
@@ -94,12 +108,49 @@ func (r *DetectorRegistry) DetectorFor(category DetectionCategory) Detector {
 	return nil
 }
 
+// DetectAll runs every registered detector against input, in registration
+// order. It applies no thresholds: the caller decides what a score means.
 func (r *DetectorRegistry) DetectAll(input string) []DetectionResult {
 	results := make([]DetectionResult, 0, len(r.detectors))
 	for _, d := range r.detectors {
 		results = append(results, d.Detect(input))
 	}
 	return results
+}
+
+// scorePatterns is the shared body of the three fixed-pattern detectors: every
+// pattern that matches contributes its weight once, the total is clamped to 1,
+// and the explanation names the patterns that fired. label is the word the
+// explanation uses for this detector's pattern set.
+func scorePatterns(patterns []detectionPattern, input, label string) (float64, []MatchedPattern, string) {
+	var matched []MatchedPattern
+	total := 0.0
+	for index := range patterns {
+		pattern := &patterns[index]
+		loc := pattern.regex.FindStringIndex(input)
+		if loc == nil {
+			continue
+		}
+		total += pattern.weight
+		matched = append(matched, MatchedPattern{
+			Name:        pattern.name,
+			Weight:      pattern.weight,
+			MatchedText: input[loc[0]:loc[1]],
+		})
+	}
+	if total > 1.0 {
+		total = 1.0
+	}
+	if len(matched) == 0 {
+		return total, nil, ""
+	}
+	names := make([]string, len(matched))
+	for index, pattern := range matched {
+		names[index] = pattern.Name
+	}
+	explanation := fmt.Sprintf(
+		"matched %d %s pattern(s): %s", len(matched), label, strings.Join(names, ", "))
+	return total, matched, explanation
 }
 
 type detectionPattern struct {
@@ -115,17 +166,18 @@ type RegexInjectionDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexInjectionDetector returns the built-in prompt-injection detector
+// with its fixed pattern set compiled.
 func NewRegexInjectionDetector() *RegexInjectionDetector {
 	return &RegexInjectionDetector{
 		patterns: []detectionPattern{
 			{
-				// Character classes below are explicit ASCII ([ \t\n\r\f],
-				// [0-9], [A-Za-z0-9_]) instead of \s/\d/\w: those shorthands
-				// are Unicode-aware in Rust `regex` & Python `re` but
-				// ASCII-only in Go RE2 & JS RegExp, so a pattern using \s+
-				// let Rust/Python match NBSP-obfuscated injection content
-				// that Go/JS missed. Must stay byte-for-byte identical to
-				// the Rust/TS/Python patterns.
+				// Character classes are written out as explicit ASCII
+				// ([ \t\n\r\f], [0-9], [A-Za-z0-9_]) rather than \s/\d/\w,
+				// whose meaning differs between regex engines: a Unicode-aware
+				// \s also matches NBSP and friends, so the same obfuscated
+				// payload would score differently depending on the engine.
+				// These patterns are normative and must not drift.
 				name:     "ignore_instructions",
 				regex:    regexp.MustCompile(`(?i)ignore[ \t\n\r\f]+(all[ \t\n\r\f]+)?(previous|prior|above)[ \t\n\r\f]+(instructions|rules|prompts)`),
 				weight:   0.4,
@@ -171,50 +223,23 @@ func NewRegexInjectionDetector() *RegexInjectionDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexInjectionDetector) Name() string { return "regex_injection" }
 
+// Category is [DetectionCategoryPromptInjection].
 func (d *RegexInjectionDetector) Category() DetectionCategory {
 	return DetectionCategoryPromptInjection
 }
 
+// Detect scores input against the fixed injection pattern set.
 func (d *RegexInjectionDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d injection pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "injection")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }
@@ -241,8 +266,8 @@ type HeuristicFamily struct {
 // NFC-normalized, ASCII-case-folded input, so they are lowercase. A family
 // contributes its weight at most once; the sum is clamped to 100.
 //
-// This table is normative: it must stay byte-for-byte identical to
-// HEURISTIC_FAMILIES in crates/hushspec/src/detection.rs and to the spec table.
+// This table is normative: it must stay byte-for-byte identical to the table
+// in detection spec 3.5.3.
 var HeuristicFamilies = []HeuristicFamily{
 	{
 		Name:   "instruction_override",
@@ -350,8 +375,11 @@ func NewHeuristicInjectionDetector() *HeuristicInjectionDetector {
 	return &HeuristicInjectionDetector{families: families}
 }
 
+// Name is [HeuristicDetectorName], which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *HeuristicInjectionDetector) Name() string { return HeuristicDetectorName }
 
+// Category is [DetectionCategoryPromptInjection].
 func (d *HeuristicInjectionDetector) Category() DetectionCategory {
 	return DetectionCategoryPromptInjection
 }
@@ -396,6 +424,8 @@ func (d *HeuristicInjectionDetector) IntegerScore(input string) (uint32, []Match
 	return total, matched
 }
 
+// Detect runs the normative signal table over input and reports the integer
+// score of [HeuristicInjectionDetector.IntegerScore] normalized to [0, 1].
 func (d *HeuristicInjectionDetector) Detect(input string) DetectionResult {
 	score, matched := d.IntegerScore(input)
 	var explanation string
@@ -452,12 +482,14 @@ type RegexJailbreakDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexJailbreakDetector returns the built-in jailbreak detector with its
+// fixed pattern set compiled.
 func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	return &RegexJailbreakDetector{
 		patterns: []detectionPattern{
 			{
-				// See the ignore_instructions comment above: explicit ASCII
-				// class instead of \s for cross-SDK parity.
+				// Explicit ASCII class instead of \s, for the reason given on
+				// ignore_instructions above.
 				name:     "jailbreak_dan",
 				regex:    regexp.MustCompile(`(?i)(DAN|do[ \t\n\r\f]+anything[ \t\n\r\f]+now|developer[ \t\n\r\f]+mode|jailbreak)`),
 				weight:   0.5,
@@ -467,50 +499,23 @@ func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexJailbreakDetector) Name() string { return "regex_jailbreak" }
 
+// Category is [DetectionCategoryJailbreak].
 func (d *RegexJailbreakDetector) Category() DetectionCategory {
 	return DetectionCategoryJailbreak
 }
 
+// Detect scores input against the fixed jailbreak pattern set.
 func (d *RegexJailbreakDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d jailbreak pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "jailbreak")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }
@@ -521,21 +526,19 @@ type RegexExfiltrationDetector struct {
 	patterns []detectionPattern
 }
 
+// NewRegexExfiltrationDetector returns the built-in exfiltration detector with
+// its fixed pattern set compiled.
 func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	return &RegexExfiltrationDetector{
 		patterns: []detectionPattern{
 			{
-				// Explicit ASCII non-digit boundaries instead of \b AND an
-				// explicit [0-9] body instead of \d: Go RE2's \b and \d are
-				// already ASCII-only, but Rust `regex` and Python `re` treat
-				// \b as a Unicode word boundary and \d as a Unicode digit
-				// class, so a run of digits preceded/followed by a non-ASCII
-				// letter (e.g. "café123-45-6789") or a fullwidth-digit SSN
-				// matched there but not here. The explicit (?:^|[^0-9]) /
-				// (?:[^0-9]|$) boundaries and [0-9] body make the ASCII-vs-
-				// Unicode distinction irrelevant -- only "is this an ASCII
-				// digit" matters -- so all four SDKs agree. Must stay
-				// byte-for-byte identical to the Rust/TS/Python patterns.
+				// Explicit ASCII non-digit boundaries instead of \b, and an
+				// explicit [0-9] body instead of \d. Engines disagree on both:
+				// a Unicode word boundary and a Unicode digit class would also
+				// match a run of digits next to a non-ASCII letter (say
+				// "café123-45-6789") or a fullwidth-digit SSN. Spelling the
+				// boundaries as (?:^|[^0-9]) / (?:[^0-9]|$) makes only "is this
+				// an ASCII digit" matter. The pattern is normative.
 				name:     "ssn",
 				regex:    regexp.MustCompile(`(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)`),
 				weight:   0.8,
@@ -549,21 +552,19 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 				category: DetectionCategoryDataExfil,
 			},
 			{
-				// Explicit ASCII boundaries instead of \b: Rust `regex` and
-				// Python `re` treat \b as a Unicode word boundary while Go RE2
-				// and JS RegExp treat it as ASCII, so an address adjacent to a
-				// non-ASCII letter diverged. The explicit
-				// (?:^|[^A-Za-z0-9._%+-]) / (?:[^A-Za-z0-9.-]|$) boundaries make
-				// all four agree. Must stay byte-for-byte identical to the
-				// Rust/TS/Python patterns.
+				// Explicit ASCII boundaries instead of \b, whose meaning
+				// differs between engines: a Unicode word boundary would judge
+				// an address next to a non-ASCII letter differently. Spelling
+				// them as (?:^|[^A-Za-z0-9._%+-]) / (?:[^A-Za-z0-9.-]|$) leaves
+				// no room for that. The pattern is normative.
 				name:     "email_address",
 				regex:    regexp.MustCompile(`(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)`),
 				weight:   0.3,
 				category: DetectionCategoryDataExfil,
 			},
 			{
-				// See the ignore_instructions comment above: explicit ASCII
-				// classes instead of \s/\S for cross-SDK parity.
+				// Explicit ASCII classes instead of \s/\S, for the reason given
+				// on ignore_instructions above.
 				name:     "api_key_pattern",
 				regex:    regexp.MustCompile(`(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token)[ \t\n\r\f]*[:=][ \t\n\r\f]*[^ \t\n\r\f]+`),
 				weight:   0.6,
@@ -579,50 +580,23 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	}
 }
 
+// Name is the detector's stable identifier, which a receipt records with the
+// [DetectorIDVersion] suffix.
 func (d *RegexExfiltrationDetector) Name() string { return "regex_exfiltration" }
 
+// Category is [DetectionCategoryDataExfil].
 func (d *RegexExfiltrationDetector) Category() DetectionCategory {
 	return DetectionCategoryDataExfil
 }
 
+// Detect scores input against the fixed exfiltration pattern set.
 func (d *RegexExfiltrationDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d exfiltration pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "exfiltration")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }
@@ -646,11 +620,16 @@ type EvaluationWithDetection struct {
 type DetectorLevel string
 
 const (
-	DetectorLevelNone       DetectorLevel = "none"
-	DetectorLevelLow        DetectorLevel = "low"
+	// DetectorLevelNone is a zero score.
+	DetectorLevelNone DetectorLevel = "none"
+	// DetectorLevelLow is a non-zero score below every threshold floor.
+	DetectorLevelLow DetectorLevel = "low"
+	// DetectorLevelSuspicious is a score at or above 0.25.
 	DetectorLevelSuspicious DetectorLevel = "suspicious"
-	DetectorLevelHigh       DetectorLevel = "high"
-	DetectorLevelCritical   DetectorLevel = "critical"
+	// DetectorLevelHigh is a score at or above 0.5.
+	DetectorLevelHigh DetectorLevel = "high"
+	// DetectorLevelCritical is a score at or above 0.75.
+	DetectorLevelCritical DetectorLevel = "critical"
 )
 
 // DetectorLevelFromScore maps a normalized score in [0, 1] to its level.
@@ -758,11 +737,11 @@ func mergeDetectionDecision(
 // spec declares a `detection` extension, scans action.Content with the
 // built-in regex detectors and folds their signal into the decision.
 //
-// It is an EXACT no-op -- the returned Evaluation is `base` unchanged, with
-// no Detections and an empty DetectionDecision -- whenever
-// spec.Extensions.Detection is absent or action.Content is empty. Every
-// pre-existing evaluation fixture has no detection extension, so this keeps
-// them byte-for-byte unaffected.
+// It is an exact no-op -- the returned Evaluation is `base` unchanged, with no
+// Detections and an empty DetectionDecision -- whenever
+// spec.Extensions.Detection is absent or action.Content is empty, so a policy
+// that declares no detection extension is evaluated exactly as it would be
+// without this pipeline.
 //
 // prompt_injection and jailbreak are wired to the built-in regex detectors
 // (RegexInjectionDetector / RegexJailbreakDetector), each gated on being
@@ -957,11 +936,10 @@ func (p *CompiledPolicy) EvaluateWithDetectionTraced(
 	if p.detection == nil {
 		return TracedEvaluationWithDetection{Traced: traced, Evaluation: base}
 	}
-	// Detection is emptiness-gated, not presence-gated: Rust reads
-	// `content.unwrap_or_default()` and returns the base evaluation when the
-	// result is empty, so an explicitly empty payload is a no-op here (unlike
-	// secret_patterns, where presence alone makes the block applicable). The
-	// pipeline still counts as having run, so the trace is empty, not absent.
+	// Detection is emptiness-gated, not presence-gated: an explicitly empty
+	// payload is a no-op here, unlike secret_patterns, where presence alone
+	// makes the block applicable. The pipeline still counts as having run, so
+	// the trace is empty, not absent.
 	content := action.ContentOrEmpty()
 	if content == "" {
 		empty := []DetectorEvaluation{}
@@ -1006,8 +984,7 @@ func (p *CompiledPolicy) EvaluateWithDetectionTraced(
 		})
 	}
 
-	// threat_intel: intentionally not auto-wired -- see doc comment above.
-	// No detector runs for it; ThreatIntel is unused here on purpose.
+	// threat_intel is intentionally not auto-wired; see the doc comment above.
 
 	final := base
 	if decisionRank(decision) > decisionRank(base.Decision) {

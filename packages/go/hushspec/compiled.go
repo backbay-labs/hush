@@ -19,6 +19,7 @@
 // A [CompiledPolicy] is immutable once built and safe for concurrent use. It
 // keeps a reference to the source document for receipts and hashing, and
 // assumes that document is not mutated afterwards.
+
 package hushspec
 
 import (
@@ -294,7 +295,7 @@ type compiledShellCommands struct {
 type compiledToolAccess struct {
 	rule *ToolAccessRule
 	// Tool names are compared as exact, case-sensitive strings after NFC
-	// normalization (D3, core spec 3.7), so the lists are folded once.
+	// normalization (core spec 3.7), so the lists are folded once.
 	allow               []string
 	block               []string
 	requireConfirmation []string
@@ -362,7 +363,7 @@ func (c *compiledOrigins) selectProfile(origin *OriginContext) *compiledOriginPr
 	var best *compiledOriginProfile
 	for index := range c.profiles {
 		profile := &c.profiles[index]
-		// A profile without a `match` field is never a candidate (D12).
+		// A profile without a `match` field is never a candidate (origins spec 3).
 		if profile.match == nil {
 			continue
 		}
@@ -684,7 +685,7 @@ func (p *CompiledPolicy) recordCompileError(rulePath, pattern string, err error)
 }
 
 // normalizeToolNames NFC-folds a tool-name list once, so matching is a plain
-// string comparison (D3, core spec 3.7).
+// string comparison (core spec 3.7).
 func normalizeToolNames(names []string) []string {
 	if len(names) == 0 {
 		return nil
@@ -694,15 +695,6 @@ func normalizeToolNames(names []string) []string {
 		out[index] = norm.NFC.String(name)
 	}
 	return out
-}
-
-func containsNormalizedName(names []string, normalized string) bool {
-	for _, name := range names {
-		if name == normalized {
-			return true
-		}
-	}
-	return false
 }
 
 func compileOrigins(origins *OriginsExtension) *compiledOrigins {

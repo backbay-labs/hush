@@ -13,7 +13,7 @@ import (
 // fixtures/receipts/valid/*.json MUST be accepted by a conformant receipt
 // parser and fixtures/receipts/invalid/*.json MUST be rejected; each invalid
 // file name says which rule it breaks. fixtures/receipts/signed carries the
-// P2-06 receipt-signing vectors.
+// receipt-signing vectors.
 
 func receiptVectorFiles(t *testing.T, parts ...string) []string {
 	t.Helper()
@@ -125,7 +125,7 @@ func mustCanonical(t *testing.T, receipt *DecisionReceipt) string {
 }
 
 // --------------------------------------------------------------------------
-// Receipt signing (P2-06)
+// Receipt signing
 // --------------------------------------------------------------------------
 
 // signedReceiptVectorClock is the instant the signed vectors were made under.

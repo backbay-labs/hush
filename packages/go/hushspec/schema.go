@@ -2,7 +2,7 @@ package hushspec
 
 // Model types are generated into generated_models.go via scripts/generate_sdk_models.py.
 //
-// This file carries the HushSpec YAML profile of core spec 2.4 (D17): a single
+// This file carries the HushSpec YAML profile of core spec 2.4: a single
 // document, YAML 1.2 Core scalar resolution, no anchors, aliases, or merge
 // keys, no tab indentation, and bounded size, nesting depth, and node count.
 // gopkg.in/yaml.v3 enforces only part of that on its own (it rejects duplicate
@@ -20,8 +20,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Limits from core spec 2.4 (RECOMMENDED defaults, shared with the Rust
-// reference implementation).
+// Limits from core spec 2.4 (its RECOMMENDED defaults, which every HushSpec
+// engine shares).
 const (
 	// MaxDocumentBytes is the maximum accepted document size in bytes.
 	MaxDocumentBytes = 1024 * 1024
@@ -34,8 +34,7 @@ const (
 // yaml11Booleans are the scalars gopkg.in/yaml.v3 coerces into a typed bool
 // field for YAML 1.1 compatibility. Under the YAML 1.2 Core schema of the
 // HushSpec profile they are plain strings, so a boolean-typed field that
-// receives one is a type error, exactly as in the Rust, TypeScript, and
-// Python SDKs.
+// receives one is a type error.
 var yaml11Booleans = map[string]struct{}{
 	"y": {}, "Y": {}, "yes": {}, "Yes": {}, "YES": {},
 	"n": {}, "N": {}, "no": {}, "No": {}, "NO": {},
@@ -117,9 +116,10 @@ func checkProfileNode(node *yaml.Node, depth int) error {
 	return nil
 }
 
-// measureNode mirrors the Rust reference `measure`: the document's root value
-// sits at depth 1, a mapping counts its key and its value as separate nodes
-// one level deeper, and every scalar counts as one node.
+// measureNode returns the document's nesting depth and node count as core spec
+// 2.4 counts them: the root value sits at depth 1, a mapping counts its key and
+// its value as separate nodes one level deeper, and every scalar counts as one
+// node.
 func measureNode(node *yaml.Node, depth int) (int, int) {
 	if node == nil {
 		return depth, 0
@@ -147,10 +147,10 @@ func measureNode(node *yaml.Node, depth int) (int, int) {
 
 // checkTypedBooleans walks the document alongside the generated model types
 // and rejects a YAML 1.1 boolean scalar (`yes`, `no`, `on`, `off`, ...) that
-// lands on a Go bool field. gopkg.in/yaml.v3 would silently coerce it; the
-// reference SDKs treat it as the string it is under YAML 1.2 Core and fail the
-// typed decode. Positions that are not boolean-typed are left alone, so
-// `name: yes` stays the string "yes" exactly as in Rust.
+// lands on a Go bool field. gopkg.in/yaml.v3 would silently coerce it, where
+// the YAML 1.2 Core schema reads it as the string it is, which fails the typed
+// decode. Positions that are not boolean-typed are left alone, so `name: yes`
+// stays the string "yes".
 func checkTypedBooleans(node *yaml.Node, target reflect.Type, path string) error {
 	if node == nil || target == nil {
 		return nil

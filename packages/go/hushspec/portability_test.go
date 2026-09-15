@@ -4,30 +4,27 @@ import (
 	"testing"
 )
 
-func strPtr(s string) *string { return &s }
-
 // ---------------------------------------------------------------------------
-// S1: conditions context value-matching parity (matchValueGo / valuesEqual /
-// matchesScalarOrMembership must mirror Rust's match_value).
+// `when.context` value matching (core spec 3.13)
 // ---------------------------------------------------------------------------
 
 func TestConditionArrayVsArrayIntersection(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"user.groups": []interface{}{"admins", "ml-team"},
+		Context: map[string]any{
+			"user.groups": []any{"admins", "ml-team"},
 		},
 	}
 	// Actual context field is itself an array: match on a non-empty
 	// intersection with the expected array.
-	match := &RuntimeContext{User: map[string]interface{}{
-		"groups": []interface{}{"ml-team", "sre"},
+	match := &RuntimeContext{User: map[string]any{
+		"groups": []any{"ml-team", "sre"},
 	}}
 	if !EvaluateCondition(cond, match) {
 		t.Error("expected array-vs-array with a shared element to match (intersection)")
 	}
 
-	disjoint := &RuntimeContext{User: map[string]interface{}{
-		"groups": []interface{}{"sre", "oncall"},
+	disjoint := &RuntimeContext{User: map[string]any{
+		"groups": []any{"sre", "oncall"},
 	}}
 	if EvaluateCondition(cond, disjoint) {
 		t.Error("expected array-vs-array with no shared element to NOT match")
@@ -36,15 +33,15 @@ func TestConditionArrayVsArrayIntersection(t *testing.T) {
 
 func TestConditionNumberArrayMembership(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"session.action_count": []interface{}{1, 2, 3},
+		Context: map[string]any{
+			"session.action_count": []any{1, 2, 3},
 		},
 	}
-	member := &RuntimeContext{Session: map[string]interface{}{"action_count": 2}}
+	member := &RuntimeContext{Session: map[string]any{"action_count": 2}}
 	if !EvaluateCondition(cond, member) {
 		t.Error("expected numeric scalar that is a member of the expected array to match")
 	}
-	nonMember := &RuntimeContext{Session: map[string]interface{}{"action_count": 9}}
+	nonMember := &RuntimeContext{Session: map[string]any{"action_count": 9}}
 	if EvaluateCondition(cond, nonMember) {
 		t.Error("expected numeric scalar that is not a member to NOT match")
 	}
@@ -52,64 +49,63 @@ func TestConditionNumberArrayMembership(t *testing.T) {
 
 func TestConditionBoolArrayMembership(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"request.interactive": []interface{}{true},
+		Context: map[string]any{
+			"request.interactive": []any{true},
 		},
 	}
-	member := &RuntimeContext{Request: map[string]interface{}{"interactive": true}}
+	member := &RuntimeContext{Request: map[string]any{"interactive": true}}
 	if !EvaluateCondition(cond, member) {
 		t.Error("expected bool scalar that is a member of the expected array to match")
 	}
-	nonMember := &RuntimeContext{Request: map[string]interface{}{"interactive": false}}
+	nonMember := &RuntimeContext{Request: map[string]any{"interactive": false}}
 	if EvaluateCondition(cond, nonMember) {
 		t.Error("expected bool scalar that is not a member to NOT match")
 	}
 }
 
-// TestConditionIntFloatDistinction verifies the int-vs-float matching parity
-// with Rust (S1): an integer-shaped expected value matches ONLY an integer
-// actual, while a float-shaped expected value matches an int or float actual by
-// numeric value. Go previously coerced both to float64, so int 5 wrongly
-// matched a float 5.0 actual.
+// TestConditionIntFloatDistinction locks in the int-vs-float distinction: an
+// integer-shaped expected value matches ONLY an integer actual, while a
+// float-shaped expected value matches an int or float actual by numeric value.
+// Coercing both to float64 would let int 5 match a float 5.0 actual.
 func TestConditionIntFloatDistinction(t *testing.T) {
 	// expected 5 (int) vs actual 5.0 (float) -> false
 	if EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.count": 5}},
-		&RuntimeContext{Session: map[string]interface{}{"count": 5.0}},
+		&Condition{Context: map[string]any{"session.count": 5}},
+		&RuntimeContext{Session: map[string]any{"count": 5.0}},
 	) {
 		t.Error("expected int 5 must NOT match a float 5.0 actual")
 	}
 
 	// expected 5.0 (float) vs actual 5 (int) -> true
 	if !EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.count": 5.0}},
-		&RuntimeContext{Session: map[string]interface{}{"count": 5}},
+		&Condition{Context: map[string]any{"session.count": 5.0}},
+		&RuntimeContext{Session: map[string]any{"count": 5}},
 	) {
 		t.Error("expected float 5.0 must match an int 5 actual")
 	}
 
 	// expected [5] (int) vs actual [5.0] (float) -> false
 	if EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.counts": []interface{}{5}}},
-		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5.0}}},
+		&Condition{Context: map[string]any{"session.counts": []any{5}}},
+		&RuntimeContext{Session: map[string]any{"counts": []any{5.0}}},
 	) {
 		t.Error("expected int-array [5] must NOT match a float-array [5.0] actual")
 	}
 
 	// expected 5.0 (float) vs actual [5] (int array, membership) -> true
 	if !EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.counts": 5.0}},
-		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5}}},
+		&Condition{Context: map[string]any{"session.counts": 5.0}},
+		&RuntimeContext{Session: map[string]any{"counts": []any{5}}},
 	) {
 		t.Error("expected float 5.0 must match membership in an int-array [5] actual")
 	}
 }
 
-// TestTimeWindowRejectsLeadingPlusInHHMM verifies S4: a HH:MM token with a
-// leading '+' (e.g. "+9:00") is a parse failure, matching TS/Python (Go's
-// strconv.Atoi would otherwise accept the sign). Under D15 an unparsable
-// window cannot be evaluated, so it leaves the rule block ACTIVE (fail closed
-// toward enforcement) and validation rejects the document outright.
+// TestTimeWindowRejectsLeadingPlusInHHMM: a HH:MM token with a leading '+'
+// (e.g. "+9:00") is a parse failure, which strconv.Atoi would otherwise accept.
+// Under core spec 3.13 an unparsable window cannot be evaluated, so it leaves
+// the rule block ACTIVE (fail closed toward enforcement) and validation rejects
+// the document outright.
 func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
 	ctx := &RuntimeContext{CurrentTime: "2026-01-14T10:30:00Z"}
 
@@ -129,7 +125,7 @@ func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// S2: reject the same exotic/non-portable regex constructs everywhere.
+// Non-portable regex constructs (core spec 3.14.3)
 // ---------------------------------------------------------------------------
 
 func TestRejectsNonPortableRegexConstructs(t *testing.T) {
@@ -167,7 +163,8 @@ func TestDisallowedRegexFeatureFiresBeforeCompile(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// S3: exfiltration detector ASCII-only ssn/email; fullwidth-digit SSN scores 0.
+// The exfiltration detector's ssn and email patterns are ASCII-only, so a
+// fullwidth-digit SSN scores 0.
 // ---------------------------------------------------------------------------
 
 func TestExfiltrationFullwidthSSNScoresZero(t *testing.T) {
@@ -193,11 +190,11 @@ func TestExfiltrationFullwidthSSNScoresZero(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// D3: an empty (or unknown) posture.current denies as an unknown state,
-// while an absent current falls back to the initial state.
+// An empty (or unknown) posture.current denies as an unknown state, while an
+// absent current falls back to the initial state (posture spec 3).
 // ---------------------------------------------------------------------------
 
-func postureSpecForParity() *HushSpec {
+func postureSpecWithSingleState() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
 		Extensions: &Extensions{
@@ -213,7 +210,7 @@ func postureSpecForParity() *HushSpec {
 }
 
 func TestEmptyPostureCurrentDenies(t *testing.T) {
-	spec := postureSpecForParity()
+	spec := postureSpecWithSingleState()
 
 	// Explicit empty current -> unknown state "" -> deny (fail-closed).
 	empty := Evaluate(spec, &EvaluationAction{
@@ -247,10 +244,10 @@ func TestEmptyPostureCurrentDenies(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// D4: a present-but-empty match field (e.g. `provider: ""`) is a real,
-// unsatisfiable constraint in the reference SDKs. Because the generated Go
-// model collapses "" and an absent field, Go rejects the empty sentinel at
-// parse. An all-absent match must still match every origin with score 0.
+// A present-but-empty match field (e.g. `provider: ""`) is a real,
+// unsatisfiable constraint. Because the generated Go model collapses "" and an
+// absent field, the empty sentinel is rejected at parse. An all-absent match
+// must still match every origin with score 0 (origins spec 3).
 // ---------------------------------------------------------------------------
 
 func TestOriginMatchEmptyProviderRejected(t *testing.T) {
@@ -265,9 +262,8 @@ func TestOriginMatchEmptyProviderRejected(t *testing.T) {
 	}
 }
 
-// TestOriginMatchAllAbsentStillSelects guards against regressing the score-0
-// selection of an all-absent match rule (which Rust/TS/Python match with
-// score 0), the exact shape the differential generator produces.
+// TestOriginMatchAllAbsentStillSelects locks in the score-0 selection of an
+// all-absent match rule, the exact shape the differential generator produces.
 func TestOriginMatchAllAbsentStillSelects(t *testing.T) {
 	spec := &HushSpec{
 		HushSpecVersion: "0.1.0",
@@ -290,7 +286,7 @@ func TestOriginMatchAllAbsentStillSelects(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// D5: non-integer floats in integer-typed fields are rejected at parse.
+// Non-integer floats in integer-typed fields are rejected at parse.
 // ---------------------------------------------------------------------------
 
 func TestRejectsNonIntegerFloatIntegerFields(t *testing.T) {

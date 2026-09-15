@@ -288,7 +288,7 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 	}
 }
 
-// TestEvaluateUnknownActionType locks in D1 (core 5): an action type the
+// TestEvaluateUnknownActionType locks in core spec 5: an action type the
 // specification does not define denies, it does not fall through to allow.
 func TestEvaluateUnknownActionType(t *testing.T) {
 	spec := &HushSpec{
@@ -307,8 +307,9 @@ func TestEvaluateUnknownActionType(t *testing.T) {
 	}
 }
 
-// TestEvaluateCustomActionRequiresPostureCapability locks in D1: `custom` is
-// permitted only when the current posture state grants the `custom` capability.
+// TestEvaluateCustomActionRequiresPostureCapability locks in core spec 5:
+// `custom` is permitted only when the current posture state grants the `custom`
+// capability.
 func TestEvaluateCustomActionRequiresPostureCapability(t *testing.T) {
 	withoutPosture := &HushSpec{HushSpecVersion: "0.2.0"}
 	result := Evaluate(withoutPosture, &EvaluationAction{Type: "custom", Target: "anything"})
@@ -352,7 +353,7 @@ extensions:
 	}
 }
 
-func TestGlobMatches(t *testing.T) {
+func TestPathGlobMatchesNormalizedTargets(t *testing.T) {
 	tests := []struct {
 		pattern string
 		target  string
@@ -370,31 +371,9 @@ func TestGlobMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_vs_%s", tt.pattern, tt.target), func(t *testing.T) {
-			got := globMatches(tt.pattern, tt.target)
+			got := PathGlobMatches(tt.pattern, NormalizePath(tt.target))
 			if got != tt.match {
-				t.Errorf("globMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
-			}
-		})
-	}
-}
-
-func TestImbalanceRatio(t *testing.T) {
-	tests := []struct {
-		add, del int
-		expected float64
-	}{
-		{0, 0, 0.0},
-		{0, 5, 5.0},
-		{5, 0, 5.0},
-		{10, 2, 5.0},
-		{2, 10, 5.0},
-		{4, 4, 1.0},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d_%d", tt.add, tt.del), func(t *testing.T) {
-			got := imbalanceRatio(tt.add, tt.del)
-			if got != tt.expected {
-				t.Errorf("imbalanceRatio(%d, %d) = %f, want %f", tt.add, tt.del, got, tt.expected)
+				t.Errorf("PathGlobMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
 			}
 		})
 	}
@@ -537,7 +516,7 @@ extensions:
 	}
 }
 
-// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in D12: an overlay
+// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in origins spec 4: an overlay
 // `default: allow` cannot relax a base `default: block` -- the stricter of the
 // two wins -- and the reported rule is the base's, since the base's `block` is
 // what determined the effective value.

@@ -13,8 +13,8 @@ import (
 // action as `confirmed` (a human or a policy-aware confirmation channel
 // approved it); returning false blocks it.
 //
-// A guard with no handler denies every warn (core spec D16): a warn nobody can
-// confirm is a deny.
+// A guard with no handler denies every warn: a warn nobody can confirm is a
+// deny (core spec 6).
 type WarnHandler func(result EvaluationResult, action *EvaluationAction) bool
 
 // GuardRefusal is the verification failure a guard is holding a policy under.
@@ -238,7 +238,7 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 // a chain that will not merge, a pattern that does not compile -- is an error,
 // because there is no document to refuse against.
 func NewGuardFromFile(path string, options GuardOptions) (*Guard, error) {
-	resolution, refusal, err := resolveGuardPolicyFile(path, options)
+	resolution, refusal, err := resolveFileForGuard(path, options.resolveOptions(), options.Loader)
 	if err != nil {
 		return nil, err
 	}
@@ -288,20 +288,15 @@ func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard
 	return guard, nil
 }
 
-// resolveGuardPolicyFile resolves path under the guard's verification options.
+// resolveFileForGuard resolves path under the given verification options, so a
+// [FileProvider] refuses a policy exactly as a guard built straight from the
+// file does.
 //
 // A chain that would not verify under RequireSignature is resolved a second
 // time with the requirement lifted, purely to recover the evidence -- the
 // chain, the hashes and the failing hop's status -- that the refused guard
 // reports. The document is never treated as verified: the returned refusal is
 // what makes every action deny.
-func resolveGuardPolicyFile(path string, options GuardOptions) (*Resolution, *GuardRefusal, error) {
-	return resolveFileForGuard(path, options.resolveOptions(), options.Loader)
-}
-
-// resolveFileForGuard is [resolveGuardPolicyFile] over the resolver's own
-// options, so a [FileProvider] refuses a policy exactly as a guard built
-// straight from the file does.
 func resolveFileForGuard(
 	path string,
 	resolveOptions ResolveOptions,
@@ -642,7 +637,7 @@ func gateOutcome(
 		case onWarn != nil && onWarn(result, action):
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeConfirmed}
 		default:
-			// Fail closed: a warn nobody can confirm is a deny (D16).
+			// Fail closed: a warn nobody can confirm is a deny (core spec 6).
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeBlocked}
 		}
 	default:

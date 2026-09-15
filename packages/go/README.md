@@ -110,7 +110,8 @@ spec, err := hushspec.ResolveFile("./policy.yaml")
 resolved, err := hushspec.Resolve(spec, "./policy.yaml", nil)
 
 // Built-in rulesets are embedded in the binary: default, strict, permissive,
-// ai-agent, cicd, remote-desktop.
+// ai-agent, cicd, remote-desktop, and the vertical library under
+// library/<vertical>/<name>. hushspec.BuiltinNames lists them all.
 builtin, ok := hushspec.LoadBuiltin("builtin:strict")
 ```
 
@@ -273,7 +274,7 @@ evaluations. It is safe to share across goroutines.
 guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
 	Actor:  &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
 	Sink:   sink,                      // receipts and policy_loaded / policy_swapped
-	OnWarn: confirmWithOperator,       // nil denies every warn (D16)
+	OnWarn: confirmWithOperator,       // nil denies every warn
 })
 if err != nil {
 	log.Fatal(err)

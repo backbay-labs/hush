@@ -78,8 +78,8 @@ func Parse(yamlStr string) (*HushSpec, error) {
 
 	// Raw-document checks catch structural issues the typed decode swallows
 	// (non-integer floats truncated into int fields, empty/invalid enum
-	// sentinels, a posture missing its required transitions key), keeping Go's
-	// accept/reject decision identical to the other SDKs.
+	// sentinels, a posture missing its required transitions key), so a document
+	// this engine accepts is one the schema accepts.
 	if issues := validateRawDocument(yamlStr); len(issues) > 0 {
 		messages := make([]string, 0, len(issues))
 		for _, issue := range issues {
@@ -98,8 +98,8 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	return &spec, nil
 }
 
-// parseError is a shape refusal: E001, the code the reference implementation
-// reports for anything its deny-unknown-fields model will not deserialize.
+// parseError is a shape refusal: E001, the code registered for anything the
+// deny-unknown-fields model will not deserialize.
 func parseError(format string, args ...any) *ValidationError {
 	return &ValidationError{
 		Code:    ErrorCodeParse,
@@ -108,10 +108,10 @@ func parseError(format string, args ...any) *ValidationError {
 	}
 }
 
-// Rewrites of gopkg.in/yaml.v3's own diagnostics into the vocabulary the other
-// HushSpec SDKs use, so one refusal reads the same in every language and the
-// `message_contains` assertions of the invalid-vector sidecars hold across all
-// four. Only the wording changes; nothing is accepted or rejected differently.
+// Rewrites of gopkg.in/yaml.v3's own diagnostics into the HushSpec refusal
+// vocabulary, so the `message_contains` assertions of the invalid-vector
+// sidecars hold. Only the wording changes; nothing is accepted or rejected
+// differently.
 var (
 	decoderUnknownFieldPattern = regexp.MustCompile(
 		"field ([^ ]+) not found in type ([^\\s]+)")
@@ -189,9 +189,9 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 			spec.Rules.BrowserAutomation.CredentialDetection = true
 		}
 	}
-	// Origin profile rule blocks are tri-state overlays (D12): they carry no
-	// `enabled` flag and their `default` stays unset unless the document
-	// states one, so no defaults are materialized for them here.
+	// Origin profile rule blocks are tri-state overlays (origins spec 4): they
+	// carry no `enabled` flag and their `default` stays unset unless the
+	// document states one, so no defaults are materialized for them here.
 }
 
 // Marshal serializes a HushSpec document to YAML.

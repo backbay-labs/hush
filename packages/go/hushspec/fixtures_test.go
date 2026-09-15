@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -242,7 +243,7 @@ func TestSharedFixtures(t *testing.T) {
 						t.Fatalf("%s: cases[%d].expect.decision must be allow, warn, or deny", fixturePath, index)
 					}
 					// The evaluator-test schema accepts any non-empty action
-					// type so unknown-type vectors can assert the D1 deny.
+					// type so unknown-type vectors can assert their deny.
 					actionType, ok := testCase.Action["type"].(string)
 					if !ok || actionType == "" {
 						t.Fatalf("%s: cases[%d].action.type must be a non-empty string", fixturePath, index)
@@ -361,10 +362,10 @@ func mergeFixtureLoader(basePath string) ResolveLoader {
 }
 
 // mergeFixtureExpectsReject reports whether a merge vector is supposed to fail.
-// Two conventions are honoured, because the shared fixtures are written by the
-// Rust reference implementation and either may appear: an "expect-reject"
-// marker file (beside the child, named for it or for the whole directory), or
-// `reject: true` in a fixture.yaml manifest (per child or per directory).
+// The shared fixtures spell it two ways and either may appear: an
+// "expect-reject" marker file (beside the child, named for it or for the whole
+// directory), or `reject: true` in a fixture.yaml manifest (per child or per
+// directory).
 func mergeFixtureExpectsReject(t *testing.T, childPath string) bool {
 	t.Helper()
 	dir := filepath.Dir(childPath)
@@ -443,13 +444,24 @@ func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, b
 // per-case controls and tags and the rule_trace / receipt assertions.
 var supportedTestVersions = []string{"0.1.0", "0.2.0"}
 
-func fixtureRepoRoot(t *testing.T) string {
-	t.Helper()
+// repoRoot is the checkout this package lives in, resolved from this source
+// file's own path so it does not depend on the working directory. It takes no
+// testing handle, so a benchmark can use it too.
+func repoRoot() (string, error) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
-		t.Fatal("failed to resolve test file path")
+		return "", errors.New("failed to resolve the test file path")
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../..")), nil
+}
+
+func fixtureRepoRoot(t *testing.T) string {
+	t.Helper()
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }
 
 func fixtureFiles(t *testing.T, repoRoot, subdir string) []string {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf16"
@@ -238,7 +238,7 @@ var canonicalSchemaRules = map[reflect.Type]canonicalRules{
 	reflect.TypeOf(OriginProfile{}): {
 		"id": canonicalRequired,
 		// An explicit `match: {}` is the default profile; an absent `match`
-		// never matches (origins spec section 3, D12).
+		// never matches (origins spec section 3).
 		"match": canonicalPreserveEmpty,
 	},
 	// OriginToolAccessOverlay and OriginEgressOverlay need no entry: their
@@ -551,37 +551,14 @@ func sortedUTF16Keys(m map[string]any) []string {
 	for key := range m {
 		items = append(items, encoded{key: key, units: utf16.Encode([]rune(key))})
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return compareUTF16Units(items[i].units, items[j].units) < 0
+	slices.SortFunc(items, func(a, b encoded) int {
+		return slices.Compare(a.units, b.units)
 	})
 	keys := make([]string, len(items))
 	for i, item := range items {
 		keys[i] = item.key
 	}
 	return keys
-}
-
-func compareUTF16Units(a, b []uint16) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
-		if a[i] != b[i] {
-			if a[i] < b[i] {
-				return -1
-			}
-			return 1
-		}
-	}
-	switch {
-	case len(a) < len(b):
-		return -1
-	case len(a) > len(b):
-		return 1
-	default:
-		return 0
-	}
 }
 
 const hexDigits = "0123456789abcdef"

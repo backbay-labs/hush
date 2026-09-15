@@ -10,27 +10,24 @@ import (
 )
 
 // validateRawDocument inspects the raw YAML document for structural problems
-// that the typed decode silently absorbs, so Go accepts or rejects a policy
-// identically to the Rust, TypeScript, and Python SDKs. Three classes of issue
-// only survive at the raw level, because the typed Go model cannot express
-// them:
+// that the typed decode silently absorbs, so this engine accepts exactly the
+// documents the schema accepts. Three classes of issue only survive at the raw
+// level, because the typed Go model cannot express them:
 //
 //   - Non-integer floats in integer-typed fields. gopkg.in/yaml.v3 truncates a
 //     scalar like `max_additions: 1.5` into a Go int (-> 1) without error,
-//     whereas the reference SDKs reject any non-integer value.
+//     where the schema rejects any non-integer value.
 //   - Empty or invalid enum sentinels. The generated Go model represents
 //     optional enum-ish strings (match.visibility, metadata.classification, ...)
 //     as plain strings, so a present-but-empty "" is indistinguishable from an
-//     absent field in the typed struct; the reference SDKs treat "" (and any
-//     other out-of-set value) as a real, invalid value.
-//   - A posture extension missing its required `transitions` key, which is a
-//     required (non-defaulted) field in the reference models.
+//     absent field in the typed struct; the schema treats "" (and any other
+//     out-of-set value) as a real, invalid value.
+//   - A posture extension missing its required `transitions` key, which the
+//     schema requires and supplies no default for.
 //
 // It returns one issue per problem found, each carrying the registered error
 // code of spec/registries/error-codes.yaml that the condition maps onto, or an
-// empty list when the document is clean. This mirrors the parse-time raw
-// validation performed by the TypeScript and Python SDKs
-// (validate_raw_document).
+// empty list when the document is clean.
 func validateRawDocument(yamlStr string) []ValidationError {
 	var root map[string]any
 	if err := yaml.Unmarshal([]byte(yamlStr), &root); err != nil {
@@ -52,10 +49,9 @@ func validateRawDocument(yamlStr string) []ValidationError {
 type rawIssues struct{ items []ValidationError }
 
 // add records a shape refusal: a missing or unknown member, a value of the
-// wrong type, or an enum variant outside its closed set. The reference
-// implementation refuses every one of those at parse time, because each of its
-// structs denies unknown fields and each of its enums denies unknown variants,
-// so they carry E001.
+// wrong type, or an enum variant outside its closed set. Every one of those is
+// refused at parse time, because the model denies unknown fields and every enum
+// denies unknown variants, so they carry E001.
 func (r *rawIssues) add(message string) {
 	r.items = append(r.items, ValidationError{
 		Code: ErrorCodeParse, Kind: "PARSE", Message: message,
@@ -93,8 +89,8 @@ func validateRawRules(rules map[string]any, errs *rawIssues) {
 			validateRawCondition(when, fmt.Sprintf("rules.%s.when", name), 0, errs)
 		}
 	}
-	// Enum-typed properties: the reference models are serde enums, so a value
-	// outside the closed set is an unknown variant refused at parse time.
+	// Enum-typed properties: a value outside the closed set is an unknown
+	// variant, refused at parse time.
 	if egress := rawObject(rules, "egress"); egress != nil {
 		checkRawVariant(egress, "default", "rules.egress.default", DefaultActions, errs)
 	}
@@ -116,10 +112,10 @@ func validateRawRules(rules map[string]any, errs *rawIssues) {
 		}
 	}
 	if pi := rawObject(rules, "patch_integrity"); pi != nil {
-		// max_additions/max_deletions are required (non-Option) usize fields in
-		// the reference models: an explicit null -- which serde rejects at parse
-		// and which the typed Go model would otherwise silently coerce to a
-		// default -- is rejected here, as is a non-integer float.
+		// max_additions/max_deletions are required non-negative integers with a
+		// schema default: an explicit null -- which the typed Go model would
+		// otherwise silently coerce to that default -- is rejected here, as is a
+		// non-integer float.
 		checkRawRequiredInteger(pi, "max_additions", "rules.patch_integrity.max_additions", errs)
 		checkRawRequiredInteger(pi, "max_deletions", "rules.patch_integrity.max_deletions", errs)
 	}
@@ -127,8 +123,8 @@ func validateRawRules(rules map[string]any, errs *rawIssues) {
 		checkRawInteger(ta, "max_args_size", "rules.tool_access.max_args_size", errs)
 	}
 	if ce := rawObject(rules, "code_execution"); ce != nil {
-		// Option<usize> fields: absent/null are accepted, but a negative value
-		// (which serde's unsigned type rejects at parse) must be rejected too.
+		// Optional non-negative integers: absent and null are accepted, but a
+		// negative value must be rejected.
 		checkRawNonNegativeInteger(ce, "max_execution_time_ms", "rules.code_execution.max_execution_time_ms", errs)
 		checkRawNonNegativeInteger(ce, "max_scan_bytes", "rules.code_execution.max_scan_bytes", errs)
 	}
@@ -137,10 +133,10 @@ func validateRawRules(rules map[string]any, errs *rawIssues) {
 // validateRawCondition checks the parts of a `when` object the typed decode
 // cannot express: the `rate` predicate's required members, its non-negative
 // integer threshold, and its closed `comparison` set (core spec 3.13). Those
-// are shape failures that the reference implementation refuses at parse time,
-// so they are reported here rather than as constraint violations. The
-// identifier grammar and the nesting depth stay with [ValidateConditions],
-// which the reference reports as constraint violations.
+// are shape failures, refused at parse time, so they are reported here rather
+// than as constraint violations. The identifier grammar and the nesting depth
+// stay with [ValidateConditions], which reports them as constraint
+// violations.
 //
 // The walk descends `all_of`, `any_of` and `not` so a nested `rate` is checked
 // too; it stops one level past the nesting cap, which ValidateConditions
@@ -286,11 +282,11 @@ func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 				checkRawEnum(match, "visibility",
 					fmt.Sprintf("origins.profiles[%d].match.visibility", i), OriginVisibilities, errs)
 				// A present-but-empty free-string match field (e.g.
-				// `provider: ""`) is a real, unsatisfiable constraint in the
-				// reference SDKs, but the generated Go model collapses "" and an
-				// absent field, so reject the empty sentinel here (D4). An
-				// absent field is left untouched -- an all-absent match still
-				// matches every origin with score 0, matching the others.
+				// `provider: ""`) is a real, unsatisfiable constraint, but the
+				// generated Go model collapses "" and an absent field, so the
+				// empty sentinel is rejected here. An absent field is left
+				// untouched -- an all-absent match still matches every origin
+				// with score 0.
 				for _, field := range []string{"provider", "tenant_id", "space_id", "sensitivity", "actor_role"} {
 					checkRawNonEmptyString(match, field,
 						fmt.Sprintf("origins.profiles[%d].match.%s", i, field), errs)
@@ -354,9 +350,8 @@ func validateRawMetadata(md map[string]any, errs *rawIssues) {
 	if md == nil {
 		return
 	}
-	// policy_version is an Option<usize>: absent/null are accepted, but a
-	// non-integer float or a negative value (rejected by the unsigned type at
-	// parse in the reference models) is not.
+	// policy_version is an optional non-negative integer: absent and null are
+	// accepted, a non-integer float or a negative value is not.
 	checkRawNonNegativeInteger(md, "policy_version", "metadata.policy_version", errs)
 	checkRawVariant(md, "classification", "metadata.classification", Classifications, errs)
 	checkRawVariant(md, "lifecycle_state", "metadata.lifecycle_state", LifecycleStates, errs)
@@ -547,12 +542,11 @@ func isRawNegativeInteger(v any) bool {
 }
 
 // checkRawNonNegativeInteger records an error when key is present with a
-// non-null value that is not a non-negative integer scalar. It mirrors an
-// Option<usize> field in the reference models: an absent key or an explicit
-// null is accepted (the field stays None), while a non-integer (e.g. 1.5) or a
-// negative integer (e.g. -5, which serde's unsigned type rejects at parse) is
-// not. Absent/null are left untouched so an omitted optional field keeps its
-// default, matching the other SDKs.
+// non-null value that is not a non-negative integer scalar. It stands for an
+// optional non-negative integer in the schema: an absent key or an explicit
+// null is accepted (the field stays unset), while a non-integer (e.g. 1.5) or
+// a negative integer (e.g. -5) is not. Absent and null are left untouched so
+// an omitted optional field keeps its default.
 func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok || v == nil {
@@ -568,12 +562,11 @@ func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *rawI
 }
 
 // checkRawRequiredInteger records an error when key is present with a value
-// that is null or not an integer scalar. It mirrors a required (non-Option)
-// usize field: an absent key is accepted (the typed model supplies the
-// default), but an explicit null -- which serde rejects at parse and which the
-// typed Go model would otherwise coerce to its default -- is rejected, as is a
-// non-integer float. A negative value stays a cross-field concern of
-// [Validate], matching the existing behavior for these fields.
+// that is null or not an integer scalar. It stands for a required non-negative
+// integer with a schema default: an absent key is accepted (the typed model
+// supplies the default), but an explicit null -- which the typed Go model would
+// otherwise coerce to that default -- is rejected, as is a non-integer float. A
+// negative value stays a cross-field concern of [Validate].
 func checkRawRequiredInteger(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {
@@ -585,12 +578,12 @@ func checkRawRequiredInteger(obj map[string]any, key, path string, errs *rawIssu
 }
 
 // checkRawEnum records an error when key is present in obj with a value that is
-// not one of allowed. A present-but-empty "" fails, matching the reference SDKs
-// that treat "" as a real (invalid) value rather than an absent field.
+// not one of allowed. A present-but-empty "" fails: "" is a real (invalid)
+// value, not an absent field.
 //
-// These are the origins module's own `match` sets, which the reference
-// implementation carries as plain strings and checks at validation time, so
-// they are constraint violations (E004) rather than unknown variants.
+// These are the origins module's own `match` sets, which the schema carries as
+// plain strings and checks at validation time, so they are constraint
+// violations (E004) rather than unknown variants.
 func checkRawEnum(obj map[string]any, key, path string, allowed map[string]struct{}, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {
@@ -602,10 +595,10 @@ func checkRawEnum(obj map[string]any, key, path string, allowed map[string]struc
 }
 
 // checkRawVariant rejects an enum-typed property whose value is outside its
-// closed set. The reference implementation models these as serde enums, which
-// refuse an unknown variant at parse time, so this is a shape refusal (E001)
-// rather than a constraint violation. An absent key is left alone: the typed
-// model supplies the schema default.
+// closed set. The schema models these as closed enums, which refuse an unknown
+// variant at parse time, so this is a shape refusal (E001) rather than a
+// constraint violation. An absent key is left alone: the typed model supplies
+// the schema default.
 func checkRawVariant[T ~string](
 	obj map[string]any, key, path string, allowed map[T]struct{}, errs *rawIssues,
 ) {
@@ -621,8 +614,7 @@ func checkRawVariant[T ~string](
 }
 
 // checkRawRequiredVariant is [checkRawVariant] for a property the schema
-// requires: an absent key is a missing field, which the reference
-// implementation also refuses at parse time.
+// requires: an absent key is a missing field, refused at parse time.
 func checkRawRequiredVariant[T ~string](
 	obj map[string]any, key, path string, allowed map[T]struct{}, errs *rawIssues,
 ) {

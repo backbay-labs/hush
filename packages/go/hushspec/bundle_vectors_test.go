@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,25 +123,22 @@ func TestBundleVectors(t *testing.T) {
 			}
 
 			options := VerifyBundleOptions{Keyring: keyring, Now: now}
-			// A policy that will not resolve has nothing to compare, which is
-			// check 4's own failure -- never a test error.
-			policyMissing := false
 			if tc.Policy != "" {
+				// Every vector that names a policy names one that resolves, so a
+				// resolution failure is a broken fixture. Treating it as check 4's
+				// own failure would let a vector expecting policy_mismatch pass
+				// without the verifier ever running.
 				resolution, resolveErr := ResolveFileWithOptions(
 					filepath.Join(root, tc.Policy), ResolveOptions{})
 				if resolveErr != nil {
-					policyMissing = true
-				} else {
-					options.PolicyResolution = resolution
+					t.Fatalf("the vector names a policy that does not resolve: %v", resolveErr)
 				}
+				options.PolicyResolution = resolution
 			}
 
 			result := VerifyBundle(bundle, options)
 			actual := result.Reason
-			switch {
-			case policyMissing:
-				actual = BundleReasonPolicyMismatch
-			case result.OK:
+			if result.OK {
 				actual = "valid"
 			}
 
@@ -198,10 +196,12 @@ func TestBundleVectorsUseTheClosedReasonSet(t *testing.T) {
 }
 
 // TestBundlesValidateAgainstTheSchema checks every published bundle against
-// schemas/hushspec-bundle.v0.schema.json the way the Rust runner does: the
-// envelope against the root, and the decoded payload against $defs/Statement.
-// The Go SDK has no JSON Schema engine, so this asserts the constraints the
-// schema states for the members this SDK reads.
+// schemas/hushspec-bundle.v0.schema.json: the envelope against the root, and
+// the decoded payload against $defs/Statement. This SDK carries no JSON Schema
+// engine, so the constraints the schema states for the members it reads are
+// asserted directly -- the three `const` members are read out of the schema
+// itself, so a bundle, a Go constant and the published schema cannot drift
+// apart unnoticed.
 func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 	root, manifest := loadBundleVectors(t)
 	schemaPath := filepath.Join(fixtureRepoRoot(t), "schemas", "hushspec-bundle.v0.schema.json")
@@ -212,6 +212,22 @@ func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 	var schema map[string]any
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
 		t.Fatalf("the bundle schema is not JSON: %v", err)
+	}
+
+	// The constants this SDK compares against are the schema's own, so a
+	// divergence between the two is a failure here rather than a silent
+	// disagreement with every other implementation.
+	payloadType := schemaConst(t, schema, "properties", "payloadType")
+	statementType := schemaConst(t, schema, "$defs", "Statement", "properties", "_type")
+	predicateType := schemaConst(t, schema, "$defs", "Statement", "properties", "predicateType")
+	for _, pin := range []struct{ schema, sdk string }{
+		{payloadType, BundlePayloadType},
+		{statementType, BundleStatementType},
+		{predicateType, BundlePredicateType},
+	} {
+		if pin.schema != pin.sdk {
+			t.Fatalf("the schema pins %q where this SDK uses %q", pin.schema, pin.sdk)
+		}
 	}
 
 	seen := map[string]bool{}
@@ -229,8 +245,8 @@ func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 			if err != nil {
 				t.Fatalf("every published bundle is a well-formed envelope: %v", err)
 			}
-			if envelope.PayloadType != BundlePayloadType {
-				t.Errorf("payloadType %q", envelope.PayloadType)
+			if envelope.PayloadType != payloadType {
+				t.Errorf("payloadType %q, the schema pins %q", envelope.PayloadType, payloadType)
 			}
 			payload, err := envelope.PayloadBytes()
 			if err != nil {
@@ -245,12 +261,31 @@ func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 			if len(statement.Subject) != 1 {
 				t.Errorf("a bundle attests exactly one subject, found %d", len(statement.Subject))
 			}
-			if statement.Type != BundleStatementType {
-				t.Errorf("_type %q", statement.Type)
+			if statement.Type != statementType {
+				t.Errorf("_type %q, the schema pins %q", statement.Type, statementType)
 			}
 			if len(statement.Predicate.Chain) == 0 {
 				t.Error("the chain must hold at least one link")
 			}
 		})
 	}
+}
+
+// schemaConst reads the `const` of the schema member at path, failing when the
+// path does not lead to one.
+func schemaConst(t *testing.T, schema map[string]any, path ...string) string {
+	t.Helper()
+	node := schema
+	for _, segment := range path {
+		next, ok := node[segment].(map[string]any)
+		if !ok {
+			t.Fatalf("the bundle schema has no object at %s", strings.Join(path, "."))
+		}
+		node = next
+	}
+	value, ok := node["const"].(string)
+	if !ok {
+		t.Fatalf("the bundle schema member at %s has no string const", strings.Join(path, "."))
+	}
+	return value
 }

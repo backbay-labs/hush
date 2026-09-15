@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestNormalizePathIsLexical covers D6 (core 3.1, 3.14.1): NFC, `\` to `/`,
+// TestNormalizePathIsLexical covers core spec 3.1 and 3.14.1: NFC, `\` to `/`,
 // collapsed separators, lexical `.`/`..` resolution, no trailing `/`. The
 // cleaner is deliberately not filepath.Clean -- that is OS-specific and would
 // leave `C:\proj\..\.env` untouched on Linux.
@@ -57,7 +57,7 @@ func TestPathGlobsFollowTheSpecTable(t *testing.T) {
 	}
 }
 
-// TestNormalizeHost covers D5 (core 3.14.2): scheme, userinfo, path, query,
+// TestNormalizeHost covers core spec 3.14.2: scheme, userinfo, path, query,
 // port, and trailing dot are stripped, the host is lowercased, and non-ASCII
 // labels are compared in IDNA A-label form.
 func TestNormalizeHost(t *testing.T) {
@@ -140,9 +140,9 @@ func TestPunycodeMatchesRFCExamples(t *testing.T) {
 	}
 }
 
-// TestVersionAcceptanceFollowsD14 covers core spec 2.2: an engine declaring
-// support for minor X.Y accepts every X.Y.Z document.
-func TestVersionAcceptanceFollowsD14(t *testing.T) {
+// TestEveryPatchOfASupportedMinorIsAccepted covers core spec 2.2: an engine
+// declaring support for minor X.Y accepts every X.Y.Z document.
+func TestEveryPatchOfASupportedMinorIsAccepted(t *testing.T) {
 	for _, version := range []string{"0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"} {
 		if !IsSupported(version) {
 			t.Errorf("expected %q to be supported", version)
@@ -171,7 +171,7 @@ func TestValidateAcceptsAnyPatchOfASupportedMinor(t *testing.T) {
 	}
 }
 
-// TestYAMLProfileRejections covers D17 (core 2.4): anchors, aliases, merge
+// TestYAMLProfileRejections covers core spec 2.4: anchors, aliases, merge
 // keys, multi-document streams, YAML 1.1 booleans in boolean-typed fields,
 // duplicate keys, and tab indentation are all parse errors.
 func TestYAMLProfileRejections(t *testing.T) {
@@ -241,7 +241,7 @@ func TestYAMLProfileBoundsNestingAndNodes(t *testing.T) {
 	}
 }
 
-// TestToolNamesMatchExactly covers D3 (core 3.7): tool names are compared as
+// TestToolNamesMatchExactly covers core spec 3.7: tool names are compared as
 // exact strings, so glob metacharacters are literal.
 func TestToolNamesMatchExactly(t *testing.T) {
 	spec, err := Parse(`
@@ -262,7 +262,7 @@ rules:
 	}
 }
 
-// TestNoEarlyReturnAggregatesEveryBlock covers D2 (core 6.1): an allowlist or
+// TestNoEarlyReturnAggregatesEveryBlock covers core spec 6.1: an allowlist or
 // exception match never short-circuits a later block, and the aggregate is the
 // strictest decision of every block that ran.
 func TestNoEarlyReturnAggregatesEveryBlock(t *testing.T) {
@@ -311,7 +311,7 @@ rules:
 	}
 }
 
-// TestBrowserAndCodeActionsDispatch covers D13 (core 3.11, 3.12): the
+// TestBrowserAndCodeActionsDispatch covers core spec 3.11 and 3.12: the
 // browser_action and code_exec action types reach their rule blocks.
 func TestBrowserAndCodeActionsDispatch(t *testing.T) {
 	spec, err := Parse(`
@@ -354,7 +354,7 @@ rules:
 	}
 }
 
-// TestPostureWithEmptyCapabilitiesDeniesEverything covers D11 (posture 3): a
+// TestPostureWithEmptyCapabilitiesDeniesEverything covers posture spec 3: a
 // state that grants no capabilities permits nothing.
 func TestPostureWithEmptyCapabilitiesDeniesEverything(t *testing.T) {
 	spec, err := Parse(`
