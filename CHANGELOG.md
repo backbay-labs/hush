@@ -8,6 +8,50 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 P6-03, SDK API contract)
+
+- **`docs/src/reference/sdk-api.md`**: the cross-SDK API contract. Eighteen capability
+  areas -- parse/validate, merge/resolve with verify-on-load and digest pins, compiled
+  policies, the four evaluation entry points, conditions (`capability` and `rate`),
+  detection (`heuristic_injection@1`), canonical form and content hash, receipts 0.2 and
+  the receipt hash, the log chain, signing and keyrings, bundle verification, the guard
+  with its enforcement modes and refused state, observers and metrics, providers and hot
+  reload, sinks including OTLP, adapters, panic mode, version constants and error codes --
+  each a table giving the exact entry point every SDK publishes today, the shared semantic
+  contract, and the deliberate language-idiom differences (Rust `Result`, TypeScript
+  `{ok, value}` unions, Python `(ok, value)` tuples with `_or_raise` variants, Go
+  `(T, error)`). Plus the cross-SDK invariants and the check that enforces each: identical
+  decisions, identical canonical bytes and `content_hash`, byte-identical receipts after
+  JCS under the fixed inputs, identical reason and error codes, and identical public names.
+  Every name in the page is verified against the source.
+
+### Changed (RFC 09 P6-03, honest capability documentation)
+
+- **All four SDKs are Level 5 (Attested)**, not Rust alone. `docs/src/reference/sdk-conformance.md`
+  is rewritten from the vectors each SDK's tests actually walk, citing the test file for
+  every vector family; TypeScript, Python and Go now run the bundle vectors, which were the
+  last Level 5 gap. The Level 1 error-code gap is closed too: all four fixture runners
+  assert the `.expect.yaml` sidecar's registered code and `message_contains` substring, so
+  the "known gap" note in `docs/src/reference/conformance.md` is gone and Levels 0, 1 and 3
+  there are aligned word for word with core spec section 8.
+- **README capability matrix rewritten** from the code. Corrected claims that were no longer
+  true: `HushGuard`, observers, hot reload, policy signing, receipt signing and the OTLP
+  sink are in all four SDKs, not two; `content_hash` *is* byte-identical across the SDKs
+  (`hushspec-difftest` compares it, and the receipt hash, on 500 generated policy groups per
+  commit); there are twelve rule blocks, not ten; the CLI has 22 subcommands, not ten. Newly
+  documented limits: Python and Go ship no HTTP client and reject an `https:` `extends`
+  reference outright, bundle *creation* is Rust and `h2h` only, Rust ships no framework
+  adapters, Rust signing needs the `signing` feature and Python's needs the `signing` extra,
+  and Go spells the guard `Guard`.
+- **`docs/plans/ROADMAP.md`** gains a status section for RFC 09 Waves 0-5 and flips the
+  Section 8 criteria that are now true: `when` conditions specified and schema-defined, all
+  four SDKs past Level 3, `HushGuard` in every SDK, Ed25519 signing in every SDK, panic mode
+  in every SDK, separation of duties enforceable (`GOV_SOD_VIOLATION`, `h2h sign
+  --allow-unapproved`), compliance mappings on every library policy, and evaluation suites
+  for all eight. Left unchecked, with the reason stated: the 1.0 freeze, package-registry
+  publication and prebuilt binaries (no `v0.x` tag cut yet), a cloud-storage policy loader,
+  and published Prometheus recording rules and alert examples.
+
 ### Added (RFC 09 P6-02, TypeScript SDK parity)
 
 - `OtlpReceiptSink` (`@hushspec/core`): exports decision receipts and

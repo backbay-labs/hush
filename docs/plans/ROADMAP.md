@@ -1,11 +1,58 @@
 # HushSpec Master Roadmap
 
-**Version:** 1.2
-**Date:** 2026-09-14
+**Version:** 1.3
+**Date:** 2026-09-15
 **Status:** Active
 **Maintainer:** HushSpec Core Team
 
-> Verified against code on 2026-09-14. Remaining work is tracked in RFC 09 (`09-compliance-as-code-plan.md`).
+> Verified against code on 2026-09-15, after RFC 09 Waves 0-5. Remaining work is tracked in RFC 09 (`09-compliance-as-code-plan.md`).
+
+---
+
+## 0. Status after RFC 09 Waves 0-5 (2026-09-15)
+
+Waves 0 through 5 of [RFC 09](./09-compliance-as-code-plan.md) have landed. That
+plan, not this document, is the source of truth for what remains; this section
+records where the code stands so the phases below can be read against it.
+
+**Shipped in Waves 0-5:**
+
+- **Spec 0.2.0 (draft).** Twelve rule blocks, three extension modules, and six
+  normative conformance levels (core spec section 8) -- Levels 4 (Auditor) and 5
+  (Attested) are now written down rather than forward-referenced. Companion
+  specifications for canonical form, decision receipts, policy signing, the
+  hash-linked log and policy bundles. Ratified decisions D14-D20, including
+  `when.capability`, `when.rate`, and the normative `heuristic_injection@1`
+  detector.
+- **All four SDKs at Level 5.** Rust, TypeScript, Python and Go each run the
+  whole vector corpus, including the canonical-hash, resolution, expected-receipt,
+  signing, log, receipt-signing and bundle vectors, and each asserts the
+  registered error code on every `invalid/` vector. See
+  [`docs/src/reference/sdk-conformance.md`](../src/reference/sdk-conformance.md)
+  for the per-vector evidence.
+- **The evidence chain end to end.** Canonical form (RFC 8785) and a portable
+  `content_hash`; receipt format 0.2 with a recorded rule trace; verify-on-load
+  with digest pinning; a hash-linked log that names the line it breaks on;
+  receipt signing; and DSSE/in-toto policy bundles.
+- **Runtime integration at parity.** The enforcement point (`HushGuard`, spelled
+  `Guard` in Go), enforcement modes with per-rule overrides, the refused state,
+  observers with Prometheus exposition, providers with watch/poll hot reload, an
+  OTLP receipt sink, and framework adapters in three SDKs.
+- **Tooling.** 22 `h2h` subcommands, a published conformance program
+  (`fixtures/MANIFEST.json`, the conformance-report schema, the release bundle,
+  the statement template), a GitHub Action, pre-commit hooks and a container
+  image, the eight-policy vertical library with 198 control-tagged evaluation
+  cases, and `h2h report` for compliance evidence over a window of receipts.
+
+**Not yet done:** the 1.0 spec freeze (RFC 09 Wave 6, packages P5-01..05), the
+first tagged release and package-registry publication, cloud-storage policy
+loaders, and published Prometheus recording rules and alert examples. Each is
+called out in Section 8 below.
+
+**Naming note.** The CLI is `h2h`; the name `hushspec` in older sections of this
+document refers to the same binary before the rename.
+
+---
 
 This document is the single entry point for understanding the HushSpec development roadmap. It synthesizes eight RFC documents into a unified plan with phasing, dependencies, milestones, and gap coverage.
 
@@ -21,22 +68,22 @@ HushSpec v0.1.0 is a draft specification with four SDK implementations (Rust, Ty
 - **Validate** documents against structural and semantic rules
 - **Merge** documents using three strategies (`replace`, `merge`, `deep_merge`)
 - **Resolve** single-inheritance `extends` chains from local filesystem, builtins, and HTTP sources
-- **Evaluate** actions against policies in all four SDKs (Level 3 conformance)
+- **Evaluate** actions against policies in all four SDKs (now Level 5 conformance; see Section 0)
 - **Audit** evaluation decisions with structured receipts and rule traces
 - **Detect** prompt injection, jailbreak, and exfiltration patterns via pluggable detectors
-- **Sign** and **verify** policies with Ed25519 keys (Rust SDK, feature-gated, and the `h2h` CLI; not yet ported to TypeScript, Python, or Go)
-- **Observe** evaluation events with structured logging and metrics collectors (TypeScript and Python only)
+- **Sign** and **verify** policies with Ed25519 keys in all four SDKs and the `h2h` CLI (Rust behind the `signing` feature, Python behind the `signing` extra), with verification on load
+- **Observe** evaluation events with structured logging and metrics collectors in all four SDKs
 
-The spec covers 10 core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection) and three extension modules (posture, origins, detection). A CLI tool (`hushspec`) provides 10 subcommands for validation, testing, linting, diffing, formatting, scaffolding, signing, verification, key generation, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI, and MCP (TypeScript only). SDKs are not yet published to package registries.
+The spec covers 10 core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection) and three extension modules (posture, origins, detection). The `h2h` CLI provides 22 subcommands spanning validation, hashing, testing, linting, diffing, formatting, scaffolding, governance audit, signing, verification, key generation, bundles, log and receipt verification, compliance reporting, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI and MCP in TypeScript, Python and Go, plus Vercel AI SDK and LangChain in TypeScript and LangChain and CrewAI in Python. SDKs are not yet published to package registries.
 
 ### Where We Need to Be
 
 Production adoption requires HushSpec to be a complete, trusted, and ergonomic security framework:
 
-- Every SDK must evaluate policies identically (Level 3 conformance across all four languages) -- **DONE**
+- Every SDK must evaluate policies identically (Level 3 across all four languages; all four now reach Level 5) -- **DONE**
 - Operators must have audit trails that satisfy SOC2, HIPAA, PCI-DSS, and FedRAMP requirements
 - Policy authors must have CLI tooling for validation, testing, linting, and diffing -- **DONE**
-- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **Partial** (HTTPS loading with ETag caching ships in all four SDKs; file-watching/polling hot reload ships in TypeScript only; no S3, GCS, Azure, Vault, or git loader exists in any SDK)
+- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **Partial** (HTTPS loading with ETag caching ships in Rust, behind the `http` feature, and TypeScript; Python and Go ship no HTTP client and reject an `https:` reference outright. File-watching and polling hot reload, and signature verification on load, ship in all four. No S3, GCS, Azure, Vault, or git loader exists in any SDK)
 - Detection extensions must have working implementations, not just schema fields -- **DONE**
 - Enterprise deployments must have governance, signing, RBAC, and emergency override capabilities -- **Partial** (Ed25519 signing implemented in the Rust SDK and `h2h` CLI only; panic mode done in Rust and Go; separation-of-duties and RBAC/OIDC/LDAP integration not implemented)
 - Regulated industries must have vetted, compliance-mapped policy templates to start from
@@ -475,48 +522,48 @@ HushSpec is **production-ready** when all of the following criteria are met:
 ### Specification
 
 - [ ] v1.0 specification published with stability guarantee (no breaking changes without major version bump)
-- [x] All 10 rule blocks and 3 extensions have normative prose with test vectors
+- [x] All 12 rule blocks and 3 extensions have normative prose with test vectors
 - [x] Decision receipt format is part of the specification artifact set
-- [ ] Conditional rules (`when` field) are specified and schema-defined
+- [x] Conditional rules (`when` field) are specified and schema-defined (core spec 3.13; `time_window`, `context`, `all_of`/`any_of`/`not`, `capability` (D19) and `rate` (D19), all in `hushspec-core.v0.schema.json` and implemented in four SDKs)
 
 ### SDKs
 
-- [x] All four SDKs (Rust, TypeScript, Python, Go) at Level 3 conformance (parse, validate, merge, resolve, evaluate)
+- [x] All four SDKs (Rust, TypeScript, Python, Go) at Level 3 conformance (parse, validate, merge, resolve, evaluate) -- and now at **Level 5** (Attested): receipts, canonical hashing, signing, verify-on-load, the hash-linked log, receipt signing and bundle verification
 - [x] Cross-SDK conformance verified by shared fixture corpus (100% pass rate)
 - [x] Audit trail (decision receipts) implemented in all SDKs
 - [x] Detection pipeline functional in all SDKs with regex-based reference detectors
-- [ ] Published to package registries (crates.io, npm, PyPI, pkg.go.dev)
+- [ ] Published to package registries (crates.io, npm, PyPI, pkg.go.dev) -- `publish.yml` is written and `cargo package` / `npm pack` / `python -m build` succeed, but no `v0.x` tag has been cut, so nothing is published yet
 
 ### CLI
 
-- [ ] `hushspec` CLI binary available via Homebrew, npm, cargo install, and pre-built binaries
-- [x] Six subcommands operational: `validate`, `test`, `lint`, `diff`, `fmt`, `init`
-- [x] `hushspec sign` and `hushspec verify` for policy signing workflows
+- [ ] `h2h` CLI binary available via Homebrew, npm, cargo install, and pre-built binaries -- `release.yml`, the tap formula, the npm shim and the Dockerfile exist, but they first produce artifacts on the first tagged release; `cargo install hushspec-cli` from source works today
+- [x] Six subcommands operational: `validate`, `test`, `lint`, `diff`, `fmt`, `init` -- 22 ship today (adding `resolve`, `hash`, `eval`, `explain`, `audit`, `schema`, `sign`, `verify`, `keygen`, `bundle`, `log`, `receipts`, `report`, `panic`, `completions`, `version`)
+- [x] `h2h sign` and `h2h verify` for policy signing workflows (signature format 0.2 over the resolved policy's content hash, with keyrings, expiry and rollback protection)
 
 ### Runtime Integration
 
-- [ ] `HushGuard` middleware pattern implemented in all SDKs (done in TypeScript and Python; not yet in Rust or Go)
-- [x] At least 3 framework adapters shipped (Claude/Anthropic, OpenAI, MCP) (TypeScript)
-- [ ] Remote policy loading from HTTPS and at least one cloud storage provider (HTTPS only; no S3/GCS/Azure/Vault/git loader exists in any SDK)
+- [x] `HushGuard` middleware pattern implemented in all SDKs (Go spells the type `Guard`), with enforcement modes, per-rule overrides, the warn confirmation channel, the refused state and policy-event records
+- [x] At least 3 framework adapters shipped (Claude/Anthropic, OpenAI, MCP) in TypeScript, Python and Go, plus Vercel AI SDK and LangChain.js in TypeScript and LangChain and CrewAI in Python
+- [ ] Remote policy loading from HTTPS and at least one cloud storage provider -- HTTPS only, and only in Rust (`http` feature) and TypeScript; no S3, GCS, Azure, Vault or git loader exists in any SDK
 
 ### Security and Governance
 
-- [ ] Policy signing with Ed25519 functional in all SDKs (Rust SDK, feature-gated, and `h2h` CLI only; not yet in TypeScript, Python, or Go)
-- [x] Emergency override / panic mode specified and reference implementation available (Rust, Go)
+- [x] Policy signing with Ed25519 functional in all SDKs -- all four are conforming verifiers over all 16 `fixtures/signing/vectors.yaml` cases, verify on load, and sign and verify receipts. Rust needs the `signing` Cargo feature; Python needs the `signing` extra, without which the entry points raise `SigningUnavailable` rather than reporting an unverified signature as good
+- [x] Emergency override / panic mode specified and reference implementation available in all four SDKs, with a sentinel file that fails closed on an I/O error
 - [x] ReDoS protection enforced during validation in all SDKs
-- [ ] Separation of duties (author != approver) enforceable via tooling
+- [x] Separation of duties (author != approver) enforceable via tooling -- `GOV_SOD_VIOLATION` from `h2h audit` (with `--strict` making it fatal), alongside `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER` and `GOV_SELF_SUPERSEDES`; `h2h sign` refuses a policy that is not `approved` or `deployed` without `--allow-unapproved`
 
 ### Policy Library
 
 - [x] At least 5 vertical policies published (HIPAA, SOC2, PCI-DSS, FedRAMP, general-purpose) (in `library/`)
-- [ ] Each vertical policy includes compliance mapping documentation
-- [ ] All library policies pass validation and have evaluation test suites (validation: yes; evaluation test suites: none exist -- `fixtures/library/` is absent; tracked in RFC 09 P3-03)
+- [x] Each vertical policy includes compliance mapping documentation -- all eight carry machine-readable `metadata.controls[]` entries naming frameworks registered in `spec/registries/frameworks.yaml`, checked by lint `L011`-`L013` and surfaced by `h2h audit --controls`
+- [x] All library policies pass validation and have evaluation test suites -- `fixtures/library/<vertical>/<name>.test.yaml`, 198 control-tagged cases across the eight policies, run in CI with `--fail-on-uncovered` so every declared rule path is exercised
 
 ### Observability
 
 - [x] Decision receipt generation with <10 microsecond overhead
-- [x] At least 2 receipt sinks available (file, console)
-- [ ] Prometheus metric definitions published with recording rules and alert examples
+- [x] At least 2 receipt sinks available -- seven in every SDK (`FileReceiptSink`, `StderrReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`, `NullSink`, `ChainedFileSink`) plus an OTLP/HTTP sink
+- [ ] Prometheus metric definitions published with recording rules and alert examples -- the four series are emitted by every SDK's `MetricsCollector` and documented in `docs/src/guides/runtime-integration.md`, but no recording rules or alert examples are published
 
 ---
 
