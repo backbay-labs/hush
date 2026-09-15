@@ -219,7 +219,7 @@ guard.enforce({"type": "tool_call", "target": "bash"})  # raises HushSpecDenied 
 
 ## CLI Tool
 
-The `h2h` CLI covers the common policy workflow: validate, test, evaluate and explain single actions, lint, diff, format, initialize, sign, verify, and trigger panic mode.
+The `h2h` CLI covers the common policy workflow: validate, resolve, test, evaluate and explain single actions, lint, diff, format, initialize, sign, verify, print schemas, generate shell completions, and trigger panic mode.
 
 ```bash
 # Validate a policy against the HushSpec schema
@@ -241,8 +241,21 @@ h2h lint policy.yaml --fix
 # Compare two policies and show effective decision changes
 h2h diff old.yaml new.yaml
 
+# Fail CI when a change can turn a deny into an allow or warn
+h2h diff main.yaml pr.yaml --fail-on relaxed
+
+# Print a policy with its extends chain resolved and merged
+h2h resolve policy.yaml
+
 # Format policy files canonically
 h2h fmt policy.yaml
+
+# validate, lint and fmt also read stdin
+cat policy.yaml | h2h validate -
+
+# Print a published JSON Schema (embedded in the binary)
+h2h schema core
+h2h schema --list
 
 # Scaffold a new policy project
 h2h init --preset default
@@ -259,7 +272,16 @@ h2h keygen
 # Emergency override (deny-all kill switch)
 h2h panic activate --sentinel /tmp/hushspec.panic
 h2h panic deactivate --sentinel /tmp/hushspec.panic
+
+# Shell completions and build/spec provenance
+h2h completions zsh > "${fpath[1]}/_h2h"
+h2h version --format json
 ```
+
+Every subcommand supports `--format json`, and exit codes are uniform: `0`
+success, `1` policy failure, `2` input or usage failure (`4` for a `warn`
+decision from `eval`/`explain`). Full flag and exit-code tables live in the
+[CLI reference](docs/src/reference/cli.md).
 
 See [Installation](#installation) above for install options — Homebrew, npm, Cargo, or prebuilt binaries.
 
