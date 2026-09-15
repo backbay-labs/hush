@@ -14,12 +14,14 @@ sys.path.insert(0, str(ROOT / "packages" / "python"))
 
 from hushspec import parse, validate  # noqa: E402
 from hushspec.conditions import RuntimeContext  # noqa: E402
+from hushspec.detection import evaluate_with_detection  # noqa: E402
 from hushspec.evaluate import (  # noqa: E402
     EvaluationAction,
     OriginContext,
     PostureContext,
-    evaluate,
+    evaluate_traced,
 )
+from hushspec.resolve import resolve  # noqa: E402
 
 
 def build_action(data: dict) -> EvaluationAction:
@@ -58,7 +60,23 @@ def build_action(data: dict) -> EvaluationAction:
     )
 
 
-def result_to_dict(result) -> dict:
+def trace_to_list(trace) -> list[dict]:
+    out: list[dict] = []
+    for entry in trace:
+        normalized = {
+            "rule_block": entry.rule_block,
+            "outcome": entry.outcome.value,
+            "evaluated": entry.evaluated,
+        }
+        if entry.matched_rule is not None:
+            normalized["matched_rule"] = entry.matched_rule
+        if entry.reason is not None:
+            normalized["reason"] = entry.reason
+        out.append(normalized)
+    return out
+
+
+def result_to_dict(result, trace) -> dict:
     out = {"decision": result.decision.value}
     if result.matched_rule is not None:
         out["matched_rule"] = result.matched_rule
@@ -68,6 +86,9 @@ def result_to_dict(result) -> dict:
         out["origin_profile"] = result.origin_profile
     if result.posture is not None:
         out["posture"] = {"current": result.posture.current, "next": result.posture.next}
+    rule_trace = trace_to_list(trace)
+    if rule_trace:
+        out["rule_trace"] = rule_trace
     return out
 
 
@@ -92,15 +113,29 @@ def main() -> int:
         if not ok:
             rejection = {"status": "rejected", "phase": "parse", "message": str(parsed)}
         else:
-            validation = validate(parsed)
-            if not validation.is_valid:
-                rejection = {
-                    "status": "rejected",
-                    "phase": "validate",
-                    "message": str(validation.errors[0]),
-                }
-            else:
-                spec = parsed
+            # parse -> resolve -> validate -> evaluate, the same order the Rust
+            # oracle uses. The generator only emits `builtin:` references, which
+            # the default composite loader serves from the SDK's embedded rulesets.
+            if parsed.extends is not None:
+                resolved_ok, resolved = resolve(parsed)
+                if not resolved_ok:
+                    rejection = {
+                        "status": "rejected",
+                        "phase": "resolve",
+                        "message": str(resolved),
+                    }
+                else:
+                    parsed = resolved
+            if rejection is None:
+                validation = validate(parsed)
+                if not validation.is_valid:
+                    rejection = {
+                        "status": "rejected",
+                        "phase": "validate",
+                        "message": str(validation.errors[0]),
+                    }
+                else:
+                    spec = parsed
 
         for case in group["actions"]:
             key = f"{group['id']}/{case['id']}"
@@ -108,8 +143,16 @@ def main() -> int:
                 results[key] = rejection
                 continue
             try:
-                result = evaluate(spec, build_action(case["action"]))
-                results[key] = {"status": "ok", "result": result_to_dict(result)}
+                action = build_action(case["action"])
+                # Detection-aware result plus the base evaluator's trace:
+                # detection never re-runs the rule blocks, so the traced
+                # evaluation's trace is the trace behind the final verdict.
+                traced = evaluate_traced(spec, action, None, {})
+                result = evaluate_with_detection(spec, action).evaluation
+                results[key] = {
+                    "status": "ok",
+                    "result": result_to_dict(result, traced.trace),
+                }
             except Exception as error:  # noqa: BLE001 - report per-case, never crash
                 results[key] = {"status": "error", "message": str(error)}
 
