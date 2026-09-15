@@ -2,9 +2,9 @@ use colored::Colorize;
 use hushspec::log::{ChainedFileSink, PolicyEvent};
 use hushspec::receipt::{DetectorEvaluation, RuleOutcome, RuleTraceEntry};
 use hushspec::{
-    Actor, AuditConfig, AuditContext, Decision, DecisionReceipt, EnforcementMode,
-    EnforcementSummary, EvaluationAction, HushSpec, PolicySummary, Resolution, ResolveError,
-    ResolveOptions, evaluate_audited, policy_summary, unverified_policy_receipt, validate,
+    Actor, AuditConfig, AuditContext, CompiledPolicy, Decision, DecisionReceipt, EnforcementMode,
+    EnforcementSummary, EvaluationAction, HushSpec, Policy, PolicyError, PolicySummary, Resolution,
+    ResolveError, ResolveOptions, policy_summary, unverified_policy_receipt,
 };
 
 const KNOWN_ACTION_TYPES: &[&str] = &[
@@ -183,7 +183,7 @@ pub fn run(args: EvalArgs) -> i32 {
 
     let ctx = audit_context(&args);
 
-    let policy = match load_policy(&args.policy, &options) {
+    let policy = match load_policy(&args.policy, options) {
         Ok(policy) => policy,
         Err(LoadFailure::Unverified { summary, message }) => {
             // Signing spec 6.5: refuse to evaluate against an unverified
@@ -204,8 +204,18 @@ pub fn run(args: EvalArgs) -> i32 {
         }
     };
 
-    let receipt = evaluate_audited(&policy.resolution, &action, &AuditConfig::default(), &ctx);
-    if let Err(code) = record_log(&args, Some(&policy.resolution), &receipt) {
+    let receipt = match policy
+        .compiled
+        .evaluate_audited(&action, &AuditConfig::default(), &ctx)
+    {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            eprintln!("{} {error}", "error:".red());
+            return 2;
+        }
+    };
+    let resolution = policy.compiled.resolution().ok();
+    if let Err(code) = record_log(&args, resolution, &receipt) {
         return code;
     }
     if let Err(code) = emit(&args, &receipt, Some(&policy)) {
@@ -290,9 +300,9 @@ pub fn run_explain(mut args: EvalArgs) -> i32 {
     run(args)
 }
 
-/// A resolved, validated policy plus display metadata.
+/// A resolved, validated, compiled policy plus display metadata.
 struct LoadedPolicy {
-    resolution: Resolution,
+    compiled: CompiledPolicy,
     extends: Option<String>,
     source: String,
 }
@@ -307,51 +317,47 @@ enum LoadFailure {
     Other(String),
 }
 
-/// Load a policy from a builtin reference or a filesystem path, resolve
-/// its extends chain with verify-on-load, and validate the resolved document.
-fn load_policy(reference: &str, options: &ResolveOptions) -> Result<LoadedPolicy, LoadFailure> {
-    if let Some(yaml) = hushspec::load_builtin(reference) {
-        let unresolved = HushSpec::parse(yaml).map_err(|e| {
-            LoadFailure::Other(format!("failed to parse builtin '{reference}': {e}"))
-        })?;
-        let extends = unresolved.extends.clone();
+/// Load a policy from a builtin reference or a filesystem path and run the
+/// whole pipeline -- resolve with verify-on-load, validate, compile -- through
+/// the [`Policy`] façade, so `h2h eval` takes exactly the path the SDK
+/// documents.
+fn load_policy(reference: &str, options: ResolveOptions) -> Result<LoadedPolicy, LoadFailure> {
+    let (policy, source) = if let Some(yaml) = hushspec::load_builtin(reference) {
         let source = if reference.starts_with("builtin:") {
             reference.to_string()
         } else {
             format!("builtin:{reference}")
         };
-        let loader = hushspec::create_composite_loader();
-        let resolution =
-            hushspec::resolve_with_options(&unresolved, Some(&source), &loader, options)
-                .map_err(|e| map_resolve_error(e, &unresolved, &source))?;
-        return validated(LoadedPolicy {
-            resolution,
-            extends,
-            source,
-        });
-    }
+        let policy = Policy::from_str(yaml)
+            .map_err(|e| LoadFailure::Other(format!("failed to parse builtin '{reference}': {e}")))?
+            .with_source(source.clone());
+        (policy, source)
+    } else {
+        let path = std::path::Path::new(reference);
+        if !path.exists() {
+            return Err(LoadFailure::Other(format!("file not found: {reference}")));
+        }
+        let policy = Policy::from_path(path).map_err(|e| LoadFailure::Other(e.to_string()))?;
+        (policy, reference.to_string())
+    };
 
-    let path = std::path::Path::new(reference);
-    if !path.exists() {
-        return Err(LoadFailure::Other(format!("file not found: {reference}")));
-    }
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| LoadFailure::Other(format!("failed to read {reference}: {e}")))?;
-    let unresolved = HushSpec::parse(&content)
-        .map_err(|e| LoadFailure::Other(format!("failed to parse {reference}: {e}")))?;
-    let extends = unresolved.extends.clone();
-    let resolution = hushspec::resolve_path_with_options(path, options)
-        .map_err(|e| map_resolve_error(e, &unresolved, reference))?;
-    validated(LoadedPolicy {
-        resolution,
+    let extends = policy.spec().extends.clone();
+    // Kept for the unverified-policy receipt, which reports on the leaf.
+    let leaf = policy.spec().clone();
+    let compiled = policy
+        .resolve(options)
+        .compile()
+        .map_err(|error| map_policy_error(error, &leaf, &source))?;
+    Ok(LoadedPolicy {
+        compiled,
         extends,
-        source: reference.to_string(),
+        source,
     })
 }
 
-fn map_resolve_error(error: ResolveError, leaf: &HushSpec, source: &str) -> LoadFailure {
+fn map_policy_error(error: PolicyError, leaf: &HushSpec, source: &str) -> LoadFailure {
     match error {
-        ResolveError::SignatureRequired { document, status } => {
+        PolicyError::Resolve(ResolveError::SignatureRequired { document, status }) => {
             match hushspec::own_content_hash(leaf, source) {
                 Ok(content_hash) => LoadFailure::Unverified {
                     summary: Box::new(PolicySummary {
@@ -374,20 +380,11 @@ fn map_resolve_error(error: ResolveError, leaf: &HushSpec, source: &str) -> Load
                 Err(e) => LoadFailure::Other(format!("failed to resolve {source}: {e}")),
             }
         }
-        other => LoadFailure::Other(format!("failed to resolve {source}: {other}")),
+        PolicyError::Resolve(other) => {
+            LoadFailure::Other(format!("failed to resolve {source}: {other}"))
+        }
+        other => LoadFailure::Other(other.to_string()),
     }
-}
-
-fn validated(policy: LoadedPolicy) -> Result<LoadedPolicy, LoadFailure> {
-    let validation = validate(&policy.resolution.spec);
-    if !validation.is_valid() {
-        let errors: Vec<String> = validation.errors.iter().map(|e| e.to_string()).collect();
-        return Err(LoadFailure::Other(format!(
-            "policy failed validation: {}",
-            errors.join(", ")
-        )));
-    }
-    Ok(policy)
 }
 
 fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {

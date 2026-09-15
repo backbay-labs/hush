@@ -3,27 +3,29 @@
 //!
 //! # Getting started
 //!
-//! [`CompiledPolicy`] is the evaluation entry point: compile a resolved,
-//! validated document once and evaluate many actions against it, so each
-//! action costs only the matching, never the pattern compilation.
+//! [`Policy`] is the recommended entry point. It runs the whole pipeline --
+//! `load → resolve → verify → validate → compile` -- so no caller has to
+//! remember the order, and hands back a [`CompiledPolicy`] with every regex,
+//! glob and host pattern already compiled and its [`Resolution`] (chain,
+//! signature status, content hash) attached:
 //!
 //! ```
-//! use hushspec::{CompiledPolicy, EvaluationAction, HushSpec};
+//! use hushspec::{EvaluationAction, Policy};
 //!
-//! let spec = HushSpec::parse("hushspec: \"0.1.0\"\n")?;
-//! let policy = CompiledPolicy::compile(&spec)?;
+//! let policy = Policy::from_str("hushspec: \"0.1.0\"\n")?.compile()?;
 //! let action = EvaluationAction {
 //!     action_type: "tool_call".to_string(),
 //!     target: Some("read_file".to_string()),
 //!     ..Default::default()
 //! };
 //! let decision = policy.evaluate(&action);
-//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! # Ok::<(), hushspec::PolicyError>(())
 //! ```
 //!
-//! The free functions ([`evaluate`], [`evaluate_with_detection`],
-//! [`evaluate_audited`], ...) stay available and behave identically, but
-//! compile the policy on every call.
+//! Compile once, evaluate many: evaluation against a [`CompiledPolicy`] costs
+//! only the matching, never the pattern compilation. The free functions
+//! ([`evaluate`], [`evaluate_with_detection`], [`evaluate_audited`], ...) stay
+//! available and behave identically, but compile the policy on every call.
 //!
 //! Panic mode is carried by a [`PanicState`] handle, not a process global, so
 //! a multi-tenant host can arm one tenant's kill switch alone. A policy
@@ -46,6 +48,7 @@ pub mod governance;
 pub mod log;
 pub mod merge;
 pub mod panic;
+pub mod policy;
 pub mod receipt;
 pub mod regex_profile;
 pub mod resolve;
@@ -92,6 +95,7 @@ pub use panic::{
     PanicState, activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active,
     panic_policy,
 };
+pub use policy::{Policy, PolicyError};
 pub use receipt::{
     ActionSummary, Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode,
     EnforcementOutcome, EnforcementSummary, POLICY_UNVERIFIED_RULE, PolicySummary, RECEIPT_VERSION,
