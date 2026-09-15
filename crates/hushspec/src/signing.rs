@@ -1185,7 +1185,7 @@ pub fn verify_policy_at(
 }
 
 // --------------------------------------------------------------------------
-// Receipt signing (RFC 09 P2-06, receipt spec 6)
+// Receipt signing (receipt spec 6)
 // --------------------------------------------------------------------------
 
 /// A receipt together with a signature over its receipt hash.

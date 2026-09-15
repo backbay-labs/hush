@@ -13,19 +13,17 @@
 //!
 //! Net effect: a `std::net::TcpListener` bound to `127.0.0.1` (or any other
 //! loopback/private address, which is the only kind of address a same-host
-//! test listener can bind to without root/network namespace tricks) is
+//! test listener can bind to without root or network-namespace tricks) is
 //! unreachable from `load_from_https` -- `validate_url` fails closed on the
-//! private-IP check before a connection is ever attempted. Per the work
-//! order, the loader itself is not modified to add an escape hatch (that is
-//! a product decision outside this task's scope, and doing so would weaken
-//! the SSRF guard for every caller, not just tests). So this file covers
-//! what the public API surface allows without a live server: SSRF/URL
-//! rejection behavior (offline -- IP literals resolve locally, no network
-//! access required) and `HttpLoaderConfig` default-value validation.
+//! private-IP check before a connection is ever attempted. Adding an escape
+//! hatch for tests would weaken the SSRF guard for every caller, so this file
+//! covers what the public API allows without a live server: SSRF/URL
+//! rejection (offline -- IP literals resolve locally, no network access
+//! required) and `HttpLoaderConfig` default-value validation.
 //!
 //! ETag caching returning the cached body on 304, size-limit rejection,
-//! non-2xx -> error, and content-hash-mismatch -> error all require a
-//! reachable server and so are blocked by the above for the reasons stated.
+//! non-2xx -> error, and content-hash-mismatch -> error all need a reachable
+//! server, and so are covered by the conformance fixtures instead.
 
 #![cfg(feature = "http")]
 

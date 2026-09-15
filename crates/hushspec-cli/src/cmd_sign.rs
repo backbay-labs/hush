@@ -3,8 +3,9 @@
 //! The signature covers the content hash of the **resolved** policy, so the
 //! policy's `extends` chain is resolved and validated before anything is
 //! signed: a signer that cannot resolve the chain must refuse to sign
-//! (signing spec 3). The lifecycle gate from RFC 09 P2-11 runs first, because
-//! a signature is a durable attestation that this document was approved.
+//! (signing spec 3). The `metadata.lifecycle_state` gate (core spec 2.5) runs
+//! first, because a signature is a durable attestation that this document was
+//! approved.
 
 use colored::Colorize;
 use hushspec::signing::{Envelope, SignOptions, SigningError};

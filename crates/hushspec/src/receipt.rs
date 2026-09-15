@@ -226,7 +226,7 @@ pub struct EnforcementSummary {
 impl EnforcementSummary {
     /// The disposition implied by a decision when there is no enforcement
     /// point to say otherwise: an allow proceeds; a warn with no confirmation
-    /// channel is a deny (core spec D16); under monitor mode a warn or deny
+    /// channel is a deny (core spec 6); under monitor mode a warn or deny
     /// proceeds and is recorded as `would_block`.
     #[must_use]
     pub fn implied(decision: Decision, mode: EnforcementMode) -> Self {

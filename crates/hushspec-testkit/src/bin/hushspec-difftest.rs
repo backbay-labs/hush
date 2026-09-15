@@ -33,7 +33,7 @@ struct Cli {
     #[arg(long)]
     max_seconds: Option<u64>,
 
-    /// SDKs to compare against the Rust oracle (repeatable; default: all three)
+    /// SDKs to compare against the reference (repeatable; default: all three)
     #[arg(long = "sdk", value_parser = ["typescript", "python", "go"])]
     sdks: Vec<String>,
 

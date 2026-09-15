@@ -3056,7 +3056,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-report.v0.schema.json",
   "title": "HushSpec Evidence Report v0.1",
-  "description": "An aggregation over decision receipts and policy-in-effect events for one window (RFC 09 P3-01, `h2h report --format json`). A report is derived evidence: every number is counted from recorded receipts (spec/hushspec-receipt.md) and never re-evaluated, so a report cannot disagree with the receipts it summarizes. When the inputs were hash-linked logs (spec/hushspec-log.md), `chain_verified` says whether the chain verified; a report over a broken chain is only produced when the operator asked for one, and is stamped false.",
+  "description": "An aggregation over decision receipts and policy-in-effect events for one window (`h2h report --format json`). A report is derived evidence: every number is counted from recorded receipts (spec/hushspec-receipt.md) and never re-evaluated, so a report cannot disagree with the receipts it summarizes. When the inputs were hash-linked logs (spec/hushspec-log.md), `chain_verified` says whether the chain verified; a report over a broken chain is only produced when the operator asked for one, and is stamped false.",
   "type": "object",
   "required": [
     "report_version",

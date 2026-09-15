@@ -1297,7 +1297,8 @@ fn evaluate_computer_use(rule: &ComputerUseRule, target: &str) -> BlockDecision 
             Some("rules.computer_use.mode"),
             Some("observe mode does not block unlisted actions"),
         ),
-        // guardrail and fail_closed have identical reference semantics (D9).
+        // `fail_closed` is an alias of `guardrail`; both deny unlisted
+        // actions (core spec 3.8).
         ComputerUseMode::Guardrail | ComputerUseMode::FailClosed => BlockDecision::deny(
             "rules.computer_use.mode",
             "unlisted computer-use action is denied",
@@ -1577,8 +1578,8 @@ fn resolve_posture(
 }
 
 fn next_posture_state(posture: &PostureExtension, current: &str, signal: &str) -> Option<String> {
-    // D18 (posture spec 5.3): a transition whose `from` names the current
-    // state outranks one whose `from` is `"*"`; among equals, document order.
+    // Posture spec 5.3: a transition whose `from` names the current state
+    // outranks one whose `from` is `"*"`; among equals, document order wins.
     let matching = |wildcard: bool| {
         posture.transitions.iter().find_map(|transition| {
             let from_matches = if wildcard {

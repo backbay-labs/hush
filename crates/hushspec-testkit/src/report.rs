@@ -254,7 +254,7 @@ pub fn build(
 #[must_use]
 pub fn reference_implementation() -> Implementation {
     Implementation {
-        name: "hushspec (Rust reference implementation)".to_string(),
+        name: "hushspec (reference implementation)".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         language: "rust".to_string(),
     }

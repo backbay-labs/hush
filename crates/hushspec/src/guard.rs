@@ -27,7 +27,7 @@
 //! # Fail-closed
 //!
 //! - A `warn` with no [`HushGuardBuilder::on_warn`] handler is a deny (core
-//!   spec D16). There is no "warn means proceed" default.
+//!   spec 6). There is no "warn means proceed" default.
 //! - A policy that did not verify under `require_signature` puts the guard in
 //!   the [refused](HushGuard::refused) state: every action is denied with
 //!   `__hushspec_policy_unverified__` and an
@@ -391,7 +391,7 @@ impl HushGuardBuilder {
     /// The confirmation channel for `warn`: return `true` to let the action
     /// through as [`EnforcementOutcome::Confirmed`].
     ///
-    /// Without one, a `warn` is a deny (core spec D16).
+    /// Without one, a `warn` is a deny (core spec 6).
     #[must_use]
     pub fn on_warn(
         mut self,
@@ -710,7 +710,7 @@ impl HushGuard {
                 Some(handler) if handler(&evaluated.result, action) => {
                     (false, EnforcementOutcome::Confirmed)
                 }
-                // Core spec D16: with no confirmation channel, a warn denies.
+                // Core spec 6: with no confirmation channel, a warn denies.
                 _ => (true, EnforcementOutcome::Blocked),
             },
             Decision::Deny if mode == EnforcementMode::Monitor => {
@@ -1021,7 +1021,7 @@ rules:
 
     fn policy(yaml: &str) -> Policy {
         // A scoped latch: the panic tests arm the process-wide one and the lib
-        // test binary runs them concurrently with these.
+        // test binary runs them in parallel with these.
         Policy::from_str(yaml)
             .expect("parses")
             .with_panic_state(PanicState::new())
@@ -1088,7 +1088,7 @@ rules:
         let guard = guard(WARN_POLICY);
         let decision = guard.check(&action("tool_call", "deploy"));
         assert_eq!(decision.result.decision, Decision::Warn);
-        assert!(!decision.allowed(), "core spec D16: warn fails closed");
+        assert!(!decision.allowed(), "core spec 6: warn fails closed");
         assert_eq!(decision.enforcement.outcome, EnforcementOutcome::Blocked);
     }
 
@@ -1627,7 +1627,7 @@ rules:
     }
 
     #[test]
-    fn concurrent_swaps_record_a_consistent_chain_of_policy_events() {
+    fn parallel_swaps_record_a_consistent_chain_of_policy_events() {
         let sink = Arc::new(RecordingSink::default());
         let guard = Arc::new(
             HushGuard::builder()

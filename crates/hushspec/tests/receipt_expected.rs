@@ -1,4 +1,4 @@
-//! Expected receipts for the ports (RFC 09 P2-04).
+//! Expected receipts shared by every SDK (receipt spec 8).
 //!
 //! For every case of every shared evaluation fixture, the Rust SDK produces a
 //! receipt under fixed inputs (see `fixtures/receipts/expected/README.md`).

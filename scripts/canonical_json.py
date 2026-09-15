@@ -7,7 +7,7 @@ fields removed) followed by RFC 8785 (JCS) serialization and a SHA-256
 content digest.
 
 This script is the reference that generates the vectors under
-fixtures/core/hash/. SDK implementations (P2-02) must reproduce its output
+fixtures/core/hash/. SDK implementations must reproduce its output
 byte-for-byte for every vector.
 
 Usage:

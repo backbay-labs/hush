@@ -18,7 +18,7 @@ pub enum SinkError {
 pub trait ReceiptSink: Send + Sync {
     fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError>;
 
-    /// Record a policy-in-effect event (RFC 09 P2-10). Sinks that only carry
+    /// Record a policy-in-effect event (log spec 6). Sinks that only carry
     /// receipts ignore it; the hash-linked log writes it as an entry.
     fn record_policy_event(&self, _event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
         Ok(())

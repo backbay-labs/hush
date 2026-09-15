@@ -106,16 +106,16 @@ fn file_sink_appends_not_overwrites() {
 }
 
 #[test]
-fn file_sink_handles_concurrent_writers() {
+fn file_sink_writes_whole_lines_under_parallel_writers() {
     // 8 threads x 200 receipts through one shared sink. If `FileReceiptSink`
-    // ever interleaves writes (e.g. a future refactor batches multiple
-    // `write()` syscalls per `send()`), lines get corrupted (a line that
+    // ever interleaves writes (say a future refactor batches several
+    // `write()` syscalls per `send()`), lines get corrupted: a line that
     // fails to parse as JSON, or a line count short of 1600 because two
-    // writers' bytes landed in the same line).
+    // writers' bytes landed in the same line.
     const THREADS: usize = 8;
     const PER_THREAD: usize = 200;
 
-    let dir = std::env::temp_dir().join(format!("hushspec_sink_concurrent_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("hushspec_sink_parallel_{}", std::process::id()));
     let path = dir.join("receipts.jsonl");
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -133,7 +133,7 @@ fn file_sink_handles_concurrent_writers() {
                     let mut receipt = make_receipt(decision);
                     receipt.receipt_id = format!("t{thread_id}-r{i}");
                     sink.send(&receipt)
-                        .expect("concurrent send should not error");
+                        .expect("send from a writer thread should not error");
                 }
             })
         })
@@ -149,7 +149,7 @@ fn file_sink_handles_concurrent_writers() {
         lines.len(),
         THREADS * PER_THREAD,
         "expected {} lines from {THREADS} threads x {PER_THREAD} receipts; \
-         a lower count means concurrent writes interleaved and merged lines",
+         a lower count means writes interleaved and merged lines",
         THREADS * PER_THREAD
     );
 

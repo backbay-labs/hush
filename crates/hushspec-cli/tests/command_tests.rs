@@ -1,6 +1,6 @@
-//! Integration coverage for the commands and flags added by P3-05:
-//! `resolve`, `schema`, `completions`, `version`, `diff --fail-on`, stdin
-//! input for `validate`/`lint`/`fmt`, and `fmt`'s comment safety.
+//! Integration coverage for `resolve`, `schema`, `completions`, `version`,
+//! `diff --fail-on`, stdin input for `validate`/`lint`/`fmt`, and `fmt`'s
+//! comment safety.
 
 use assert_cmd::Command;
 use predicates::prelude::*;

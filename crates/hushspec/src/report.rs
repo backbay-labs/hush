@@ -1,4 +1,4 @@
-//! Evidence aggregation over receipts and policy events (RFC 09 P3-01).
+//! Evidence aggregation over receipts and policy events.
 //!
 //! A receipt proves one evaluation; a log proves a sequence of them. A
 //! *report* answers the question an auditor actually asks: over this window,

@@ -78,7 +78,7 @@ pub enum PolicyEventKind {
     Swapped,
 }
 
-/// A policy-in-effect record (RFC 09 P2-10): what was enforced from this
+/// A policy-in-effect record (log spec 6): what was enforced from this
 /// moment on, with the same identity a receipt carries.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -388,7 +388,7 @@ impl ChainedFileSink {
         Ok(entry)
     }
 
-    /// Record a policy-in-effect event (RFC 09 P2-10).
+    /// Record a policy-in-effect event (log spec 6).
     ///
     /// # Errors
     ///

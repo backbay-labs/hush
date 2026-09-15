@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // have done, enforce everything else.
             .enforcement_override("rules.secret_patterns", EnforcementMode::Monitor)
             // The confirmation channel a `warn` needs. Without one, a warn
-            // denies (core spec D16) -- so this is what turns
+            // denies (core spec 6) -- so this is what turns
             // `require_confirmation` into an actual prompt.
             .on_warn(|result, action| {
                 println!(

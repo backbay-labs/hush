@@ -7,10 +7,10 @@
 //! (`spec/registries/error-codes.yaml`) its rejection must carry, and
 //! optionally a substring the diagnostic must contain.
 //!
-//! The Rust reference asserts the code. TypeScript, Python, and Go still only
-//! have to reject the vector: their validators do not emit registry codes yet
-//! (RFC 09 P6-03), and core spec Section 8 Level 1 requires the code only of
-//! implementations that do.
+//! The reference implementation asserts the code. An implementation whose
+//! validator does not emit registry codes only has to reject the vector: core
+//! spec Section 8 Level 1 requires the code only of implementations that
+//! emit them.
 
 use std::path::{Path, PathBuf};
 
@@ -72,7 +72,7 @@ pub fn load(vector: &Path) -> Result<Option<ExpectedError>, String> {
     Ok(Some(expected))
 }
 
-/// The registered code for a refusal by the Rust reference implementation.
+/// The registered code for a refusal by the reference implementation.
 ///
 /// This mirrors, deliberately and in one place, the mapping `h2h validate`
 /// prints (`crates/hushspec-cli/src/cmd_validate.rs`): a fixture's expected

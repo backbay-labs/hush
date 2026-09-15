@@ -1,6 +1,6 @@
 #![cfg(feature = "signing")]
 
-//! Receipt signing (RFC 09 P2-06): a 0.2 envelope over the receipt hash,
+//! Receipt signing (receipt spec 6): a 0.2 envelope over the receipt hash,
 //! and the vectors under `fixtures/receipts/signed/` (regenerate with
 //! `HUSHSPEC_UPDATE_SIGNED_RECEIPTS=1`).
 

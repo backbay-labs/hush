@@ -1,4 +1,4 @@
-//! `h2h report` (RFC 09 P3-01) and the vectors under `fixtures/report/`.
+//! `h2h report` and the vectors under `fixtures/report/`.
 //!
 //! The synthetic 24-hour log is generated here, from a fixed clock, fixed
 //! actors and two real policies, so the committed vector and the committed
@@ -244,7 +244,7 @@ fn cases() -> Vec<Case> {
             mode: EnforcementMode::Enforce,
             enforcement: Some(EnforcementOutcome::Confirmed),
         },
-        // The same warn with nobody to confirm it: a block (core spec D16).
+        // The same warn with nobody to confirm it: a block (core spec 6).
         Case {
             hour: 13,
             minute: 15,

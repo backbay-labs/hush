@@ -61,7 +61,7 @@ pub fn minimize_case(
         let divergences = compare_reports(&oracle_report, &failing_report, options);
 
         // Phantom divergences are harness-fabricated case keys that were
-        // never part of the bundle this round evaluated. The oracle always
+        // never part of the bundle this round evaluated. The reference always
         // answers exactly the candidate keys `candidates_bundle` generated
         // (one per entry in `candidates`), so a key it never produced isn't
         // a shrinkable candidate at all: `candidate_index` applied to an
@@ -146,9 +146,9 @@ fn candidate_index(case_key: &str) -> Option<usize> {
     number.checked_sub(1)
 }
 
-/// Whether the Rust oracle would evaluate this candidate rather than reject
-/// it. Mirrors `diff::parse_policy` exactly -- parse, resolve `extends`,
-/// validate -- so a candidate that survives here is one the oracle can
+/// Whether the reference would evaluate this candidate rather than reject it.
+/// Applies `diff::parse_policy`'s exact sequence -- parse, resolve `extends`,
+/// validate -- so a candidate that survives here is one the reference can
 /// actually answer for, and shrinking never wanders into a bundle where every
 /// SDK merely agrees on "rejected".
 fn rust_accepts(policy: &Value) -> bool {
@@ -352,8 +352,6 @@ fn set_path(root: &mut Value, path: &[String], new_value: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Test-only imports live here so the non-test build stays warning-free
-    // (clippy runs with -D warnings).
     use crate::diff::{CaseVerdict, NormalizedResult, SdkReport};
     use std::collections::BTreeMap;
 
@@ -683,13 +681,11 @@ mod tests {
     }
 
     /// A harness that fabricates an out-of-range case key must never crash
-    /// the minimizer. Before the fix, the only divergence `compare_reports`
-    /// found each round was the phantom "g9999/a9999" key (every real key
-    /// agrees with the oracle), so the old `divergences.first()` +
-    /// `candidates[index]` selection would parse "g9999" into index 9998
-    /// and index-out-of-bounds panic against a candidates vec with only a
-    /// handful of entries. This test completing at all (whether Ok or Err)
-    /// proves the panic is gone.
+    /// the minimizer. When every real key agrees with the reference, the only
+    /// divergence left each round is the phantom "g9999/a9999" key; selecting
+    /// the candidate by parsing that group number yields index 9998 against a
+    /// candidates vector holding a handful of entries. The minimizer must
+    /// discard the key instead of indexing with it.
     #[test]
     fn minimizer_survives_a_phantom_case_key_without_panicking() {
         let policy = serde_json::json!({

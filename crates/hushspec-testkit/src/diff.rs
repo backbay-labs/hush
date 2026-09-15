@@ -67,7 +67,7 @@ pub struct NormalizedResult {
     ///
     /// Defaulted rather than required so a harness that predates the audited
     /// protocol still deserializes; its missing hash then compares as `None`
-    /// against the oracle's, which is the `Receipt` divergence a stale harness
+    /// against the reference's, which is the `Receipt` divergence a stale harness
     /// should produce rather than a silent pass. `--ignore-receipts` opts out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt_hash: Option<String>,
@@ -163,7 +163,7 @@ pub struct SdkReport {
     ///
     /// Defaulted rather than required so an older harness's report still
     /// deserializes; its empty map then compares as a missing `content_hash`
-    /// against the oracle's populated one, which is exactly the divergence a
+    /// against the reference's populated one, which is exactly the divergence a
     /// stale harness should produce rather than a silent pass.
     #[serde(default)]
     pub groups: BTreeMap<String, GroupReport>,
@@ -358,7 +358,8 @@ impl AuditInputs {
     }
 }
 
-/// The Rust reference oracle. Mirrors the testkit runner's fixture ingestion:
+/// The reference evaluator: the answer every SDK harness is compared
+/// against. Applies the testkit runner's fixture ingestion:
 /// YAML re-encode -> parse -> validate -> evaluate, and records the receipt of
 /// every case it evaluates.
 pub struct InProcessEvaluator;
@@ -540,8 +541,8 @@ pub enum DivergenceKind {
     /// the evidence, which is what an auditor keeps and a log chains.
     Receipt,
     MissingCase,
-    /// The harness answered for a case key the oracle (and therefore the
-    /// bundle) never produced. Both the oracle and every SDK evaluate the
+    /// The harness answered for a case key the reference (and therefore the
+    /// bundle) never produced. Both the reference and every SDK evaluate the
     /// identical bundle, so this should be geometrically impossible for a
     /// correct harness -- when it happens it is harness-integrity evidence,
     /// not an ordinary verdict disagreement.
@@ -590,7 +591,7 @@ pub struct ReceiptDifference {
     /// `/detection_trace/0/score`. Empty for two values of different types at
     /// the root.
     pub member: String,
-    /// The oracle's value there, absent when the member is missing entirely.
+    /// The reference's value there, absent when the member is missing entirely.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oracle: Option<serde_json::Value>,
     /// The harness's value there, absent when the member is missing entirely.
@@ -634,10 +635,10 @@ pub struct CompareOptions {
     pub ignore_receipts: bool,
 }
 
-/// Compare an SDK report against the Rust oracle. First difference wins per
-/// case; iteration follows the oracle's sorted key order. The comparison is
-/// symmetric in key coverage: a case the oracle has but the harness omits is
-/// `MissingCase`, and a case the harness answers but the oracle (and
+/// Compare an SDK report against the reference evaluator. First difference wins per
+/// case; iteration follows the reference's sorted key order. The comparison is
+/// symmetric in key coverage: a case the reference has but the harness omits is
+/// `MissingCase`, and a case the harness answers but the reference (and
 /// therefore the bundle) never produced is `PhantomCase`. Neither direction
 /// is allowed to pass silently -- a buggy harness that fabricates extra
 /// case keys must be exposed exactly like one that drops cases.
@@ -786,9 +787,9 @@ fn escape_pointer(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
 }
 
-/// Every group the oracle or the harness knows about must carry the same
+/// Every group the reference or the harness knows about must carry the same
 /// policy identity. A group the harness left out of `groups` has no hash,
-/// which diverges against the oracle's -- fail-closed, exactly like a case
+/// which diverges against the reference's -- fail-closed, exactly like a case
 /// missing from `results`. The divergence is keyed by the group id, which has
 /// no `/` and therefore is never mistaken for a case key.
 fn compare_group_reports(
@@ -995,7 +996,7 @@ pub struct DifftestConfig {
     pub actions_per_group: usize,
     pub chunks: usize,
     pub max_seconds: Option<u64>,
-    /// Subset of ["typescript", "python", "go"]; the Rust oracle always runs.
+    /// Subset of ["typescript", "python", "go"]; Rust is always the baseline.
     pub sdks: Vec<String>,
     pub minimize: bool,
     pub emit_fixtures_dir: Option<std::path::PathBuf>,
@@ -1300,7 +1301,7 @@ mod tests {
     /// Serializes the test that arms the process-wide panic latch against the
     /// ones that call `run_difftest`, which refuses to run while it is armed.
     /// `hushspec::activate_panic` sets one global flag and this binary runs
-    /// its tests concurrently, so without a latch of our own an unrelated
+    /// its tests in parallel, so without a latch of our own an unrelated
     /// difftest can observe the arming and fail.
     static PANIC_LATCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -1390,9 +1391,10 @@ mod tests {
         );
     }
 
-    /// The oracle must report the trace, not just the verdict: a trace-only
+    /// The reference must report the trace, not just the verdict: a trace-only
     /// disagreement is a real evaluator divergence (it is what a receipt
-    /// records), and before P1-12 it was invisible to the fuzzer.
+    /// records), so the bundle protocol carries the trace and not only the
+    /// decision.
     #[test]
     fn oracle_reports_a_rule_trace_and_trace_only_differences_diverge() {
         let bundle = CaseBundle::single_case(
@@ -1410,7 +1412,7 @@ mod tests {
         };
         assert!(
             !result.rule_trace.is_empty(),
-            "the oracle must surface the evaluator's rule trace"
+            "the reference must surface the evaluator's rule trace"
         );
 
         // Same verdict, empty trace: exactly what a harness that forgot to
@@ -1439,7 +1441,7 @@ mod tests {
         assert!(compare_reports(&report, &observed, &options).is_empty());
     }
 
-    /// The oracle reports one canonical content hash per group, over the
+    /// The reference reports one canonical content hash per group, over the
     /// *resolved* policy. A harness that reports a different hash -- or none
     /// at all -- is a divergence, because a receipt or signature made by that
     /// SDK would name a policy the others cannot recognize.
@@ -1456,7 +1458,7 @@ mod tests {
         let expected = report.groups["g0001"]
             .content_hash
             .clone()
-            .expect("the oracle hashes an accepted policy");
+            .expect("the reference hashes an accepted policy");
         assert!(expected.starts_with("sha256:"), "{expected}");
         let resolved = parse_policy(&bundle.groups[0].policy).expect("policy resolves");
         assert_eq!(expected, hushspec::content_hash(&resolved).expect("hashes"));
@@ -1539,11 +1541,11 @@ mod tests {
         let mut oracle = InProcessEvaluator;
         let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
         let CaseVerdict::Ok { result } = &report.results["g0001/a0001"] else {
-            panic!("the oracle must evaluate this case");
+            panic!("the reference must evaluate this case");
         };
         assert!(
             result.receipt_hash.is_some(),
-            "the oracle records a receipt"
+            "the reference records a receipt"
         );
 
         // Everything the pre-receipt fuzzer compared still agrees; only the
@@ -1601,7 +1603,7 @@ mod tests {
         let mut oracle = InProcessEvaluator;
         let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
         let CaseVerdict::Ok { result } = &report.results["g0001/a0001"] else {
-            panic!("the oracle must evaluate this case");
+            panic!("the reference must evaluate this case");
         };
         let mut silent = result.clone();
         silent.receipt_hash = None;
@@ -1736,12 +1738,12 @@ mod tests {
             bundle.audit = broken;
             assert!(
                 matches!(oracle.evaluate_bundle(&bundle), Err(DiffError::Config(_))),
-                "the oracle must refuse audit inputs it cannot replay"
+                "the reference must refuse audit inputs it cannot replay"
             );
         }
     }
 
-    /// A policy the oracle rejects has no identity to report, and a harness
+    /// A policy the reference rejects has no identity to report, and a harness
     /// that rejects it too must agree by also reporting none.
     #[test]
     fn a_rejected_policy_reports_no_content_hash() {
@@ -1781,13 +1783,13 @@ mod tests {
         );
     }
 
-    /// Generating a Wave 2 rule block is not the same as *reaching* it: a
+    /// Generating a 0.2 rule block is not the same as *reaching* it: a
     /// block that is disabled, gated off by a false `when`, or short-circuited
     /// by the origins/posture guards is traced as `skip` and proves nothing.
-    /// Assert the oracle actually evaluates the new blocks over a generated
+    /// Assert the reference actually evaluates the new blocks over a generated
     /// corpus, and that detection escalates at least one verdict.
     #[test]
-    fn generated_corpus_actually_reaches_the_wave_two_evaluators() {
+    fn generated_corpus_actually_reaches_the_0_2_evaluators() {
         let bundle = crate::r#gen::generate_bundle(
             5,
             &crate::r#gen::GenConfig {
@@ -2194,8 +2196,8 @@ mod tests {
 
     #[test]
     fn compare_reports_flags_a_phantom_case_not_in_the_oracle() {
-        // The oracle-driven loop above only ever walks the oracle's keys, so
-        // a harness that *adds* a case key the oracle (and therefore the
+        // The reference-driven loop above only ever walks the reference's keys, so
+        // a harness that *adds* a case key the reference (and therefore the
         // bundle) never produced would be invisible without a symmetric
         // check in the other direction. This must never be silent: it is
         // harness-integrity evidence, not an ordinary verdict disagreement.
@@ -2343,7 +2345,7 @@ mod tests {
     fn run_difftest_detects_divergence_from_a_lying_harness() {
         let _latch = panic_latch();
         // A stub "typescript" harness that always answers allow-with-no-rule,
-        // which must diverge from the oracle on the deny cases the generator
+        // which must diverge from the reference on the deny cases the generator
         // produces (and at minimum differ in matched_rule/reason on others).
         let dir = tempfile::tempdir().expect("tempdir");
         let stub = r#"#!/bin/sh
@@ -2434,7 +2436,7 @@ EOF
         let _latch = panic_latch();
         // A stub harness that answers correctly for every real case AND adds
         // one case key the bundle never produced. Even if every real answer
-        // happened to agree with the oracle, the invented key must still
+        // happened to agree with the reference, the invented key must still
         // surface as a divergence -- proof that run_difftest's comparison is
         // symmetric in key coverage, not just oracle-driven.
         let dir = tempfile::tempdir().expect("tempdir");
@@ -2507,9 +2509,9 @@ EOF
         // terminates in at most a handful of subprocess spawns.
         //
         // The policy carries an `extends` and the action a runtime `context`
-        // -- the two P1-12 fields the generator now emits and that the fixture
-        // schema cannot express verbatim (no `extends` resolver in the
-        // runners, no `context` on the schema's `Action`). Putting them in the
+        // -- the two generated fields the fixture schema cannot express
+        // verbatim (no `extends` resolver in the runners, no `context` on the
+        // schema's `Action`). Putting them in the
         // input proves the minimize -> emit -> discover -> run_conformance
         // round-trip really does flatten and relocate them, rather than
         // emitting a fixture that is quietly wrong.
@@ -2531,7 +2533,7 @@ EOF
             .expect("write bundle");
 
         // Always answers "allow" for every case actually present in the
-        // bundle it's given -- diverges from the oracle's expected "deny" on
+        // bundle it's given -- diverges from the reference's expected "deny" on
         // the input case, and (unlike a hardcoded single-key stub) still
         // answers correctly during minimization, which probes multi-group
         // candidate bundles, not just the original one-case bundle.
@@ -2634,7 +2636,7 @@ EOF
         // reports where they first differ.
         let _latch = panic_latch();
         let dir = tempfile::tempdir().expect("tempdir");
-        // No rules at all: the oracle allows with no matched rule, which the
+        // No rules at all: the reference allows with no matched rule, which the
         // stub can mirror exactly, so the receipt is the only thing left to
         // disagree about.
         let bundle = CaseBundle::single_case(
@@ -2701,7 +2703,7 @@ EOF
             .receipt_difference
             .as_ref()
             .expect("the second pass must bring the receipts back");
-        // `action` sorts first among the members the oracle's receipt has and
+        // `action` sorts first among the members the reference's receipt has and
         // the stub's does not.
         assert_eq!(difference.member, "/action");
         assert!(difference.observed.is_none());
@@ -2709,7 +2711,7 @@ EOF
         // ...and the receipts themselves land on the reported verdicts, so an
         // uploaded report holds the evidence rather than a pointer at it.
         let CaseVerdict::Ok { result } = &divergence.oracle else {
-            panic!("the oracle evaluated this case");
+            panic!("the reference evaluated this case");
         };
         assert_eq!(
             result.receipt.as_ref().expect("oracle receipt")["decision"],
@@ -2726,8 +2728,8 @@ EOF
 
     /// `PANIC_ACTIVE` is one global `AtomicBool` in the `hushspec` crate
     /// (see `hushspec::panic`), so any test that activates it risks a
-    /// window where another concurrently-running test's `evaluate()` call
-    /// observes it. `hushspec`'s own test suite accepts the same tradeoff
+    /// window where a test running in parallel observes it from its own
+    /// `evaluate()` call. `hushspec`'s own test suite accepts the same tradeoff
     /// (see the `TEST_LOCK`-guarded tests in `hushspec::panic::tests`) with
     /// no cross-crate synchronization primitive exposed for us to share, so
     /// the best available mitigation here is a `Drop` guard that

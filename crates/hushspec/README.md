@@ -2,7 +2,7 @@
 
 Agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under.
 
-`hushspec` is the Rust reference implementation of the [HushSpec](https://github.com/backbay-labs/hush) open policy format. It provides parsing, validation, evaluation, resolution, detection, signing, and audit trail capabilities for HushSpec policy documents.
+`hushspec` is the reference implementation, in Rust, of the [HushSpec](https://github.com/backbay-labs/hush) open policy format. It provides parsing, validation, evaluation, resolution, detection, signing, and audit trail capabilities for HushSpec policy documents.
 
 ## Installation
 
@@ -74,7 +74,7 @@ let guard = HushGuard::builder()
     .observer(metrics.clone())
     // Shadow one rule block while it is rolled out; enforce everything else.
     .enforcement_override("rules.secret_patterns", EnforcementMode::Monitor)
-    // Without a confirmation channel a `warn` denies (core spec D16).
+    // Without a confirmation channel a `warn` denies (core spec 6).
     .on_warn(|_result, _action| ask_the_operator())
     .build_from_policy(Policy::from_path("policy.yaml")?)?;
 

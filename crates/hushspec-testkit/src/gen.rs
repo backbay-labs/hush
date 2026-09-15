@@ -28,7 +28,7 @@ const CAPABILITY_POOL: &[&str] = &[
     "shell",
     "tool_call",
     "egress",
-    // 0.2.0 gates `custom` actions on this capability (core spec 5 / D1), so
+    // 0.2.0 gates `custom` actions on this capability (core spec 5), so
     // the pool has to contain it for `custom` actions to ever be permitted.
     "custom",
 ];
@@ -45,7 +45,7 @@ const SPACE_TYPES: &[&str] = &[
 ];
 const VISIBILITIES: &[&str] = &["private", "internal", "public", "external_shared"];
 
-/// Document versions the engine accepts (core spec 2.2 / D14): both supported
+/// Document versions the engine accepts (core spec 2.2): both supported
 /// minors and a non-zero patch level, so a version-acceptance drift in any SDK
 /// surfaces as an `Acceptance` divergence.
 const VERSION_POOL: &[&str] = &["0.1.0", "0.2.0", "0.2.3"];
@@ -246,9 +246,9 @@ fn sample_valid_policy(runner: &mut TestRunner, seed: u64, group_index: usize) -
             continue;
         }
         // A document whose `extends` chain resolves to something invalid would
-        // make all four SDKs answer "rejected" in unison -- agreement, but zero
-        // evaluation coverage. Resolve here exactly as the oracle and the three
-        // harnesses do and keep only documents that are still valid afterwards.
+        // make every SDK answer "rejected" in unison -- agreement, but zero
+        // evaluation coverage. Resolve here the way every harness does and keep
+        // only documents that are still valid afterwards.
         if spec.extends.is_some() {
             let Ok(resolved) = crate::diff::resolve_builtin_extends(&spec) else {
                 continue;
@@ -282,7 +282,7 @@ fn path_strategy() -> impl Strategy<Value = String> {
 /// (core spec 3.3): case folding, scheme/userinfo/port/path/query stripping,
 /// the root-label trailing dot, IPv4 and bracketed IPv6 literals, and the two
 /// Unicode spellings of one label. Each arm is a place an SDK can normalize
-/// differently from the Rust oracle without any fixture noticing.
+/// differently from the reference without any fixture noticing.
 fn egress_target_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
         8 => domain_strategy(),
@@ -1893,11 +1893,12 @@ mod tests {
         }
     }
 
-    /// The Wave 2 surface the fuzzer previously never reached. Each of these
-    /// must actually appear in a modest bundle, or the strategy that is
-    /// supposed to produce it has silently stopped firing.
+    /// The 0.2.0 policy surface -- `extends`, `when`, the two new rule
+    /// blocks, the detection extension and the new action types -- must
+    /// actually appear in a modest bundle, or the strategy that is supposed
+    /// to produce it has silently stopped firing.
     #[test]
-    fn generated_corpus_covers_the_wave_two_surface() {
+    fn generated_corpus_covers_the_0_2_policy_surface() {
         let bundle = generate_bundle(
             5,
             &GenConfig {
@@ -1951,9 +1952,9 @@ mod tests {
         assert!(saw_timeout, "no action carried code_exec `timeout_ms`");
     }
 
-    /// Host and path normalization inputs are the point of P1-12's strategy
-    /// work: assert the corpus really contains the awkward spellings rather
-    /// than only the tidy `host.tld` / `/a/b` forms.
+    /// Host and path normalization (core spec 3.14.1, 3.14.2) is only
+    /// differentially tested if the corpus really contains the awkward
+    /// spellings, not just the tidy `host.tld` / `/a/b` forms.
     #[test]
     fn generated_corpus_covers_normalization_inputs() {
         let bundle = generate_bundle(

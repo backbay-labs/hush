@@ -79,7 +79,7 @@ fn split_action_context(
 }
 
 /// Build a standard evaluator fixture from a minimized diverging case.
-/// The `expect` block comes from the Rust oracle; the failing SDK's suite
+/// The `expect` block comes from the reference; the failing SDK's suite
 /// will fail on this fixture until the divergence is fixed.
 ///
 /// The evidence -- `expect.rule_trace` and `expect.receipt` -- is pinned only
@@ -96,7 +96,7 @@ pub fn build_regression_fixture(
 ) -> Result<(String, String), DiffError> {
     let CaseVerdict::Ok { result } = oracle_verdict else {
         return Err(DiffError::Config(
-            "refusing to emit a fixture: the Rust oracle did not evaluate the case (generator bug)"
+            "refusing to emit a fixture: the reference did not evaluate the case (generator bug)"
                 .to_string(),
         ));
     };
@@ -201,10 +201,10 @@ pub fn build_regression_fixture(
 
     let fixture = render(&expect);
 
-    // The Rust reference evaluator accepts any string as `action.type`,
-    // silently falling through to Allow for ones it doesn't recognize (see
+    // The evaluator accepts any string as `action.type`, silently falling
+    // through to Allow for ones it doesn't recognize (see
     // `hushspec::evaluate`). The fuzz generator can and does produce such
-    // actions, so a divergence can be reproduced with an action the oracle
+    // actions, so a divergence can be reproduced with an action the reference
     // happily evaluated but that the evaluator-test schema -- a closed enum
     // of known action types -- rejects. Emitting that fixture anyway would
     // hand the caller a fixture that is permanently red for a reason
@@ -462,7 +462,7 @@ mod tests {
     fn trace_candidates_offer_both_spellings() {
         let min = reason_case();
         let CaseVerdict::Ok { result } = oracle_verdict(&min) else {
-            panic!("the oracle must evaluate the reason case");
+            panic!("the reference did not evaluate the reason case");
         };
         let policy = flatten_extends(&min.policy).expect("flattens");
         let receipt = receipt_for(&min, &policy).expect("the case records a receipt");
@@ -536,16 +536,15 @@ mod tests {
     #[test]
     fn build_regression_fixture_emits_unknown_action_type_as_deny_vector() {
         // The fuzz generator (gen.rs `action_strategy`) has a low-weight
-        // "unknown_action" branch so the oracle's fail-closed arm (any
-        // unrecognized `action.type` -> Deny, core spec Section 5) gets
-        // exercised. The evaluator-test schema accepts any type string for
+        // "unknown_action" branch so the fail-closed arm (any unrecognized
+        // `action.type` -> Deny, core spec Section 5) gets exercised. The evaluator-test schema accepts any type string for
         // exactly this reason, so such a case is a legitimate vector.
         let mut min = minimized();
         min.action = serde_json::json!({"type": "unknown_action", "target": "shell_exec"});
         let verdict = oracle_verdict(&min);
         assert!(
             matches!(&verdict, CaseVerdict::Ok { .. }),
-            "the oracle must evaluate this action -- got {verdict:?}"
+            "the reference did not evaluate this action -- got {verdict:?}"
         );
 
         let dir = tempfile::tempdir().expect("tempdir");

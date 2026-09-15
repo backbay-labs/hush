@@ -1,5 +1,4 @@
-//! `h2h report`: turn a window of receipts into an evidence report
-//! (RFC 09 P3-01).
+//! `h2h report`: turn a window of receipts into an evidence report.
 //!
 //! The input is either a hash-linked log (`spec/hushspec-log.md`) or a plain
 //! receipt JSONL; each line is classified on its own. A log's chain is
