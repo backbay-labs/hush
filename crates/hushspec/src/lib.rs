@@ -73,7 +73,10 @@ pub use canonical::{
     canonical_value_of, content_hash, content_hash_value, serialize_jcs,
 };
 pub use compiled::{CompileError, CompiledPolicy, default_detector_registry};
-pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
+pub use conditions::{
+    Condition, RateComparison, RateCondition, RuntimeContext, TimeWindowCondition,
+    evaluate_condition, evaluate_condition_with_capabilities, is_capability_identifier,
+};
 pub use detection::{
     DetectionCategory, DetectionResult, Detector, DetectorEvaluation, DetectorLevel,
     DetectorRegistry, EvaluationWithDetection, MatchedPattern, RegexExfiltrationDetector,

@@ -1,0 +1,53 @@
+hushspec_test: "0.1.0"
+description: "D19 (core 3.13): a when.capability condition gates its block on the effective posture state granting the capability; a state that does not grant it makes the block inert"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      when:
+        capability: shell
+      block: [deploy]
+      default: allow
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call, shell]
+        restricted:
+          capabilities: [tool_call]
+      transitions: []
+cases:
+  - description: "the effective state grants shell: the block is active and denies deploy"
+    action:
+      type: tool_call
+      target: deploy
+      posture:
+        current: standard
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+      posture:
+        current: standard
+        next: standard
+  - description: "the effective state does not grant shell: the block is inert and deploy is allowed"
+    action:
+      type: tool_call
+      target: deploy
+      posture:
+        current: restricted
+    expect:
+      decision: allow
+      posture:
+        current: restricted
+        next: restricted
+  - description: "the initial state applies when the action carries no posture input"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+      posture:
+        current: standard
+        next: standard

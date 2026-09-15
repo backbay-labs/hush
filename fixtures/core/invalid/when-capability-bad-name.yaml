@@ -1,0 +1,7 @@
+# D19 (core 3.13): a capability name must match the identifier grammar.
+hushspec: "0.1.0"
+rules:
+  tool_access:
+    when:
+      capability: "Shell-Access"
+    block: [deploy]

@@ -945,6 +945,7 @@ class PromptInjectionDetection:
     warn_at_or_above: DetectionLevel | None = None
     block_at_or_above: DetectionLevel | None = None
     max_scan_bytes: int | None = None
+    heuristics: PromptInjectionHeuristics | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> PromptInjectionDetection:
@@ -953,6 +954,7 @@ class PromptInjectionDetection:
             warn_at_or_above=(DetectionLevel(data.get('warn_at_or_above')) if data.get('warn_at_or_above') is not None else None),
             block_at_or_above=(DetectionLevel(data.get('block_at_or_above')) if data.get('block_at_or_above') is not None else None),
             max_scan_bytes=(data.get('max_scan_bytes') if data.get('max_scan_bytes') is not None else None),
+            heuristics=(PromptInjectionHeuristics.from_dict(data.get('heuristics')) if data.get('heuristics') is not None else None),
         )
 
     def to_dict(self) -> dict:
@@ -965,6 +967,28 @@ class PromptInjectionDetection:
             data['block_at_or_above'] = self.block_at_or_above.value
         if self.max_scan_bytes is not None:
             data['max_scan_bytes'] = self.max_scan_bytes
+        if self.heuristics is not None:
+            data['heuristics'] = self.heuristics.to_dict()
+        return data
+
+@dataclass
+class PromptInjectionHeuristics:
+    enabled: bool | None = None
+    min_score: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> PromptInjectionHeuristics:
+        return cls(
+            enabled=(data.get('enabled') if data.get('enabled') is not None else None),
+            min_score=(data.get('min_score') if data.get('min_score') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        if self.enabled is not None:
+            data['enabled'] = self.enabled
+        if self.min_score is not None:
+            data['min_score'] = self.min_score
         return data
 
 @dataclass

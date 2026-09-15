@@ -1,0 +1,9 @@
+# D19 (core 3.13): a rate condition requires counter, threshold, and comparison.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      rate:
+        counter: shell_commands
+        comparison: gte
+    forbidden_patterns: ["rm[ \\t]+-rf"]

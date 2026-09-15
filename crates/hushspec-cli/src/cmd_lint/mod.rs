@@ -601,6 +601,9 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     // L020: a `when` clause that narrows nothing
     checks::check_degenerate_conditions(rules, file, &mut findings);
 
+    // L021: a `when.capability` no posture state grants
+    checks::check_ungranted_capability_conditions(spec, file, &mut findings);
+
     findings
 }
 

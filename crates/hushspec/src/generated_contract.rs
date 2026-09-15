@@ -102,8 +102,17 @@ pub const CODE_EXECUTION_KEYS: &[&str] = &[
     "max_execution_time_ms",
     "max_scan_bytes",
 ];
-pub const CONDITION_KEYS: &[&str] = &["time_window", "context", "all_of", "any_of", "not"];
+pub const CONDITION_KEYS: &[&str] = &[
+    "time_window",
+    "context",
+    "all_of",
+    "any_of",
+    "not",
+    "capability",
+    "rate",
+];
 pub const TIME_WINDOW_KEYS: &[&str] = &["start", "end", "timezone", "days"];
+pub const RATE_CONDITION_KEYS: &[&str] = &["counter", "threshold", "comparison"];
 pub const POSTURE_KEYS: &[&str] = &["initial", "states", "transitions"];
 pub const POSTURE_STATE_KEYS: &[&str] = &["description", "capabilities", "budgets"];
 pub const POSTURE_TRANSITION_KEYS: &[&str] = &["from", "to", "on", "after"];
@@ -153,7 +162,9 @@ pub const PROMPT_INJECTION_KEYS: &[&str] = &[
     "warn_at_or_above",
     "block_at_or_above",
     "max_scan_bytes",
+    "heuristics",
 ];
+pub const PROMPT_INJECTION_HEURISTICS_KEYS: &[&str] = &["enabled", "min_score"];
 pub const JAILBREAK_KEYS: &[&str] = &[
     "enabled",
     "block_threshold",

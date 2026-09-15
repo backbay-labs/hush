@@ -339,6 +339,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "current_time": {
           "type": "string",
           "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
+        },
+        "counters": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Engine-maintained counters consulted by `rate` conditions (core spec 3.13)."
         }
       }
     },

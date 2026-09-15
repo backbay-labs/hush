@@ -1,0 +1,25 @@
+hushspec_test: "0.1.0"
+description: "D19 (core 3.13): a when.capability condition on a policy with no posture extension is unevaluable, so the block stays active (fail-closed toward enforcement)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      when:
+        capability: shell
+      block: [deploy]
+      default: allow
+cases:
+  - description: "no posture extension: the capability predicate is unevaluable and the block still denies"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "an unrelated tool is still allowed by the block's default"
+    action:
+      type: tool_call
+      target: read_file
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.default

@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "Pending D18 (posture 5.3, unchanged text): a transition with a named from takes priority over a wildcard from for the same trigger; the reference implementation currently picks the first in document order"
+description: "D18 (posture 5.3): for the same trigger, a transition whose from names the current state outranks one whose from is the wildcard, regardless of document order; the wildcard still applies to states with no named transition"
 policy:
   hushspec: "0.1.0"
   rules:
@@ -32,6 +32,7 @@ cases:
         signal: critical_violation
     expect:
       decision: allow
+      matched_rule: rules.tool_access.default
       posture:
         current: standard
         next: restricted
@@ -44,6 +45,7 @@ cases:
         signal: critical_violation
     expect:
       decision: allow
+      matched_rule: rules.tool_access.default
       posture:
         current: restricted
         next: locked

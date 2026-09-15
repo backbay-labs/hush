@@ -178,6 +178,8 @@ var ConditionKeys = map[string]struct{}{
 	"all_of":      {},
 	"any_of":      {},
 	"not":         {},
+	"capability":  {},
+	"rate":        {},
 }
 
 var TimeWindowKeys = map[string]struct{}{
@@ -185,6 +187,12 @@ var TimeWindowKeys = map[string]struct{}{
 	"end":      {},
 	"timezone": {},
 	"days":     {},
+}
+
+var RateConditionKeys = map[string]struct{}{
+	"counter":    {},
+	"threshold":  {},
+	"comparison": {},
 }
 
 var PostureKeys = map[string]struct{}{
@@ -285,6 +293,12 @@ var PromptInjectionKeys = map[string]struct{}{
 	"warn_at_or_above":  {},
 	"block_at_or_above": {},
 	"max_scan_bytes":    {},
+	"heuristics":        {},
+}
+
+var PromptInjectionHeuristicsKeys = map[string]struct{}{
+	"enabled":   {},
+	"min_score": {},
 }
 
 var JailbreakKeys = map[string]struct{}{

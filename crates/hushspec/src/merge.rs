@@ -2,6 +2,7 @@ use crate::extensions::{
     DetectionExtension, Extensions, JailbreakDetection, OriginsExtension, PostureExtension,
     PromptInjectionDetection, ThreatIntelDetection,
 };
+use crate::generated_models::PromptInjectionHeuristics;
 use crate::rules::Rules;
 use crate::schema::{HushSpec, MergeStrategy};
 
@@ -232,6 +233,13 @@ fn merge_prompt_injection(
                         .block_at_or_above
                         .or(base_prompt.block_at_or_above),
                     max_scan_bytes: child_prompt.max_scan_bytes.or(base_prompt.max_scan_bytes),
+                    heuristics: match (&base_prompt.heuristics, &child_prompt.heuristics) {
+                        (Some(base), Some(child)) => Some(PromptInjectionHeuristics {
+                            enabled: child.enabled.or(base.enabled),
+                            min_score: child.min_score.or(base.min_score),
+                        }),
+                        (base, child) => child.clone().or_else(|| base.clone()),
+                    },
                 })
             } else {
                 Some(child_prompt.clone())
