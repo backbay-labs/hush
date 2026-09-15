@@ -1,4 +1,6 @@
 from hushspec.generated_models import (
+    BrowserAutomationRule,
+    CodeExecutionRule,
     ComputerUseMode,
     ComputerUseRule,
     DefaultAction,
@@ -30,6 +32,8 @@ __all__ = [
     "ComputerUseMode",
     "RemoteDesktopChannelsRule",
     "InputInjectionRule",
+    "BrowserAutomationRule",
+    "CodeExecutionRule",
     "Severity",
     "DefaultAction",
 ]

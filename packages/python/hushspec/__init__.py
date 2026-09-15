@@ -1,16 +1,26 @@
 from hushspec.evaluate import (
+    PANIC_RULE,
+    UNKNOWN_ACTION_TYPE_RULE,
     Decision,
     EvaluationAction,
     EvaluationResult,
     OriginContext,
     PostureContext,
     PostureResult,
+    RuleOutcome,
+    TracedEvaluation,
     activate_panic,
     check_panic_sentinel,
     deactivate_panic,
     evaluate,
+    evaluate_traced,
+    host_pattern_matches,
     is_panic_active,
+    normalize_host,
+    normalize_path,
     panic_policy,
+    path_glob_matches,
+    punycode_encode,
 )
 from hushspec.receipt import (
     ActionSummary,
@@ -33,8 +43,10 @@ from hushspec.extensions import (
     OriginBudgets,
     OriginDataPolicy,
     OriginDefaultBehavior,
+    OriginEgressOverlay,
     OriginMatch,
     OriginProfile,
+    OriginToolAccessOverlay,
     OriginsExtension,
     PostureExtension,
     PostureState,
@@ -84,6 +96,8 @@ from hushspec.conditions import (
     TimeWindowCondition,
     evaluate_condition,
     evaluate_with_context,
+    timezone_is_known,
+    validate_condition,
 )
 from hushspec.parse import parse, parse_or_raise
 from hushspec.builtins import BUILTIN_NAMES, load_builtin
@@ -96,6 +110,8 @@ from hushspec.resolve import (
     resolve_or_raise,
 )
 from hushspec.rules import (
+    BrowserAutomationRule,
+    CodeExecutionRule,
     ComputerUseMode,
     ComputerUseRule,
     DefaultAction,
@@ -113,8 +129,21 @@ from hushspec.rules import (
     ToolAccessRule,
 )
 from hushspec.schema import Classification, GovernanceMetadata, HushSpec, LifecycleState, MergeStrategy
-from hushspec.validate import ValidationError, ValidationResult, is_safe_regex, validate
-from hushspec.version import HUSHSPEC_VERSION, SUPPORTED_VERSIONS, is_supported
+from hushspec.validate import (
+    ValidationError,
+    ValidationResult,
+    is_safe_regex,
+    validate,
+    validate_conditions,
+)
+from hushspec.version import (
+    HUSHSPEC_SUPPORTED_MINORS,
+    HUSHSPEC_SUPPORTED_VERSIONS,
+    HUSHSPEC_VERSION,
+    SUPPORTED_VERSIONS,
+    is_supported,
+    supported_minor,
+)
 
 __version__ = HUSHSPEC_VERSION
 
@@ -137,6 +166,8 @@ __all__ = [
     "ComputerUseMode",
     "RemoteDesktopChannelsRule",
     "InputInjectionRule",
+    "BrowserAutomationRule",
+    "CodeExecutionRule",
     "Severity",
     "DefaultAction",
     "Extensions",
@@ -148,6 +179,8 @@ __all__ = [
     "OriginDefaultBehavior",
     "OriginProfile",
     "OriginMatch",
+    "OriginToolAccessOverlay",
+    "OriginEgressOverlay",
     "OriginDataPolicy",
     "OriginBudgets",
     "BridgePolicy",
@@ -163,6 +196,7 @@ __all__ = [
     "ValidationResult",
     "ValidationError",
     "is_safe_regex",
+    "validate_conditions",
     "merge",
     "create_builtin_loader",
     "create_composite_loader",
@@ -177,7 +211,19 @@ __all__ = [
     "RuntimeContext",
     "evaluate_condition",
     "evaluate_with_context",
+    "validate_condition",
+    "timezone_is_known",
     "evaluate",
+    "evaluate_traced",
+    "TracedEvaluation",
+    "RuleOutcome",
+    "normalize_host",
+    "normalize_path",
+    "host_pattern_matches",
+    "path_glob_matches",
+    "punycode_encode",
+    "PANIC_RULE",
+    "UNKNOWN_ACTION_TYPE_RULE",
     "Decision",
     "EvaluationAction",
     "EvaluationResult",
@@ -225,6 +271,9 @@ __all__ = [
     "RegexJailbreakDetector",
     "evaluate_with_detection",
     "HUSHSPEC_VERSION",
+    "HUSHSPEC_SUPPORTED_MINORS",
+    "HUSHSPEC_SUPPORTED_VERSIONS",
     "SUPPORTED_VERSIONS",
     "is_supported",
+    "supported_minor",
 ]
