@@ -190,6 +190,14 @@ def compute_policy_hash(spec: HushSpec) -> str:
     resolved against the embedded builtins first and, if that is impossible,
     rejected rather than hashed. Guards resolve on load, so this is a backstop
     for direct callers.
+
+    This is the HushSpec 0.1 digest: bare 64-hex over this SDK's own JSON
+    serialization of the parsed model, so the four SDKs do not agree on it.
+    :func:`hushspec.canonical.content_hash` is the 0.2 replacement -- RFC 8785
+    over the canonical projection, wire form ``sha256:<hex>``, identical in
+    every SDK. Receipts move to it in RFC 09 P2-04 together with the receipt
+    v0.2 schema; until then the two are not comparable (canonical spec
+    section 5, "Migration").
     """
     if spec.extends is not None:
         from hushspec.resolve import create_builtin_loader, resolve
