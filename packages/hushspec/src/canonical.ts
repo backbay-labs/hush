@@ -739,6 +739,26 @@ export function canonicalJson(spec: HushSpec): string {
 }
 
 /**
+ * RFC 8785 (JCS) serialization of an arbitrary JSON value (spec section 4,
+ * the serialization step on its own).
+ *
+ * The projection of section 3 is schema-driven and applies to HushSpec
+ * documents only; other objects that have to be hashed or signed byte-exactly
+ * -- a signature envelope (spec/hushspec-signing.md section 4.1), a receipt
+ * -- carry no schema defaults and need the serializer alone. Sharing it is the
+ * point: the envelope a signer signs and the envelope a verifier checks are
+ * canonicalized by the same code as the policy hash inside them.
+ *
+ * @throws {CanonicalError} if the value holds something with no JSON
+ * representation (NaN, Infinity, a function, a symbol).
+ */
+export function canonicalizeValue(value: JsonValue): string {
+  const out: string[] = [];
+  serialize(clone(value), out);
+  return out.join('');
+}
+
+/**
  * The content hash of a **resolved** HushSpec document (spec section 5):
  * `sha256:` followed by 64 lowercase hex digits of SHA-256 over the UTF-8
  * bytes of {@link canonicalJson}.

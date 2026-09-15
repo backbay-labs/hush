@@ -51,7 +51,41 @@ export {
 } from './parse.js';
 export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
 export { merge } from './merge.js';
-export { canonicalJson, contentHash, CanonicalError, type JsonValue } from './canonical.js';
+export {
+  canonicalJson,
+  canonicalizeValue,
+  contentHash,
+  CanonicalError,
+  type JsonValue,
+} from './canonical.js';
+export {
+  signPolicy,
+  verifyPolicy,
+  parseEnvelope,
+  envelopeSigningInput,
+  loadKeyring,
+  keyringFromPublicKey,
+  keyIdFromPublicKey,
+  publicKeyPemFromPrivateKey,
+  generateKeypair,
+  Keyring,
+  SigningError,
+  SIGNATURE_FORMAT_VERSION,
+  SIGNATURE_ALGORITHM,
+  KEYRING_VERSION,
+  DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+  type Envelope,
+  type ReasonCode,
+  type SignOptions,
+  type VerifyOptions,
+  type VerificationOutcome,
+  type VerificationSuccess,
+  type VerificationFailure,
+  type TrustedKey,
+  type TrustedKeyDocument,
+  type KeyringDocument,
+  type GeneratedKeypair,
+} from './signing.js';
 export { resolve, resolveFromFile, createCompositeLoader, createBuiltinLoader, type LoadedSpec, type ResolveOptions, type ResolveResult } from './resolve.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export { createHttpLoader, createSyncHttpLoader, type HttpLoaderConfig } from './http-loader.js';
