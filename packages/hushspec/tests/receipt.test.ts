@@ -458,14 +458,24 @@ describe('detection_trace', () => {
       { type: 'tool_call', target: 'chat', content: 'please summarize the notes' },
       enabledConfig(),
     );
-    expect(receipt.detection_trace).toHaveLength(1);
-    expect(receipt.detection_trace![0]).toEqual({
-      detector_id: 'regex_injection@1',
-      category: 'prompt_injection',
-      score: 0,
-      level: 'none',
-      matched: false,
-    });
+    // Both prompt-injection detectors run and each records its own entry
+    // (detection spec 3.5).
+    expect(receipt.detection_trace).toEqual([
+      {
+        detector_id: 'regex_injection@1',
+        category: 'prompt_injection',
+        score: 0,
+        level: 'none',
+        matched: false,
+      },
+      {
+        detector_id: 'heuristic_injection@1',
+        category: 'prompt_injection',
+        score: 0,
+        level: 'none',
+        matched: false,
+      },
+    ]);
     expect(receipt.decision).toBe('allow');
   });
 

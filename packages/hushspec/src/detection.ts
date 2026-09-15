@@ -8,6 +8,7 @@ import type {
 } from './evaluate.js';
 import type { Condition, RuntimeContext } from './conditions.js';
 import type { DetectionExtension, DetectionLevel } from './extensions.js';
+import { compileProfileRegex } from './regex.js';
 
 export type DetectionCategory = 'prompt_injection' | 'jailbreak' | 'data_exfiltration';
 
@@ -41,6 +42,7 @@ export class DetectorRegistry {
   static withDefaults(): DetectorRegistry {
     const registry = new DetectorRegistry();
     registry.register(new RegexInjectionDetector());
+    registry.register(new HeuristicInjectionDetector());
     registry.register(new RegexJailbreakDetector());
     registry.register(new RegexExfiltrationDetector());
     return registry;
@@ -137,6 +139,195 @@ export class RegexInjectionDetector implements Detector {
       category: this.category,
       score,
       matched_patterns: matchedPatterns,
+      explanation,
+    };
+  }
+}
+
+/**
+ * Name of the normative heuristic detector (`heuristic_injection@1` once the
+ * id version suffix is appended).
+ */
+export const HEURISTIC_DETECTOR_NAME = 'heuristic_injection';
+
+/**
+ * The signal families of `heuristic_injection@1`, verbatim from detection
+ * spec 3.5: `[family, weight, patterns]`. Patterns are written in the
+ * HushSpec regex profile (ASCII classes, no lookaround) and matched against
+ * the NFC-normalized, ASCII-case-folded input, so they are lowercase. A
+ * family contributes its weight at most once; the sum is clamped to 100.
+ */
+export const HEURISTIC_FAMILIES: ReadonlyArray<readonly [string, number, readonly string[]]> = [
+  [
+    'instruction_override',
+    40,
+    [
+      'ignore (all |any |the |every |your )?(previous|prior|above|earlier|preceding) (instructions?|prompts?|rules|guidance)',
+      'disregard (all |any |the |your )?(system|previous|prior|earlier|above) (prompts?|instructions?|rules)',
+      'forget (all |everything )?(you were told|your instructions|the instructions|previous instructions|prior instructions)',
+      '(new|updated|revised|override) instructions?[ \\t]*:',
+    ],
+  ],
+  [
+    'role_switch',
+    30,
+    [
+      'you are now (a|an|the|my|in) ',
+      'act as (a|an|the|my|if you were) ',
+      'pretend (to be|you are|that you are|you have) ',
+      'from now on,? you (are|will|must|should)',
+      'developer mode',
+      'do anything now',
+      'dan mode',
+    ],
+  ],
+  [
+    'delimiter_smuggling',
+    30,
+    [
+      '<\\|(im_start|im_end|system|endoftext)\\|>',
+      '\\[/?inst\\]',
+      '##+[ \\t]*(system|assistant|instructions)',
+      '(begin|end) (system|hidden|secret) (prompt|instructions)',
+      '<(system|assistant)>',
+      '(---+|===+|```)[ \\t]*(system|assistant|user)[ \\t]*[:\\n]',
+    ],
+  ],
+  [
+    'exfiltration_coercion',
+    35,
+    [
+      '(reveal|print|show|output|repeat|display|dump|leak|expose) (me )?(all )?(of )?(the |your )?(hidden |initial |original |secret |system |confidential |full )?(system prompt|prompt|instructions|rules|configuration|guidelines)',
+      '(send|post|upload|exfiltrate|forward) [^\\n]{0,40} (to|at) https?://',
+      'what (is|are|were) your (system prompt|initial instructions|hidden instructions|original instructions)',
+    ],
+  ],
+  [
+    'encoded_payload',
+    15,
+    ['[a-z0-9+/]{40,}={0,2}', '(\\\\u[0-9a-f]{4}){4,}', '(%[0-9a-f]{2}){8,}'],
+  ],
+  ['structural_punctuation', 10, ['[!?]{4,}']],
+];
+
+/**
+ * The computed `structural_uppercase` family (detection spec 3.5): weight 10
+ * when the NFC text has at least 40 ASCII letters and at least 60% of them are
+ * uppercase. Measured before case folding, since folding erases it.
+ */
+export const HEURISTIC_UPPERCASE_WEIGHT = 10;
+/** @see {@link HEURISTIC_UPPERCASE_WEIGHT} */
+export const HEURISTIC_UPPERCASE_MIN_LETTERS = 40;
+/** @see {@link HEURISTIC_UPPERCASE_WEIGHT} */
+export const HEURISTIC_UPPERCASE_MIN_PERCENT = 60;
+
+interface HeuristicFamily {
+  name: string;
+  weight: number;
+  patterns: RegExp[];
+}
+
+/** `structural_uppercase`: at least 40 ASCII letters, at least 60% uppercase. */
+function uppercaseSignal(text: string): boolean {
+  let letters = 0;
+  let upper = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    const isUpper = code >= 65 && code <= 90;
+    if (isUpper || (code >= 97 && code <= 122)) {
+      letters += 1;
+      if (isUpper) upper += 1;
+    }
+  }
+  if (letters < HEURISTIC_UPPERCASE_MIN_LETTERS) return false;
+  return upper * 100 >= letters * HEURISTIC_UPPERCASE_MIN_PERCENT;
+}
+
+/**
+ * Fold `A-Z` and nothing else. `String.prototype.toLowerCase` is
+ * Unicode-aware -- it maps the Kelvin sign to `k` and `I` with a dot above to
+ * `i` plus a combining dot -- where the reference engine's
+ * `to_ascii_lowercase` touches only ASCII, so spelling it out is what keeps
+ * the score identical across SDKs.
+ */
+function asciiFold(text: string): string {
+  return text.replace(/[A-Z]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 32));
+}
+
+/**
+ * The normative heuristic prompt-injection detector (detection spec 3.5).
+ *
+ * Integer arithmetic over a fixed signal table so every conformant engine
+ * reproduces the score exactly: the input (already truncated to the policy's
+ * `max_scan_bytes`) is NFC-normalized, the uppercase signal is measured, the
+ * text is ASCII-case-folded, and each family whose pattern matches adds its
+ * weight once. The receipt carries `score / 100`.
+ */
+export class HeuristicInjectionDetector implements Detector {
+  readonly name = HEURISTIC_DETECTOR_NAME;
+  readonly category: DetectionCategory = 'prompt_injection';
+
+  private readonly families: HeuristicFamily[];
+
+  constructor() {
+    this.families = HEURISTIC_FAMILIES.map(([name, weight, patterns]) => ({
+      name,
+      weight,
+      patterns: patterns.map(pattern => {
+        try {
+          return compileProfileRegex(pattern).regex;
+        } catch (error) {
+          throw new Error(
+            `heuristic family ${name} pattern ${JSON.stringify(pattern)}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }),
+    }));
+  }
+
+  /** The spec's integer score in `0..=100` and the families that fired. */
+  integerScore(input: string): { score: number; matched: MatchedPattern[] } {
+    const normalized = input.normalize('NFC');
+    let total = 0;
+    const matched: MatchedPattern[] = [];
+
+    if (uppercaseSignal(normalized)) {
+      total += HEURISTIC_UPPERCASE_WEIGHT;
+      matched.push({ name: 'structural_uppercase', weight: HEURISTIC_UPPERCASE_WEIGHT / 100 });
+    }
+
+    const folded = asciiFold(normalized);
+    for (const family of this.families) {
+      for (const pattern of family.patterns) {
+        const found = pattern.exec(folded);
+        if (found == null) continue;
+        total += family.weight;
+        matched.push({
+          name: family.name,
+          weight: family.weight / 100,
+          matched_text: found[0],
+        });
+        break;
+      }
+    }
+
+    return { score: Math.min(total, 100), matched };
+  }
+
+  detect(input: string): DetectionResult {
+    const { score, matched } = this.integerScore(input);
+    const explanation = matched.length === 0
+      ? undefined
+      : `heuristic score ${score}/100 from ${matched.length} signal famil${
+        matched.length === 1 ? 'y' : 'ies'
+      }: ${matched.map(entry => entry.name).join(', ')}`;
+    return {
+      detector_name: this.name,
+      category: this.category,
+      score: score / 100,
+      matched_patterns: matched,
       explanation,
     };
   }
@@ -348,6 +539,14 @@ const LEVEL_FLOORS: Record<DetectionLevel, number> = {
   critical: 0.75,
 };
 
+/**
+ * The heuristic detector's integer score recovered from its normalized
+ * `score / 100` form (exact: the normalized value is always `n / 100`).
+ */
+function heuristicInteger(score: number): number {
+  return Math.max(Math.round(score * 100), 0);
+}
+
 const DECISION_RANK: Record<Decision, number> = { allow: 0, warn: 1, deny: 2 };
 
 function decisionRank(decision: Decision | undefined): number {
@@ -380,11 +579,20 @@ function truncateUtf8(input: string, maxBytes: number): string {
   return bytes.toString('utf8', 0, end);
 }
 
-// Singletons: the spec-driven path only ever drives these two built-in
-// detectors (see evaluateWithDetection's threat_intel note below), so there
-// is no need to pay DetectorRegistry.withDefaults()'s per-call allocation.
+// Singletons: the spec-driven path only ever drives these built-in detectors
+// (see evaluateWithDetection's threat_intel note below), so there is no need
+// to pay DetectorRegistry.withDefaults()'s per-call allocation.
 const INJECTION_DETECTOR = new RegexInjectionDetector();
+const HEURISTIC_DETECTOR = new HeuristicInjectionDetector();
 const JAILBREAK_DETECTOR = new RegexJailbreakDetector();
+
+/**
+ * Every prompt-injection detector, in registration order (detection spec
+ * 3.5): the engine's regex detector and the normative heuristic one. Each is
+ * scored against the same byte budget and level floors and records its own
+ * `detection_trace` entry.
+ */
+const PROMPT_INJECTION_DETECTORS: readonly Detector[] = [INJECTION_DETECTOR, HEURISTIC_DETECTOR];
 
 /**
  * Spec-driven detection entry point.
@@ -444,6 +652,10 @@ export interface CompiledPromptInjection {
   scanBytes: number;
   blockFloor: number;
   warnFloor: number;
+  /** `heuristics.enabled` (detection spec 3.5.1), default `true`. */
+  heuristicsEnabled: boolean;
+  /** `heuristics.min_score` (detection spec 3.5.1), default `0`. */
+  heuristicsMinScore: number;
 }
 
 /** Jailbreak detection with its 0-100 thresholds resolved. */
@@ -467,6 +679,8 @@ export function compileDetection(
       scanBytes: promptInjection.max_scan_bytes ?? DEFAULT_SCAN_BYTES,
       blockFloor: LEVEL_FLOORS[promptInjection.block_at_or_above ?? 'high'],
       warnFloor: LEVEL_FLOORS[promptInjection.warn_at_or_above ?? 'suspicious'],
+      heuristicsEnabled: promptInjection.heuristics?.enabled !== false,
+      heuristicsMinScore: promptInjection.heuristics?.min_score ?? 0,
     };
   }
 
@@ -520,24 +734,35 @@ export function runDetection(
   const promptInjection = detection.promptInjection;
   if (promptInjection != null) {
     const scan = truncateUtf8(content, promptInjection.scanBytes);
-    const result = INJECTION_DETECTOR.detect(scan);
+    for (const detector of PROMPT_INJECTION_DETECTORS) {
+      const isHeuristic = detector.name === HEURISTIC_DETECTOR_NAME;
+      if (isHeuristic && !promptInjection.heuristicsEnabled) continue;
+      const result = detector.detect(scan);
+      if (isHeuristic && heuristicInteger(result.score) < promptInjection.heuristicsMinScore) {
+        // Below the policy's floor the heuristic reports no signal
+        // (detection spec 3.5.4).
+        result.score = 0;
+        result.matched_patterns = [];
+        result.explanation = undefined;
+      }
 
-    let matched = false;
-    if (result.score >= promptInjection.blockFloor) {
-      contributions.push(['prompt_injection', 'deny']);
-      matched = true;
-    } else if (result.score >= promptInjection.warnFloor) {
-      contributions.push(['prompt_injection', 'warn']);
-      matched = true;
+      let matched = false;
+      if (result.score >= promptInjection.blockFloor) {
+        contributions.push(['prompt_injection', 'deny']);
+        matched = true;
+      } else if (result.score >= promptInjection.warnFloor) {
+        contributions.push(['prompt_injection', 'warn']);
+        matched = true;
+      }
+      detectorTrace.push({
+        detector_id: `${result.detector_name}${DETECTOR_ID_VERSION}`,
+        category: 'prompt_injection',
+        score: result.score,
+        level: detectorLevel(result.score),
+        matched,
+      });
+      detections.push(result);
     }
-    detectorTrace.push({
-      detector_id: `${result.detector_name}${DETECTOR_ID_VERSION}`,
-      category: 'prompt_injection',
-      score: result.score,
-      level: detectorLevel(result.score),
-      matched,
-    });
-    detections.push(result);
   }
 
   const jailbreak = detection.jailbreak;
