@@ -338,6 +338,12 @@ jobs:
   policy-lint:
     name: Policy Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed only by the SARIF upload below. A pull request from a fork is
+      # granted read-only tokens whatever this says, which is why that step is
+      # both conditioned on the head repo and continue-on-error.
+      security-events: write
     steps:
       - uses: actions/checkout@v4
 
@@ -376,6 +382,33 @@ jobs:
           # *errors*; only those two by-design warnings are tolerated, and no
           # warning is suppressed -- both still print in the job log.
           ./target/debug/h2h lint rulesets/permissive.yaml
+
+      # Re-lint everything into SARIF so findings land on the pull request as
+      # code-scanning annotations instead of only in this log. Runs even when a
+      # gate above failed -- that is exactly when the annotations are wanted --
+      # and never changes the job's own verdict.
+      - name: Lint to SARIF
+        if: always()
+        run: |
+          mapfile -t all < <(
+            ls rulesets/*.yaml
+            find library -type f \( -name '*.yaml' -o -name '*.yml' \) | sort
+          )
+          ./target/debug/h2h lint --format sarif --out h2h-lint.sarif "${all[@]}" || true
+
+      - name: Upload SARIF to code scanning
+        # Forks cannot be granted `security-events: write`, so the upload is
+        # skipped there rather than failing the job. continue-on-error covers
+        # the rest (a repo with code scanning disabled, an API hiccup).
+        if: >-
+          always() &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: h2h-lint.sarif
+          category: h2h-policy-lint
 
   # ── Dependency audits ──────────────────────────────────────────────
   cargo-deny:

@@ -8,6 +8,30 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 P3-04, `h2h lint`)
+
+- **Source spans.** Every finding is now located at the key or list entry it is about
+  rather than at the file. Positions come from a second pass over the same bytes with a
+  real YAML event parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
+  sequences and comments between entries aligned where a line scanner does not. Text
+  output prints `file:line:column` with the document path beneath it; JSON findings gain
+  `path` and a `span` object (`file`, `line`, `column`, `end_line`, `end_column`). Lint
+  reports the resolved document, so a finding about an inherited block names the base that
+  declares it -- `builtin:permissive:9:9`, not the leaf.
+- **SARIF 2.1.0 output**: `h2h lint --format sarif`, with `--out <PATH>` to write the
+  report to a file. One run, a `tool.driver` for `h2h` carrying the full rule catalog
+  (`shortDescription`, `fullDescription`, `defaultConfiguration.level`, `helpUri`), and one
+  `result` per finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
+  `logicalLocations` entry naming the document path, and a `fixes` deletion for fixable
+  findings. The SARIF 2.1.0 JSON Schema is vendored at
+  `crates/hushspec-cli/schemas/sarif-2.1.0.schema.json` and every emitted document is
+  validated against it offline in `tests/lint_span_tests.rs`. The `Policy Lint` CI job
+  uploads the file with `github/codeql-action/upload-sarif`, guarded so a fork -- which
+  cannot hold `security-events: write` -- still passes.
+### Changed (RFC 09 P3-04, `h2h lint`)
+
+- Exit `2` now also covers `--out` combined with `--format text`.
+
 ### Added (RFC 09 Wave 4, Rust)
 
 - Receipt format 0.2 in the Rust SDK: `evaluate_audited` now takes a `Resolution` and an
