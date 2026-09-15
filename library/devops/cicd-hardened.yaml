@@ -178,3 +178,32 @@ rules:
       - git_push
     default: block
     max_args_size: 1048576
+
+# Structured control mappings (core spec 2.5). This policy is operational
+# hardening rather than a regulated framework, so it maps to the OWASP LLM
+# Top 10 and ISO/IEC 27001 Annex A. Declarative metadata only: mappings never
+# influence evaluation.
+metadata:
+  controls:
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM02"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.secret_patterns
+      notes: "Sensitive Information Disclosure. CI credential stores are unreachable and pipeline token patterns are detected."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM03"
+      rule_paths:
+        - rules.egress
+      notes: "Supply Chain. Egress is restricted to package registries and build services."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM06"
+      rule_paths:
+        - rules.tool_access
+        - rules.shell_commands
+      notes: "Excessive Agency. Tools are limited to build and test operations; deploy and credential commands are blocked."
+    - framework: iso-27001-2022
+      control_id: "A.8.32"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Change management. Patch limits keep pipeline changes reviewable."
