@@ -56,6 +56,43 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   `SignedReceipt`. `SignatureStatus.SignedAt` is renamed `VerifiedAt` (`verified_at`) to match
   the schema, and an in-memory leaf is recorded in the chain as `memory`.
 
+### Added (RFC 09 Wave 4, TypeScript)
+
+- Receipt format 0.2 in `@hushspec/core`: `evaluateAudited(resolution, action, config, context)`
+  (plus `evaluateAuditedSpec`) records `receipt_version`, a UUID v7 `receipt_id`, a
+  millisecond `timestamp` with `time_source`, the optional `actor`, the canonical
+  `policy.content_hash` with `extends_chain` and signature status, the evaluator's recorded
+  rule trace under the schema's closed `rule_block` ids, `detection_trace` whenever the
+  detection pipeline ran, `action.content_hash` / `content_size` in place of content, and the
+  required `enforcement` disposition. New `receiptHash`, `parseReceipt`, `policySummary`,
+  `unverifiedPolicyReceipt`, `deterministicUuidV7` and `formatTimestamp`; `computePolicyHash`
+  now returns the canonical `sha256:` hash instead of the 0.1 per-SDK digest.
+- Hash-linked receipt log: `ChainedFileSink` (fsync per entry, exclusive lock file, rotation
+  through a `log_started` entry), `policyLoadedEvent` / `policySwappedEvent`, and
+  `verifyLog` / `verifyLogs` / `verifyLogFiles` returning a `LogVerifyReport` that names the
+  first break by file and line. `ReceiptSink` gains an optional `recordPolicyEvent`.
+- Receipt signing: `signReceipt` / `verifyReceipt` over the receipt hash, plus the
+  `signContentHash` / `verifyContentHash` primitives they and the log share.
+- `HushGuard` emits 0.2 receipts through its sink using the guard's own resolution, records
+  `policy_loaded` on construction and `policy_swapped` on hot reload, emits the reserved
+  `__hushspec_policy_unverified__` receipt for actions refused under `requireSignature`, and
+  accepts `actor` and `timeSource` options.
+- Vector runners for `fixtures/core/resolve/`, `fixtures/receipts/{expected,valid,invalid}`,
+  `fixtures/log/{valid,invalid}` and `fixtures/receipts/signed/`.
+
+### Changed (RFC 09 Wave 4, TypeScript)
+
+- **Breaking.** `evaluateAudited` takes a `Resolution` rather than a `HushSpec`; use
+  `evaluateAuditedSpec` for a bare document. `AuditConfig` is `{ enabled, includeRuleTrace,
+  recordDuration }` -- `redact_content` is gone, because a 0.2 receipt never carries content.
+- **Breaking.** `SignatureStatus.signed_at` is now `verified_at` and holds the verifier's
+  clock rather than the envelope's signing time.
+- **Breaking.** The chain identity of an in-memory document is `memory`, matching the Rust
+  reference and `fixtures/core/resolve/`. `INLINE_POLICY_SOURCE` is kept as a deprecated alias
+  of the new `MEMORY_SOURCE`.
+- Resolution failures throw a `ResolveError` carrying a machine-readable `reason`
+  (`invalid_pin`, `not_found`, `cycle`, `max_depth`, ...) instead of a bare `Error`.
+
 ### Added
 
 - Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,

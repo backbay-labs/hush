@@ -38,7 +38,7 @@ export type AsyncLoader = (reference: string, from?: string) => LoadedSpec | Pro
  * `extends` references *and* it is the identity the leaf carries into
  * {@link Resolution.chain} and into the signature locator. A caller that has a
  * real file path should pass it; a caller holding only a YAML string should
- * not invent one, and the leaf is then reported as `<inline>`.
+ * not invent one, and the leaf is then reported as {@link MEMORY_SOURCE}.
  */
 export interface ResolveInput {
   source?: string;
@@ -113,10 +113,15 @@ export type SignatureLocator = (
  * into `receipt.policy.signature`.
  */
 export interface SignatureStatus {
-  key_id?: string;
   verified: boolean;
+  key_id?: string;
+  /**
+   * When verification ran -- the verifier's clock, not the envelope's
+   * `signed_at` (Receipt specification section 4.2). RFC 3339 UTC with
+   * milliseconds and a `Z` suffix.
+   */
+  verified_at?: string;
   reason?: string;
-  signed_at?: string;
 }
 
 /**
@@ -150,6 +155,71 @@ export interface Resolution {
  * plus the two that only verification-on-load can produce.
  */
 export type LoadReasonCode = ReasonCode | 'digest_mismatch' | 'missing_signature';
+
+/**
+ * Wrap a document that is already resolved (no `extends`) as a single-link
+ * resolution, so a caller that holds a bare spec can still build receipts
+ * that name a real content hash.
+ *
+ * `source` names the leaf in {@link Resolution.chain}; it defaults to
+ * {@link MEMORY_SOURCE}, the identity a document that was not loaded from
+ * anywhere carries.
+ *
+ * @throws {CanonicalError} when the document has no canonical form, including
+ * when it still declares `extends`.
+ */
+export function resolutionFromResolved(spec: HushSpec, source?: string): Resolution {
+  const hash = contentHash(spec);
+  return {
+    spec,
+    content_hash: hash,
+    chain: [{ source: source ?? MEMORY_SOURCE, content_hash: hash }],
+  };
+}
+
+/**
+ * Why a chain could not be resolved at all, in the vocabulary
+ * `fixtures/core/resolve/` uses and the Rust `ResolveError` variants map to.
+ * `digest_mismatch` and `signature_required` come back as a
+ * {@link PolicyVerificationError}, which carries the same codes.
+ */
+export type ResolveReasonCode =
+  | 'invalid_pin'
+  | 'not_found'
+  | 'cycle'
+  | 'max_depth'
+  | 'http'
+  | 'parse'
+  | 'read';
+
+/**
+ * A chain could not be walked: a malformed digest pin, a reference no loader
+ * serves, a cycle, or a chain deeper than the cap.
+ *
+ * Carries the machine-readable `reason` so a caller (and the resolve vectors)
+ * can distinguish the cases without matching on message text.
+ */
+export class ResolveError extends Error {
+  readonly reason: ResolveReasonCode;
+
+  constructor(reason: ResolveReasonCode, message: string) {
+    super(message);
+    this.name = 'ResolveError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * The reason code a thrown resolution failure reports, or `undefined` for an
+ * error this resolver did not classify.
+ */
+export function resolveErrorReason(
+  error: unknown,
+): ResolveReasonCode | LoadReasonCode | undefined {
+  if (error instanceof PolicyVerificationError) return error.reason;
+  if (error instanceof ResolveError) return error.reason;
+  return undefined;
+}
 
 /**
  * A hop of the chain did not prove itself: its digest pin did not match, it
@@ -192,8 +262,15 @@ export class PolicyVerificationError extends Error {
  */
 const MAX_EXTENDS_DEPTH = 32;
 
-/** The leaf's chain identity when the caller had no source to give. */
-export const INLINE_POLICY_SOURCE = '<inline>';
+/**
+ * The chain identity of a document that was not loaded from anywhere -- a
+ * spec handed to the resolver in memory. Matches the Rust reference's
+ * `MEMORY_SOURCE`, which is what `fixtures/core/resolve/` pins.
+ */
+export const MEMORY_SOURCE = 'memory';
+
+/** @deprecated Older spelling of {@link MEMORY_SOURCE}; same value. */
+export const INLINE_POLICY_SOURCE = MEMORY_SOURCE;
 
 /**
  * Resolve an `extends` chain, returning the merged document.
@@ -339,9 +416,10 @@ export function createBuiltinLoader(): Loader {
       return { source, spec };
     }
     if (reference.startsWith('builtin:')) {
-      throw new Error(`unknown builtin ruleset '${reference}'`);
+      throw new ResolveError('not_found', `unknown builtin ruleset '${reference}'`);
     }
-    throw new Error(
+    throw new ResolveError(
+      'not_found',
       `cannot resolve 'extends: ${reference}': this loader only serves builtin rulesets ` +
         `(${BUILTIN_REFERENCE_HINT})`,
     );
@@ -358,7 +436,8 @@ export function createCompositeLoader(): Loader {
     }
 
     if (reference.startsWith('https://') || reference.startsWith('http://')) {
-      throw new Error(
+      throw new ResolveError(
+        'http',
         `HTTP-based policy loading is not supported in the synchronous loader; ` +
           `use createHttpLoader() for '${reference}'`,
       );
@@ -380,7 +459,7 @@ export function createCompositeLoader(): Loader {
 function loadBuiltinOrThrow(reference: string): LoadedSpec {
   const spec = loadBuiltin(reference);
   if (!spec) {
-    throw new Error(`unknown builtin ruleset '${reference}'`);
+    throw new ResolveError('not_found', `unknown builtin ruleset '${reference}'`);
   }
   return { source: reference, spec };
 }
@@ -406,7 +485,8 @@ export function splitDigestPin(reference: string): { reference: string; pin?: st
   if (match === null) {
     const hash = reference.lastIndexOf('#');
     if (hash >= 0 && /^#sha(256)?:/i.test(reference.slice(hash))) {
-      throw new Error(
+      throw new ResolveError(
+        'invalid_pin',
         `malformed digest pin in 'extends: ${reference}': ` +
           'expected "#sha256:" followed by 64 lowercase hex digits',
       );
@@ -415,7 +495,10 @@ export function splitDigestPin(reference: string): { reference: string; pin?: st
   }
   const base = reference.slice(0, match.index);
   if (base === '') {
-    throw new Error(`'extends: ${reference}' pins a digest but names no policy`);
+    throw new ResolveError(
+      'invalid_pin',
+      `'extends: ${reference}' pins a digest but names no policy`,
+    );
   }
   return { reference: base, pin: match[1] };
 }
@@ -477,7 +560,7 @@ async function collectChainAsync(
  * synchronous path async.
  */
 function startWalk(spec: HushSpec, source: string | undefined) {
-  const hops: Hop[] = [{ source: source ?? INLINE_POLICY_SOURCE, spec }];
+  const hops: Hop[] = [{ source: source ?? MEMORY_SOURCE, spec }];
   const stack: string[] = source != null ? [source] : [];
   let current = spec;
   let currentSource = source;
@@ -492,7 +575,10 @@ function startWalk(spec: HushSpec, source: string | undefined) {
     },
     step(): { reference: string; pin?: string } {
       if (depth >= MAX_EXTENDS_DEPTH) {
-        throw new Error(`extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`);
+        throw new ResolveError(
+          'max_depth',
+          `extends chain exceeds maximum depth of ${MAX_EXTENDS_DEPTH}`,
+        );
       }
       depth += 1;
       return splitDigestPin(current.extends!);
@@ -500,7 +586,8 @@ function startWalk(spec: HushSpec, source: string | undefined) {
     accept(loaded: LoadedSpec, pin?: string): void {
       const cycleIndex = stack.indexOf(loaded.source);
       if (cycleIndex >= 0) {
-        throw new Error(
+        throw new ResolveError(
+          'cycle',
           `circular extends detected: ${[...stack.slice(cycleIndex), loaded.source].join(' -> ')}`,
         );
       }
@@ -616,6 +703,18 @@ function buildResolution(
   return resolution;
 }
 
+/**
+ * The instant a verification ran, as `verified_at` spells it: RFC 3339 UTC,
+ * milliseconds, `Z`. The verifier's own clock (`options.verify.now`, or now),
+ * never the envelope's `signed_at` -- an auditor needs to know when the check
+ * happened, and the signing time is already inside the envelope.
+ */
+function verifiedAt(options: ResolveOptions): string {
+  const value = options.verify?.now;
+  const date = value === undefined ? new Date() : typeof value === 'string' ? new Date(value) : value;
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
 function verifyLink(
   partial: HushSpec,
   envelope: Uint8Array | string,
@@ -646,9 +745,9 @@ function verifyLink(
   const outcome: VerificationOutcome = verifyPolicy(partial, document, verifyOptions);
   if (outcome.ok) {
     return {
-      key_id: outcome.keyId,
       verified: true,
-      signed_at: outcome.signedAt,
+      key_id: outcome.keyId,
+      verified_at: verifiedAt(options),
     };
   }
   return {
@@ -681,14 +780,14 @@ function describeEnvelopeKey(document: unknown): { key_id?: string } {
  * the engine and carry no envelope; `https:` sources need the async locator.
  */
 export function defaultSignatureLocator(source: string): string | null {
-  if (isBuiltinSource(source) || source === INLINE_POLICY_SOURCE) return null;
+  if (isBuiltinSource(source) || source === MEMORY_SOURCE) return null;
   if (/^https?:\/\//i.test(source)) return null;
   return readSidecar(source);
 }
 
 /** {@link defaultSignatureLocator} plus `<url>.sig` for `https:` sources. */
 export async function defaultAsyncSignatureLocator(source: string): Promise<string | null> {
-  if (isBuiltinSource(source) || source === INLINE_POLICY_SOURCE) return null;
+  if (isBuiltinSource(source) || source === MEMORY_SOURCE) return null;
   if (/^https?:\/\//i.test(source)) return fetchSignature(`${source}.sig`);
   return readSidecar(source);
 }
@@ -709,10 +808,21 @@ function readSidecar(filePath: string): string | null {
 // --------------------------------------------------------------------------
 
 function readPolicyFile(filePath: string): LoadedSpec {
-  const source = realpathSync(filePath);
-  const parsed = parse(readFileSync(source, 'utf8'));
+  let source: string;
+  let text: string;
+  try {
+    source = realpathSync(filePath);
+    text = readFileSync(source, 'utf8');
+  } catch (error) {
+    throw new ResolveError(
+      'read',
+      `Failed to read HushSpec at ${filePath}: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const parsed = parse(text);
   if (!parsed.ok) {
-    throw new Error(`Failed to parse HushSpec at ${source}: ${parsed.error}`);
+    throw new ResolveError('parse', `Failed to parse HushSpec at ${source}: ${parsed.error}`);
   }
   return { source, spec: parsed.value };
 }

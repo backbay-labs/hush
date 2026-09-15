@@ -755,11 +755,22 @@ extensions:
       expect(receipt.decision).toBe('deny');
       expect(receipt.matched_rule).toBe('detection');
       expect(receipt.reason).toBe('content flagged by prompt_injection detection');
-      const detectionEntry = receipt.rule_trace.find((e) => e.rule_block === 'detection');
-      expect(detectionEntry).toBeDefined();
-      expect(detectionEntry!.outcome).toBe('deny');
-      expect(detectionEntry!.matched_rule).toBe('detection');
-      expect(detectionEntry!.evaluated).toBe(true);
+      // Format 0.2 records detectors in `detection_trace`, not as a rule block:
+      // `rule_trace` is the *rule* blocks that ran (receipt spec 4.3, 4.6).
+      expect(receipt.rule_trace.some((e) => e.rule_block === 'detection')).toBe(false);
+      const detector = receipt.detection_trace?.find(
+        (d) => d.category === 'prompt_injection',
+      );
+      expect(detector).toBeDefined();
+      expect(detector!.detector_id).toBe('regex_injection@1');
+      expect(detector!.matched).toBe(true);
+      expect(detector!.level).toBe('critical');
+      // Content is hashed, never carried (receipt spec 4.4).
+      expect(receipt.action.content_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(receipt.action.content_size).toBe(
+        Buffer.byteLength(action.content, 'utf8'),
+      );
+      expect(JSON.stringify(receipt)).not.toContain('ignore all previous');
     }
   });
 
@@ -796,10 +807,12 @@ describe('receipt sink integration', () => {
     expect(receipts).toHaveLength(1);
     expect(receipts[0].decision).toBe('deny');
     expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
-    expect(receipts[0].policy.content_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(receipts[0].receipt_version).toBe('0.2');
+    expect(receipts[0].policy.content_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(receipts[0].policy.content_hash).toBe(guard.resolution.content_hash);
   });
 
-  it('evaluate() sends an untagged receipt', () => {
+  it('evaluate() records the disposition implied by the decision', () => {
     const receipts: DecisionReceipt[] = [];
     const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
       sink: { send: (r) => receipts.push(r) },
@@ -807,7 +820,10 @@ describe('receipt sink integration', () => {
     const result = guard.evaluate({ type: 'tool_call', target: 'dangerous_tool' });
     expect(result.decision).toBe('deny');
     expect(receipts).toHaveLength(1);
-    expect(receipts[0].enforcement).toBeUndefined();
+    // `enforcement` is required in 0.2: a receipt without a disposition is not
+    // evidence that a control operated (receipt spec 4.7). evaluate() has no
+    // enforcement point, so the decision implies it.
+    expect(receipts[0].enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
   });
 
   it('a throwing sink never breaks enforcement', () => {
@@ -952,8 +968,9 @@ describe('sink-only guard on provider failure', () => {
     expect(receipts[0].decision).toBe('deny');
     expect(receipts[0].matched_rule).toBe('__hushspec_policy_provider__');
     expect(receipts[0].reason).toContain('provider unavailable');
-    // evaluate() never sets enforcement (unlike gate()) -- receipts stay untagged.
-    expect(receipts[0].enforcement).toBeUndefined();
+    // 0.2 requires a disposition; evaluate() records the one the decision
+    // implies under the guard's mode (monitor here).
+    expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
     expect(receipts[0].rule_trace).toEqual([]);
     expect(receipts[0].policy.name).toBe('allow-all');
   });

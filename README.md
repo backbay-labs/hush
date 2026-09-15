@@ -293,18 +293,18 @@ See [Installation](#installation) above for install options — Homebrew, npm, C
 <details>
 <summary>Decision Receipts (Audit Trail)</summary>
 
-`evaluate_audited()` generates structured decision receipts with rule traces, policy summaries, and optional content redaction. Receipts conform to `hushspec-receipt.v0.schema.json` and are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
+`evaluate_audited()` generates format 0.2 decision receipts: the resolved policy's canonical content hash, the actor, the recorded rule and detection traces, and the enforcement disposition. Content is never carried -- only its `sha256:` hash and byte size -- so a receipt log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v0.schema.json` and are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
 
 ```typescript
-import { parseOrThrow, evaluateAudited } from '@hushspec/core';
+import { parseOrThrow, resolveWithOptions, evaluateAudited } from '@hushspec/core';
 
-const spec = parseOrThrow(policyYaml);
-const receipt = evaluateAudited(spec, action, {
+const resolution = resolveWithOptions(parseOrThrow(policyYaml));
+const receipt = evaluateAudited(resolution, action, {
   enabled: true,
-  include_rule_trace: true,
-  redact_content: false,
+  includeRuleTrace: true,
+  recordDuration: true,
 });
-// receipt.decision, receipt.rule_evaluations, receipt.policy_summary
+// receipt.decision, receipt.rule_trace, receipt.policy.content_hash
 ```
 
 Receipt sinks (`FileReceiptSink`, `ConsoleReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`) are available in all four SDKs for routing receipts to storage, logging, or custom callback endpoints. No OTLP sink exists in any SDK today.

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { HushSpec } from './schema.js';
 import type { EvaluationAction, EvaluationResult } from './evaluate.js';
 import { isPanicActive } from './evaluate.js';
@@ -11,17 +11,37 @@ import {
   PolicyVerificationError,
   createBuiltinLoader,
   createCompositeLoader,
+  resolutionFromResolved,
   resolveWithOptions,
 } from './resolve.js';
 import { Keyring, keyringFromPublicKey } from './signing.js';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
-import type { AuditConfig, DecisionReceipt, EnforcementMode, EnforcementSummary } from './receipt.js';
-import { computePolicyHash, DEFAULT_AUDIT_CONFIG, evaluateAudited } from './receipt.js';
+import type {
+  Actor,
+  AuditConfig,
+  AuditContext,
+  DecisionReceipt,
+  EnforcementMode,
+  EnforcementSummary,
+  PolicySummary,
+  TimeSource,
+} from './receipt.js';
+import {
+  DEFAULT_AUDIT_CONFIG,
+  RECEIPT_VERSION,
+  evaluateAudited,
+  formatTimestamp,
+  impliedEnforcement,
+  policySummary,
+  unverifiedPolicyReceipt,
+  uuidV7,
+} from './receipt.js';
+import type { PolicyEvent } from './log.js';
+import { policyLoadedEvent, policySwappedEvent } from './log.js';
 import type { ReceiptSink } from './sinks.js';
 import { EXTENSION_KEYS_SET, RULE_KEYS_SET } from './generated/contract.js';
-import { HUSHSPEC_VERSION } from './version.js';
 
 export type WarnHandler = (result: EvaluationResult, action: EvaluationAction) => boolean;
 
@@ -45,6 +65,14 @@ export interface HushGuardOptions {
   enforcement?: EnforcementConfig;
   sink?: ReceiptSink;
   audit?: AuditConfig;
+  /**
+   * Who actions are evaluated for (Receipt specification section 4.1). An
+   * enforcement point SHOULD populate every field it knows; receipts omit the
+   * member entirely when nothing is set.
+   */
+  actor?: Actor;
+  /** How much to trust the receipt clock (receipt spec 3.3). Default `system`. */
+  timeSource?: TimeSource;
   /**
    * Loader for `extends` references. Defaults to builtin-only (or the
    * builtin+filesystem composite loader when `baseDir` is set).
@@ -261,89 +289,53 @@ function validateEnforcementConfig(config: EnforcementConfig, observable: boolea
 }
 
 /**
- * Fold a policy's `detection:` extension into an already-computed receipt,
- * mirroring the Rust reference (`crates/hushspec-cli/src/cmd_eval.rs`'s
- * `apply_detection`).
- *
- * `evaluateAudited()` builds its receipt from the plain `evaluate()`, which
- * does not consult the detection extension. When content detection escalates
- * the decision (allow -> warn, or allow/warn -> deny), copy the escalated
- * decision, matched_rule, and reason onto the receipt and append a `detection`
- * rule-trace entry -- so a sink-backed guard applies detection identically to
- * the receipt-free path and the emitted audit record stays self-consistent.
- *
- * A no-op when the policy has no detection extension, there is no content, or
- * detection does not escalate: `receipt.decision` came from the same base
- * `evaluate()` as `evaluateWithDetection`'s base, so they differ only on
- * escalation, and detection never weakens a policy decision.
- */
-function applyDetection(
-  receipt: DecisionReceipt,
-  spec: HushSpec,
-  action: EvaluationAction,
-): void {
-  const detected = evaluateWithDetection(spec, action).evaluation;
-  if (detected.decision === receipt.decision) {
-    return;
-  }
-  receipt.rule_trace.push({
-    rule_block: 'detection',
-    // Decision ('allow' | 'warn' | 'deny') is a subset of RuleOutcome.
-    outcome: detected.decision,
-    matched_rule: detected.matched_rule,
-    reason: detected.reason,
-    evaluated: true,
-  });
-  receipt.decision = detected.decision;
-  receipt.matched_rule = detected.matched_rule;
-  receipt.reason = detected.reason;
-}
-
-/**
- * Build a minimal receipt for the provider-failure deny/would-block branch
- * in `gate()`, where there is no policy to run `evaluateAudited()` against --
+ * Build a receipt for the provider-failure deny/would-block branch in
+ * `gate()`, where there is no policy to run `evaluateAudited()` against --
  * only the already-computed `result`.
  *
  * Without this, a guard configured with a `sink` but no `observer` (monitor
  * mode accepts either, per `validateEnforcementConfig`) would go completely
- * silent on a provider outage: `record()` only forwards a receipt to the
- * sink when one is present, and the provider-failure branch used to always
- * pass `undefined`. That violates "a monitored block is never silent" --
- * this builds a real (if minimal) receipt whenever a sink is configured so
- * it always gets a record.
+ * silent on a provider outage: `record()` only forwards a receipt to the sink
+ * when one is present, and the provider-failure branch used to always pass
+ * `undefined`. That violates "a monitored block is never silent".
  *
- * `policySpec` is the guard's last successfully loaded policy (`this.policy`)
- * used only to populate the receipt's `PolicySummary`; it is never evaluated
- * against `action` since the whole point of this path is that no evaluation
- * happened.
+ * `policy` is the identity of the guard's last successfully loaded policy; it
+ * was never evaluated against `action`, which is the whole point of this path,
+ * so `rule_trace` is empty.
  */
 function buildFailureReceipt(
-  policySpec: HushSpec,
+  policy: PolicySummary,
   action: EvaluationAction,
   result: EvaluationResult,
-  audit: AuditConfig,
+  enforcement: EnforcementSummary,
+  ctx: AuditContext,
 ): DecisionReceipt {
-  const contentRedacted = audit.redact_content && action.content != null;
+  const actor = ctx.actor;
   return {
-    receipt_id: randomUUID(),
-    timestamp: new Date().toISOString(),
-    hushspec_version: HUSHSPEC_VERSION,
+    receipt_version: RECEIPT_VERSION,
+    receipt_id: ctx.receiptId ?? uuidV7(ctx.clock?.getTime()),
+    timestamp: formatTimestamp(ctx.clock ?? new Date()),
+    time_source: ctx.timeSource ?? 'system',
+    ...(actor === undefined ? {} : { actor }),
+    policy,
     action: {
       type: action.type,
-      target: action.target,
-      // `|| undefined` (rather than the boolean itself) drops the key when
-      // false, matching evaluateAudited()'s and Rust/Go's skip-if-false
-      // behavior.
-      content_redacted: contentRedacted || undefined,
+      ...(action.target === undefined ? {} : { target: action.target }),
+      ...(action.content === undefined
+        ? {}
+        : {
+            content_hash: `sha256:${createHash('sha256')
+              .update(action.content, 'utf8')
+              .digest('hex')}`,
+            content_size: Buffer.byteLength(action.content, 'utf8'),
+          }),
+      ...(action.args_size === undefined ? {} : { args_size: action.args_size }),
     },
     decision: result.decision,
-    matched_rule: result.matched_rule,
-    reason: result.reason,
+    ...(result.matched_rule === undefined ? {} : { matched_rule: result.matched_rule }),
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
     rule_trace: [],
-    policy: { name: policySpec.name, version: policySpec.hushspec },
-    origin_profile: result.origin_profile,
-    posture: result.posture,
-    evaluation_duration_us: 0,
+    enforcement,
   };
 }
 
@@ -370,8 +362,10 @@ export class HushGuard {
   private enforcementOverrides: Record<string, EnforcementMode> = {};
   private sink: ReceiptSink | null = null;
   private audit: AuditConfig = DEFAULT_AUDIT_CONFIG;
+  private actor: Actor | undefined;
+  private timeSource: TimeSource;
   private resolveOptions: PolicyResolveOptions;
-  private resolutionValue: Resolution | null = null;
+  private resolutionValue: Resolution;
   /**
    * Set when verification was required and did not pass. The guard still holds
    * the document it was handed -- so `resolution` and the policy hash report
@@ -389,6 +383,8 @@ export class HushGuard {
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.sink = options?.sink ?? null;
     this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
+    this.actor = options?.actor;
+    this.timeSource = options?.timeSource ?? 'system';
     this.resolveOptions = {
       loader: options?.loader,
       baseDir: options?.baseDir,
@@ -405,11 +401,38 @@ export class HushGuard {
     this.resolutionValue = resolution;
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
+    this.policyHash = resolution.content_hash;
     if (options?.observer) {
       this.observableEvaluator = new ObservableEvaluator();
       this.observableEvaluator.addObserver(options.observer);
-      this.policyHash = computePolicyHash(this.policy);
       this.observableEvaluator.notifyPolicyLoaded(this.policy.name, this.policyHash);
+    }
+    // A policy-in-effect record before any receipt evaluated under it
+    // (log spec 6): a reader maps every receipt to the policy in force by
+    // walking back to the nearest policy event.
+    this.emitPolicyEvent(policyLoadedEvent(this.policySummary(), this.enforcementMode));
+  }
+
+  /** The identity of the policy in force, as a receipt and a log entry carry it. */
+  private policySummary(): PolicySummary {
+    return policySummary(this.resolutionValue);
+  }
+
+  /** The audit context every receipt this guard emits is built with. */
+  private auditContext(enforcement?: EnforcementSummary): AuditContext {
+    return {
+      ...(this.actor === undefined ? {} : { actor: this.actor }),
+      ...(enforcement === undefined ? {} : { enforcement }),
+      enforcementMode: this.enforcementMode,
+      timeSource: this.timeSource,
+    };
+  }
+
+  private emitPolicyEvent(event: PolicyEvent): void {
+    try {
+      this.sink?.recordPolicyEvent?.(event);
+    } catch {
+      /* sinks must not break policy loading */
     }
   }
 
@@ -472,11 +495,11 @@ export class HushGuard {
   }
 
   /**
-   * The chain, hashes and signature outcome of the policy in force. Stashed
-   * for the receipt's `policy.extends_chain` / `policy.signature`, which this
-   * SDK still emits in the 0.1 shape.
+   * The chain, hashes and signature outcome of the policy in force -- what a
+   * receipt's `policy.content_hash`, `policy.extends_chain` and
+   * `policy.signature` are taken from.
    */
-  get resolution(): Resolution | null {
+  get resolution(): Resolution {
     return this.resolutionValue;
   }
 
@@ -511,44 +534,26 @@ export class HushGuard {
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
-    const policy = this.activePolicyResult();
-    if ('decision' in policy) {
-      // Provider-failure deny: mirrors gate()'s buildFailureReceipt handling
-      // (see its doc comment) so a sink-only guard (sink, no observer) is
-      // never silent here either. Before this, evaluate() returned the
-      // failure result directly without ever building or sending a receipt,
-      // so a fromProvider guard with a sink but no observer emitted zero
-      // receipts on a provider outage -- the exact "monitored block must
-      // never be silent" violation buildFailureReceipt was introduced to
-      // close for gate()/check()/enforce().
-      const receipt = this.sink
-        ? buildFailureReceipt(this.policy, action, policy, this.audit)
-        : undefined;
-      if (receipt && this.sink) {
-        try {
-          this.sink.send(receipt);
-        } catch {
-          /* sinks must not break evaluation */
-        }
-      }
+    const active = this.activeResolution();
+    if ('decision' in active) {
+      // Provider-failure (or signature-refusal) deny: mirrors gate()'s
+      // handling so a sink-only guard (sink, no observer -- monitor mode
+      // accepts either) is never silent here either.
+      const enforcement = impliedEnforcement(active.decision, this.effectiveMode(active));
+      const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
+      this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
         this.observerAction(action),
-        policy,
+        active,
         0,
         undefined,
         receipt,
       );
-      return policy;
+      return active;
     }
     if (this.sink) {
-      const { result, durationUs, receipt } = this.runEvaluation(policy, action);
-      if (receipt) {
-        try {
-          this.sink.send(receipt);
-        } catch {
-          /* sinks must not break evaluation */
-        }
-      }
+      const { result, durationUs, receipt } = this.runEvaluation(active, action);
+      this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
         this.observerAction(action),
         result,
@@ -563,11 +568,20 @@ export class HushGuard {
       // which calls the plain evaluate()) so a policy's detection extension
       // is honored here too, then emit through the same public notification
       // ObservableEvaluator.evaluate() would otherwise have sent.
-      const { result, durationUs } = this.runEvaluation(policy, action);
+      const { result, durationUs } = this.runEvaluation(active, action);
       this.observableEvaluator.notifyEvaluationCompleted(this.observerAction(action), result, durationUs);
       return result;
     }
-    return this.runEvaluation(policy, action).result;
+    return this.runEvaluation(active, action).result;
+  }
+
+  private send(receipt?: DecisionReceipt): void {
+    if (receipt === undefined || this.sink === null) return;
+    try {
+      this.sink.send(receipt);
+    } catch {
+      /* sinks must not break evaluation */
+    }
   }
 
   check(action: EvaluationAction): boolean {
@@ -587,29 +601,27 @@ export class HushGuard {
    * enforcement path: check() and enforce() delegate here.
    */
   gate(action: EvaluationAction): GateOutcome {
-    const policy = this.activePolicyResult();
-    if ('decision' in policy) {
-      // Provider-failure deny: no loaded policy, so evaluateAudited() can't
-      // run -- but the decision must still be audited. A monitored provider
-      // outage must never proceed silently, so build a minimal receipt
-      // whenever a sink is configured (buildFailureReceipt) rather than
-      // passing undefined: record() only reaches the sink when a receipt is
-      // present, and a sink-only guard (sink, no observer -- monitor mode
-      // accepts either) would otherwise emit nothing at all here.
-      const mode = this.effectiveMode(policy);
+    const active = this.activeResolution();
+    if ('decision' in active) {
+      // Provider failure or a policy that would not verify: no policy to run
+      // evaluateAudited() against -- but the decision must still be audited.
+      // A monitored outage must never proceed silently, so build a receipt
+      // whenever a sink is configured rather than passing undefined:
+      // record() only reaches the sink when a receipt is present, and a
+      // sink-only guard (sink, no observer -- monitor mode accepts either)
+      // would otherwise emit nothing at all here.
+      const mode = this.effectiveMode(active);
       const proceed = mode === 'monitor';
       const enforcement: EnforcementSummary = {
         mode,
         outcome: proceed ? 'would_block' : 'blocked',
       };
-      const receipt = this.sink
-        ? buildFailureReceipt(this.policy, action, policy, this.audit)
-        : undefined;
-      this.record(action, policy, 0, enforcement, receipt);
-      return { result: policy, proceed, enforcement };
+      const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
+      this.record(action, active, 0, enforcement, receipt);
+      return { result: active, proceed, enforcement };
     }
 
-    const { result, durationUs, receipt } = this.runEvaluation(policy, action);
+    const { result, durationUs, receipt } = this.runEvaluation(active, action);
     const mode = this.effectiveMode(result);
     let proceed: boolean;
     let outcome: EnforcementSummary['outcome'];
@@ -673,20 +685,17 @@ export class HushGuard {
     return this.enforcementMode;
   }
 
-  private runEvaluation(policy: HushSpec, action: EvaluationAction): {
+  private runEvaluation(resolution: Resolution, action: EvaluationAction): {
     result: EvaluationResult;
     durationUs: number;
     receipt?: DecisionReceipt;
   } {
     if (this.sink) {
-      // evaluateAudited() builds the receipt from the plain evaluate(), which
-      // does not consult the detection extension; applyDetection() folds it in
-      // (escalating decision/matched_rule/reason and appending a `detection`
-      // rule-trace entry) so a sink-backed guard honors a policy's detection
-      // extension identically to the receipt-free path below. No-op when
-      // nothing escalates, so existing receipts are unchanged.
-      const receipt = evaluateAudited(policy, action, this.audit);
-      applyDetection(receipt, policy, action);
+      // evaluateAudited() routes through the detection pipeline itself, so a
+      // sink-backed guard honors a policy's `detection:` extension identically
+      // to the receipt-free path below -- and `detection_trace` records what
+      // ran rather than being reconstructed afterwards.
+      const receipt = evaluateAudited(resolution, action, this.audit, this.auditContext());
       return {
         result: {
           decision: receipt.decision,
@@ -695,14 +704,57 @@ export class HushGuard {
           origin_profile: receipt.origin_profile,
           posture: receipt.posture,
         },
-        durationUs: receipt.evaluation_duration_us,
+        durationUs: receipt.duration_us ?? 0,
         receipt,
       };
     }
     const start = performance.now();
-    const result = evaluateWithDetection(policy, action).evaluation;
+    const result = evaluateWithDetection(resolution.spec, action).evaluation;
     const durationUs = Math.round((performance.now() - start) * 1000);
     return { result, durationUs };
+  }
+
+  /**
+   * The receipt for an action that was refused without an evaluation.
+   *
+   * A policy that did not verify gets the reserved
+   * `__hushspec_policy_unverified__` receipt of signing spec 6.5, which
+   * records `policy.signature.verified: false` and the verifier's reason; a
+   * provider outage gets the same shape with the decision that was made.
+   */
+  private refusedReceipt(
+    action: EvaluationAction,
+    result: EvaluationResult,
+    enforcement: EnforcementSummary,
+  ): DecisionReceipt {
+    if (result.matched_rule === POLICY_SIGNATURE_RULE) {
+      return unverifiedPolicyReceipt(
+        this.unverifiedPolicySummary(),
+        action,
+        this.auditContext(enforcement),
+      );
+    }
+    return buildFailureReceipt(
+      this.policySummary(),
+      action,
+      result,
+      enforcement,
+      this.auditContext(enforcement),
+    );
+  }
+
+  /**
+   * The policy identity for a refused load: the resolution the guard was
+   * handed, with the failing hop's verification outcome recorded even when
+   * the resolver never got as far as filling in the leaf's (signing spec
+   * 6.5, "recording policy.signature.verified: false with the reason").
+   */
+  private unverifiedPolicySummary(): PolicySummary {
+    const summary = this.policySummary();
+    if (summary.signature === undefined && this.refusal !== null) {
+      summary.signature = this.refusal.status;
+    }
+    return summary;
   }
 
   private record(
@@ -732,12 +784,13 @@ export class HushGuard {
   }
 
   /**
-   * Redact an action for observer emission the same way the receipt redacts it:
-   * when `redact_content` is enabled and content is present, strip the content
-   * and set the redacted flag so raw content never leaks into the observer stream.
+   * Redact an action for observer emission the way a receipt does: content is
+   * never carried (receipt spec 4.4 records only its hash and size), so it is
+   * stripped here too and the redacted flag is set -- raw content must not
+   * leak into the observer stream either.
    */
   private observerAction(action: EvaluationAction): EvaluationAction {
-    if (this.audit.redact_content && action.content != null) {
+    if (action.content != null) {
       const { content: _content, ...rest } = action;
       return { ...rest, content_redacted: true };
     }
@@ -783,17 +836,31 @@ export class HushGuard {
     const previousHash = this.policyHash;
     this.policy = resolved;
     this.resolutionValue = next;
+    this.policyHash = next.content_hash;
     if (this.observableEvaluator) {
-      this.policyHash = computePolicyHash(resolved);
       this.observableEvaluator.notifyPolicyReloaded(
         resolved.name,
         this.policyHash,
         previousHash ?? undefined,
       );
     }
+    // Log spec 6: a `policy_swapped` record before any receipt evaluated
+    // under the new policy, naming the hash it replaced.
+    this.emitPolicyEvent(
+      policySwappedEvent(
+        this.policySummary(),
+        this.enforcementMode,
+        previousHash ?? undefined,
+      ),
+    );
   }
 
-  private activePolicyResult(): HushSpec | EvaluationResult {
+  /**
+   * The resolution every action is evaluated against, or the deny that stands
+   * in for it when there is none: a policy that did not verify (signing spec
+   * 6.5) or a provider that cannot serve one.
+   */
+  private activeResolution(): Resolution | EvaluationResult {
     if (this.refusal != null) {
       return {
         decision: 'deny',
@@ -804,7 +871,7 @@ export class HushGuard {
       };
     }
     if (this.provider == null) {
-      return this.policy;
+      return this.resolutionValue;
     }
 
     try {
@@ -827,8 +894,16 @@ export class HushGuard {
           reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
         };
       }
-      this.policy = current;
-      return current;
+      if (current !== this.policy) {
+        // A provider that reloaded without notifying the guard: adopt its own
+        // resolution when it has one for exactly this document, otherwise
+        // re-derive the identity so receipts never name a stale hash.
+        this.policy = current;
+        this.resolutionValue =
+          resolutionFor(this.provider, current) ?? resolutionFromResolved(current);
+        this.policyHash = this.resolutionValue.content_hash;
+      }
+      return this.resolutionValue;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {

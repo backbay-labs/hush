@@ -8,6 +8,8 @@ import {
   type KeyObject,
 } from 'node:crypto';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
+import type { DecisionReceipt } from './receipt.js';
+import { receiptHash } from './receipt.js';
 import type { HushSpec } from './schema.js';
 import { validate } from './validate.js';
 
@@ -728,9 +730,6 @@ export function signPolicy(
   privateKeyPem: string,
   options: SignOptions = {},
 ): Envelope {
-  const privateKey = privateKeyFromPem(privateKeyPem);
-  const keyId = keyIdOf(createPublicKey(privateKey));
-
   const invalid = describeValidation(resolvedSpec);
   if (invalid !== undefined) {
     throw new SigningError(`refusing to sign an invalid policy: ${invalid}`);
@@ -743,11 +742,45 @@ export function signPolicy(
     throw new SigningError(`refusing to sign: ${describe(error)}`);
   }
 
-  const policyVersion = options.policyVersion ?? resolvedSpec.metadata?.policy_version;
+  return signContentHash(hash, privateKeyPem, {
+    ...options,
+    policyVersion: options.policyVersion ?? resolvedSpec.metadata?.policy_version,
+    policyName: options.policyName ?? resolvedSpec.name,
+  });
+}
+
+/**
+ * Sign a content hash that is already in hand (spec section 4.2).
+ *
+ * The hash-level primitive behind {@link signPolicy}: an enforcement point
+ * that has already resolved and hashed the document it is about to evaluate
+ * signs *that* hash rather than re-reading a file, and a log or a receipt
+ * signs its own hash the same way (log spec 7, receipt spec 6).
+ *
+ * Prefer {@link signPolicy} for a policy, which computes the hash the way a
+ * verifier will.
+ *
+ * @throws {SigningError} when the key is unusable or `hash` is not a
+ * `sha256:` digest.
+ */
+export function signContentHash(
+  hash: string,
+  privateKeyPem: string,
+  options: SignOptions = {},
+): Envelope {
+  if (!SHA256_PATTERN.test(hash)) {
+    throw new SigningError(
+      `content_hash ${JSON.stringify(hash)} is not sha256:<64 lowercase hex>`,
+    );
+  }
+  const privateKey = privateKeyFromPem(privateKeyPem);
+  const keyId = keyIdOf(createPublicKey(privateKey));
+
+  const policyVersion = options.policyVersion;
   if (policyVersion !== undefined && (!Number.isInteger(policyVersion) || policyVersion < 0)) {
     throw new SigningError('policy_version must be a non-negative integer');
   }
-  const policyName = options.policyName ?? resolvedSpec.name;
+  const policyName = options.policyName;
 
   // Member order follows the table in spec section 4; JSON object order is not
   // significant, and the signing input re-sorts anyway.
@@ -823,6 +856,48 @@ export function verifyPolicy(
   envelope: Envelope | unknown,
   options: VerifyOptions,
 ): VerificationOutcome {
+  // Check 9's input is computed up front but only *reported* after checks 1-8
+  // pass, so a forged signature is never described in terms of the policy's
+  // own problems.
+  let hash: string | undefined;
+  let detail = '';
+  try {
+    const invalid = describeValidation(resolvedSpec);
+    if (invalid !== undefined) {
+      detail = `policy does not validate: ${invalid}`;
+    } else {
+      hash = contentHash(resolvedSpec);
+    }
+  } catch (error) {
+    detail = `policy cannot be hashed: ${describe(error)}`;
+  }
+  return verifyContentHash(envelope, hash, options, detail);
+}
+
+/**
+ * Verify an envelope against a content hash that is already in hand: the ten
+ * ordered checks of spec section 6.2, with check 9 comparing `hash` rather
+ * than re-deriving it from a document.
+ *
+ * This is what an enforcement point uses to bind verification to the exact
+ * in-memory resolved document it is about to evaluate (spec section 10,
+ * "time of check, time of use"), and what a log entry and a receipt are
+ * verified with (log spec 7, receipt spec 6).
+ *
+ * `hash` of `undefined` means the caller had nothing to compare -- a document
+ * that would not resolve or validate. That is a check-9 failure
+ * (`content_hash_mismatch`, spec section 6.2), reported only after checks 1
+ * through 8 have passed; `missingHashDetail` supplies the free-text reason.
+ *
+ * @throws {SigningError} only for a configuration problem -- no keyring, or a
+ * keyring that does not load.
+ */
+export function verifyContentHash(
+  envelope: Envelope | unknown,
+  hash: string | undefined,
+  options: VerifyOptions,
+  missingHashDetail = 'there is no content hash to compare',
+): VerificationOutcome {
   const keyring = resolveKeyring(options);
   const skewSeconds = options.maxClockSkewSeconds ?? DEFAULT_MAX_CLOCK_SKEW_SECONDS;
   if (!Number.isFinite(skewSeconds) || skewSeconds < 0) {
@@ -893,22 +968,15 @@ export function verifyPolicy(
     return fail('signature_mismatch', `signature does not verify under key ${key.keyId}`);
   }
 
-  // 9. Content. A policy that cannot be resolved or validated has no hash to
+  // 9. Content. A document that cannot be resolved or validated has no hash to
   //    compare, which the spec folds into this same reason.
-  let hash: string;
-  try {
-    const invalid = describeValidation(resolvedSpec);
-    if (invalid !== undefined) {
-      return fail('content_hash_mismatch', `policy does not validate: ${invalid}`);
-    }
-    hash = contentHash(resolvedSpec);
-  } catch (error) {
-    return fail('content_hash_mismatch', `policy cannot be hashed: ${describe(error)}`);
+  if (hash === undefined) {
+    return fail('content_hash_mismatch', missingHashDetail);
   }
   if (hash !== claims.content_hash) {
     return fail(
       'content_hash_mismatch',
-      `policy hashes to ${hash}, the envelope covers ${claims.content_hash}`,
+      `content hashes to ${hash}, the envelope covers ${claims.content_hash}`,
     );
   }
 
@@ -949,4 +1017,58 @@ function signatureMatches(envelope: Envelope, publicKey: KeyObject): boolean {
     // an exception to propagate: fail closed.
     return false;
   }
+}
+
+// --------------------------------------------------------------------------
+// Receipt signing (RFC 09 P2-06, receipt spec 6)
+// --------------------------------------------------------------------------
+
+/** A receipt together with a signature over its receipt hash. */
+export interface SignedReceipt {
+  receipt: DecisionReceipt;
+  /** A 0.2 envelope whose `content_hash` is the receipt hash. */
+  signature: Envelope;
+}
+
+/**
+ * Sign a receipt: the envelope's `content_hash` is the receipt hash (receipt
+ * spec 6), so the signature covers every field of the receipt.
+ *
+ * `policyName` and `policyVersion` are left unset unless `options` provides
+ * them; a receipt already names its policy.
+ *
+ * @throws {SigningError} when the key is unusable or the receipt cannot be
+ * canonicalized.
+ */
+export function signReceipt(
+  receipt: DecisionReceipt,
+  privateKeyPem: string,
+  options: SignOptions = {},
+): SignedReceipt {
+  let hash: string;
+  try {
+    hash = receiptHash(receipt);
+  } catch (error) {
+    throw new SigningError(`refusing to sign a receipt with no canonical form: ${describe(error)}`);
+  }
+  return { receipt, signature: signContentHash(hash, privateKeyPem, options) };
+}
+
+/**
+ * Verify a receipt signature: the ten checks of spec section 6.2 with the
+ * receipt hash as the content hash. A receipt edited after signing fails at
+ * check 9 with `content_hash_mismatch`.
+ */
+export function verifyReceipt(
+  signed: SignedReceipt,
+  options: VerifyOptions,
+): VerificationOutcome {
+  let hash: string | undefined;
+  let detail = '';
+  try {
+    hash = receiptHash(signed.receipt);
+  } catch (error) {
+    detail = `receipt cannot be hashed: ${describe(error)}`;
+  }
+  return verifyContentHash(signed.signature, hash, options, detail);
 }
