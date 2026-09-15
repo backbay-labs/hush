@@ -297,6 +297,9 @@ rules:
 "#,
         )
         .expect("parses")
+        // A scoped latch: the panic tests arm the process-wide one, and the
+        // lib test binary runs them concurrently with this.
+        .with_panic_state(PanicState::new())
         .compile()
         .expect("compiles");
 

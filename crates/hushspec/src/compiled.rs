@@ -675,7 +675,11 @@ rules:
         severity: critical
 "#,
         );
-        let policy = CompiledPolicy::compile(&doc).expect("compiles");
+        // A scoped latch: the panic tests arm the process-wide one, and the
+        // lib test binary runs them concurrently with this.
+        let policy = CompiledPolicy::compile(&doc)
+            .expect("compiles")
+            .with_panic_state(PanicState::new());
         let compiled = policy
             .matchers
             .secret_patterns
