@@ -55,7 +55,7 @@ The `hushspec` field is the only REQUIRED field. Its value MUST be a string matc
 
 **Version acceptance.** An engine that declares support for minor version `X.Y` MUST accept every document whose `hushspec` value is `X.Y.Z` for any non-negative integer `Z`. Patch versions contain only clarifications and errata (see Section 10.1) and never change document validity or evaluation semantics, so rejecting them is a conformance failure. Engines MUST reject documents whose `X.Y` they do not support.
 
-Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/staged/0.2.0/core/valid/version-patch-accept.yaml` (staged).
+Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/version-patch-accept.yaml`.
 
 ### 2.3 Extends Field
 
@@ -75,7 +75,7 @@ HushSpec documents use a restricted YAML profile so that every conformant parser
 6. Engines MUST enforce resource limits on the input: a maximum document size, a maximum nesting depth, and a maximum node count. The RECOMMENDED defaults are 1 MiB, 32 levels, and 100,000 nodes. Exceeding any limit MUST be reported as a parse error.
 7. Tabs are not valid YAML indentation and MUST be rejected. Byte order marks MUST be accepted and ignored.
 
-Test vectors: `fixtures/core/invalid/yaml-duplicate-key.yaml`, `fixtures/core/invalid/float-version.yaml`, and the staged vectors `fixtures/staged/0.2.0/core/invalid/yaml-*.yaml` (see `fixtures/staged/README.md`).
+Test vectors: `fixtures/core/invalid/yaml-duplicate-key.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/invalid/yaml-alias.yaml`, `fixtures/core/invalid/yaml-multi-doc.yaml`, `fixtures/core/invalid/yaml-bool-yes.yaml`.
 
 ### 2.5 Metadata
 
@@ -128,7 +128,7 @@ Block access to sensitive filesystem paths.
 
 A forbidden path produces **deny** with `matched_rule` `rules.forbidden_paths.patterns`. A path that matches an exception produces **allow** from this block with `matched_rule` `rules.forbidden_paths.exceptions`; that allow MUST NOT prevent other applicable blocks from being evaluated (Section 6.1). When `patterns` is empty, no paths are forbidden regardless of the `enabled` state.
 
-Test vectors: `fixtures/core/evaluation/forbidden-paths.test.yaml`, `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/path-normalization-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/forbidden-paths.test.yaml`, `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/core/evaluation/path-normalization-lexical.test.yaml`, `fixtures/core/evaluation/no-early-return.test.yaml`.
 
 ### 3.2 `rules.path_allowlist`
 
@@ -143,7 +143,7 @@ Allowlist-based path access control. When enabled, only paths matching the allow
 
 **Semantics:** When enabled, a file operation is allowed by this block only if the normalized target path (Section 3.14.1) matches at least one pattern in the corresponding array (`read`, `write`, or `patch`). If `patch` is empty, patch operations fall back to the `write` array. If the relevant array is empty (and no fallback applies), all operations of that type are denied. A match produces **allow** with `matched_rule` `rules.path_allowlist`; a non-match produces **deny** with the same `matched_rule`. An allow from this block MUST NOT prevent other applicable blocks (in particular `secret_patterns` and `patch_integrity`) from being evaluated (Section 6.1).
 
-Test vector: `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
+Test vector: `fixtures/core/evaluation/no-early-return.test.yaml`.
 
 ### 3.3 `rules.egress`
 
@@ -161,7 +161,7 @@ Network egress control by host.
 2. If the host matches any entry in `allow`, the decision is **allow** (`rules.egress.allow`).
 3. Otherwise, the `default` value applies (`rules.egress.default`).
 
-Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/egress-normalization-staged.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
 
 ### 3.4 `rules.secret_patterns`
 
@@ -200,7 +200,7 @@ Detect secrets in content before it is written or transmitted.
 
 `<name>` is the first pattern in document order among those at the highest matched severity. Engines MUST NOT stop at the first match: a later `critical` pattern MUST outrank an earlier `warn` pattern.
 
-Test vectors: `fixtures/core/evaluation/secret-patterns.test.yaml`, `fixtures/core/evaluation/severity-mapping.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/severity-mapping-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/content-scan-egress-tool.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/secret-patterns.test.yaml`, `fixtures/core/evaluation/severity-mapping.test.yaml`, `fixtures/core/evaluation/severity-precedence.test.yaml`, `fixtures/core/evaluation/content-scan-egress-tool.test.yaml`.
 
 ### 3.5 `rules.patch_integrity`
 
@@ -230,7 +230,7 @@ Validate the safety and reasonableness of patch/diff content.
 
 Checks are evaluated in the order listed; the first failing check determines `matched_rule`.
 
-Test vectors: `fixtures/core/evaluation/patch-integrity.test.yaml`, `fixtures/core/evaluation/patch-integrity-defaults.test.yaml`, `fixtures/core/evaluation/patch-balance.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/patch-balance-zero.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/patch-integrity.test.yaml`, `fixtures/core/evaluation/patch-integrity-defaults.test.yaml`, `fixtures/core/evaluation/patch-balance.test.yaml`, `fixtures/core/evaluation/patch-balance-zero.test.yaml`.
 
 ### 3.6 `rules.shell_commands`
 
@@ -268,7 +268,7 @@ Control tool and MCP (Model Context Protocol) invocations.
 5. If `allow` is non-empty and the tool name equals no entry, the decision is **deny** (`rules.tool_access.allow`, reason "tool is not in the allowlist"). This is allowlist mode; the `default` field MUST NOT be consulted when `allow` is non-empty.
 6. Otherwise (`allow` is empty), the `default` value applies (`rules.tool_access.default`).
 
-Test vectors: `fixtures/core/evaluation/tool-access.test.yaml`, `fixtures/core/evaluation/tool-exact-match.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/tool-exact-match-staged.test.yaml` (staged), `fixtures/staged/0.2.0/core/evaluation/tool-allowlist-deny.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/tool-access.test.yaml`, `fixtures/core/evaluation/tool-exact-match.test.yaml`, `fixtures/core/evaluation/tool-glob-literal.test.yaml`, `fixtures/core/evaluation/tool-allowlist-deny.test.yaml`.
 
 ### 3.8 `rules.computer_use`
 
@@ -289,7 +289,7 @@ Version 0.1.0 described `guardrail` as permitting engine heuristics on borderlin
 
 Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`) compared as exact strings. This specification does not mandate a fixed set of action identifiers.
 
-Test vectors: `fixtures/core/evaluation/computer-use.test.yaml` (its `guardrail` warn expectation is superseded), `fixtures/staged/0.2.0/core/evaluation/computer-use-guardrail-deny.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`, `fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml`.
 
 ### 3.9 `rules.remote_desktop_channels`
 
@@ -344,7 +344,7 @@ Fine-grained controls for browser-automation tool calls: a host allowlist, a ver
 
 The block is evaluated only for `browser_action` actions.
 
-Test vectors: `fixtures/core/valid/browser-automation-rule.yaml`, `fixtures/staged/0.2.0/core/evaluation/browser-automation.test.yaml` (staged).
+Test vectors: `fixtures/core/valid/browser-automation-rule.yaml`, `fixtures/core/evaluation/browser-automation.test.yaml`.
 
 ### 3.12 `rules.code_execution`
 
@@ -370,7 +370,7 @@ Restrictions for sandboxed interpreter actions: a language allowlist, a dangerou
 
 When `content` is longer than `max_scan_bytes`, only the prefix is scanned; engines SHOULD warn that the scan was truncated. The block is evaluated only for `code_exec` actions.
 
-Test vectors: `fixtures/core/valid/code-execution-rule.yaml`, `fixtures/staged/0.2.0/core/evaluation/code-execution.test.yaml` (staged).
+Test vectors: `fixtures/core/valid/code-execution-rule.yaml`, `fixtures/core/evaluation/code-execution.test.yaml`.
 
 ### 3.13 Conditional Rule Blocks (`when`)
 
@@ -413,7 +413,7 @@ The window is half-open: it contains the current local time `t` when `start <= t
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/staged/0.2.0/core/valid/when-conditions.yaml`, `fixtures/staged/0.2.0/core/invalid/when-*.yaml`, `fixtures/staged/0.2.0/core/evaluation/conditions.test.yaml` (all staged; the evaluator-test schema gains a `context` field in the same change).
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`.
 
 ### 3.14 Pattern Matching
 
@@ -448,7 +448,7 @@ Patterns MUST be written with `/` separators and are NFC-normalized; they are no
 | `**`  | Elsewhere (for example a trailing `/**` or `foo**`): any sequence of zero or more characters including `/`. `/home/**` matches `/home/x` and `/home/x/y` but not `/home` (the trailing slash is stripped from the target and the pattern requires the `/`). |
 | other | Literal. `[`, `]`, `{`, `}`, `(`, `)`, `+`, `.`, `^`, `$`, `|`, `\` have no special meaning.               |
 
-Test vectors: `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/core/evaluation/forbidden-paths-leading-globstar.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/path-normalization-staged.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures/core/evaluation/forbidden-paths-leading-globstar.test.yaml`, `fixtures/core/evaluation/path-normalization-lexical.test.yaml`.
 
 #### 3.14.2 Host Patterns
 
@@ -473,7 +473,7 @@ Patterns undergo steps 5-7 only.
 
 The apex host is never implied by a wildcard; a document that intends to allow `example.com` MUST list it. If the normalized host is an IPv4 literal or a bracketed IPv6 literal, it matches a pattern only when the pattern is character-for-character equal to it; wildcards MUST NOT match IP literals. A target that cannot be reduced to a syntactically valid host MUST be treated as matching nothing (so `default` applies).
 
-Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/egress-normalization-staged.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
 
 #### 3.14.3 Regex Profile
 
@@ -557,7 +557,7 @@ HushSpec defines a standard taxonomy of action types. Engines use action types t
 
 **Unknown and custom action types.** An action whose type is not in the table above, or whose type is `custom`, has no applicable rule blocks. Because no declared control can vouch for it, the engine MUST produce **deny** with `matched_rule` `__unknown_action_type__` and a reason naming the type. Exception: when the posture extension is active and the current posture state lists the `custom` capability, a `custom` action is permitted by the reference evaluator (engine-specific rules MAY still restrict it). Engines MUST NOT allow an action merely because no rule mentions it.
 
-Test vectors: `fixtures/staged/0.2.0/core/evaluation/unknown-action.test.yaml` (staged; the evaluator-test schema gains the `custom` action type in the same change).
+Test vectors: `fixtures/core/evaluation/unknown-action.test.yaml`.
 
 ---
 
@@ -579,7 +579,7 @@ Evaluation of one action proceeds as follows:
 2. **Block evaluation.** Every applicable rule block for the action type (Section 5 table) that is present, `enabled`, and whose `when` condition holds is evaluated, in the order listed in the table. Each block yields exactly one of `allow`, `warn`, or `deny` and MAY name a `matched_rule` and `reason`. Engines MUST NOT stop after a block that allows: an allow from `path_allowlist` or from a `forbidden_paths` exception does not exempt the action from `secret_patterns` or `patch_integrity`.
 3. **Aggregation.** The action's decision is the most restrictive block decision: **deny** if any block denied; otherwise **warn** if any block warned; otherwise **allow**. The reported `matched_rule` and `reason` are those of the first block, in evaluation order, whose decision equals the aggregate decision and which named a `matched_rule`; when no block named one they are absent.
 
-Test vectors: `fixtures/core/evaluation/decision-precedence.test.yaml`, `fixtures/staged/0.2.0/core/evaluation/no-early-return.test.yaml` (staged).
+Test vectors: `fixtures/core/evaluation/decision-precedence.test.yaml`, `fixtures/core/evaluation/no-early-return.test.yaml`.
 
 ### 6.2 Monitor (Shadow) Enforcement
 

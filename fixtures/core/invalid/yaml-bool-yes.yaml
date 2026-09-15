@@ -1,5 +1,4 @@
 # D17 (core 2.4): YAML 1.2 Core has no `yes` boolean; it is a string and is rejected where a boolean is required.
-# Staged: Python (PyYAML 1.1) and Go (yaml.v3) currently accept it.
 hushspec: "0.1.0"
 rules:
   egress:
