@@ -1,0 +1,65 @@
+hushspec_test: "0.1.0"
+description: "D13 (core 3.12): code_execution evaluation for code_exec (staged: evaluator-test schema must add the code_exec type and the network and timeout_ms fields)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    code_execution:
+      enabled: true
+      language_allowlist:
+        - python
+      module_denylist:
+        - subprocess
+        - socket
+      network_access: false
+      max_execution_time_ms: 5000
+cases:
+  - description: "an allowed language with clean code is allowed"
+    action:
+      type: code_exec
+      target: python
+      content: "print(1)"
+    expect:
+      decision: allow
+      matched_rule: rules.code_execution
+  - description: "a language outside the allowlist is denied"
+    action:
+      type: code_exec
+      target: javascript
+      content: "console.log(1)"
+    expect:
+      decision: deny
+      matched_rule: rules.code_execution.language_allowlist
+  - description: "importing a denied module is denied"
+    action:
+      type: code_exec
+      target: python
+      content: "import subprocess\nsubprocess.run(['ls'])"
+    expect:
+      decision: deny
+      matched_rule: rules.code_execution.module_denylist
+  - description: "a denied module name embedded in a longer identifier is not a match"
+    action:
+      type: code_exec
+      target: python
+      content: "subprocessing = 1"
+    expect:
+      decision: allow
+      matched_rule: rules.code_execution
+  - description: "a call requesting network access is denied when network_access is false"
+    action:
+      type: code_exec
+      target: python
+      content: "print(1)"
+      network: true
+    expect:
+      decision: deny
+      matched_rule: rules.code_execution.network_access
+  - description: "a requested timeout above the limit is denied"
+    action:
+      type: code_exec
+      target: python
+      content: "print(1)"
+      timeout_ms: 6000
+    expect:
+      decision: deny
+      matched_rule: rules.code_execution.max_execution_time_ms

@@ -1,0 +1,61 @@
+hushspec_test: "0.1.0"
+description: "D15 (core 3.13): a when condition gates its rule block; missing context makes the block inert; current_time drives time windows (staged: evaluator-test schema must add a per-case context field)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    shell_commands:
+      when:
+        context:
+          environment: production
+      forbidden_patterns:
+        - "rm[ \\t]+-rf[ \\t]+/"
+    tool_access:
+      when:
+        time_window:
+          start: "09:00"
+          end: "17:00"
+          timezone: "UTC"
+      block: [deploy]
+      default: allow
+cases:
+  - description: "context matches: the shell block is active and denies"
+    context:
+      environment: production
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "context differs: the shell block is inert"
+    context:
+      environment: staging
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: allow
+  - description: "context key absent: the condition is false and the block is inert"
+    context: {}
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: allow
+  - description: "inside the time window the tool block is active"
+    context:
+      current_time: "2026-09-14T12:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "outside the time window the tool block is inert"
+    context:
+      current_time: "2026-09-14T20:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow

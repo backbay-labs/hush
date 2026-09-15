@@ -1,0 +1,98 @@
+hushspec_test: "0.1.0"
+description: "D7 (core 3.14.3): ASCII-only class escapes, end-of-text anchor, dot excludes only newline"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        - name: d_class
+          pattern: "id\\d{3}"
+          severity: critical
+        - name: end_anchor
+          pattern: "token$"
+          severity: critical
+        - name: word_boundary
+          pattern: "\\bfoo"
+          severity: critical
+        - name: dot
+          pattern: "a.b"
+          severity: critical
+        - name: s_class
+          pattern: "k\\sv"
+          severity: critical
+cases:
+  - description: "backslash-d matches ASCII digits"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "id123"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.d_class
+  - description: "backslash-d does not match Arabic-Indic digits"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "id١٢٣"
+    expect:
+      decision: allow
+  - description: "dollar matches at the end of text"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "token"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.end_anchor
+  - description: "dollar does not match before a trailing newline"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "token\n"
+    expect:
+      decision: allow
+  - description: "backslash-b is ASCII: a non-ASCII letter is not a word character"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "éfoo"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.word_boundary
+  - description: "backslash-b finds no boundary inside an ASCII word"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "xfoo"
+    expect:
+      decision: allow
+  - description: "dot matches a carriage return"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "a\rb"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.dot
+  - description: "dot does not match a newline"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "a\nb"
+    expect:
+      decision: allow
+  - description: "backslash-s does not match a no-break space"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "k v"
+    expect:
+      decision: allow
+  - description: "backslash-s matches a vertical tab"
+    action:
+      type: file_write
+      target: "/tmp/x"
+      content: "kv"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.s_class

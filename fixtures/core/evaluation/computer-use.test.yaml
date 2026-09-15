@@ -1,3 +1,7 @@
+# NOTE: the "warn on unlisted action (guardrail mode)" case below encodes 0.1.0
+# behavior. Spec 0.2.0 (D9, core 3.8) ratifies deny; the superseding vector is
+# fixtures/staged/0.2.0/core/evaluation/computer-use-guardrail-deny.test.yaml.
+# Rewrite that case to deny when the staged vector is promoted.
 hushspec_test: "0.1.0"
 description: "Computer use guard evaluation"
 policy:

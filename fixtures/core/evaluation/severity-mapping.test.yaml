@@ -1,0 +1,47 @@
+hushspec_test: "0.1.0"
+description: "D8 (core 3.4): critical and error severities deny; skip_paths bypasses scanning"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        - name: err_token
+          pattern: "ERRTOKEN[0-9]+"
+          severity: error
+        - name: crit_token
+          pattern: "CRITTOKEN[0-9]+"
+          severity: critical
+      skip_paths:
+        - "**/fixtures/**"
+cases:
+  - description: "error severity denies"
+    action:
+      type: file_write
+      target: "/repo/src/a.txt"
+      content: "ERRTOKEN1"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.err_token
+  - description: "critical severity denies"
+    action:
+      type: file_write
+      target: "/repo/src/a.txt"
+      content: "CRITTOKEN1"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.crit_token
+  - description: "a path matching skip_paths is not scanned"
+    action:
+      type: file_write
+      target: "/repo/fixtures/a.txt"
+      content: "CRITTOKEN1"
+    expect:
+      decision: allow
+      matched_rule: rules.secret_patterns.skip_paths
+  - description: "content with no match is allowed"
+    action:
+      type: file_write
+      target: "/repo/src/a.txt"
+      content: "clean"
+    expect:
+      decision: allow

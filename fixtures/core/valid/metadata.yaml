@@ -1,0 +1,17 @@
+hushspec: "0.1.0"
+name: with-metadata
+description: "Core 2.5: every governance metadata field is accepted and has no effect on evaluation"
+metadata:
+  author: "security@example.com"
+  approved_by: "ciso@example.com"
+  approval_date: "2026-09-01"
+  classification: internal
+  change_ticket: "CHG-1234"
+  lifecycle_state: approved
+  policy_version: 3
+  effective_date: "2026-09-02"
+  expiry_date: "2027-09-02"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

@@ -1,0 +1,7 @@
+# Core 2.4 (D17): duplicate mapping keys are rejected.
+hushspec: "0.1.0"
+name: first
+name: second
+rules:
+  egress:
+    default: block
