@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,7 +14,12 @@ import (
 	_ "time/tzdata"
 )
 
+// MaxNestingDepth is the maximum allowed nesting depth for compound
+// conditions (core spec 3.13).
 const MaxNestingDepth = 8
+
+// DayAbbreviations are the day names accepted in time_window.days.
+var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 type TimeWindowCondition struct {
 	Start    string   `yaml:"start" json:"start"`                           // HH:MM (24-hour)
@@ -52,7 +58,10 @@ func EvaluateCondition(condition *Condition, context *RuntimeContext) bool {
 
 func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth int) bool {
 	if depth > MaxNestingDepth {
-		return false
+		// Validation rejects this at parse time; an out-of-band condition that
+		// exceeds the depth cannot be evaluated, and an unevaluable condition
+		// must not switch a control off (core spec 3.13), so treat it as held.
+		return true
 	}
 
 	if condition.TimeWindow != nil {
@@ -96,20 +105,23 @@ func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth
 }
 
 func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) bool {
+	// Fail closed toward enforcement (core spec 3.13): a window the engine
+	// cannot evaluate -- unresolvable time zone, unparsable current_time, or a
+	// malformed HH:MM that escaped validation -- leaves the block ACTIVE.
 	now := resolveCurrentTimeForCondition(context, tw.Timezone)
 	if now == nil {
-		return false
+		return true
 	}
 
 	hour, minute, dayOfWeek := now[0], now[1], now[2]
 
 	startH, startM, ok := parseHHMM(tw.Start)
 	if !ok {
-		return false
+		return true
 	}
 	endH, endM, ok := parseHHMM(tw.End)
 	if !ok {
-		return false
+		return true
 	}
 
 	currentMinutes := hour*60 + minute
@@ -168,11 +180,143 @@ func parseHHMM(s string) (int, int, bool) {
 }
 
 func dayAbbreviationCond(day int) string {
-	days := []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
-	if day >= 0 && day < len(days) {
-		return days[day]
+	if day >= 0 && day < len(DayAbbreviations) {
+		return DayAbbreviations[day]
 	}
 	return "mon"
+}
+
+// ValidateConditions performs the parse-time validation of every rule block's
+// `when` condition (D15, core spec 3.13 and 7.10). Unknown keys are rejected by
+// the decoder; this checks the HH:MM fields, the timezone, the day
+// abbreviations, and the nesting depth. It returns one message per violation,
+// each prefixed with the rule path (for example `rules.egress.when`).
+func ValidateConditions(rules *Rules) []string {
+	if rules == nil {
+		return nil
+	}
+	blocks := []struct {
+		name string
+		when *Condition
+	}{
+		{"forbidden_paths", nil},
+		{"path_allowlist", nil},
+		{"egress", nil},
+		{"secret_patterns", nil},
+		{"patch_integrity", nil},
+		{"shell_commands", nil},
+		{"tool_access", nil},
+		{"computer_use", nil},
+		{"remote_desktop_channels", nil},
+		{"input_injection", nil},
+		{"browser_automation", nil},
+		{"code_execution", nil},
+	}
+	if rules.ForbiddenPaths != nil {
+		blocks[0].when = rules.ForbiddenPaths.When
+	}
+	if rules.PathAllowlist != nil {
+		blocks[1].when = rules.PathAllowlist.When
+	}
+	if rules.Egress != nil {
+		blocks[2].when = rules.Egress.When
+	}
+	if rules.SecretPatterns != nil {
+		blocks[3].when = rules.SecretPatterns.When
+	}
+	if rules.PatchIntegrity != nil {
+		blocks[4].when = rules.PatchIntegrity.When
+	}
+	if rules.ShellCommands != nil {
+		blocks[5].when = rules.ShellCommands.When
+	}
+	if rules.ToolAccess != nil {
+		blocks[6].when = rules.ToolAccess.When
+	}
+	if rules.ComputerUse != nil {
+		blocks[7].when = rules.ComputerUse.When
+	}
+	if rules.RemoteDesktopChannels != nil {
+		blocks[8].when = rules.RemoteDesktopChannels.When
+	}
+	if rules.InputInjection != nil {
+		blocks[9].when = rules.InputInjection.When
+	}
+	if rules.BrowserAutomation != nil {
+		blocks[10].when = rules.BrowserAutomation.When
+	}
+	if rules.CodeExecution != nil {
+		blocks[11].when = rules.CodeExecution.When
+	}
+
+	var errs []string
+	for _, block := range blocks {
+		if block.when == nil {
+			continue
+		}
+		errs = append(errs, ValidateCondition(block.when, fmt.Sprintf("rules.%s.when", block.name))...)
+	}
+	return errs
+}
+
+// ValidateCondition validates one condition subtree rooted at path.
+func ValidateCondition(condition *Condition, path string) []string {
+	var errs []string
+	validateConditionDepth(condition, path, 0, &errs)
+	return errs
+}
+
+func validateConditionDepth(condition *Condition, path string, depth int, errs *[]string) {
+	if condition == nil {
+		return
+	}
+	if depth > MaxNestingDepth {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s: conditions nest deeper than the maximum of %d levels", path, MaxNestingDepth))
+		return
+	}
+	if tw := condition.TimeWindow; tw != nil {
+		for _, field := range []struct{ name, value string }{{"start", tw.Start}, {"end", tw.End}} {
+			if _, _, ok := parseHHMM(field.value); !ok {
+				*errs = append(*errs, fmt.Sprintf(
+					"%s.time_window.%s: %q is not a valid HH:MM time", path, field.name, field.value))
+			}
+		}
+		if tw.Timezone != "" && !TimezoneIsKnown(tw.Timezone) {
+			*errs = append(*errs, fmt.Sprintf(
+				"%s.time_window.timezone: %q is neither an IANA time zone nor a fixed offset", path, tw.Timezone))
+		}
+		for _, day := range tw.Days {
+			known := false
+			for _, abbrev := range DayAbbreviations {
+				if strings.EqualFold(day, abbrev) {
+					known = true
+					break
+				}
+			}
+			if !known {
+				*errs = append(*errs, fmt.Sprintf(
+					"%s.time_window.days: %q is not one of mon, tue, wed, thu, fri, sat, sun", path, day))
+			}
+		}
+	}
+	for index := range condition.AllOf {
+		validateConditionDepth(&condition.AllOf[index], fmt.Sprintf("%s.all_of[%d]", path, index), depth+1, errs)
+	}
+	for index := range condition.AnyOf {
+		validateConditionDepth(&condition.AnyOf[index], fmt.Sprintf("%s.any_of[%d]", path, index), depth+1, errs)
+	}
+	if condition.Not != nil {
+		validateConditionDepth(condition.Not, path+".not", depth+1, errs)
+	}
+}
+
+// TimezoneIsKnown reports whether tz is an IANA identifier known to this
+// engine, a known alias, or a fixed `+HH:MM` / `-HH:MM` offset. An empty
+// string is not a time zone -- an absent `timezone` field defaults to UTC, but
+// an explicitly empty one is unresolvable.
+func TimezoneIsKnown(tz string) bool {
+	return tz != "" && resolveConditionLocation(tz) != nil
 }
 
 // resolveCurrentTimeForCondition returns [hour, minute, dayOfWeek (0=Mon..6=Sun)].
@@ -237,6 +381,11 @@ var fixedTimezoneOffsets = map[string]int{
 }
 
 func resolveConditionLocation(tz string) *time.Location {
+	// time.LoadLocation resolves "" to UTC and "Local" to the host zone; the
+	// reference engines know neither, so both stay unresolvable here.
+	if tz == "" || tz == "Local" {
+		return nil
+	}
 	if location, err := time.LoadLocation(tz); err == nil {
 		return location
 	}
@@ -449,78 +598,16 @@ func matchFloatNumber(actual interface{}, expected float64) bool {
 	}
 }
 
-// EvaluateWithContext evaluates with conditional rule activation. Rule blocks
-// whose conditions evaluate to false are skipped (treated as absent).
+// EvaluateWithContext evaluates with an explicit runtime context and an
+// out-of-band map of conditions keyed by rule-block name. The explicit context
+// replaces action.Context; out-of-band conditions are ANDed with each block's
+// own in-document `when` (core spec 3.13). A block whose condition is false is
+// inert for this evaluation.
 func EvaluateWithContext(
 	spec *HushSpec,
 	action *EvaluationAction,
 	context *RuntimeContext,
 	conditions map[string]*Condition,
 ) EvaluationResult {
-	effectiveSpec := applyConditions(spec, context, conditions)
-	return Evaluate(effectiveSpec, action)
-}
-
-func applyConditions(
-	spec *HushSpec,
-	context *RuntimeContext,
-	conditions map[string]*Condition,
-) *HushSpec {
-	if spec.Rules == nil {
-		return spec
-	}
-
-	effective := *spec
-	rulesCopy := *spec.Rules
-	effective.Rules = &rulesCopy
-	changed := false
-
-	for blockName, condition := range conditions {
-		if !EvaluateCondition(condition, context) {
-			switch blockName {
-			case "forbidden_paths":
-				rulesCopy.ForbiddenPaths = nil
-				changed = true
-			case "path_allowlist":
-				rulesCopy.PathAllowlist = nil
-				changed = true
-			case "egress":
-				rulesCopy.Egress = nil
-				changed = true
-			case "secret_patterns":
-				rulesCopy.SecretPatterns = nil
-				changed = true
-			case "patch_integrity":
-				rulesCopy.PatchIntegrity = nil
-				changed = true
-			case "shell_commands":
-				rulesCopy.ShellCommands = nil
-				changed = true
-			case "tool_access":
-				rulesCopy.ToolAccess = nil
-				changed = true
-			case "computer_use":
-				rulesCopy.ComputerUse = nil
-				changed = true
-			case "remote_desktop_channels":
-				rulesCopy.RemoteDesktopChannels = nil
-				changed = true
-			case "input_injection":
-				rulesCopy.InputInjection = nil
-				changed = true
-			case "browser_automation":
-				rulesCopy.BrowserAutomation = nil
-				changed = true
-			case "code_execution":
-				rulesCopy.CodeExecution = nil
-				changed = true
-			}
-		}
-	}
-
-	if !changed {
-		return spec
-	}
-
-	return &effective
+	return EvaluateTraced(spec, action, context, conditions).Result
 }

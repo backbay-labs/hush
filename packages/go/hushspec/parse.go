@@ -34,26 +34,23 @@ type parsePresenceSpec struct {
 		RemoteDesktopChannels *struct {
 			Audio *bool `yaml:"audio"`
 		} `yaml:"remote_desktop_channels"`
+		BrowserAutomation *struct {
+			CredentialDetection *bool `yaml:"credential_detection"`
+		} `yaml:"browser_automation"`
 	} `yaml:"rules"`
-	Extensions *struct {
-		Origins *struct {
-			Profiles []struct {
-				Egress *struct {
-					Enabled *bool          `yaml:"enabled"`
-					Default *DefaultAction `yaml:"default"`
-				} `yaml:"egress"`
-				ToolAccess *struct {
-					Enabled *bool `yaml:"enabled"`
-				} `yaml:"tool_access"`
-			} `yaml:"profiles"`
-		} `yaml:"origins"`
-	} `yaml:"extensions"`
 }
 
 // Parse decodes a YAML string into a HushSpec document. Unknown fields are
 // rejected and the top-level "hushspec" version key must be present.
 // Cross-field validation is performed separately by [Validate].
 func Parse(yamlStr string) (*HushSpec, error) {
+	// The HushSpec YAML profile (core spec 2.4) is enforced before the typed
+	// decode: single document, no anchors/aliases/merge keys, YAML 1.2 Core
+	// booleans, and bounded size, depth, and node count.
+	if err := enforceYAMLProfile(yamlStr); err != nil {
+		return nil, fmt.Errorf("failed to parse HushSpec YAML: %w", err)
+	}
+
 	var spec HushSpec
 	decoder := yaml.NewDecoder(strings.NewReader(yamlStr))
 	decoder.KnownFields(true)
@@ -131,23 +128,14 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 			spec.Rules.ToolAccess.Enabled = true
 		}
 	}
-	if spec.Extensions != nil && spec.Extensions.Origins != nil && presence.Extensions != nil && presence.Extensions.Origins != nil {
-		for index := range spec.Extensions.Origins.Profiles {
-			if spec.Extensions.Origins.Profiles[index].Egress != nil {
-				if index >= len(presence.Extensions.Origins.Profiles) || presence.Extensions.Origins.Profiles[index].Egress == nil || presence.Extensions.Origins.Profiles[index].Egress.Enabled == nil {
-					spec.Extensions.Origins.Profiles[index].Egress.Enabled = true
-				}
-				if index >= len(presence.Extensions.Origins.Profiles) || presence.Extensions.Origins.Profiles[index].Egress == nil || presence.Extensions.Origins.Profiles[index].Egress.Default == nil {
-					spec.Extensions.Origins.Profiles[index].Egress.Default = DefaultActionBlock
-				}
-			}
-			if spec.Extensions.Origins.Profiles[index].ToolAccess != nil {
-				if index >= len(presence.Extensions.Origins.Profiles) || presence.Extensions.Origins.Profiles[index].ToolAccess == nil || presence.Extensions.Origins.Profiles[index].ToolAccess.Enabled == nil {
-					spec.Extensions.Origins.Profiles[index].ToolAccess.Enabled = true
-				}
-			}
+	if spec.Rules != nil && spec.Rules.BrowserAutomation != nil {
+		if presence.Rules == nil || presence.Rules.BrowserAutomation == nil || presence.Rules.BrowserAutomation.CredentialDetection == nil {
+			spec.Rules.BrowserAutomation.CredentialDetection = true
 		}
 	}
+	// Origin profile rule blocks are tri-state overlays (D12): they carry no
+	// `enabled` flag and their `default` stays unset unless the document
+	// states one, so no defaults are materialized for them here.
 }
 
 // Marshal serializes a HushSpec document to YAML.
