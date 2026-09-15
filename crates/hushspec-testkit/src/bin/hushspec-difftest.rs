@@ -61,6 +61,10 @@ struct Cli {
     #[arg(long)]
     ignore_rule_trace: bool,
 
+    /// Compare everything except the per-group canonical content hash
+    #[arg(long)]
+    ignore_content_hash: bool,
+
     /// Replay an existing bundle instead of generating
     #[arg(long)]
     bundle: Option<PathBuf>,
@@ -97,6 +101,7 @@ fn main() {
         bundles_dir: cli.bundles_dir,
         ignore_reason: cli.ignore_reason,
         ignore_rule_trace: cli.ignore_rule_trace,
+        ignore_content_hash: cli.ignore_content_hash,
         repo_root: repo_root(),
         bundle_path: cli.bundle,
         harness_override: None,

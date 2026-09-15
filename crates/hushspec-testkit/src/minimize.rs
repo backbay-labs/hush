@@ -396,6 +396,7 @@ mod tests {
             Ok(SdkReport {
                 sdk: self.sdk.to_string(),
                 results,
+                groups: std::collections::BTreeMap::new(),
             })
         }
     }
@@ -515,6 +516,7 @@ mod tests {
             Ok(SdkReport {
                 sdk: self.sdk.to_string(),
                 results,
+                groups: std::collections::BTreeMap::new(),
             })
         }
     }
@@ -570,6 +572,7 @@ mod tests {
             Ok(SdkReport {
                 sdk: self.sdk.to_string(),
                 results,
+                groups: std::collections::BTreeMap::new(),
             })
         }
     }
