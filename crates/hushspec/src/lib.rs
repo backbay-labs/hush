@@ -47,6 +47,7 @@ mod generated_models;
 pub mod governance;
 pub mod log;
 pub mod merge;
+pub mod observer;
 pub mod panic;
 pub mod policy;
 pub mod receipt;
@@ -92,6 +93,13 @@ pub use log::{
     verify_log, verify_log_files, verify_logs,
 };
 pub use merge::merge;
+#[cfg(feature = "http")]
+pub use observer::WebhookObserver;
+pub use observer::{
+    DURATION_BUCKETS_US, ErrorEvent, EvaluationCompletedEvent, EvaluationObserver,
+    JsonLineObserver, MetricsCollector, MetricsSnapshot, ObservableEvaluator, ObserverEvent,
+    ObserverEventType, ObserverLevel, PolicyLoadedEvent, StderrObserver, decision_label,
+};
 pub use panic::{
     PanicState, activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active,
     panic_policy,
