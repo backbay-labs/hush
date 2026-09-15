@@ -29,6 +29,31 @@ export interface TimeWindowCondition {
   days?: string[];
 }
 
+/**
+ * How a {@link RateCondition} compares its counter with its threshold.
+ *
+ * `gte`: true when `counter >= threshold`; `lt`: true when `counter < threshold`.
+ */
+export const RATE_COMPARISONS = ['gte', 'lt'] as const;
+
+export type RateComparison = (typeof RATE_COMPARISONS)[number];
+
+/**
+ * A rate predicate: an engine-supplied counter compared with a threshold
+ * (core spec 3.13).
+ *
+ * HushSpec never stores state and never increments anything; the engine owns
+ * the counter and its window and supplies the current value in
+ * {@link RuntimeContext.counters}.
+ */
+export interface RateCondition {
+  /** Name of the counter in {@link RuntimeContext.counters}. */
+  counter: string;
+  /** Non-negative threshold the counter is compared against. */
+  threshold: number;
+  comparison: RateComparison;
+}
+
 /** Multiple fields are ANDed; all present fields must evaluate to true. */
 export interface Condition {
   time_window?: TimeWindowCondition;
@@ -36,6 +61,18 @@ export interface Condition {
   all_of?: Condition[];
   any_of?: Condition[];
   not?: Condition;
+  /**
+   * The effective posture state must grant this capability (core spec 3.13).
+   * Unevaluable -- and therefore held -- when the policy has no posture
+   * extension.
+   */
+  capability?: string;
+  /**
+   * A runtime counter compared against a threshold (core spec 3.13).
+   * Unevaluable -- and therefore held -- when the context carries no such
+   * counter.
+   */
+  rate?: RateCondition;
 }
 
 export interface RuntimeContext {
@@ -46,21 +83,60 @@ export interface RuntimeContext {
   session?: Record<string, unknown>;
   request?: Record<string, unknown>;
   custom?: Record<string, unknown>;
+  /**
+   * Engine-maintained counters consulted by `rate` conditions (core spec
+   * 3.13). The engine owns the window; HushSpec only compares.
+   */
+  counters?: Record<string, number>;
   /** Override for testing (ISO 8601). */
   current_time?: string;
 }
 
-/** Missing context fields evaluate to false (fail-closed). */
+/**
+ * Missing context fields evaluate to false (fail-closed).
+ *
+ * A `capability` predicate is unevaluable through this entry point (no
+ * posture state is known) and therefore holds; use
+ * {@link evaluateConditionWithCapabilities} from an evaluator that has
+ * resolved the effective posture state.
+ */
 export function evaluateCondition(
   condition: Condition,
   context: RuntimeContext,
 ): boolean {
-  return evaluateConditionDepth(condition, context, 0);
+  return evaluateConditionDepth(condition, context, undefined, 0);
+}
+
+/**
+ * The capabilities an effective posture state grants, as either a list (the
+ * document spelling) or a set (what a compiled policy holds).
+ */
+export type GrantedCapabilities = ReadonlySet<string> | readonly string[];
+
+/**
+ * {@link evaluateCondition} with the capabilities the effective posture state
+ * grants: `undefined` when the policy has no posture extension (a
+ * `capability` predicate is then unevaluable and holds), a list otherwise (an
+ * unknown state grants nothing, so the predicate is false).
+ */
+export function evaluateConditionWithCapabilities(
+  condition: Condition,
+  context: RuntimeContext,
+  capabilities: GrantedCapabilities | undefined,
+): boolean {
+  return evaluateConditionDepth(condition, context, capabilities, 0);
+}
+
+function grants(capabilities: GrantedCapabilities, name: string): boolean {
+  return Array.isArray(capabilities)
+    ? capabilities.includes(name)
+    : (capabilities as ReadonlySet<string>).has(name);
 }
 
 function evaluateConditionDepth(
   condition: Condition,
   context: RuntimeContext,
+  capabilities: GrantedCapabilities | undefined,
   depth: number,
 ): boolean {
   if (depth > MAX_NESTING_DEPTH) {
@@ -82,10 +158,26 @@ function evaluateConditionDepth(
     }
   }
 
+  // `capability`: unevaluable without a posture extension (held); otherwise
+  // the effective state must list the capability.
+  if (condition.capability != null && capabilities != null) {
+    if (!grants(capabilities, condition.capability)) {
+      return false;
+    }
+  }
+
+  // `rate`: unevaluable when the engine supplied no such counter (held).
+  if (condition.rate != null) {
+    const count = counterValue(context, condition.rate.counter);
+    if (count != null && !rateHolds(condition.rate, count)) {
+      return false;
+    }
+  }
+
   if (condition.all_of != null) {
     if (
       !condition.all_of.every((c) =>
-        evaluateConditionDepth(c, context, depth + 1),
+        evaluateConditionDepth(c, context, capabilities, depth + 1),
       )
     ) {
       return false;
@@ -95,7 +187,7 @@ function evaluateConditionDepth(
   if (condition.any_of != null && condition.any_of.length > 0) {
     if (
       !condition.any_of.some((c) =>
-        evaluateConditionDepth(c, context, depth + 1),
+        evaluateConditionDepth(c, context, capabilities, depth + 1),
       )
     ) {
       return false;
@@ -103,12 +195,31 @@ function evaluateConditionDepth(
   }
 
   if (condition.not != null) {
-    if (evaluateConditionDepth(condition.not, context, depth + 1)) {
+    if (evaluateConditionDepth(condition.not, context, capabilities, depth + 1)) {
       return false;
     }
   }
 
   return true;
+}
+
+/**
+ * The counter the engine supplied under `name`, or `undefined` when it
+ * supplied none. A value that is not a finite number is read as absent: the
+ * predicate is then unevaluable and holds, which leaves the block active
+ * (core spec 3.13) rather than switching a control off on malformed input.
+ */
+function counterValue(context: RuntimeContext, name: string): number | undefined {
+  const counters = context.counters;
+  if (counters == null || !Object.prototype.hasOwnProperty.call(counters, name)) {
+    return undefined;
+  }
+  const value = counters[name];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function rateHolds(rate: RateCondition, count: number): boolean {
+  return rate.comparison === 'gte' ? count >= rate.threshold : count < rate.threshold;
 }
 
 function checkTimeWindow(
@@ -476,6 +587,19 @@ function validateConditionDepth(
     }
   }
 
+  if (condition.capability != null && !isCapabilityIdentifier(condition.capability)) {
+    errors.push(
+      `${path}.capability: ${debugQuote(condition.capability)} is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)`,
+    );
+  }
+
+  const rate = condition.rate;
+  if (rate != null && typeof rate === 'object' && !isCapabilityIdentifier(rate.counter)) {
+    errors.push(
+      `${path}.rate.counter: ${debugQuote(rate.counter)} is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)`,
+    );
+  }
+
   if (Array.isArray(condition.all_of)) {
     condition.all_of.forEach((child, index) => {
       validateConditionDepth(child, `${path}.all_of[${index}]`, depth + 1, errors);
@@ -493,6 +617,22 @@ function validateConditionDepth(
 
 function debugQuote(value: unknown): string {
   return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * The identifier grammar shared by posture capabilities and rate counters
+ * (core spec 3.13): one or more dot-separated segments, each a lowercase
+ * ASCII letter followed by lowercase letters, digits or underscores.
+ *
+ * ```abnf
+ * identifier = segment *("." segment)
+ * segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+ * ```
+ */
+export function isCapabilityIdentifier(name: unknown): boolean {
+  return typeof name === 'string'
+    && name.length > 0
+    && name.split('.').every(segment => /^[a-z][a-z0-9_]*$/.test(segment));
 }
 
 /**

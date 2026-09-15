@@ -38,6 +38,8 @@ import {
   POSTURE_STATE_KEYS_SET,
   POSTURE_TRANSITION_KEYS_SET,
   PROMPT_INJECTION_KEYS_SET,
+  PROMPT_INJECTION_HEURISTICS_KEYS_SET,
+  RATE_CONDITION_KEYS_SET,
   REMOTE_DESKTOP_KEYS_SET,
   RULE_KEYS_SET,
   SECRET_PATTERNS_KEYS_SET,
@@ -52,7 +54,7 @@ import {
 import { compileProfileRegex, isSafeRegex } from './regex.js';
 import { HUSHSPEC_SUPPORTED_MINORS, isSupported } from './version.js';
 import type { Condition } from './conditions.js';
-import { MAX_NESTING_DEPTH, validateCondition } from './conditions.js';
+import { MAX_NESTING_DEPTH, RATE_COMPARISONS, validateCondition } from './conditions.js';
 
 export { isSafeRegex };
 
@@ -107,6 +109,9 @@ const CAPABILITY_NAMES = new Set([
 const BUDGET_NAMES = new Set([
   'file_writes', 'egress_calls', 'shell_commands', 'tool_calls', 'patches', 'custom_calls',
 ]);
+
+/** `when.rate.comparison` (core spec 3.13). */
+const RATE_COMPARISONS_SET: ReadonlySet<string> = new Set(RATE_COMPARISONS);
 
 /** Recursion bound for the structural condition walk; see validateConditionShape. */
 const MAX_STRUCTURAL_CONDITION_DEPTH = 64;
@@ -688,6 +693,23 @@ function validateConditionShape(
     addError(ctx, 'invalid_object', `${path}.context must be an object`);
   }
 
+  // `capability` is a leaf string; the identifier grammar is a semantic check
+  // and lives in validateCondition (core spec 3.13).
+  validateOptionalString(obj, 'capability', ctx, `${path}.capability`);
+
+  if (hasValue(obj, 'rate')) {
+    const rate = obj.rate;
+    const ratePath = `${path}.rate`;
+    if (!isRecord(rate)) {
+      addError(ctx, 'invalid_object', `${ratePath} must be an object`);
+    } else {
+      rejectUnknownKeys(rate, RATE_CONDITION_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${ratePath}: ${key}`);
+      validateRequiredString(rate, 'counter', ctx, `${ratePath}.counter`);
+      validateRequiredInteger(rate, 'threshold', ctx, `${ratePath}.threshold`);
+      validateRequiredEnum(rate, 'comparison', ctx, `${ratePath}.comparison`, RATE_COMPARISONS_SET);
+    }
+  }
+
   // The depth cap (MAX_NESTING_DEPTH) is reported by validateCondition(). This
   // much looser bound only stops a hand-built object from exhausting the stack;
   // it is far deeper than the document nesting cap enforced by parse(), so
@@ -967,6 +989,20 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
     const block = validateOptionalEnum(section, 'block_at_or_above', sectionCtx, `${sectionPath}.block_at_or_above`, DETECTION_LEVELS_SET);
     validateOptionalInteger(section, 'max_scan_bytes', sectionCtx, `${sectionPath}.max_scan_bytes`, { min: 1 });
 
+    validateOptionalRuleObject(section, 'heuristics', sectionCtx, (heuristics, heuristicsCtx, heuristicsPath) => {
+      rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, 'unknown_field', key => `unknown field at ${heuristicsPath}: ${key}`);
+      validateOptionalBoolean(heuristics, 'enabled', heuristicsCtx, `${heuristicsPath}.enabled`);
+      // A floor the reference engine spells `usize`: a negative value is a
+      // type error, and the upper bound is left to the detector (a floor
+      // above 100 simply silences it).
+      if (hasValue(heuristics, 'min_score')) {
+        const minScore = heuristics.min_score;
+        if (typeof minScore !== 'number' || !Number.isInteger(minScore) || minScore < 0) {
+          addError(heuristicsCtx, 'invalid_type', `${heuristicsPath}.min_score must be a non-negative integer`);
+        }
+      }
+    }, sectionPath);
+
     if (sectionCtx.includeWarnings && warn && block) {
       const order: Record<string, number> = { safe: 0, suspicious: 1, high: 2, critical: 3 };
       if (order[block] < order[warn]) {
@@ -1075,6 +1111,28 @@ function validateRequiredEnum(
     return undefined;
   }
   return validateEnumValue(obj[key], ctx, path, allowed);
+}
+
+/**
+ * A required non-negative integer -- the shape the reference engine spells as
+ * `u64`, where a negative value is a *type* error rather than a range one.
+ */
+function validateRequiredInteger(
+  obj: UnknownRecord,
+  key: string,
+  ctx: ValidationContext,
+  path: string,
+): number | undefined {
+  if (!hasValue(obj, key)) {
+    addError(ctx, 'missing_field', `${path} is required`);
+    return undefined;
+  }
+  const value = obj[key];
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    addError(ctx, 'invalid_type', `${path} must be a non-negative integer`);
+    return undefined;
+  }
+  return value;
 }
 
 function validateOptionalString(

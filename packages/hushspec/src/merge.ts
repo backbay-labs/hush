@@ -147,10 +147,27 @@ function mergeDetection(
   if (!base) return child;
 
   return {
-    prompt_injection: mergeObject(base.prompt_injection, child.prompt_injection),
+    prompt_injection: mergePromptInjection(base.prompt_injection, child.prompt_injection),
     jailbreak: mergeObject(base.jailbreak, child.jailbreak),
     threat_intel: mergeObject(base.threat_intel, child.threat_intel),
   };
+}
+
+/**
+ * `prompt_injection`, whose `heuristics` is itself merged field by field
+ * (detection spec 8.1): a child that sets only `min_score` keeps the base's
+ * `enabled` rather than replacing the whole block.
+ */
+function mergePromptInjection(
+  base: PromptInjectionDetection | undefined,
+  child: PromptInjectionDetection | undefined,
+): PromptInjectionDetection | undefined {
+  const merged = mergeObject(base, child);
+  if (merged === undefined) return undefined;
+  const baseHeuristics = base?.heuristics;
+  const childHeuristics = child?.heuristics;
+  if (baseHeuristics === undefined || childHeuristics === undefined) return merged;
+  return { ...merged, heuristics: { ...baseHeuristics, ...childHeuristics } };
 }
 
 function mergeObject<T extends PromptInjectionDetection | JailbreakDetection | ThreatIntelDetection>(

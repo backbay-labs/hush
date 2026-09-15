@@ -36,6 +36,7 @@ export type {
   BridgeTarget,
   DetectionExtension,
   PromptInjectionDetection,
+  PromptInjectionHeuristics,
   DetectionLevel,
   JailbreakDetection,
   ThreatIntelDetection,
@@ -163,14 +164,20 @@ export {
 } from './evaluate.js';
 export {
   evaluateCondition,
+  evaluateConditionWithCapabilities,
+  isCapabilityIdentifier,
   validateCondition,
   validateConditions,
   timezoneIsKnown,
   MAX_NESTING_DEPTH,
   DAY_ABBREVIATIONS,
+  RATE_COMPARISONS,
   CONDITION_RULE_BLOCKS,
   type Condition,
   type TimeWindowCondition,
+  type RateCondition,
+  type RateComparison,
+  type GrantedCapabilities,
   type RuntimeContext,
 } from './conditions.js';
 export {

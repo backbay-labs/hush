@@ -64,7 +64,7 @@ import type {
   PostureTransition,
 } from './extensions.js';
 import type { Condition, RuntimeContext } from './conditions.js';
-import { evaluateCondition } from './conditions.js';
+import { evaluateConditionWithCapabilities } from './conditions.js';
 import { compileProfileRegex } from './regex.js';
 import type {
   Decision,
@@ -1095,6 +1095,14 @@ class Evaluation {
     private readonly conditions: Record<string, Condition>,
   ) {}
 
+  /**
+   * The capabilities the effective posture state grants, for `capability`
+   * conditions (core spec 3.13): `undefined` until posture is resolved and
+   * whenever the policy has no posture extension (the predicate is then
+   * unevaluable and holds); an unknown state grants nothing.
+   */
+  private capabilities: ReadonlySet<string> | undefined;
+
   run(): TracedEvaluation {
     if (isPanicActive()) {
       this.record('panic', 'deny', PANIC_RULE, 'emergency panic mode is active', true);
@@ -1122,6 +1130,11 @@ class Evaluation {
 
     // Posture guard.
     const posture = resolvePosture(this.posture, matchedProfile, this.action.posture);
+
+    // `when` conditions see the effective posture state (capability
+    // predicates), so the capability mask is resolved only now.
+    this.capabilities = postureCapabilities(this.posture, posture);
+
     const denied = this.postureCapabilityGuard(posture);
     if (denied != null) {
       this.skipAll(blocks, 'short-circuited by posture deny');
@@ -1216,13 +1229,19 @@ class Evaluation {
     if (!compiled.enabled) {
       return DISABLED;
     }
-    if (compiled.when !== undefined && !evaluateCondition(compiled.when, this.context)) {
+    if (
+      compiled.when !== undefined
+      && !evaluateConditionWithCapabilities(compiled.when, this.context, this.capabilities)
+    ) {
       return CONDITION_FALSE;
     }
     const outOfBand = Object.prototype.hasOwnProperty.call(this.conditions, block)
       ? this.conditions[block]
       : undefined;
-    if (outOfBand != null && !evaluateCondition(outOfBand, this.context)) {
+    if (
+      outOfBand != null
+      && !evaluateConditionWithCapabilities(outOfBand, this.context, this.capabilities)
+    ) {
       return OUT_OF_BAND_FALSE;
     }
     return undefined;
@@ -1857,18 +1876,39 @@ function resolvePosture(
   return { current, next };
 }
 
+/**
+ * The capabilities the effective posture state grants, for `capability`
+ * conditions (core spec 3.13): `undefined` when the policy has no posture
+ * extension (the predicate is then unevaluable and holds); an unknown state
+ * grants nothing.
+ */
+function postureCapabilities(
+  posture: CompiledPosture | undefined,
+  resolved: PostureResult | undefined,
+): ReadonlySet<string> | undefined {
+  if (posture == null || resolved == null) return undefined;
+  return posture.states.get(resolved.current)?.capabilities ?? EMPTY_CAPABILITIES;
+}
+
+/** The grant of a posture state this document never defined: nothing. */
+const EMPTY_CAPABILITIES: ReadonlySet<string> = new Set<string>();
+
 function nextPostureState(
   posture: CompiledPosture,
   current: string,
   signal: string,
 ): string | undefined {
-  // D18 (pending): first matching transition in document order.
-  for (const transition of posture.transitions) {
-    if (transition.from !== '*' && transition.from !== current) continue;
-    if (transition.on !== signal) continue;
-    return transition.to;
-  }
-  return undefined;
+  // D18 (posture spec 5.3): a transition whose `from` names the current state
+  // outranks one whose `from` is `"*"`; among equals, document order.
+  const matching = (wildcard: boolean): string | undefined => {
+    for (const transition of posture.transitions) {
+      const fromMatches = wildcard ? transition.from === '*' : transition.from === current;
+      if (!fromMatches || transition.on !== signal) continue;
+      return transition.to;
+    }
+    return undefined;
+  };
+  return matching(false) ?? matching(true);
 }
 
 /**
