@@ -478,8 +478,14 @@ fn the_content_check_runs_after_the_signature_check() {
     let mut envelope = sign_content_hash(&digest('3'), &signing, &SignOptions::default()).unwrap();
 
     // A corrupt signature is check 8, reported before the content mismatch
-    // that a forged content_hash would also produce.
-    envelope.signature.replace_range(0..1, "A");
+    // that a forged content_hash would also produce. Flip the first character
+    // to something it is definitely not, so the mutation always bites.
+    let flipped = if envelope.signature.starts_with('A') {
+        "B"
+    } else {
+        "A"
+    };
+    envelope.signature.replace_range(0..1, flipped);
     let error = verify_content_hash(
         &envelope,
         Some(&digest('4')),
