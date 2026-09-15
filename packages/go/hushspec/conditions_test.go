@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -278,7 +279,12 @@ func TestTimeWindowWrapsMidnightWithDayFilter(t *testing.T) {
 	}
 }
 
-func TestTimeWindowInvalidTimezoneFailsClosed(t *testing.T) {
+// TestTimeWindowUnresolvableTimezoneLeavesBlockActive locks in D15/core 3.13:
+// fail-closed points toward enforcement, so a window the engine cannot
+// evaluate -- here an unresolvable time zone -- leaves its rule block ACTIVE
+// rather than silently switching a control off. Validation rejects such a
+// document at parse time; this covers the out-of-band path that bypasses it.
+func TestTimeWindowUnresolvableTimezoneLeavesBlockActive(t *testing.T) {
 	cond := &Condition{
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
@@ -286,8 +292,24 @@ func TestTimeWindowInvalidTimezoneFailsClosed(t *testing.T) {
 			Timezone: "America/NeYork",
 		},
 	}
-	if EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T13:30:00Z")) {
-		t.Error("expected invalid timezone to fail closed")
+	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T13:30:00Z")) {
+		t.Error("expected an unresolvable timezone to leave the rule block active")
+	}
+	if TimezoneIsKnown("America/NeYork") {
+		t.Error("expected an unresolvable timezone to be rejected by validation")
+	}
+}
+
+func TestTimezoneIsKnownAcceptsIANAAndFixedOffsets(t *testing.T) {
+	for _, tz := range []string{"UTC", "America/New_York", "Europe/Berlin", "+05:30", "-08:00", "JST"} {
+		if !TimezoneIsKnown(tz) {
+			t.Errorf("expected %q to be a known timezone", tz)
+		}
+	}
+	for _, tz := range []string{"", "Local", "Mars/Olympus_Mons", "+99:00", "nonsense"} {
+		if TimezoneIsKnown(tz) {
+			t.Errorf("expected %q to be rejected", tz)
+		}
 	}
 }
 
@@ -392,6 +414,10 @@ func TestEmptyConditionAlwaysTrue(t *testing.T) {
 	}
 }
 
+// TestMaxNestingDepthExceeded locks in D15: validation rejects a condition
+// nested past MaxNestingDepth at parse time, and an out-of-band condition that
+// escapes validation cannot be evaluated -- so it leaves the block ACTIVE
+// rather than switching the control off.
 func TestMaxNestingDepthExceeded(t *testing.T) {
 	cond := &Condition{
 		Context: map[string]interface{}{"environment": "production"},
@@ -399,8 +425,62 @@ func TestMaxNestingDepthExceeded(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		cond = &Condition{AllOf: []Condition{*cond}}
 	}
-	if EvaluateCondition(cond, ctxWithEnv("production")) {
-		t.Error("expected max nesting to fail")
+	if !EvaluateCondition(cond, ctxWithEnv("production")) {
+		t.Error("expected an unevaluable over-deep condition to leave the block active")
+	}
+	if len(ValidateCondition(cond, "rules.egress.when")) == 0 {
+		t.Error("expected an over-deep condition to be rejected by validation")
+	}
+}
+
+// TestValidateConditionReportsEveryViolation covers the parse-time checks of
+// D15: bad HH:MM, an unknown zone, and an unknown day abbreviation, each
+// reported against its rule path.
+func TestValidateConditionReportsEveryViolation(t *testing.T) {
+	cond := &Condition{
+		AnyOf: []Condition{{
+			TimeWindow: &TimeWindowCondition{
+				Start:    "25:00",
+				End:      "17:61",
+				Timezone: "Mars/Olympus_Mons",
+				Days:     []string{"mon", "funday"},
+			},
+		}},
+	}
+	errs := ValidateCondition(cond, "rules.shell_commands.when")
+	if len(errs) != 4 {
+		t.Fatalf("expected 4 violations, got %d: %v", len(errs), errs)
+	}
+	for _, message := range errs {
+		if !strings.HasPrefix(message, "rules.shell_commands.when.any_of[0].time_window.") {
+			t.Errorf("expected every message to carry the rule path, got %q", message)
+		}
+	}
+}
+
+// TestValidateConditionsWalksEveryRuleBlock locks in that all twelve rule
+// blocks carry a validated `when` field.
+func TestValidateConditionsWalksEveryRuleBlock(t *testing.T) {
+	bad := func() *Condition {
+		return &Condition{TimeWindow: &TimeWindowCondition{Start: "99:00", End: "17:00"}}
+	}
+	rules := &Rules{
+		ForbiddenPaths:        &ForbiddenPathsRule{When: bad()},
+		PathAllowlist:         &PathAllowlistRule{When: bad()},
+		Egress:                &EgressRule{When: bad()},
+		SecretPatterns:        &SecretPatternsRule{When: bad()},
+		PatchIntegrity:        &PatchIntegrityRule{When: bad()},
+		ShellCommands:         &ShellCommandsRule{When: bad()},
+		ToolAccess:            &ToolAccessRule{When: bad()},
+		ComputerUse:           &ComputerUseRule{When: bad()},
+		RemoteDesktopChannels: &RemoteDesktopChannelsRule{When: bad()},
+		InputInjection:        &InputInjectionRule{When: bad()},
+		BrowserAutomation:     &BrowserAutomationRule{When: bad()},
+		CodeExecution:         &CodeExecutionRule{When: bad()},
+	}
+	errs := ValidateConditions(rules)
+	if len(errs) != 12 {
+		t.Fatalf("expected one violation per rule block, got %d: %v", len(errs), errs)
 	}
 }
 

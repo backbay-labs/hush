@@ -352,8 +352,12 @@ func TestTraceUnknownActionType(t *testing.T) {
 	action := &EvaluationAction{Type: "unknown_action", Target: "test"}
 	receipt := EvaluateAudited(spec, action, enabledConfig())
 
-	if receipt.Decision != DecisionAllow {
-		t.Errorf("expected allow, got %q", receipt.Decision)
+	// D1: an action type unknown to the specification denies.
+	if receipt.Decision != DecisionDeny {
+		t.Errorf("expected deny, got %q", receipt.Decision)
+	}
+	if receipt.MatchedRule != UnknownActionTypeRule {
+		t.Errorf("expected matched_rule %q, got %q", UnknownActionTypeRule, receipt.MatchedRule)
 	}
 
 	found := false

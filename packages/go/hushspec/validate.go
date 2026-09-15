@@ -39,7 +39,8 @@ func Validate(spec *HushSpec) *ValidationResult {
 		result.addError("MISSING_VERSION", "missing or empty 'hushspec' version field")
 	} else if !IsSupported(spec.HushSpecVersion) {
 		result.addError("UNSUPPORTED_VERSION",
-			fmt.Sprintf("unsupported HushSpec version %q; supported: %v", spec.HushSpecVersion, SupportedVersions))
+			fmt.Sprintf("unsupported hushspec version: %s (this engine accepts minor versions %s)",
+				spec.HushSpecVersion, strings.Join(SupportedMinors, ", ")))
 	}
 
 	if spec.MergeStrategy != "" && !containsTyped(spec.MergeStrategy, MergeStrategies) {
@@ -178,6 +179,22 @@ func validateRules(rules *Rules, result *ValidationResult) {
 			validateRegex(pattern, fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index), result)
 		}
 	}
+
+	if rules.BrowserAutomation != nil {
+		for index, pattern := range rules.BrowserAutomation.ExtraCredentialPatterns {
+			validateRegex(pattern, fmt.Sprintf("rules.browser_automation.extra_credential_patterns[%d]", index), result)
+		}
+	}
+
+	if rules.CodeExecution != nil && rules.CodeExecution.MaxScanBytes != nil && *rules.CodeExecution.MaxScanBytes < 1 {
+		result.addError("INVALID_MAX_SCAN_BYTES", "rules.code_execution.max_scan_bytes must be >= 1")
+	}
+
+	// D15 (core 3.13): every rule block's `when` condition is validated at
+	// parse time; a bad HH:MM, timezone, day, or excessive nesting is an error.
+	for _, message := range ValidateConditions(rules) {
+		result.addError("INVALID_CONDITION", message)
+	}
 }
 
 func validateExtensions(ext *Extensions, result *ValidationResult) {
@@ -287,13 +304,19 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 		}
 		seen[profile.ID] = true
 
-		if profile.ToolAccess != nil && profile.ToolAccess.Default != "" && !containsTyped(profile.ToolAccess.Default, DefaultActions) {
+		// Profile rule blocks are tri-state overlays (D12): an absent `default`
+		// inherits the base document's, so only a present value is checked.
+		if profile.ToolAccess != nil && profile.ToolAccess.Default != nil && !containsTyped(*profile.ToolAccess.Default, DefaultActions) {
 			result.addError("INVALID_DEFAULT_ACTION",
-				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, profile.ToolAccess.Default))
+				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, *profile.ToolAccess.Default))
 		}
-		if profile.Egress != nil && profile.Egress.Default != "" && !containsTyped(profile.Egress.Default, DefaultActions) {
+		if profile.Egress != nil && profile.Egress.Default != nil && !containsTyped(*profile.Egress.Default, DefaultActions) {
 			result.addError("INVALID_DEFAULT_ACTION",
-				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, profile.Egress.Default))
+				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, *profile.Egress.Default))
+		}
+		if profile.ToolAccess != nil && profile.ToolAccess.MaxArgsSize != nil && *profile.ToolAccess.MaxArgsSize < 1 {
+			result.addError("INVALID_MAX_ARGS_SIZE",
+				fmt.Sprintf("origins.profiles[%d].tool_access.max_args_size must be >= 1", index))
 		}
 
 		if profile.Match != nil {
