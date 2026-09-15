@@ -573,3 +573,53 @@ jobs:
           path: coverage-out/
           if-no-files-found: error
           retention-days: 14
+
+  # ── action.yml smoke test ──────────────────────────────────────────
+  # No release with binaries exists yet, so this exercises the action via
+  # `version: source` (build crates/hushspec-cli from this checkout) --
+  # once tagged releases ship binaries, add a second invocation pinned to
+  # a real tag to cover the download/verify/cache path too.
+  action-smoke:
+    name: Action Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate rulesets/default.yaml via the HushSpec action
+        id: hushspec
+        uses: ./
+        with:
+          command: validate
+          paths: rulesets/default.yaml
+          version: source
+
+      - name: Check action outputs
+        run: |
+          [ "${{ steps.hushspec.outputs.exit-code }}" = "0" ] || { echo "::error::expected exit-code 0, got '${{ steps.hushspec.outputs.exit-code }}'"; exit 1; }
+          [ -s "${{ steps.hushspec.outputs.report-path }}" ] || { echo "::error::report file '${{ steps.hushspec.outputs.report-path }}' is missing or empty"; exit 1; }
+
+  # ── Container image ──────────────────────────────────────────────────
+  docker-build:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: h2h:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run h2h version inside the built image
+        run: docker run --rm h2h:ci version
