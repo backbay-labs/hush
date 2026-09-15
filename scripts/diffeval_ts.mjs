@@ -6,7 +6,8 @@ import YAML from 'yaml';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = path.join(root, 'packages', 'hushspec', 'dist', 'index.js');
-const { parse, validate, resolve, evaluateTraced, evaluateWithDetection } = await import(distEntry);
+const { parse, validate, resolve, evaluateTraced, evaluateWithDetection, contentHash } =
+  await import(distEntry);
 
 if (process.argv.length !== 3) {
   console.error('usage: diffeval_ts.mjs <bundle.json>');
@@ -20,6 +21,12 @@ if (bundle.hushspec_diff !== '0.1.0') {
 }
 
 const results = {};
+// Canonical content hash per group (spec/hushspec-canonical.md section 5),
+// keyed by group id alongside the per-action `results`. Only groups whose
+// policy survived parse -> resolve -> validate have one: the canonical form is
+// defined for resolved, valid documents only, and the oracle has nothing to
+// compare against for a rejected policy.
+const contentHashes = {};
 for (const group of bundle.groups) {
   let spec = null;
   let rejection = null;
@@ -50,6 +57,16 @@ for (const group of bundle.groups) {
       } else {
         spec = candidate;
       }
+    }
+  }
+
+  if (spec != null) {
+    try {
+      contentHashes[group.id] = contentHash(spec);
+    } catch (error) {
+      // A canonicalization failure is a divergence to report, not a silently
+      // missing key: the oracle hashes every accepted policy.
+      contentHashes[group.id] = `error: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
 
@@ -94,4 +111,6 @@ for (const group of bundle.groups) {
   }
 }
 
-process.stdout.write(`${JSON.stringify({ sdk: 'typescript', results })}\n`);
+process.stdout.write(
+  `${JSON.stringify({ sdk: 'typescript', results, content_hash: contentHashes })}\n`,
+);
