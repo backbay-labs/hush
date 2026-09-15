@@ -25,12 +25,12 @@ type caseBundle struct {
 // (fixtures/receipts/expected/README.md). A bundle written before the `audit`
 // block existed replays defaultAudit, which is the same thing.
 type auditSpec struct {
-	Clock           string         `json:"clock"`
-	TimeSource      string         `json:"time_source"`
-	EnforcementMode string         `json:"enforcement_mode"`
-	Actor           hushspec.Actor `json:"actor"`
-	IndexBase       uint64         `json:"index_base"`
-	EmitReceipts    bool           `json:"emit_receipts"`
+	Clock           string          `json:"clock"`
+	TimeSource      string          `json:"time_source"`
+	EnforcementMode string          `json:"enforcement_mode"`
+	Actor           *hushspec.Actor `json:"actor"`
+	IndexBase       uint64          `json:"index_base"`
+	EmitReceipts    bool            `json:"emit_receipts"`
 }
 
 func defaultAudit() auditSpec {
@@ -38,13 +38,35 @@ func defaultAudit() auditSpec {
 		Clock:           "2026-09-15T12:00:00.000Z",
 		TimeSource:      "trusted",
 		EnforcementMode: "enforce",
-		Actor: hushspec.Actor{
+		Actor: &hushspec.Actor{
 			AgentID:   "fixture-agent",
 			SessionID: "fixture-session",
 			Principal: "fixture@hushspec.dev",
 			Runtime:   "hushspec-conformance/0.2",
 		},
 	}
+}
+
+// withDefaults fills in the members a bundle left out, member by member --
+// what the other three SDKs do, and what a bundle carrying only
+// `{"emit_receipts": true}` relies on. An *empty* actor (`"actor": {}`) is a
+// deliberate "no actor", which is why it is a pointer: only an absent one is
+// replaced.
+func (s auditSpec) withDefaults() auditSpec {
+	fallback := defaultAudit()
+	if s.Clock == "" {
+		s.Clock = fallback.Clock
+	}
+	if s.TimeSource == "" {
+		s.TimeSource = fallback.TimeSource
+	}
+	if s.EnforcementMode == "" {
+		s.EnforcementMode = fallback.EnforcementMode
+	}
+	if s.Actor == nil {
+		s.Actor = fallback.Actor
+	}
+	return s
 }
 
 type caseGroup struct {
@@ -137,7 +159,7 @@ func newAuditInputs(spec auditSpec) (auditInputs, error) {
 
 // context returns the audit context of the case at position in the bundle.
 func (a auditInputs) context(position uint64) *hushspec.AuditContext {
-	actor := a.spec.Actor
+	actor := *a.spec.Actor
 	clock := a.clock
 	return &hushspec.AuditContext{
 		Actor:           &actor,
@@ -201,7 +223,7 @@ func main() {
 
 	spec := defaultAudit()
 	if bundle.Audit != nil {
-		spec = *bundle.Audit
+		spec = bundle.Audit.withDefaults()
 	}
 	// Fail closed: audit inputs we cannot read have no reproducible receipts,
 	// and falling back to "now" would make this harness disagree with every
