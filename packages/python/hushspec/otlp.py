@@ -323,20 +323,49 @@ class OtlpReceiptSink(ReceiptSink):
                     self._idle.wait(remaining)
             return True
 
-    def close(self, timeout: Optional[float] = 10.0) -> None:
-        """Flush, stop the export thread, and refuse further records."""
+    def start(self) -> None:
+        """Start the export thread, for a sink built with ``start=False``.
+
+        A no-op once the thread is running. A sink that is never started
+        queues until ``max_queue`` and then drops, so this is the other half
+        of deferred construction.
+        """
         with self._lock:
             if self._closed:
+                raise OtlpError("sink is closed")
+            if self._thread is not None and self._thread.is_alive():
                 return
+        self._start()
+
+    def close(self, timeout: Optional[float] = 10.0) -> bool:
+        """Flush, stop the export thread, and refuse further records.
+
+        Returns whether the thread is gone. ``timeout`` is the budget for the
+        whole shutdown, split between the flush and the join, so ``close(10)``
+        takes at most ten seconds rather than twice that. A join that times out
+        keeps the thread reference: forgetting a thread still mid-export would
+        leave it unobservable and unjoinable.
+        """
+        with self._lock:
+            if self._closed:
+                return self._thread is None or not self._thread.is_alive()
             self._closed = True
+        deadline = None if timeout is None else time.monotonic() + timeout
         self.flush(timeout)
         with self._lock:
             self._stopping = True
             self._not_empty.notify_all()
         thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout)
-        self._thread = None
+        if thread is None or thread is threading.current_thread():
+            return thread is None
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        thread.join(remaining)
+        if thread.is_alive():
+            return False
+        with self._lock:
+            if self._thread is thread:
+                self._thread = None
+        return True
 
     def __enter__(self) -> "OtlpReceiptSink":
         return self
@@ -354,16 +383,31 @@ class OtlpReceiptSink(ReceiptSink):
 
     def _enqueue(self, record: dict[str, Any]) -> None:
         overflow = 0
+        closed = False
         with self._lock:
             # Drop the newest rather than evicting the oldest: the records
             # already queued are the ones closest to being evidence.
-            if self._closed or len(self._pending) >= self._max_queue:
+            if self._closed:
+                self.dropped += 1
+                overflow = self.dropped
+                closed = True
+            elif len(self._pending) >= self._max_queue:
                 self.dropped += 1
                 overflow = self.dropped
             else:
                 self._pending.append(record)
                 self._not_empty.notify()
-        if overflow:
+        if not overflow:
+            return
+        if closed:
+            # A wrong-lifecycle drop, not back-pressure: reporting it as a full
+            # queue would send an operator after the wrong problem.
+            self._report(
+                OtlpExportError(
+                    "OTLP sink is closed; record dropped", records=1
+                )
+            )
+        else:
             self._report(
                 OtlpQueueFullError(
                     f"OTLP export queue full ({self._max_queue}); record dropped",
@@ -377,7 +421,21 @@ class OtlpReceiptSink(ReceiptSink):
             if batch is None:
                 return
             if batch:
-                self._export(batch)
+                try:
+                    self._export(batch)
+                except Exception as exc:  # noqa: BLE001
+                    # _export reports its own failures, so reaching here is a
+                    # bug rather than a transport error. The thread must
+                    # survive it: once it dies the sink silently drops every
+                    # later receipt.
+                    with self._lock:
+                        self.failed += len(batch)
+                    self._report(
+                        OtlpExportError(
+                            f"OTLP export raised unexpectedly: {exc}",
+                            records=len(batch),
+                        )
+                    )
             with self._lock:
                 self._inflight = 0
                 if not self._pending:
@@ -469,6 +527,8 @@ class OtlpReceiptSink(ReceiptSink):
                 exc.read()
             except Exception:  # noqa: BLE001 - draining is best effort
                 pass
+            finally:
+                exc.close()
             return exc.code, f"HTTP {exc.code} {exc.reason}"
         except Exception as exc:  # noqa: BLE001 - URLError, timeouts, DNS, TLS
             return None, str(exc) or type(exc).__name__

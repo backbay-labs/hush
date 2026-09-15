@@ -1,29 +1,32 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import json
 import sys
+import threading
 import time
 from abc import ABC, abstractmethod
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Optional, TextIO
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from hushspec.receipt import DecisionReceipt, EnforcementSummary
 
-from hushspec.evaluate import EvaluationAction, EvaluationResult, evaluate
+from hushspec.evaluate import EvaluationAction, EvaluationResult
 from hushspec.schema import HushSpec
 
-
-
+#: How many recent durations :class:`MetricsCollector` keeps for its
+#: percentile. A collector lives as long as the process, so the window is
+#: bounded; the counters it reports are exact regardless.
+DURATION_WINDOW = 10_000
 
 
 class EvaluationObserver(ABC):
     @abstractmethod
     def on_event(self, event: dict[str, Any]) -> None: ...
-
-
-
 
 
 class JsonLineObserver(EvaluationObserver):
@@ -52,13 +55,25 @@ class ConsoleObserver(EvaluationObserver):
 
 
 class MetricsCollector(EvaluationObserver):
+    """Counts events and summarizes evaluation latency.
 
-    def __init__(self) -> None:
+    Safe to attach to a guard that several threads evaluate through: every
+    counter update is taken under a lock. The duration samples are a bounded
+    window (:data:`DURATION_WINDOW`), so the collector does not grow for the
+    life of the process; the averages and percentile it reports describe that
+    window, while the counts are exact.
+    """
+
+    def __init__(self, duration_window: int = DURATION_WINDOW) -> None:
+        self._lock = threading.Lock()
         self._counts: dict[str, int] = {}
-        self._durations: list[float] = []
+        self._durations: deque[float] = deque(maxlen=duration_window)
+        self._evaluations = 0
 
     def on_event(self, event: dict[str, Any]) -> None:
         event_type = event.get("type", "")
+        key: Optional[str] = None
+        duration_us: Optional[float] = None
 
         if event_type == "evaluation.completed":
             result = event.get("result")
@@ -66,52 +81,63 @@ class MetricsCollector(EvaluationObserver):
                 if isinstance(result, dict):
                     decision = result.get("decision", "unknown")
                 else:
-                    decision = result.decision.value if hasattr(result.decision, "value") else str(result.decision)
+                    decision = _decision_name(result.decision)
                 key = f"evaluate.{decision}"
-                self._counts[key] = self._counts.get(key, 0) + 1
             duration_us = event.get("duration_us", 0)
-            self._durations.append(duration_us)
 
-        self._counts[event_type] = self._counts.get(event_type, 0) + 1
+        with self._lock:
+            if key is not None:
+                self._counts[key] = self._counts.get(key, 0) + 1
+            if duration_us is not None:
+                self._durations.append(duration_us)
+                self._evaluations += 1
+            self._counts[event_type] = self._counts.get(event_type, 0) + 1
 
     def get_count(self, key: str) -> int:
-        return self._counts.get(key, 0)
+        with self._lock:
+            return self._counts.get(key, 0)
 
     def get_total_evaluations(self) -> int:
-        return len(self._durations)
+        with self._lock:
+            return self._evaluations
 
     def get_average_duration_us(self) -> float:
-        if not self._durations:
+        with self._lock:
+            durations = list(self._durations)
+        if not durations:
             return 0.0
-        return sum(self._durations) / len(self._durations)
+        return sum(durations) / len(durations)
 
     def get_p99_duration_us(self) -> float:
-        if not self._durations:
+        with self._lock:
+            durations = sorted(self._durations)
+        if not durations:
             return 0.0
-        sorted_durations = sorted(self._durations)
-        index = int(len(sorted_durations) * 0.99)
-        if index >= len(sorted_durations):
-            index = len(sorted_durations) - 1
-        return sorted_durations[index]
+        index = min(int(len(durations) * 0.99), len(durations) - 1)
+        return durations[index]
 
     def to_prometheus(self) -> str:
-        lines: list[str] = []
-        for key, value in self._counts.items():
-            lines.append(f"hushspec_{key.replace('.', '_')}_total {value}")
-        if self._durations:
+        with self._lock:
+            counts = dict(self._counts)
+            have_durations = bool(self._durations)
+        lines = [
+            f"hushspec_{key.replace('.', '_')}_total {value}"
+            for key, value in counts.items()
+        ]
+        if have_durations:
             lines.append(f"hushspec_evaluate_duration_us_avg {self.get_average_duration_us()}")
             lines.append(f"hushspec_evaluate_duration_us_p99 {self.get_p99_duration_us()}")
         return "\n".join(lines)
 
     def reset(self) -> None:
-        self._counts.clear()
-        self._durations.clear()
-
-
-
+        with self._lock:
+            self._counts.clear()
+            self._durations.clear()
+            self._evaluations = 0
 
 
 class ObservableEvaluator:
+    """Evaluates a policy and announces the outcome to its observers."""
 
     def __init__(self, redact_content: bool = True) -> None:
         self._observers: list[EvaluationObserver] = []
@@ -124,8 +150,17 @@ class ObservableEvaluator:
         self._observers = [o for o in self._observers if o is not observer]
 
     def evaluate(self, spec: HushSpec, action: EvaluationAction) -> EvaluationResult:
+        """Evaluate *action* against *spec* and emit ``evaluation.completed``.
+
+        Routes through the detection pipeline, as every other evaluation
+        surface does: for a policy carrying an ``extensions.detection`` block
+        an escalated decision must not come back as an allow simply because
+        the caller went through an observer (detection spec section 4).
+        """
+        from hushspec.detection import evaluate_with_detection
+
         start_ns = time.perf_counter_ns()
-        result = evaluate(spec, action)
+        result = evaluate_with_detection(spec, action).evaluation
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
         self._emit({
             "type": "evaluation.completed",
@@ -202,20 +237,21 @@ class ObservableEvaluator:
         })
 
     def _emit(self, event: dict[str, Any]) -> None:
-        for observer in self._observers:
+        # Over a snapshot: an observer that registers another one while being
+        # notified must not mutate the list this loop is walking.
+        for observer in tuple(self._observers):
             try:
                 observer.on_event(event)
-            except Exception:
+            except Exception:  # noqa: BLE001 - an observer is never fatal
                 pass
 
 
-
+def _decision_name(decision: Any) -> str:
+    """A decision as the string a metric or a JSON line carries."""
+    return decision.value if isinstance(decision, enum.Enum) else str(decision)
 
 
 def _json_default(obj: Any) -> Any:
-    import dataclasses
-    import enum
-
     from hushspec.receipt import DecisionReceipt, receipt_to_dict
 
     if isinstance(obj, DecisionReceipt):
@@ -232,5 +268,4 @@ def _json_default(obj: Any) -> Any:
 
 
 def _iso_now() -> str:
-    from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

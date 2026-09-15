@@ -1,3 +1,6 @@
+import sys
+import time
+
 import pytest
 
 from hushspec import HushGuard, HushSpecDenied
@@ -743,3 +746,108 @@ class TestDetectionInSinkPath:
         # (receipt spec 4.6: absent, not empty, means it did not run).
         assert receipt.detection_trace is not None
         assert all(not d.matched for d in receipt.detection_trace)
+
+
+class TestConcurrentPolicySwap:
+    """A hot reload is atomic from an evaluating thread's point of view."""
+
+    ALLOW = (
+        'hushspec: "0.2.0"\nname: allow-all\n'
+        "rules:\n  tool_access:\n    default: allow\n"
+    )
+    DENY = (
+        'hushspec: "0.2.0"\nname: deny-all\n'
+        "rules:\n  tool_access:\n    default: block\n"
+    )
+
+    def test_a_receipt_never_pairs_one_policy_with_another_policy_hash(self):
+        import threading
+
+        from hushspec import (
+            Decision,
+            EnforcementConfig,
+            EvaluationAction,
+            resolve_with_options_or_raise,
+        )
+
+        received: list = []
+
+        class Collect:
+            def send(self, receipt):
+                received.append(receipt)
+
+            def record_policy_event(self, event):
+                pass
+
+        allow = resolve_with_options_or_raise(parse_or_raise(self.ALLOW))
+        deny = resolve_with_options_or_raise(parse_or_raise(self.DENY))
+        by_hash = {
+            allow.content_hash: Decision.ALLOW,
+            deny.content_hash: Decision.DENY,
+        }
+
+        guard = HushGuard(
+            allow,
+            sink=Collect(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        action = EvaluationAction(type="tool_call", target="anything")
+        stop = threading.Event()
+
+        def evaluate_loop():
+            while not stop.is_set():
+                guard.gate(action)
+
+        def swap_loop():
+            resolutions = (deny, allow)
+            index = 0
+            while not stop.is_set():
+                guard.swap_resolution(resolutions[index % 2])
+                index += 1
+
+        # A short switch interval widens the window in which a swap can land
+        # between two reads of the guard's state.
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        threads = [threading.Thread(target=evaluate_loop) for _ in range(3)]
+        threads.append(threading.Thread(target=swap_loop))
+        try:
+            for thread in threads:
+                thread.start()
+            time.sleep(0.5)
+        finally:
+            stop.set()
+            for thread in threads:
+                thread.join(5.0)
+            sys.setswitchinterval(previous)
+
+        assert received, "no receipts were produced"
+        mismatched = [
+            receipt
+            for receipt in received
+            if by_hash.get(receipt.policy.content_hash) != receipt.decision
+        ]
+        assert not mismatched, (
+            f"{len(mismatched)} of {len(received)} receipts named a policy that "
+            "did not produce their decision"
+        )
+
+    def test_a_swap_clears_an_earlier_refusal_atomically(self):
+        from hushspec import (
+            Decision,
+            EvaluationAction,
+            resolve_with_options_or_raise,
+        )
+
+        signed_policy = parse_or_raise(self.ALLOW)
+        guard = HushGuard(signed_policy)
+        assert guard.refusal is None
+        resolution = resolve_with_options_or_raise(parse_or_raise(self.DENY))
+        guard.swap_resolution(resolution)
+        assert guard.refusal is None
+        assert guard.policy.name == "deny-all"
+        assert guard.resolution is resolution
+        assert (
+            guard.evaluate(EvaluationAction(type="tool_call", target="x")).decision
+            == Decision.DENY
+        )
