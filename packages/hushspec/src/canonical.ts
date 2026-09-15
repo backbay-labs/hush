@@ -78,7 +78,9 @@ export interface PropertySchema {
   readonly default?: JsonValue;
   /**
    * Spec section 3.3: an empty value here changes meaning and MUST survive
-   * projection (origins `match` and the tri-state overlay fields).
+   * projection. `OriginProfile.match` is the only such property; the origins
+   * overlay lists are not, because an absent overlay list and an empty one
+   * evaluate identically (origins spec section 4).
    */
   readonly presenceSignificant?: true;
 }
@@ -344,19 +346,21 @@ const ORIGINS = object({
           posture: { schema: LEAF },
           tool_access: {
             schema: object({
-              // Tri-state overlays: written-but-empty overrides the base
-              // block, absent inherits (spec section 3.3).
-              allow: { schema: STRING_ARRAY, presenceSignificant: true },
-              block: { schema: STRING_ARRAY, presenceSignificant: true },
-              require_confirmation: { schema: STRING_ARRAY, presenceSignificant: true },
+              // Overlay lists: an absent one inherits the base block, an empty
+              // one contributes nothing, and the two evaluate alike (origins
+              // spec section 4), so an empty one is omitted like any other
+              // no-default empty container (spec section 3.3).
+              allow: { schema: STRING_ARRAY },
+              block: { schema: STRING_ARRAY },
+              require_confirmation: { schema: STRING_ARRAY },
               default: { schema: LEAF },
               max_args_size: { schema: LEAF },
             }),
           },
           egress: {
             schema: object({
-              allow: { schema: STRING_ARRAY, presenceSignificant: true },
-              block: { schema: STRING_ARRAY, presenceSignificant: true },
+              allow: { schema: STRING_ARRAY },
+              block: { schema: STRING_ARRAY },
               default: { schema: LEAF },
             }),
           },
