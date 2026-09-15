@@ -1,7 +1,5 @@
 use crate::fixture::{FixtureCategory, TestFixture};
-use hushspec::{
-    Decision, EvaluationAction, HushSpec, PostureResult, evaluate_with_detection, merge,
-};
+use hushspec::{Decision, EvaluationAction, HushSpec, PostureResult, evaluate_with_detection};
 use jsonschema::JSONSchema;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -85,30 +83,50 @@ fn test_valid_fixture(fixture: &TestFixture) -> TestResult {
 
 fn test_invalid_fixture(fixture: &TestFixture) -> TestResult {
     let path = fixture.path.display().to_string();
-    match HushSpec::parse(&fixture.content) {
+    let result = |passed: bool, message: String| TestResult {
+        fixture_path: path.clone(),
+        category: fixture.category,
+        passed,
+        message,
+    };
+
+    // The refusal, as a registered error code plus its diagnostic
+    // (spec/registries/error-codes.yaml).
+    let refusal: Option<(&str, String)> = match HushSpec::parse(&fixture.content) {
+        Err(error) => Some((crate::expect::parse_error_code(), error.to_string())),
         Ok(spec) => {
             let validation = hushspec::validate(&spec);
-            if validation.is_valid() {
-                TestResult {
-                    fixture_path: path,
-                    category: fixture.category,
-                    passed: false,
-                    message: "Expected rejection but document was accepted".to_string(),
-                }
-            } else {
-                TestResult {
-                    fixture_path: path,
-                    category: fixture.category,
-                    passed: true,
-                    message: format!("Correctly rejected: {}", validation.errors[0]),
-                }
-            }
+            validation.errors.first().map(|error| {
+                (
+                    crate::expect::validation_error_code(error),
+                    error.to_string(),
+                )
+            })
         }
-        Err(_) => TestResult {
-            fixture_path: path,
-            category: fixture.category,
-            passed: true,
-            message: "Correctly rejected at parse time".to_string(),
+    };
+
+    let Some((code, message)) = refusal else {
+        return result(
+            false,
+            "Expected rejection but document was accepted".to_string(),
+        );
+    };
+
+    // Every invalid vector names the code its rejection must carry, so a
+    // vector cannot pass by being refused for an unrelated reason.
+    match crate::expect::load(&fixture.path) {
+        Err(error) => result(false, error),
+        Ok(None) => result(
+            false,
+            format!(
+                "no {} sidecar: every invalid vector must name the error code it is rejected \
+                 with (spec/registries/error-codes.yaml)",
+                crate::expect::SIDECAR_SUFFIX
+            ),
+        ),
+        Ok(Some(expected)) => match crate::expect::check(&expected, code, &message) {
+            Some(problem) => result(false, problem),
+            None => result(true, format!("Correctly rejected [{code}]: {message}")),
         },
     }
 }
@@ -482,6 +500,30 @@ fn test_merge_case(
         .and_then(|stem| stem.to_str())
         .unwrap_or_default();
     let expected_name = child_name.replacen("child-", "expected-", 1);
+    let dir = child_fixture
+        .path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+
+    // A vector marked as a refusal (an `expect-reject` file, or `reject: true`
+    // in the directory's fixture.yaml) has no expected document: the failure
+    // is the assertion.
+    if crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+        return match crate::merge_vector::compose(base, &child_fixture.path) {
+            Ok(_) => TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: "Expected the vector to be refused, but it composed".to_string(),
+            },
+            Err(error) => TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: true,
+                message: format!("Correctly refused: {error}"),
+            },
+        };
+    }
 
     let Some(expected_fixture) = fixtures.iter().find(|fixture| {
         fixture.category == FixtureCategory::MergeExpected
@@ -500,17 +542,6 @@ fn test_merge_case(
         };
     };
 
-    let child_spec = match HushSpec::parse(&child_fixture.content) {
-        Ok(spec) => spec,
-        Err(error) => {
-            return TestResult {
-                fixture_path: path,
-                category: FixtureCategory::MergeChild,
-                passed: false,
-                message: format!("Failed to parse merge child: {error}"),
-            };
-        }
-    };
     let expected_spec = match HushSpec::parse(&expected_fixture.content) {
         Ok(spec) => spec,
         Err(error) => {
@@ -523,7 +554,20 @@ fn test_merge_case(
         }
     };
 
-    let merged = merge(base, &child_spec);
+    // A child that pins its base by digest is resolved rather than merged, so
+    // the pin is actually checked; every other child keeps the direct
+    // merge(base, child) the corpus has always been checked with.
+    let merged = match crate::merge_vector::compose(base, &child_fixture.path) {
+        Ok(merged) => merged,
+        Err(error) => {
+            return TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: format!("Failed to compose merge vector: {error}"),
+            };
+        }
+    };
     if merged == expected_spec {
         TestResult {
             fixture_path: path,
@@ -614,9 +658,13 @@ pub(crate) fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(),
 fn evaluator_schema() -> &'static JSONSchema {
     static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| {
-        let schema_json: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../schemas/hushspec-evaluator-test.v0.schema.json"
-        ))
+        // Embedded via the generated module rather than `include_str!`: the
+        // schemas live outside the crate directory and would not survive
+        // `cargo package` (see scripts/generate_testkit_schemas.py).
+        let schema_json: serde_json::Value = serde_json::from_str(
+            crate::generated_schemas::schema_body("evaluator-test")
+                .expect("the evaluator-test schema is embedded"),
+        )
         .expect("evaluator schema should be valid JSON");
         // The evaluator fixture schema has no `format` keyword today, but formats
         // are asserted deliberately (rather than left at the draft's default) so
