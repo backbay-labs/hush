@@ -23,6 +23,13 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 ### Added
 
 - `CHANGELOG.md`, `SECURITY.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` at the repository root.
+- Machine-readable control mappings (RFC 09 P2-09): `metadata.controls[]`
+  (`framework`, `control_id`, `rule_paths`, `notes`) in the core schema, spec 2.5, and all
+  four SDKs; a framework registry at `spec/registries/frameworks.yaml` with its own schema;
+  lint `L011` (unmapped rule block), `L012` (rule path resolves to nothing) and `L013`
+  (unregistered framework or non-conforming control id); `h2h audit --controls` (text and
+  JSON) with a rule-block coverage line and a `--strict` exit code; and all eight
+  `library/` policies migrated from comment-only mappings to structured ones.
 
 ### Planned
 

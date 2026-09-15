@@ -92,10 +92,41 @@ The OPTIONAL `metadata` object carries governance information about the policy. 
 | `policy_version`  | integer | OPTIONAL | Monotonically increasing version counter. MUST be >= 1.                     |
 | `effective_date`  | string  | OPTIONAL | ISO 8601 date the policy becomes effective.                                 |
 | `expiry_date`     | string  | OPTIONAL | ISO 8601 date the policy expires.                                           |
+| `controls`        | array   | OPTIONAL | Compliance control mappings. See below.                                     |
 
-Unknown keys under `metadata` MUST be rejected (Section 2.1). Under every merge strategy the child's `metadata` object, when present, replaces the base's `metadata` object entirely; when the child omits `metadata`, the base's is preserved. Governance semantics (lifecycle enforcement, approval checks, control mappings) are defined by the HushSpec Governance specification, not by this document.
+Unknown keys under `metadata` MUST be rejected (Section 2.1). Under every merge strategy the child's `metadata` object, when present, replaces the base's `metadata` object entirely; when the child omits `metadata`, the base's is preserved. Governance semantics (lifecycle enforcement, approval checks) are defined by the HushSpec Governance specification, not by this document.
 
-Test vector: `fixtures/core/valid/metadata.yaml`.
+#### 2.5.1 Control Mappings
+
+The OPTIONAL `metadata.controls` array states which compliance controls the policy implements, and which parts of the document implement each one. Each entry is an object:
+
+| Field        | Type             | Required | Description                                                                 |
+|--------------|------------------|----------|-----------------------------------------------------------------------------|
+| `framework`  | string           | REQUIRED | Framework identifier. MUST match `^[a-z0-9][a-z0-9.-]*$`.                   |
+| `control_id` | string           | REQUIRED | Control identifier within the framework. MUST NOT be empty.                 |
+| `rule_paths` | array of string  | REQUIRED | Paths to the parts of the document that implement the control. MUST contain at least one entry, and every entry MUST be non-empty. |
+| `notes`      | string           | OPTIONAL | Free-text rationale.                                                        |
+
+Unknown keys within a mapping MUST be rejected (Section 2.1).
+
+**Control mappings MUST NOT influence evaluation.** An engine MUST produce the same decision for a document with mappings as for the same document with `metadata.controls` removed. They are a claim about the policy, checked by tooling, never an input to a rule.
+
+**Path grammar.** Each `rule_paths` entry is a dot path into the *resolved* document (Section 2.3), optionally ending in a bracketed selector:
+
+```abnf
+rule-path = root *( "." segment ) [ selector ]
+root      = "rules" / "extensions"
+segment   = 1*( ALPHA / DIGIT / "_" )
+selector  = "[" 1*( %x20-5A / %x5C-7C / %x7E ) "]"   ; any character except "[" and "]"
+```
+
+A selector names one entry of the list or mapping the preceding path resolves to, matching a list entry by its `name` or `id` field and a mapping by its key. Examples: `rules` (the whole rules object), `rules.egress` (one rule block), `rules.egress.allow` (one field), `rules.secret_patterns.patterns[ssn]` (one named secret pattern), `extensions.posture` (an extension subtree).
+
+Because paths are resolved against the resolved document, a mapping in a child policy may name a rule block the child inherits from its base.
+
+**Frameworks.** Framework identifiers are listed, together with a `control_id_pattern` for each, in `spec/registries/frameworks.yaml`. Registration is advisory: a document naming an unregistered framework, or a control id that does not match its framework's pattern, is still a valid HushSpec document and engines MUST NOT reject it. Linters SHOULD flag both (`h2h lint` reports them as L013), SHOULD flag a rule path that resolves to nothing (L012), and SHOULD flag a rule block left unmapped once a policy declares any mapping (L011).
+
+Test vectors: `fixtures/core/valid/metadata.yaml`, `fixtures/core/valid/metadata-controls.yaml`, `fixtures/core/invalid/metadata-controls-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-empty-paths.yaml`, `fixtures/core/invalid/metadata-controls-bad-framework-id.yaml`.
 
 ---
 
