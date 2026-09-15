@@ -3,10 +3,14 @@ use hushspec::receipt::compute_policy_hash;
 use hushspec::{AuditConfig, EvaluationAction, HushSpec, evaluate, evaluate_audited};
 use std::hint::black_box;
 
-const DEFAULT_POLICY: &str = include_str!("../../../rulesets/default.yaml");
+/// The embedded `default` ruleset (generated from rulesets/default.yaml by
+/// scripts/generate_rust_builtins.py).
+fn default_policy() -> &'static str {
+    hushspec::load_builtin("default").expect("default ruleset is embedded")
+}
 
 fn default_spec() -> HushSpec {
-    HushSpec::parse(DEFAULT_POLICY).expect("default ruleset parses")
+    HushSpec::parse(default_policy()).expect("default ruleset parses")
 }
 
 fn minimal_spec() -> HushSpec {

@@ -8,7 +8,6 @@
 use hushspec::{AuditConfig, EvaluationAction, HushSpec, evaluate, evaluate_audited};
 use std::time::Instant;
 
-const DEFAULT_POLICY: &str = include_str!("../../../rulesets/default.yaml");
 const BATCHES: usize = 60;
 const ITERS_PER_BATCH: usize = 2_000;
 
@@ -44,7 +43,10 @@ fn receipt_overhead_within_budget() {
         panic!("bench_thresholds must run with --release (debug timings are meaningless)");
     }
 
-    let spec = HushSpec::parse(DEFAULT_POLICY).expect("default ruleset parses");
+    // The embedded `default` ruleset (generated from rulesets/default.yaml by
+    // scripts/generate_rust_builtins.py).
+    let default_policy = hushspec::load_builtin("default").expect("default ruleset is embedded");
+    let spec = HushSpec::parse(default_policy).expect("default ruleset parses");
     let action: EvaluationAction = serde_json::from_value(serde_json::json!({
         "type": "tool_call",
         "target": "read_file"

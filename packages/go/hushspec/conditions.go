@@ -4,6 +4,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	// time.LoadLocation reads the *system* tz database ($GOROOT/lib/time or
+	// /usr/share/zoneinfo), which scratch/distroless images and Windows do not
+	// have, so a `time_window.timezone` rule would silently fail to resolve
+	// there. Importing time/tzdata embeds the IANA database in the binary
+	// (~450KB) as a fallback, consulted only when the system copy is missing.
+	_ "time/tzdata"
 )
 
 const MaxNestingDepth = 8

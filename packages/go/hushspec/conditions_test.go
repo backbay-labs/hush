@@ -224,6 +224,46 @@ func TestTimeWindowUsesDSTForIANATimezones(t *testing.T) {
 	}
 }
 
+func TestTimeWindowLoadsIANAZonesFromTzdata(t *testing.T) {
+	// Neither zone is in the fixedTimezoneOffsets fallback table, so these
+	// assertions only pass if time.LoadLocation finds a tz database. That is
+	// what the blank `time/tzdata` import in conditions.go guarantees on
+	// scratch/distroless images and Windows, which ship no system zoneinfo --
+	// without it LoadLocation errors and the condition fails closed.
+	newYork := &Condition{
+		TimeWindow: &TimeWindowCondition{
+			Start:    "09:00",
+			End:      "10:00",
+			Timezone: "America/New_York",
+		},
+	}
+	// 09:30 in New York, winter (UTC-5) and summer (UTC-4).
+	if !EvaluateCondition(newYork, ctxWithTimeStr("2026-01-14T14:30:00Z")) {
+		t.Error("expected America/New_York to resolve in winter")
+	}
+	if !EvaluateCondition(newYork, ctxWithTimeStr("2026-07-14T13:30:00Z")) {
+		t.Error("expected America/New_York to resolve under DST")
+	}
+	if EvaluateCondition(newYork, ctxWithTimeStr("2026-01-14T09:30:00Z")) {
+		t.Error("expected America/New_York to reject outside the window")
+	}
+
+	kolkata := &Condition{
+		TimeWindow: &TimeWindowCondition{
+			Start:    "09:00",
+			End:      "10:00",
+			Timezone: "Asia/Kolkata",
+		},
+	}
+	// 09:30 in Kolkata (UTC+5:30 year-round).
+	if !EvaluateCondition(kolkata, ctxWithTimeStr("2026-01-14T04:00:00Z")) {
+		t.Error("expected Asia/Kolkata to resolve inside the window")
+	}
+	if EvaluateCondition(kolkata, ctxWithTimeStr("2026-01-14T09:30:00Z")) {
+		t.Error("expected Asia/Kolkata to reject outside the window")
+	}
+}
+
 func TestTimeWindowWrapsMidnightWithDayFilter(t *testing.T) {
 	cond := &Condition{
 		TimeWindow: &TimeWindowCondition{

@@ -2,6 +2,7 @@ pub mod conditions;
 pub mod detection;
 pub mod evaluate;
 pub mod extensions;
+mod generated_builtins;
 mod generated_contract;
 mod generated_models;
 pub mod governance;
