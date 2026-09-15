@@ -531,8 +531,8 @@ fn keygen_writes_private_key_with_restrictive_permissions() {
         .success()
         .stdout(predicate::str::contains("Created"));
 
-    let private_key = tmp.path().join("h2h.key");
-    let public_key = tmp.path().join("h2h.pub");
+    let private_key = tmp.path().join("h2h.key.pem");
+    let public_key = tmp.path().join("h2h.pub.pem");
     assert!(private_key.exists(), "private key should exist");
     assert!(public_key.exists(), "public key should exist");
 

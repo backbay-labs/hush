@@ -23,7 +23,7 @@ pub mod version;
 
 pub use canonical::{
     CONTENT_HASH_PREFIX, CanonicalError, canonical_json, canonical_json_value, content_hash,
-    content_hash_value,
+    content_hash_value, serialize_jcs,
 };
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{

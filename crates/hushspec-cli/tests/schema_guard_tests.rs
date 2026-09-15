@@ -39,7 +39,7 @@ fn every_schema_meta_validates_and_id_matches_filename() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 9, "expected the 9 published schemas");
+    assert_eq!(checked, 10, "expected the 10 published schemas");
 }
 
 /// The framework registry is normative input to lint L013 and to the embedded

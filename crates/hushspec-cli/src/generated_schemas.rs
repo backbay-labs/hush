@@ -10,6 +10,7 @@ pub const SCHEMA_NAMES: &[&str] = &[
     "evaluator-test",
     "framework-registry",
     "hash-vector",
+    "keyring",
     "origins",
     "posture",
     "receipt",
@@ -26,6 +27,7 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
         "hushspec-framework-registry.v0.schema.json",
     ),
     ("hash-vector", "hushspec-hash-vector.v0.schema.json"),
+    ("keyring", "hushspec-keyring.v0.schema.json"),
     ("origins", "hushspec-origins.v0.schema.json"),
     ("posture", "hushspec-posture.v0.schema.json"),
     ("receipt", "hushspec-receipt.v0.schema.json"),
@@ -1228,6 +1230,67 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
 "#,
     ),
     (
+        "keyring",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-keyring.v0.schema.json",
+  "title": "HushSpec Trusted Keyring v0.2",
+  "description": "The set of public keys a verifier trusts for policy signatures. Normative prose: spec/hushspec-signing.md section 5. A verifier MUST select the key whose key_id equals the envelope's key_id and MUST NOT fall back to any other key.",
+  "type": "object",
+  "required": ["keyring_version", "keys"],
+  "additionalProperties": false,
+  "properties": {
+    "keyring_version": {
+      "type": "string",
+      "const": "0.2"
+    },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/TrustedKey" }
+    }
+  },
+  "$defs": {
+    "TrustedKey": {
+      "type": "object",
+      "required": ["key_id", "algorithm", "public_key"],
+      "additionalProperties": false,
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of the DER-encoded SubjectPublicKeyInfo in public_key. Verifiers MUST recompute it from public_key and reject the entry if it differs."
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "public_key": {
+          "type": "string",
+          "pattern": "^-----BEGIN PUBLIC KEY-----\\n[A-Za-z0-9+/=\\n]+-----END PUBLIC KEY-----\\n?$",
+          "description": "The public key as a PEM-encoded SubjectPublicKeyInfo (RFC 7468 'PUBLIC KEY')."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable label for the key."
+        },
+        "not_after": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+          "description": "Signatures whose signed_at is at or after this instant MUST be rejected for this key. Lets a key be retired without invalidating signatures made before retirement."
+        },
+        "revoked": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, every signature by this key MUST be rejected regardless of signed_at."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
         "origins",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1846,44 +1909,61 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-signature.v0.schema.json",
-  "title": "HushSpec Detached Policy Signature v0",
-  "description": "A detached cryptographic signature for a HushSpec policy document. Stored as a .sig JSON file alongside the signed policy file.",
+  "title": "HushSpec Policy Signature Envelope v0.2",
+  "description": "A detached Ed25519 signature over the canonical form of a resolved HushSpec policy. Stored as a .sig JSON file next to the policy. Normative prose: spec/hushspec-signing.md. The signature covers the RFC 8785 canonical serialization of this object with the `signature` member removed.",
   "type": "object",
-  "required": ["format_version", "algorithm", "content_hash", "signature", "signed_at", "key_id"],
+  "required": ["format_version", "algorithm", "key_id", "signed_at", "content_hash", "signature"],
   "additionalProperties": false,
   "properties": {
     "format_version": {
       "type": "string",
-      "const": "0.1.0",
-      "description": "Signature format version."
+      "const": "0.2",
+      "description": "Envelope format version. Verifiers MUST reject any other value."
     },
     "algorithm": {
       "type": "string",
-      "enum": ["ed25519"],
-      "description": "Signature algorithm. Must be 'ed25519' for v0.x."
-    },
-    "content_hash": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA-256 hex digest of the raw policy file bytes."
-    },
-    "signature": {
-      "type": "string",
-      "description": "Base64-encoded Ed25519 signature of the canonical signature envelope, including content_hash, signed_at, key_id, and signer when present."
-    },
-    "signed_at": {
-      "type": "string",
-      "format": "date-time",
-      "description": "ISO 8601 UTC timestamp of when the signature was created."
+      "const": "ed25519",
+      "description": "Signature algorithm. Only ed25519 (RFC 8032, pure, no pre-hash) is defined in 0.2. Verifiers MUST reject any other value."
     },
     "key_id": {
       "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "sha256 of the DER-encoded SubjectPublicKeyInfo of the signing key (RFC 5280 / RFC 8410). Used to select the key from a keyring; verifiers MUST reject a key_id that is not in the keyring."
+    },
+    "signed_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "When the signature was made, RFC 3339 UTC with millisecond precision and Z suffix."
+    },
+    "expires_at": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "Optional expiry. A verifier whose current time is at or after this instant MUST treat the signature as invalid."
+    },
+    "policy_version": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The policy's metadata.policy_version at signing time, when present. Verifiers with a recorded last-seen version for this policy name MUST reject a lower value (rollback protection)."
+    },
+    "policy_name": {
+      "type": "string",
       "minLength": 1,
-      "description": "Opaque identifier for the signing key, used for key lookup."
+      "description": "The policy's name at signing time, when present. Together with policy_version it scopes rollback protection."
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Content hash of the resolved policy (spec/hushspec-canonical.md section 5). NOT a hash of the file bytes: reformatting the YAML does not invalidate the signature, changing a base policy in the extends chain does."
     },
     "signer": {
       "type": "string",
-      "description": "Human-readable identity of the signer (email, team name, etc.)."
+      "minLength": 1,
+      "description": "Human-readable identity of the signer. Covered by the signature; informational for verifiers."
+    },
+    "signature": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{86}$",
+      "description": "The 64-byte Ed25519 signature, base64url encoded without padding (RFC 4648 section 5), over the canonical form of this envelope without the signature member."
     }
   }
 }

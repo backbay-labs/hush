@@ -30,11 +30,30 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
   (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
   expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
-  with a published test-only key. Schemas staged at `schemas/staged/0.2.0/`; the Rust
-  implementation is brought to it in RFC 09 P2-07.
+  with a published test-only key.
+- Signing format 0.2 in the Rust SDK and `h2h` (RFC 09 P2-07): `hushspec::signing` now signs
+  the content hash of the *resolved* policy over an RFC 8785 envelope, so reformatting a
+  signed policy keeps its signature valid and a changed base policy invalidates it. Keys are
+  PEM PKCS#8 / SPKI with `key_id` recomputed from the SPKI digest, trust is a `Keyring` with
+  retirement and revocation, and `verify_policy` reports the closed reason-code set of signing
+  spec 6.4 (`malformed_envelope`, `unsupported_format_version`, `unsupported_algorithm`,
+  `unknown_key_id`, `key_revoked`, `key_retired`, `signed_at_in_future`, `expired`,
+  `signature_mismatch`, `content_hash_mismatch`, `policy_version_rollback`). All 16 vectors
+  under `fixtures/signing/` pass. `h2h keygen` writes `<name>.key.pem` / `<name>.pub.pem` and
+  prints the key id (`--convert` upgrades a 0.1 key file); `h2h sign` gains `--expires-in`,
+  `--policy-version` and `--out`; `h2h verify` gains `--keyring`, `--now`, `--max-skew`,
+  `--last-seen-version` and `--format json`, and names a 0.1 signature rather than rejecting
+  it as corrupt. The signature and keyring schemas are promoted out of
+  `schemas/staged/0.2.0/`; TypeScript, Python and Go follow in the same work package.
 
 ### Changed
 
+- **Breaking (signing).** Signature format 0.1 is superseded and cannot be verified by 0.2:
+  it signed raw file bytes with bespoke 32-byte key files. Convert a key with
+  `h2h keygen --convert <old.key>` and re-sign with `h2h sign`. `h2h keygen` now writes
+  `h2h.key.pem` / `h2h.pub.pem` rather than `h2h.key` / `h2h.pub`, and `h2h sign` drops
+  `--key-id` (the id is the SPKI digest and is never chosen by the signer). The Rust
+  `hushspec::signing` API is rewritten around `Envelope`, `Keyring` and `ReasonCode`.
 - Repositioned the project around "agentic compliance as code": updated the tagline and
   introductory copy across `README.md`, `docs/src/introduction.md`, package manifests, and
   package READMEs.

@@ -209,10 +209,10 @@ A future minor version may allow the envelope to be embedded in the policy under
 
 ## 8. Tooling conventions
 
-- `h2h keygen` writes `<name>.key.pem` (PKCS#8) and `<name>.pub.pem` (SPKI) and prints the `key_id`.
-- `h2h sign <policy> --key <key.pem> [--expires <duration>] [--signer <id>]` writes `<policy>.sig`.
-- `h2h verify <policy> --keyring <keyring.json> [--now <timestamp>] [--last-seen-version <n>]` exits 0 on `valid` and non-zero otherwise, printing the reason code. `--key <pub.pem>` is accepted as a one-key keyring.
-- SDKs expose `sign_policy`, `verify_policy` returning the outcome and reason code, and a `Keyring` type that recomputes ids on load.
+- `h2h keygen [--name <name>] [--output-dir <dir>] [--convert <old.key>]` writes `<name>.key.pem` (PKCS#8) and `<name>.pub.pem` (SPKI) and prints the `key_id`. `--convert` reads a HushSpec 0.1 key file and re-writes it as PEM; the signatures that key made stay format 0.1 and have to be re-made.
+- `h2h sign <policy> --key <key.pem> [--expires-in <duration>] [--policy-version <n>] [--signer <id>] [--out <path>]` writes `<policy>.sig`. `policy_name` and `policy_version` default to the policy's own; `--policy-version` overrides.
+- `h2h verify <policy> --keyring <keyring.json> [--sig <path>] [--now <timestamp>] [--max-skew <seconds>] [--last-seen-version <n>] [--format json]` exits 0 on `valid` and non-zero otherwise, printing the reason code. `--key <pub.pem>` is accepted as a one-key keyring.
+- SDKs expose `sign_policy`, `verify_policy` returning the outcome and reason code, and a `Keyring` type that recomputes ids on load. The reference implementation pairs each with a hash-level primitive (`sign_content_hash`, `verify_content_hash`) so that an enforcement point can verify the in-memory resolved document it is about to evaluate rather than a file it would re-read (Section 10).
 
 These are conventions for the reference tooling, not conformance requirements.
 
