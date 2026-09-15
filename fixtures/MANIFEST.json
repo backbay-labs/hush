@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "0.2.0",
-  "generated_at": "2026-09-15T21:43:25Z",
+  "generated_at": "2026-09-15T22:05:29Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -3743,7 +3743,7 @@
     },
     {
       "path": "fixtures/signing/README.md",
-      "sha256": "a9393217a5a4af203323e8c11e334b9b60a0128c7cae89bfb500d5d396419b9c",
+      "sha256": "6d2e9baa2f5c8c7ef60e3e1b21cd45daca78bf8ddf1ad54e0f49e9bbd1b77e53",
       "category": "doc",
       "module": "signing",
       "level": 0

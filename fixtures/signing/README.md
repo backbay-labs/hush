@@ -47,5 +47,6 @@ h2h verify fixtures/signing/policies/basic.yaml \
   --now 2026-09-15T12:00:00.000Z
 ```
 
-Expected outcomes and reason codes are defined in spec sections 6.2 and 6.4. These vectors are
-walked by the `h2h` CLI only; the SDKs do not implement signing yet.
+Expected outcomes and reason codes are defined in spec sections 6.2 and 6.4. Every SDK runs
+these vectors in its own test suite, and `h2h verify` exercises the same cases; a divergence
+between engines is a conformance failure.
