@@ -28,6 +28,39 @@ type TimeWindowCondition struct {
 	Days     []string `yaml:"days,omitempty" json:"days,omitempty"`         // mon..sun
 }
 
+// RateComparison is how a [RateCondition] compares its counter with its
+// threshold (core spec 3.13).
+type RateComparison string
+
+const (
+	// RateComparisonGte is true when counter >= threshold.
+	RateComparisonGte RateComparison = "gte"
+	// RateComparisonLt is true when counter < threshold.
+	RateComparisonLt RateComparison = "lt"
+)
+
+// RateComparisons is the closed set of `rate.comparison` values.
+var RateComparisons = map[RateComparison]struct{}{
+	RateComparisonGte: {},
+	RateComparisonLt:  {},
+}
+
+// RateCondition compares an engine-supplied counter with a threshold (core
+// spec 3.13).
+//
+// HushSpec never stores state and never increments anything: the engine owns
+// the counter and its window and supplies the current value for this
+// evaluation in [RuntimeContext.Counters]. A counter the engine did not supply
+// makes the predicate unevaluable, which leaves the block active.
+type RateCondition struct {
+	// Counter names a key of RuntimeContext.Counters. Identifier grammar.
+	Counter string `yaml:"counter" json:"counter"`
+	// Threshold is the non-negative value the counter is compared against.
+	Threshold uint64 `yaml:"threshold" json:"threshold"`
+	// Comparison is "gte" or "lt".
+	Comparison RateComparison `yaml:"comparison" json:"comparison"`
+}
+
 // Condition gates whether a rule block is active. All present fields are
 // combined with AND semantics. Fail-closed: missing context fields evaluate
 // to false.
@@ -37,6 +70,14 @@ type Condition struct {
 	AllOf      []Condition            `yaml:"all_of,omitempty" json:"all_of,omitempty"`
 	AnyOf      []Condition            `yaml:"any_of,omitempty" json:"any_of,omitempty"`
 	Not        *Condition             `yaml:"not,omitempty" json:"not,omitempty"`
+	// Capability is true when the effective posture state -- the state the
+	// posture guard uses, after origins profile selection and the action's
+	// posture input -- grants it. Unevaluable, and therefore held, when the
+	// policy has no posture extension (core spec 3.13).
+	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	// Rate compares an engine-supplied counter with a threshold. Unevaluable,
+	// and therefore held, when the context carries no such counter.
+	Rate *RateCondition `yaml:"rate,omitempty" json:"rate,omitempty"`
 }
 
 // RuntimeContext is the runtime context provided by the enforcement engine.
@@ -48,15 +89,62 @@ type RuntimeContext struct {
 	Session     map[string]interface{} `yaml:"session,omitempty" json:"session,omitempty"`
 	Request     map[string]interface{} `yaml:"request,omitempty" json:"request,omitempty"`
 	Custom      map[string]interface{} `yaml:"custom,omitempty" json:"custom,omitempty"`
-	CurrentTime string                 `yaml:"current_time,omitempty" json:"current_time,omitempty"` // RFC3339; defaults to system time
+	// Counters are the engine-maintained counters `rate` conditions consult
+	// (core spec 3.13). The engine owns the window; HushSpec only compares.
+	Counters    map[string]uint64 `yaml:"counters,omitempty" json:"counters,omitempty"`
+	CurrentTime string            `yaml:"current_time,omitempty" json:"current_time,omitempty"` // RFC3339; defaults to system time
+}
+
+// grantedCapabilities is what the effective posture state grants, for the
+// `capability` predicate of core spec 3.13. `known` is false when the policy
+// has no posture extension, which makes the predicate unevaluable (and so
+// held); a known-but-unlisted capability is false, and an unknown state grants
+// nothing.
+type grantedCapabilities struct {
+	known bool
+	list  []string
+}
+
+func (g grantedCapabilities) grants(name string) bool {
+	for _, granted := range g.list {
+		if granted == name {
+			return true
+		}
+	}
+	return false
 }
 
 // EvaluateCondition returns true if the condition is satisfied by the context.
+//
+// A `capability` predicate is unevaluable through this entry point -- no
+// posture state is known here -- and therefore holds. An evaluator that has
+// resolved the effective posture state calls
+// [EvaluateConditionWithCapabilities] instead.
 func EvaluateCondition(condition *Condition, context *RuntimeContext) bool {
-	return evaluateConditionDepth(condition, context, 0)
+	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0)
 }
 
-func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth int) bool {
+// EvaluateConditionWithCapabilities is [EvaluateCondition] with the
+// capabilities the effective posture state grants. Pass hasPosture=false when
+// the policy has no posture extension: a `capability` predicate is then
+// unevaluable and holds. With hasPosture=true an unknown state grants nothing,
+// so the predicate is false.
+func EvaluateConditionWithCapabilities(
+	condition *Condition,
+	context *RuntimeContext,
+	capabilities []string,
+	hasPosture bool,
+) bool {
+	return evaluateConditionDepth(condition, context,
+		grantedCapabilities{known: hasPosture, list: capabilities}, 0)
+}
+
+func evaluateConditionDepth(
+	condition *Condition,
+	context *RuntimeContext,
+	capabilities grantedCapabilities,
+	depth int,
+) bool {
 	if depth > MaxNestingDepth {
 		// Validation rejects this at parse time; an out-of-band condition that
 		// exceeds the depth cannot be evaluated, and an unevaluable condition
@@ -76,16 +164,35 @@ func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth
 		}
 	}
 
-	for _, c := range condition.AllOf {
-		if !evaluateConditionDepth(&c, context, depth+1) {
+	// `capability`: unevaluable without a posture extension (held); otherwise
+	// the effective state must list the capability.
+	if condition.Capability != "" && capabilities.known && !capabilities.grants(condition.Capability) {
+		return false
+	}
+
+	// `rate`: unevaluable when the engine supplied no such counter (held).
+	if rate := condition.Rate; rate != nil {
+		if count, ok := context.Counters[rate.Counter]; ok {
+			satisfied := count >= rate.Threshold
+			if rate.Comparison == RateComparisonLt {
+				satisfied = count < rate.Threshold
+			}
+			if !satisfied {
+				return false
+			}
+		}
+	}
+
+	for index := range condition.AllOf {
+		if !evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1) {
 			return false
 		}
 	}
 
 	if len(condition.AnyOf) > 0 {
 		found := false
-		for _, c := range condition.AnyOf {
-			if evaluateConditionDepth(&c, context, depth+1) {
+		for index := range condition.AnyOf {
+			if evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1) {
 				found = true
 				break
 			}
@@ -96,7 +203,7 @@ func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth
 	}
 
 	if condition.Not != nil {
-		if evaluateConditionDepth(condition.Not, context, depth+1) {
+		if evaluateConditionDepth(condition.Not, context, capabilities, depth+1) {
 			return false
 		}
 	}
@@ -300,6 +407,16 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			}
 		}
 	}
+	if name := condition.Capability; name != "" && !IsCapabilityIdentifier(name) {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s.capability: %q is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+			path, name))
+	}
+	if rate := condition.Rate; rate != nil && !IsCapabilityIdentifier(rate.Counter) {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s.rate.counter: %q is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+			path, rate.Counter))
+	}
 	for index := range condition.AllOf {
 		validateConditionDepth(&condition.AllOf[index], fmt.Sprintf("%s.all_of[%d]", path, index), depth+1, errs)
 	}
@@ -309,6 +426,34 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 	if condition.Not != nil {
 		validateConditionDepth(condition.Not, path+".not", depth+1, errs)
 	}
+}
+
+// IsCapabilityIdentifier reports whether name matches the identifier grammar
+// shared by posture capabilities and rate counters (core spec 3.13): one or
+// more dot-separated segments, each a lowercase ASCII letter followed by
+// lowercase ASCII letters, digits or underscores.
+//
+//	identifier = segment *("." segment)
+//	segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+func IsCapabilityIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, segment := range strings.Split(name, ".") {
+		if segment == "" {
+			return false
+		}
+		for index := 0; index < len(segment); index++ {
+			c := segment[index]
+			switch {
+			case c >= 'a' && c <= 'z':
+			case index > 0 && (c >= '0' && c <= '9' || c == '_'):
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // TimezoneIsKnown reports whether tz is an IANA identifier known to this

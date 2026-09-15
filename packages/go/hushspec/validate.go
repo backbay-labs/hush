@@ -1,7 +1,9 @@
 package hushspec
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"regexp"
 	"strconv"
@@ -9,22 +11,149 @@ import (
 	"time"
 )
 
+// The registered error codes of spec/registries/error-codes.yaml. Every
+// refusal this SDK reports carries one, so "the document was rejected" can be
+// checked as "rejected for this reason" (core spec 8, Level 1). A registered
+// code's meaning never changes and is never reused for a different condition.
+const (
+	// ErrorCodeInput: the policy file does not exist, or reading it failed.
+	// A transport-level failure: nothing was parsed.
+	ErrorCodeInput = "E000"
+	// ErrorCodeParse: the input is not a single YAML 1.2 Core document that
+	// deserializes into the HushSpec model. Covers syntax errors, YAML profile
+	// violations, a missing required field, an unknown field at any nesting
+	// level, a value of the wrong type, and an unknown enum variant.
+	ErrorCodeParse = "E001"
+	// ErrorCodeUnsupportedVersion: the `hushspec` field names a version this
+	// engine does not accept.
+	ErrorCodeUnsupportedVersion = "E002"
+	// ErrorCodeDuplicatePatternName: two `rules.secret_patterns.patterns`
+	// entries share a `name`.
+	ErrorCodeDuplicatePatternName = "E003"
+	// ErrorCodeConstraint: a structural constraint of core Section 7 or of an
+	// extension module is violated.
+	ErrorCodeConstraint = "E004"
+	// ErrorCodeInvalidRegex: a pattern field holds a regular expression
+	// outside the HushSpec regex profile (core Section 3.14).
+	ErrorCodeInvalidRegex = "E005"
+	// ErrorCodeExtends: the `extends` chain could not be resolved.
+	ErrorCodeExtends = "E010"
+	// ErrorCodeInvalidDate: a `metadata` date field is not an ISO 8601
+	// calendar date.
+	ErrorCodeInvalidDate = "E011"
+)
+
+// ErrorCodes is every code this SDK emits, in registry order. The set is
+// closed: a code outside it is not a code.
+var ErrorCodes = []string{
+	ErrorCodeInput,
+	ErrorCodeParse,
+	ErrorCodeUnsupportedVersion,
+	ErrorCodeDuplicatePatternName,
+	ErrorCodeConstraint,
+	ErrorCodeInvalidRegex,
+	ErrorCodeExtends,
+	ErrorCodeInvalidDate,
+}
+
+// validationKindCodes maps this SDK's own symbolic error kinds onto the
+// registered codes, matching the Rust reference's mapping condition for
+// condition. Anything not listed is a constraint violation, which is what
+// E004 covers.
+var validationKindCodes = map[string]string{
+	// A document with no `hushspec` never reaches Validate -- Parse refuses it
+	// as a missing required field, which is a parse refusal in every SDK.
+	"MISSING_VERSION":        ErrorCodeParse,
+	"UNSUPPORTED_VERSION":    ErrorCodeUnsupportedVersion,
+	"DUPLICATE_PATTERN_NAME": ErrorCodeDuplicatePatternName,
+	"INVALID_REGEX":          ErrorCodeInvalidRegex,
+	"INVALID_DATE":           ErrorCodeInvalidDate,
+	// A value outside a serde-enum's closed set is an unknown variant, which
+	// the reference implementation refuses at parse time. [Parse] refuses
+	// these at parse time too (see raw_validate.go); the checks below catch a
+	// spec a caller built in memory, and must name the same code.
+	"INVALID_MERGE_STRATEGY":     ErrorCodeParse,
+	"INVALID_DEFAULT_ACTION":     ErrorCodeParse,
+	"INVALID_SEVERITY":           ErrorCodeParse,
+	"INVALID_COMPUTER_USE_MODE":  ErrorCodeParse,
+	"INVALID_DETECTION_LEVEL":    ErrorCodeParse,
+	"INVALID_TRANSITION_TRIGGER": ErrorCodeParse,
+	"INVALID_DEFAULT_BEHAVIOR":   ErrorCodeParse,
+}
+
+// RegistryErrorCode is the registered code for one of this SDK's symbolic
+// error kinds.
+func RegistryErrorCode(kind string) string {
+	if code, ok := validationKindCodes[kind]; ok {
+		return code
+	}
+	return ErrorCodeConstraint
+}
+
 type ValidationResult struct {
 	Errors   []ValidationError
 	Warnings []string
 }
 
+// ValidationError is one refusal. Code is the registered identifier of
+// spec/registries/error-codes.yaml and is the programmatic contract; Kind is
+// this SDK's finer-grained symbolic name for the same condition; Path names
+// the offending member when the producer knows it; Message is free text for
+// humans and MUST NOT be parsed.
+//
+// A *ValidationError is an error, so a refusal returned by [Parse] can be
+// inspected with errors.As to read its code.
 type ValidationError struct {
 	Code    string
+	Kind    string
+	Path    string
 	Message string
+}
+
+func (e *ValidationError) Error() string {
+	if e.Path != "" && !strings.Contains(e.Message, e.Path) {
+		return fmt.Sprintf("%s: %s: %s", e.Code, e.Path, e.Message)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// ErrorCodeOf reports the registered error code an error carries, and whether
+// it carried one at all.
+//
+// A [*ValidationError] carries its own code. Beyond that, a failure to resolve
+// an `extends` chain is E010 and a failure to read the input at all is E000,
+// so a caller can report one code for every refusal without type-switching by
+// hand. A parse failure found inside a resolve failure keeps its own E001: the
+// chain was walked, and a document on it was not a HushSpec document.
+func ErrorCodeOf(err error) (string, bool) {
+	var validationError *ValidationError
+	if errors.As(err, &validationError) {
+		return validationError.Code, true
+	}
+	if _, ok := ResolveReason(err); ok {
+		return ErrorCodeExtends, true
+	}
+	var pathError *fs.PathError
+	if errors.As(err, &pathError) {
+		return ErrorCodeInput, true
+	}
+	return "", false
 }
 
 func (r *ValidationResult) IsValid() bool {
 	return len(r.Errors) == 0
 }
 
-func (r *ValidationResult) addError(code, msg string) {
-	r.Errors = append(r.Errors, ValidationError{Code: code, Message: msg})
+func (r *ValidationResult) addError(kind, msg string) {
+	r.Errors = append(r.Errors, ValidationError{
+		Code: RegistryErrorCode(kind), Kind: kind, Message: msg,
+	})
+}
+
+func (r *ValidationResult) addErrorAt(kind, path, msg string) {
+	r.Errors = append(r.Errors, ValidationError{
+		Code: RegistryErrorCode(kind), Kind: kind, Path: path, Message: msg,
+	})
 }
 
 func (r *ValidationResult) addWarning(msg string) {
@@ -302,7 +431,10 @@ func validateRules(rules *Rules, result *ValidationResult) {
 	// D15 (core 3.13): every rule block's `when` condition is validated at
 	// parse time; a bad HH:MM, timezone, day, or excessive nesting is an error.
 	for _, message := range ValidateConditions(rules) {
-		result.addError("INVALID_CONDITION", message)
+		// Every condition diagnostic is `<path>: <what is wrong>`, so the path
+		// the refusal reports is the part before the first colon.
+		path, _, _ := strings.Cut(message, ": ")
+		result.addErrorAt("INVALID_CONDITION", path, message)
 	}
 }
 

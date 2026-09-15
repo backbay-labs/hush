@@ -201,6 +201,11 @@ type evaluator struct {
 	context    *RuntimeContext
 	conditions map[string]*Condition
 	trace      []RuleEvaluation
+	// capabilities is what the effective posture state grants, resolved once
+	// per evaluation before the active-block mask is derived: `when`
+	// conditions can name a capability (core spec 3.13), so posture -- and the
+	// origins profile it may come from -- is settled first.
+	capabilities grantedCapabilities
 }
 
 // blockMask is the set of applicable blocks that are active for one
@@ -248,6 +253,10 @@ func (e *evaluator) run() TracedEvaluation {
 
 	// Posture guard.
 	posture := resolvePosture(policy.posture, matchedProfile, e.action.Posture)
+	// `when` conditions see the effective posture state (capability
+	// predicates), so the capabilities it grants are settled before the
+	// active-block mask is derived below.
+	e.capabilities = postureCapabilities(policy.posture, posture)
 	if denied := e.postureCapabilityGuard(posture); denied != nil {
 		e.skipAll(blocks, "short-circuited by posture deny")
 		return e.finish(DecisionDeny, denied.matchedRule, denied.reason, originProfileID, posture)
@@ -408,12 +417,12 @@ func (e *evaluator) activity(block blockID) *inactive {
 	if !gate.enabled {
 		return inactiveDisabled
 	}
-	if gate.when != nil && !EvaluateCondition(gate.when, e.context) {
+	if gate.when != nil && !evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) {
 		return inactiveConditionFalse
 	}
 	if len(e.conditions) > 0 {
 		condition, ok := e.conditions[blockNames[block]]
-		if ok && condition != nil && !EvaluateCondition(condition, e.context) {
+		if ok && condition != nil && !evaluateConditionDepth(condition, e.context, e.capabilities, 0) {
 			return inactiveOutOfBandCondition
 		}
 	}
@@ -1135,16 +1144,41 @@ func resolvePosture(
 }
 
 func nextPostureState(posture *PostureExtension, current string, signal string) string {
-	for _, transition := range posture.Transitions {
-		if transition.From != "*" && transition.From != current {
-			continue
+	// D18 (posture spec 5.3): a transition whose `from` names the current
+	// state outranks one whose `from` is "*"; among equals, document order.
+	match := func(wildcard bool) (string, bool) {
+		for _, transition := range posture.Transitions {
+			fromMatches := transition.From == current
+			if wildcard {
+				fromMatches = transition.From == "*"
+			}
+			if !fromMatches || string(transition.On) != signal {
+				continue
+			}
+			return transition.To, true
 		}
-		if string(transition.On) != signal {
-			continue
-		}
-		return transition.To
+		return "", false
 	}
-	return ""
+	if to, found := match(false); found {
+		return to
+	}
+	to, _ := match(true)
+	return to
+}
+
+// postureCapabilities is what the effective posture state grants, for
+// `capability` conditions (core spec 3.13): unknown when the policy has no
+// posture extension (the predicate is then unevaluable and holds), and an
+// unknown state grants nothing.
+func postureCapabilities(extension *PostureExtension, posture *PostureResult) grantedCapabilities {
+	if extension == nil || posture == nil {
+		return grantedCapabilities{}
+	}
+	state, ok := extension.States[posture.Current]
+	if !ok {
+		return grantedCapabilities{known: true}
+	}
+	return grantedCapabilities{known: true, list: state.Capabilities}
 }
 
 // matchOrigin returns the number of `match` fields satisfied by origin, or

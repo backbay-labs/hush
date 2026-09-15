@@ -212,6 +212,11 @@ var canonicalSchemaRules = map[reflect.Type]canonicalRules{
 		"end":      canonicalRequired,
 		"timezone": withDefault("UTC"),
 	},
+	reflect.TypeOf(RateCondition{}): {
+		"counter":    canonicalRequired,
+		"threshold":  canonicalRequired,
+		"comparison": canonicalRequired,
+	},
 	reflect.TypeOf(ControlMapping{}): {
 		"framework":  canonicalRequired,
 		"control_id": canonicalRequired,
@@ -255,6 +260,10 @@ var canonicalSchemaRules = map[reflect.Type]canonicalRules{
 		"warn_at_or_above":  withDefault(string(DetectionLevelSuspicious)),
 		"block_at_or_above": withDefault(string(DetectionLevelHigh)),
 		"max_scan_bytes":    withDefault(int64(200000)),
+	},
+	reflect.TypeOf(PromptInjectionHeuristics{}): {
+		"enabled":   withDefault(true),
+		"min_score": withDefault(int64(0)),
 	},
 	reflect.TypeOf(JailbreakDetection{}): {
 		"enabled":         withDefault(true),

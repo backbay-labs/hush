@@ -3,6 +3,8 @@ package hushspec
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,10 +26,12 @@ import (
 //   - A posture extension missing its required `transitions` key, which is a
 //     required (non-defaulted) field in the reference models.
 //
-// It returns one message per problem found, or an empty slice when the document
-// is clean. This mirrors the parse-time raw validation performed by the
-// TypeScript and Python SDKs (validate_raw_document).
-func validateRawDocument(yamlStr string) []string {
+// It returns one issue per problem found, each carrying the registered error
+// code of spec/registries/error-codes.yaml that the condition maps onto, or an
+// empty list when the document is clean. This mirrors the parse-time raw
+// validation performed by the TypeScript and Python SDKs
+// (validate_raw_document).
+func validateRawDocument(yamlStr string) []ValidationError {
 	var root map[string]any
 	if err := yaml.Unmarshal([]byte(yamlStr), &root); err != nil {
 		// The typed decode in Parse already surfaces structural parse errors;
@@ -35,16 +39,81 @@ func validateRawDocument(yamlStr string) []string {
 		return nil
 	}
 
-	var errs []string
+	var errs rawIssues
+	checkRawVariant(root, "merge_strategy", "merge_strategy", MergeStrategies, &errs)
 	validateRawRules(rawObject(root, "rules"), &errs)
 	validateRawExtensions(rawObject(root, "extensions"), &errs)
 	validateRawMetadata(rawObject(root, "metadata"), &errs)
-	return errs
+	return errs.items
 }
 
-func validateRawRules(rules map[string]any, errs *[]string) {
+// rawIssues collects parse-time refusals together with the registered code
+// each one carries.
+type rawIssues struct{ items []ValidationError }
+
+// add records a shape refusal: a missing or unknown member, a value of the
+// wrong type, or an enum variant outside its closed set. The reference
+// implementation refuses every one of those at parse time, because each of its
+// structs denies unknown fields and each of its enums denies unknown variants,
+// so they carry E001.
+func (r *rawIssues) add(message string) {
+	r.items = append(r.items, ValidationError{
+		Code: ErrorCodeParse, Kind: "PARSE", Message: message,
+	})
+}
+
+// addConstraint records a structural-constraint violation (E004): a value that
+// deserializes but breaks a rule of core Section 7 or of an extension module.
+func (r *rawIssues) addConstraint(path, message string) {
+	r.items = append(r.items, ValidationError{
+		Code: ErrorCodeConstraint, Kind: "INVALID_VALUE", Path: path, Message: message,
+	})
+}
+
+// rawConditionBlocks are the rule blocks whose `when` the raw validator walks.
+// It is the block list of core spec 3.13, kept in the order ValidateConditions
+// reports in so both spell a violation the same way.
+var rawConditionBlocks = []string{
+	"forbidden_paths", "path_allowlist", "egress", "secret_patterns",
+	"patch_integrity", "shell_commands", "tool_access", "computer_use",
+	"remote_desktop_channels", "input_injection", "browser_automation",
+	"code_execution",
+}
+
+func validateRawRules(rules map[string]any, errs *rawIssues) {
 	if rules == nil {
 		return
+	}
+	for _, name := range rawConditionBlocks {
+		block := rawObject(rules, name)
+		if block == nil {
+			continue
+		}
+		if when, present := block["when"]; present {
+			validateRawCondition(when, fmt.Sprintf("rules.%s.when", name), 0, errs)
+		}
+	}
+	// Enum-typed properties: the reference models are serde enums, so a value
+	// outside the closed set is an unknown variant refused at parse time.
+	if egress := rawObject(rules, "egress"); egress != nil {
+		checkRawVariant(egress, "default", "rules.egress.default", DefaultActions, errs)
+	}
+	if ta := rawObject(rules, "tool_access"); ta != nil {
+		checkRawVariant(ta, "default", "rules.tool_access.default", DefaultActions, errs)
+	}
+	if cu := rawObject(rules, "computer_use"); cu != nil {
+		checkRawVariant(cu, "mode", "rules.computer_use.mode", ComputerUseModes, errs)
+	}
+	if sp := rawObject(rules, "secret_patterns"); sp != nil {
+		for index, raw := range rawArray(sp, "patterns") {
+			pattern, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			// `severity` is a required member of SecretPattern.
+			checkRawRequiredVariant(pattern, "severity",
+				fmt.Sprintf("rules.secret_patterns.patterns[%d]", index), Severities, errs)
+		}
 	}
 	if pi := rawObject(rules, "patch_integrity"); pi != nil {
 		// max_additions/max_deletions are required (non-Option) usize fields in
@@ -65,7 +134,113 @@ func validateRawRules(rules map[string]any, errs *[]string) {
 	}
 }
 
-func validateRawExtensions(ext map[string]any, errs *[]string) {
+// validateRawCondition checks the parts of a `when` object the typed decode
+// cannot express: the `rate` predicate's required members, its non-negative
+// integer threshold, and its closed `comparison` set (core spec 3.13). Those
+// are shape failures that the reference implementation refuses at parse time,
+// so they are reported here rather than as constraint violations. The
+// identifier grammar and the nesting depth stay with [ValidateConditions],
+// which the reference reports as constraint violations.
+//
+// The walk descends `all_of`, `any_of` and `not` so a nested `rate` is checked
+// too; it stops one level past the nesting cap, which ValidateConditions
+// reports on its own.
+func validateRawCondition(raw any, path string, depth int, errs *rawIssues) {
+	if depth > MaxNestingDepth {
+		return
+	}
+	condition, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	if rate, present := condition["rate"]; present {
+		validateRawRate(rate, path+".rate", errs)
+	}
+	for _, key := range []string{"all_of", "any_of"} {
+		children, isList := condition[key].([]any)
+		if !isList {
+			continue
+		}
+		for index, child := range children {
+			validateRawCondition(child, fmt.Sprintf("%s.%s[%d]", path, key, index), depth+1, errs)
+		}
+	}
+	if child, present := condition["not"]; present {
+		validateRawCondition(child, path+".not", depth+1, errs)
+	}
+}
+
+func validateRawRate(raw any, path string, errs *rawIssues) {
+	rate, ok := raw.(map[string]any)
+	if !ok {
+		errs.add(fmt.Sprintf("%s: invalid type: %s, expected a rate condition object",
+			path, describeRawScalar(raw)))
+		return
+	}
+	for key := range rate {
+		if _, known := RateConditionKeys[key]; !known {
+			errs.add(fmt.Sprintf("%s: unknown field `%s`, expected one of `counter`, `threshold`, `comparison`",
+				path, key))
+		}
+	}
+
+	if _, present := rate["counter"]; !present {
+		errs.add(fmt.Sprintf("%s: missing field `counter`", path))
+	} else if _, isString := rate["counter"].(string); !isString {
+		errs.add(fmt.Sprintf("%s.counter: invalid type: %s, expected a string",
+			path, describeRawScalar(rate["counter"])))
+	}
+
+	threshold, present := rate["threshold"]
+	switch {
+	case !present:
+		errs.add(fmt.Sprintf("%s: missing field `threshold`", path))
+	case !isRawInteger(threshold):
+		errs.add(fmt.Sprintf("%s.threshold: invalid type: %s, expected a non-negative integer",
+			path, describeRawScalar(threshold)))
+	case isRawNegativeInteger(threshold):
+		errs.add(fmt.Sprintf("%s.threshold: invalid type: integer `%v`, expected a non-negative integer",
+			path, threshold))
+	}
+
+	comparison, present := rate["comparison"]
+	switch {
+	case !present:
+		errs.add(fmt.Sprintf("%s: missing field `comparison`", path))
+	default:
+		name, isString := comparison.(string)
+		if !isString || !containsTyped(RateComparison(name), RateComparisons) {
+			errs.add(fmt.Sprintf(
+				"%s.comparison: unknown variant `%v`, expected `gte` or `lt`", path, comparison))
+		}
+	}
+}
+
+// describeRawScalar renders a raw YAML value the way a decoder names it in an
+// "invalid type" diagnostic.
+func describeRawScalar(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return fmt.Sprintf("string %q", value)
+	case bool:
+		return fmt.Sprintf("boolean `%v`", value)
+	case float32, float64:
+		return fmt.Sprintf("floating point `%v`", value)
+	case map[string]any:
+		return "a map"
+	case []any:
+		return "a sequence"
+	default:
+		if isRawInteger(v) {
+			return fmt.Sprintf("integer `%v`", value)
+		}
+		return fmt.Sprintf("`%v`", value)
+	}
+}
+
+func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 	if ext == nil {
 		return
 	}
@@ -74,7 +249,15 @@ func validateRawExtensions(ext map[string]any, errs *[]string) {
 		// transitions is a required field in the reference models: an absent
 		// key is rejected (an empty list is fine).
 		if _, ok := posture["transitions"]; !ok {
-			*errs = append(*errs, "extensions.posture.transitions is required")
+			errs.add("extensions.posture: missing field `transitions`")
+		}
+		for index, raw := range rawArray(posture, "transitions") {
+			transition, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			checkRawRequiredVariant(transition, "on",
+				fmt.Sprintf("extensions.posture.transitions[%d]", index), TransitionTriggers, errs)
 		}
 		for stateName, raw := range rawObject(posture, "states") {
 			state, ok := raw.(map[string]any)
@@ -90,6 +273,8 @@ func validateRawExtensions(ext map[string]any, errs *[]string) {
 	}
 
 	if origins := rawObject(ext, "origins"); origins != nil {
+		checkRawVariant(origins, "default_behavior",
+			"origins.default_behavior", OriginDefaultBehaviors, errs)
 		for i, raw := range rawArray(origins, "profiles") {
 			profile, ok := raw.(map[string]any)
 			if !ok {
@@ -110,6 +295,14 @@ func validateRawExtensions(ext map[string]any, errs *[]string) {
 					checkRawNonEmptyString(match, field,
 						fmt.Sprintf("origins.profiles[%d].match.%s", i, field), errs)
 				}
+			}
+			if overlay := rawObject(profile, "tool_access"); overlay != nil {
+				checkRawVariant(overlay, "default",
+					fmt.Sprintf("origins.profiles[%d].tool_access.default", i), DefaultActions, errs)
+			}
+			if overlay := rawObject(profile, "egress"); overlay != nil {
+				checkRawVariant(overlay, "default",
+					fmt.Sprintf("origins.profiles[%d].egress.default", i), DefaultActions, errs)
 			}
 			if budgets := rawObject(profile, "budgets"); budgets != nil {
 				checkRawInteger(budgets, "tool_calls",
@@ -137,6 +330,14 @@ func validateRawExtensions(ext map[string]any, errs *[]string) {
 	if detection := rawObject(ext, "detection"); detection != nil {
 		if pi := rawObject(detection, "prompt_injection"); pi != nil {
 			checkRawInteger(pi, "max_scan_bytes", "detection.prompt_injection.max_scan_bytes", errs)
+			checkRawVariant(pi, "warn_at_or_above",
+				"detection.prompt_injection.warn_at_or_above", DetectionLevels, errs)
+			checkRawVariant(pi, "block_at_or_above",
+				"detection.prompt_injection.block_at_or_above", DetectionLevels, errs)
+			if heuristics := rawObject(pi, "heuristics"); heuristics != nil {
+				checkRawNonNegativeInteger(heuristics, "min_score",
+					"detection.prompt_injection.heuristics.min_score", errs)
+			}
 		}
 		if jb := rawObject(detection, "jailbreak"); jb != nil {
 			checkRawInteger(jb, "block_threshold", "detection.jailbreak.block_threshold", errs)
@@ -149,7 +350,7 @@ func validateRawExtensions(ext map[string]any, errs *[]string) {
 	}
 }
 
-func validateRawMetadata(md map[string]any, errs *[]string) {
+func validateRawMetadata(md map[string]any, errs *rawIssues) {
 	if md == nil {
 		return
 	}
@@ -157,16 +358,8 @@ func validateRawMetadata(md map[string]any, errs *[]string) {
 	// non-integer float or a negative value (rejected by the unsigned type at
 	// parse in the reference models) is not.
 	checkRawNonNegativeInteger(md, "policy_version", "metadata.policy_version", errs)
-	if v, ok := md["classification"]; ok {
-		if s, isStr := v.(string); !isStr || !containsTyped(Classification(s), Classifications) {
-			*errs = append(*errs, fmt.Sprintf("metadata.classification %v is not a valid classification", v))
-		}
-	}
-	if v, ok := md["lifecycle_state"]; ok {
-		if s, isStr := v.(string); !isStr || !containsTyped(LifecycleState(s), LifecycleStates) {
-			*errs = append(*errs, fmt.Sprintf("metadata.lifecycle_state %v is not a valid lifecycle_state", v))
-		}
-	}
+	checkRawVariant(md, "classification", "metadata.classification", Classifications, errs)
+	checkRawVariant(md, "lifecycle_state", "metadata.lifecycle_state", LifecycleStates, errs)
 	validateRawControls(md, errs)
 	validateRawChangelog(md, errs)
 }
@@ -174,14 +367,14 @@ func validateRawMetadata(md map[string]any, errs *[]string) {
 // validateRawChangelog performs the structural checks on metadata.changelog
 // that the typed decode cannot express: a missing `version`, `date` or
 // `summary` is indistinguishable from an empty one in the typed struct.
-func validateRawChangelog(md map[string]any, errs *[]string) {
+func validateRawChangelog(md map[string]any, errs *rawIssues) {
 	raw, ok := md["changelog"]
 	if !ok {
 		return
 	}
 	changelog, ok := raw.([]any)
 	if !ok {
-		*errs = append(*errs, "metadata.changelog must be an array")
+		errs.add("metadata.changelog must be an array")
 		return
 	}
 
@@ -189,30 +382,30 @@ func validateRawChangelog(md map[string]any, errs *[]string) {
 		path := fmt.Sprintf("metadata.changelog[%d]", i)
 		entry, ok := entryRaw.(map[string]any)
 		if !ok {
-			*errs = append(*errs, path+" must be an object")
+			errs.add(path + " must be an object")
 			continue
 		}
 
 		for key := range entry {
 			if _, known := ChangelogEntryKeys[key]; !known {
-				*errs = append(*errs, fmt.Sprintf("unknown field at %s: %v", path, key))
+				errs.add(fmt.Sprintf("%s: unknown field `%v`", path, key))
 			}
 		}
 
 		if version, ok := entry["version"].(string); !ok {
-			*errs = append(*errs, path+".version is required")
+			errs.add(path + ": missing field `version`")
 		} else if version == "" {
-			*errs = append(*errs, path+".version must not be empty")
+			errs.addConstraint(path+".version", path+".version must not be empty")
 		}
 
 		if _, ok := entry["date"].(string); !ok {
-			*errs = append(*errs, path+".date is required")
+			errs.add(path + ": missing field `date`")
 		}
 
 		if summary, ok := entry["summary"].(string); !ok {
-			*errs = append(*errs, path+".summary is required")
+			errs.add(path + ": missing field `summary`")
 		} else if summary == "" {
-			*errs = append(*errs, path+".summary must not be empty")
+			errs.addConstraint(path+".summary", path+".summary must not be empty")
 		}
 	}
 }
@@ -227,14 +420,14 @@ var frameworkIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 // the typed decode cannot express: required fields (a missing `framework` is
 // indistinguishable from an empty one in the typed struct), a non-empty
 // rule_paths list, and the framework id grammar.
-func validateRawControls(md map[string]any, errs *[]string) {
+func validateRawControls(md map[string]any, errs *rawIssues) {
 	raw, ok := md["controls"]
 	if !ok {
 		return
 	}
 	controls, ok := raw.([]any)
 	if !ok {
-		*errs = append(*errs, "metadata.controls must be an array")
+		errs.add("metadata.controls must be an array")
 		return
 	}
 
@@ -242,51 +435,51 @@ func validateRawControls(md map[string]any, errs *[]string) {
 		path := fmt.Sprintf("metadata.controls[%d]", i)
 		entry, ok := entryRaw.(map[string]any)
 		if !ok {
-			*errs = append(*errs, path+" must be an object")
+			errs.add(path + " must be an object")
 			continue
 		}
 
 		for key := range entry {
 			if _, known := ControlMappingKeys[key]; !known {
-				*errs = append(*errs, fmt.Sprintf("unknown field at %s: %v", path, key))
+				errs.add(fmt.Sprintf("%s: unknown field `%v`", path, key))
 			}
 		}
 
 		framework, ok := entry["framework"].(string)
 		if !ok {
-			*errs = append(*errs, path+".framework is required")
+			errs.add(path + ": missing field `framework`")
 		} else if !frameworkIDPattern.MatchString(framework) {
-			*errs = append(*errs, fmt.Sprintf(
+			errs.addConstraint(path+".framework", fmt.Sprintf(
 				"%s.framework %q must match ^[a-z0-9][a-z0-9.-]*$", path, framework))
 		}
 
 		if controlID, ok := entry["control_id"].(string); !ok {
-			*errs = append(*errs, path+".control_id is required")
+			errs.add(path + ": missing field `control_id`")
 		} else if controlID == "" {
-			*errs = append(*errs, path+".control_id must not be empty")
+			errs.addConstraint(path+".control_id", path+".control_id must not be empty")
 		}
 
 		rulePathsRaw, present := entry["rule_paths"]
 		if !present {
-			*errs = append(*errs, path+".rule_paths is required")
+			errs.add(path + ": missing field `rule_paths`")
 			continue
 		}
 		rulePaths, ok := rulePathsRaw.([]any)
 		if !ok {
-			*errs = append(*errs, path+".rule_paths must be an array")
+			errs.add(path + ".rule_paths must be an array")
 			continue
 		}
 		if len(rulePaths) == 0 {
-			*errs = append(*errs, path+".rule_paths must list at least one rule path")
+			errs.addConstraint(path+".rule_paths", path+".rule_paths must list at least one rule path")
 		}
 		for j, rulePathRaw := range rulePaths {
 			rulePath, ok := rulePathRaw.(string)
 			if !ok {
-				*errs = append(*errs, fmt.Sprintf("%s.rule_paths[%d] must be a string", path, j))
+				errs.add(fmt.Sprintf("%s.rule_paths[%d] must be a string", path, j))
 				continue
 			}
 			if rulePath == "" {
-				*errs = append(*errs, fmt.Sprintf("%s.rule_paths[%d] must not be empty", path, j))
+				errs.addConstraint(fmt.Sprintf("%s.rule_paths[%d]", path, j), fmt.Sprintf("%s.rule_paths[%d] must not be empty", path, j))
 			}
 		}
 	}
@@ -315,13 +508,13 @@ func rawArray(m map[string]any, key string) []any {
 // checkRawInteger records an error when key is present in obj with a value that
 // is not an integer scalar (e.g. a float like 1.5, which yaml.v3 would silently
 // truncate into a Go int field). Absent keys are ignored.
-func checkRawInteger(obj map[string]any, key, path string, errs *[]string) {
+func checkRawInteger(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok || v == nil {
 		return
 	}
 	if !isRawInteger(v) {
-		*errs = append(*errs, fmt.Sprintf("%s must be an integer", path))
+		errs.add(fmt.Sprintf("%s must be an integer", path))
 	}
 }
 
@@ -360,17 +553,17 @@ func isRawNegativeInteger(v any) bool {
 // negative integer (e.g. -5, which serde's unsigned type rejects at parse) is
 // not. Absent/null are left untouched so an omitted optional field keeps its
 // default, matching the other SDKs.
-func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *[]string) {
+func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok || v == nil {
 		return
 	}
 	if !isRawInteger(v) {
-		*errs = append(*errs, fmt.Sprintf("%s must be an integer", path))
+		errs.add(fmt.Sprintf("%s must be an integer", path))
 		return
 	}
 	if isRawNegativeInteger(v) {
-		*errs = append(*errs, fmt.Sprintf("%s must be non-negative", path))
+		errs.add(fmt.Sprintf("%s must be non-negative", path))
 	}
 }
 
@@ -381,38 +574,85 @@ func checkRawNonNegativeInteger(obj map[string]any, key, path string, errs *[]st
 // typed Go model would otherwise coerce to its default -- is rejected, as is a
 // non-integer float. A negative value stays a cross-field concern of
 // [Validate], matching the existing behavior for these fields.
-func checkRawRequiredInteger(obj map[string]any, key, path string, errs *[]string) {
+func checkRawRequiredInteger(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {
 		return
 	}
 	if v == nil || !isRawInteger(v) {
-		*errs = append(*errs, fmt.Sprintf("%s must be an integer", path))
+		errs.add(fmt.Sprintf("%s must be an integer", path))
 	}
 }
 
 // checkRawEnum records an error when key is present in obj with a value that is
 // not one of allowed. A present-but-empty "" fails, matching the reference SDKs
 // that treat "" as a real (invalid) value rather than an absent field.
-func checkRawEnum(obj map[string]any, key, path string, allowed map[string]struct{}, errs *[]string) {
+//
+// These are the origins module's own `match` sets, which the reference
+// implementation carries as plain strings and checks at validation time, so
+// they are constraint violations (E004) rather than unknown variants.
+func checkRawEnum(obj map[string]any, key, path string, allowed map[string]struct{}, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {
 		return
 	}
 	if s, isStr := v.(string); !isStr || !containsTyped(s, allowed) {
-		*errs = append(*errs, fmt.Sprintf("%s %v is not valid", path, v))
+		errs.addConstraint(path, fmt.Sprintf("%s %v is not valid", path, v))
 	}
+}
+
+// checkRawVariant rejects an enum-typed property whose value is outside its
+// closed set. The reference implementation models these as serde enums, which
+// refuse an unknown variant at parse time, so this is a shape refusal (E001)
+// rather than a constraint violation. An absent key is left alone: the typed
+// model supplies the schema default.
+func checkRawVariant[T ~string](
+	obj map[string]any, key, path string, allowed map[T]struct{}, errs *rawIssues,
+) {
+	v, ok := obj[key]
+	if !ok {
+		return
+	}
+	if name, isStr := v.(string); isStr && containsTyped(T(name), allowed) {
+		return
+	}
+	errs.add(fmt.Sprintf("%s: unknown variant `%v`, expected one of %s",
+		path, v, strings.Join(quotedVariants(allowed), ", ")))
+}
+
+// checkRawRequiredVariant is [checkRawVariant] for a property the schema
+// requires: an absent key is a missing field, which the reference
+// implementation also refuses at parse time.
+func checkRawRequiredVariant[T ~string](
+	obj map[string]any, key, path string, allowed map[T]struct{}, errs *rawIssues,
+) {
+	if _, ok := obj[key]; !ok {
+		errs.add(fmt.Sprintf("%s: missing field `%s`", path, key))
+		return
+	}
+	checkRawVariant(obj, key, path+"."+key, allowed, errs)
+}
+
+// quotedVariants renders a closed set as the sorted, backtick-quoted list a
+// diagnostic names, so the message is the same on every run.
+func quotedVariants[T ~string](allowed map[T]struct{}) []string {
+	names := make([]string, 0, len(allowed))
+	for name := range allowed {
+		names = append(names, "`"+string(name)+"`")
+	}
+	sort.Strings(names)
+	return names
 }
 
 // checkRawNonEmptyString records an error when key is present in obj with an
 // empty string value. An absent key is ignored, so only an explicit "" (which
 // the typed model cannot distinguish from absent) is rejected.
-func checkRawNonEmptyString(obj map[string]any, key, path string, errs *[]string) {
+func checkRawNonEmptyString(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {
 		return
 	}
 	if s, isStr := v.(string); isStr && s == "" {
-		*errs = append(*errs, fmt.Sprintf("%s must not be empty", path))
+		errs.addConstraint(path, fmt.Sprintf("%s must not be empty", path))
 	}
 }

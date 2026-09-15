@@ -52,7 +52,7 @@ func TestInvalidRegexSyntaxSecretPatterns(t *testing.T) {
 	}
 	found := false
 	for _, err := range result.Errors {
-		if err.Code == "INVALID_REGEX" {
+		if err.Kind == "INVALID_REGEX" && err.Code == ErrorCodeInvalidRegex {
 			found = true
 			break
 		}

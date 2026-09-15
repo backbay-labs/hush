@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -43,12 +44,18 @@ type parsePresenceSpec struct {
 // Parse decodes a YAML string into a HushSpec document. Unknown fields are
 // rejected and the top-level "hushspec" version key must be present.
 // Cross-field validation is performed separately by [Validate].
+//
+// Every refusal is a [*ValidationError] carrying a registered error code
+// (spec/registries/error-codes.yaml), so a caller can read the code with
+// errors.As rather than matching on the message: E001 for anything the
+// document's shape refuses, E004 for a structural constraint a well-shaped
+// document breaks.
 func Parse(yamlStr string) (*HushSpec, error) {
 	// The HushSpec YAML profile (core spec 2.4) is enforced before the typed
 	// decode: single document, no anchors/aliases/merge keys, YAML 1.2 Core
 	// booleans, and bounded size, depth, and node count.
 	if err := enforceYAMLProfile(yamlStr); err != nil {
-		return nil, fmt.Errorf("failed to parse HushSpec YAML: %w", err)
+		return nil, parseError("failed to parse HushSpec YAML: %s", err.Error())
 	}
 
 	var spec HushSpec
@@ -56,15 +63,16 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	decoder.KnownFields(true)
 	err := decoder.Decode(&spec)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HushSpec YAML: %w", err)
+		return nil, parseError("failed to parse HushSpec YAML: %s", normalizeDecoderMessage(err.Error()))
 	}
 	if spec.HushSpecVersion == "" {
-		return nil, fmt.Errorf("missing or empty 'hushspec' version field")
+		return nil, parseError("missing field `hushspec`: the document must declare a spec version")
 	}
 
 	var presence parsePresenceSpec
 	if err := yaml.Unmarshal([]byte(yamlStr), &presence); err != nil {
-		return nil, fmt.Errorf("failed to inspect HushSpec YAML defaults: %w", err)
+		return nil, parseError("failed to inspect HushSpec YAML defaults: %s",
+			normalizeDecoderMessage(err.Error()))
 	}
 	applyParseDefaults(&spec, &presence)
 
@@ -73,10 +81,58 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	// sentinels, a posture missing its required transitions key), keeping Go's
 	// accept/reject decision identical to the other SDKs.
 	if issues := validateRawDocument(yamlStr); len(issues) > 0 {
-		return nil, fmt.Errorf("invalid HushSpec document: %s", strings.Join(issues, "; "))
+		messages := make([]string, 0, len(issues))
+		for _, issue := range issues {
+			messages = append(messages, issue.Message)
+		}
+		// The refusal reports the first issue's code and path; the message
+		// lists every issue found, so one pass names every problem.
+		return nil, &ValidationError{
+			Code:    issues[0].Code,
+			Kind:    issues[0].Kind,
+			Path:    issues[0].Path,
+			Message: "invalid HushSpec document: " + strings.Join(messages, "; "),
+		}
 	}
 
 	return &spec, nil
+}
+
+// parseError is a shape refusal: E001, the code the reference implementation
+// reports for anything its deny-unknown-fields model will not deserialize.
+func parseError(format string, args ...any) *ValidationError {
+	return &ValidationError{
+		Code:    ErrorCodeParse,
+		Kind:    "PARSE",
+		Message: fmt.Sprintf(format, args...),
+	}
+}
+
+// Rewrites of gopkg.in/yaml.v3's own diagnostics into the vocabulary the other
+// HushSpec SDKs use, so one refusal reads the same in every language and the
+// `message_contains` assertions of the invalid-vector sidecars hold across all
+// four. Only the wording changes; nothing is accepted or rejected differently.
+var (
+	decoderUnknownFieldPattern = regexp.MustCompile(
+		"field ([^ ]+) not found in type ([^\\s]+)")
+	decoderTypeMismatchPattern = regexp.MustCompile(
+		"cannot unmarshal !!([a-z]+)(?: `([^`]*)`)? into (\\S+)")
+	decoderDuplicateKeyPattern = regexp.MustCompile(
+		`mapping key ("(?:[^"\\]|\\.)*") already defined at line (\d+)`)
+)
+
+func normalizeDecoderMessage(message string) string {
+	message = decoderUnknownFieldPattern.ReplaceAllString(message, "unknown field `$1` in $2")
+	message = decoderTypeMismatchPattern.ReplaceAllStringFunc(message, func(match string) string {
+		groups := decoderTypeMismatchPattern.FindStringSubmatch(match)
+		if groups[2] == "" {
+			return fmt.Sprintf("invalid type: %s, expected %s", groups[1], groups[3])
+		}
+		return fmt.Sprintf("invalid type: %s `%s`, expected %s", groups[1], groups[2], groups[3])
+	})
+	message = decoderDuplicateKeyPattern.ReplaceAllString(
+		message, "duplicate entry with key $1 (already defined at line $2)")
+	return message
 }
 
 func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {

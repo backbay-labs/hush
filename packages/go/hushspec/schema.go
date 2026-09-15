@@ -171,7 +171,7 @@ func checkTypedBooleans(node *yaml.Node, target reflect.Type, path string) error
 			return nil
 		}
 		return fmt.Errorf(
-			"line %d: %s expects a boolean; %q is a string under the YAML 1.2 Core schema (YAML profile)",
+			"line %d: %s expected a boolean; %q is a string under the YAML 1.2 Core schema (YAML profile)",
 			node.Line, strings.TrimPrefix(path, "."), node.Value,
 		)
 	case yaml.SequenceNode:
