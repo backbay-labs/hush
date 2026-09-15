@@ -15,6 +15,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Checks relative links inside the book source and the top-level README,
+  # plus the external URLs they point at. Deliberately NOT a dependency of
+  # `deploy`: an external site going down should not block a docs release.
+  #
+  # lychee (rather than the mdbook-linkcheck backend) so that `mdbook build
+  # docs` keeps working for contributors and for the CI docs job without an
+  # extra backend binary on PATH.
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --include-verbatim
+            --max-retries 3
+            --accept 200,204,206,429
+            --exclude-path docs/book
+            'docs/src/**/*.md'
+            README.md
+          fail: true
+          # Default is to open an issue on failure; this repo wants a red job.
+          jobSummary: true
+
   deploy:
     environment:
       name: github-pages

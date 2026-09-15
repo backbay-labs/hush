@@ -1,0 +1,70 @@
+version: 2
+
+# HushSpec ships four SDKs plus a CLI, so every ecosystem in the repo needs
+# its own entry. Updates are grouped per ecosystem to keep PR volume low:
+# one PR a week per ecosystem instead of one per crate/package.
+updates:
+  # ── Rust workspace (crates/*) ─────────────────────────────────────
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── npm workspace root (packages/hushspec is a workspace member) ──
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Python SDK ───────────────────────────────────────────────────
+  - package-ecosystem: pip
+    directory: /packages/python
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      pip-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Go SDK ───────────────────────────────────────────────────────
+  - package-ecosystem: gomod
+    directory: /packages/go
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      gomod-minor-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ── Workflow actions ─────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"
