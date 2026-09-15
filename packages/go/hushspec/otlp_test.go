@@ -127,6 +127,11 @@ func TestOTLPSinkExportsReceiptShape(t *testing.T) {
 		}
 	}
 
+	scope := payloads[0].ResourceLogs[0].ScopeLogs[0].Scope
+	if scope.Name != SDKName || scope.Version != Version {
+		t.Fatalf("the scope must name this SDK, got %+v", scope)
+	}
+
 	records := c.records()
 	if len(records) != 1 {
 		t.Fatalf("expected one record, got %d", len(records))
@@ -386,9 +391,48 @@ func TestOTLPSinkDropsOnOverflow(t *testing.T) {
 	}
 }
 
-func TestOTLPSinkRequiresEndpoint(t *testing.T) {
-	if _, err := NewOTLPReceiptSink(OTLPOptions{}); err == nil {
-		t.Fatal("an endpoint is required")
+func TestOTLPSinkRejectsBadEndpoints(t *testing.T) {
+	for _, endpoint := range []string{"", "   ", "file:///tmp/evidence", "localhost:4318", "http://"} {
+		if _, err := NewOTLPReceiptSink(OTLPOptions{Endpoint: endpoint}); err == nil {
+			t.Fatalf("endpoint %q must be rejected", endpoint)
+		}
+	}
+	for endpoint, want := range map[string]string{
+		"http://localhost:4318":            "http://localhost:4318/v1/logs",
+		"http://localhost:4318/":           "http://localhost:4318/v1/logs",
+		"https://otel.example.com/v1/logs": "https://otel.example.com/v1/logs",
+	} {
+		got, err := logsEndpoint(endpoint)
+		if err != nil {
+			t.Fatalf("logsEndpoint(%q): %v", endpoint, err)
+		}
+		if got != want {
+			t.Fatalf("logsEndpoint(%q) = %q, want %q", endpoint, got, want)
+		}
+	}
+}
+
+func TestOTLPRecordFallsBackToExportTime(t *testing.T) {
+	receipt := otlpTestReceipt(t, DecisionAllow)
+	receipt.Timestamp = "not a timestamp"
+	record, err := receiptLogRecord(receipt)
+	if err != nil {
+		t.Fatalf("receiptLogRecord: %v", err)
+	}
+	nanos, err := strconv.ParseInt(record.TimeUnixNano, 10, 64)
+	if err != nil {
+		t.Fatalf("parse timeUnixNano %q: %v", record.TimeUnixNano, err)
+	}
+	// A record with no time at all is dropped by collectors, so an unreadable
+	// clock falls back to the export time rather than to zero.
+	if time.Since(time.Unix(0, nanos)) > time.Minute {
+		t.Fatalf("expected the export time, got %q", record.TimeUnixNano)
+	}
+}
+
+func TestOTLPSeverityFailsClosed(t *testing.T) {
+	if got := severityOf(Decision("quarantine")); got != "ERROR" {
+		t.Fatalf("an unknown decision is not an INFO, got %q", got)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -116,6 +117,7 @@ type OTLPReceiptSink struct {
 	onError       func(error)
 
 	resource []otlpAttribute
+	scope    otlpScope
 
 	queue    chan otlpLogRecord
 	flushCh  chan chan struct{}
@@ -134,13 +136,9 @@ var (
 
 // NewOTLPReceiptSink starts an exporter against a collector endpoint.
 func NewOTLPReceiptSink(options OTLPOptions) (*OTLPReceiptSink, error) {
-	endpoint := strings.TrimSpace(options.Endpoint)
-	if endpoint == "" {
-		return nil, errors.New("otlp sink: endpoint is required")
-	}
-	endpoint = strings.TrimRight(endpoint, "/")
-	if !strings.HasSuffix(endpoint, "/v1/logs") {
-		endpoint += "/v1/logs"
+	endpoint, err := logsEndpoint(options.Endpoint)
+	if err != nil {
+		return nil, err
 	}
 
 	serviceName := options.ServiceName
@@ -190,6 +188,7 @@ func NewOTLPReceiptSink(options OTLPOptions) (*OTLPReceiptSink, error) {
 		maxRetries:    maxRetries,
 		retryBackoff:  retryBackoff,
 		onError:       options.OnError,
+		scope:         otlpScope{Name: sdk.Name, Version: sdk.Version},
 		resource: []otlpAttribute{
 			stringAttribute(otlpResourceServiceName, serviceName),
 			stringAttribute(otlpResourceSDK, sdk.Name),
@@ -344,7 +343,7 @@ func (s *OTLPReceiptSink) export(batch []otlpLogRecord) []otlpLogRecord {
 	payload := otlpLogsPayload{
 		ResourceLogs: []otlpResourceLogs{{
 			Resource:  otlpResource{Attributes: s.resource},
-			ScopeLogs: []otlpScopeLogs{{LogRecords: batch}},
+			ScopeLogs: []otlpScopeLogs{{Scope: s.scope, LogRecords: batch}},
 		}},
 	}
 	body, err := json.Marshal(payload)
@@ -436,7 +435,16 @@ type otlpLogRecord struct {
 	Attributes   []otlpAttribute `json:"attributes"`
 }
 
+// otlpScope names the instrumentation that produced the records. Every SDK
+// reports its own name and version here, so a collector can tell which
+// enforcement point a record came from without reading the resource.
+type otlpScope struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
 type otlpScopeLogs struct {
+	Scope      otlpScope       `json:"scope"`
 	LogRecords []otlpLogRecord `json:"logRecords"`
 }
 
@@ -526,26 +534,58 @@ func policyEventLogRecord(event *PolicyEvent) (otlpLogRecord, error) {
 }
 
 // severityOf maps a decision to the severity a collector filters on: an allow
-// is routine, a warn is worth a look, a denial is an incident.
+// is routine, a warn is worth a look, a denial is an incident. A decision this
+// build does not know is not an "INFO".
 func severityOf(decision Decision) string {
 	switch decision {
-	case DecisionDeny:
-		return "ERROR"
+	case DecisionAllow:
+		return "INFO"
 	case DecisionWarn:
 		return "WARN"
 	default:
-		return "INFO"
+		return "ERROR"
 	}
 }
 
 // unixNanoOf converts a receipt timestamp (RFC 3339 UTC, millisecond
-// precision) to the decimal nanoseconds OTLP records. A timestamp that will
-// not parse exports as "0" rather than failing the record: a receipt with a
-// broken clock is still evidence.
+// precision) to the decimal nanoseconds OTLP records.
+//
+// A timestamp that will not parse falls back to the export time rather than to
+// zero: a record with no time at all is dropped by collectors, and the body
+// still carries the entry's own timestamp verbatim.
 func unixNanoOf(timestamp string) string {
 	instant, err := time.Parse(time.RFC3339Nano, timestamp)
 	if err != nil {
-		return "0"
+		instant = time.Now()
 	}
 	return strconv.FormatInt(instant.UnixNano(), 10)
+}
+
+// logsEndpoint is "<endpoint>/v1/logs", without doubling a path the caller
+// already gave.
+//
+// Anything that is not HTTP(S) is rejected up front: a sink that silently
+// accepted a "file:" endpoint would turn a misconfiguration into evidence
+// nobody is looking at.
+func logsEndpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", errors.New("otlp sink: endpoint is required")
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("otlp sink: endpoint %q: %w", endpoint, err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf(
+			"otlp sink: endpoint must be http:// or https://, got %q", endpoint)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("otlp sink: endpoint has no host: %q", endpoint)
+	}
+	trimmed := strings.TrimRight(endpoint, "/")
+	if strings.HasSuffix(trimmed, "/v1/logs") {
+		return trimmed, nil
+	}
+	return trimmed + "/v1/logs", nil
 }
