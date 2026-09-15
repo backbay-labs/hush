@@ -110,6 +110,10 @@ h2h diff old.yaml new.yaml
 # Format policy files canonically
 h2h fmt policy.yaml
 
+# Print the canonical content hash (portable policy identity)
+h2h hash policy.yaml
+h2h hash policy.yaml --format canonical
+
 # Sign / verify / keygen
 h2h keygen
 h2h sign policy.yaml --key h2h.key

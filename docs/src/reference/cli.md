@@ -99,6 +99,38 @@ layers, say) fails rather than being emitted. Warnings go to stderr, so
 Exit: `0` success · `1` parse, resolve or validation failure (including strict
 warnings) · `2` the policy file was not found.
 
+## `h2h hash`
+
+Print a policy's **content hash** — the portable identity defined by the canonical form
+specification (`spec/hushspec-canonical.md`). Two parties holding the same policy get the
+same digest in every SDK, regardless of which optional keys the author omitted or which
+language wrote the file.
+
+```bash
+h2h hash policy.yaml                      # sha256:<64 hex>
+h2h hash policy.yaml --format canonical   # the RFC 8785 JSON the digest covers
+h2h hash builtin:default                  # builtins work too
+h2h resolve policy.yaml | h2h hash -      # read an already-resolved document
+```
+
+| Flag | Description |
+|---|---|
+| `<POLICY>` | Policy file, a builtin reference (`builtin:default`), or `-` for stdin. |
+| `-f, --format <digest\|canonical>` | Print the `sha256:` digest (default) or the canonical JSON text it is computed over. |
+| `--strict` | Fail when the document produces validation warnings. |
+
+The hash covers the **resolved** document, so a policy that declares `extends` is resolved
+through the same chain `h2h resolve` walks before it is hashed. Changing a base therefore
+changes the identity of every policy that extends it, even when the child file is
+untouched — that is the point: the enforced policy changed. `merge_strategy` is a
+resolution field and never appears in the canonical form.
+
+The document is validated first: an invalid document has no canonical form, because a
+digest for something no engine would accept is worse than no digest at all.
+
+Exit: `0` success · `1` parse, resolve, validation or canonicalization failure · `2` the
+policy file was not found.
+
 ## `h2h lint`
 
 Static analysis for policies: empty rule blocks, overlapping patterns, shadowed
