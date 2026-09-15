@@ -62,6 +62,23 @@ func (c *collector) records() []otlpLogRecord {
 	return records
 }
 
+// waitForRequests blocks until the collector has received want requests, so a
+// test can order its assertions against the sink's background exporter instead
+// of racing it.
+func (c *collector) waitForRequests(t *testing.T, want int) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if len(c.requests()) >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected %d exports, got %d", want, len(c.requests()))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func startCollector(t *testing.T, c *collector) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(c.handler))
@@ -254,11 +271,19 @@ func TestOTLPSinkBatches(t *testing.T) {
 	}
 	defer sink.Close()
 
-	for i := 0; i < 6; i++ {
-		if err := sink.Send(otlpTestReceipt(t, DecisionAllow)); err != nil {
-			t.Fatalf("Send: %v", err)
+	// A full batch exports on its own, with no flush and no tick. Each batch is
+	// awaited before the next is queued: a flush observed while records are
+	// still queued legitimately drains them into one request, so sending all
+	// six at once would not pin the batch shape.
+	for batch := 1; batch <= 2; batch++ {
+		for i := 0; i < 3; i++ {
+			if err := sink.Send(otlpTestReceipt(t, DecisionAllow)); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
 		}
+		c.waitForRequests(t, batch)
 	}
+
 	if err := sink.Flush(context.Background()); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
