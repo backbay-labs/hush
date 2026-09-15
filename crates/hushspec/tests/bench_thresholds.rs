@@ -6,7 +6,8 @@
 //!   cargo test -p hushspec --release --test bench_thresholds -- --ignored --nocapture
 
 use hushspec::{
-    AuditConfig, AuditContext, EvaluationAction, HushSpec, Resolution, evaluate, evaluate_audited,
+    AuditConfig, AuditContext, CompiledPolicy, EvaluationAction, HushSpec, Resolution, evaluate,
+    evaluate_audited,
 };
 use std::time::Instant;
 
@@ -65,13 +66,36 @@ fn receipt_overhead_within_budget() {
     let resolution = Resolution::from_resolved(&spec, None).expect("resolved");
     let ctx = AuditContext::default();
 
+    // The gate measures the compiled path: receipt overhead is the cost the
+    // receipt adds over the same evaluation, so both halves must be the same
+    // evaluation. Compiling per call on one side and not the other would
+    // measure pattern compilation, not receipts.
+    let policy = CompiledPolicy::from_resolution(resolution.clone()).expect("policy compiles");
+
     let t_eval = median_iteration_us(|| {
-        std::hint::black_box(evaluate(&spec, &action));
+        std::hint::black_box(policy.evaluate(&action));
     });
     let t_disabled = median_iteration_us(|| {
-        std::hint::black_box(evaluate_audited(&resolution, &action, &disabled, &ctx));
+        std::hint::black_box(
+            policy
+                .evaluate_audited(&action, &disabled, &ctx)
+                .expect("receipt"),
+        );
     });
     let t_enabled = median_iteration_us(|| {
+        std::hint::black_box(
+            policy
+                .evaluate_audited(&action, &enabled, &ctx)
+                .expect("receipt"),
+        );
+    });
+
+    // Reported, not gated: what a caller that hands `evaluate` a `&HushSpec`
+    // pays instead, so the value of holding a `CompiledPolicy` is visible.
+    let t_uncompiled_eval = median_iteration_us(|| {
+        std::hint::black_box(evaluate(&spec, &action));
+    });
+    let t_uncompiled_audited = median_iteration_us(|| {
         std::hint::black_box(evaluate_audited(&resolution, &action, &enabled, &ctx));
     });
 
@@ -80,13 +104,15 @@ fn receipt_overhead_within_budget() {
     let disabled_budget = budget_us("HUSHSPEC_BENCH_BUDGET_DISABLED_US", 2.0);
     let enabled_budget = budget_us("HUSHSPEC_BENCH_BUDGET_ENABLED_US", 10.0);
 
-    println!("evaluate:                 {t_eval:.3} us/iter");
+    println!("compiled evaluate:                 {t_eval:.3} us/iter");
     println!(
-        "evaluate_audited (off):   {t_disabled:.3} us/iter (overhead {disabled_overhead:.3} us, budget {disabled_budget} us)"
+        "compiled evaluate_audited (off):   {t_disabled:.3} us/iter (overhead {disabled_overhead:.3} us, budget {disabled_budget} us)"
     );
     println!(
-        "evaluate_audited (on):    {t_enabled:.3} us/iter (overhead {enabled_overhead:.3} us, budget {enabled_budget} us)"
+        "compiled evaluate_audited (on):    {t_enabled:.3} us/iter (overhead {enabled_overhead:.3} us, budget {enabled_budget} us)"
     );
+    println!("uncompiled evaluate:               {t_uncompiled_eval:.3} us/iter");
+    println!("uncompiled evaluate_audited (on):  {t_uncompiled_audited:.3} us/iter");
 
     assert!(
         disabled_overhead < disabled_budget,
