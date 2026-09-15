@@ -610,7 +610,7 @@ h2h --version          # clap's short form, CLI version only
 
 Exit: always `0`.
 
-## Evidence chain (RFC 09 Wave 4)
+## Evidence chain
 
 ### Verify-on-load flags (`eval`, `explain`, `resolve`)
 

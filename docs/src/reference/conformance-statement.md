@@ -128,7 +128,7 @@ The reference implementation's own statement, for the shape of a filled-in one:
 
 | | |
 |---|---|
-| **Implementation** | `hushspec` (Rust reference implementation), version 0.1.1 |
+| **Implementation** | `hushspec` (the Rust crate), version 0.1.1 |
 | **Language / runtime** | Rust 1.88+ |
 | **Claimed level** | Level 5 (Attested) |
 | **Specification version** | 0.2.0 |

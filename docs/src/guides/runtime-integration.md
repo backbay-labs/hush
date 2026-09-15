@@ -97,7 +97,7 @@ one with a tenant-scoped kill switch (`build_from_resolution_with`).
 ### `warn` needs a confirmation channel
 
 A `warn` decision means "ask a human". Without an `on_warn` handler a guard has
-nobody to ask, so the action is **denied** (core spec D16). There is no
+nobody to ask, so the action is **denied** (core spec 6). There is no
 "warn means proceed" default in any SDK.
 
 A handler that returns `true` records the outcome as `confirmed` -- distinct

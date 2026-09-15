@@ -16,8 +16,8 @@ divergence:
 - [`packages/python/tests/test_public_surface.py`](https://github.com/backbay-labs/hush/blob/main/packages/python/tests/test_public_surface.py) -- `ISOMORPHIC_NAMES`, plus `__all__` honesty checks
 - [`packages/go/hushspec/isomorphism_test.go`](https://github.com/backbay-labs/hush/blob/main/packages/go/hushspec/isomorphism_test.go) -- `isomorphicEntryPoints`, read off the package AST
 
-Rust is the oracle the other three are differentially fuzzed against, so it has
-no pinning test of its own; `crates/hushspec/src/lib.rs` is its surface.
+The other three SDKs are differentially fuzzed against Rust, so Rust has no
+pinning test of its own; `crates/hushspec/src/lib.rs` is its surface.
 
 ## Reading the tables
 
@@ -123,7 +123,7 @@ code" is the answer a relying party needs:
 |---|---|---|---|---|---|---|
 | Condition value | `Condition` | `Condition` | `Condition` | `Condition` | `time_window`, `context`, `all_of`, `any_of`, `not`, `capability`, `rate` | |
 | Evaluate a condition | `evaluate_condition` | `evaluateCondition` | `evaluate_condition` | `EvaluateCondition` | An unevaluable condition means **active**: the rule block still runs and can still deny | Fail-closed -- a `when` clause never turns a deny into an allow by failing |
-| With posture capabilities | `evaluate_condition_with_capabilities` | `evaluateConditionWithCapabilities` | `evaluate_condition_with_capabilities` | `EvaluateConditionWithCapabilities` | `when.capability` holds when the effective posture state grants that capability (core spec 3.13, D19) | |
+| With posture capabilities | `evaluate_condition_with_capabilities` | `evaluateConditionWithCapabilities` | `evaluate_condition_with_capabilities` | `EvaluateConditionWithCapabilities` | `when.capability` holds when the effective posture state grants that capability (core spec 3.13) | |
 | Capability identifier | `is_capability_identifier` | `isCapabilityIdentifier` | `is_capability_identifier` | `IsCapabilityIdentifier` | The grammar a capability name must match | Lint `L021` flags a capability no posture state grants |
 | Rate condition | `RateCondition`, `RateComparison` | `RateCondition`, `RateComparison`, `RATE_COMPARISONS` | `RateCondition`, `RateComparison` | `RateCondition`, `RateComparison`, `RateComparisonGte`, `RateComparisonLt`, `RateComparisons` | `{counter, threshold, comparison}` against `RuntimeContext.counters`, supplied by the engine. A missing counter is unevaluable, so the block stays active | The closed comparison set is `gte`, `lt` |
 | Runtime context | `RuntimeContext` | `RuntimeContext` | `RuntimeContext` | `RuntimeContext` | `user`, `environment`, `deployment`, `agent`, `session`, `request`, `custom`, `counters`, `current_time` | |
@@ -138,7 +138,7 @@ code" is the answer a relying party needs:
 | Registry | `DetectorRegistry` | `DetectorRegistry` | `DetectorRegistry` | `DetectorRegistry`, `NewDetectorRegistry` | Custom detectors register beside the built-ins | |
 | Default registry | `DetectorRegistry::with_defaults`, `default_detector_registry` | `DetectorRegistry.withDefaults` | `default_detector_registry` | `WithDefaultDetectors`, `NewDefaultDetectorRegistry` | The same four detectors in the same order | `NewDefaultDetectorRegistry` is the isomorphism alias of `WithDefaultDetectors`; both build the same registry |
 | Regex detectors | `RegexInjectionDetector`, `RegexJailbreakDetector`, `RegexExfiltrationDetector` | the same three | the same three | `NewRegexInjectionDetector`, `NewRegexJailbreakDetector`, `NewRegexExfiltrationDetector` | `regex_injection@1`, `regex_jailbreak@1`, `regex_exfiltration@1` | |
-| `heuristic_injection@1` | `detection::HeuristicInjectionDetector` | `HeuristicInjectionDetector` | `HeuristicInjectionDetector` | `NewHeuristicInjectionDetector` | The normative integer-scored detector of detection spec 3.5 (D20). The signal table and the uppercase rule are fixed, so every engine reproduces the same score for the same input | Rust does not re-export it at the crate root -- reach it as `hushspec::detection::HeuristicInjectionDetector` |
+| `heuristic_injection@1` | `detection::HeuristicInjectionDetector` | `HeuristicInjectionDetector` | `HeuristicInjectionDetector` | `NewHeuristicInjectionDetector` | The normative integer-scored detector of detection spec 3.5. The signal table and the uppercase rule are fixed, so every engine reproduces the same score for the same input | Rust does not re-export it at the crate root -- reach it as `hushspec::detection::HeuristicInjectionDetector` |
 | Detector name | `detection::HEURISTIC_DETECTOR_NAME` | `HEURISTIC_DETECTOR_NAME` | `HEURISTIC_DETECTOR_NAME` | `HeuristicDetectorName` | `"heuristic_injection"` | The `@1` suffix is appended from a private `DETECTOR_ID_VERSION` in all four, so a receipt's `detector_id` reads `heuristic_injection@1` |
 | Signal table | `detection::HEURISTIC_FAMILIES`, `HEURISTIC_UPPERCASE_WEIGHT`, `HEURISTIC_UPPERCASE_MIN_LETTERS`, `HEURISTIC_UPPERCASE_MIN_PERCENT` | the same four | `HEURISTIC_FAMILIES` (weights module-level) | `HeuristicFamilies`, `HeuristicUppercaseWeight`, `HeuristicUppercaseMinLetters`, `HeuristicUppercaseMinPercent` | Published so a third-party engine can reproduce the score without reading the source | |
 | Level from score | `DetectorLevel::from_score` | `detectorLevel` | `DetectionResult` | `DetectorLevelFromScore` | `none`, `low`, `suspicious`, `high`, `critical` | |
@@ -234,7 +234,7 @@ good.
 | Enforcement mode | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `GuardOptions.RuleOverrides` | `enforce` or `monitor`, with per-rule-path overrides; **longest prefix wins** | Monitor mode is refused without a sink or an observer: an unrecorded observation is not evidence |
 | Outcome | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary`, `ImpliedEnforcement` | `allowed`, `confirmed`, `blocked`, `would_block` -- required on every receipt | |
 | Rule-path prefix match | `matches_rule_path_prefix` | `matchesRulePathPrefix` | `matches_rule_path_prefix` | `MatchesRulePathPrefix` | How an override key matches a `matched_rule` | |
-| Warn confirmation | `on_warn` (`WarnHandler`) | `onWarn` (`WarnHandler`) | `on_warn` | `GuardOptions.OnWarn` (`WarnHandler`) | **Absent, a `warn` denies** (core spec D16) | The one place the guard is stricter than the evaluator |
+| Warn confirmation | `on_warn` (`WarnHandler`) | `onWarn` (`WarnHandler`) | `on_warn` | `GuardOptions.OnWarn` (`WarnHandler`) | **Absent, a `warn` denies** (core spec 6) | The one place the guard is stricter than the evaluator |
 | Refused state | `refused`, `refusal` | denials carry `POLICY_SIGNATURE_RULE` | `HushGuard.refusal` | `(*Guard).Refused`, `GuardRefusal` | A policy that fails verification under `require_signature` does not fail construction -- it builds a guard that denies **every** action with `__hushspec_policy_unverified__` and an unverified-policy receipt | Failing to build would tempt a caller into running with no policy at all |
 | Hot swap | `swap_policy` | `swapPolicy` | `swap_policy`, `swap_resolution` | `SwapPolicy` | Atomic. A new policy that will not validate or compile leaves the last good one in force and is reported through `on_error` | |
 | Panic and refusal | always enforce | always enforce | always enforce | always enforce | Neither monitor mode nor a warn handler can let a panic-mode or refused-policy deny through | |
@@ -314,7 +314,7 @@ through a guard, a chained sink and an OTLP sink.
 | Spec version written | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `Version` | `"0.2.0"` |
 | Minors accepted | `version::HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS`, `SUPPORTED_MINORS` | `SupportedMinors` | `["0.1", "0.2"]` |
 | Representative versions | `version::HUSHSPEC_SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `SupportedVersions` | `["0.1.0", "0.2.0"]` |
-| Acceptance test | `version::is_supported` | `isSupported` | `is_supported` | `IsSupported` | Accepts every `X.Y.Z` of a supported minor (core spec 2.2, D14) |
+| Acceptance test | `version::is_supported` | `isSupported` | `is_supported` | `IsSupported` | Accepts every `X.Y.Z` of a supported minor (core spec 2.2) |
 | Minor of a version | `version::supported_minor` | `supportedMinor` | `supported_minor` | `SupportedMinor` | |
 | Package identity | Cargo metadata | `SDK_NAME`, `SDK_VERSION` | `__version__` | `SDKName` | The SDK's own release, distinct from the spec version |
 | Artifact formats | `RECEIPT_VERSION`, `LOG_VERSION`, `signing::FORMAT_VERSION`, `signing::KEYRING_VERSION`, `BUNDLE_VERSION`, `REPORT_VERSION` | `RECEIPT_VERSION`, `LOG_VERSION`, `SIGNATURE_FORMAT_VERSION`, `KEYRING_VERSION`, `BUNDLE_VERSION` | `RECEIPT_VERSION`, `LOG_VERSION`, `ENVELOPE_FORMAT_VERSION`, `KEYRING_VERSION`, `BUNDLE_VERSION` | `ReceiptVersion`, `LogVersion`, `SignatureFormatVersion`, `KeyringFormatVersion`, `BundleVersion` | `0.2`, `0.1`, `0.2`, `0.2`, `0.1` |
@@ -394,7 +394,7 @@ Stated once, because they are why the surface looks the way it does.
    and a malformed pattern all deny.
 3. **An unevaluable `when` means the block is active.** A condition that cannot
    be decided never removes a rule from consideration.
-4. **A warn with no confirmation channel denies** (core spec D16).
+4. **A warn with no confirmation channel denies** (core spec 6).
 5. **A required signature that cannot be verified refuses the whole policy**,
    and the refusal is itself recorded as a receipt.
 6. **A failed reload keeps the last good policy.** There is no window in which

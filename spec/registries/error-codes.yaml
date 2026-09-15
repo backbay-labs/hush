@@ -5,12 +5,11 @@
 # `<name>.expect.yaml` sidecar naming the code its rejection MUST carry, so
 # "the document was rejected" can be checked as "rejected for this reason".
 #
-# This registry lists the codes the Rust reference implementation emits today
-# (`crates/hushspec/src/validate.rs` + `crates/hushspec/src/parse.rs`, surfaced
-# by `h2h validate --format json`). It is deliberately a description of shipped
-# behavior, not a wish list: RFC 09 P6-03 aligns the TypeScript, Python, and Go
-# validators onto these codes, and only then does core spec Section 8 Level 1
-# require them of every implementation. Until then TypeScript, Python, and Go
+# This registry describes shipped behavior, not a wish list: it lists the codes
+# the Rust and Python SDKs emit today (in Rust, `crates/hushspec/src/validate.rs`
+# and `crates/hushspec/src/parse.rs`, surfaced by `h2h validate --format json`).
+# Core spec Section 8 Level 1 requires the codes of every implementation only
+# once the TypeScript and Go validators emit them as well; until then those two
 # are required to reject the vector, not to name the code.
 #
 # Stability: a registered code's meaning never changes. A code may gain
