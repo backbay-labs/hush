@@ -73,7 +73,7 @@ h2h verify policy.yaml --key h2h.pub
 
 ```bash
 # Conformance tests against fixtures
-cargo run -p hushspec-testkit -- --fixtures fixtures
+cargo run -p hushspec-testkit --bin hushspec-testkit -- --fixtures fixtures
 
 # Generate a portable differential case bundle
 cargo run -p hushspec-testkit --bin hushspec-gen -- --seed 42 --groups 50 --out bundle.json

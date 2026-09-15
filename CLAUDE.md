@@ -120,7 +120,7 @@ h2h verify policy.yaml --key h2h.pub
 
 ```bash
 # Run conformance tests against fixtures
-cargo run -p hushspec-testkit -- --fixtures fixtures
+cargo run -p hushspec-testkit --bin hushspec-testkit -- --fixtures fixtures
 ```
 
 ### Differential Fuzzing & Benchmarks
