@@ -250,3 +250,34 @@ jobs:
         run: |
           for d in out/cli-*; do (cd "$d" && npm publish --access public --provenance); done
           (cd out/cli && npm publish --access public --provenance)
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: true
+          tags: |
+            ghcr.io/backbay-labs/h2h:${{ env.TAG }}
+            ghcr.io/backbay-labs/h2h:latest
