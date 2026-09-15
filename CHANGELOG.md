@@ -18,6 +18,21 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   the receipt produced under the fixed inputs of `fixtures/receipts/expected/README.md`;
   `actor`, `timestamp` and `receipt_id` are ignored, nested objects are compared member-wise).
   `hushspec_test` now accepts `0.1.0` and `0.2.0`, so every existing fixture stays valid.
+- `h2h test --format junit` writes a JUnit XML report -- one `<testsuite>` per fixture file,
+  one `<testcase>` per case, each case's `controls` and `tags` as `<property>` entries, and each
+  failure as a `<failure>` carrying the expected and the actual value -- and `--report-file`
+  writes the report to a path while stdout keeps the readable summary.
+- Rule coverage in `h2h test`: every run compares the rule paths a policy declares (every rule
+  block of the resolved document, plus every named secret pattern) with the paths its cases hit
+  through `matched_rule` and through each `rule_trace` entry, prints the table, and reports the
+  numbers in the JSON report's new `coverage` member and in a `rule coverage` JUnit suite.
+  `--fail-on-uncovered` exits non-zero when a declared path was never hit.
+
+### Changed (RFC 09 P3-02)
+
+- `h2h test --format json` now prints an object (`passed`, `failed`, `fixtures[]`, `coverage`)
+  rather than a bare array of per-file results; the per-file objects are unchanged and now also
+  carry each case's `controls` and `tags`.
 
 ### Added (RFC 09 Wave 4, Rust)
 
