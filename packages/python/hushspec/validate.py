@@ -7,6 +7,13 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from hushspec.conditions import Condition, validate_condition
+from hushspec.error_codes import (
+    ERROR_CONSTRAINT_VIOLATION,
+    ERROR_DUPLICATE_PATTERN_NAME,
+    ERROR_INVALID_DATE,
+    ERROR_INVALID_REGEX,
+    ERROR_UNSUPPORTED_VERSION,
+)
 from hushspec.extensions import DetectionLevel, TransitionTrigger
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.schema import Classification, HushSpec, LifecycleState
@@ -30,10 +37,35 @@ _DETECTION_LEVEL_ORDER = {
 }
 
 
+#: Which registry code each validation check reports. Every check not listed
+#: here is a core Section 7 / extension-module constraint violation, which is
+#: what E004 covers, so only the four the registry names separately need an
+#: entry. Mirrors the Rust reference's mapping, which names the same four
+#: ValidationError variants and folds the rest into E004.
+_REGISTRY_CODES: dict[str, str] = {
+    "unsupported_version": ERROR_UNSUPPORTED_VERSION,
+    "duplicate_pattern_name": ERROR_DUPLICATE_PATTERN_NAME,
+    "invalid_regex": ERROR_INVALID_REGEX,
+    "invalid_date": ERROR_INVALID_DATE,
+}
+
+
 @dataclass
 class ValidationError:
-    code: str
+    """One reason a document was refused.
+
+    ``kind`` names the specific check (``invalid_condition``,
+    ``duplicate_pattern_name``, ...); ``code`` is the stable registry
+    identifier that check reports (``spec/registries/error-codes.yaml``), the
+    one a shared ``invalid/`` vector's ``.expect.yaml`` sidecar pins.
+    """
+
+    kind: str
     message: str
+    code: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.code = _REGISTRY_CODES.get(self.kind, ERROR_CONSTRAINT_VIOLATION)
 
     def __str__(self) -> str:
         return self.message

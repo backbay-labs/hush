@@ -53,7 +53,7 @@ unknown_field: true
             parse_or_raise(yaml)
             assert False, "Expected ValueError"
         except ValueError as e:
-            assert "unknown top-level field" in str(e)
+            assert "unknown field `unknown_field`" in str(e)
 
 
 class TestParseWithRules:
@@ -109,7 +109,7 @@ unknown_field: true
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown top-level field" in err
+        assert "unknown field `unknown_field`" in err
 
     def test_reject_unknown_rule(self):
         yaml = """
@@ -121,7 +121,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown rule" in err
+        assert "unknown field `nonexistent_rule` at rules" in err
 
     def test_reject_unknown_extension(self):
         yaml = """
@@ -133,7 +133,7 @@ extensions:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown extension" in err
+        assert "unknown field `nonexistent_extension` at extensions" in err
 
     def test_reject_unknown_nested_field(self):
         yaml = """
@@ -146,7 +146,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown field at rules.egress" in err
+        assert "unknown field `extra_field` at rules.egress" in err
 
     def test_reject_invalid_bool_type(self):
         yaml = """
@@ -159,7 +159,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "rules.egress.enabled must be a boolean" in err
+        assert "rules.egress.enabled: invalid type, expected a boolean" in err
 
     def test_missing_hushspec_version(self):
         yaml = """
@@ -552,7 +552,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.browser_automation.enabled must be a boolean" in err
+        assert "rules.browser_automation.enabled: invalid type, expected a boolean" in err
 
     def test_rejects_unknown_field(self):
         yaml = """
@@ -564,7 +564,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "unknown field at rules.browser_automation" in err
+        assert "unknown field `bogus_field` at rules.browser_automation" in err
 
     def test_rejects_non_array_allowed_domains(self):
         yaml = """
@@ -575,7 +575,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.browser_automation.allowed_domains must be an array" in err
+        assert "rules.browser_automation.allowed_domains: invalid type, expected an array" in err
 
     def test_rejects_unsafe_regex_in_extra_credential_patterns(self):
         yaml = """
@@ -621,7 +621,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.code_execution.enabled must be a boolean" in err
+        assert "rules.code_execution.enabled: invalid type, expected a boolean" in err
 
     def test_rejects_unknown_field(self):
         yaml = """
@@ -633,7 +633,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "unknown field at rules.code_execution" in err
+        assert "unknown field `bogus_field` at rules.code_execution" in err
 
     def test_rejects_zero_max_scan_bytes(self):
         yaml = """
@@ -784,7 +784,7 @@ class TestYamlRobustness:
         ok, err = parse('hushspec: "0.1.0"\nname: a\nname: b\n')
         assert ok is False
         assert isinstance(err, str)
-        assert "duplicate key" in err
+        assert "duplicate entry with key" in err
 
     def test_rejects_duplicate_nested_keys(self):
         yaml = """
@@ -797,7 +797,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "duplicate key" in err
+        assert "duplicate entry with key" in err
 
     def test_anchor_bomb_fails_fast(self):
         # A nested-anchor bomb: tiny source text whose alias-expanded size is
@@ -878,7 +878,7 @@ class TestYamlProfile:
             'hushspec: "0.2.0"\nname: first\n---\nhushspec: "0.2.0"\nname: second\n'
         )
         assert ok is False
-        assert "single document" in err
+        assert "multi-document streams are not allowed" in err
 
     def test_accepts_a_leading_directive_end_marker(self):
         ok, spec = parse('---\nhushspec: "0.2.0"\nname: only\n')
@@ -892,7 +892,7 @@ class TestYamlProfile:
                 "    default: block\n"
             )
             assert ok is False, literal
-            assert "must be a boolean" in err, literal
+            assert "expected a boolean" in err, literal
 
     def test_still_accepts_core_booleans(self):
         for literal, expected in (("true", True), ("false", False), ("True", True)):
@@ -968,4 +968,6 @@ class TestVersionAcceptance:
         message = str(result.errors[0])
         assert message.startswith("unsupported hushspec version: 0.9.0")
         assert "0.1, 0.2" in message
-        assert result.errors[0].code == "unsupported_version"
+        assert result.errors[0].kind == "unsupported_version"
+        # And the registry code the shared `invalid/` sidecars pin.
+        assert result.errors[0].code == "E002"

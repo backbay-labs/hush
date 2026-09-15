@@ -1,6 +1,8 @@
 from hushspec import (
     HushSpec,
     OriginDefaultBehavior,
+    PostureContext,
+    compile_policy,
     merge,
     parse,
     parse_or_raise,
@@ -430,7 +432,7 @@ extensions:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "similarity_threshold must be <= 1" in err
+        assert "similarity_threshold must be between 0.0 and 1.0" in err
 
     def test_validate_detection_prompt_injection_threshold_warning(self):
         yaml = """
@@ -648,3 +650,61 @@ extensions:
         assert result.is_valid, f"errors: {result.errors}"
         assert spec.rules is not None
         assert spec.extensions is not None
+
+
+class TestTransitionPriority:
+    """D18 (posture spec 5.3): a `from` that names the current state outranks
+    the wildcard, whatever the document order; among equals, document order.
+
+    Vector: fixtures/posture/evaluation/transition-priority.test.yaml.
+    """
+
+    POLICY = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [tool_call]
+      locked:
+        capabilities: []
+    transitions:
+      - from: "*"
+        to: locked
+        on: critical_violation
+      - from: standard
+        to: restricted
+        on: critical_violation
+      - from: standard
+        to: locked
+        on: critical_violation
+"""
+
+    def _next(self, current: str) -> str:
+        policy = compile_policy(parse_or_raise(self.POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current=current, signal="critical_violation")
+        )
+        assert posture is not None
+        return posture.next
+
+    def test_a_named_from_wins_over_a_wildcard_listed_before_it(self):
+        assert self._next("standard") == "restricted"
+
+    def test_the_wildcard_still_applies_where_no_named_transition_matches(self):
+        assert self._next("restricted") == "locked"
+
+    def test_among_equals_document_order_wins(self):
+        # Two `from: standard` transitions share the trigger; the first one
+        # written is the one that fires.
+        assert self._next("standard") == "restricted"
+
+    def test_no_matching_trigger_holds_the_state(self):
+        policy = compile_policy(parse_or_raise(self.POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current="standard", signal="user_approval")
+        )
+        assert posture is not None and posture.next == "standard"
