@@ -55,7 +55,8 @@ pub use log::{
 };
 pub use merge::merge;
 pub use panic::{
-    activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active, panic_policy,
+    PanicState, activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active,
+    panic_policy,
 };
 pub use receipt::{
     ActionSummary, Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode,
