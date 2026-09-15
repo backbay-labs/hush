@@ -275,15 +275,6 @@ export function pathGlobMatches(pattern: string, path: string): boolean {
   return regex != null && regex.test(path);
 }
 
-/**
- * Match a raw path target against a path glob, normalizing the target first.
- * Kept for callers outside the evaluator; prefer {@link pathGlobMatches} with
- * an already-normalized path.
- */
-export function globMatches(pattern: string, target: string): boolean {
-  return pathGlobMatches(pattern, normalizePath(target));
-}
-
 // ---------------------------------------------------------------------------
 // Host patterns (core spec 3.14.2)
 // ---------------------------------------------------------------------------

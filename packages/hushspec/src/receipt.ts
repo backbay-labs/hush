@@ -14,6 +14,7 @@ import { compiledFor, compiledForResolution } from './compiled.js';
 import type { ChainLink, Resolution, SignatureStatus } from './resolve.js';
 import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
+import { utf8ByteLength } from './utf8.js';
 
 /**
  * Decision receipts, format 0.2 (spec/hushspec-receipt.md).
@@ -266,7 +267,7 @@ function uuidFromBytes(bytes: Uint8Array): string {
   );
 }
 
-/** A fresh UUID version 7 (RFC 9562): 48-bit millisecond time, random tail. */
+/** A fresh UUID version 7 (receipt spec 3.2): 48-bit time, random tail. */
 export function uuidV7(unixMillis: number = Date.now()): string {
   const bytes = randomBytes(16);
   const ms = BigInt(Math.trunc(unixMillis)) & 0x0000_ffff_ffff_ffffn;
@@ -283,8 +284,8 @@ export function uuidV7(unixMillis: number = Date.now()): string {
  * conformance vector can name the receipt id it expects.
  *
  * `rand_a` (12 bits) is `seed & 0xfff`; `rand_b` (62 bits) is `seed >> 12`.
- * Exactly `hushspec::deterministic_uuid_v7` in the Rust reference, which is
- * what `fixtures/receipts/expected/` pins.
+ * The derivation is identical in every SDK, so the expected receipts under
+ * `fixtures/receipts/expected/` reproduce byte for byte.
  */
 export function deterministicUuidV7(unixMillis: number, seed: number | bigint): string {
   const bytes = new Uint8Array(16);
@@ -298,7 +299,7 @@ export function deterministicUuidV7(unixMillis: number, seed: number | bigint): 
   bytes[7] = Number(randA & 0xffn);
   const randB = (seedBits >> 12n) & 0x3fff_ffff_ffff_ffffn;
   // The 62-bit `rand_b`, big-endian across bytes 8..15, with the top two bits
-  // replaced by the RFC 4122 variant marker `10`.
+  // replaced by the variant marker `10`.
   for (let index = 0; index < 8; index += 1) {
     bytes[8 + index] = Number((randB >> BigInt(8 * (7 - index))) & 0xffn);
   }
@@ -360,7 +361,7 @@ export interface AuditContext {
 /**
  * The disposition implied by a decision when there is no enforcement point to
  * say otherwise: an allow proceeds; a warn with no confirmation channel is a
- * deny (core spec D16); under monitor mode a warn or deny proceeds and is
+ * deny (core spec 6); under monitor mode a warn or deny proceeds and is
  * recorded as `would_block`.
  */
 export function impliedEnforcement(
@@ -427,7 +428,7 @@ function actionSummary(action: EvaluationAction): ActionSummary {
     summary.content_hash = `sha256:${createHash('sha256')
       .update(action.content, 'utf8')
       .digest('hex')}`;
-    summary.content_size = Buffer.byteLength(action.content, 'utf8');
+    summary.content_size = utf8ByteLength(action.content);
   }
   if (action.args_size !== undefined) summary.args_size = action.args_size;
   const origin = compactObject(action.origin);

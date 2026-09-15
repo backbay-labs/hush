@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
+import type { LookupAddress } from 'node:dns';
 import path from 'node:path';
 import type { HushSpec } from './schema.js';
 import type { LoadedSpec } from './resolve.js';
@@ -17,28 +18,15 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_SIZE = 1_048_576; // 1 MB
 
 /**
- * Extract the embedded IPv4 address from an IPv4-mapped (`::ffff:x`) or
- * IPv4-translated (`::ffff:0:x`) IPv6 address, in either dotted (`::ffff:127.0.0.1`)
- * or hextet (`::ffff:7f00:1`) form, returning it as a dotted string.
+ * The IPv4 address embedded in the trailing 32 bits of an IPv6 address, as a
+ * dotted string: either already dotted (`127.0.0.1`) or one or two hextets
+ * (`7f00:1`, `a9fe:a9fe`). `undefined` when the tail is neither.
  */
-function mappedIpv4Address(normalized: string): string | undefined {
-  let rest: string;
-  if (normalized.startsWith('::ffff:')) {
-    rest = normalized.slice('::ffff:'.length);
-  } else {
-    return undefined;
-  }
-  // IPv4-translated form ::ffff:0:a.b.c.d
-  if (rest.startsWith('0:')) {
-    rest = rest.slice(2);
-  }
-
+function embeddedIpv4(rest: string): string | undefined {
   if (rest.includes('.')) {
-    // Already dotted-quad IPv4.
     return rest;
   }
 
-  // Trailing 32 bits encoded as one or two hextets, e.g. "7f00:1" or "a9fe:a9fe".
   const groups = rest.split(':');
   if (groups.length === 0 || groups.length > 2) {
     return undefined;
@@ -55,6 +43,20 @@ function mappedIpv4Address(normalized: string): string | undefined {
   const c = (value >>> 8) & 0xff;
   const d = value & 0xff;
   return `${a}.${b}.${c}.${d}`;
+}
+
+/**
+ * Extract the embedded IPv4 address from an IPv4-mapped (`::ffff:x`) or
+ * IPv4-translated (`::ffff:0:x`) IPv6 address, in either dotted
+ * (`::ffff:127.0.0.1`) or hextet (`::ffff:7f00:1`) form.
+ */
+function mappedIpv4Address(normalized: string): string | undefined {
+  if (!normalized.startsWith('::ffff:')) {
+    return undefined;
+  }
+  const rest = normalized.slice('::ffff:'.length);
+  // IPv4-translated form ::ffff:0:a.b.c.d
+  return embeddedIpv4(rest.startsWith('0:') ? rest.slice(2) : rest);
 }
 
 /**
@@ -76,29 +78,7 @@ function compatibleIpv4Address(normalized: string): string | undefined {
   if (rest === '' || rest.startsWith('ffff:')) {
     return undefined;
   }
-
-  if (rest.includes('.')) {
-    // Dotted-quad compatible form, e.g. `::169.254.169.254`.
-    return rest;
-  }
-
-  // Trailing 32 bits as one or two hextets, e.g. "7f00:1" or "a9fe:a9fe".
-  const groups = rest.split(':');
-  if (groups.length === 0 || groups.length > 2) {
-    return undefined;
-  }
-  let value = 0;
-  for (const group of groups) {
-    if (!/^[0-9a-f]{1,4}$/.test(group)) {
-      return undefined;
-    }
-    value = value * 0x10000 + parseInt(group, 16);
-  }
-  const a = (value >>> 24) & 0xff;
-  const b = (value >>> 16) & 0xff;
-  const c = (value >>> 8) & 0xff;
-  const d = value & 0xff;
-  return `${a}.${b}.${c}.${d}`;
+  return embeddedIpv4(rest);
 }
 
 export function isPrivateIp(ip: string): boolean {
@@ -184,9 +164,10 @@ function readCache(cacheDir: string, url: string): { etag: string; body: string 
   const bodyPath = path.join(cacheDir, `${key}.yaml`);
 
   try {
-    const metaContent = readFileSync(metaPath, 'utf8');
-    const meta: CacheMeta = JSON.parse(metaContent);
-    if (meta.url !== url) return null;
+    const meta = JSON.parse(readFileSync(metaPath, 'utf8')) as Partial<CacheMeta> | null;
+    // A cache entry written by another version, or truncated: treat it as a
+    // miss rather than revalidating against an etag that is not a string.
+    if (meta == null || meta.url !== url || typeof meta.etag !== 'string') return null;
     const body = readFileSync(bodyPath, 'utf8');
     return { etag: meta.etag, body };
   } catch {
@@ -248,20 +229,20 @@ async function readResponseText(
  */
 async function assertPublicHost(url: URL): Promise<void> {
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  let resolved: LookupAddress[];
   try {
-    const resolved = await lookup(hostname, { all: true });
-    for (const addr of resolved) {
-      if (isPrivateIp(addr.address)) {
-        throw new Error(
-          `SSRF protection: host '${hostname}' resolves to private IP ${addr.address}`,
-        );
-      }
-    }
+    resolved = await lookup(hostname, { all: true });
   } catch (err) {
-    if (err instanceof Error && err.message.includes('SSRF protection')) {
-      throw err;
-    }
     throw new Error(`failed to resolve host '${hostname}': ${err}`);
+  }
+  // Outside the try: a refusal here is the answer, not a lookup failure to be
+  // re-described as one.
+  for (const addr of resolved) {
+    if (isPrivateIp(addr.address)) {
+      throw new Error(
+        `SSRF protection: host '${hostname}' resolves to private IP ${addr.address}`,
+      );
+    }
   }
 }
 

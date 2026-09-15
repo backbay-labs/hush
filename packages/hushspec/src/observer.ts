@@ -64,9 +64,12 @@ export class ConsoleObserver implements EvaluationObserver {
   constructor(private level: 'all' | 'deny_only' = 'all') {}
 
   onEvent(event: ObserverEvent): void {
-    if (this.level === 'deny_only' && event.type === 'evaluation.completed') {
-      const e = event as EvaluationCompletedEvent;
-      if (e.result.decision !== 'deny') return;
+    if (
+      this.level === 'deny_only' &&
+      event.type === 'evaluation.completed' &&
+      event.result.decision !== 'deny'
+    ) {
+      return;
     }
     console.error(`[hushspec] ${event.type} at ${event.timestamp}`, event);
   }
@@ -78,10 +81,9 @@ export class MetricsCollector implements EvaluationObserver {
 
   onEvent(event: ObserverEvent): void {
     if (event.type === 'evaluation.completed') {
-      const e = event as EvaluationCompletedEvent;
-      const key = `evaluate.${e.result.decision}`;
+      const key = `evaluate.${event.result.decision}`;
       this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
-      this.durations.push(e.duration_us);
+      this.durations.push(event.duration_us);
     }
     this.counts.set(event.type, (this.counts.get(event.type) ?? 0) + 1);
   }
@@ -102,7 +104,8 @@ export class MetricsCollector implements EvaluationObserver {
   getP99DurationUs(): number {
     if (this.durations.length === 0) return 0;
     const sorted = [...this.durations].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length * 0.99)] ?? sorted[sorted.length - 1];
+    // `floor(n * 0.99) < n` for every n >= 1, so the index is always in range.
+    return sorted[Math.floor(sorted.length * 0.99)];
   }
 
   toPrometheus(): string {

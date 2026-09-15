@@ -34,8 +34,8 @@
  *    from the first block in evaluation order whose decision equals the
  *    aggregate and which named a rule.
  *
- * This file is a port of `crates/hushspec/src/evaluate.rs`, which is the
- * normative reference implementation; keep the two in lockstep.
+ * The core specification is normative for every decision here, and
+ * `fixtures/core/evaluation/` pins it.
  */
 import type { HushSpec } from './schema.js';
 import type {
@@ -100,6 +100,7 @@ import { DEFAULT_AUDIT_CONFIG, receiptFromEvaluation } from './receipt.js';
 import type { Resolution } from './resolve.js';
 import { resolutionFromResolved } from './resolve.js';
 import { contentHash } from './canonical.js';
+import { truncateUtf8 } from './utf8.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -222,7 +223,7 @@ function compileExactSetOrUndefined(entries: string[] | undefined): Set<string> 
 // Compiled rule blocks
 // ---------------------------------------------------------------------------
 
-/** Every block id the reference specification defines, in no particular order. */
+/** Every rule-block id the core specification defines. */
 type BlockId =
   | 'forbidden_paths'
   | 'path_allowlist'
@@ -1657,7 +1658,7 @@ function evaluateComputerUse(rule: CompiledComputerUse, target: string): BlockDe
   if (rule.observe) {
     return blockAllow('rules.computer_use.mode', 'observe mode does not block unlisted actions');
   }
-  // guardrail and fail_closed have identical reference semantics (D9).
+  // `guardrail` and `fail_closed` deny an unlisted action alike (core spec 3.8).
   return blockDeny('rules.computer_use.mode', 'unlisted computer-use action is denied');
 }
 
@@ -1821,18 +1822,6 @@ function evaluateCodeExecution(
   return blockAllow('rules.code_execution', 'code execution is permitted');
 }
 
-/** Truncate `content` to at most `limit` UTF-8 bytes, on a code-point boundary. */
-function truncateUtf8(content: string, limit: number): string {
-  const bytes = new TextEncoder().encode(content);
-  if (bytes.length <= limit) return content;
-  let end = limit;
-  // UTF-8 continuation bytes are 0b10xxxxxx; back off until a lead byte.
-  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) {
-    end -= 1;
-  }
-  return new TextDecoder().decode(bytes.subarray(0, end));
-}
-
 /**
  * Whether `word` occurs in `text` bounded by non-`[A-Za-z0-9_]` characters or
  * the text boundaries (core spec 3.12 step 4).
@@ -1898,7 +1887,7 @@ function nextPostureState(
   current: string,
   signal: string,
 ): string | undefined {
-  // D18 (posture spec 5.3): a transition whose `from` names the current state
+  // Posture spec 5.3: a transition whose `from` names the current state
   // outranks one whose `from` is `"*"`; among equals, document order.
   const matching = (wildcard: boolean): string | undefined => {
     for (const transition of posture.transitions) {
@@ -1994,8 +1983,10 @@ function patchStats(content: string): PatchStats {
 }
 
 /**
- * Mirrors Rust's `str::lines`: split on `\n`, drop a trailing `\r`, and treat a
- * trailing newline as a terminator rather than producing a final empty line.
+ * Split on `\n`, drop a trailing `\r`, and treat a trailing newline as a
+ * terminator rather than a separator that yields a final empty line -- so a
+ * patch's addition and deletion counts do not depend on whether the diff ends
+ * with a newline.
  */
 function splitLines(content: string): string[] {
   if (content.length === 0) return [];
