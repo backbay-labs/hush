@@ -4,7 +4,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, Union, TYPE_CHECKING
 
 from hushspec.compiled import CompiledPolicy, compile_policy
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
@@ -27,6 +27,7 @@ from hushspec.signing import Keyring
 
 if TYPE_CHECKING:
     from hushspec.observer import EvaluationObserver
+    from hushspec.provider import PolicyProvider, PolicyPoller, PolicyWatcher
     from hushspec.receipt import (
         Actor,
         AuditConfig,
@@ -226,7 +227,7 @@ class HushGuard:
 
     def __init__(
         self,
-        policy: HushSpec,
+        policy: Union[HushSpec, Resolution],
         on_warn: Optional[WarnHandler] = None,
         observer: Optional["EvaluationObserver"] = None,
         enforcement: Optional[EnforcementConfig] = None,
@@ -264,14 +265,20 @@ class HushGuard:
         )
         self._resolution: Optional[Resolution] = None
         self._refusal: Optional[SignatureStatus] = None
-        self._requested_policy_name = policy.name
-        self._requested_policy_version = policy.hushspec
+        self._watcher: Any = None
+        requested = policy.spec if isinstance(policy, Resolution) else policy
+        self._requested_policy_name = requested.name
+        self._requested_policy_version = requested.hushspec
         # Resolve before anything else touches the spec: a guard never holds an
         # unresolved document, and the receipt hash covers the resolved policy.
         # A policy that cannot be *verified* does not raise -- the guard has to
         # stay alive to deny, and to record the refusal (signing spec 6.5).
         try:
-            self._resolution = self._resolve(policy)
+            self._resolution = (
+                self._adopt_resolution(policy)
+                if isinstance(policy, Resolution)
+                else self._resolve(policy)
+            )
             self._policy = self._resolution.spec
         except PolicyVerificationError as exc:
             self._refusal = exc.status
@@ -413,6 +420,135 @@ class HushGuard:
             source=self._resolve_source,
             options=self._resolve_options,
         )
+
+    def _adopt_resolution(self, resolution: Resolution) -> Resolution:
+        """Accept a resolution produced elsewhere, or refuse it.
+
+        A provider resolves under its own :class:`~hushspec.resolve.ResolveOptions`,
+        so the guard re-checks the two things it would otherwise have proved
+        itself: that the document is actually resolved, and -- when this guard
+        was built with ``require_signature`` -- that the leaf verified. Without
+        the second check a signature requirement would be silently dropped by
+        passing the policy in pre-resolved, which is precisely the fail-open the
+        requirement exists to prevent.
+        """
+        if resolution.spec.extends is not None:
+            raise ValueError(
+                "provider returned an unresolved policy "
+                f"('extends: {resolution.spec.extends}')"
+            )
+        if self._resolve_options.require_signature:
+            signature = resolution.signature
+            if signature is None or not signature.verified:
+                status = signature or SignatureStatus(
+                    verified=False, reason="missing_signature"
+                )
+                leaf = resolution.chain[-1].source if resolution.chain else "<memory>"
+                raise PolicyVerificationError(
+                    "policy was resolved without a verified signature, but this "
+                    "guard requires one",
+                    source=leaf,
+                    status=status,
+                )
+        return resolution
+
+    @classmethod
+    def from_provider(
+        cls,
+        provider: "PolicyProvider",
+        on_warn: Optional[WarnHandler] = None,
+        observer: Optional["EvaluationObserver"] = None,
+        enforcement: Optional[EnforcementConfig] = None,
+        sink: Optional["ReceiptSink"] = None,
+        audit: Optional["AuditConfig"] = None,
+        actor: Optional["Actor"] = None,
+        require_signature: bool = False,
+        *,
+        watch: bool = False,
+        poll: bool = False,
+        interval_s: Optional[float] = None,
+        on_error: Optional[Callable[[Exception], None]] = None,
+        on_reload: Optional[Callable[[Resolution], None]] = None,
+        panic_sentinel: Optional[Union[str, bool]] = None,
+    ) -> HushGuard:
+        """Build a guard from a provider, optionally keeping it hot.
+
+        The provider has already resolved the policy and gathered its evidence,
+        so nothing is resolved twice: the chain hashes and signature outcome it
+        returned are what every receipt carries. ``require_signature`` here does
+        not re-run verification (the provider's ``options`` do that) -- it
+        asserts that the resolution the provider handed over actually verified,
+        so a misconfigured provider cannot quietly downgrade a guard.
+
+        With ``watch=True`` a :class:`~hushspec.provider.PolicyWatcher` reloads
+        the policy when the file changes; with ``poll=True`` a
+        :class:`~hushspec.provider.PolicyPoller` reloads it on a fixed interval
+        for sources that are not files. Either one calls :meth:`swap_resolution`
+        on every change and leaves the policy in force untouched when a reload
+        fails, reporting the failure through ``on_error``. The loop is available
+        as :attr:`watcher` and must be stopped by the caller (or used as a
+        context manager) when the guard is done.
+
+        The *first* load is not caught: whatever the provider raises propagates,
+        because a guard with no policy at all has nothing to enforce.
+        """
+        from hushspec.provider import (
+            DEFAULT_POLL_INTERVAL_S,
+            DEFAULT_WATCH_INTERVAL_S,
+            PolicyPoller,
+            PolicyWatcher,
+        )
+
+        if watch and poll:
+            raise ValueError("pass either `watch` or `poll`, not both")
+
+        guard = cls(
+            provider.load(),
+            on_warn,
+            observer=observer,
+            enforcement=enforcement,
+            sink=sink,
+            audit=audit,
+            actor=actor,
+            require_signature=require_signature,
+        )
+        if not (watch or poll):
+            return guard
+
+        def apply(resolution: Resolution) -> None:
+            guard.swap_resolution(resolution)
+            if on_reload is not None:
+                on_reload(resolution)
+
+        loop_cls = PolicyWatcher if watch else PolicyPoller
+        default_interval = (
+            DEFAULT_WATCH_INTERVAL_S if watch else DEFAULT_POLL_INTERVAL_S
+        )
+        loop = loop_cls(
+            provider,
+            interval_s if interval_s is not None else default_interval,
+            apply,
+            on_error,
+            panic_sentinel=panic_sentinel,
+        )
+        # The guard already holds what the provider loaded, so the loop starts
+        # from it rather than announcing it as a change. A guard that refused
+        # the load holds nothing, so the loop keeps the change to announce: the
+        # next tick offers the document again, and a fixed one is adopted.
+        if guard.resolution is not None:
+            loop.adopt(guard.resolution)
+        loop.start(load=False)
+        guard._watcher = loop
+        return guard
+
+    @property
+    def watcher(self) -> Optional[Union["PolicyWatcher", "PolicyPoller"]]:
+        """The hot-reload loop attached by :meth:`from_provider`, if any.
+
+        Stop it (``guard.watcher.stop()``) when the guard is done: it holds a
+        daemon thread that would otherwise keep reloading.
+        """
+        return self._watcher
 
     @property
     def resolution(self) -> Optional[Resolution]:
@@ -648,6 +784,36 @@ class HushGuard:
         # failed swap therefore raises and changes nothing -- including a guard
         # that is already refusing, which keeps refusing.
         resolution = self._resolve(new_policy)
+        self._swap(
+            resolution,
+            requested_name=new_policy.name,
+            requested_version=new_policy.hushspec,
+        )
+
+    def swap_resolution(self, resolution: Resolution) -> None:
+        """Swap in a policy a provider already resolved (the hot-reload path).
+
+        The same load as :meth:`swap_policy` minus the resolution, which a
+        :class:`~hushspec.provider.PolicyProvider` performed -- so the evidence
+        the provider gathered (chain hashes, signature outcome) is the evidence
+        every later receipt carries, rather than being recomputed and lost. A
+        resolution this guard will not accept is rejected here, leaving the
+        policy in force untouched.
+        """
+        adopted = self._adopt_resolution(resolution)
+        self._swap(
+            adopted,
+            requested_name=adopted.spec.name,
+            requested_version=adopted.spec.hushspec,
+        )
+
+    def _swap(
+        self,
+        resolution: Resolution,
+        *,
+        requested_name: Optional[str],
+        requested_version: str,
+    ) -> None:
         resolved = resolution.spec
         # Compile before anything is swapped in: the guard never holds a
         # policy it has not prepared.
@@ -659,8 +825,8 @@ class HushGuard:
         # A swap that verifies clears an earlier refusal: the guard now holds a
         # policy it was able to prove.
         self._refusal = None
-        self._requested_policy_name = new_policy.name
-        self._requested_policy_version = new_policy.hushspec
+        self._requested_policy_name = requested_name
+        self._requested_policy_version = requested_version
         self._policy_hash = resolution.content_hash
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_policy_reloaded(
