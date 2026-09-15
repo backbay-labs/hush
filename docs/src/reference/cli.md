@@ -135,11 +135,14 @@ policy file was not found.
 ## `h2h lint`
 
 Static analysis for policies: empty rule blocks, overlapping patterns, shadowed
-exceptions, over-broad egress, regex complexity, disabled rules, duplicates.
+exceptions, over-broad allow lists, regex complexity, disabled rules,
+duplicates, control mappings, credential coverage, permissive defaults and
+unreachable extension configuration.
 
 ```bash
 h2h lint policy.yaml
 h2h lint --format json --fail-on-warnings policy.yaml
+h2h lint --format sarif --out lint.sarif policy.yaml
 h2h lint policy.yaml --fix
 h2h lint policy.yaml --dry-run
 ```
@@ -147,20 +150,100 @@ h2h lint policy.yaml --dry-run
 | Flag | Description |
 |---|---|
 | `<FILES>...` | One or more policy files; `-` reads stdin. |
-| `-f, --format <text\|json>` | Output format (default `text`). |
+| `-f, --format <text\|json\|sarif>` | Output format (default `text`). |
+| `--out <PATH>` | Write the report to a file instead of stdout (`json` and `sarif` only). |
 | `--fail-on-warnings` | Exit `1` on warnings, not just errors. |
 | `--fix` | Apply decision-neutral auto-fixes in place. Refused for `-`. |
 | `--dry-run` | Show what `--fix` would change without writing. |
 
-JSON findings carry `code`, `severity`, `message`, `location` and `fixable`;
-each file also reports the `fixed` codes that `--fix` actually applied.
-
-Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, or
-`--fix` was pointed at stdin.
+Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, `--out`
+was combined with `--format text`, or `--fix` was pointed at stdin.
 
 > `--fix` rewrites the file through the canonical formatter, which does not
 > preserve comments. Run it on documents whose comments you can afford to lose,
 > or review the `--dry-run` diff first.
+
+### Source positions
+
+Every finding is located at the **key or list entry it is about**, not at the
+file. Text output prints `file:line:column` followed by the document path:
+
+```
+warning[L008]: rules.egress.allow[1]: duplicate pattern "api.example.com"
+  --> rulesets/example.yaml:8:9
+   | rules.egress.allow[1]
+```
+
+Positions come from a second pass over the same bytes with a real YAML event
+parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
+sequences and comments between entries correctly aligned — a line scanner does
+not. Lint reports the **resolved** document, so a finding about a block a policy
+inherits names the base that declares it:
+
+```
+warning[L004]: rules.egress.allow[0] contains wildcard pattern "*" ...
+  --> builtin:permissive:9:9
+   | rules.egress.allow[0]
+```
+
+JSON findings carry `code`, `severity`, `message`, `location`, `fixable`, the
+document `path`, and a `span` object (`file`, `line`, `column`, `end_line`,
+`end_column`; 1-based, with `end_column` pointing at the character after the
+region). Each file also reports the `fixed` codes that `--fix` actually applied.
+A finding whose key could not be located — an inherited default no document
+writes, or a base fetched over HTTP — omits `span` and still carries `location`.
+
+### SARIF
+
+`--format sarif` emits a SARIF 2.1.0 document: one run, a `tool.driver` for
+`h2h` carrying the full rule catalog below (each with `shortDescription`,
+`fullDescription` and a `defaultConfiguration.level`), and one `result` per
+finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
+`logicalLocations` entry naming the document path, and — for fixable findings —
+a `fixes` entry describing the deletion `--fix` would perform. Severities map
+`error → error`, `warning → warning`, `info → note`.
+
+```bash
+h2h lint --format sarif --out lint.sarif rulesets/*.yaml
+```
+
+Upload the file with `github/codeql-action/upload-sarif` and findings appear as
+code-scanning annotations on the pull request that introduced them. This repo's
+own `Policy Lint` job does exactly that.
+
+### Lint rules
+
+Severity is a function of provability. `error` means the document contains
+configuration that can never take effect under the spec's own rules; `warning`
+means a construct defeats something else the same document declares; `info`
+means the construct is coherent but easy to arrive at by accident. Two codes
+(`L016`, `L018`) report at two severities for exactly that reason — see their
+rows.
+
+| Code | Level | Rule | Why it fires |
+|---|---|---|---|
+| `E000` | error | file-unreadable | The path does not exist, or the file is not readable UTF-8. Nothing was linted. |
+| `E001` | error | parse-error | YAML parsing or deserialization failed. HushSpec rejects unknown keys, so a typo in a field name lands here rather than being silently ignored. |
+| `E002` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
+| `L001` | warning | empty-rule-block | The block is enabled but declares nothing to allow or deny, so it makes no decision. A block that looks like enforcement and is not is worse than an absent one. |
+| `L002` | warning | overlapping-patterns | Sampled synthetic targets matched two patterns in the same list. Overlap is not itself a defect, but a redundant pair is dead weight. |
+| `L003` | warning | shadowed-exception | A `forbidden_paths` exception re-permits a path that nothing denies, so it has no effect. |
+| `L004` | warning | overly-broad-allow | `allow: ["*"]` permits every target, which makes the rest of the list decorative. |
+| `L006` | warning | regex-complexity | Nested quantifiers are a ReDoS risk; very long or heavily alternated patterns are hard to review. |
+| `L007` | info | disabled-rule | `enabled: false` makes a block inert, which **permits** what it would otherwise govern. Reported for all twelve rule blocks, so a disabled control is never invisible. |
+| `L008` | warning | duplicate-pattern | A byte-identical repeat of an earlier entry contributes nothing. The one finding whose removal is provably decision-neutral, so `--fix` always applies it. |
+| `L009` | info | missing-secret-patterns | Without secret detection, a `file_write` carrying a credential is indistinguishable from any other write. |
+| `L010` | warning | unreachable-allow | Block takes precedence over allow, so an entry in both can never decide anything. |
+| `L011` | warning | unmapped-rule-block | Once a policy maps controls, an unmapped block is enforcement with no stated reason. Policies that map nothing are silent. |
+| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing — a false compliance claim. |
+| `L013` | warning | unregistered-control | The framework is not in `spec/registries/frameworks.yaml`, or the control id does not match that framework's pattern. The registry is advisory, so this is an unverifiable claim, not an invalid document. |
+| `L014` | warning / info | credential-paths-uncovered | `.env`, `.ssh`, `.aws`, `.gnupg`, `.kube` and `id_rsa` are where agent credentials actually live, and the message names the ones a denylist does not reach. A policy running a `path_allowlist` is silent (everything outside it is already denied). A policy with **neither** block reports `info`: a capability-scoped document meant to be composed onto a base legitimately says nothing about the filesystem. |
+| `L015` | warning | under-graded-credential-pattern | Severity drives what an engine does with a match, so a pattern that recognizes an AWS key id (`AKIA`/`ASIA`), a GitHub token (`gh[opsur]_`, `github_pat_`), a PEM private key header or an OpenAI `sk-` key and grades it below `critical` has downgraded a credential leak to a note. |
+| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect — they become dead — and reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
+| `L017` | warning | permissive-default | `egress.default: allow` permits every host outside `block`, making the allow list decorative; `tool_access.default: allow` with empty `block` and `require_confirmation` permits every tool. Supersedes `L005`, which reported the same shape as `info` and only when the allow list was non-empty; `L005` is retired and will not be reused. |
+| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
+| `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
+| `L020` | info | inert-condition | The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. Listing all seven days is likewise the default. An `all_of`/`any_of` with no members is always true. (There is no "never true" window to report: core spec 3.13 keeps a block active when a window cannot be evaluated.) |
 
 ## `h2h fmt`
 
