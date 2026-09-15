@@ -650,6 +650,6 @@ def evaluate_with_context(
     The explicit *context* replaces ``action.context``; each entry in
     *conditions* is ANDed with its rule block's own ``when`` (core spec 3.13).
     """
-    from hushspec.evaluate import evaluate_traced
+    from hushspec.compiled import compiled_for_spec
 
-    return evaluate_traced(spec, action, context, conditions).result
+    return compiled_for_spec(spec).evaluate_with_context(action, context, conditions)

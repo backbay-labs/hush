@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
-from hushspec.detection import evaluate_with_detection
+from hushspec.compiled import CompiledPolicy, compile_policy
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
@@ -280,6 +280,15 @@ class HushGuard:
             # ever did, it must not be the document that failed verification.
             from hushspec.evaluate import panic_policy
             self._policy = panic_policy()
+        # Compile once, here: the guard evaluates the same document over and
+        # over, so its patterns, matchers and conditions are prepared at load
+        # time rather than per action. Lenient, because a pattern outside the
+        # regex profile must deny the actions that reach it (the reference
+        # behaviour), not stop the guard from loading.
+        self._compiled = compile_policy(
+            self._resolution if self._resolution is not None else self._policy,
+            strict=False,
+        )
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
         self._policy_hash: Optional[str] = (
@@ -419,6 +428,16 @@ class HushGuard:
         """Why the guard is denying everything, or ``None`` when it is not."""
         return self._refusal
 
+    @property
+    def compiled(self) -> CompiledPolicy:
+        """The compiled policy in force, as every evaluation sees it.
+
+        Recompiled on :meth:`swap_policy`; for a guard that is refusing an
+        unverified policy this is the deny-all backstop, not the document that
+        failed to verify.
+        """
+        return self._compiled
+
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
         # Always routes through _run_evaluation() (sink or not) so this is
         # detection-aware the same way gate()/check()/enforce() are -- a
@@ -518,14 +537,12 @@ class HushGuard:
         if self._refusal is not None:
             return self._refused_evaluation(action)
         if self._sink is not None:
-            from hushspec.receipt import evaluate_audited
-
-            # evaluate_audited() routes through the detection pipeline itself,
-            # so the receipt's decision is already the one an enforcement point
+            # The audited path routes through the detection pipeline itself, so
+            # the receipt's decision is already the one an enforcement point
             # acts on -- identical to the sink-free path below, which is the
             # same pipeline without the recording.
-            receipt = evaluate_audited(
-                self._resolution, action, self._audit, self._audit_context()
+            receipt = self._compiled.evaluate_audited(
+                action, self._audit, self._audit_context(), self._resolution
             )
             result = EvaluationResult(
                 decision=receipt.decision,
@@ -536,10 +553,10 @@ class HushGuard:
             )
             return result, receipt.duration_us or 0, receipt
         start_ns = time.perf_counter_ns()
-        # evaluate_with_detection() is an exact no-op unless the policy
-        # carries an extensions.detection block, so every non-detection
-        # policy behaves identically to a plain evaluate() call here.
-        result = evaluate_with_detection(self._policy, action).evaluation
+        # The detection pipeline is an exact no-op unless the policy carries an
+        # extensions.detection block, so every non-detection policy behaves
+        # identically to a plain evaluate() call here.
+        result = self._compiled.evaluate_with_detection(action).evaluation
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
         return result, duration_us, None
 
@@ -632,8 +649,12 @@ class HushGuard:
         # that is already refusing, which keeps refusing.
         resolution = self._resolve(new_policy)
         resolved = resolution.spec
+        # Compile before anything is swapped in: the guard never holds a
+        # policy it has not prepared.
+        compiled = compile_policy(resolution, strict=False)
         previous_hash = self._policy_hash
         self._policy = resolved
+        self._compiled = compiled
         self._resolution = resolution
         # A swap that verifies clears an earlier refusal: the guard now holds a
         # policy it was able to prove.
