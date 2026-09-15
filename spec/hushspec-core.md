@@ -63,6 +63,8 @@ The `extends` field is a single string reference to a base policy document. Reso
 
 A **resolved document** is the output of merging the entire `extends` chain (Section 4). A resolved document MUST NOT contain the `extends` field and MUST NOT contain the `merge_strategy` field. Engines MUST evaluate only resolved documents: evaluating a document whose `extends` reference has not been resolved silently drops the base policy and is a conformance failure. An engine that cannot resolve a reference MUST refuse to evaluate the document rather than evaluate the child alone.
 
+The identity of a resolved document is its **content hash**, defined by the Canonical Form specification (`hushspec-canonical.md`): a deterministic projection of the resolved document with schema defaults made explicit, serialized per RFC 8785 and hashed with SHA-256. Decision receipts (`hushspec-receipt.md`) and policy signatures (`hushspec-signing.md`) both identify a policy by that hash, never by file bytes or by an engine-specific serialization.
+
 ### 2.4 YAML Profile
 
 HushSpec documents use a restricted YAML profile so that every conformant parser accepts and rejects the same byte sequences.

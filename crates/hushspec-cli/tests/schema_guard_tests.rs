@@ -39,5 +39,5 @@ fn every_schema_meta_validates_and_id_matches_filename() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 7, "expected the 7 published schemas");
+    assert_eq!(checked, 8, "expected the 8 published schemas");
 }

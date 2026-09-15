@@ -1,0 +1,20 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.2: every rule block present but empty; each materializes all of its schema\
+  \ defaults (enabled, arrays, enums, numbers) while fields without defaults stay absent"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "forbidden_paths": {}
+    "path_allowlist": {}
+    "egress": {}
+    "secret_patterns": {}
+    "patch_integrity": {}
+    "shell_commands": {}
+    "tool_access": {}
+    "computer_use": {}
+    "remote_desktop_channels": {}
+    "input_injection": {}
+    "browser_automation": {}
+    "code_execution": {}
+canonical: "{\"hushspec\":\"0.1.0\",\"rules\":{\"browser_automation\":{\"allowed_domains\":[],\"allowed_verbs\":[],\"blocked_domains\":[],\"credential_detection\":true,\"enabled\":false,\"extra_credential_patterns\":[]},\"code_execution\":{\"enabled\":false,\"language_allowlist\":[],\"module_denylist\":[],\"network_access\":false},\"computer_use\":{\"allowed_actions\":[],\"enabled\":false,\"mode\":\"guardrail\"},\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true},\"forbidden_paths\":{\"enabled\":true,\"exceptions\":[],\"patterns\":[]},\"input_injection\":{\"allowed_types\":[],\"enabled\":false,\"require_postcondition_probe\":false},\"patch_integrity\":{\"enabled\":true,\"forbidden_patterns\":[],\"max_additions\":1000,\"max_deletions\":500,\"max_imbalance_ratio\":10,\"require_balance\":false},\"path_allowlist\":{\"enabled\":false,\"patch\":[],\"read\":[],\"write\":[]},\"remote_desktop_channels\":{\"audio\":true,\"clipboard\":false,\"drive_mapping\":false,\"enabled\":false,\"file_transfer\":false},\"secret_patterns\":{\"enabled\":true,\"patterns\":[],\"skip_paths\":[]},\"shell_commands\":{\"enabled\":true,\"forbidden_patterns\":[]},\"tool_access\":{\"allow\":[],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"require_confirmation\":[]}}}"
+content_hash: "sha256:7f8c81b8679f4d308f65281a183d68794bfe823846d3f3af70f1133de3b17203"

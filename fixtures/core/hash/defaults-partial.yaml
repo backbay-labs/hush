@@ -1,0 +1,18 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.2: defaults fill only the absent fields of a present block; written values\
+  \ are kept verbatim and absent blocks are not invented"
+"policy":
+  "hushspec": "0.1.0"
+  "name": "defaults-partial"
+  "rules":
+    "egress":
+      "allow":
+      - "api.example.com"
+      "default": "allow"
+    "forbidden_paths":
+      "patterns":
+      - "**/.env"
+    "tool_access":
+      "max_args_size": 4096
+canonical: "{\"hushspec\":\"0.1.0\",\"name\":\"defaults-partial\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"allow\",\"enabled\":true},\"forbidden_paths\":{\"enabled\":true,\"exceptions\":[],\"patterns\":[\"**/.env\"]},\"tool_access\":{\"allow\":[],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"max_args_size\":4096,\"require_confirmation\":[]}}}"
+content_hash: "sha256:591a4f1a2537e631919673a68b44d9cbe47ffb5450e65dba1584be69bd0e7c57"

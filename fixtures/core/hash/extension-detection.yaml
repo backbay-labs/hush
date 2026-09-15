@@ -1,0 +1,12 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.4: detection projected against the detection schema; each present detector\
+  \ materializes its thresholds and limits"
+"policy":
+  "hushspec": "0.1.0"
+  "extensions":
+    "detection":
+      "prompt_injection":
+        "block_at_or_above": "high"
+      "jailbreak": {}
+canonical: "{\"extensions\":{\"detection\":{\"jailbreak\":{\"block_threshold\":80,\"enabled\":true,\"max_input_bytes\":200000,\"warn_threshold\":50},\"prompt_injection\":{\"block_at_or_above\":\"high\",\"enabled\":true,\"max_scan_bytes\":200000,\"warn_at_or_above\":\"suspicious\"}}},\"hushspec\":\"0.1.0\"}"
+content_hash: "sha256:14566a7aaad7c0959618e6806878165dd02696dd686cd76bf4d9bba425441ef0"

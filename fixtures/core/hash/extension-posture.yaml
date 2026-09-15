@@ -1,0 +1,28 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.4: posture extension projected against the posture schema; states is a map\
+  \ whose values are projected, transitions keep `on` as a string key (YAML 1.2 Core)"
+"policy":
+  "hushspec": "0.1.0"
+  "extensions":
+    "posture":
+      "initial": "normal"
+      "states":
+        "normal":
+          "description": "default"
+          "capabilities":
+          - "egress"
+          - "tool_call"
+          "budgets":
+            "tool_calls": 100
+        "locked":
+          "capabilities": []
+      "transitions":
+      - "from": "normal"
+        "to": "locked"
+        "on": "secret_detected"
+      - "from": "locked"
+        "to": "normal"
+        "on": "operator_reset"
+        "after": "1h"
+canonical: "{\"extensions\":{\"posture\":{\"initial\":\"normal\",\"states\":{\"locked\":{},\"normal\":{\"budgets\":{\"tool_calls\":100},\"capabilities\":[\"egress\",\"tool_call\"],\"description\":\"default\"}},\"transitions\":[{\"from\":\"normal\",\"on\":\"secret_detected\",\"to\":\"locked\"},{\"after\":\"1h\",\"from\":\"locked\",\"on\":\"operator_reset\",\"to\":\"normal\"}]}},\"hushspec\":\"0.1.0\"}"
+content_hash: "sha256:62760db33c7edcf9c90a8dc8801a9416e4b2931b4c4cd6e24ce5bde7228fd1c0"

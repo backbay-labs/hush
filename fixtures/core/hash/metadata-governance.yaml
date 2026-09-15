@@ -1,0 +1,23 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.1: governance metadata is part of the canonical form (none of its fields have\
+  \ defaults, so it is emitted exactly as written, keys sorted)"
+"policy":
+  "hushspec": "0.1.0"
+  "name": "metadata-governance"
+  "description": "Policy with a full governance block"
+  "metadata":
+    "policy_version": 3
+    "author": "security@example.com"
+    "approved_by": "ciso@example.com"
+    "approval_date": "2026-09-01"
+    "classification": "confidential"
+    "change_ticket": "CHG-0042"
+    "lifecycle_state": "approved"
+    "effective_date": "2026-09-15"
+    "expiry_date": "2027-09-15"
+  "rules":
+    "egress":
+      "allow":
+      - "api.example.com"
+canonical: "{\"description\":\"Policy with a full governance block\",\"hushspec\":\"0.1.0\",\"metadata\":{\"approval_date\":\"2026-09-01\",\"approved_by\":\"ciso@example.com\",\"author\":\"security@example.com\",\"change_ticket\":\"CHG-0042\",\"classification\":\"confidential\",\"effective_date\":\"2026-09-15\",\"expiry_date\":\"2027-09-15\",\"lifecycle_state\":\"approved\",\"policy_version\":3},\"name\":\"metadata-governance\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true}}}"
+content_hash: "sha256:8432a0aa168ca1ebba23510cf8efe83de4b6659f32c2334954290320fdd8c7c3"

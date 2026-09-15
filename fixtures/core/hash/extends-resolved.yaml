@@ -1,0 +1,114 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.1 + core 2.3: a document that extends builtin:default is canonicalized only\
+  \ after resolution; `policy` is the resolved output (deep_merge: child rule blocks replace base blocks,\
+  \ absent ones inherit) and `extends`/`merge_strategy` never appear"
+"source":
+  "hushspec": "0.1.0"
+  "name": "extends-child"
+  "extends": "builtin:default"
+  "merge_strategy": "deep_merge"
+  "rules":
+    "egress":
+      "allow":
+      - "api.example.com"
+      "default": "block"
+    "shell_commands":
+      "enabled": false
+"policy":
+  "hushspec": "0.1.0"
+  "name": "extends-child"
+  "description": "Default security rules for AI agent execution"
+  "merge_strategy": "deep_merge"
+  "rules":
+    "forbidden_paths":
+      "enabled": true
+      "patterns":
+      - "**/.ssh/**"
+      - "**/id_rsa*"
+      - "**/id_ed25519*"
+      - "**/id_ecdsa*"
+      - "**/.aws/**"
+      - "**/.gnupg/**"
+      - "**/.kube/**"
+      - "**/.docker/**"
+      - "**/.npmrc"
+      - "**/.env"
+      - "**/.env.*"
+      - "**/.git-credentials"
+      - "**/.gitconfig"
+      - "**/.password-store/**"
+      - "**/pass/**"
+      - "**/.1password/**"
+      - "/etc/shadow"
+      - "/etc/passwd"
+      - "/etc/sudoers"
+      - "**/AppData/Roaming/Microsoft/Credentials/**"
+      - "**/AppData/Local/Microsoft/Credentials/**"
+      - "**/AppData/Roaming/Microsoft/Vault/**"
+      - "**/NTUSER.DAT"
+      - "**/Windows/System32/config/SAM"
+      - "**/Windows/System32/config/SECURITY"
+      - "**/Windows/System32/config/SYSTEM"
+      "exceptions": []
+    "egress":
+      "enabled": true
+      "allow":
+      - "api.example.com"
+      "block": []
+      "default": "block"
+    "secret_patterns":
+      "enabled": true
+      "patterns":
+      - "name": "aws_access_key"
+        "pattern": "(AKIA|ASIA)[0-9A-Z]{16}"
+        "severity": "critical"
+      - "name": "github_token"
+        "pattern": "gh[opsur]_[A-Za-z0-9]{36}"
+        "severity": "critical"
+      - "name": "github_fine_grained_pat"
+        "pattern": "github_pat_[0-9a-zA-Z_]{50,}"
+        "severity": "critical"
+      - "name": "openai_key"
+        "pattern": "sk-[A-Za-z0-9]{48}"
+        "severity": "critical"
+      - "name": "openai_project_key"
+        "pattern": "sk-proj-[A-Za-z0-9_]{20,}"
+        "severity": "critical"
+      - "name": "private_key"
+        "pattern": "-----BEGIN[ \\t\\n\\r\\f]+(RSA[ \\t\\n\\r\\f]+)?PRIVATE[ \\t\\n\\r\\f]+KEY-----"
+        "severity": "critical"
+      "skip_paths":
+      - "**/test/**"
+      - "**/tests/**"
+      - "**/*_test.*"
+      - "**/*.test.*"
+    "patch_integrity":
+      "enabled": true
+      "max_additions": 1000
+      "max_deletions": 500
+      "forbidden_patterns":
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls)"
+      - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check)"
+      - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
+      - "(?i)chmod[ \\t\\n\\r\\f]+777"
+      "require_balance": false
+      "max_imbalance_ratio": 10.0
+    "shell_commands":
+      "enabled": false
+      "forbidden_patterns": []
+    "tool_access":
+      "enabled": true
+      "allow": []
+      "block":
+      - "shell_exec"
+      - "run_command"
+      - "raw_file_write"
+      - "raw_file_delete"
+      "require_confirmation":
+      - "file_write"
+      - "file_delete"
+      - "git_push"
+      "default": "allow"
+      "max_args_size": 1048576
+canonical: "{\"description\":\"Default security rules for AI agent execution\",\"hushspec\":\"0.1.0\",\"name\":\"extends-child\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true},\"forbidden_paths\":{\"enabled\":true,\"exceptions\":[],\"patterns\":[\"**/.ssh/**\",\"**/id_rsa*\",\"**/id_ed25519*\",\"**/id_ecdsa*\",\"**/.aws/**\",\"**/.gnupg/**\",\"**/.kube/**\",\"**/.docker/**\",\"**/.npmrc\",\"**/.env\",\"**/.env.*\",\"**/.git-credentials\",\"**/.gitconfig\",\"**/.password-store/**\",\"**/pass/**\",\"**/.1password/**\",\"/etc/shadow\",\"/etc/passwd\",\"/etc/sudoers\",\"**/AppData/Roaming/Microsoft/Credentials/**\",\"**/AppData/Local/Microsoft/Credentials/**\",\"**/AppData/Roaming/Microsoft/Vault/**\",\"**/NTUSER.DAT\",\"**/Windows/System32/config/SAM\",\"**/Windows/System32/config/SECURITY\",\"**/Windows/System32/config/SYSTEM\"]},\"patch_integrity\":{\"enabled\":true,\"forbidden_patterns\":[\"(?i)disable[ \\\\t\\\\n\\\\r\\\\f_\\\\-]?(security|auth|ssl|tls)\",\"(?i)skip[ \\\\t\\\\n\\\\r\\\\f_\\\\-]?(verify|validation|check)\",\"(?i)rm[ \\\\t\\\\n\\\\r\\\\f]+-rf[ \\\\t\\\\n\\\\r\\\\f]+/\",\"(?i)chmod[ \\\\t\\\\n\\\\r\\\\f]+777\"],\"max_additions\":1000,\"max_deletions\":500,\"max_imbalance_ratio\":10,\"require_balance\":false},\"secret_patterns\":{\"enabled\":true,\"patterns\":[{\"name\":\"aws_access_key\",\"pattern\":\"(AKIA|ASIA)[0-9A-Z]{16}\",\"severity\":\"critical\"},{\"name\":\"github_token\",\"pattern\":\"gh[opsur]_[A-Za-z0-9]{36}\",\"severity\":\"critical\"},{\"name\":\"github_fine_grained_pat\",\"pattern\":\"github_pat_[0-9a-zA-Z_]{50,}\",\"severity\":\"critical\"},{\"name\":\"openai_key\",\"pattern\":\"sk-[A-Za-z0-9]{48}\",\"severity\":\"critical\"},{\"name\":\"openai_project_key\",\"pattern\":\"sk-proj-[A-Za-z0-9_]{20,}\",\"severity\":\"critical\"},{\"name\":\"private_key\",\"pattern\":\"-----BEGIN[ \\\\t\\\\n\\\\r\\\\f]+(RSA[ \\\\t\\\\n\\\\r\\\\f]+)?PRIVATE[ \\\\t\\\\n\\\\r\\\\f]+KEY-----\",\"severity\":\"critical\"}],\"skip_paths\":[\"**/test/**\",\"**/tests/**\",\"**/*_test.*\",\"**/*.test.*\"]},\"shell_commands\":{\"enabled\":false,\"forbidden_patterns\":[]},\"tool_access\":{\"allow\":[],\"block\":[\"shell_exec\",\"run_command\",\"raw_file_write\",\"raw_file_delete\"],\"default\":\"allow\",\"enabled\":true,\"max_args_size\":1048576,\"require_confirmation\":[\"file_write\",\"file_delete\",\"git_push\"]}}}"
+content_hash: "sha256:4ba13327b864978769de230b334c5354dcf5a770b59894f4725f09d50e4e8f4d"

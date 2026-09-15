@@ -1,0 +1,27 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.3: empty containers for fields without a schema default are equivalent to\
+  \ absence and omitted (empty when, empty extensions, empty metadata, empty days); arrays whose default\
+  \ is [] stay because the default is materialized anyway"
+"policy":
+  "hushspec": "0.1.0"
+  "name": "empty-containers"
+  "rules":
+    "forbidden_paths":
+      "patterns": []
+      "exceptions": []
+      "when": {}
+    "tool_access":
+      "allow": []
+      "when":
+        "all_of": []
+        "context": {}
+    "egress":
+      "when":
+        "time_window":
+          "start": "09:00"
+          "end": "17:00"
+          "days": []
+  "extensions": {}
+  "metadata": {}
+canonical: "{\"hushspec\":\"0.1.0\",\"name\":\"empty-containers\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"time_window\":{\"end\":\"17:00\",\"start\":\"09:00\",\"timezone\":\"UTC\"}}},\"forbidden_paths\":{\"enabled\":true,\"exceptions\":[],\"patterns\":[]},\"tool_access\":{\"allow\":[],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"require_confirmation\":[]}}}"
+content_hash: "sha256:f2bfef4cf75b47a4a77a345fc6f456e2b8f6cc083b01febfb7fe23c1e91ce5fe"
