@@ -84,3 +84,15 @@ cases:
     expect:
       decision: deny
       matched_rule: rules.shell_commands.forbidden_patterns[2]
+  - description: "allow foo inside an ASCII word (no ASCII word boundary)"
+    action:
+      type: shell_command
+      target: "xfooy"
+    expect:
+      decision: allow
+  - description: "allow newline between a and b (. never matches newline)"
+    action:
+      type: shell_command
+      target: "a\nb"
+    expect:
+      decision: allow

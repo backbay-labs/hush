@@ -24,7 +24,6 @@ Owning work packages: P1-03 (Rust), P1-04 (TypeScript), P1-05 (Python), P1-06 (G
 | `core/evaluation/tool-allowlist-deny.test.yaml` | D4 | core 3.7 | Reference evaluator falls through to `default` in allowlist mode |
 | `core/evaluation/egress-normalization-staged.test.yaml` | D5 | core 3.3, 3.14.2 | Port, case, trailing dot, URL, IDNA, single-label `*`, IP-literal rule; companion to the promoted `egress-normalization.test.yaml` |
 | `core/evaluation/path-normalization-staged.test.yaml` | D6 | core 3.14.1 | Lexical normalization; companion to the promoted `path-normalization.test.yaml` |
-| `core/evaluation/regex-dialect-staged.test.yaml` | D7 | core 3.14.3 | ASCII class escapes, `$`, `.`; requires P1-07 in all four SDKs |
 | `core/evaluation/severity-mapping-staged.test.yaml` | D8 | core 3.4 | `warn` severity and worst-severity-wins |
 | `core/evaluation/content-scan-egress-tool.test.yaml` | D8 | core 3.4, 5 | `egress` and `tool_call` scanned when `content` is present |
 | `core/evaluation/computer-use-guardrail-deny.test.yaml` | D9 | core 3.8 | **Supersedes** the "warn on unlisted action (guardrail mode)" case in `fixtures/core/evaluation/computer-use.test.yaml`; rewrite that case to `deny` on promotion |
