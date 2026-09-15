@@ -1,6 +1,12 @@
 import type { HushSpec } from './schema.js';
 import {
   BRIDGE_POLICY_KEYS_SET,
+  BROWSER_AUTOMATION_KEYS_SET,
+  CODE_EXECUTION_KEYS_SET,
+  CONDITION_KEYS_SET,
+  ORIGIN_EGRESS_OVERLAY_KEYS_SET,
+  ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET,
+  TIME_WINDOW_KEYS_SET,
   BRIDGE_TARGET_KEYS_SET,
   CLASSIFICATIONS_SET,
   COMPUTER_USE_KEYS_SET,
@@ -83,61 +89,8 @@ const BUDGET_NAMES = new Set([
   'file_writes', 'egress_calls', 'shell_commands', 'tool_calls', 'patches', 'custom_calls',
 ]);
 
-// BrowserAutomation / CodeExecution field sets, mirroring the
-// `$defs.BrowserAutomation` / `$defs.CodeExecution` definitions in
-// schemas/hushspec-core.v0.schema.json. These are declared locally (rather
-// than imported from generated/contract.ts, alongside the other *_KEYS_SET
-// constants) because scripts/generate_sdk_contracts.py does not yet emit
-// per-block key sets for these two rule blocks -- hand-adding them to the
-// generated file would desync it from `generate_sdk_contracts.py --check`,
-// which CI runs.
-const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set([
-  'when',
-  'enabled',
-  'allowed_domains',
-  'blocked_domains',
-  'allowed_verbs',
-  'credential_detection',
-  'extra_credential_patterns',
-]);
-// `$defs.Condition` / `$defs.TimeWindow` in schemas/hushspec-core.v0.schema.json.
-const CONDITION_KEYS_SET: ReadonlySet<string> = new Set([
-  'time_window',
-  'context',
-  'all_of',
-  'any_of',
-  'not',
-]);
 /** Recursion bound for the structural condition walk; see validateConditionShape. */
 const MAX_STRUCTURAL_CONDITION_DEPTH = 64;
-const TIME_WINDOW_KEYS_SET: ReadonlySet<string> = new Set([
-  'start',
-  'end',
-  'timezone',
-  'days',
-]);
-// Origin profile overlays (origins spec 4, D12): tri-state, no `enabled`/`when`.
-const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set([
-  'allow',
-  'block',
-  'require_confirmation',
-  'default',
-  'max_args_size',
-]);
-const ORIGIN_EGRESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set([
-  'allow',
-  'block',
-  'default',
-]);
-const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set([
-  'when',
-  'enabled',
-  'language_allowlist',
-  'module_denylist',
-  'network_access',
-  'max_execution_time_ms',
-  'max_scan_bytes',
-]);
 
 export function validate(spec: HushSpec): ValidationResult {
   return validateDocument(spec as unknown, {

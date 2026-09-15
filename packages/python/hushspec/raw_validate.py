@@ -7,6 +7,10 @@ from typing import Any, Callable
 from hushspec.conditions import Condition
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.generated_contract import (
+    BROWSER_AUTOMATION_KEYS,
+    CODE_EXECUTION_KEYS,
+    ORIGIN_EGRESS_OVERLAY_KEYS,
+    ORIGIN_TOOL_ACCESS_OVERLAY_KEYS,
     BRIDGE_POLICY_KEYS,
     BRIDGE_TARGET_KEYS,
     CLASSIFICATIONS,
@@ -50,45 +54,6 @@ from hushspec.generated_contract import (
 
 DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
 
-# BrowserAutomation / CodeExecution field sets, mirroring the
-# ``$defs.BrowserAutomation`` / ``$defs.CodeExecution`` definitions in
-# schemas/hushspec-core.v0.schema.json. These are declared locally (rather
-# than in generated_contract.py, alongside the other *_KEYS constants)
-# because scripts/generate_sdk_contracts.py does not yet emit per-block key
-# sets for these two rule blocks -- hand-adding them to the generated file
-# would desync it from `generate_sdk_contracts.py --check`, which CI runs.
-BROWSER_AUTOMATION_KEYS = frozenset(
-    (
-        "when",
-        "enabled",
-        "allowed_domains",
-        "blocked_domains",
-        "allowed_verbs",
-        "credential_detection",
-        "extra_credential_patterns",
-    )
-)
-CODE_EXECUTION_KEYS = frozenset(
-    (
-        "when",
-        "enabled",
-        "language_allowlist",
-        "module_denylist",
-        "network_access",
-        "max_execution_time_ms",
-        "max_scan_bytes",
-    )
-)
-
-# Origin profile rule-block overlays (origins spec 4, D12). These are
-# tri-state overrides, not full rule blocks: they carry no ``enabled`` and no
-# ``when``, and their ``default``/``max_args_size`` are optional with no
-# materialized value. Declared locally for the same reason as the two sets
-# above: scripts/generate_sdk_contracts.py does not emit them.
-ORIGIN_TOOL_ACCESS_OVERLAY_KEYS = frozenset(
-    ("allow", "block", "require_confirmation", "default", "max_args_size")
-)
-ORIGIN_EGRESS_OVERLAY_KEYS = frozenset(("allow", "block", "default"))
 
 
 def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:

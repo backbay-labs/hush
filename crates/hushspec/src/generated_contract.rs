@@ -76,6 +76,26 @@ pub const INPUT_INJECTION_KEYS: &[&str] = &[
     "allowed_types",
     "require_postcondition_probe",
 ];
+pub const BROWSER_AUTOMATION_KEYS: &[&str] = &[
+    "when",
+    "enabled",
+    "allowed_domains",
+    "blocked_domains",
+    "allowed_verbs",
+    "credential_detection",
+    "extra_credential_patterns",
+];
+pub const CODE_EXECUTION_KEYS: &[&str] = &[
+    "when",
+    "enabled",
+    "language_allowlist",
+    "module_denylist",
+    "network_access",
+    "max_execution_time_ms",
+    "max_scan_bytes",
+];
+pub const CONDITION_KEYS: &[&str] = &["time_window", "context", "all_of", "any_of", "not"];
+pub const TIME_WINDOW_KEYS: &[&str] = &["start", "end", "timezone", "days"];
 pub const POSTURE_KEYS: &[&str] = &["initial", "states", "transitions"];
 pub const POSTURE_STATE_KEYS: &[&str] = &["description", "capabilities", "budgets"];
 pub const POSTURE_TRANSITION_KEYS: &[&str] = &["from", "to", "on", "after"];
@@ -102,6 +122,14 @@ pub const ORIGIN_MATCH_KEYS: &[&str] = &[
     "sensitivity",
     "actor_role",
 ];
+pub const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS: &[&str] = &[
+    "allow",
+    "block",
+    "require_confirmation",
+    "default",
+    "max_args_size",
+];
+pub const ORIGIN_EGRESS_OVERLAY_KEYS: &[&str] = &["allow", "block", "default"];
 pub const ORIGIN_DATA_KEYS: &[&str] = &[
     "allow_external_sharing",
     "redact_before_send",

@@ -45,6 +45,18 @@ export const REMOTE_DESKTOP_KEYS_SET: ReadonlySet<string> = new Set(REMOTE_DESKT
 export const INPUT_INJECTION_KEYS = ['when', 'enabled', 'allowed_types', 'require_postcondition_probe'] as const;
 export const INPUT_INJECTION_KEYS_SET: ReadonlySet<string> = new Set(INPUT_INJECTION_KEYS);
 
+export const BROWSER_AUTOMATION_KEYS = ['when', 'enabled', 'allowed_domains', 'blocked_domains', 'allowed_verbs', 'credential_detection', 'extra_credential_patterns'] as const;
+export const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set(BROWSER_AUTOMATION_KEYS);
+
+export const CODE_EXECUTION_KEYS = ['when', 'enabled', 'language_allowlist', 'module_denylist', 'network_access', 'max_execution_time_ms', 'max_scan_bytes'] as const;
+export const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set(CODE_EXECUTION_KEYS);
+
+export const CONDITION_KEYS = ['time_window', 'context', 'all_of', 'any_of', 'not'] as const;
+export const CONDITION_KEYS_SET: ReadonlySet<string> = new Set(CONDITION_KEYS);
+
+export const TIME_WINDOW_KEYS = ['start', 'end', 'timezone', 'days'] as const;
+export const TIME_WINDOW_KEYS_SET: ReadonlySet<string> = new Set(TIME_WINDOW_KEYS);
+
 export const POSTURE_KEYS = ['initial', 'states', 'transitions'] as const;
 export const POSTURE_KEYS_SET: ReadonlySet<string> = new Set(POSTURE_KEYS);
 
@@ -62,6 +74,12 @@ export const ORIGIN_PROFILE_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_PROFI
 
 export const ORIGIN_MATCH_KEYS = ['provider', 'tenant_id', 'space_id', 'space_type', 'visibility', 'external_participants', 'tags', 'sensitivity', 'actor_role'] as const;
 export const ORIGIN_MATCH_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_MATCH_KEYS);
+
+export const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS = ['allow', 'block', 'require_confirmation', 'default', 'max_args_size'] as const;
+export const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_TOOL_ACCESS_OVERLAY_KEYS);
+
+export const ORIGIN_EGRESS_OVERLAY_KEYS = ['allow', 'block', 'default'] as const;
+export const ORIGIN_EGRESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_EGRESS_OVERLAY_KEYS);
 
 export const ORIGIN_DATA_KEYS = ['allow_external_sharing', 'redact_before_send', 'block_sensitive_outputs'] as const;
 export const ORIGIN_DATA_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_DATA_KEYS);
