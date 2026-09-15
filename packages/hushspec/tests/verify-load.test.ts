@@ -263,7 +263,10 @@ rules:
     });
     expect(resolution.signature).toMatchObject({ verified: true });
     expect(resolution.signature?.key_id).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(resolution.signature?.signed_at).toMatch(/Z$/);
+    // `verified_at` is the verifier's clock, not the envelope's `signed_at`.
+    expect(resolution.signature?.verified_at).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+    );
     // The builtin hop is part of the engine and needs no envelope.
     expect(resolution.chain[0]!.source).toBe('builtin:strict');
     expect(resolution.chain[0]!.signature).toBeUndefined();
