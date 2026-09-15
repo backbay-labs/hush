@@ -236,17 +236,11 @@ var canonicalSchemaRules = map[reflect.Type]canonicalRules{
 		// never matches (origins spec section 3, D12).
 		"match": canonicalPreserveEmpty,
 	},
-	reflect.TypeOf(OriginToolAccessOverlay{}): {
-		// Tri-state overlay fields: written-but-empty overrides the base
-		// block, absent inherits (origins spec section 4).
-		"allow":                canonicalPreserveEmpty,
-		"block":                canonicalPreserveEmpty,
-		"require_confirmation": canonicalPreserveEmpty,
-	},
-	reflect.TypeOf(OriginEgressOverlay{}): {
-		"allow": canonicalPreserveEmpty,
-		"block": canonicalPreserveEmpty,
-	},
+	// OriginToolAccessOverlay and OriginEgressOverlay need no entry: their
+	// overlay lists carry no default, are not required, and are not
+	// presence-significant. An absent overlay list inherits the base block and
+	// an empty one contributes nothing, which evaluate the same (origins spec
+	// section 4), so an empty one is omitted like any other empty container.
 	reflect.TypeOf(OriginDataPolicy{}): {
 		"allow_external_sharing":  withDefault(false),
 		"redact_before_send":      withDefault(false),
