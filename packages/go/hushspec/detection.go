@@ -2,9 +2,12 @@ package hushspec
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 type DetectionCategory string
@@ -50,13 +53,45 @@ func (r *DetectorRegistry) Register(detector Detector) {
 }
 
 // WithDefaultDetectors returns a registry pre-loaded with the built-in
-// regex-based injection, jailbreak, and exfiltration detectors.
+// detectors, in registration order: the regex-based prompt-injection detector,
+// the normative `heuristic_injection@1` detector (detection spec 3.5), then
+// the jailbreak and exfiltration detectors.
 func WithDefaultDetectors() *DetectorRegistry {
 	r := NewDetectorRegistry()
 	r.Register(NewRegexInjectionDetector())
+	r.Register(NewHeuristicInjectionDetector())
 	r.Register(NewRegexJailbreakDetector())
 	r.Register(NewRegexExfiltrationDetector())
 	return r
+}
+
+// NewDefaultDetectorRegistry is [WithDefaultDetectors] under the name the
+// other SDKs use for it.
+func NewDefaultDetectorRegistry() *DetectorRegistry { return WithDefaultDetectors() }
+
+// DetectorsFor returns every registered detector of category, in registration
+// order. The prompt-injection pipeline runs all of them -- the regex detector
+// and the normative heuristic detector -- each against the category's byte
+// budget and thresholds.
+func (r *DetectorRegistry) DetectorsFor(category DetectionCategory) []Detector {
+	var out []Detector
+	for _, detector := range r.detectors {
+		if detector.Category() == category {
+			out = append(out, detector)
+		}
+	}
+	return out
+}
+
+// DetectorFor returns the first registered detector whose category matches, or
+// nil.
+func (r *DetectorRegistry) DetectorFor(category DetectionCategory) Detector {
+	for _, detector := range r.detectors {
+		if detector.Category() == category {
+			return detector
+		}
+	}
+	return nil
 }
 
 func (r *DetectorRegistry) DetectAll(input string) []DetectionResult {
@@ -182,6 +217,233 @@ func (d *RegexInjectionDetector) Detect(input string) DetectionResult {
 		MatchedPatterns: matchedPatterns,
 		Explanation:     explanation,
 	}
+}
+
+// --------------------------------------------------------------------------
+// The normative heuristic detector (detection spec 3.5)
+// --------------------------------------------------------------------------
+
+// HeuristicDetectorName is the name of the normative heuristic detector;
+// `heuristic_injection@1` once the id version suffix is appended.
+const HeuristicDetectorName = "heuristic_injection"
+
+// HeuristicFamily is one signal family of `heuristic_injection@1`: a name, the
+// weight it contributes at most once, and the patterns any of which fires it.
+type HeuristicFamily struct {
+	Name     string
+	Weight   uint32
+	Patterns []string
+}
+
+// HeuristicFamilies are the signal families of `heuristic_injection@1`,
+// verbatim from detection spec 3.5.3. Patterns are written in the HushSpec
+// regex profile (ASCII classes, no lookaround) and matched against the
+// NFC-normalized, ASCII-case-folded input, so they are lowercase. A family
+// contributes its weight at most once; the sum is clamped to 100.
+//
+// This table is normative: it must stay byte-for-byte identical to
+// HEURISTIC_FAMILIES in crates/hushspec/src/detection.rs and to the spec table.
+var HeuristicFamilies = []HeuristicFamily{
+	{
+		Name:   "instruction_override",
+		Weight: 40,
+		Patterns: []string{
+			`ignore (all |any |the |every |your )?(previous|prior|above|earlier|preceding) (instructions?|prompts?|rules|guidance)`,
+			`disregard (all |any |the |your )?(system|previous|prior|earlier|above) (prompts?|instructions?|rules)`,
+			`forget (all |everything )?(you were told|your instructions|the instructions|previous instructions|prior instructions)`,
+			`(new|updated|revised|override) instructions?[ \t]*:`,
+		},
+	},
+	{
+		Name:   "role_switch",
+		Weight: 30,
+		Patterns: []string{
+			`you are now (a|an|the|my|in) `,
+			`act as (a|an|the|my|if you were) `,
+			`pretend (to be|you are|that you are|you have) `,
+			`from now on,? you (are|will|must|should)`,
+			`developer mode`,
+			`do anything now`,
+			`dan mode`,
+		},
+	},
+	{
+		Name:   "delimiter_smuggling",
+		Weight: 30,
+		Patterns: []string{
+			`<\|(im_start|im_end|system|endoftext)\|>`,
+			`\[/?inst\]`,
+			`##+[ \t]*(system|assistant|instructions)`,
+			`(begin|end) (system|hidden|secret) (prompt|instructions)`,
+			`<(system|assistant)>`,
+			`(---+|===+|` + "```" + `)[ \t]*(system|assistant|user)[ \t]*[:\n]`,
+		},
+	},
+	{
+		Name:   "exfiltration_coercion",
+		Weight: 35,
+		Patterns: []string{
+			`(reveal|print|show|output|repeat|display|dump|leak|expose) (me )?(all )?(of )?(the |your )?(hidden |initial |original |secret |system |confidential |full )?(system prompt|prompt|instructions|rules|configuration|guidelines)`,
+			`(send|post|upload|exfiltrate|forward) [^\n]{0,40} (to|at) https?://`,
+			`what (is|are|were) your (system prompt|initial instructions|hidden instructions|original instructions)`,
+		},
+	},
+	{
+		Name:   "encoded_payload",
+		Weight: 15,
+		Patterns: []string{
+			`[a-z0-9+/]{40,}={0,2}`,
+			`(\\u[0-9a-f]{4}){4,}`,
+			`(%[0-9a-f]{2}){8,}`,
+		},
+	},
+	{
+		Name:     "structural_punctuation",
+		Weight:   10,
+		Patterns: []string{`[!?]{4,}`},
+	},
+}
+
+// The computed `structural_uppercase` family (detection spec 3.5.2 step 3):
+// weight 10 when the NFC text has at least 40 ASCII letters and at least 60%
+// of them are uppercase. Measured before case folding, since folding erases it.
+const (
+	HeuristicUppercaseWeight     uint32 = 10
+	HeuristicUppercaseMinLetters        = 40
+	HeuristicUppercaseMinPercent        = 60
+)
+
+type compiledHeuristicFamily struct {
+	name     string
+	weight   uint32
+	patterns []*regexp.Regexp
+}
+
+// HeuristicInjectionDetector is the normative heuristic prompt-injection
+// detector of detection spec 3.5.
+//
+// Integer arithmetic over a fixed signal table, so every conformant engine
+// reproduces the score exactly: the input (already truncated to the policy's
+// `max_scan_bytes`) is NFC-normalized, the uppercase signal is measured, the
+// text is ASCII-case-folded, and each family whose pattern matches adds its
+// weight once. The receipt carries `score / 100`.
+type HeuristicInjectionDetector struct {
+	families []compiledHeuristicFamily
+}
+
+// NewHeuristicInjectionDetector compiles the normative family table through
+// the HushSpec regex profile. A pattern outside the profile is a defect in
+// this package, not in a policy, so it panics rather than degrading silently.
+func NewHeuristicInjectionDetector() *HeuristicInjectionDetector {
+	families := make([]compiledHeuristicFamily, 0, len(HeuristicFamilies))
+	for _, family := range HeuristicFamilies {
+		compiled := compiledHeuristicFamily{name: family.Name, weight: family.Weight}
+		for _, pattern := range family.Patterns {
+			re, err := CompileProfileRegex(pattern)
+			if err != nil {
+				panic(fmt.Sprintf("heuristic family %s pattern %q: %v", family.Name, pattern, err))
+			}
+			compiled.patterns = append(compiled.patterns, re)
+		}
+		families = append(families, compiled)
+	}
+	return &HeuristicInjectionDetector{families: families}
+}
+
+func (d *HeuristicInjectionDetector) Name() string { return HeuristicDetectorName }
+
+func (d *HeuristicInjectionDetector) Category() DetectionCategory {
+	return DetectionCategoryPromptInjection
+}
+
+// IntegerScore is the spec's integer score in 0..=100 and the families that
+// fired, in table order with the computed uppercase signal first.
+func (d *HeuristicInjectionDetector) IntegerScore(input string) (uint32, []MatchedPattern) {
+	normalized := norm.NFC.String(input)
+	var total uint32
+	var matched []MatchedPattern
+
+	if heuristicUppercaseSignal(normalized) {
+		total += HeuristicUppercaseWeight
+		matched = append(matched, MatchedPattern{
+			Name:   "structural_uppercase",
+			Weight: float64(HeuristicUppercaseWeight) / 100.0,
+		})
+	}
+
+	// Only ASCII letters fold (detection spec 3.5.2 step 4): asciiLower leaves
+	// every non-ASCII code point alone, where strings.ToLower would not.
+	folded := asciiLower(normalized)
+	for _, family := range d.families {
+		for _, pattern := range family.patterns {
+			loc := pattern.FindStringIndex(folded)
+			if loc == nil {
+				continue
+			}
+			total += family.weight
+			matched = append(matched, MatchedPattern{
+				Name:        family.name,
+				Weight:      float64(family.weight) / 100.0,
+				MatchedText: folded[loc[0]:loc[1]],
+			})
+			break
+		}
+	}
+
+	if total > 100 {
+		total = 100
+	}
+	return total, matched
+}
+
+func (d *HeuristicInjectionDetector) Detect(input string) DetectionResult {
+	score, matched := d.IntegerScore(input)
+	var explanation string
+	if len(matched) > 0 {
+		names := make([]string, len(matched))
+		for i, pattern := range matched {
+			names[i] = pattern.Name
+		}
+		plural := "ies"
+		if len(matched) == 1 {
+			plural = "y"
+		}
+		explanation = fmt.Sprintf("heuristic score %d/100 from %d signal famil%s: %s",
+			score, len(matched), plural, strings.Join(names, ", "))
+	}
+	return DetectionResult{
+		DetectorName:    d.Name(),
+		Category:        d.Category(),
+		Score:           float64(score) / 100.0,
+		MatchedPatterns: matched,
+		Explanation:     explanation,
+	}
+}
+
+// heuristicUppercaseSignal is the `structural_uppercase` family: at least 40
+// ASCII letters, at least 60% of them uppercase. Every ASCII letter counts,
+// including letters inside encoded runs.
+func heuristicUppercaseSignal(text string) bool {
+	letters, upper := 0, 0
+	for _, r := range text {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			letters++
+			upper++
+		case r >= 'a' && r <= 'z':
+			letters++
+		}
+	}
+	if letters < HeuristicUppercaseMinLetters {
+		return false
+	}
+	return upper*100 >= letters*HeuristicUppercaseMinPercent
+}
+
+// heuristicIntegerScore recovers the integer score from its normalized
+// `n / 100` form (exact: the normalized value is always n/100).
+func heuristicIntegerScore(score float64) int {
+	return int(math.Round(math.Max(score*100.0, 0)))
 }
 
 // RegexJailbreakDetector scores jailbreak attempts using a fixed set of
@@ -451,6 +713,7 @@ type TracedEvaluationWithDetection struct {
 // on every call.
 var (
 	defaultInjectionDetector = NewRegexInjectionDetector()
+	defaultHeuristicDetector = NewHeuristicInjectionDetector()
 	defaultJailbreakDetector = NewRegexJailbreakDetector()
 )
 
@@ -545,6 +808,11 @@ type compiledDetector struct {
 	scale          float64
 	blockThreshold float64
 	warnThreshold  float64
+	// minScore is the `heuristics.min_score` floor of detection spec 3.5.1,
+	// applied to the heuristic detector's integer score: below it the detector
+	// reports 0 with no contributing families. Zero for every other detector,
+	// where it is inert.
+	minScore int
 }
 
 // compiledDetection is the detection extension's detector registry, built once
@@ -602,6 +870,32 @@ func compileDetection(detection *DetectionExtension) *compiledDetection {
 			blockThreshold: detectionLevelFloor(blockLevel),
 			warnThreshold:  detectionLevelFloor(warnLevel),
 		})
+
+		// The normative heuristic detector runs alongside the regex one
+		// against the same byte budget and the same level floors, and records
+		// its own trace entry (detection spec 3.5). `heuristics.enabled: false`
+		// turns it off entirely: it then records no entry at all.
+		heuristicsEnabled := true
+		minScore := 0
+		if h := pi.Heuristics; h != nil {
+			if h.Enabled != nil {
+				heuristicsEnabled = *h.Enabled
+			}
+			if h.MinScore != nil {
+				minScore = *h.MinScore
+			}
+		}
+		if heuristicsEnabled {
+			compiled.add(compiledDetector{
+				detector:       defaultHeuristicDetector,
+				category:       DetectionCategoryPromptInjection,
+				maxBytes:       maxBytes,
+				scale:          1.0,
+				blockThreshold: detectionLevelFloor(blockLevel),
+				warnThreshold:  detectionLevelFloor(warnLevel),
+				minScore:       minScore,
+			})
+		}
 	}
 
 	if jb := detection.Jailbreak; jb != nil && (jb.Enabled == nil || *jb.Enabled) {
@@ -684,6 +978,13 @@ func (p *CompiledPolicy) EvaluateWithDetectionTraced(
 	for index := range p.detection.detectors {
 		wired := &p.detection.detectors[index]
 		result := wired.detector.Detect(truncateToBytes(content, wired.maxBytes))
+		if wired.minScore > 0 && heuristicIntegerScore(result.Score) < wired.minScore {
+			// Below the policy's floor the heuristic reports no signal
+			// (detection spec 3.5.4).
+			result.Score = 0
+			result.MatchedPatterns = nil
+			result.Explanation = ""
+		}
 		detections = append(detections, result)
 
 		scaled := result.Score * wired.scale
