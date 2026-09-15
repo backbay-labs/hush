@@ -95,15 +95,72 @@ const result = evaluate(spec, { type: 'egress', target: 'evil.example.com' });
 ### Audit Trail
 
 ```typescript
-import { parseOrThrow, evaluateAudited } from '@hushspec/core';
+import { parseOrThrow, resolveWithOptions, evaluateAudited } from '@hushspec/core';
 
-const receipt = evaluateAudited(spec, action, {
+const resolution = resolveWithOptions(parseOrThrow(policyYaml));
+const receipt = evaluateAudited(resolution, action, {
   enabled: true,
-  include_rule_trace: true,
-  redact_content: false,
+  includeRuleTrace: true,
+  recordDuration: true,
 });
-// receipt.decision, receipt.rule_evaluations, receipt.policy_summary
+// receipt.decision, receipt.rule_trace, receipt.policy.content_hash
 ```
+
+## Evidence chain
+
+A decision receipt proves one evaluation; a hash-linked log proves a sequence
+of them. Together with receipt signing they are what an auditor is handed.
+
+**Receipts** ([format 0.2](../../spec/hushspec-receipt.md)) record which
+resolved policy was in force (by canonical content hash), who acted, what was
+attempted, what the policy decided and why, which rule blocks and detectors
+actually ran, and what the enforcement point did. A receipt never carries
+action content -- only its `sha256:` hash and byte size -- so a receipt log is
+safe to hand over. `receiptHash()` is `sha256:` over the receipt's RFC 8785
+canonical form; it is what a log links and a signature covers.
+
+**The log** ([format 0.1](../../spec/hushspec-log.md)) is JSON Lines. Each
+entry names the previous entry's hash and carries its own, so an edited,
+deleted, inserted or reordered line is detectable from the file alone.
+`ChainedFileSink` is a `ReceiptSink`, so a guard writes one by construction,
+and it also records `policy_loaded` / `policy_swapped` events -- a reader maps
+every receipt to the policy in force by walking back to the nearest one.
+
+```typescript
+import { ChainedFileSink, HushGuard, verifyLogFiles } from '@hushspec/core';
+
+const sink = ChainedFileSink.open('./audit.jsonl');
+const guard = HushGuard.fromFile('./policy.yaml', {
+  sink,
+  actor: { agent_id: 'deploy-bot', session_id: run.id, principal: user.email },
+});
+
+guard.enforce({ type: 'egress', target: 'api.github.com' });
+
+const report = verifyLogFiles(['./audit.jsonl']);
+if (!report.ok) {
+  // report.break names the file, 1-based line, and what failed there.
+  throw new Error(`${report.break.file}:${report.break.line}: ${report.break.message}`);
+}
+```
+
+**Signing.** Give the sink a key and every entry carries an Ed25519 envelope
+over its `entry_hash`; pass a keyring to the verifier and every one is
+checked. A single receipt can also be signed on its own:
+
+```typescript
+import { signReceipt, verifyReceipt, loadKeyring } from '@hushspec/core';
+
+const signed = signReceipt(receipt, privateKeyPem, { signer: 'audit@example.com' });
+const outcome = verifyReceipt(signed, { keyring: loadKeyring(keyringJson) });
+// outcome.ok, or outcome.reason: 'content_hash_mismatch' when the receipt was edited
+```
+
+Rotation carries the chain forward: `sink.rotate('./audit-2.jsonl')` writes a
+`log_started` entry naming the previous file's last hash, and
+`verifyLogFiles([...])` checks the files in order. Truncation is not
+detectable from a file alone (log spec section 9) -- publish `sink.head()`
+periodically as an external anchor.
 
 ### Detection Pipeline
 
