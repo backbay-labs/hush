@@ -12,21 +12,21 @@ func strPtr(s string) *string { return &s }
 
 func TestConditionArrayVsArrayIntersection(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"user.groups": []interface{}{"admins", "ml-team"},
+		Context: map[string]any{
+			"user.groups": []any{"admins", "ml-team"},
 		},
 	}
 	// Actual context field is itself an array: match on a non-empty
 	// intersection with the expected array.
-	match := &RuntimeContext{User: map[string]interface{}{
-		"groups": []interface{}{"ml-team", "sre"},
+	match := &RuntimeContext{User: map[string]any{
+		"groups": []any{"ml-team", "sre"},
 	}}
 	if !EvaluateCondition(cond, match) {
 		t.Error("expected array-vs-array with a shared element to match (intersection)")
 	}
 
-	disjoint := &RuntimeContext{User: map[string]interface{}{
-		"groups": []interface{}{"sre", "oncall"},
+	disjoint := &RuntimeContext{User: map[string]any{
+		"groups": []any{"sre", "oncall"},
 	}}
 	if EvaluateCondition(cond, disjoint) {
 		t.Error("expected array-vs-array with no shared element to NOT match")
@@ -35,15 +35,15 @@ func TestConditionArrayVsArrayIntersection(t *testing.T) {
 
 func TestConditionNumberArrayMembership(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"session.action_count": []interface{}{1, 2, 3},
+		Context: map[string]any{
+			"session.action_count": []any{1, 2, 3},
 		},
 	}
-	member := &RuntimeContext{Session: map[string]interface{}{"action_count": 2}}
+	member := &RuntimeContext{Session: map[string]any{"action_count": 2}}
 	if !EvaluateCondition(cond, member) {
 		t.Error("expected numeric scalar that is a member of the expected array to match")
 	}
-	nonMember := &RuntimeContext{Session: map[string]interface{}{"action_count": 9}}
+	nonMember := &RuntimeContext{Session: map[string]any{"action_count": 9}}
 	if EvaluateCondition(cond, nonMember) {
 		t.Error("expected numeric scalar that is not a member to NOT match")
 	}
@@ -51,15 +51,15 @@ func TestConditionNumberArrayMembership(t *testing.T) {
 
 func TestConditionBoolArrayMembership(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"request.interactive": []interface{}{true},
+		Context: map[string]any{
+			"request.interactive": []any{true},
 		},
 	}
-	member := &RuntimeContext{Request: map[string]interface{}{"interactive": true}}
+	member := &RuntimeContext{Request: map[string]any{"interactive": true}}
 	if !EvaluateCondition(cond, member) {
 		t.Error("expected bool scalar that is a member of the expected array to match")
 	}
-	nonMember := &RuntimeContext{Request: map[string]interface{}{"interactive": false}}
+	nonMember := &RuntimeContext{Request: map[string]any{"interactive": false}}
 	if EvaluateCondition(cond, nonMember) {
 		t.Error("expected bool scalar that is not a member to NOT match")
 	}
@@ -72,32 +72,32 @@ func TestConditionBoolArrayMembership(t *testing.T) {
 func TestConditionIntFloatDistinction(t *testing.T) {
 	// expected 5 (int) vs actual 5.0 (float) -> false
 	if EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.count": 5}},
-		&RuntimeContext{Session: map[string]interface{}{"count": 5.0}},
+		&Condition{Context: map[string]any{"session.count": 5}},
+		&RuntimeContext{Session: map[string]any{"count": 5.0}},
 	) {
 		t.Error("expected int 5 must NOT match a float 5.0 actual")
 	}
 
 	// expected 5.0 (float) vs actual 5 (int) -> true
 	if !EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.count": 5.0}},
-		&RuntimeContext{Session: map[string]interface{}{"count": 5}},
+		&Condition{Context: map[string]any{"session.count": 5.0}},
+		&RuntimeContext{Session: map[string]any{"count": 5}},
 	) {
 		t.Error("expected float 5.0 must match an int 5 actual")
 	}
 
 	// expected [5] (int) vs actual [5.0] (float) -> false
 	if EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.counts": []interface{}{5}}},
-		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5.0}}},
+		&Condition{Context: map[string]any{"session.counts": []any{5}}},
+		&RuntimeContext{Session: map[string]any{"counts": []any{5.0}}},
 	) {
 		t.Error("expected int-array [5] must NOT match a float-array [5.0] actual")
 	}
 
 	// expected 5.0 (float) vs actual [5] (int array, membership) -> true
 	if !EvaluateCondition(
-		&Condition{Context: map[string]interface{}{"session.counts": 5.0}},
-		&RuntimeContext{Session: map[string]interface{}{"counts": []interface{}{5}}},
+		&Condition{Context: map[string]any{"session.counts": 5.0}},
+		&RuntimeContext{Session: map[string]any{"counts": []any{5}}},
 	) {
 		t.Error("expected float 5.0 must match membership in an int-array [5] actual")
 	}

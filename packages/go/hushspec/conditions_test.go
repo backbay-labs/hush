@@ -15,7 +15,7 @@ func ctxWithTimeStr(t string) *RuntimeContext {
 
 func ctxWithUserRole(role string) *RuntimeContext {
 	return &RuntimeContext{
-		User: map[string]interface{}{"role": role},
+		User: map[string]any{"role": role},
 	}
 }
 
@@ -35,7 +35,7 @@ func makeEgressSpecForCond() *HushSpec {
 
 func TestContextConditionMatchesEnvironment(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{"environment": "production"},
+		Context: map[string]any{"environment": "production"},
 	}
 	if !EvaluateCondition(cond, ctxWithEnv("production")) {
 		t.Error("expected condition to match production environment")
@@ -44,7 +44,7 @@ func TestContextConditionMatchesEnvironment(t *testing.T) {
 
 func TestContextConditionRejectsMismatch(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{"environment": "production"},
+		Context: map[string]any{"environment": "production"},
 	}
 	if EvaluateCondition(cond, ctxWithEnv("staging")) {
 		t.Error("expected condition to reject staging environment")
@@ -53,7 +53,7 @@ func TestContextConditionRejectsMismatch(t *testing.T) {
 
 func TestContextConditionMissingFieldFailsClosed(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{"user.role": "admin"},
+		Context: map[string]any{"user.role": "admin"},
 	}
 	if EvaluateCondition(cond, &RuntimeContext{}) {
 		t.Error("expected missing field to fail closed")
@@ -62,7 +62,7 @@ func TestContextConditionMissingFieldFailsClosed(t *testing.T) {
 
 func TestContextConditionMatchesUserRole(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{"user.role": "admin"},
+		Context: map[string]any{"user.role": "admin"},
 	}
 	if !EvaluateCondition(cond, ctxWithUserRole("admin")) {
 		t.Error("expected admin to match")
@@ -74,8 +74,8 @@ func TestContextConditionMatchesUserRole(t *testing.T) {
 
 func TestContextConditionArrayOrMatch(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{
-			"environment": []interface{}{"production", "staging"},
+		Context: map[string]any{
+			"environment": []any{"production", "staging"},
 		},
 	}
 	if !EvaluateCondition(cond, ctxWithEnv("production")) {
@@ -91,12 +91,12 @@ func TestContextConditionArrayOrMatch(t *testing.T) {
 
 func TestContextConditionScalarVsArrayMembership(t *testing.T) {
 	ctx := &RuntimeContext{
-		User: map[string]interface{}{
-			"groups": []interface{}{"engineering", "ml-team"},
+		User: map[string]any{
+			"groups": []any{"engineering", "ml-team"},
 		},
 	}
 	cond := &Condition{
-		Context: map[string]interface{}{"user.groups": "ml-team"},
+		Context: map[string]any{"user.groups": "ml-team"},
 	}
 	if !EvaluateCondition(cond, ctx) {
 		t.Error("expected ml-team to be found in groups array")
@@ -316,14 +316,14 @@ func TestTimezoneIsKnownAcceptsIANAAndFixedOffsets(t *testing.T) {
 func TestAllOfRequiresAllConditions(t *testing.T) {
 	cond := &Condition{
 		AllOf: []Condition{
-			{Context: map[string]interface{}{"environment": "production"}},
-			{Context: map[string]interface{}{"user.role": "admin"}},
+			{Context: map[string]any{"environment": "production"}},
+			{Context: map[string]any{"user.role": "admin"}},
 		},
 	}
 
 	fullCtx := &RuntimeContext{
 		Environment: "production",
-		User:        map[string]interface{}{"role": "admin"},
+		User:        map[string]any{"role": "admin"},
 	}
 	if !EvaluateCondition(cond, fullCtx) {
 		t.Error("expected both conditions to match")
@@ -337,8 +337,8 @@ func TestAllOfRequiresAllConditions(t *testing.T) {
 func TestAnyOfRequiresAnyCondition(t *testing.T) {
 	cond := &Condition{
 		AnyOf: []Condition{
-			{Context: map[string]interface{}{"environment": "production"}},
-			{Context: map[string]interface{}{"environment": "staging"}},
+			{Context: map[string]any{"environment": "production"}},
+			{Context: map[string]any{"environment": "staging"}},
 		},
 	}
 
@@ -356,7 +356,7 @@ func TestAnyOfRequiresAnyCondition(t *testing.T) {
 func TestNotNegatesCondition(t *testing.T) {
 	cond := &Condition{
 		Not: &Condition{
-			Context: map[string]interface{}{"environment": "production"},
+			Context: map[string]any{"environment": "production"},
 		},
 	}
 
@@ -378,11 +378,11 @@ func TestNestedCompoundConditions(t *testing.T) {
 					Timezone: "UTC",
 				},
 			},
-			{Context: map[string]interface{}{"environment": "production"}},
+			{Context: map[string]any{"environment": "production"}},
 			{
 				AnyOf: []Condition{
-					{Context: map[string]interface{}{"user.role": "admin"}},
-					{Context: map[string]interface{}{"user.role": "sre"}},
+					{Context: map[string]any{"user.role": "admin"}},
+					{Context: map[string]any{"user.role": "sre"}},
 				},
 			},
 		},
@@ -391,7 +391,7 @@ func TestNestedCompoundConditions(t *testing.T) {
 	ctx := &RuntimeContext{
 		Environment: "production",
 		CurrentTime: "2026-01-14T10:00:00Z",
-		User:        map[string]interface{}{"role": "admin"},
+		User:        map[string]any{"role": "admin"},
 	}
 	if !EvaluateCondition(cond, ctx) {
 		t.Error("expected nested compound to match")
@@ -400,7 +400,7 @@ func TestNestedCompoundConditions(t *testing.T) {
 	ctxViewer := &RuntimeContext{
 		Environment: "production",
 		CurrentTime: "2026-01-14T10:00:00Z",
-		User:        map[string]interface{}{"role": "viewer"},
+		User:        map[string]any{"role": "viewer"},
 	}
 	if EvaluateCondition(cond, ctxViewer) {
 		t.Error("expected viewer to fail nested compound")
@@ -420,7 +420,7 @@ func TestEmptyConditionAlwaysTrue(t *testing.T) {
 // rather than switching the control off.
 func TestMaxNestingDepthExceeded(t *testing.T) {
 	cond := &Condition{
-		Context: map[string]interface{}{"environment": "production"},
+		Context: map[string]any{"environment": "production"},
 	}
 	for i := 0; i < 12; i++ {
 		cond = &Condition{AllOf: []Condition{*cond}}
@@ -489,7 +489,7 @@ func TestEvaluateWithContextPassesWhenConditionMet(t *testing.T) {
 	action := &EvaluationAction{Type: "egress", Target: "api.openai.com"}
 	ctx := &RuntimeContext{Environment: "production"}
 	conditions := map[string]*Condition{
-		"egress": {Context: map[string]interface{}{"environment": "production"}},
+		"egress": {Context: map[string]any{"environment": "production"}},
 	}
 
 	result := EvaluateWithContext(spec, action, ctx, conditions)
@@ -503,7 +503,7 @@ func TestEvaluateWithContextSkipsRuleWhenConditionFails(t *testing.T) {
 	action := &EvaluationAction{Type: "egress", Target: "evil.example.com"}
 	ctx := &RuntimeContext{Environment: "staging"}
 	conditions := map[string]*Condition{
-		"egress": {Context: map[string]interface{}{"environment": "production"}},
+		"egress": {Context: map[string]any{"environment": "production"}},
 	}
 
 	result := EvaluateWithContext(spec, action, ctx, conditions)
@@ -517,7 +517,7 @@ func TestEvaluateWithContextEnforcesRuleWhenConditionMet(t *testing.T) {
 	action := &EvaluationAction{Type: "egress", Target: "evil.example.com"}
 	ctx := &RuntimeContext{Environment: "production"}
 	conditions := map[string]*Condition{
-		"egress": {Context: map[string]interface{}{"environment": "production"}},
+		"egress": {Context: map[string]any{"environment": "production"}},
 	}
 
 	result := EvaluateWithContext(spec, action, ctx, conditions)
@@ -543,7 +543,7 @@ func TestEvaluateWithContextMissingContextFailsClosed(t *testing.T) {
 	action := &EvaluationAction{Type: "egress", Target: "api.openai.com"}
 	ctx := &RuntimeContext{}
 	conditions := map[string]*Condition{
-		"egress": {Context: map[string]interface{}{"environment": "production"}},
+		"egress": {Context: map[string]any{"environment": "production"}},
 	}
 
 	result := EvaluateWithContext(spec, action, ctx, conditions)
@@ -558,15 +558,15 @@ func TestEvaluateWithContextCompoundCondition(t *testing.T) {
 	conditions := map[string]*Condition{
 		"egress": {
 			AllOf: []Condition{
-				{Context: map[string]interface{}{"environment": "production"}},
-				{Context: map[string]interface{}{"user.role": "admin"}},
+				{Context: map[string]any{"environment": "production"}},
+				{Context: map[string]any{"user.role": "admin"}},
 			},
 		},
 	}
 
 	fullCtx := &RuntimeContext{
 		Environment: "production",
-		User:        map[string]interface{}{"role": "admin"},
+		User:        map[string]any{"role": "admin"},
 	}
 	result := EvaluateWithContext(spec, action, fullCtx, conditions)
 	if result.Decision != DecisionDeny {
