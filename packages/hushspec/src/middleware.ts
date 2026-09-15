@@ -6,8 +6,14 @@ import { evaluateWithDetection } from './detection.js';
 import { parse } from './parse.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import nodePath from 'node:path';
-import type { LoadedSpec } from './resolve.js';
-import { createBuiltinLoader, createCompositeLoader, resolve as resolveSpec } from './resolve.js';
+import type { Loader, ResolveOptions, Resolution, SignatureStatus } from './resolve.js';
+import {
+  PolicyVerificationError,
+  createBuiltinLoader,
+  createCompositeLoader,
+  resolveWithOptions,
+} from './resolve.js';
+import { Keyring, keyringFromPublicKey } from './signing.js';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
@@ -43,16 +49,121 @@ export interface HushGuardOptions {
    * Loader for `extends` references. Defaults to builtin-only (or the
    * builtin+filesystem composite loader when `baseDir` is set).
    */
-  loader?: (reference: string, from?: string) => LoadedSpec;
+  loader?: Loader;
   /**
    * Directory that relative `extends` references resolve against.
    * `HushGuard.fromFile()` defaults it to the policy file's directory.
    */
   baseDir?: string;
+  /**
+   * The policy's own identity: the leaf's `source` in `resolution.chain`, and
+   * where the default locator looks for its `.sig`. `fromFile()` sets it to
+   * the policy's real path; a YAML string has none and is reported as
+   * `<inline>`.
+   */
+  source?: string;
+  /**
+   * Refuse to evaluate unless every non-`builtin:` hop of the `extends` chain
+   * is pinned by digest or validly signed (Signing specification section 6.5).
+   * Needs `keyring` or `trustedKeys`.
+   */
+  requireSignature?: boolean;
+  /** Trusted keys. Mutually exclusive with `trustedKeys`. */
+  keyring?: Keyring;
+  /** SPKI PEM public keys, assembled into a keyring. */
+  trustedKeys?: readonly string[];
+  /** Clock and rollback parameters for signature verification. */
+  verify?: ResolveOptions['verify'];
+  /**
+   * An already-verified {@link Resolution} to adopt instead of resolving
+   * again. `fromProvider()` uses it to carry the provider's own verified load
+   * into the guard: re-resolving there would hand the resolver a document that
+   * no longer has a source to find a signature next to.
+   */
+  resolution?: Resolution;
 }
 
-/** The `extends`-resolution half of {@link HushGuardOptions}. */
-export type PolicyResolveOptions = Pick<HushGuardOptions, 'loader' | 'baseDir'>;
+/**
+ * `matched_rule` for every denial issued by a guard that refused its policy.
+ *
+ * Distinct from `__hushspec_policy_provider__` (the policy could not be
+ * *obtained*) because this one means the policy was obtained and rejected --
+ * the receipt has to be able to say which.
+ */
+export const POLICY_SIGNATURE_RULE = '__hushspec_policy_signature__';
+
+/** The policy-loading half of {@link HushGuardOptions}. */
+export type PolicyResolveOptions = Pick<
+  HushGuardOptions,
+  'loader' | 'baseDir' | 'source' | 'requireSignature' | 'keyring' | 'trustedKeys' | 'verify'
+>;
+
+/**
+ * Build the keyring a guard verifies against. `trustedKeys` is the
+ * convenience form -- bare SPKI PEMs, no revocation or retirement -- and a
+ * real deployment passes a `keyring` loaded from a keyring document.
+ */
+function keyringOf(options?: PolicyResolveOptions): Keyring | undefined {
+  if (options?.keyring !== undefined && options.trustedKeys !== undefined) {
+    throw new Error('pass either `keyring` or `trustedKeys`, not both');
+  }
+  if (options?.keyring !== undefined) return options.keyring;
+  const pems = options?.trustedKeys;
+  if (pems === undefined) return undefined;
+  if (pems.length === 0) {
+    throw new Error('`trustedKeys` is empty: there would be nothing to verify against');
+  }
+  return new Keyring(pems.flatMap((pem) => keyringFromPublicKey(pem).keys));
+}
+
+function resolveOptionsOf(options?: PolicyResolveOptions): ResolveOptions {
+  const keyring = keyringOf(options);
+  return {
+    ...(options?.requireSignature === true ? { requireSignature: true } : {}),
+    ...(keyring === undefined ? {} : { keyring }),
+    ...(options?.verify === undefined ? {} : { verify: options.verify }),
+  };
+}
+
+/**
+ * Resolve a policy the way a guard must: chain merged, every hop hashed, and
+ * whatever the options require verified before the document is usable.
+ *
+ * @throws {PolicyVerificationError} when a hop fails to prove itself.
+ */
+export function resolvePolicyResolution(
+  policy: HushSpec,
+  options?: PolicyResolveOptions,
+): Resolution {
+  const load =
+    options?.loader ?? (options?.baseDir != null ? createCompositeLoader() : createBuiltinLoader());
+  // `resolveWithOptions()` treats `source` as the *file* a relative reference
+  // is resolved from, so without a real one point it at a placeholder inside
+  // baseDir.
+  const anchor =
+    options?.baseDir != null
+      ? nodePath.join(nodePath.resolve(options.baseDir), '<policy>')
+      : undefined;
+  const source = options?.source ?? anchor;
+  // Built before the try: a contradictory key configuration is the caller's
+  // mistake, not a chain that would not resolve, and should not be reported
+  // as one.
+  const resolveOptions = resolveOptionsOf(options);
+
+  try {
+    return resolveWithOptions(policy, {
+      source,
+      loader: anchoredLoader(load, source, anchor),
+      options: resolveOptions,
+    });
+  } catch (error) {
+    if (error instanceof PolicyVerificationError || policy.extends == null) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to resolve policy 'extends: ${policy.extends}': ${message}`);
+  }
+}
 
 /**
  * Resolve a policy's `extends` chain, or throw.
@@ -73,25 +184,28 @@ export function resolvePolicyOrThrow(
     return policy;
   }
 
-  const load =
-    options?.loader ?? (options?.baseDir != null ? createCompositeLoader() : createBuiltinLoader());
-  // `resolve()` treats `source` as the *file* a relative reference is resolved
-  // from, so point it at a placeholder inside baseDir.
-  const source =
-    options?.baseDir != null
-      ? nodePath.join(nodePath.resolve(options.baseDir), '<policy>')
-      : undefined;
-
-  const result = resolveSpec(policy, { source, load });
-  if (!result.ok) {
-    throw new Error(`Failed to resolve policy 'extends: ${policy.extends}': ${result.error}`);
-  }
-  if (result.value.extends != null) {
+  const resolved = resolvePolicyResolution(policy, options).spec;
+  if (resolved.extends != null) {
     throw new Error(
       `Failed to resolve policy 'extends: ${policy.extends}': resolver returned an unresolved policy`,
     );
   }
-  return result.value;
+  return resolved;
+}
+
+/**
+ * Keep `source` and `baseDir` doing their separate jobs.
+ *
+ * `source` names the policy -- the chain's leaf, and where the default locator
+ * looks for its `.sig` -- while `baseDir` says which directory the *leaf's own*
+ * relative `extends` resolves against, and a caller may legitimately set it to
+ * somewhere other than the policy's own directory. Rewriting `from` for the
+ * leaf's reference alone keeps both true; every reference below the leaf
+ * already resolves against the file that declared it.
+ */
+function anchoredLoader(load: Loader, source?: string, anchor?: string): Loader {
+  if (anchor === undefined || source === undefined || anchor === source) return load;
+  return (reference, from) => load(reference, from === source ? anchor : from);
 }
 
 const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
@@ -233,6 +347,18 @@ function buildFailureReceipt(
   };
 }
 
+/**
+ * The provider's own resolution for exactly this document, or `undefined`.
+ *
+ * Identity, not equality: a provider that reloaded between `load()` and this
+ * call would otherwise hand back a resolution describing a different document,
+ * and the guard would report -- and trust -- the wrong chain.
+ */
+function resolutionFor(provider: PolicyProvider, spec: HushSpec): Resolution | undefined {
+  const resolution = provider.resolution?.();
+  return resolution != null && resolution.spec === spec ? resolution : undefined;
+}
+
 /** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
 export class HushGuard {
   private policy: HushSpec;
@@ -245,6 +371,13 @@ export class HushGuard {
   private sink: ReceiptSink | null = null;
   private audit: AuditConfig = DEFAULT_AUDIT_CONFIG;
   private resolveOptions: PolicyResolveOptions;
+  private resolutionValue: Resolution | null = null;
+  /**
+   * Set when verification was required and did not pass. The guard still holds
+   * the document it was handed -- so `resolution` and the policy hash report
+   * what was loaded -- but every action is denied against it.
+   */
+  private refusal: { source: string; status: SignatureStatus } | null = null;
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
@@ -256,10 +389,20 @@ export class HushGuard {
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.sink = options?.sink ?? null;
     this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
-    this.resolveOptions = { loader: options?.loader, baseDir: options?.baseDir };
+    this.resolveOptions = {
+      loader: options?.loader,
+      baseDir: options?.baseDir,
+      source: options?.source,
+      requireSignature: options?.requireSignature,
+      keyring: options?.keyring,
+      trustedKeys: options?.trustedKeys,
+      verify: options?.verify,
+    };
     // Resolve before anything else touches the spec: a guard never holds an
     // unresolved document, and the receipt hash covers the resolved policy.
-    this.policy = resolvePolicyOrThrow(policy, this.resolveOptions);
+    const resolution = this.loadResolution(policy, options?.resolution);
+    this.policy = resolution.spec;
+    this.resolutionValue = resolution;
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
     if (options?.observer) {
@@ -282,15 +425,16 @@ export class HushGuard {
     if (!result.ok) {
       throw new Error(`Failed to parse policy: ${result.error}`);
     }
-    let baseDir = options?.baseDir;
-    if (baseDir == null) {
+    let source = options?.source;
+    if (source == null) {
       try {
-        baseDir = nodePath.dirname(realpathSync(path));
+        source = realpathSync(path);
       } catch {
-        baseDir = nodePath.dirname(nodePath.resolve(path));
+        source = nodePath.resolve(path);
       }
     }
-    return new HushGuard(result.value, { ...options, baseDir });
+    const baseDir = options?.baseDir ?? nodePath.dirname(source);
+    return new HushGuard(result.value, { ...options, baseDir, source });
   }
 
   /**
@@ -312,9 +456,58 @@ export class HushGuard {
     options?: HushGuardOptions,
   ): Promise<HushGuard> {
     const spec = await provider.load();
-    const guard = new HushGuard(spec, { ...options, provider });
-    provider.watch((newSpec) => guard.swapPolicy(newSpec));
+    // A provider resolves (and verifies) against the source it loaded from;
+    // re-doing it here would hand the resolver a document with no source to
+    // find a `.sig` next to, so adopt the provider's own resolution when it
+    // offers one for exactly this document.
+    const guard = new HushGuard(spec, {
+      ...options,
+      provider,
+      resolution: resolutionFor(provider, spec),
+    });
+    provider.watch((newSpec, resolution) =>
+      guard.swapPolicy(newSpec, resolution ?? resolutionFor(provider, newSpec)),
+    );
     return guard;
+  }
+
+  /**
+   * The chain, hashes and signature outcome of the policy in force. Stashed
+   * for the receipt's `policy.extends_chain` / `policy.signature`, which this
+   * SDK still emits in the 0.1 shape.
+   */
+  get resolution(): Resolution | null {
+    return this.resolutionValue;
+  }
+
+  /**
+   * Load a policy, and on a verification failure under `requireSignature`
+   * enter the refused state rather than throwing.
+   *
+   * Refusing beats throwing here because a guard that never came into
+   * existence emits nothing: no receipt, no observer event, no record that an
+   * agent tried to act under an unverified policy. Specification section 6.5
+   * requires exactly that record ("MUST refuse to evaluate ... recording
+   * `policy.signature.verified: false` with the reason in receipts it emits
+   * for refused actions"). Every other load failure -- a base that will not
+   * load, a chain that will not merge -- still throws: there is no document to
+   * refuse against.
+   */
+  private loadResolution(policy: HushSpec, adopted?: Resolution): Resolution {
+    if (adopted !== undefined) return adopted;
+    try {
+      return resolvePolicyResolution(policy, this.resolveOptions);
+    } catch (error) {
+      if (
+        error instanceof PolicyVerificationError &&
+        this.resolveOptions.requireSignature === true &&
+        error.resolution !== undefined
+      ) {
+        this.refusal = { source: error.source, status: error.status };
+        return error.resolution;
+      }
+      throw error;
+    }
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
@@ -452,6 +645,12 @@ export class HushGuard {
     if (isPanicActive() || result.matched_rule === '__hushspec_panic__') {
       return 'enforce';
     }
+    // A guard that could not verify its policy has no policy to monitor
+    // against: specification section 6.5 says refuse, and letting monitor mode
+    // wave the action through would be exactly the fail-open it forbids.
+    if (result.matched_rule === POLICY_SIGNATURE_RULE) {
+      return 'enforce';
+    }
     let matched = result.matched_rule;
     // detection.ts emits the bare literal 'detection' as matched_rule rather
     // than a hierarchical rule path (see packages/hushspec/src/detection.ts),
@@ -569,13 +768,21 @@ export class HushGuard {
     return { type: 'shell_command', target: command };
   }
 
-  swapPolicy(newPolicy: HushSpec): void {
-    // Hot-reload is a policy load like any other: an unresolved document is
-    // rejected here rather than swapped in. The throw propagates to the
-    // provider's `onError`, leaving the previously resolved policy in force.
-    const resolved = resolvePolicyOrThrow(newPolicy, this.resolveOptions);
+  swapPolicy(newPolicy: HushSpec, resolution?: Resolution): void {
+    // Hot-reload is a policy load like any other: an unresolved or unverified
+    // document is rejected here rather than swapped in. The throw propagates
+    // to the provider's `onError`, leaving the previously resolved policy in
+    // force -- which is why this path never enters the refused state: the
+    // policy already in force was verified, and keeping it is strictly safer
+    // than replacing it with one that was not.
+    const next =
+      resolution !== undefined && resolution.spec === newPolicy
+        ? resolution
+        : resolvePolicyResolution(newPolicy, this.resolveOptions);
+    const resolved = next.spec;
     const previousHash = this.policyHash;
     this.policy = resolved;
+    this.resolutionValue = next;
     if (this.observableEvaluator) {
       this.policyHash = computePolicyHash(resolved);
       this.observableEvaluator.notifyPolicyReloaded(
@@ -587,6 +794,15 @@ export class HushGuard {
   }
 
   private activePolicyResult(): HushSpec | EvaluationResult {
+    if (this.refusal != null) {
+      return {
+        decision: 'deny',
+        matched_rule: POLICY_SIGNATURE_RULE,
+        reason:
+          `policy signature verification failed for ${this.refusal.source}: ` +
+          `${this.refusal.status.reason ?? 'unverified'}`,
+      };
+    }
     if (this.provider == null) {
       return this.policy;
     }
