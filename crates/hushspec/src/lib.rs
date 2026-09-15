@@ -51,6 +51,7 @@ pub mod panic;
 pub mod policy;
 pub mod receipt;
 pub mod regex_profile;
+pub mod report;
 pub mod resolve;
 pub mod rules;
 pub mod schema;
@@ -104,6 +105,12 @@ pub use receipt::{
     unverified_policy_receipt,
 };
 pub use regex_profile::{RegexProfileError, compile_profile_regex};
+pub use report::{
+    ActionTypeRow, ActorRow, ChainSummary, ControlEvidenceRow, ControlsEvidence, DecisionTotals,
+    DetectorRow, FrameworkEvidence, LevelTotals, ModeTotals, OutcomeTotals, PolicyRow,
+    PolicyTimelineRow, REPORT_VERSION, ReasonCount, Report, ReportOptions, RuleBlockRow,
+    RulePathCount, SignatureSummary, Totals, Window, build_report, in_window,
+};
 pub use resolve::{
     BUILTIN_NAMES, ChainLink, LoadedSpec, MEMORY_SOURCE, Resolution, ResolveError, ResolveOptions,
     SignatureLocator, SignatureStatus, create_composite_loader, load_builtin, own_content_hash,
