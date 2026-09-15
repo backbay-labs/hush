@@ -13,7 +13,7 @@ const SUPPORTED_TEST_VERSIONS: &[&str] = &["0.1.0", "0.2.0"];
 
 /// Fixed evaluation time for `expect.receipt`: 2026-09-15T12:00:00.000Z, the
 /// clock `fixtures/receipts/expected/README.md` pins.
-const RECEIPT_CLOCK_MILLIS: u64 = 1_789_473_600_000;
+use crate::bundle::AUDIT_CLOCK_MILLIS as RECEIPT_CLOCK_MILLIS;
 
 /// Receipt members that are inputs rather than outcomes, never compared.
 const RECEIPT_IGNORED_MEMBERS: [&str; 3] = ["actor", "timestamp", "receipt_id"];

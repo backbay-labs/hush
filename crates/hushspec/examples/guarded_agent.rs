@@ -58,7 +58,12 @@ rules:
 "#;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let workdir = std::env::temp_dir().join("hushspec-guarded-agent");
+    // One directory per run. A fixed path under the shared temp directory is
+    // both a symlink target an attacker can pre-create and, because
+    // `ChainedFileSink` appends, a log that mixes this run's chain with the
+    // last one's -- so `h2h log verify` below would inspect neither.
+    let workdir =
+        std::env::temp_dir().join(format!("hushspec-guarded-agent-{}", std::process::id()));
     std::fs::create_dir_all(&workdir)?;
     let policy_path = workdir.join("policy.yaml");
     std::fs::write(&policy_path, POLICY)?;

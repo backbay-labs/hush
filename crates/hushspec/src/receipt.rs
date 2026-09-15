@@ -383,6 +383,10 @@ pub fn format_timestamp(instant: DateTime<Utc>) -> String {
 /// The shape is checked before parsing because `parse_from_rfc3339` also
 /// accepts offsets and other sub-second precisions, which receipts and
 /// envelopes do not.
+///
+/// Only the signing and bundle envelopes validate timestamps they were
+/// handed, so this is gated with them.
+#[cfg(feature = "signing")]
 pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
     let bytes = value.as_bytes();
     let shape = b"####-##-##T##:##:##.###Z";

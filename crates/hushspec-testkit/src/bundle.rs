@@ -10,6 +10,17 @@ pub const AUDIT_CLOCK: &str = "2026-09-15T12:00:00.000Z";
 /// case is `deterministic_uuid_v7(AUDIT_CLOCK_MILLIS, case index)`.
 pub const AUDIT_CLOCK_MILLIS: u64 = 1_789_473_600_000;
 
+/// [`AUDIT_CLOCK_MILLIS`] as an instant (2026-09-15T12:00:00Z).
+///
+/// Every vector that needs a clock reads it from here, so a receipt recorded
+/// by one part of the testkit and verified by another cannot disagree about
+/// what "now" was.
+#[must_use]
+pub fn audit_clock() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::from_timestamp_millis(AUDIT_CLOCK_MILLIS as i64)
+        .expect("AUDIT_CLOCK_MILLIS is a representable instant")
+}
+
 /// A portable set of differential test cases: policies with actions to
 /// evaluate. Serialized as JSON so every SDK replays identical cases.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
