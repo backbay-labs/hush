@@ -189,8 +189,8 @@ func (r *policyReloader) reloadLocked() (bool, error) {
 	}
 
 	if guard := r.options.Guard; guard != nil {
-		if err := guard.SwapPolicy(resolution); err != nil {
-			err := error(&PolicyLoadError{Source: r.provider.Source(), Err: err})
+		if swapErr := guard.SwapPolicy(resolution); swapErr != nil {
+			err := &PolicyLoadError{Source: r.provider.Source(), Err: swapErr}
 			r.report(err)
 			return false, err
 		}

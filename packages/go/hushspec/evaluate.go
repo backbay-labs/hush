@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/text/unicode/norm"
@@ -705,18 +706,18 @@ func evaluateToolAccess(
 	}
 
 	// 2. block: union of both lists.
-	if base != nil && containsNormalizedName(base.block, tool) {
+	if base != nil && slices.Contains(base.block, tool) {
 		return denyDecision("rules.tool_access.block", "tool is explicitly blocked")
 	}
-	if overlay != nil && containsNormalizedName(overlay.block, tool) {
+	if overlay != nil && slices.Contains(overlay.block, tool) {
 		return denyDecision(overlayPrefix+".block", "tool is explicitly blocked")
 	}
 
 	// 3. require_confirmation: union of both lists.
-	if base != nil && containsNormalizedName(base.requireConfirmation, tool) {
+	if base != nil && slices.Contains(base.requireConfirmation, tool) {
 		return warnDecision("rules.tool_access.require_confirmation", "tool requires confirmation")
 	}
-	if overlay != nil && containsNormalizedName(overlay.requireConfirmation, tool) {
+	if overlay != nil && slices.Contains(overlay.requireConfirmation, tool) {
 		return warnDecision(overlayPrefix+".require_confirmation", "tool requires confirmation")
 	}
 
@@ -724,10 +725,10 @@ func evaluateToolAccess(
 	baseAllow := base != nil && len(base.allow) > 0
 	overlayAllow := overlay != nil && len(overlay.allow) > 0
 	if baseAllow || overlayAllow {
-		if baseAllow && !containsNormalizedName(base.allow, tool) {
+		if baseAllow && !slices.Contains(base.allow, tool) {
 			return denyDecision("rules.tool_access.allow", "tool is not in the allowlist")
 		}
-		if overlayAllow && !containsNormalizedName(overlay.allow, tool) {
+		if overlayAllow && !slices.Contains(overlay.allow, tool) {
 			return denyDecision(overlayPrefix+".allow", "tool is not in the allowlist")
 		}
 		matchedRule := "rules.tool_access.allow"
@@ -1353,13 +1354,6 @@ func PathGlobMatches(pattern, path string) bool {
 	return re.MatchString(path)
 }
 
-// globMatches matches a raw path target against a path glob, normalizing the
-// target first. Kept for callers outside the evaluator; prefer
-// [PathGlobMatches] with an already-normalized path.
-func globMatches(pattern, target string) bool {
-	return PathGlobMatches(pattern, NormalizePath(target))
-}
-
 // ---------------------------------------------------------------------------
 // Host patterns (core spec 3.14.2)
 // ---------------------------------------------------------------------------
@@ -1387,11 +1381,11 @@ func NormalizeHost(target string) *string {
 
 	if strings.HasPrefix(authority, "[") {
 		rest := authority[1:]
-		close := strings.Index(rest, "]")
-		if close < 0 {
+		closing := strings.Index(rest, "]")
+		if closing < 0 {
 			return nil
 		}
-		inner := rest[:close]
+		inner := rest[:closing]
 		if inner == "" {
 			return nil
 		}
@@ -1737,19 +1731,4 @@ func splitLines(content string) []string {
 		lines[index] = strings.TrimSuffix(line, "\r")
 	}
 	return lines
-}
-
-func imbalanceRatio(additions, deletions int) float64 {
-	if additions == 0 && deletions == 0 {
-		return 0.0
-	}
-	if additions == 0 {
-		return float64(deletions)
-	}
-	if deletions == 0 {
-		return float64(additions)
-	}
-	larger := math.Max(float64(additions), float64(deletions))
-	smaller := math.Min(float64(additions), float64(deletions))
-	return larger / smaller
 }

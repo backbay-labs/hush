@@ -65,11 +65,11 @@ type RateCondition struct {
 // combined with AND semantics. Fail-closed: missing context fields evaluate
 // to false.
 type Condition struct {
-	TimeWindow *TimeWindowCondition   `yaml:"time_window,omitempty" json:"time_window,omitempty"`
-	Context    map[string]interface{} `yaml:"context,omitempty" json:"context,omitempty"`
-	AllOf      []Condition            `yaml:"all_of,omitempty" json:"all_of,omitempty"`
-	AnyOf      []Condition            `yaml:"any_of,omitempty" json:"any_of,omitempty"`
-	Not        *Condition             `yaml:"not,omitempty" json:"not,omitempty"`
+	TimeWindow *TimeWindowCondition `yaml:"time_window,omitempty" json:"time_window,omitempty"`
+	Context    map[string]any       `yaml:"context,omitempty" json:"context,omitempty"`
+	AllOf      []Condition          `yaml:"all_of,omitempty" json:"all_of,omitempty"`
+	AnyOf      []Condition          `yaml:"any_of,omitempty" json:"any_of,omitempty"`
+	Not        *Condition           `yaml:"not,omitempty" json:"not,omitempty"`
 	// Capability is true when the effective posture state -- the state the
 	// posture guard uses, after origins profile selection and the action's
 	// posture input -- grants it. Unevaluable, and therefore held, when the
@@ -82,13 +82,13 @@ type Condition struct {
 
 // RuntimeContext is the runtime context provided by the enforcement engine.
 type RuntimeContext struct {
-	User        map[string]interface{} `yaml:"user,omitempty" json:"user,omitempty"`
-	Environment string                 `yaml:"environment,omitempty" json:"environment,omitempty"`
-	Deployment  map[string]interface{} `yaml:"deployment,omitempty" json:"deployment,omitempty"`
-	Agent       map[string]interface{} `yaml:"agent,omitempty" json:"agent,omitempty"`
-	Session     map[string]interface{} `yaml:"session,omitempty" json:"session,omitempty"`
-	Request     map[string]interface{} `yaml:"request,omitempty" json:"request,omitempty"`
-	Custom      map[string]interface{} `yaml:"custom,omitempty" json:"custom,omitempty"`
+	User        map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
+	Environment string         `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Deployment  map[string]any `yaml:"deployment,omitempty" json:"deployment,omitempty"`
+	Agent       map[string]any `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Session     map[string]any `yaml:"session,omitempty" json:"session,omitempty"`
+	Request     map[string]any `yaml:"request,omitempty" json:"request,omitempty"`
+	Custom      map[string]any `yaml:"custom,omitempty" json:"custom,omitempty"`
 	// Counters are the engine-maintained counters `rate` conditions consult
 	// (core spec 3.13). The engine owns the window; HushSpec only compares.
 	Counters    map[string]uint64 `yaml:"counters,omitempty" json:"counters,omitempty"`
@@ -299,71 +299,68 @@ func dayAbbreviationCond(day int) string {
 // abbreviations, and the nesting depth. It returns one message per violation,
 // each prefixed with the rule path (for example `rules.egress.when`).
 func ValidateConditions(rules *Rules) []string {
+	var errs []string
+	for _, block := range ruleConditions(rules) {
+		errs = append(errs, ValidateCondition(block.when, "rules."+block.name+".when")...)
+	}
+	return errs
+}
+
+// conditionBlock pairs a rule block's name with the `when` it declared.
+type conditionBlock struct {
+	name string
+	when *Condition
+}
+
+// ruleConditions lists every rule block that declared a `when`, in the block
+// order of core spec 5 -- the order a document's violations are reported in.
+func ruleConditions(rules *Rules) []conditionBlock {
 	if rules == nil {
 		return nil
 	}
-	blocks := []struct {
-		name string
-		when *Condition
-	}{
-		{"forbidden_paths", nil},
-		{"path_allowlist", nil},
-		{"egress", nil},
-		{"secret_patterns", nil},
-		{"patch_integrity", nil},
-		{"shell_commands", nil},
-		{"tool_access", nil},
-		{"computer_use", nil},
-		{"remote_desktop_channels", nil},
-		{"input_injection", nil},
-		{"browser_automation", nil},
-		{"code_execution", nil},
-	}
-	if rules.ForbiddenPaths != nil {
-		blocks[0].when = rules.ForbiddenPaths.When
-	}
-	if rules.PathAllowlist != nil {
-		blocks[1].when = rules.PathAllowlist.When
-	}
-	if rules.Egress != nil {
-		blocks[2].when = rules.Egress.When
-	}
-	if rules.SecretPatterns != nil {
-		blocks[3].when = rules.SecretPatterns.When
-	}
-	if rules.PatchIntegrity != nil {
-		blocks[4].when = rules.PatchIntegrity.When
-	}
-	if rules.ShellCommands != nil {
-		blocks[5].when = rules.ShellCommands.When
-	}
-	if rules.ToolAccess != nil {
-		blocks[6].when = rules.ToolAccess.When
-	}
-	if rules.ComputerUse != nil {
-		blocks[7].when = rules.ComputerUse.When
-	}
-	if rules.RemoteDesktopChannels != nil {
-		blocks[8].when = rules.RemoteDesktopChannels.When
-	}
-	if rules.InputInjection != nil {
-		blocks[9].when = rules.InputInjection.When
-	}
-	if rules.BrowserAutomation != nil {
-		blocks[10].when = rules.BrowserAutomation.When
-	}
-	if rules.CodeExecution != nil {
-		blocks[11].when = rules.CodeExecution.When
-	}
-
-	var errs []string
-	for _, block := range blocks {
-		if block.when == nil {
-			continue
+	blocks := make([]conditionBlock, 0, blockCount)
+	add := func(name string, when *Condition) {
+		if when != nil {
+			blocks = append(blocks, conditionBlock{name: name, when: when})
 		}
-		errs = append(errs, ValidateCondition(block.when, fmt.Sprintf("rules.%s.when", block.name))...)
 	}
-	return errs
+	if rule := rules.ForbiddenPaths; rule != nil {
+		add("forbidden_paths", rule.When)
+	}
+	if rule := rules.PathAllowlist; rule != nil {
+		add("path_allowlist", rule.When)
+	}
+	if rule := rules.Egress; rule != nil {
+		add("egress", rule.When)
+	}
+	if rule := rules.SecretPatterns; rule != nil {
+		add("secret_patterns", rule.When)
+	}
+	if rule := rules.PatchIntegrity; rule != nil {
+		add("patch_integrity", rule.When)
+	}
+	if rule := rules.ShellCommands; rule != nil {
+		add("shell_commands", rule.When)
+	}
+	if rule := rules.ToolAccess; rule != nil {
+		add("tool_access", rule.When)
+	}
+	if rule := rules.ComputerUse; rule != nil {
+		add("computer_use", rule.When)
+	}
+	if rule := rules.RemoteDesktopChannels; rule != nil {
+		add("remote_desktop_channels", rule.When)
+	}
+	if rule := rules.InputInjection; rule != nil {
+		add("input_injection", rule.When)
+	}
+	if rule := rules.BrowserAutomation; rule != nil {
+		add("browser_automation", rule.When)
+	}
+	if rule := rules.CodeExecution; rule != nil {
+		add("code_execution", rule.When)
+	}
+	return blocks
 }
 
 // ValidateCondition validates one condition subtree rooted at path.
@@ -540,14 +537,14 @@ func resolveConditionLocation(tz string) *time.Location {
 	}
 
 	if strings.HasPrefix(tz, "+") {
-		offset, ok := parseTimezoneOffsetGo(tz[1:])
+		offset, ok := parseTimezoneOffset(tz[1:])
 		if !ok {
 			return nil
 		}
 		return time.FixedZone(tz, offset*60)
 	}
 	if strings.HasPrefix(tz, "-") {
-		offset, ok := parseTimezoneOffsetGo(tz[1:])
+		offset, ok := parseTimezoneOffset(tz[1:])
 		if !ok {
 			return nil
 		}
@@ -557,7 +554,7 @@ func resolveConditionLocation(tz string) *time.Location {
 	return nil
 }
 
-func parseTimezoneOffsetGo(s string) (int, bool) {
+func parseTimezoneOffset(s string) (int, bool) {
 	if idx := strings.Index(s, ":"); idx >= 0 {
 		hours, err := strconv.Atoi(s[:idx])
 		if err != nil {
@@ -576,17 +573,17 @@ func parseTimezoneOffsetGo(s string) (int, bool) {
 	return hours * 60, true
 }
 
-func checkContextMatch(expected map[string]interface{}, context *RuntimeContext) bool {
+func checkContextMatch(expected map[string]any, context *RuntimeContext) bool {
 	for key, expectedValue := range expected {
-		actual := resolveContextValueGo(key, context)
-		if !matchValueGo(actual, expectedValue) {
+		actual := resolveContextValue(key, context)
+		if !matchValue(actual, expectedValue) {
 			return false
 		}
 	}
 	return true
 }
 
-func resolveContextValueGo(path string, context *RuntimeContext) interface{} {
+func resolveContextValue(path string, context *RuntimeContext) any {
 	dotIdx := strings.Index(path, ".")
 	var topLevel, rest string
 	if dotIdx >= 0 {
@@ -638,7 +635,7 @@ func resolveContextValueGo(path string, context *RuntimeContext) interface{} {
 	}
 }
 
-func mapGet(m map[string]interface{}, key string) interface{} {
+func mapGet(m map[string]any, key string) any {
 	if m == nil {
 		return nil
 	}
@@ -651,7 +648,7 @@ func mapGet(m map[string]interface{}, key string) interface{} {
 // matches ONLY an integer-typed actual, while a float-shaped expected value
 // matches an integer or float actual by numeric value. Any other actual shape,
 // or a type mismatch, is not equal.
-func valuesEqual(actual, expected interface{}) bool {
+func valuesEqual(actual, expected any) bool {
 	switch ev := expected.(type) {
 	case string:
 		av, ok := actual.(string)
@@ -673,8 +670,8 @@ func valuesEqual(actual, expected interface{}) bool {
 // matchesScalarOrMembership compares an expected scalar with an actual value:
 // when the actual value is an array, the scalar must equal one of its elements
 // (membership); otherwise it is a plain scalar comparison.
-func matchesScalarOrMembership(actual, expected interface{}) bool {
-	if arr, ok := actual.([]interface{}); ok {
+func matchesScalarOrMembership(actual, expected any) bool {
+	if arr, ok := actual.([]any); ok {
 		for _, item := range arr {
 			if valuesEqual(item, expected) {
 				return true
@@ -691,7 +688,7 @@ func matchesScalarOrMembership(actual, expected interface{}) bool {
 // the actual value, so expected-array vs actual-array succeeds on a non-empty
 // intersection and expected-array vs actual-scalar succeeds on membership --
 // for string, number, and bool candidates alike.
-func matchValueGo(actual, expected interface{}) bool {
+func matchValue(actual, expected any) bool {
 	if actual == nil {
 		return false
 	}
@@ -699,7 +696,7 @@ func matchValueGo(actual, expected interface{}) bool {
 	switch ev := expected.(type) {
 	case string, bool, int, int64, float64:
 		return matchesScalarOrMembership(actual, expected)
-	case []interface{}:
+	case []any:
 		for _, candidate := range ev {
 			if matchesScalarOrMembership(actual, candidate) {
 				return true
@@ -714,7 +711,7 @@ func matchValueGo(actual, expected interface{}) bool {
 // matchIntNumber compares an integer-shaped expected value: it matches ONLY an
 // integer-typed actual (int/int64) with an equal value -- a float64 actual such
 // as 5.0 does NOT match, even when numerically equal.
-func matchIntNumber(actual interface{}, expected int64) bool {
+func matchIntNumber(actual any, expected int64) bool {
 	switch av := actual.(type) {
 	case int:
 		return int64(av) == expected
@@ -727,7 +724,7 @@ func matchIntNumber(actual interface{}, expected int64) bool {
 
 // matchFloatNumber compares a float-shaped expected value: it matches an
 // int/int64/float64 actual whose numeric value is equal.
-func matchFloatNumber(actual interface{}, expected float64) bool {
+func matchFloatNumber(actual any, expected float64) bool {
 	switch av := actual.(type) {
 	case int:
 		return float64(av) == expected

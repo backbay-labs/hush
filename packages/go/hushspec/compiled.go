@@ -697,15 +697,6 @@ func normalizeToolNames(names []string) []string {
 	return out
 }
 
-func containsNormalizedName(names []string, normalized string) bool {
-	for _, name := range names {
-		if name == normalized {
-			return true
-		}
-	}
-	return false
-}
-
 func compileOrigins(origins *OriginsExtension) *compiledOrigins {
 	compiled := &compiledOrigins{
 		defaultBehavior: originDefaultBehavior(origins),

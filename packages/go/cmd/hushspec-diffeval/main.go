@@ -219,14 +219,14 @@ func main() {
 		os.Exit(2)
 	}
 
-	spec := defaultAudit()
+	settings := defaultAudit()
 	if bundle.Audit != nil {
-		spec = bundle.Audit.withDefaults()
+		settings = bundle.Audit.withDefaults()
 	}
 	// Fail closed: audit inputs we cannot read have no reproducible receipts,
 	// and falling back to "now" would make this harness disagree with every
 	// other one while still looking like it answered.
-	audit, err := newAuditInputs(spec)
+	audit, err := newAuditInputs(settings)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(2)

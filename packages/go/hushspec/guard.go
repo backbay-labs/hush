@@ -238,7 +238,7 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 // a chain that will not merge, a pattern that does not compile -- is an error,
 // because there is no document to refuse against.
 func NewGuardFromFile(path string, options GuardOptions) (*Guard, error) {
-	resolution, refusal, err := resolveGuardPolicyFile(path, options)
+	resolution, refusal, err := resolveFileForGuard(path, options.resolveOptions(), options.Loader)
 	if err != nil {
 		return nil, err
 	}
@@ -288,20 +288,15 @@ func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard
 	return guard, nil
 }
 
-// resolveGuardPolicyFile resolves path under the guard's verification options.
+// resolveFileForGuard resolves path under the given verification options, so a
+// [FileProvider] refuses a policy exactly as a guard built straight from the
+// file does.
 //
 // A chain that would not verify under RequireSignature is resolved a second
 // time with the requirement lifted, purely to recover the evidence -- the
 // chain, the hashes and the failing hop's status -- that the refused guard
 // reports. The document is never treated as verified: the returned refusal is
 // what makes every action deny.
-func resolveGuardPolicyFile(path string, options GuardOptions) (*Resolution, *GuardRefusal, error) {
-	return resolveFileForGuard(path, options.resolveOptions(), options.Loader)
-}
-
-// resolveFileForGuard is [resolveGuardPolicyFile] over the resolver's own
-// options, so a [FileProvider] refuses a policy exactly as a guard built
-// straight from the file does.
 func resolveFileForGuard(
 	path string,
 	resolveOptions ResolveOptions,

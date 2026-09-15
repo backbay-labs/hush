@@ -101,6 +101,41 @@ func (r *DetectorRegistry) DetectAll(input string) []DetectionResult {
 	return results
 }
 
+// scorePatterns is the shared body of the three fixed-pattern detectors: every
+// pattern that matches contributes its weight once, the total is clamped to 1,
+// and the explanation names the patterns that fired. label is the word the
+// explanation uses for this detector's pattern set.
+func scorePatterns(patterns []detectionPattern, input, label string) (float64, []MatchedPattern, string) {
+	var matched []MatchedPattern
+	total := 0.0
+	for index := range patterns {
+		pattern := &patterns[index]
+		loc := pattern.regex.FindStringIndex(input)
+		if loc == nil {
+			continue
+		}
+		total += pattern.weight
+		matched = append(matched, MatchedPattern{
+			Name:        pattern.name,
+			Weight:      pattern.weight,
+			MatchedText: input[loc[0]:loc[1]],
+		})
+	}
+	if total > 1.0 {
+		total = 1.0
+	}
+	if len(matched) == 0 {
+		return total, nil, ""
+	}
+	names := make([]string, len(matched))
+	for index, pattern := range matched {
+		names[index] = pattern.Name
+	}
+	explanation := fmt.Sprintf(
+		"matched %d %s pattern(s): %s", len(matched), label, strings.Join(names, ", "))
+	return total, matched, explanation
+}
+
 type detectionPattern struct {
 	name     string
 	regex    *regexp.Regexp
@@ -176,43 +211,12 @@ func (d *RegexInjectionDetector) Category() DetectionCategory {
 }
 
 func (d *RegexInjectionDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d injection pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "injection")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }
@@ -472,43 +476,12 @@ func (d *RegexJailbreakDetector) Category() DetectionCategory {
 }
 
 func (d *RegexJailbreakDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d jailbreak pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "jailbreak")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }
@@ -578,43 +551,12 @@ func (d *RegexExfiltrationDetector) Category() DetectionCategory {
 }
 
 func (d *RegexExfiltrationDetector) Detect(input string) DetectionResult {
-	var matchedPatterns []MatchedPattern
-	totalWeight := 0.0
-
-	for _, p := range d.patterns {
-		loc := p.regex.FindStringIndex(input)
-		if loc != nil {
-			totalWeight += p.weight
-			matchedPatterns = append(matchedPatterns, MatchedPattern{
-				Name:        p.name,
-				Weight:      p.weight,
-				MatchedText: input[loc[0]:loc[1]],
-			})
-		}
-	}
-
-	score := totalWeight
-	if score > 1.0 {
-		score = 1.0
-	}
-
-	var explanation string
-	if len(matchedPatterns) > 0 {
-		names := make([]string, len(matchedPatterns))
-		for i, p := range matchedPatterns {
-			names[i] = p.Name
-		}
-		explanation = fmt.Sprintf(
-			"matched %d exfiltration pattern(s): %s",
-			len(matchedPatterns), strings.Join(names, ", "),
-		)
-	}
-
+	score, matched, explanation := scorePatterns(d.patterns, input, "exfiltration")
 	return DetectionResult{
 		DetectorName:    d.Name(),
 		Category:        d.Category(),
 		Score:           score,
-		MatchedPatterns: matchedPatterns,
+		MatchedPatterns: matched,
 		Explanation:     explanation,
 	}
 }

@@ -547,12 +547,8 @@ func resolveChain(
 			}
 			// A matching pin satisfies the hop on its own; otherwise the hop
 			// needs an envelope that verified valid.
-			if opts.RequireSignature && hop.pin == "" && (status == nil || !status.Verified) {
-				failed := SignatureStatus{Reason: ReasonMissingSignature}
-				if status != nil {
-					failed = *status
-				}
-				return nil, &SignatureRequiredError{Source: hop.source, Status: failed}
+			if opts.RequireSignature && hop.pin == "" && !status.Verified {
+				return nil, &SignatureRequiredError{Source: hop.source, Status: *status}
 			}
 		}
 
@@ -617,7 +613,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 		for index, entry := range stack {
 			if entry == loaded.Source {
 				cycle := append(slices.Clone(stack[index:]), loaded.Source)
-				return nil, &CycleError{Chain: joinChain(cycle)}
+				return nil, &CycleError{Chain: strings.Join(cycle, " -> ")}
 			}
 		}
 
@@ -750,6 +746,8 @@ func splitDigestPin(reference string) (string, string, error) {
 	return ref, fragment, nil
 }
 
+// loadSpecFile reads and parses the document at path, returning it with the
+// canonical (absolute, symlink-resolved) path it was read from.
 func loadSpecFile(path string) (*HushSpec, string, error) {
 	source, err := filepath.Abs(path)
 	if err != nil {
@@ -770,27 +768,16 @@ func loadSpecFile(path string) (*HushSpec, string, error) {
 	return spec, source, nil
 }
 
+// loadFromFilesystem resolves a relative reference against the referring
+// document's directory and loads it.
 func loadFromFilesystem(reference string, from string) (*LoadedSpec, error) {
 	resolvedPath := reference
 	if !filepath.IsAbs(reference) && from != "" {
 		resolvedPath = filepath.Join(filepath.Dir(from), reference)
 	}
-
-	absPath, err := filepath.Abs(resolvedPath)
+	spec, canonical, err := loadSpecFile(resolvedPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve path %q: %w", resolvedPath, err)
-	}
-	canonical, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to canonicalize %q: %w", absPath, err)
-	}
-	content, err := os.ReadFile(canonical)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read HushSpec at %s: %w", canonical, err)
-	}
-	spec, err := Parse(string(content))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HushSpec at %s: %w", canonical, err)
+		return nil, err
 	}
 	return &LoadedSpec{Source: canonical, Spec: spec}, nil
 }
@@ -802,8 +789,4 @@ func describeSource(source string) string {
 		return "the in-memory policy document"
 	}
 	return source
-}
-
-func joinChain(chain []string) string {
-	return strings.Join(chain, " -> ")
 }

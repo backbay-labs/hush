@@ -980,9 +980,11 @@ func isKnownBudgetKey(value string) bool {
 	}
 }
 
+// durationPattern is the `after` grammar of a posture timeout transition.
+var durationPattern = regexp.MustCompile(`^[0-9]+[smhd]$`)
+
 func isValidDuration(value string) bool {
-	matched, _ := regexp.MatchString(`^\d+[smhd]$`, value)
-	return matched
+	return durationPattern.MatchString(value)
 }
 
 func containsTyped[T comparable](value T, allowed map[T]struct{}) bool {

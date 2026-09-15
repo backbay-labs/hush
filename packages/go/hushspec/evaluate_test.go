@@ -353,7 +353,7 @@ extensions:
 	}
 }
 
-func TestGlobMatches(t *testing.T) {
+func TestPathGlobMatchesNormalizedTargets(t *testing.T) {
 	tests := []struct {
 		pattern string
 		target  string
@@ -371,31 +371,9 @@ func TestGlobMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_vs_%s", tt.pattern, tt.target), func(t *testing.T) {
-			got := globMatches(tt.pattern, tt.target)
+			got := PathGlobMatches(tt.pattern, NormalizePath(tt.target))
 			if got != tt.match {
-				t.Errorf("globMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
-			}
-		})
-	}
-}
-
-func TestImbalanceRatio(t *testing.T) {
-	tests := []struct {
-		add, del int
-		expected float64
-	}{
-		{0, 0, 0.0},
-		{0, 5, 5.0},
-		{5, 0, 5.0},
-		{10, 2, 5.0},
-		{2, 10, 5.0},
-		{4, 4, 1.0},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d_%d", tt.add, tt.del), func(t *testing.T) {
-			got := imbalanceRatio(tt.add, tt.del)
-			if got != tt.expected {
-				t.Errorf("imbalanceRatio(%d, %d) = %f, want %f", tt.add, tt.del, got, tt.expected)
+				t.Errorf("PathGlobMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
 			}
 		})
 	}
