@@ -1,4 +1,4 @@
-use crate::bundle::{BUNDLE_FORMAT_VERSION, CaseAction, CaseBundle, CaseGroup};
+use crate::bundle::{AuditSpec, BUNDLE_FORMAT_VERSION, CaseAction, CaseBundle, CaseGroup};
 use crate::diff::{CaseEvaluator, CompareOptions, DiffError, DivergenceKind, compare_reports};
 use serde_json::Value;
 
@@ -120,6 +120,11 @@ fn candidates_bundle(candidates: &[(Value, Value)]) -> CaseBundle {
         hushspec_diff: BUNDLE_FORMAT_VERSION.to_string(),
         seed: 0,
         generated_by: "hushspec-minimize".to_string(),
+        // The shrink probes carry the default audit inputs, and so does the
+        // single-case bundle `case_divergence` starts from: both sides of every
+        // probe replay the same clock, actor and receipt ids, so a receipt
+        // divergence stays reproducible all the way down to the minimized case.
+        audit: AuditSpec::default(),
         groups: candidates
             .iter()
             .enumerate()
@@ -388,6 +393,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -458,6 +465,98 @@ mod tests {
         assert!(minimized.rounds >= 1);
     }
 
+    /// A receipt-only divergence must shrink like any other: the probes the
+    /// minimizer builds carry the same audit inputs on both sides, so the
+    /// receipts it compares along the way are the receipts the run compared.
+    ///
+    /// The stub agrees on every field the pre-receipt fuzzer looked at and
+    /// disagrees only on the recorded evidence, exactly as an SDK with a
+    /// receipt bug would.
+    #[test]
+    fn minimizer_shrinks_a_receipt_only_divergence() {
+        struct ReceiptStub {
+            sdk: &'static str,
+            tamper: bool,
+        }
+
+        impl CaseEvaluator for ReceiptStub {
+            fn sdk_name(&self) -> &str {
+                self.sdk
+            }
+
+            fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+                let mut report = crate::diff::InProcessEvaluator.evaluate_bundle(bundle)?;
+                report.sdk = self.sdk.to_string();
+                if !self.tamper {
+                    return Ok(report);
+                }
+                // Only policies that still carry the marker record a wrong
+                // receipt, so shrinking has something to home in on.
+                let tampered: std::collections::BTreeSet<String> = bundle
+                    .groups
+                    .iter()
+                    .filter(|group| group.policy.pointer("/rules/shell_commands").is_some())
+                    .flat_map(|group| {
+                        group
+                            .actions
+                            .iter()
+                            .map(move |case| format!("{}/{}", group.id, case.id))
+                    })
+                    .collect();
+                for (key, verdict) in &mut report.results {
+                    if let CaseVerdict::Ok { result } = verdict
+                        && tampered.contains(key)
+                    {
+                        result.receipt_hash = Some(format!("sha256:{}", "0".repeat(64)));
+                    }
+                }
+                Ok(report)
+            }
+        }
+
+        let policy = serde_json::json!({
+            "hushspec": "0.2.0",
+            "name": "big_policy",
+            "description": "lots of irrelevant stuff to strip away",
+            "rules": {
+                "shell_commands": { "forbidden_patterns": ["rm"] },
+                "tool_access": { "allow": ["read_file", "search"], "block": ["shell_exec"] },
+                "forbidden_paths": { "patterns": ["**/.ssh/**", "/etc/passwd"] }
+            }
+        });
+        let action = serde_json::json!({"type": "shell_command", "target": "ls -la"});
+
+        let mut oracle = ReceiptStub {
+            sdk: "rust",
+            tamper: false,
+        };
+        let mut failing = ReceiptStub {
+            sdk: "go",
+            tamper: true,
+        };
+        let minimized = minimize_case(
+            &policy,
+            &action,
+            &mut oracle,
+            &mut failing,
+            &CompareOptions::default(),
+            &MinimizeConfig::default(),
+        )
+        .expect("minimizes");
+
+        assert_eq!(minimized.kind, DivergenceKind::Receipt);
+        assert!(
+            minimized.policy.pointer("/rules/shell_commands").is_some(),
+            "the block the receipt bug needs must survive: {}",
+            minimized.policy
+        );
+        assert!(
+            minimized.policy.get("description").is_none(),
+            "irrelevant structure must still be stripped: {}",
+            minimized.policy
+        );
+    }
+
     #[test]
     fn minimizer_refuses_non_diverging_cases() {
         let policy = serde_json::json!({"hushspec": "0.1.0"});
@@ -508,6 +607,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -551,6 +652,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -566,6 +669,8 @@ mod tests {
                         origin_profile: None,
                         posture: None,
                         rule_trace: Vec::new(),
+                        receipt_hash: None,
+                        receipt: None,
                     },
                 },
             );

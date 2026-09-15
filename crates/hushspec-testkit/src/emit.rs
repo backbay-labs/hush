@@ -1,6 +1,43 @@
-use crate::diff::{CaseVerdict, DiffError, DivergenceKind};
+use crate::bundle::AuditSpec;
+use crate::diff::{CaseVerdict, DiffError, DivergenceKind, case_receipt};
 use crate::minimize::MinimizedCase;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::sync::OnceLock;
+
+/// The optional `expect` members the evaluator-test schema defines *in this
+/// checkout*, read from the schema file at runtime.
+///
+/// The fixture schema grows members (`rule_trace`, `receipt`) on its own
+/// schedule. Reading the file rather than the copy compiled into this binary
+/// means an emitter built before a member landed still pins it, and one built
+/// after a member was removed still stops -- a fixture that names a member the
+/// runners' schema does not define is rejected by every runner, which is worse
+/// than a fixture that pins less.
+fn schema_expect_members() -> &'static BTreeSet<String> {
+    static MEMBERS: OnceLock<BTreeSet<String>> = OnceLock::new();
+    MEMBERS.get_or_init(|| {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../schemas/hushspec-evaluator-test.v0.schema.json"
+        );
+        let text = std::fs::read_to_string(path)
+            .map(std::borrow::Cow::Owned)
+            // Falling back to the compiled-in copy keeps a published binary
+            // (no repo around it) emitting exactly what it was built against.
+            .unwrap_or(std::borrow::Cow::Borrowed(include_str!(
+                "../../../schemas/hushspec-evaluator-test.v0.schema.json"
+            )));
+        let Ok(schema) = serde_json::from_str::<serde_json::Value>(&text) else {
+            return BTreeSet::new();
+        };
+        schema
+            .pointer("/$defs/ExpectedResult/properties")
+            .and_then(serde_json::Value::as_object)
+            .map(|properties| properties.keys().cloned().collect())
+            .unwrap_or_default()
+    })
+}
 
 /// Flatten a minimized policy's `extends` chain into the document itself.
 ///
@@ -45,11 +82,13 @@ fn split_action_context(
 /// The `expect` block comes from the Rust oracle; the failing SDK's suite
 /// will fail on this fixture until the divergence is fixed.
 ///
-/// `rule_trace` is deliberately not written into `expect`: the evaluator-test
-/// schema's `ExpectedResult` is `additionalProperties: false` with no
-/// `rule_trace` member, so a fixture carrying one would be rejected by every
-/// runner. A trace-only divergence still emits (pinning `reason`, which the
-/// trace is built from) and is still reported by the difftest run.
+/// The evidence -- `expect.rule_trace` and `expect.receipt` -- is pinned only
+/// when the evaluator-test schema of this checkout defines those members
+/// (`schema_expect_members`), because `ExpectedResult` is
+/// `additionalProperties: false` and a fixture carrying an undefined member is
+/// rejected by every runner. Where they are missing, a trace- or receipt-only
+/// divergence still emits, pinning `reason` (which the trace is built from),
+/// and is still reported by the difftest run.
 pub fn build_regression_fixture(
     min: &MinimizedCase,
     oracle_verdict: &CaseVerdict,
@@ -74,11 +113,15 @@ pub fn build_regression_fixture(
         );
     }
     // reason strings are only pinned when the divergence itself was about
-    // them -- or about the rule trace, whose entries are made of the same
-    // per-block reasons and which `expect` has no field for (see the
-    // rule_trace note on `build_regression_fixture`).
-    if matches!(min.kind, DivergenceKind::Reason | DivergenceKind::RuleTrace)
-        && let Some(reason) = &result.reason
+    // them -- or about the rule trace or the receipt, which are both made of
+    // the same per-block reasons and which `expect` may have no field for
+    // (see the note on `build_regression_fixture`). Without this a
+    // trace-or-receipt-only repro would pin nothing but the decision the two
+    // SDKs already agreed on, and be green everywhere from the day it landed.
+    if matches!(
+        min.kind,
+        DivergenceKind::Reason | DivergenceKind::RuleTrace | DivergenceKind::Receipt
+    ) && let Some(reason) = &result.reason
     {
         expect.insert(
             "reason".to_string(),
@@ -104,25 +147,59 @@ pub fn build_regression_fixture(
         .unwrap_or_else(|| "unknown".to_string());
     let policy = flatten_extends(&min.policy)?;
     let (action, context) = split_action_context(&min.action);
-    let mut case = serde_json::Map::new();
-    case.insert(
-        "description".to_string(),
-        serde_json::Value::String("minimized diverging case".to_string()),
-    );
-    case.insert("action".to_string(), action);
-    if let Some(context) = context {
-        case.insert("context".to_string(), context);
+    let render = |expect: &serde_json::Map<String, serde_json::Value>| {
+        let mut case = serde_json::Map::new();
+        case.insert(
+            "description".to_string(),
+            serde_json::Value::String("minimized diverging case".to_string()),
+        );
+        case.insert("action".to_string(), action.clone());
+        if let Some(context) = &context {
+            case.insert("context".to_string(), context.clone());
+        }
+        case.insert(
+            "expect".to_string(),
+            serde_json::Value::Object(expect.clone()),
+        );
+        serde_json::json!({
+            "hushspec_test": "0.1.0",
+            "description": format!(
+                "auto-minimized differential regression (sdk {}, seed {seed}, kind {kind_slug})",
+                min.sdk
+            ),
+            "policy": policy,
+            "cases": [serde_json::Value::Object(case)],
+        })
+    };
+
+    // Pin the evidence too, when the fixture schema has somewhere to put it:
+    // `expect.rule_trace` (which block decided, and in what order) and
+    // `expect.receipt` (the whole 0.2 receipt under the fixed audit inputs).
+    // A trace- or receipt-only divergence otherwise emits a fixture that
+    // pins only the decision -- green everywhere, including on the SDK that
+    // diverged. Each member's spelling belongs to the schema, not to this
+    // emitter, so candidates are offered in order and the first the schema
+    // accepts wins; when none does, the member is left out rather than
+    // emitted wrong.
+    let receipt = receipt_for(min, &policy);
+    for (member, candidates) in [
+        ("rule_trace", trace_candidates(result, receipt.as_ref())),
+        ("receipt", receipt_candidates(receipt.as_ref())),
+    ] {
+        if !schema_expect_members().contains(member) {
+            continue;
+        }
+        for candidate in candidates {
+            let mut probe = expect.clone();
+            probe.insert(member.to_string(), candidate);
+            if crate::runner::validate_evaluator_schema(&render(&probe)).is_ok() {
+                expect = probe;
+                break;
+            }
+        }
     }
-    case.insert("expect".to_string(), serde_json::Value::Object(expect));
-    let fixture = serde_json::json!({
-        "hushspec_test": "0.1.0",
-        "description": format!(
-            "auto-minimized differential regression (sdk {}, seed {seed}, kind {kind_slug})",
-            min.sdk
-        ),
-        "policy": policy,
-        "cases": [serde_json::Value::Object(case)],
-    });
+
+    let fixture = render(&expect);
 
     // The Rust reference evaluator accepts any string as `action.type`,
     // silently falling through to Allow for ones it doesn't recognize (see
@@ -148,6 +225,68 @@ pub fn build_regression_fixture(
     let yaml = serde_yaml::to_string(&fixture)
         .map_err(|error| DiffError::Config(format!("failed to serialize fixture: {error}")))?;
     Ok((format!("regression-{hash8}.test.yaml"), yaml))
+}
+
+/// The receipt the minimized case records under the bundle's fixed audit
+/// inputs at case index 0 -- the index the emitted single-case fixture has.
+///
+/// `policy` is the flattened document the fixture embeds, so the receipt names
+/// the identity a runner reading the fixture computes, not the identity of the
+/// unresolved fragment the minimizer happened to shrink to.
+fn receipt_for(
+    min: &MinimizedCase,
+    policy: &serde_json::Value,
+) -> Option<hushspec::receipt::DecisionReceipt> {
+    let yaml = serde_yaml::to_string(policy).ok()?;
+    let spec = hushspec::HushSpec::parse(&yaml).ok()?;
+    // `context` is still on the action here; the emitted fixture moves it onto
+    // the case, which is where a runner reads it back from and applies it to
+    // an action that has none. Same evaluation either way.
+    let action: hushspec::EvaluationAction = serde_json::from_value(min.action.clone()).ok()?;
+    case_receipt(&spec, &action, &AuditSpec::default(), 0).ok()
+}
+
+/// Spellings of `expect.rule_trace`, most likely first: the evaluator's own
+/// recording (what `evaluate_traced` returns in every SDK), then the receipt
+/// spelling (engine-stage ids and `rule_path`, what the receipt carries).
+fn trace_candidates(
+    result: &crate::diff::NormalizedResult,
+    receipt: Option<&hushspec::receipt::DecisionReceipt>,
+) -> Vec<serde_json::Value> {
+    let mut candidates = Vec::new();
+    if !result.rule_trace.is_empty()
+        && let Ok(value) = serde_json::to_value(&result.rule_trace)
+    {
+        candidates.push(value);
+    }
+    if let Some(receipt) = receipt
+        && !receipt.rule_trace.is_empty()
+        && let Ok(value) = serde_json::to_value(&receipt.rule_trace)
+    {
+        candidates.push(value);
+    }
+    candidates
+}
+
+/// Spellings of `expect.receipt`, most likely first: the hash alone, the hash
+/// in a wrapper, then the whole receipt.
+fn receipt_candidates(
+    receipt: Option<&hushspec::receipt::DecisionReceipt>,
+) -> Vec<serde_json::Value> {
+    let Some(receipt) = receipt else {
+        return Vec::new();
+    };
+    let Ok(hash) = receipt.receipt_hash() else {
+        return Vec::new();
+    };
+    let mut candidates = vec![
+        serde_json::Value::String(hash.clone()),
+        serde_json::json!({"receipt_hash": hash}),
+    ];
+    if let Ok(value) = serde_json::to_value(receipt) {
+        candidates.push(value);
+    }
+    candidates
 }
 
 pub fn write_regression_fixture(
@@ -283,6 +422,83 @@ mod tests {
             "expect has no rule_trace member in the evaluator-test schema:\n{yaml}"
         );
         assert_round_trips_through_runner(&filename, &yaml);
+    }
+
+    /// The emitter pins the evidence only when the fixture schema has a home
+    /// for it. Whichever way the schema in this checkout reads, the emitted
+    /// fixture must (a) validate and (b) never carry a member the schema does
+    /// not define -- a fixture the runners reject is worse than one that pins
+    /// less.
+    #[test]
+    fn expect_members_follow_the_schema_of_this_checkout() {
+        let mut min = reason_case();
+        min.kind = DivergenceKind::RuleTrace;
+        let verdict = oracle_verdict(&min);
+        let (filename, yaml) = build_regression_fixture(&min, &verdict, 1).expect("fixture builds");
+        let fixture: serde_json::Value = serde_yaml::from_str(&yaml).expect("fixture is YAML");
+        let expect = fixture["cases"][0]["expect"]
+            .as_object()
+            .expect("expect is an object");
+
+        for member in ["rule_trace", "receipt"] {
+            let declared = schema_expect_members().contains(member);
+            if !declared {
+                assert!(
+                    !expect.contains_key(member),
+                    "emitted `expect.{member}` that the schema does not define:\n{yaml}"
+                );
+            }
+        }
+        // Whatever it chose, the whole fixture still round-trips through the
+        // real discovery -> schema -> parse -> evaluate -> expect pipeline.
+        assert_round_trips_through_runner(&filename, &yaml);
+    }
+
+    /// The candidate list is what makes the member's *spelling* the schema's
+    /// business rather than the emitter's: the evaluator trace first, the
+    /// receipt trace second, and nothing at all when there is no trace.
+    #[test]
+    fn trace_candidates_offer_both_spellings() {
+        let min = reason_case();
+        let CaseVerdict::Ok { result } = oracle_verdict(&min) else {
+            panic!("the oracle must evaluate the reason case");
+        };
+        let policy = flatten_extends(&min.policy).expect("flattens");
+        let receipt = receipt_for(&min, &policy).expect("the case records a receipt");
+
+        let candidates = trace_candidates(&result, Some(&receipt));
+        assert_eq!(candidates.len(), 2, "{candidates:?}");
+        // The evaluator's own spelling: `matched_rule`, no engine-stage ids.
+        assert!(candidates[0][0].get("matched_rule").is_some());
+        assert!(candidates[0][0].get("rule_path").is_none());
+        // The receipt's: `rule_path`.
+        assert!(candidates[1][0].get("rule_path").is_some());
+
+        assert!(trace_candidates(&result, None).len() == 1);
+        assert!(
+            trace_candidates(&crate::diff::NormalizedResult::default(), None).is_empty(),
+            "a case with no trace pins no trace"
+        );
+    }
+
+    /// The receipt candidates are the hash, the hash in a wrapper, and the
+    /// whole receipt -- and the hash is the one the receipt actually has, not
+    /// a hash of something else.
+    #[test]
+    fn receipt_candidates_pin_this_case_s_receipt() {
+        let min = reason_case();
+        let policy = flatten_extends(&min.policy).expect("flattens");
+        let receipt = receipt_for(&min, &policy).expect("the case records a receipt");
+        let candidates = receipt_candidates(Some(&receipt));
+        assert_eq!(candidates.len(), 3);
+        let hash = receipt.receipt_hash().expect("hashes");
+        assert_eq!(candidates[0], serde_json::Value::String(hash.clone()));
+        assert_eq!(candidates[1]["receipt_hash"], serde_json::json!(hash));
+        assert_eq!(candidates[2]["receipt_version"], "0.2");
+        // Reproducible: the fixed audit inputs, not the wall clock.
+        assert_eq!(candidates[2]["timestamp"], crate::bundle::AUDIT_CLOCK);
+        assert!(candidates[2].get("duration_us").is_none());
+        assert!(receipt_candidates(None).is_empty());
     }
 
     #[test]

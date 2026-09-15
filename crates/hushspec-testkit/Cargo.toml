@@ -34,3 +34,5 @@ thiserror = "2"
 proptest = "=1.11.0"
 tempfile = "3"
 sha2 = "0.10"
+# The audited differential path pins the evaluation clock of every case.
+chrono = { version = "0.4", features = ["serde"] }
