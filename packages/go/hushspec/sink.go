@@ -48,24 +48,27 @@ func NewFileReceiptSink(path string) *FileReceiptSink {
 	return &FileReceiptSink{path: path}
 }
 
-// Send appends the receipt as one JSON line.
-func (s *FileReceiptSink) Send(receipt *DecisionReceipt) error {
-	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("sink: open file: %w", err)
-	}
-	defer f.Close()
-
+// Send appends the receipt as one JSON line. A close that fails is reported:
+// a buffered write lost on close is a receipt that was never recorded.
+func (s *FileReceiptSink) Send(receipt *DecisionReceipt) (err error) {
 	data, err := json.Marshal(receipt)
 	if err != nil {
 		return fmt.Errorf("sink: marshal receipt: %w", err)
 	}
 
-	_, err = fmt.Fprintf(f, "%s\n", data)
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		return fmt.Errorf("sink: open file: %w", err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("sink: close file: %w", closeErr)
+		}
+	}()
+
+	if _, err := fmt.Fprintf(f, "%s\n", data); err != nil {
 		return fmt.Errorf("sink: write receipt: %w", err)
 	}
-
 	return nil
 }
 

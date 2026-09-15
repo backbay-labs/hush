@@ -269,6 +269,39 @@ func TestPolicyWatcherStartStop(t *testing.T) {
 	watcher.Stop() // idempotent
 }
 
+// TestPolicyWatcherRestartsAfterContextCancel: a watch that ended because its
+// context was cancelled has nothing running, so a later Start must be accepted
+// rather than refused as "already started".
+func TestPolicyWatcherRestartsAfterContextCancel(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "policy.yaml")
+	writePolicy(t, path, policyAllowingGitHub)
+
+	provider := NewFileProvider(path, ResolveOptions{})
+	watcher, err := NewPolicyWatcher(provider, ReloadOptions{Interval: 5 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("NewPolicyWatcher: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := watcher.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	cancel()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := watcher.Start(context.Background())
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Start after a cancelled context stayed refused: %v", err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	watcher.Stop()
+}
+
 // stubProvider serves a scripted sequence of loads.
 type stubProvider struct {
 	mu      sync.Mutex
