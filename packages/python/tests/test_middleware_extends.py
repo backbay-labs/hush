@@ -132,7 +132,7 @@ def test_constructor_rejects_unresolvable_policy():
 def test_swap_policy_rejects_unresolved_policy():
     guard = HushGuard.from_yaml(
         'hushspec: "0.1.0"\nname: allow-all\n'
-        'rules:\n  tool_access:\n    allow: ["*"]\n    default: allow\n'
+        'rules:\n  tool_access:\n    default: allow\n'
     )
     leaf = parse_or_raise('hushspec: "0.1.0"\nextends: "./nope.yaml"\nname: leaf\n')
     with pytest.raises(ValueError, match="failed to resolve policy"):

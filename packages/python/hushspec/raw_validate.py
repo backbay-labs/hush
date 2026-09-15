@@ -4,6 +4,7 @@ import math
 import re
 from typing import Any, Callable
 
+from hushspec.conditions import Condition
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.generated_contract import (
     BRIDGE_POLICY_KEYS,
@@ -58,6 +59,7 @@ DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
 # would desync it from `generate_sdk_contracts.py --check`, which CI runs.
 BROWSER_AUTOMATION_KEYS = frozenset(
     (
+        "when",
         "enabled",
         "allowed_domains",
         "blocked_domains",
@@ -68,6 +70,7 @@ BROWSER_AUTOMATION_KEYS = frozenset(
 )
 CODE_EXECUTION_KEYS = frozenset(
     (
+        "when",
         "enabled",
         "language_allowlist",
         "module_denylist",
@@ -76,6 +79,32 @@ CODE_EXECUTION_KEYS = frozenset(
         "max_scan_bytes",
     )
 )
+
+# Origin profile rule-block overlays (origins spec 4, D12). These are
+# tri-state overrides, not full rule blocks: they carry no ``enabled`` and no
+# ``when``, and their ``default``/``max_args_size`` are optional with no
+# materialized value. Declared locally for the same reason as the two sets
+# above: scripts/generate_sdk_contracts.py does not emit them.
+ORIGIN_TOOL_ACCESS_OVERLAY_KEYS = frozenset(
+    ("allow", "block", "require_confirmation", "default", "max_args_size")
+)
+ORIGIN_EGRESS_OVERLAY_KEYS = frozenset(("allow", "block", "default"))
+
+
+def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    """Structural check of a rule block's ``when`` condition (core spec 3.13).
+
+    Unknown keys and wrong types inside a condition are *parse* errors (they
+    are rejected by serde in the Rust reference); the semantic checks --
+    ``HH:MM`` values, timezone, day names, nesting depth -- belong to
+    ``validate`` and live in hushspec.validate.validate_conditions.
+    """
+    if "when" not in obj:
+        return
+    try:
+        Condition.from_dict(obj["when"])
+    except (ValueError, TypeError, AttributeError) as exc:
+        errors.append(f"{path}.when: {exc}")
 
 
 def validate_raw_document(doc: Any) -> list[str]:
@@ -138,6 +167,7 @@ def _validate_rules(obj: dict[str, Any], errors: list[str]) -> None:
 
 def _validate_forbidden_paths(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, FORBIDDEN_PATH_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "patterns", errors, f"{path}.patterns")
     _validate_optional_string_array(obj, "exceptions", errors, f"{path}.exceptions")
@@ -145,6 +175,7 @@ def _validate_forbidden_paths(obj: dict[str, Any], errors: list[str], path: str)
 
 def _validate_path_allowlist(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, PATH_ALLOWLIST_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "read", errors, f"{path}.read")
     _validate_optional_string_array(obj, "write", errors, f"{path}.write")
@@ -153,6 +184,7 @@ def _validate_path_allowlist(obj: dict[str, Any], errors: list[str], path: str) 
 
 def _validate_egress(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, EGRESS_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "allow", errors, f"{path}.allow")
     _validate_optional_string_array(obj, "block", errors, f"{path}.block")
@@ -161,6 +193,7 @@ def _validate_egress(obj: dict[str, Any], errors: list[str], path: str) -> None:
 
 def _validate_secret_patterns(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, SECRET_PATTERNS_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "skip_paths", errors, f"{path}.skip_paths")
 
@@ -196,6 +229,7 @@ def _validate_secret_patterns(obj: dict[str, Any], errors: list[str], path: str)
 
 def _validate_patch_integrity(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, PATCH_INTEGRITY_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_int(obj, "max_additions", errors, f"{path}.max_additions", min_value=0)
     _validate_optional_int(obj, "max_deletions", errors, f"{path}.max_deletions", min_value=0)
@@ -214,6 +248,7 @@ def _validate_patch_integrity(obj: dict[str, Any], errors: list[str], path: str)
 
 def _validate_shell_commands(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, SHELL_COMMAND_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     patterns = _validate_optional_string_array(
         obj, "forbidden_patterns", errors, f"{path}.forbidden_patterns"
@@ -225,6 +260,7 @@ def _validate_shell_commands(obj: dict[str, Any], errors: list[str], path: str) 
 
 def _validate_tool_access(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, TOOL_ACCESS_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "allow", errors, f"{path}.allow")
     _validate_optional_string_array(obj, "block", errors, f"{path}.block")
@@ -237,6 +273,7 @@ def _validate_tool_access(obj: dict[str, Any], errors: list[str], path: str) -> 
 
 def _validate_computer_use(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, COMPUTER_USE_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_enum(obj, "mode", errors, f"{path}.mode", COMPUTER_USE_MODES)
     _validate_optional_string_array(obj, "allowed_actions", errors, f"{path}.allowed_actions")
@@ -246,6 +283,7 @@ def _validate_remote_desktop_channels(
     obj: dict[str, Any], errors: list[str], path: str
 ) -> None:
     _reject_unknown_keys(obj, REMOTE_DESKTOP_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_bool(obj, "clipboard", errors, f"{path}.clipboard")
     _validate_optional_bool(obj, "file_transfer", errors, f"{path}.file_transfer")
@@ -255,6 +293,7 @@ def _validate_remote_desktop_channels(
 
 def _validate_input_injection(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, INPUT_INJECTION_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "allowed_types", errors, f"{path}.allowed_types")
     _validate_optional_bool(
@@ -264,6 +303,7 @@ def _validate_input_injection(obj: dict[str, Any], errors: list[str], path: str)
 
 def _validate_browser_automation(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, BROWSER_AUTOMATION_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "allowed_domains", errors, f"{path}.allowed_domains")
     _validate_optional_string_array(obj, "blocked_domains", errors, f"{path}.blocked_domains")
@@ -280,6 +320,7 @@ def _validate_browser_automation(obj: dict[str, Any], errors: list[str], path: s
 
 def _validate_code_execution(obj: dict[str, Any], errors: list[str], path: str) -> None:
     _reject_unknown_keys(obj, CODE_EXECUTION_KEYS, errors, path)
+    _validate_when(obj, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
     _validate_optional_string_array(obj, "language_allowlist", errors, f"{path}.language_allowlist")
     _validate_optional_string_array(obj, "module_denylist", errors, f"{path}.module_denylist")
@@ -494,8 +535,12 @@ def _validate_origins(
             elif posture not in posture_states:
                 errors.append(f"{profile_path}.posture '{posture}' does not reference a defined posture state")
 
-        _validate_optional_object(profile, "tool_access", errors, profile_path, _validate_tool_access)
-        _validate_optional_object(profile, "egress", errors, profile_path, _validate_egress)
+        _validate_optional_object(
+            profile, "tool_access", errors, profile_path, _validate_origin_tool_access
+        )
+        _validate_optional_object(
+            profile, "egress", errors, profile_path, _validate_origin_egress
+        )
 
         if "data" in profile:
             data = profile["data"]
@@ -577,6 +622,28 @@ def _validate_origins(
                             )
 
         _validate_optional_string(profile, "explanation", errors, f"{profile_path}.explanation")
+
+
+def _validate_origin_tool_access(
+    obj: dict[str, Any], errors: list[str], path: str
+) -> None:
+    """Tri-state tool_access overlay on an origin profile (origins spec 4)."""
+    _reject_unknown_keys(obj, ORIGIN_TOOL_ACCESS_OVERLAY_KEYS, errors, path)
+    _validate_optional_string_array(obj, "allow", errors, f"{path}.allow")
+    _validate_optional_string_array(obj, "block", errors, f"{path}.block")
+    _validate_optional_string_array(
+        obj, "require_confirmation", errors, f"{path}.require_confirmation"
+    )
+    _validate_optional_enum(obj, "default", errors, f"{path}.default", DEFAULT_ACTIONS)
+    _validate_optional_int(obj, "max_args_size", errors, f"{path}.max_args_size", min_value=1)
+
+
+def _validate_origin_egress(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    """Tri-state egress overlay on an origin profile (origins spec 4)."""
+    _reject_unknown_keys(obj, ORIGIN_EGRESS_OVERLAY_KEYS, errors, path)
+    _validate_optional_string_array(obj, "allow", errors, f"{path}.allow")
+    _validate_optional_string_array(obj, "block", errors, f"{path}.block")
+    _validate_optional_enum(obj, "default", errors, f"{path}.default", DEFAULT_ACTIONS)
 
 
 def _validate_detection(obj: dict[str, Any], errors: list[str], path: str) -> None:

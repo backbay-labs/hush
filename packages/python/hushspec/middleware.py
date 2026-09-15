@@ -95,7 +95,7 @@ def _apply_detection(
     escalate (detection never weakens a policy decision), so receipts for
     every non-detection policy are byte-for-byte unchanged.
     """
-    from hushspec.receipt import RuleEvaluation
+    from hushspec.receipt import RuleEvaluation, RuleOutcome
 
     detected = evaluate_with_detection(spec, action).evaluation
     if detected.decision == receipt.decision:
@@ -104,7 +104,7 @@ def _apply_detection(
     receipt.rule_trace.append(
         RuleEvaluation(
             rule_block="detection",
-            outcome=detected.decision.value,
+            outcome=RuleOutcome(detected.decision.value),
             matched_rule=detected.matched_rule,
             reason=detected.reason,
             evaluated=True,

@@ -6,10 +6,11 @@ from dataclasses import dataclass, field
 
 from datetime import date
 
+from hushspec.conditions import Condition, validate_condition
 from hushspec.extensions import DetectionLevel, TransitionTrigger
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.schema import Classification, HushSpec, LifecycleState
-from hushspec.version import is_supported
+from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported
 
 _CAPABILITY_NAMES = frozenset(
     {"file_access", "file_write", "egress", "shell", "tool_call", "patch", "custom"}
@@ -52,8 +53,13 @@ def validate(spec: HushSpec) -> ValidationResult:
     warnings: list[str] = []
 
     if not is_supported(spec.hushspec):
+        minors = ", ".join(HUSHSPEC_SUPPORTED_MINORS)
         errors.append(
-            ValidationError("unsupported_version", f"unsupported hushspec version: {spec.hushspec}")
+            ValidationError(
+                "unsupported_version",
+                f"unsupported hushspec version: {spec.hushspec} "
+                f"(this engine accepts minor versions {minors})",
+            )
         )
 
     if spec.rules is not None:
@@ -70,6 +76,8 @@ def validate(spec: HushSpec) -> ValidationResult:
             and spec.rules.computer_use is None
             and spec.rules.remote_desktop_channels is None
             and spec.rules.input_injection is None
+            and spec.rules.browser_automation is None
+            and spec.rules.code_execution is None
         ):
             warnings.append("no rules configured")
     else:
@@ -144,6 +152,68 @@ def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
                 "rules.tool_access.max_args_size must be >= 1",
             )
         )
+
+    if rules.browser_automation is not None:
+        for index, pattern in enumerate(
+            rules.browser_automation.extra_credential_patterns
+        ):
+            _validate_regex(
+                pattern,
+                f"rules.browser_automation.extra_credential_patterns[{index}]",
+                errors,
+            )
+
+    if rules.code_execution is not None and rules.code_execution.max_scan_bytes == 0:
+        errors.append(
+            ValidationError(
+                "invalid_max_scan_bytes",
+                "rules.code_execution.max_scan_bytes must be >= 1",
+            )
+        )
+
+    validate_conditions(rules, errors)
+
+
+#: Rule blocks that may carry a ``when`` condition, in document order.
+_CONDITIONAL_BLOCKS = (
+    "forbidden_paths",
+    "path_allowlist",
+    "egress",
+    "secret_patterns",
+    "patch_integrity",
+    "shell_commands",
+    "tool_access",
+    "computer_use",
+    "remote_desktop_channels",
+    "input_injection",
+    "browser_automation",
+    "code_execution",
+)
+
+
+def validate_conditions(rules: object, errors: list[ValidationError]) -> None:
+    """Validate every rule block's ``when`` condition (core spec 3.13, 7.10).
+
+    Structural problems (unknown keys, wrong types) are parse errors and are
+    reported by ``hushspec.raw_validate``; what is checked here is the
+    semantics: ``HH:MM`` fields, the IANA time zone, the day abbreviations,
+    and the nesting depth.
+    """
+    for name in _CONDITIONAL_BLOCKS:
+        block = getattr(rules, name, None)
+        if block is None:
+            continue
+        raw = getattr(block, "when", None)
+        if raw is None:
+            continue
+        path = f"rules.{name}.when"
+        try:
+            condition = raw if isinstance(raw, Condition) else Condition.from_dict(raw)
+        except (ValueError, TypeError, AttributeError) as exc:
+            errors.append(ValidationError("invalid_condition", f"{path}: {exc}"))
+            continue
+        for message in validate_condition(condition, path):
+            errors.append(ValidationError("invalid_condition", message))
 
 
 def _validate_posture(ext: object, errors: list[ValidationError], warnings: list[str]) -> None:
@@ -266,6 +336,17 @@ def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
                 )
             )
         seen_ids.add(profile.id)
+
+        if (
+            profile.tool_access is not None
+            and profile.tool_access.max_args_size == 0
+        ):
+            errors.append(
+                ValidationError(
+                    "invalid_max_args_size",
+                    f"origins.profiles[{index}].tool_access.max_args_size must be >= 1",
+                )
+            )
 
         if profile.posture is not None:
             if posture_states is None:

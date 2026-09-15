@@ -14,6 +14,7 @@ from hushspec import (
     Rules,
     ThreatIntelDetection,
     TransitionTrigger,
+    is_supported,
     merge,
     parse,
     parse_or_raise,
@@ -829,8 +830,9 @@ rules:
         assert ok is False
         assert isinstance(err, str)
 
-    def test_legitimate_anchors_still_resolve(self):
-        # A small, non-malicious anchor/alias document must still parse fine.
+    def test_anchors_are_rejected_by_the_yaml_profile(self):
+        # D17 (core 2.4): anchors are outside the HushSpec YAML profile, even
+        # in a small non-malicious document, so every SDK rejects them.
         yaml = """
 hushspec: "0.1.0"
 name: anchored
@@ -841,9 +843,129 @@ rules:
     block: []
     default: block
 """
-        ok, spec = parse(yaml)
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "anchors are not allowed" in err
+
+
+class TestYamlProfile:
+    """D17 (core 2.4): the accepted YAML dialect."""
+
+    def test_rejects_aliases(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  forbidden_paths:\n"
+            "    patterns: &secrets\n"
+            '      - "**/.env"\n'
+            "    exceptions: *secrets\n"
+        )
+        assert ok is False
+        assert "are not allowed (YAML profile)" in err
+
+    def test_rejects_merge_keys(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    <<: {default: block}\n"
+        )
+        assert ok is False
+        assert "merge keys are not allowed" in err
+
+    def test_rejects_multi_document_streams(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\nname: first\n---\nhushspec: "0.2.0"\nname: second\n'
+        )
+        assert ok is False
+        assert "single document" in err
+
+    def test_accepts_a_leading_directive_end_marker(self):
+        ok, spec = parse('---\nhushspec: "0.2.0"\nname: only\n')
         assert ok is True
-        assert isinstance(spec, HushSpec)
-        assert spec.rules is not None
-        assert spec.rules.egress is not None
-        assert spec.rules.egress.allow == ["api.example.com"]
+        assert spec.name == "only"
+
+    def test_rejects_yaml_1_1_booleans(self):
+        for literal in ("yes", "no", "on", "off"):
+            ok, err = parse(
+                f'hushspec: "0.2.0"\nrules:\n  egress:\n    enabled: {literal}\n'
+                "    default: block\n"
+            )
+            assert ok is False, literal
+            assert "must be a boolean" in err, literal
+
+    def test_still_accepts_core_booleans(self):
+        for literal, expected in (("true", True), ("false", False), ("True", True)):
+            ok, spec = parse(
+                f'hushspec: "0.2.0"\nrules:\n  egress:\n    enabled: {literal}\n'
+                "    default: block\n"
+            )
+            assert ok is True, literal
+            assert spec.rules.egress.enabled is expected, literal
+
+    def test_a_bare_on_key_stays_a_string(self):
+        # `on:` is the posture transition trigger field; under YAML 1.1 PyYAML
+        # would turn it into the boolean key True.
+        ok, spec = parse(
+            'hushspec: "0.2.0"\n'
+            "extensions:\n"
+            "  posture:\n"
+            "    initial: standard\n"
+            "    states:\n"
+            "      standard:\n"
+            "        capabilities: [tool_call]\n"
+            "      locked:\n"
+            "        capabilities: []\n"
+            "    transitions:\n"
+            "      - from: standard\n"
+            "        to: locked\n"
+            "        on: user_denial\n"
+        )
+        assert ok is True
+        assert spec.extensions.posture.transitions[0].on.value == "user_denial"
+
+    def test_rejects_tab_indentation(self):
+        ok, err = parse('hushspec: "0.2.0"\nrules:\n\tegress:\n\t\tdefault: block\n')
+        assert ok is False
+        assert "YAML parse error" in err
+
+    def test_rejects_documents_over_the_size_cap(self):
+        oversized = 'hushspec: "0.2.0"\nname: "' + "x" * (1024 * 1024) + '"\n'
+        ok, err = parse(oversized)
+        assert ok is False
+        assert "maximum size" in err
+
+    def test_rejects_nesting_past_the_depth_cap(self):
+        body = 'hushspec: "0.2.0"\nrules:\n  shell_commands:\n    when:\n'
+        indent = 6
+        for _ in range(40):
+            body += " " * indent + "not:\n"
+            indent += 2
+        body += " " * indent + "context: {a: 1}\n"
+        ok, err = parse(body)
+        assert ok is False
+        assert "maximum depth" in err
+
+
+class TestVersionAcceptance:
+    """D14 (core 2.2): an engine supporting minor X.Y accepts every X.Y.Z."""
+
+    def test_accepts_every_patch_of_a_supported_minor(self):
+        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"):
+            assert is_supported(version) is True, version
+            ok, spec = parse(f'hushspec: "{version}"\nname: v\n')
+            assert ok is True, version
+            assert validate(spec).is_valid, version
+
+    def test_rejects_unsupported_or_malformed_versions(self):
+        for version in ("0.3.0", "1.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
+            assert is_supported(version) is False, version
+
+    def test_unsupported_version_names_the_supported_minors(self):
+        spec = parse_or_raise('hushspec: "0.9.0"\nname: v\n')
+        result = validate(spec)
+        assert not result.is_valid
+        message = str(result.errors[0])
+        assert message.startswith("unsupported hushspec version: 0.9.0")
+        assert "0.1, 0.2" in message
+        assert result.errors[0].code == "unsupported_version"

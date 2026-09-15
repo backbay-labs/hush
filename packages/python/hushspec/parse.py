@@ -1,76 +1,77 @@
+"""Document parsing under the HushSpec YAML profile (core spec 2.4).
+
+The profile is YAML 1.2 **Core** schema, exactly one document per stream, no
+duplicate mapping keys, no anchors, aliases, or merge keys, no tab
+indentation, and bounded size, nesting depth, and node count.
+
+PyYAML implements YAML 1.1, whose boolean resolver also accepts
+``yes/no/on/off/y/n``; the loader below installs Core-schema resolvers so those
+tokens stay plain strings and are rejected wherever a boolean is required,
+exactly as ``serde_yaml`` rejects them in the Rust reference.
+"""
+
 from __future__ import annotations
 
 import collections.abc
+import re
 
 import yaml
 
 from hushspec.raw_validate import validate_raw_document
 from hushspec.schema import HushSpec
 
-# Upper bound on the alias-expanded node count of a single document. PyYAML
-# shares anchor nodes, so a "billion laughs" bomb composes only a handful of
-# nodes -- but our post-parse passes (_normalize_yaml_mapping_keys,
-# validate_raw_document) walk that shared DAG as a *tree*, so an
-# exponentially-expanding document would hang there. Capping the alias-expanded
-# size at compose time rejects such bombs before they reach those passes. 100k
-# is far above any realistic policy (shipped policies are a few hundred nodes).
-_MAX_EXPANDED_NODES = 100_000
+#: Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default).
+MAX_DOCUMENT_BYTES = 1024 * 1024
+#: Maximum accepted nesting depth (core spec 2.4, RECOMMENDED default).
+MAX_NESTING_DEPTH = 32
+#: Maximum accepted node count (core spec 2.4, RECOMMENDED default).
+MAX_NODE_COUNT = 100_000
+
+#: YAML 1.2 Core schema boolean forms. YAML 1.1's `yes`/`no`/`on`/`off` are
+#: deliberately absent -- under the profile they are plain strings.
+_CORE_BOOL = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
 
 
-class _NodeLimitError(yaml.YAMLError):
-    """Raised when a document's alias-expanded node count exceeds the cap."""
+class _ProfileError(yaml.YAMLError):
+    """Raised when a document violates the HushSpec YAML profile."""
 
 
 class _StrictSafeLoader(yaml.SafeLoader):
-    """A ``SafeLoader`` hardened to match the Rust/TS/Go SDKs.
+    """A ``SafeLoader`` restricted to the HushSpec YAML profile.
 
+    * Anchors, aliases, and merge keys are rejected at compose time (the other
+      three SDKs reject them, and they are also the shape an alias bomb takes).
     * Duplicate mapping keys are rejected (PyYAML otherwise silently keeps the
-      last value; the other three SDKs reject duplicates).
-    * Alias expansion is bounded so an anchor/alias bomb fails fast instead of
-      hanging in the post-parse tree walks.
+      last value).
+    * Booleans follow the YAML 1.2 Core schema (see ``_CORE_BOOL``).
     """
 
-    def __init__(self, stream) -> None:
-        super().__init__(stream)
-        # id(node) -> alias-expanded node count, memoized so shared anchor
-        # nodes are sized once.
-        self._expanded_sizes: dict[int, int] = {}
-
-    # -- alias-expansion cap (compose phase) --------------------------------
+    # -- anchors and aliases (compose phase) --------------------------------
     def compose_node(self, parent, index):
-        node = super().compose_node(parent, index)
-        if self._expanded_size(node) > _MAX_EXPANDED_NODES:
-            raise _NodeLimitError(
-                "YAML alias expansion exceeds the maximum of "
-                f"{_MAX_EXPANDED_NODES} nodes"
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()
+            raise _ProfileError(
+                f"line {event.start_mark.line + 1}: aliases are not allowed "
+                "(YAML profile)"
             )
-        return node
+        event = self.peek_event()
+        if getattr(event, "anchor", None) is not None:
+            raise _ProfileError(
+                f"line {event.start_mark.line + 1}: anchors are not allowed "
+                "(YAML profile)"
+            )
+        return super().compose_node(parent, index)
 
-    def _expanded_size(self, node) -> int:
-        key = id(node)
-        cached = self._expanded_sizes.get(key)
-        if cached is not None:
-            return cached
-        # Children are composed before their container, so their sizes are
-        # already memoized here. An aliased child resolves to the same node
-        # object, so it contributes its target's expanded size -- which is
-        # what makes a bomb's size grow exponentially and trip the cap within
-        # a few levels.
-        if isinstance(node, yaml.SequenceNode):
-            size = 1
-            for child in node.value:
-                size += self._expanded_sizes.get(id(child), 1)
-        elif isinstance(node, yaml.MappingNode):
-            size = 1
-            for key_node, value_node in node.value:
-                size += self._expanded_sizes.get(id(key_node), 1)
-                size += self._expanded_sizes.get(id(value_node), 1)
-        else:
-            size = 1
-        self._expanded_sizes[key] = size
-        return size
+    # -- merge keys and duplicate keys (construct phase) --------------------
+    def flatten_mapping(self, node):
+        for key_node, _value_node in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                raise _ProfileError(
+                    f"line {key_node.start_mark.line + 1}: merge keys are not "
+                    "allowed (YAML profile)"
+                )
+        return super().flatten_mapping(node)
 
-    # -- duplicate-key rejection (construct phase) --------------------------
     def construct_mapping(self, node, deep=False):
         if not isinstance(node, yaml.MappingNode):
             raise yaml.constructor.ConstructorError(
@@ -101,8 +102,66 @@ class _StrictSafeLoader(yaml.SafeLoader):
         return mapping
 
 
+def _install_core_bool_resolver(loader: type[yaml.SafeLoader]) -> None:
+    """Narrow the implicit boolean resolver to the YAML 1.2 Core forms.
+
+    ``yaml_implicit_resolvers`` is a first-character index; PyYAML registers
+    the 1.1 boolean pattern under ``y n Y N t f T F o O`` (plus the empty
+    key). Rebuilding the table drops ``yes``/``no``/``on``/``off`` -- they
+    resolve as plain strings, so ``enabled: yes`` fails the boolean check in
+    ``raw_validate`` instead of silently meaning ``true``.
+    """
+    bool_tag = "tag:yaml.org,2002:bool"
+    resolvers: dict[str, list] = {}
+    for first_char, entries in yaml.SafeLoader.yaml_implicit_resolvers.items():
+        kept = [(tag, regex) for tag, regex in entries if tag != bool_tag]
+        resolvers[first_char] = kept
+    for first_char in "tTfF":
+        resolvers.setdefault(first_char, [])
+        resolvers[first_char] = [(bool_tag, _CORE_BOOL)] + resolvers[first_char]
+    loader.yaml_implicit_resolvers = {
+        key: list(value) for key, value in resolvers.items() if value
+    }
+
+
+_install_core_bool_resolver(_StrictSafeLoader)
+
+#: Public alias: the YAML 1.2 Core, profile-enforcing loader. Exposed so tools
+#: that read HushSpec-adjacent YAML (evaluator fixtures, bundles) resolve
+#: scalars the same way the parser does.
+CoreSafeLoader = _StrictSafeLoader
+
+
+def _measure(value, depth: int) -> tuple[int, int]:
+    """Return ``(max_depth, node_count)`` for a parsed document, mirroring the
+    Rust reference's ``measure`` over ``serde_yaml::Value``."""
+    if isinstance(value, list):
+        max_depth, nodes = depth, 1
+        for item in value:
+            item_depth, item_nodes = _measure(item, depth + 1)
+            max_depth = max(max_depth, item_depth)
+            nodes += item_nodes
+        return max_depth, nodes
+    if isinstance(value, dict):
+        max_depth, nodes = depth, 1
+        for key, item in value.items():
+            key_depth, key_nodes = _measure(key, depth + 1)
+            item_depth, item_nodes = _measure(item, depth + 1)
+            max_depth = max(max_depth, key_depth, item_depth)
+            nodes += key_nodes + item_nodes
+        return max_depth, nodes
+    return depth, 1
+
+
 def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
     """Returns ``(True, spec)`` on success or ``(False, error_message)`` on failure."""
+    if len(yaml_str.encode("utf-8")) > MAX_DOCUMENT_BYTES:
+        return (
+            False,
+            "YAML parse error: document exceeds the maximum size of "
+            f"{MAX_DOCUMENT_BYTES} bytes",
+        )
+
     try:
         doc = yaml.load(yaml_str, Loader=_StrictSafeLoader)
     except yaml.YAMLError as e:
@@ -116,7 +175,20 @@ def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
     if not isinstance(doc, dict):
         return False, "HushSpec document must be a YAML mapping"
 
-    doc = _normalize_yaml_mapping_keys(doc)
+    depth, nodes = _measure(doc, 1)
+    if depth > MAX_NESTING_DEPTH:
+        return (
+            False,
+            "YAML parse error: document nesting exceeds the maximum depth of "
+            f"{MAX_NESTING_DEPTH}",
+        )
+    if nodes > MAX_NODE_COUNT:
+        return (
+            False,
+            "YAML parse error: document exceeds the maximum node count of "
+            f"{MAX_NODE_COUNT}",
+        )
+
     errors = validate_raw_document(doc)
     if errors:
         return False, errors[0]
@@ -129,16 +201,3 @@ def parse_or_raise(yaml_str: str) -> HushSpec:
     if not ok:
         raise ValueError(result)
     return result  # type: ignore[return-value]
-
-
-def _normalize_yaml_mapping_keys(value):
-    """Normalize PyYAML's YAML 1.1 bool-key coercions (notably bare ``on:``)."""
-    if isinstance(value, dict):
-        normalized = {}
-        for key, item in value.items():
-            normalized_key = "on" if key is True and "on" not in value else key
-            normalized[normalized_key] = _normalize_yaml_mapping_keys(item)
-        return normalized
-    if isinstance(value, list):
-        return [_normalize_yaml_mapping_keys(item) for item in value]
-    return value

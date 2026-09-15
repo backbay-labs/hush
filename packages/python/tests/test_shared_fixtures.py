@@ -6,8 +6,10 @@ from typing import Any
 import yaml
 
 from hushspec import merge, parse, validate
+from hushspec.conditions import RuntimeContext
 from hushspec.detection import evaluate_with_detection
 from hushspec.evaluate import EvaluationAction, OriginContext, PostureContext
+from hushspec.parse import CoreSafeLoader
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -96,7 +98,9 @@ class TestSharedFixtures:
     def test_evaluator_fixtures(self):
         for subdir in EVALUATION_DIRS:
             for fixture_path in iter_yaml_files(subdir):
-                raw = yaml.safe_load(fixture_path.read_text())
+                # YAML 1.2 Core (the HushSpec profile): `on:`/`yes:` stay
+                # strings, so the policy survives the re-dump below.
+                raw = yaml.load(fixture_path.read_text(), Loader=CoreSafeLoader)
                 assert raw["hushspec_test"] == "0.1.0"
                 assert raw["description"].strip()
                 assert raw["cases"]
@@ -122,7 +126,7 @@ class TestSharedFixtures:
                 # this is equivalent to evaluate() for all of them and only
                 # exercises detection for fixtures/detection/evaluation/.
                 for index, case in enumerate(raw["cases"]):
-                    action = _action_from_case(case["action"])
+                    action = _action_from_case(case["action"], case.get("context"))
                     actual = evaluate_with_detection(spec, action).evaluation
                     expect = case["expect"]
                     label = (
@@ -148,12 +152,16 @@ def parse_or_fail(path: Path):
     return result
 
 
-def _action_from_case(raw: dict[str, Any]) -> EvaluationAction:
+def _action_from_case(
+    raw: dict[str, Any], context: dict[str, Any] | None = None
+) -> EvaluationAction:
     """Build an EvaluationAction from a fixture case's raw ``action`` mapping.
 
     Field names are shared verbatim with schemas/hushspec-evaluator-test.v0
-    .schema.json's Action/Origin/PostureInput $defs, so this is a direct
-    keyword-argument passthrough per sub-object.
+    .schema.json's Action/Origin/PostureInput/RuntimeContext $defs, so this is
+    a direct keyword-argument passthrough per sub-object. The case-level
+    ``context`` (core spec 3.13) rides on the action, exactly as the Rust
+    reference threads it through ``EvaluationAction.context``.
     """
     origin = OriginContext(**raw["origin"]) if raw.get("origin") is not None else None
     posture = PostureContext(**raw["posture"]) if raw.get("posture") is not None else None
@@ -164,4 +172,8 @@ def _action_from_case(raw: dict[str, Any]) -> EvaluationAction:
         args_size=raw.get("args_size"),
         origin=origin,
         posture=posture,
+        url=raw.get("url"),
+        network=raw.get("network"),
+        timeout_ms=raw.get("timeout_ms"),
+        context=RuntimeContext.from_dict(context) if context is not None else None,
     )

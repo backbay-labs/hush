@@ -1,13 +1,17 @@
 import pytest
 
+from hushspec import parse, parse_or_raise, validate
 from hushspec.conditions import (
+    MAX_NESTING_DEPTH,
     Condition,
     RuntimeContext,
     TimeWindowCondition,
     evaluate_condition,
     evaluate_with_context,
+    timezone_is_known,
+    validate_condition,
 )
-from hushspec.evaluate import Decision, EvaluationAction
+from hushspec.evaluate import Decision, EvaluationAction, evaluate
 from hushspec.rules import DefaultAction, EgressRule, ToolAccessRule, Rules
 from hushspec.schema import HushSpec
 
@@ -273,13 +277,20 @@ class TestTimeWindowConditions:
         )
         assert evaluate_condition(cond, ctx_with_time("2026-01-17T03:00:00Z")) is True
 
-    def test_invalid_timezone_fails_closed(self):
+    def test_invalid_timezone_keeps_block_active(self):
+        # D15 (core 3.13): an unresolvable time zone cannot be evaluated, and
+        # an unevaluable condition MUST NOT switch a security control off, so
+        # the window is treated as satisfied. Validation rejects the zone at
+        # parse time.
         cond = Condition(
             time_window=TimeWindowCondition(
                 start="09:00", end="17:00", timezone="America/NeYork"
             )
         )
-        assert evaluate_condition(cond, ctx_with_time("2026-01-14T13:30:00Z")) is False
+        assert evaluate_condition(cond, ctx_with_time("2026-01-14T13:30:00Z")) is True
+        errors = validate_condition(cond, "rules.x.when")
+        assert len(errors) == 1, errors
+        assert "timezone" in errors[0]
 
 
 
@@ -364,10 +375,14 @@ class TestEdgeCases:
         assert evaluate_condition(Condition(), RuntimeContext()) is True
 
     def test_max_nesting_depth_exceeded(self):
+        # D15 (core 3.13): validation rejects the document; if such a condition
+        # still reaches evaluation (out-of-band map) it cannot be evaluated,
+        # and an unevaluable condition leaves the block active.
         cond = Condition(context={"environment": "production"})
         for _ in range(12):
             cond = Condition(all_of=[cond])
-        assert evaluate_condition(cond, ctx_with_env("production")) is False
+        assert evaluate_condition(cond, ctx_with_env("production")) is True
+        assert validate_condition(cond, "rules.x.when") != []
 
 
 
@@ -465,3 +480,174 @@ class TestEvaluateWithContext:
         partial_ctx = RuntimeContext(environment="production")
         result2 = evaluate_with_context(spec, action, partial_ctx, conditions)
         assert result2.decision == Decision.ALLOW
+
+
+# D15 (core 3.13): `when` is a document field, decoded and validated at parse
+# and validate time.
+
+
+class TestConditionDecoding:
+    def test_decodes_every_condition_form(self):
+        cond = Condition.from_dict(
+            {
+                "time_window": {
+                    "start": "09:00",
+                    "end": "17:00",
+                    "timezone": "UTC",
+                    "days": ["mon"],
+                },
+                "context": {"environment": "production"},
+                "all_of": [{"context": {"user.role": "admin"}}],
+                "any_of": [{"context": {"agent.type": "batch"}}],
+                "not": {"context": {"environment": "staging"}},
+            }
+        )
+        assert cond.time_window is not None
+        assert cond.time_window.days == ["mon"]
+        assert cond.all_of is not None and len(cond.all_of) == 1
+        assert cond.any_of is not None and len(cond.any_of) == 1
+        assert cond.not_ is not None
+
+    def test_rejects_unknown_condition_key(self):
+        with pytest.raises(ValueError, match="unknown condition field"):
+            Condition.from_dict({"weekday_only": True})
+
+    def test_rejects_unknown_time_window_key(self):
+        with pytest.raises(ValueError, match="unknown time_window field"):
+            Condition.from_dict({"time_window": {"start": "09:00", "end": "17:00", "tz": "UTC"}})
+
+    def test_round_trips_through_to_dict(self):
+        raw = {
+            "time_window": {"start": "09:00", "end": "17:00"},
+            "not": {"context": {"environment": "staging"}},
+        }
+        assert Condition.from_dict(raw).to_dict() == raw
+
+
+class TestValidateCondition:
+    def test_accepts_a_well_formed_condition(self):
+        cond = Condition.from_dict(
+            {
+                "time_window": {
+                    "start": "22:00",
+                    "end": "06:00",
+                    "timezone": "America/New_York",
+                    "days": ["mon", "fri"],
+                }
+            }
+        )
+        assert validate_condition(cond, "rules.egress.when") == []
+
+    def test_reports_each_violation(self):
+        cond = Condition.from_dict(
+            {
+                "time_window": {
+                    "start": "25:00",
+                    "end": "17:60",
+                    "timezone": "+05:30",
+                    "days": ["Mon", "funday"],
+                }
+            }
+        )
+        errors = validate_condition(cond, "rules.shell_commands.when")
+        assert len(errors) == 3, errors
+        assert any("time_window.start" in e for e in errors)
+        assert any("time_window.end" in e for e in errors)
+        assert any("funday" in e for e in errors)
+
+    def test_rejects_an_unknown_timezone(self):
+        cond = Condition.from_dict(
+            {"time_window": {"start": "09:00", "end": "17:00", "timezone": "Mars/Olympus_Mons"}}
+        )
+        errors = validate_condition(cond, "rules.egress.when")
+        assert len(errors) == 1, errors
+        assert "timezone" in errors[0]
+
+    def test_rejects_nesting_past_the_depth_cap(self):
+        deep = Condition(context={})
+        for _ in range(MAX_NESTING_DEPTH + 1):
+            deep = Condition(not_=deep)
+        errors = validate_condition(deep, "rules.egress.when")
+        assert len(errors) == 1, errors
+        assert "nest deeper" in errors[0]
+
+        ok = Condition(context={})
+        for _ in range(MAX_NESTING_DEPTH):
+            ok = Condition(not_=ok)
+        assert validate_condition(ok, "rules.egress.when") == []
+
+
+class TestTimezoneIsKnown:
+    def test_accepts_iana_names_aliases_and_fixed_offsets(self):
+        assert timezone_is_known("UTC") is True
+        assert timezone_is_known("America/New_York") is True
+        assert timezone_is_known("+05:30") is True
+        assert timezone_is_known("-08:00") is True
+        assert timezone_is_known("JST") is True
+
+    def test_rejects_unknown_zones(self):
+        assert timezone_is_known("Mars/Olympus_Mons") is False
+        assert timezone_is_known("America/NeYork") is False
+
+
+class TestDocumentWhenValidation:
+    def test_document_condition_gates_its_block(self):
+        spec = parse_or_raise(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  shell_commands:\n"
+            "    when:\n"
+            "      context:\n"
+            "        environment: production\n"
+            '    forbidden_patterns: ["mkfs"]\n'
+        )
+        assert validate(spec).is_valid
+        action = EvaluationAction(type="shell_command", target="mkfs /dev/sda")
+        active = evaluate(
+            spec,
+            EvaluationAction(
+                type="shell_command",
+                target="mkfs /dev/sda",
+                context=RuntimeContext(environment="production"),
+            ),
+        )
+        assert active.decision == Decision.DENY
+        inert = evaluate(
+            spec,
+            EvaluationAction(
+                type="shell_command",
+                target="mkfs /dev/sda",
+                context=RuntimeContext(environment="staging"),
+            ),
+        )
+        assert inert.decision == Decision.ALLOW
+        # No context at all: the context predicate is unsatisfied, so the block
+        # is inert (a missing field is false, not unevaluable).
+        assert evaluate(spec, action).decision == Decision.ALLOW
+
+    def test_unknown_condition_key_is_a_parse_error(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  shell_commands:\n"
+            "    when:\n"
+            "      weekday_only: true\n"
+            '    forbidden_patterns: ["mkfs"]\n'
+        )
+        assert ok is False
+        assert "unknown condition field" in err
+
+    def test_bad_time_window_is_a_validation_error(self):
+        spec = parse_or_raise(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  shell_commands:\n"
+            "    when:\n"
+            "      time_window:\n"
+            '        start: "25:00"\n'
+            '        end: "06:00"\n'
+            '    forbidden_patterns: ["mkfs"]\n'
+        )
+        result = validate(spec)
+        assert not result.is_valid
+        assert "rules.shell_commands.when.time_window.start" in str(result.errors[0])

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "python"))
 
 from hushspec import parse, validate  # noqa: E402
+from hushspec.conditions import RuntimeContext  # noqa: E402
 from hushspec.evaluate import (  # noqa: E402
     EvaluationAction,
     OriginContext,
@@ -40,6 +41,9 @@ def build_action(data: dict) -> EvaluationAction:
     if "posture" in data:
         raw = data["posture"]
         posture = PostureContext(current=raw.get("current"), signal=raw.get("signal"))
+    context = None
+    if "context" in data and data["context"] is not None:
+        context = RuntimeContext.from_dict(data["context"])
     return EvaluationAction(
         type=data["type"],
         target=data.get("target"),
@@ -47,6 +51,10 @@ def build_action(data: dict) -> EvaluationAction:
         origin=origin,
         posture=posture,
         args_size=data.get("args_size"),
+        url=data.get("url"),
+        network=data.get("network"),
+        timeout_ms=data.get("timeout_ms"),
+        context=context,
     )
 
 
