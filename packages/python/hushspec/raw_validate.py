@@ -71,8 +71,8 @@ FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """Structural check of a rule block's ``when`` condition (core spec 3.13).
 
-    Unknown keys and wrong types inside a condition are *parse* errors (they
-    are rejected by serde in the Rust reference); the semantic checks --
+    Unknown keys and wrong types inside a condition are *parse* errors; the
+    semantic checks --
     ``HH:MM`` values, timezone, day names, nesting depth -- belong to
     ``validate`` and live in hushspec.validate.validate_conditions.
     """
@@ -88,9 +88,9 @@ def _constraint(message: str) -> ErrorMessage:
     """A core Section 7 / extension-module constraint violation (E004).
 
     Everything else this module reports is a parse-time refusal (E001): the
-    shape, type, enum and unknown-key checks serde performs for the Rust
-    reference. Only the semantic constraints Rust checks in `validate` are
-    tagged, so the two implementations name the same code for the same vector.
+    shape, type, enum and unknown-key checks a document must pass before it
+    decodes at all. Only the semantic constraints are tagged, so every SDK
+    names the same registry code for the same vector.
     """
     return ErrorMessage(message, ERROR_CONSTRAINT_VIOLATION)
 
@@ -643,12 +643,12 @@ def _validate_origins(
                 _validate_optional_string(match, "sensitivity", errors, f"{profile_path}.match.sensitivity")
                 _validate_optional_string(match, "actor_role", errors, f"{profile_path}.match.actor_role")
 
-                # S2: a present-but-empty free-text match field (e.g.
-                # `provider: ""`) is a degenerate, unrepresentable-consistently
-                # constraint -- reject it (parity with Go's raw validator,
-                # which already does this). `space_type`/`visibility` are
-                # enums and already reject "" as an invalid enum value via
-                # `_validate_optional_enum` above, so they are excluded here.
+                # A present-but-empty free-text match field (e.g.
+                # `provider: ""`) is a degenerate constraint with no
+                # consistent meaning, so it is rejected. `space_type` and
+                # `visibility` are enums and already reject "" as an invalid
+                # enum value via `_validate_optional_enum` above, so they are
+                # excluded here.
                 for match_field in (
                     "provider",
                     "tenant_id",
@@ -822,11 +822,10 @@ def _validate_detection_heuristics(
 ) -> None:
     """``prompt_injection.heuristics`` (detection spec 3.5.1).
 
-    ``min_score`` is a non-negative integer, the range Rust's ``usize`` field
-    enforces at parse time; the schema's upper bound of 100 is not checked
-    here, because a floor above the clamp is harmless (nothing ever reaches
-    it) and rejecting one where the reference accepts it would be a
-    conformance divergence.
+    ``min_score`` is a non-negative integer. The schema's upper bound of 100
+    is not enforced here: a floor above the clamp is harmless (nothing ever
+    reaches it), and refusing a document other engines accept would itself be
+    a conformance divergence.
     """
     _reject_unknown_keys(obj, PROMPT_INJECTION_HEURISTICS_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
@@ -1025,8 +1024,8 @@ def _reject_empty_match_string(
     obj: dict[str, Any], key: str, path: str, errors: list[str]
 ) -> None:
     """Reject a present free-text origin-match field whose value is the empty
-    string (S2). An absent field is untouched -- an all-absent match still
-    matches every origin. Type errors are reported separately by
+    string. An absent field is untouched -- an all-absent match still matches
+    every origin. Type errors are reported separately by
     `_validate_optional_string`, so a non-string value here is ignored."""
     value = obj.get(key)
     if isinstance(value, str) and value == "":
@@ -1114,8 +1113,9 @@ _RE2_DISALLOWED = re.compile(
 )
 
 
-# Shared rejection message for possessive quantifiers. Kept identical to the
-# copy in hushspec/validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+# Shared rejection message for possessive quantifiers. The wording is part of
+# the contract, so it must stay identical here, in hushspec/validate.py, and in
+# every other SDK.
 _POSSESSIVE_MESSAGE = (
     "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
     "across the HushSpec SDK regex engines"
@@ -1126,8 +1126,8 @@ _POSSESSIVE_MESSAGE = (
 # behave differently across, the four SDK engines (possessive quantifiers,
 # \Z/\z end-anchors, empty character classes []/[^]) so a pattern validates
 # identically everywhere. See hushspec/validate.py's `_disallowed_regex_
-# feature` for full documentation. Kept identical to that module's copy and
-# to the Rust/Go implementations.
+# feature` for full documentation; this copy must stay identical to it, and
+# both to the profile every other SDK implements.
 def _disallowed_regex_feature(pattern: str) -> str | None:
     chars = list(pattern)
     n = len(chars)

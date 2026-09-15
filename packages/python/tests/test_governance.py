@@ -1,8 +1,7 @@
 """Governance metadata parity (core spec 2.5).
 
-Every warning and error asserted here is produced verbatim by the Rust,
-TypeScript and Go validators too -- the wording is the contract, not an
-implementation detail.
+Every warning and error asserted here is produced verbatim by every SDK --
+the wording is the contract, not an implementation detail.
 """
 
 from __future__ import annotations

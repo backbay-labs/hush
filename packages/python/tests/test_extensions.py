@@ -275,11 +275,10 @@ extensions:
 
 
 class TestOriginMatchEmptyField:
-    """S2: an origin match free-text field present with an empty string value
-    is a degenerate, unrepresentable-consistently constraint and must be
-    rejected at validation -- matching Go's raw validator, which already
-    rejects this. The enum fields space_type/visibility already reject "" as
-    an invalid enum value (unaffected by this fix)."""
+    """An origin match free-text field present with an empty string value is a
+    degenerate constraint with no consistent meaning, so validation rejects it.
+    The enum fields space_type/visibility already reject "" as an invalid enum
+    value."""
 
     def test_rejects_empty_provider(self):
         yaml = """
@@ -653,7 +652,7 @@ extensions:
 
 
 class TestTransitionPriority:
-    """D18 (posture spec 5.3): a `from` that names the current state outranks
+    """Posture spec 5.3: a `from` that names the current state outranks
     the wildcard, whatever the document order; among equals, document order.
 
     Vector: fixtures/posture/evaluation/transition-priority.test.yaml.

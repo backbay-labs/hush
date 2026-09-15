@@ -32,8 +32,8 @@ from hushspec.evaluate import (
     PostureResult,
 )
 
-# Re-exported: the rule trace is produced by the evaluator itself, so its types
-# live there (mirroring the Rust crate's `pub use crate::evaluate::{...}`).
+# Re-exported: the rule trace is produced by the evaluator itself, so its
+# types live there.
 from hushspec.evaluate import RuleEvaluation, RuleOutcome  # noqa: F401
 from hushspec.resolve import ChainLink, Resolution, SignatureStatus
 from hushspec.schema import HushSpec
@@ -224,9 +224,9 @@ class EnforcementSummary:
     ) -> "EnforcementSummary":
         """The disposition implied by a decision with no enforcement point.
 
-        An allow proceeds; a warn with no confirmation channel is a deny (core
-        spec D16); under monitor mode a warn or deny proceeds and is recorded
-        as ``would_block``.
+        An allow proceeds; a warn with no confirmation channel is a deny
+        (core spec 6); under monitor mode a warn or deny proceeds and is
+        recorded as ``would_block``.
         """
         mode_value = mode.value if isinstance(mode, Enum) else str(mode)
         if decision == Decision.ALLOW:
@@ -242,9 +242,8 @@ class EnforcementSummary:
 class DecisionReceipt:
     """A decision receipt, format 0.2.
 
-    Field order mirrors the Rust reference's struct so the JSON Lines a sink
-    writes reads the same in every SDK; the *hash* is order-independent
-    (RFC 8785 sorts keys).
+    Field order is fixed across the SDKs so the JSON Lines a sink writes read
+    the same everywhere; the *hash* is order-independent (RFC 8785 sorts keys).
     """
 
     receipt_id: str
@@ -843,7 +842,7 @@ def _value(value: Any) -> Any:
 
 
 def _uuid7_now() -> str:
-    """A fresh UUID v7 (RFC 9562) with 74 random bits."""
+    """A fresh UUIDv7 with 74 random bits of entropy."""
     import secrets
 
     millis = int(time.time() * 1000)

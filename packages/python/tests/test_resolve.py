@@ -141,7 +141,7 @@ name: parent
 
 class TestExtendsDepthCap:
     def test_long_acyclic_chain_errors_at_depth_cap(self):
-        # S2: an acyclic `extends` chain longer than the cap (32) must fail
+        # An acyclic `extends` chain longer than the cap (32) must fail
         # closed with a clean error rather than recurse until a stack overflow.
         # 40 distinct specs, each extending the next; the 40th is terminal.
         total = 40

@@ -440,7 +440,7 @@ class TestRuleTraceActionTypes:
         assert tool_trace[0].outcome == "skip"
 
     def test_handles_unknown_action_type(self):
-        # D1 (core 5): an action type unknown to the specification denies, and
+        # Core spec 5: an action type unknown to the specification denies, and
         # the recorded trace carries the sentinel rule. Receipt spec 4.3 item 5
         # spells the engine stage `unknown_action_type`, not `default`.
         spec = HushSpec(hushspec="0.1.0")

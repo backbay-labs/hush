@@ -166,10 +166,10 @@ class TestPanicSentinel:
         assert not is_panic_active()
 
     def test_sentinel_stat_error_fails_closed(self, monkeypatch):
-        # A kill switch must fail CLOSED: if the sentinel's existence cannot be
-        # determined (e.g. a PermissionError from stat), treat it as PRESENT and
-        # activate panic -- matching Rust's `try_exists().unwrap_or(true)`. The
-        # old `os.path.isfile` swallowed such errors and failed OPEN.
+        # A kill switch must fail closed: if the sentinel's existence cannot be
+        # determined (e.g. a PermissionError from stat), treat it as present and
+        # activate panic. `os.path.isfile` swallows such errors and would fail
+        # open.
         def _raise_permission(_path):
             raise PermissionError("stat blocked")
 

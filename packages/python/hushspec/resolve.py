@@ -630,8 +630,7 @@ def _verify_hop(
       it is not pinned: ``required = require_signature and not pinned``. A
       matching digest pin is a proof about the exact bytes of the document, so
       it satisfies the hop on its own; the envelope, when there is one, is still
-      verified opportunistically and its outcome recorded. (Same rule as the
-      Rust reference's ``verify_hop``.)
+      verified opportunistically and its outcome recorded.
     """
     label = _label(source)
     if source is not None and source.startswith("builtin:"):
@@ -773,21 +772,19 @@ def create_builtin_loader() -> Resolver:
 
 
 def create_composite_loader() -> Resolver:
-    """Public alias for the builtin + filesystem loader (mirrors the TS SDK)."""
+    """Public alias for the builtin + filesystem loader."""
     return _create_composite_loader()
 
 
 def _create_composite_loader() -> Resolver:
     """Loader that serves `builtin:<name>` references from the embedded
-    rulesets and everything else from the filesystem (mirrors the Rust/TS
-    resolvers). A bare name with no path separators or dots is tried as a
-    builtin before falling back to the filesystem.
+    rulesets and everything else from the filesystem. A bare name with no path
+    separators or dots is tried as a builtin before falling back to the
+    filesystem.
 
-    `http://`/`https://` references are rejected outright, mirroring Rust's
-    (non-`http`-feature) `create_composite_loader` and TS's synchronous
-    `createCompositeLoader`: this loader has no HTTP client, so silently
-    handing a URL to the filesystem loader would fail with a confusing
-    "no such file or directory" error instead of a clear one.
+    `http://`/`https://` references are rejected outright: this loader has no
+    HTTP client, so silently handing a URL to the filesystem loader would fail
+    with a confusing "no such file or directory" error instead of a clear one.
     """
 
     def _loader(reference: str, source: str | None) -> LoadedSpec:

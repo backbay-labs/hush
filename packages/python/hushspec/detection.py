@@ -508,28 +508,25 @@ class RegexExfiltrationDetector(Detector):
         self._patterns: list[_DetectionPattern] = [
             _DetectionPattern(
                 name="ssn",
-                # ASCII non-digit boundaries rather than \b: \b is a Unicode
-                # word boundary in Python's re engine, so "café123-45-6789"
-                # (a non-ASCII, non-digit char abutting the run) would fail
-                # to match while it matches on RE2 (Go/Rust) and JS's \b
-                # (both ASCII-only). Explicit (?:^|[^0-9])...(?:[^0-9]|$)
-                # boundaries make ASCII-vs-Unicode word-boundary semantics
-                # irrelevant and keep all four SDKs byte-identical. Must stay
-                # lookaround-free (RE2 has none) -- see is_safe_regex.
+                # ASCII non-digit boundaries rather than \b, which is a
+                # Unicode word boundary in some regex engines and ASCII-only
+                # in others: a non-ASCII char abutting the run (e.g.
+                # "café123-45-6789") would then match in some engines and not
+                # in others. Explicit (?:^|[^0-9])...(?:[^0-9]|$) boundaries
+                # make word-boundary semantics irrelevant. The pattern must
+                # stay lookaround-free -- see is_safe_regex.
                 #
                 # The body uses [0-9] rather than \d for the same reason: \d
-                # is Unicode-aware in Python's re (matching fullwidth/Arabic-
-                # indic/etc. digits), while Go RE2 and JS RegExp's \d are
-                # ASCII-only. [0-9] keeps all four SDKs agreeing that a
-                # Unicode-digit run never matches "ssn".
+                # is Unicode-aware in some engines, so a fullwidth or
+                # Arabic-indic digit run would score as an SSN. It is not one.
                 regex=re.compile(r"(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)"),
                 weight=0.8,
                 category=DetectionCategory.DATA_EXFILTRATION,
             ),
             _DetectionPattern(
                 name="credit_card",
-                # Same ASCII-boundary fix as "ssn" above, and for the same
-                # cross-engine \b-divergence reason.
+                # Explicit ASCII boundaries, as for "ssn" above and for the
+                # same reason.
                 regex=re.compile(
                     r"(?:^|[^0-9])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?:[^0-9]|$)"
                 ),
@@ -538,12 +535,10 @@ class RegexExfiltrationDetector(Detector):
             ),
             _DetectionPattern(
                 name="email_address",
-                # Same ASCII-boundary fix as "ssn"/"credit_card" above: \b is
-                # a Unicode word boundary in Python's re, so a non-ASCII
-                # letter abutting the address (e.g. "café user@example.com"
-                # with no space) could disagree with Go RE2 / JS's ASCII-only
-                # \b. Explicit (?:^|[^local-part-chars])...(?:[^domain-chars]
-                # |$) boundaries make all four SDKs byte-identical.
+                # Explicit ASCII boundaries, as for "ssn"/"credit_card"
+                # above: under a Unicode \b, a non-ASCII letter abutting the
+                # address (e.g. "café user@example.com" with no space) forms
+                # no boundary, so the match would depend on the engine.
                 regex=re.compile(
                     r"(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+"
                     r"\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)"

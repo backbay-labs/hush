@@ -1,10 +1,10 @@
 """The names ``import hushspec`` is expected to carry.
 
 Isomorphism across the SDKs is partly a naming property: a reader who knows
-the Rust reference should find the same concept under the same name here, and
-a snippet in the docs should not need a different import per language. These
-are the names the cross-SDK parity checklist pins, plus the invariant that
-``__all__`` never advertises something the package does not actually export.
+one SDK should find the same concept under the same name here, and a snippet
+in the docs should not need a different import per language. These are the
+names cross-SDK parity pins, plus the invariant that ``__all__`` never
+advertises something the package does not actually export.
 """
 
 from __future__ import annotations

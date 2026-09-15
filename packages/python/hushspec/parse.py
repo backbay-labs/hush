@@ -6,8 +6,7 @@ indentation, and bounded size, nesting depth, and node count.
 
 PyYAML implements YAML 1.1, whose boolean resolver also accepts
 ``yes/no/on/off/y/n``; the loader below installs Core-schema resolvers so those
-tokens stay plain strings and are rejected wherever a boolean is required,
-exactly as ``serde_yaml`` rejects them in the Rust reference.
+tokens stay plain strings and are rejected wherever a boolean is required.
 """
 
 from __future__ import annotations
@@ -132,8 +131,11 @@ CoreSafeLoader = _StrictSafeLoader
 
 
 def _measure(value, depth: int) -> tuple[int, int]:
-    """Return ``(max_depth, node_count)`` for a parsed document, mirroring the
-    Rust reference's ``measure`` over ``serde_yaml::Value``."""
+    """Return ``(max_depth, node_count)`` for a parsed document.
+
+    Both are quantities core spec 2.4 bounds. Mapping keys count as nodes and
+    nest one level, so a deeply nested key is measured like a value.
+    """
     if isinstance(value, list):
         max_depth, nodes = depth, 1
         for item in value:

@@ -40,8 +40,7 @@ _DETECTION_LEVEL_ORDER = {
 #: Which registry code each validation check reports. Every check not listed
 #: here is a core Section 7 / extension-module constraint violation, which is
 #: what E004 covers, so only the four the registry names separately need an
-#: entry. Mirrors the Rust reference's mapping, which names the same four
-#: ValidationError variants and folds the rest into E004.
+#: entry.
 _REGISTRY_CODES: dict[str, str] = {
     "unsupported_version": ERROR_UNSUPPORTED_VERSION,
     "duplicate_pattern_name": ERROR_DUPLICATE_PATTERN_NAME,
@@ -521,8 +520,9 @@ _RE2_DISALLOWED = re.compile(
 )
 
 
-# Shared rejection message for possessive quantifiers. Must stay identical to
-# the copy in raw_validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+# Shared rejection message for possessive quantifiers. The wording is part of
+# the contract, so it must stay identical here, in raw_validate.py, and in
+# every other SDK.
 _POSSESSIVE_MESSAGE = (
     "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
     "across the HushSpec SDK regex engines"
@@ -544,8 +544,8 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
       * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
         the others reject them).
 
-    Must stay byte-identical to the Rust, TypeScript, and Go implementations,
-    and to the copy of this function in raw_validate.py.
+    The accepted set is normative: every SDK must reject exactly these
+    constructs, as must the copy of this function in raw_validate.py.
     """
     chars = list(pattern)
     n = len(chars)
@@ -640,8 +640,8 @@ def _has_nested_quantifier(pattern: str) -> bool:
     escaped parens and character-class contents -- and returns ``True`` when a
     group whose body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) is
     itself immediately followed by an unbounded quantifier. Bounded quantifiers
-    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. Must stay identical to the
-    Rust, TypeScript, and Go implementations.
+    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. The over-approximation is
+    normative: every SDK must flag exactly the same patterns.
     """
     chars = list(pattern)
     n = len(chars)

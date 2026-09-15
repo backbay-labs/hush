@@ -39,9 +39,8 @@ def _merge_with_strategy(base: HushSpec, child: HushSpec, deep: bool) -> HushSpe
             if deep
             else _merge_extensions_merge(base.extensions, child.extensions)
         ),
-        # Merge top-level metadata child-over-parent like every other field
-        # (mirrors Rust `child.metadata.clone().or_else(|| base.metadata..)`);
-        # previously it was dropped from the merged result entirely.
+        # Top-level metadata merges child-over-parent like every other field
+        # (core spec 2.3).
         metadata=(
             copy.deepcopy(child.metadata)
             if child.metadata is not None
