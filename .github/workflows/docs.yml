@@ -32,17 +32,23 @@ jobs:
 
       - uses: lycheeverse/lychee-action@v2
         with:
+          # Code blocks are not checked (no --include-verbatim): the example
+          # policies carry `$schema=` comments pointing at a host that is not
+          # serving yet. Exclusions live in .lycheeignore, one justified line
+          # each. Verified with lychee 0.24 against this tree: 91 OK,
+          # 0 errors, 1 exclusion.
           args: >-
             --no-progress
-            --include-verbatim
             --max-retries 3
             --accept 200,204,206,429
             --exclude-path docs/book
             'docs/src/**/*.md'
             README.md
           fail: true
-          # Default is to open an issue on failure; this repo wants a red job.
           jobSummary: true
+          # Authenticates GitHub links so the many github.com/backbay-labs/hush
+          # references do not trip the unauthenticated rate limit.
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy:
     environment:
