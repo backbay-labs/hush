@@ -297,12 +297,16 @@ class TestRuleTraceActionTypes:
         assert tool_trace[0].outcome == "skip"
 
     def test_handles_unknown_action_type(self):
+        # D1 (core 5): an action type unknown to the specification denies, and
+        # the recorded trace carries the sentinel rule.
         spec = HushSpec(hushspec="0.1.0")
         action = EvaluationAction(type="unknown_action", target="test")
         receipt = evaluate_audited(spec, action, _enabled_config())
-        assert receipt.decision == Decision.ALLOW
+        assert receipt.decision == Decision.DENY
+        assert receipt.matched_rule == "__unknown_action_type__"
         default_trace = [
             t for t in receipt.rule_trace if t.rule_block == "default"
         ]
         assert len(default_trace) == 1
         assert default_trace[0].evaluated is True
+        assert default_trace[0].outcome == "deny"
