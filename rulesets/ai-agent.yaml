@@ -48,7 +48,6 @@ rules:
       - "gitlab.com"
       - "bitbucket.org"
       - "*.npmjs.org"
-      - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
       - "crates.io"

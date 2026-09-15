@@ -25,7 +25,6 @@ rules:
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
-      - "**/.env.local"
       - "**/.git-credentials"
       - "**/.gnupg/**"
       - "**/.kube/**"
@@ -42,9 +41,6 @@ rules:
       - "**/secrets*"
       - "**/service-account*.json"
     exceptions:
-      - "**/.github/workflows/**"
-      - "**/.gitlab-ci.yml"
-      - "**/.circleci/config.yml"
       - "**/.env.example"
       - "**/.env.template"
 
@@ -52,7 +48,6 @@ rules:
     allow:
       # Package registries
       - "*.npmjs.org"
-      - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
       - "crates.io"
@@ -68,7 +63,6 @@ rules:
       - "*.ecr.aws"
       - "ghcr.io"
       # Code hosting
-      - "api.github.com"
       - "github.com"
       - "*.githubusercontent.com"
       - "gitlab.com"
