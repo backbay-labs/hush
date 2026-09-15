@@ -20,6 +20,16 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v0.schema.json`):
   `ChainedFileSink`, `PolicyEvent` records, `verify_logs`, and `h2h log verify`.
 - Receipt signing (`sign_receipt` / `verify_receipt`) and `h2h receipts verify`.
+- Policy bundle attestation (`spec/hushspec-bundle.md`, `schemas/hushspec-bundle.v0.schema.json`):
+  `h2h bundle create` resolves a policy and wraps it in a DSSE envelope over an in-toto Statement
+  v1 whose subject is the canonical form of the resolved document and whose predicate carries that
+  document, every `extends` hop with its hash and signature status, and the resolver. `h2h bundle
+  verify` runs the four ordered checks of bundle spec 5.2 (`malformed_bundle`, `unknown_key_id`,
+  `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch`), optionally re-resolving
+  the policy to cross-check it, and `h2h bundle inspect` prints the predicate. Bundles are signed
+  with the same Ed25519 keys and `key_id` convention as policies, and are readable by generic DSSE
+  and in-toto tooling. Eight vectors under `fixtures/bundle/`; every release now attaches a bundle
+  for each `library/` and `rulesets/` policy, covered by `actions/attest-build-provenance`.
 
 ### Added
 

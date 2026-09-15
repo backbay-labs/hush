@@ -536,3 +536,64 @@ Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
 ### `h2h hash --own`
 
 Prints the document's own content hash with `extends` and `merge_strategy` stripped and no resolution: the value a digest pin names and a receipt records for a chain link.
+
+## `h2h bundle`
+
+Policy bundle attestation ([bundle spec](../bundle-spec.md)). A bundle is a DSSE
+envelope whose payload is an in-toto Statement v1: the subject is the canonical
+form of the *resolved* policy, and the predicate carries that document, every
+`extends` hop with its own hash and signature status, and the resolver that
+produced them. It is signed with the same Ed25519 keys as policies and receipts,
+so `h2h keygen` output works unchanged.
+
+### `h2h bundle create <policy>`
+
+Resolves the policy (builtin references included), validates the merged
+document, builds the statement, and signs it.
+
+| Flag | Meaning |
+|---|---|
+| `--key <PATH>` | PEM PKCS#8 Ed25519 **private** key that signs the bundle. Without it the bundle is unsigned: it still carries the evidence, attests nothing, and `h2h bundle verify` rejects it -- so `create` warns. |
+| `--keyring <PATH>` | Trusted keys used to verify the *policy's own* signature while loading it. The outcome is recorded in `predicate.signature_verification` and per chain link. Omitted keyring means no verification was attempted, and those members are absent rather than `false`. |
+| `--require-signature` | Refuse to bundle unless every non-builtin hop carries a verifying signature or a matching `#sha256:` pin. |
+| `--max-skew <SECONDS>` | Allowed signer clock skew while verifying on load (default 300). |
+| `--created-at <TIMESTAMP>` | Pin `predicate.created_at` instead of reading the clock. With it, the same policy, key and resolver produce a byte-identical bundle: JCS payload plus deterministic Ed25519. |
+| `--subject-name <NAME>` | Override the subject label (defaults to the policy's `name`, then the leaf file name). |
+| `--out <PATH>` | Output path (defaults to `<policy file name>.bundle.json` in the working directory). |
+| `--format json` | Machine-readable summary. |
+
+Filesystem chain sources are recorded relative to the working directory when
+they lie beneath it, so a bundle built in CI carries no runner workspace path.
+
+Exit 0 on success, 1 when the policy will not resolve, will not validate, or is
+refused by `--require-signature`, 2 for unusable inputs.
+
+### `h2h bundle verify <bundle.json>`
+
+Runs the four ordered checks of bundle spec 5.2 and stops at the first failure.
+
+| Flag | Meaning |
+|---|---|
+| `--keyring <PATH>` / `--key <PATH>` | Trusted keys (keyring JSON, or one SPKI PEM taken as a one-key keyring). One of the two is required. |
+| `--policy <PATH>` | Re-resolve this policy and assert the bundle attests it (check 4): the canonical forms must match and every chain hop's hash must match, in order. Chain `source` labels are not compared -- the same policy resolved on another host is the same policy. |
+| `--now <TIMESTAMP>` | Verifier clock. A bundle carries no expiry, so this only stamps `verified_at` in the report. |
+| `--format json` | Machine-readable report carrying `valid` and, on failure, `reason` and `detail`. |
+
+| Reason code | Check |
+|---|---|
+| `malformed_bundle` | 1: not a well-formed envelope, statement, or predicate; an unknown `predicateType` or `bundle_version` lands here. |
+| `unknown_key_id` | 2: no signature names a key in the keyring. |
+| `dsse_signature_mismatch` | 2: a trusted key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
+| `subject_digest_mismatch` | 3: `predicate.resolved` does not hash to the declared subject. |
+| `policy_mismatch` | 4: `--policy` resolves to something else, or does not resolve at all. |
+
+Exit 0 on `valid`, 1 with the reason code otherwise, 2 for unusable inputs.
+
+### `h2h bundle inspect <bundle.json>`
+
+Prints the predicate summary -- subject, content hash, policy identity,
+resolver, `created_at`, every chain hop with its signature status, and the
+signing key ids -- without verifying anything. `--format json` prints the whole
+decoded statement.
+
+Exit 0, or 1 when the bundle cannot be decoded.

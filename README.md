@@ -526,6 +526,7 @@ The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for prog
 | [`hushspec-canonical.md`](./spec/hushspec-canonical.md) | Canonical form and `content_hash` of a resolved policy (RFC 8785) |
 | [`hushspec-receipt.md`](./spec/hushspec-receipt.md) | Decision receipt format 0.2 |
 | [`hushspec-signing.md`](./spec/hushspec-signing.md) | Policy signature envelopes, keys, keyrings, verification |
+| [`hushspec-bundle.md`](./spec/hushspec-bundle.md) | Policy bundle attestation: DSSE envelope over an in-toto statement |
 | [`versioning.md`](./spec/versioning.md) | Versioning and stability policy |
 
 ## Project
