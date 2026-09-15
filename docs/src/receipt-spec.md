@@ -1,6 +1,6 @@
 # Decision Receipts
 
-The full normative specification is at [`spec/hushspec-receipt.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-receipt.md). The format 0.2 schema is staged at [`schemas/staged/0.2.0/hushspec-receipt.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/staged/0.2.0/hushspec-receipt.v0.schema.json) until the SDKs emit it.
+The full normative specification is at [`spec/hushspec-receipt.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-receipt.md). The format 0.2 schema is [`schemas/hushspec-receipt.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-receipt.v0.schema.json); the Rust SDK emits it, and `fixtures/receipts/expected/` holds the receipts every SDK must reproduce.
 
 A receipt is the unit of compliance evidence: one JSON object per evaluation that records
 

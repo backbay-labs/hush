@@ -492,3 +492,47 @@ h2h --version          # clap's short form, CLI version only
 | `target` | Rust target triple the binary was built for. |
 
 Exit: always `0`.
+
+## Evidence chain (RFC 09 Wave 4)
+
+### Verify-on-load flags (`eval`, `explain`, `resolve`)
+
+| Flag | Meaning |
+|---|---|
+| `--require-signature` | Every non-builtin document in the `extends` chain must carry a detached signature that verifies, or a matching `#sha256:` pin. A policy that does not verify is refused: `eval` emits a deny receipt with `matched_rule: __hushspec_policy_unverified__` and `policy.signature.verified: false`, and exits 1. |
+| `--keyring <PATH>` / `--key <PATH>` | Trusted keys (keyring JSON, or one SPKI PEM). With `--keyring` and no `--require-signature`, verification runs opportunistically and the outcome is recorded in the receipt. |
+| `--now`, `--max-skew`, `--last-seen-version` | Verifier clock, allowed signer skew, rollback floor (signing spec 6). |
+
+Digest pins: `extends: "builtin:default#sha256:<hex>"` is checked always; the pinned value is the base's *own* content hash, which `h2h hash <policy> --own` prints. A mismatch is reported as `digest_mismatch` (exit 2 on `eval`).
+
+### Receipt fields on `eval`
+
+| Flag | Meaning |
+|---|---|
+| `--agent-id`, `--session-id`, `--principal` | The `actor` recorded in the receipt (`runtime` is always `h2h/<version>`). |
+| `--monitor` | Record the disposition in monitor mode (`would_block` instead of `blocked`). |
+| `--log <PATH>` | Append a `policy_loaded` entry and the receipt to a hash-linked log (log spec). |
+| `--log-key <PATH>` | Sign every log entry with this Ed25519 private key. |
+
+### `h2h log verify <files...>`
+
+Checks a hash-linked log: sequence continuity, `prev_hash` links, `entry_hash` recomputation, payload/entry-type agreement, receipt schema validity, and entry signatures. Pass rotated files oldest first; each continued file must start with a `log_started` entry that names the previous file's last hash.
+
+| Flag | Meaning |
+|---|---|
+| `--keyring` / `--key` | Verify entry signatures. |
+| `--require-signatures` | Every entry must be signed and verify. |
+| `--now`, `--max-skew` | Verifier clock and skew. |
+| `--format json` | Machine-readable report. |
+
+Exit 0 when the chain verifies, 1 at the first break (reported as `file:line: reason`), 2 for unusable inputs.
+
+### `h2h receipts verify <files...>`
+
+Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
+
+Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
+
+### `h2h hash --own`
+
+Prints the document's own content hash with `extends` and `merge_strategy` stripped and no resolution: the value a digest pin names and a receipt records for a chain link.

@@ -8,6 +8,7 @@
 - [Canonical Form](canonical-spec.md)
 - [Decision Receipts](receipt-spec.md)
 - [Policy Signing](signing-spec.md)
+- [Receipt Log](log-spec.md)
 - [Rules Reference](rules-reference.md)
 - [Merge Semantics](merge-semantics.md)
 - [Action Types](action-types.md)
