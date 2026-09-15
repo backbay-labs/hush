@@ -298,6 +298,10 @@ class HushGuard:
             # A refused guard announces no policy: it loaded none. The backstop
             # deny-all document is an implementation detail, not something an
             # observer should record as the policy in force.
+        # The log records which policy came into force before any receipt
+        # evaluated under it (log spec section 6). A refused guard loaded none.
+        if self._refusal is None:
+            self._record_policy_event(loaded=True)
 
     @classmethod
     def from_file(
@@ -643,3 +647,33 @@ class HushGuard:
                 self._policy_hash,
                 previous_hash,
             )
+        # The log must carry the swap before any receipt evaluated under the
+        # new policy (log spec section 6).
+        self._record_policy_event(loaded=False, previous_content_hash=previous_hash)
+
+    def _record_policy_event(
+        self, *, loaded: bool, previous_content_hash: Optional[str] = None
+    ) -> None:
+        """Write the policy-in-effect record for this load or swap.
+
+        Goes through the sink, so a hash-linked log gets a `policy_loaded` /
+        `policy_swapped` entry and a plain receipt sink ignores it. A sink that
+        raises must not take the guard down with it.
+        """
+        if self._sink is None or self._resolution is None:
+            return
+        from hushspec.log import PolicyEvent
+        from hushspec.receipt import policy_summary
+
+        summary = policy_summary(self._resolution)
+        event = (
+            PolicyEvent.loaded(summary, self._enforcement_mode)
+            if loaded
+            else PolicyEvent.swapped(
+                summary, self._enforcement_mode, previous_content_hash
+            )
+        )
+        try:
+            self._sink.record_policy_event(event)
+        except Exception:
+            pass  # sinks must not break a policy load

@@ -1,0 +1,345 @@
+"""Hash-linked receipt log (``spec/hushspec-log.md``, format 0.1).
+
+The chained sink, rotation, signing, verification, and the normative vectors
+under ``fixtures/log/``: every file in ``valid/`` must verify, every file in
+``invalid/`` must be rejected at the line its name ends with.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from hushspec.builtins import load_builtin
+from hushspec.evaluate import EvaluationAction
+from hushspec.log import (
+    GENESIS_HASH,
+    LOG_VERSION,
+    SDK_NAME,
+    ChainedFileSink,
+    EntryType,
+    LogError,
+    LogVerifyOptions,
+    PolicyEvent,
+    SdkInfo,
+    compute_entry_hash,
+    verify_log,
+    verify_log_files,
+    verify_logs,
+)
+from hushspec.receipt import (
+    Actor,
+    AuditConfig,
+    AuditContext,
+    TimeSource,
+    deterministic_uuid_v7,
+    evaluate_audited,
+    policy_summary,
+)
+from hushspec.resolve import Resolution, VerifyOptions
+from hushspec.signing import load_keyring
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VECTORS = REPO_ROOT / "fixtures" / "log"
+KEYS = REPO_ROOT / "fixtures" / "signing" / "keys"
+
+CLOCK_MILLIS = 1_789_473_600_000
+CLOCK = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _keyring():
+    return load_keyring((KEYS / "keyring.json").read_text())
+
+
+def _signed_options() -> LogVerifyOptions:
+    return LogVerifyOptions(
+        require_signatures=False,
+        keyring=_keyring(),
+        verify=VerifyOptions(now=CLOCK, max_clock_skew_seconds=300),
+    )
+
+
+def _resolution() -> Resolution:
+    return Resolution.from_resolved(load_builtin("default"), "builtin:default")
+
+
+def _actions() -> list[EvaluationAction]:
+    return [
+        EvaluationAction(type="tool_call", target="read_file"),
+        EvaluationAction(type="egress", target="api.github.com"),
+        EvaluationAction(type="file_read", target="/home/me/.ssh/id_rsa"),
+    ]
+
+
+def _context(index: int) -> AuditContext:
+    return AuditContext(
+        actor=Actor(
+            agent_id="fixture-agent",
+            session_id="fixture-session",
+            principal="fixture@hushspec.dev",
+            runtime="hushspec-conformance/0.2",
+        ),
+        time_source=TimeSource.TRUSTED.value,
+        clock=CLOCK,
+        receipt_id=deterministic_uuid_v7(CLOCK_MILLIS, index),
+    )
+
+
+def _config() -> AuditConfig:
+    return AuditConfig(enabled=True, include_rule_trace=True, record_duration=False)
+
+
+def _write_basic(path: Path, *, signed: bool = False) -> ChainedFileSink:
+    """A `policy_loaded` entry followed by three receipts, as the vectors are."""
+    resolution = _resolution()
+    sink = ChainedFileSink.open(path).with_clock(CLOCK)
+    if signed:
+        sink = sink.with_signer((KEYS / "test-signing.key.pem").read_text())
+    sink.record_policy_event(
+        PolicyEvent.loaded(
+            policy_summary(resolution),
+            "enforce",
+            timestamp="2026-09-15T12:00:00.000Z",
+            sdk=SdkInfo(name="hushspec-conformance", version="0.2"),
+        )
+    )
+    for index, action in enumerate(_actions()):
+        sink.send(evaluate_audited(resolution, action, _config(), _context(index)))
+    return sink
+
+
+# --------------------------------------------------------------------------- #
+# Behaviour
+# --------------------------------------------------------------------------- #
+
+
+class TestChainedFileSink:
+    def test_entries_link_and_verify(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        sink = _write_basic(path)
+        assert sink.head()[0] == 4
+
+        entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert len(entries) == 4
+        assert entries[0]["seq"] == 1
+        assert entries[0]["prev_hash"] == GENESIS_HASH
+        assert entries[0]["entry_type"] == EntryType.POLICY_LOADED.value
+        for before, after in zip(entries, entries[1:]):
+            assert after["prev_hash"] == before["entry_hash"]
+            assert after["seq"] == before["seq"] + 1
+        for entry in entries:
+            assert compute_entry_hash(entry) == entry["entry_hash"]
+            assert entry["log_version"] == LOG_VERSION
+
+        report = verify_log("log.jsonl", path.read_text())
+        assert (report.entries, report.receipts, report.policy_events) == (4, 3, 1)
+        assert report.last_entry_hash == entries[3]["entry_hash"]
+
+    def test_reopening_continues_the_chain(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        head = _write_basic(path).head()
+        reopened = ChainedFileSink.open(path)
+        assert reopened.head() == head
+        reopened.send(
+            evaluate_audited(_resolution(), _actions()[0], _config(), _context(9))
+        )
+        assert verify_log("log.jsonl", path.read_text()).entries == 5
+
+    def test_rotation_carries_the_chain_into_the_next_file(self, tmp_path: Path) -> None:
+        first, second = tmp_path / "log-1.jsonl", tmp_path / "log-2.jsonl"
+        sink = _write_basic(first)
+        last_hash = sink.head()[1]
+
+        started = sink.rotate(second)
+        assert started.seq == 1
+        assert started.prev_hash == last_hash
+        assert started.log_started.previous_entry_hash == last_hash
+        assert started.log_started.previous_file == "log-1.jsonl"
+        sink.send(evaluate_audited(_resolution(), _actions()[1], _config(), _context(7)))
+
+        report = verify_log_files([first, second])
+        assert (report.files, report.entries) == (2, 6)
+
+        # The second file alone verifies from its log_started link; it just
+        # cannot vouch for what came before.
+        assert verify_log("log-2", second.read_text()).entries == 2
+
+        # Given out of order, the link breaks on the first line.
+        with pytest.raises(LogError) as caught:
+            verify_log_files([second, first])
+        assert caught.value.line == 1
+
+    def test_rotating_into_an_existing_file_is_refused(self, tmp_path: Path) -> None:
+        first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+        sink = _write_basic(first)
+        second.write_text("")
+        with pytest.raises(Exception):
+            sink.rotate(second)
+
+    def test_signed_entries_verify_with_the_keyring_and_fail_without(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path, signed=True)
+        text = path.read_text()
+
+        options = LogVerifyOptions(
+            require_signatures=True,
+            keyring=_keyring(),
+            verify=VerifyOptions(now=CLOCK, max_clock_skew_seconds=300),
+        )
+        report = verify_log("log.jsonl", text, options)
+        assert report.signed == 4
+        assert report.verified_signatures == 4
+
+        with pytest.raises(LogError) as caught:
+            verify_log(
+                "log.jsonl", text, LogVerifyOptions(require_signatures=True)
+            )
+        assert "no_keyring" in caught.value.message
+
+        revoked = LogVerifyOptions(
+            require_signatures=True,
+            keyring=load_keyring((KEYS / "keyring-revoked.json").read_text()),
+            verify=VerifyOptions(now=CLOCK, max_clock_skew_seconds=300),
+        )
+        with pytest.raises(LogError) as caught:
+            verify_log("log.jsonl", text, revoked)
+        assert caught.value.line == 1
+        assert "signature" in caught.value.message
+
+    def test_unsigned_entries_fail_when_signatures_are_required(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        options = LogVerifyOptions(require_signatures=True, keyring=_keyring())
+        with pytest.raises(LogError) as caught:
+            verify_log("log.jsonl", path.read_text(), options)
+        assert caught.value.line == 1
+        assert "entry_unsigned" in caught.value.message
+
+    def test_this_sdk_names_itself_in_a_policy_event(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        sink = ChainedFileSink.open(path).with_clock(CLOCK)
+        entry = sink.record_policy_event(
+            PolicyEvent.loaded(policy_summary(_resolution()), "monitor")
+        )
+        assert entry.policy_event.sdk.name == SDK_NAME == "hushspec-python"
+        written = json.loads(path.read_text().splitlines()[0])
+        assert written["policy_event"]["enforcement_mode"] == "monitor"
+        assert written["policy_event"]["sdk"]["name"] == "hushspec-python"
+        assert verify_log("log.jsonl", path.read_text()).policy_events == 1
+
+    def test_a_swap_names_the_policy_it_replaced(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        sink = ChainedFileSink.open(path).with_clock(CLOCK)
+        previous = "sha256:" + "11" * 32
+        entry = sink.record_policy_event(
+            PolicyEvent.swapped(policy_summary(_resolution()), "enforce", previous)
+        )
+        assert entry.entry_type == EntryType.POLICY_SWAPPED.value
+        assert entry.policy_event.previous_content_hash == previous
+        assert verify_log("log.jsonl", path.read_text()).policy_events == 1
+
+
+class TestTampering:
+    def _lines(self, tmp_path: Path) -> list[str]:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        return path.read_text().splitlines()
+
+    def test_an_edited_line_is_caught_at_that_line(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        edited = lines[2].replace('"allow"', '"deny"', 1)
+        text = "\n".join([lines[0], lines[1], edited, lines[3]])
+        with pytest.raises(LogError) as caught:
+            verify_log("t", text)
+        assert caught.value.line == 3
+        assert "entry_hash" in caught.value.message
+
+    def test_a_deleted_line_is_caught(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        with pytest.raises(LogError) as caught:
+            verify_log("t", "\n".join([lines[0], lines[2], lines[3]]))
+        assert caught.value.line == 2
+        assert "sequence gap" in caught.value.message
+
+    def test_reordering_is_caught(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        with pytest.raises(LogError) as caught:
+            verify_log("t", "\n".join([lines[0], lines[2], lines[1], lines[3]]))
+        assert caught.value.line == 2
+
+    def test_truncation_is_not_detectable_from_the_file_alone(
+        self, tmp_path: Path
+    ) -> None:
+        # Log spec section 9: detecting truncation needs an external anchor.
+        lines = self._lines(tmp_path)
+        assert verify_log("t", "\n".join(lines[:2])).entries == 2
+
+    def test_payload_must_match_entry_type(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        entry = json.loads(lines[0])
+        entry["entry_type"] = "receipt"
+        with pytest.raises(LogError) as caught:
+            verify_log("t", json.dumps(entry))
+        assert "payload" in caught.value.message
+
+    def test_an_unknown_field_is_a_break(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        entry = json.loads(lines[0])
+        entry["extra"] = 1
+        with pytest.raises(LogError) as caught:
+            verify_log("t", json.dumps(entry))
+        assert "unknown field" in caught.value.message
+
+    def test_an_unknown_log_version_is_rejected(self, tmp_path: Path) -> None:
+        lines = self._lines(tmp_path)
+        entry = json.loads(lines[0])
+        entry["log_version"] = "0.2"
+        with pytest.raises(LogError) as caught:
+            verify_log("t", json.dumps(entry))
+        assert "log_version" in caught.value.message
+
+
+# --------------------------------------------------------------------------- #
+# Vectors
+# --------------------------------------------------------------------------- #
+
+VALID_VECTORS = sorted((VECTORS / "valid").glob("*.jsonl"))
+INVALID_VECTORS = sorted((VECTORS / "invalid").glob("*.jsonl"))
+
+
+def test_the_vector_directories_are_populated() -> None:
+    assert len(VALID_VECTORS) >= 4
+    assert len(INVALID_VECTORS) >= 5
+
+
+@pytest.mark.parametrize(
+    "path", [p for p in VALID_VECTORS if not p.name.startswith("rotated-")],
+    ids=lambda p: p.stem,
+)
+def test_valid_vector_verifies(path: Path) -> None:
+    verify_log(path.name, path.read_text(), _signed_options())
+
+
+def test_the_rotated_pair_verifies_in_order() -> None:
+    first = (VECTORS / "valid" / "rotated-1.jsonl").read_text()
+    second = (VECTORS / "valid" / "rotated-2.jsonl").read_text()
+    report = verify_logs([("rotated-1", first), ("rotated-2", second)])
+    assert report.files == 2
+    # And the later file alone verifies from its log_started link.
+    assert verify_log("rotated-2", second).entries >= 1
+
+
+@pytest.mark.parametrize("path", INVALID_VECTORS, ids=lambda p: p.stem)
+def test_invalid_vector_is_rejected_at_the_named_line(path: Path) -> None:
+    # The file name ends with the line a verifier must identify as the break.
+    expected_line = int(path.stem.rsplit("-", 1)[-1])
+    with pytest.raises(LogError) as caught:
+        verify_log(path.name, path.read_text(), _signed_options())
+    assert caught.value.line == expected_line, caught.value.message
