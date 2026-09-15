@@ -1,3 +1,5 @@
+#[cfg(feature = "signing")]
+pub mod bundle;
 pub mod canonical;
 pub mod conditions;
 pub mod detection;
@@ -22,9 +24,16 @@ pub mod sink;
 pub mod validate;
 pub mod version;
 
+#[cfg(feature = "signing")]
+pub use bundle::{
+    BUNDLE_VERSION, BundleError, BundleOptions, BundleReason, BundleVerified, BundleVerifyError,
+    DsseEnvelope, DsseSignature, PAYLOAD_TYPE, PREDICATE_TYPE, PolicyBundlePredicate,
+    PolicyIdentity, STATEMENT_TYPE, Statement, Subject, SubjectDigest, VerifyBundleOptions,
+    build_statement, bundle_resolution, pae, sign_statement, unsigned_envelope, verify_bundle,
+};
 pub use canonical::{
-    CONTENT_HASH_PREFIX, CanonicalError, canonical_json, canonical_json_value, content_hash,
-    content_hash_value, serialize_jcs,
+    CONTENT_HASH_PREFIX, CanonicalError, canonical_json, canonical_json_value, canonical_value,
+    canonical_value_of, content_hash, content_hash_value, serialize_jcs,
 };
 pub use conditions::{Condition, RuntimeContext, TimeWindowCondition, evaluate_condition};
 pub use detection::{

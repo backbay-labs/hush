@@ -1,4 +1,5 @@
 mod cmd_audit;
+mod cmd_bundle;
 mod cmd_completions;
 mod cmd_diff;
 mod cmd_eval;
@@ -42,6 +43,8 @@ pub(crate) struct Cli {
 enum Commands {
     /// Display governance metadata and run advisory checks
     Audit(cmd_audit::AuditArgs),
+    /// Create, verify, and inspect signed policy bundles (DSSE / in-toto)
+    Bundle(cmd_bundle::BundleArgs),
     /// Validate policy files against the HushSpec schema
     Validate(cmd_validate::ValidateArgs),
     /// Print a policy with its extends chain fully resolved and merged
@@ -87,6 +90,7 @@ fn main() {
 
     let exit_code = match cli.command {
         Commands::Audit(args) => cmd_audit::run(args),
+        Commands::Bundle(args) => cmd_bundle::run(args),
         Commands::Validate(args) => cmd_validate::run(args),
         Commands::Resolve(args) => cmd_resolve::run(args),
         Commands::Test(args) => cmd_test::run(args),

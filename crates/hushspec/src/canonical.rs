@@ -151,6 +151,39 @@ pub fn content_hash_value(document: &Value) -> Result<String, CanonicalError> {
     Ok(digest(&canonical_json_value(document)?))
 }
 
+/// The canonical projection of a resolved document (canonical spec 3), as a
+/// JSON value, before serialization.
+///
+/// [`canonical_json`] is exactly [`serialize_jcs`] applied to this. A caller
+/// that has to *embed* the canonical document inside a larger JSON structure
+/// -- a policy bundle's `predicate.resolved` (bundle spec 4.2) -- needs the
+/// value rather than the text, so that the enclosing document canonicalizes
+/// as one whole.
+///
+/// # Errors
+///
+/// As [`canonical_json`].
+pub fn canonical_value(spec: &HushSpec) -> Result<Value, CanonicalError> {
+    if spec.extends.is_some() {
+        return Err(CanonicalError::Unresolved);
+    }
+    let value =
+        serde_json::to_value(spec).map_err(|error| CanonicalError::Serialize(error.to_string()))?;
+    canonical_value_of(&value)
+}
+
+/// The canonical projection of a resolved document supplied as a JSON value.
+///
+/// # Errors
+///
+/// As [`canonical_json_value`].
+pub fn canonical_value_of(document: &Value) -> Result<Value, CanonicalError> {
+    let Some(object) = document.as_object() else {
+        return Err(CanonicalError::ExpectedObject("document".to_string()));
+    };
+    project(object)
+}
+
 /// SHA-256 of already-canonical bytes, in the `sha256:` wire form.
 ///
 /// Use this only when the canonical text is already in hand (a signature
@@ -163,10 +196,7 @@ pub fn digest(canonical: &str) -> String {
 }
 
 fn canonicalize(document: &Value) -> Result<String, CanonicalError> {
-    let Some(object) = document.as_object() else {
-        return Err(CanonicalError::ExpectedObject("document".to_string()));
-    };
-    let projected = project(object)?;
+    let projected = canonical_value_of(document)?;
     let mut out = String::new();
     write_value(&projected, &mut out)?;
     Ok(out)
