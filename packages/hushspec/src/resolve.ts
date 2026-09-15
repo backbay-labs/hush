@@ -46,6 +46,37 @@ export function resolveFromFile(filePath: string): ResolveResult {
   return resolve(parsed.value, { source, load: createCompositeLoader() });
 }
 
+/**
+ * Loader that serves `builtin:<name>` (and bare builtin names) from the
+ * embedded rulesets and refuses everything else.
+ *
+ * This is the default for callers that have no filesystem root to resolve
+ * relative references against -- `HushGuard.fromYaml()`, a provider that
+ * hands back an already-parsed spec, a poller loader returning raw YAML.
+ * Refusing (rather than guessing a root, or silently skipping the base) keeps
+ * those paths fail-closed: a policy whose base cannot be loaded is never
+ * evaluated as if the base said nothing.
+ */
+export function createBuiltinLoader(): (reference: string, from?: string) => LoadedSpec {
+  return (reference: string): LoadedSpec => {
+    const spec = loadBuiltin(reference);
+    if (spec) {
+      const source = reference.startsWith('builtin:') ? reference : `builtin:${reference}`;
+      return { source, spec };
+    }
+    if (reference.startsWith('builtin:')) {
+      throw new Error(`unknown builtin ruleset '${reference}'`);
+    }
+    throw new Error(
+      `cannot resolve 'extends: ${reference}': this loader only serves builtin rulesets ` +
+        `(${BUILTIN_REFERENCE_HINT})`,
+    );
+  };
+}
+
+const BUILTIN_REFERENCE_HINT =
+  "pass a `baseDir` to resolve relative paths, or a custom `loader`";
+
 export function createCompositeLoader(): (reference: string, from?: string) => LoadedSpec {
   return (reference: string, from?: string): LoadedSpec => {
     if (reference.startsWith('builtin:')) {
