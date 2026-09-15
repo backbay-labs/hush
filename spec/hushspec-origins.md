@@ -4,7 +4,7 @@
 **Status:** Draft
 **Date:** 2026-09-14
 **Companion to:** HushSpec Core v0.2.0
-**Supersedes:** 0.1.0 (2026-03-15). See Appendix B for the list of ratified changes.
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix B for the list of changes.
 
 ---
 
@@ -365,8 +365,8 @@ extensions:
 
 ## Appendix B. Changes from 0.1.0
 
-| ID  | Section | Change                                                                                                                 |
-|-----|---------|------------------------------------------------------------------------------------------------------------------------|
-| D12 | 2.1     | `default_behavior` MUST be enforced; a request without origin context is unmatched.                                    |
-| D12 | 3       | Selection rewritten as a deterministic algorithm: `space_id` match first, then matched-field count with no per-field weighting, then document order. A profile with no `match` field is never a candidate; `match: {}` is the default profile. |
-| D12 | 4       | Profile `tool_access` and `egress` are tri-state overlays; engines MUST NOT materialize `default` into an overlay. Allowlist intersection defined for the one-sided case. |
+| Section | Change                                                                                                                 |
+|---------|-------------------------------------------------------------------------------------------------------------------------|
+| 2.1     | `default_behavior` MUST be enforced; a request without origin context is unmatched.                                     |
+| 3       | Selection rewritten as a deterministic algorithm: `space_id` match first, then matched-field count with no per-field weighting, then document order. A profile with no `match` field is never a candidate; `match: {}` is the default profile. |
+| 4       | Profile `tool_access` and `egress` are tri-state overlays; engines MUST NOT materialize `default` into an overlay. Allowlist intersection defined for the one-sided case. |

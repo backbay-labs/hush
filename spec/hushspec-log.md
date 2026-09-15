@@ -9,7 +9,7 @@
 
 ## 1. Introduction
 
-A decision receipt proves one evaluation. A receipt **log** proves a sequence of them: that nothing was removed, inserted, edited, or reordered between the first entry and the last, and which policy was in force at every point. This specification defines the log-entry format (RFC 09 P2-05) and the policy-in-effect record (P2-10) that a log carries alongside receipts.
+A decision receipt proves one evaluation. A receipt **log** proves a sequence of them: that nothing was removed, inserted, edited, or reordered between the first entry and the last, and which policy was in force at every point. This specification defines the log-entry format and the policy-in-effect record that a log carries alongside receipts.
 
 The key words "MUST", "MUST NOT", "SHOULD", and "MAY" are to be interpreted as described in RFC 2119.
 

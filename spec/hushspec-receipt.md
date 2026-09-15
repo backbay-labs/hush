@@ -12,7 +12,7 @@
 
 A decision receipt is the unit of evidence in HushSpec. Every time an engine evaluates an action against a policy, it can emit one receipt that answers, for an auditor who was not there: which policy was in force, who was acting, what they tried to do, what the policy decided and why, which controls actually ran, and what the runtime did with the decision.
 
-Receipt format 0.1 answered some of these. It lacked an actor, it identified the policy by a hash that differed per SDK, it reconstructed the rule trace after the fact, it did not record detections, and nothing tied one receipt to the next. Format 0.2 closes those gaps and is designed to be chained: the log-entry specification (RFC 09 P2-05) wraps 0.2 receipts in a hash-linked log.
+Receipt format 0.1 answered some of these. It lacked an actor, it identified the policy by a hash that differed per SDK, it reconstructed the rule trace after the fact, it did not record detections, and nothing tied one receipt to the next. Format 0.2 closes those gaps and is designed to be chained: the Receipt Log specification wraps 0.2 receipts in a hash-linked log.
 
 ### 1.1 Terminology
 
@@ -36,7 +36,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ## 2. Conformance
 
-An engine conforms to this specification (Core conformance **Level 4, Auditor**, defined by RFC 09 P4-03) if:
+An engine conforms to this specification (Core conformance **Level 4, Auditor**, Core Section 8) if:
 
 1. Every receipt it emits validates against `schemas/hushspec-receipt.v0.schema.json` at format version 0.2.
 2. `policy.content_hash` equals the content hash of the resolved policy as defined by the Canonical Form specification.
@@ -160,7 +160,7 @@ Present when the evaluation ran the detection pipeline (Detection specification)
 
 What the enforcement point did. **Required in 0.2.** A decision without a disposition is not evidence that a control operated, so a receipt must always say. `mode` is the effective mode after per-rule overrides and panic resolution (panic always enforces). `outcome` is one of `allowed`, `confirmed` (a warn approved through a confirmation channel), `blocked`, or `would_block` (monitor mode let a warn or deny proceed).
 
-An engine used without an enforcement point records `mode: enforce` and the outcome implied by the decision (`allow` → `allowed`, `warn` and `deny` → `blocked`), because a warn with no confirmation channel is a deny (Core Section 6, D16).
+An engine used without an enforcement point records `mode: enforce` and the outcome implied by the decision (`allow` → `allowed`, `warn` and `deny` → `blocked`), because a warn with no confirmation channel is a deny (Core Section 6).
 
 ### 4.8 `origin_profile`, `posture`
 
@@ -184,7 +184,7 @@ A receipt has a canonical form: the RFC 8785 serialization of the receipt object
 
 The **receipt hash** is `sha256:` over the canonical form's UTF-8 bytes.
 
-The receipt hash is what a log links. This specification deliberately does not define chaining fields (`seq`, `prev_hash`, `entry_hash`, a per-entry signature); those belong to the log-entry format (RFC 09 P2-05), which wraps a receipt rather than extending it, so that a receipt's own hash is stable regardless of which log it lands in. Receipt signing (P2-06) likewise signs the receipt hash from outside.
+The receipt hash is what a log links. This specification deliberately does not define chaining fields (`seq`, `prev_hash`, `entry_hash`, a per-entry signature); those belong to the log-entry format (Receipt Log specification), which wraps a receipt rather than extending it, so that a receipt's own hash is stable regardless of which log it lands in. Receipt signing likewise signs the receipt hash from outside.
 
 Because the hash covers every field, engines MUST NOT mutate a receipt after computing its hash. `duration_us` in particular is covered; an engine that wants an unhashed timing figure should log it elsewhere.
 
@@ -212,7 +212,7 @@ Because the hash covers every field, engines MUST NOT mutate a receipt after com
 | `evaluation_duration_us` required | `duration_us` optional |
 | nullable fields (`type: [..., "null"]`) | no nulls anywhere; absent means absent |
 
-The Rust SDK emits format 0.2 as of RFC 09 P2-04; `schemas/hushspec-receipt.v0.schema.json` is the normative 0.2 schema. The TypeScript, Python, and Go SDKs move to it in the port step that follows, against the expected receipts under `fixtures/receipts/expected/`.
+`schemas/hushspec-receipt.v0.schema.json` is the normative 0.2 schema. The expected receipts under `fixtures/receipts/expected/` are the vectors every engine reproduces.
 
 ---
 

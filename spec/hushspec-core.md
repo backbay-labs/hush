@@ -3,7 +3,7 @@
 **Version:** 0.2.0 (Draft)
 **Status:** Draft
 **Date:** 2026-09-14
-**Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of ratified changes.
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of changes.
 
 ---
 
@@ -907,28 +907,28 @@ rules:
 
 ## Appendix D. Changes from 0.1.0
 
-Each entry names the decision ID from RFC 09 (`docs/plans/09-compliance-as-code-plan.md`).
+Each entry names the section of this specification it changed. Changes to the
+extension specifications are listed in their own appendices.
 
-| ID  | Section        | Change                                                                                                   |
-|-----|----------------|----------------------------------------------------------------------------------------------------------|
-| D1  | 5              | Unknown and `custom` action types deny (`__unknown_action_type__`) instead of allow.                     |
-| D2  | 6.1, 5         | Every applicable block is evaluated and aggregated; allowlist and exception matches no longer short-circuit. Normative applicable-block table added. |
-| D3  | 3.7            | Tool names are exact strings; glob matching of tool names is forbidden.                                   |
-| D4  | 3.7            | Allowlist mode denies unlisted tools; `default` is consulted only when `allow` is empty.                   |
-| D5  | 3.3, 3.14.2    | Host normalization algorithm (scheme, userinfo, port, path, case, trailing dot, IDNA); `*` is one label, `**` one or more; IP literals match exactly. |
-| D6  | 3.1, 3.14.1    | Path normalization algorithm (NFC, separators, `.`/`..`, trailing slash); `?` and `*` never cross `/`; brackets and braces literal. |
-| D7  | 3.14.3         | "PCRE2-compatible" replaced by the HushSpec regex profile with ASCII class semantics; compile failure at evaluation denies. |
-| D8  | 3.4            | Severity-to-decision table; worst severity wins; scanned action types enumerated.                         |
-| D9  | 3.8            | `guardrail` denies unlisted actions; heuristic leniency withdrawn; `fail_closed` is an alias.             |
-| D10 | 3.5            | `require_balance` with a zero side denies; counting rule made explicit.                                    |
-| D11 | posture 3      | Empty `capabilities` denies all (see posture spec Appendix C).                                             |
-| D12 | origins 2, 3, 4| `default_behavior` enforced; priority by `space_id` then field count; tri-state profile overlays; absent `match` never matches (see origins spec Appendix B). |
-| D13 | 3.11, 3.12, 5  | `browser_automation` and `code_execution` documented; `browser_action` and `code_exec` action types added; twelve rule blocks. |
-| D14 | 2.2, 10.1      | Engines accept every patch version of a supported minor version.                                          |
-| D15 | 3.0, 3.13, 7   | `when` conditional rule blocks specified as a document field with parse-time validation.                 |
-| D16 | 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
-| D17 | 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
-| --  | 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
-| D18 | posture 5.3    | Named `from` outranks `"*"` for the same trigger (see posture spec Appendix C).                              |
-| D19 | 3.13           | `when` gains the `capability` and `rate` leaf predicates; the runtime context gains `counters`; identifier grammar for capability and counter names. |
-| D20 | detection 3.5  | The normative `heuristic_injection@1` detector: integer scoring over a fixed signal table, reproduced exactly by every engine. |
+| Section        | Change                                                                                                   |
+|----------------|----------------------------------------------------------------------------------------------------------|
+| 2.2, 10.1      | Engines accept every patch version of a supported minor version.                                          |
+| 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
+| 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
+| 3.0, 3.13, 7   | `when` conditional rule blocks specified as a document field with parse-time validation.                   |
+| 3.1, 3.14.1    | Path normalization algorithm (NFC, separators, `.`/`..`, trailing slash); `?` and `*` never cross `/`; brackets and braces literal. |
+| 3.3, 3.14.2    | Host normalization algorithm (scheme, userinfo, port, path, case, trailing dot, IDNA); `*` is one label, `**` one or more; IP literals match exactly. |
+| 3.4            | Severity-to-decision table; worst severity wins; scanned action types enumerated.                         |
+| 3.5            | `require_balance` with a zero side denies; counting rule made explicit.                                    |
+| 3.7            | Tool names are exact strings; glob matching of tool names is forbidden. Allowlist mode denies unlisted tools; `default` is consulted only when `allow` is empty. |
+| 3.8            | `guardrail` denies unlisted actions; heuristic leniency withdrawn; `fail_closed` is an alias.             |
+| 3.11, 3.12, 5  | `browser_automation` and `code_execution` documented; `browser_action` and `code_exec` action types added; twelve rule blocks. |
+| 3.13           | `when` gains the `capability` and `rate` leaf predicates; the runtime context gains `counters`; identifier grammar for capability and counter names. |
+| 3.14.3         | "PCRE2-compatible" replaced by the HushSpec regex profile with ASCII class semantics; compile failure at evaluation denies. |
+| 5              | Unknown and `custom` action types deny (`__unknown_action_type__`) instead of allow.                       |
+| 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
+| 6.1, 5         | Every applicable block is evaluated and aggregated; allowlist and exception matches no longer short-circuit. Normative applicable-block table added. |
+| posture 3      | Empty `capabilities` denies all (see posture spec Appendix C).                                             |
+| posture 5.3    | Named `from` outranks `"*"` for the same trigger (see posture spec Appendix C).                             |
+| origins 2, 3, 4| `default_behavior` enforced; priority by `space_id` then field count; tri-state profile overlays; absent `match` never matches (see origins spec Appendix B). |
+| detection 3.5  | The normative `heuristic_injection@1` detector: integer scoring over a fixed signal table, reproduced exactly by every engine. |

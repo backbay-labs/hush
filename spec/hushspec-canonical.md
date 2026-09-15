@@ -112,7 +112,7 @@ Properties whose default **is** an empty array (`patterns`, `allow`, `block`, `e
 
 | Schema | Property | Why presence matters |
 |---|---|---|
-| `OriginProfile` | `match` | `match: {}` is the explicit default profile; an absent `match` never matches (Origins Section 3, D12). |
+| `OriginProfile` | `match` | `match: {}` is the explicit default profile; an absent `match` never matches (Origins Section 3). |
 
 The origins profile overlay lists -- `ToolAccessRule.allow`, `block`, `require_confirmation` and `EgressRule.allow`, `block` -- are **not** presence-significant: Origins Section 4 gives an absent overlay list ("inherit the base") and a present-but-empty one ("contributes nothing") the same evaluation result, so a written-empty overlay list has no meaning for the canonical form to carry.
 
