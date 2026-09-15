@@ -187,6 +187,51 @@ Rotation carries the chain forward: `sink.rotate('./audit-2.jsonl')` writes a
 detectable from a file alone (log spec section 9) -- publish `sink.head()`
 periodically as an external anchor.
 
+### OTLP export
+
+`OtlpReceiptSink` is a `ReceiptSink` that exports receipts and
+`policy_loaded` / `policy_swapped` events to an OpenTelemetry collector as
+OTLP/HTTP **logs** in JSON encoding (`POST <endpoint>/v1/logs`). It uses
+`node:http` / `node:https` directly, so the SDK stays dependency-free and an
+application that already runs the OTel SDK is unaffected.
+
+```typescript
+import { HushGuard, OtlpReceiptSink } from '@hushspec/core';
+
+const sink = new OtlpReceiptSink({
+  endpoint: 'http://localhost:4318',
+  headers: { authorization: `Bearer ${process.env.OTEL_TOKEN}` },
+  serviceName: 'deploy-bot',
+  batchSize: 32,
+  flushIntervalMs: 5_000,
+  maxQueue: 2_048,
+  onError: err => console.error('[hushspec] receipt export failed', err),
+});
+
+const guard = HushGuard.fromFile('./policy.yaml', { sink });
+guard.enforce({ type: 'egress', target: 'api.github.com' });
+
+await sink.close(); // flushes the backlog, then refuses further entries
+```
+
+One `logRecord` per entry, with the wire mapping every HushSpec SDK emits:
+
+| OTLP field | Value |
+|---|---|
+| `timeUnixNano` | The receipt's or event's own `timestamp` (`observedTimeUnixNano` is the export time) |
+| `severityText` | `INFO` for `allow`, `WARN` for `warn`, `ERROR` for `deny`; `INFO` for a policy event |
+| `body.stringValue` | The entry's RFC 8785 canonical JSON -- byte for byte the form its hash covers |
+| attributes | `hushspec.entry_type` (`receipt`, `policy_loaded`, `policy_swapped`), `hushspec.receipt_version`, `hushspec.decision`, `hushspec.action_type`, `hushspec.matched_rule`, `hushspec.policy.content_hash`, `hushspec.receipt_hash`, `hushspec.enforcement.mode`, `hushspec.enforcement.outcome` |
+| resource attributes | `service.name` (default `hushspec`), `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |
+
+`send()` never blocks and never throws: entries go onto a bounded queue and
+leave on a background chain, batched by size or by timer, retried with
+exponential backoff on 5xx, 429 and network failures. A full queue drops the
+incoming entry, counts it (`sink.dropped`) and reports it through `onError` --
+latency is never paid for in the evaluation path, and a lost receipt is never
+silent. Pair it with `MultiSink` and a `ChainedFileSink` when the collector is
+a convenience and the file is the evidence.
+
 ### Detection Pipeline
 
 Plug prompt injection, jailbreak, and exfiltration checks into the evaluation flow.

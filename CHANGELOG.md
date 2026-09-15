@@ -8,6 +8,21 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 P6-02, TypeScript SDK parity)
+
+- `OtlpReceiptSink` (`@hushspec/core`): exports decision receipts and
+  `policy_loaded` / `policy_swapped` events to an OpenTelemetry collector as OTLP/HTTP JSON
+  logs (`POST <endpoint>/v1/logs`), over `node:http` / `node:https` with no new dependency.
+  One `logRecord` per entry: `timeUnixNano` from the entry's own timestamp, `severityText`
+  `INFO`/`WARN`/`ERROR` for allow/warn/deny (`INFO` for a policy event), `body.stringValue`
+  the entry's RFC 8785 canonical JSON, and the `hushspec.*` attributes (`entry_type`,
+  `receipt_version`, `decision`, `action_type`, `matched_rule`, `policy.content_hash`,
+  `receipt_hash`, `enforcement.mode`, `enforcement.outcome`) plus the `service.name` /
+  `hushspec.sdk` / `hushspec.sdk.version` / `hushspec.spec_version` resource attributes --
+  the same wire mapping in every SDK. `send()` never blocks or throws: a bounded queue,
+  batching by size or timer, retries with exponential backoff on 5xx/429/network errors,
+  `flush()` and `close()`, and overflow that drops, counts (`sink.dropped`) and reports
+  through `onError` rather than silently losing evidence.
 ### Added (RFC 09 Wave 5, Integrations)
 
 - GitHub composite Action (`action.yml`, `backbay-labs/hush@<ref>`): installs `h2h` --

@@ -271,6 +271,21 @@ export {
   NullSink,
 } from './sinks.js';
 export {
+  OtlpReceiptSink,
+  OtlpQueueOverflowError,
+  OtlpExportError,
+  otlpLogsPayload,
+  receiptLogRecord,
+  policyEventLogRecord,
+  logsEndpoint,
+  type OtlpReceiptSinkOptions,
+  type OtlpLogsPayload,
+  type OtlpLogRecord,
+  type OtlpAttribute,
+  type OtlpStringValue,
+  type OtlpEntry,
+} from './otlp.js';
+export {
   evaluateWithDetection,
   evaluateWithDetectionTraced,
   detectorLevel,
