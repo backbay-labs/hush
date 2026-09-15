@@ -77,6 +77,10 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
         validate_detection(ext, &mut errors, &mut warnings);
     }
 
+    if let Some(metadata) = &spec.metadata {
+        validate_control_mappings(&metadata.controls, &mut errors);
+    }
+
     for gw in crate::governance::validate_governance(spec) {
         warnings.push(gw.message);
     }
@@ -523,6 +527,62 @@ fn validate_detection(
             }
         }
     }
+}
+
+/// Structural checks for `metadata.controls` (core spec 2.5).
+///
+/// Control mappings are declarative governance metadata and never influence
+/// evaluation, but a malformed mapping is still a rejected document: the
+/// framework id must match the registry's id grammar, the control id must be
+/// non-empty, and the mapping must name at least one rule path. Whether the
+/// framework is *registered*, and whether its paths *resolve*, are semantic
+/// questions answered by `h2h lint` (L012, L013) rather than by the SDK
+/// validators -- that keeps `spec/registries/frameworks.yaml` out of the four
+/// SDKs.
+fn validate_control_mappings(
+    controls: &[crate::generated_models::ControlMapping],
+    errors: &mut Vec<ValidationError>,
+) {
+    for (index, control) in controls.iter().enumerate() {
+        let path = format!("metadata.controls[{index}]");
+
+        if !is_framework_id(&control.framework) {
+            errors.push(ValidationError::Custom(format!(
+                "{path}.framework {:?} must match ^[a-z0-9][a-z0-9.-]*$",
+                control.framework
+            )));
+        }
+
+        if control.control_id.is_empty() {
+            errors.push(ValidationError::Custom(format!(
+                "{path}.control_id must not be empty"
+            )));
+        }
+
+        if control.rule_paths.is_empty() {
+            errors.push(ValidationError::Custom(format!(
+                "{path}.rule_paths must list at least one rule path"
+            )));
+        }
+
+        for (entry, rule_path) in control.rule_paths.iter().enumerate() {
+            if rule_path.is_empty() {
+                errors.push(ValidationError::Custom(format!(
+                    "{path}.rule_paths[{entry}] must not be empty"
+                )));
+            }
+        }
+    }
+}
+
+/// `^[a-z0-9][a-z0-9.-]*$`, spelled out so the check needs no regex engine.
+fn is_framework_id(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-')
 }
 
 fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) {

@@ -128,7 +128,14 @@ from hushspec.rules import (
     ShellCommandsRule,
     ToolAccessRule,
 )
-from hushspec.schema import Classification, GovernanceMetadata, HushSpec, LifecycleState, MergeStrategy
+from hushspec.schema import (
+    Classification,
+    ControlMapping,
+    GovernanceMetadata,
+    HushSpec,
+    LifecycleState,
+    MergeStrategy,
+)
 from hushspec.validate import (
     ValidationError,
     ValidationResult,
@@ -150,6 +157,7 @@ __version__ = HUSHSPEC_VERSION
 __all__ = [
     "HushSpec",
     "MergeStrategy",
+    "ControlMapping",
     "GovernanceMetadata",
     "Classification",
     "LifecycleState",

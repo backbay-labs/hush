@@ -340,6 +340,11 @@ fn print_text_findings(findings: &[LintFinding], _file: &str) {
 pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     let mut findings = Vec::new();
 
+    // L011/L012/L013: control mappings. Run before the `rules` guard so a
+    // document that maps only extensions (or maps nothing that exists) is still
+    // checked.
+    check_control_mappings(spec, file, &mut findings);
+
     let Some(rules) = &spec.rules else {
         return findings;
     };
@@ -375,6 +380,93 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     check_unreachable_allow(rules, file, &mut findings);
 
     findings
+}
+
+/// L011 (warning), L012 (error), L013 (warning): `metadata.controls`.
+///
+/// Mappings are advisory and never influence evaluation, so a policy that
+/// declares none is silent here -- L011 only fires once a policy has started
+/// mapping controls and then leaves a rule block out. L012 and L013 fire per
+/// mapping regardless.
+fn check_control_mappings(spec: &HushSpec, file: &str, findings: &mut Vec<LintFinding>) {
+    let Some(metadata) = &spec.metadata else {
+        return;
+    };
+    if metadata.controls.is_empty() {
+        return;
+    }
+
+    let doc = crate::controls::document_json(spec);
+
+    // L012: a rule path that points at nothing is a broken claim about what the
+    // policy implements, so it is an error rather than a warning.
+    for (index, control) in metadata.controls.iter().enumerate() {
+        for (entry, rule_path) in control.rule_paths.iter().enumerate() {
+            if !crate::controls::path_resolves(&doc, rule_path) {
+                findings.push(LintFinding {
+                    code: "L012".into(),
+                    severity: "error".into(),
+                    message: format!(
+                        "metadata.controls[{index}].rule_paths[{entry}] {rule_path:?} \
+                         ({} {}) does not resolve to anything in the resolved document",
+                        control.framework, control.control_id
+                    ),
+                    location: file.into(),
+                });
+            }
+        }
+    }
+
+    // L013: the registry is advisory -- an unregistered framework is a valid
+    // document, just an unverifiable claim, so both halves are warnings.
+    for (index, control) in metadata.controls.iter().enumerate() {
+        match crate::controls::registry_verdict(&control.framework, &control.control_id) {
+            crate::controls::RegistryVerdict::Ok => {}
+            crate::controls::RegistryVerdict::UnknownFramework => {
+                findings.push(LintFinding {
+                    code: "L013".into(),
+                    severity: "warning".into(),
+                    message: format!(
+                        "metadata.controls[{index}].framework {:?} is not in the HushSpec framework registry (spec/registries/frameworks.yaml)",
+                        control.framework
+                    ),
+                    location: file.into(),
+                });
+            }
+            crate::controls::RegistryVerdict::ControlIdMismatch => {
+                let pattern = crate::generated_frameworks::framework(&control.framework)
+                    .map_or("", |entry| entry.control_id_pattern);
+                findings.push(LintFinding {
+                    code: "L013".into(),
+                    severity: "warning".into(),
+                    message: format!(
+                        "metadata.controls[{index}].control_id {:?} does not match the {} control id pattern {pattern:?}",
+                        control.control_id, control.framework
+                    ),
+                    location: file.into(),
+                });
+            }
+        }
+    }
+
+    // L011: once a policy maps controls, every rule block it declares should be
+    // accounted for -- an unmapped block is enforcement with no stated reason.
+    for block_path in crate::controls::rule_block_paths(&doc) {
+        let covered = metadata.controls.iter().any(|control| {
+            control
+                .rule_paths
+                .iter()
+                .any(|rule_path| crate::controls::path_covers_block(rule_path, &block_path))
+        });
+        if !covered {
+            findings.push(LintFinding {
+                code: "L011".into(),
+                severity: "warning".into(),
+                message: format!("rule block `{block_path}` has no control mapping"),
+                location: file.into(),
+            });
+        }
+    }
 }
 
 fn check_empty_rule_blocks(rules: &hushspec::Rules, file: &str, findings: &mut Vec<LintFinding>) {

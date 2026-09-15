@@ -11,6 +11,7 @@ import {
   CLASSIFICATIONS_SET,
   COMPUTER_USE_KEYS_SET,
   COMPUTER_USE_MODES_SET,
+  CONTROL_MAPPING_KEYS_SET,
   DEFAULT_ACTIONS_SET,
   DETECTION_KEYS_SET,
   DETECTION_LEVELS_SET,
@@ -716,6 +717,7 @@ function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext):
   validateOptionalInteger(obj, 'policy_version', ctx, `${path}.policy_version`, { min: 1 });
   validateOptionalString(obj, 'effective_date', ctx, `${path}.effective_date`);
   validateOptionalString(obj, 'expiry_date', ctx, `${path}.expiry_date`);
+  validateControlMappings(obj, ctx, path);
 
   if (!ctx.includeWarnings) return;
 
@@ -738,6 +740,60 @@ function validateGovernanceMetadata(obj: UnknownRecord, ctx: ValidationContext):
   if (obj.classification === 'restricted' && !('approved_by' in obj)) {
     ctx.warnings.push("classification is 'restricted' but no approved_by is set");
   }
+}
+
+const FRAMEWORK_ID_PATTERN = /^[a-z0-9][a-z0-9.-]*$/;
+
+/**
+ * Structural checks for `metadata.controls` (core spec 2.5). Whether the
+ * framework is registered in spec/registries/frameworks.yaml, and whether the
+ * paths resolve, are semantic questions answered by `h2h lint` (L012, L013) --
+ * the registry deliberately stays out of the SDKs.
+ */
+function validateControlMappings(obj: UnknownRecord, ctx: ValidationContext, path: string): void {
+  if (!('controls' in obj)) return;
+
+  const controls = obj.controls;
+  if (!Array.isArray(controls)) {
+    addError(ctx, 'invalid_array', `${path}.controls must be an array`);
+    return;
+  }
+
+  controls.forEach((entry, index) => {
+    const entryPath = `${path}.controls[${index}]`;
+    if (!isRecord(entry)) {
+      addError(ctx, 'invalid_type', `${entryPath} must be an object`);
+      return;
+    }
+
+    rejectUnknownKeys(entry, CONTROL_MAPPING_KEYS_SET, ctx, 'unknown_field', key => `unknown field at ${entryPath}: ${key}`);
+
+    const framework = validateRequiredString(entry, 'framework', ctx, `${entryPath}.framework`);
+    if (framework != null && !FRAMEWORK_ID_PATTERN.test(framework)) {
+      addError(ctx, 'invalid_value', `${entryPath}.framework '${framework}' must match ^[a-z0-9][a-z0-9.-]*$`);
+    }
+
+    const controlId = validateRequiredString(entry, 'control_id', ctx, `${entryPath}.control_id`);
+    if (controlId === '') {
+      addError(ctx, 'invalid_value', `${entryPath}.control_id must not be empty`);
+    }
+
+    if (!('rule_paths' in entry)) {
+      addError(ctx, 'missing_field', `${entryPath}.rule_paths is required`);
+    } else {
+      const rulePaths = validateOptionalStringArray(entry, 'rule_paths', ctx, `${entryPath}.rule_paths`);
+      if (rulePaths != null && rulePaths.length === 0) {
+        addError(ctx, 'invalid_value', `${entryPath}.rule_paths must list at least one rule path`);
+      }
+      rulePaths?.forEach((rulePath, entryIndex) => {
+        if (rulePath === '') {
+          addError(ctx, 'invalid_value', `${entryPath}.rule_paths[${entryIndex}] must not be empty`);
+        }
+      });
+    }
+
+    validateOptionalString(entry, 'notes', ctx, `${entryPath}.notes`);
+  });
 }
 
 function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, path: string): void {

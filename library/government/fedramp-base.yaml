@@ -185,3 +185,44 @@ rules:
       - run_tests
     default: block
     max_args_size: 262144
+
+# Structured control mappings (core spec 2.5). Declarative metadata only: they
+# never influence evaluation. `h2h lint` enforces full rule-block coverage
+# (L011), path resolution (L012), and registry conformance (L013).
+metadata:
+  controls:
+    - framework: nist-800-53-r5
+      control_id: "AC-3"
+      rule_paths:
+        - rules.forbidden_paths
+      notes: "Access Enforcement. CUI directories and credential stores are unreachable."
+    - framework: nist-800-53-r5
+      control_id: "AC-6"
+      rule_paths:
+        - rules.tool_access
+      notes: "Least Privilege. The tool allowlist is minimal and denies by default."
+    - framework: nist-800-53-r5
+      control_id: "AU-9"
+      rule_paths:
+        - rules.forbidden_paths.patterns
+      notes: "Protection of Audit Information. Audit log paths are forbidden, so the agent cannot alter the record."
+    - framework: nist-800-53-r5
+      control_id: "CM-3"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Configuration Change Control. Patch size, balance, and forbidden-pattern limits keep changes reviewable."
+    - framework: nist-800-53-r5
+      control_id: "CM-7"
+      rule_paths:
+        - rules.shell_commands
+      notes: "Least Functionality. Dangerous and exfiltration-capable commands are blocked."
+    - framework: nist-800-53-r5
+      control_id: "SC-7"
+      rule_paths:
+        - rules.egress
+      notes: "Boundary Protection. Egress defaults to block; only .gov/.mil and approved services are allowed."
+    - framework: nist-800-53-r5
+      control_id: "SC-28"
+      rule_paths:
+        - rules.secret_patterns
+      notes: "Protection of Information at Rest. Credential and CUI marker patterns are detected before they are written."

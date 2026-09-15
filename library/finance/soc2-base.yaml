@@ -197,3 +197,36 @@ rules:
       - deploy
     default: block
     max_args_size: 524288
+
+# Structured control mappings (core spec 2.5). Declarative metadata only: they
+# never influence evaluation. `h2h lint` enforces full rule-block coverage
+# (L011), path resolution (L012), and registry conformance (L013).
+metadata:
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: "CC6.1"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.egress
+      notes: "Logical access controls. Credential stores and production config are unreachable; egress defaults to block."
+    - framework: soc2-tsc-2017
+      control_id: "CC6.3"
+      rule_paths:
+        - rules.tool_access
+      notes: "Access is restricted to the tools the role requires; everything else is denied by default."
+    - framework: soc2-tsc-2017
+      control_id: "CC7.1"
+      rule_paths:
+        - rules.secret_patterns
+        - rules.shell_commands
+      notes: "Detection of unauthorized change and credential exposure in content and commands."
+    - framework: soc2-tsc-2017
+      control_id: "CC7.2"
+      rule_paths:
+        - rules.egress.allow
+      notes: "Monitoring. Observability endpoints stay reachable so security events continue to be shipped."
+    - framework: soc2-tsc-2017
+      control_id: "CC8.1"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Change management. Patch size, balance, and forbidden-pattern limits keep changes reviewable."

@@ -548,6 +548,16 @@ pub struct ThreatIntelDetection {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ControlMapping {
+    pub framework: String,
+    pub control_id: String,
+    pub rule_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GovernanceMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
@@ -567,6 +577,8 @@ pub struct GovernanceMetadata {
     pub effective_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub controls: Vec<ControlMapping>,
 }
 
 fn default_1000() -> usize {

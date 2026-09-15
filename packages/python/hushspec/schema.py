@@ -1,5 +1,6 @@
 from hushspec.generated_models import (
     Classification,
+    ControlMapping,
     GovernanceMetadata,
     HushSpec,
     LifecycleState,
@@ -8,6 +9,7 @@ from hushspec.generated_models import (
 
 __all__ = [
     "Classification",
+    "ControlMapping",
     "GovernanceMetadata",
     "HushSpec",
     "LifecycleState",

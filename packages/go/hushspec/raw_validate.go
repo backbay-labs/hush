@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"fmt"
+	"regexp"
 
 	"gopkg.in/yaml.v3"
 )
@@ -164,6 +165,82 @@ func validateRawMetadata(md map[string]any, errs *[]string) {
 	if v, ok := md["lifecycle_state"]; ok {
 		if s, isStr := v.(string); !isStr || !containsTyped(LifecycleState(s), LifecycleStates) {
 			*errs = append(*errs, fmt.Sprintf("metadata.lifecycle_state %v is not a valid lifecycle_state", v))
+		}
+	}
+	validateRawControls(md, errs)
+}
+
+// frameworkIDPattern is the `framework` grammar from the core schema. Whether
+// the id is *registered* in spec/registries/frameworks.yaml, and whether the
+// rule paths resolve, are semantic questions answered by `h2h lint` (L012,
+// L013); the registry deliberately stays out of the SDKs.
+var frameworkIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
+
+// validateRawControls performs the structural checks on metadata.controls that
+// the typed decode cannot express: required fields (a missing `framework` is
+// indistinguishable from an empty one in the typed struct), a non-empty
+// rule_paths list, and the framework id grammar.
+func validateRawControls(md map[string]any, errs *[]string) {
+	raw, ok := md["controls"]
+	if !ok {
+		return
+	}
+	controls, ok := raw.([]any)
+	if !ok {
+		*errs = append(*errs, "metadata.controls must be an array")
+		return
+	}
+
+	for i, entryRaw := range controls {
+		path := fmt.Sprintf("metadata.controls[%d]", i)
+		entry, ok := entryRaw.(map[string]any)
+		if !ok {
+			*errs = append(*errs, path+" must be an object")
+			continue
+		}
+
+		for key := range entry {
+			if _, known := ControlMappingKeys[key]; !known {
+				*errs = append(*errs, fmt.Sprintf("unknown field at %s: %v", path, key))
+			}
+		}
+
+		framework, ok := entry["framework"].(string)
+		if !ok {
+			*errs = append(*errs, path+".framework is required")
+		} else if !frameworkIDPattern.MatchString(framework) {
+			*errs = append(*errs, fmt.Sprintf(
+				"%s.framework %q must match ^[a-z0-9][a-z0-9.-]*$", path, framework))
+		}
+
+		if controlID, ok := entry["control_id"].(string); !ok {
+			*errs = append(*errs, path+".control_id is required")
+		} else if controlID == "" {
+			*errs = append(*errs, path+".control_id must not be empty")
+		}
+
+		rulePathsRaw, present := entry["rule_paths"]
+		if !present {
+			*errs = append(*errs, path+".rule_paths is required")
+			continue
+		}
+		rulePaths, ok := rulePathsRaw.([]any)
+		if !ok {
+			*errs = append(*errs, path+".rule_paths must be an array")
+			continue
+		}
+		if len(rulePaths) == 0 {
+			*errs = append(*errs, path+".rule_paths must list at least one rule path")
+		}
+		for j, rulePathRaw := range rulePaths {
+			rulePath, ok := rulePathRaw.(string)
+			if !ok {
+				*errs = append(*errs, fmt.Sprintf("%s.rule_paths[%d] must be a string", path, j))
+				continue
+			}
+			if rulePath == "" {
+				*errs = append(*errs, fmt.Sprintf("%s.rule_paths[%d] must not be empty", path, j))
+			}
 		}
 	}
 }
