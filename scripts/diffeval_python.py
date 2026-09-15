@@ -12,7 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "python"))
 
-from hushspec import parse, validate  # noqa: E402
+from hushspec import content_hash, parse, validate  # noqa: E402
 from hushspec.conditions import RuntimeContext  # noqa: E402
 from hushspec.detection import evaluate_with_detection  # noqa: E402
 from hushspec.evaluate import (  # noqa: E402
@@ -106,6 +106,18 @@ def main() -> int:
         return 2
 
     results: dict[str, dict] = {}
+    # Group id -> canonical content hash of the resolved policy the actions in
+    # that group were evaluated against (spec/hushspec-canonical.md section 5).
+    # Every SDK must report the same value; a group whose policy was rejected
+    # has no resolved document and so no entry.
+    #
+    # This hashes the *parsed model*, not the raw tree, because that is the only
+    # form a resolved `extends` chain exists in. The typed model cannot express
+    # the absent/empty distinction canonical spec section 3.3 preserves for
+    # origins overlay fields, so the four SDKs agree here only as long as their
+    # models are lossy in the same way -- which is exactly what this comparison
+    # is for.
+    hashes: dict[str, str] = {}
     for group in bundle["groups"]:
         spec = None
         rejection = None
@@ -136,6 +148,10 @@ def main() -> int:
                     }
                 else:
                     spec = parsed
+                    try:
+                        hashes[group["id"]] = content_hash(spec)
+                    except Exception as error:  # noqa: BLE001 - reported as a divergence
+                        hashes[group["id"]] = f"error: {error}"
 
         for case in group["actions"]:
             key = f"{group['id']}/{case['id']}"
@@ -156,7 +172,7 @@ def main() -> int:
             except Exception as error:  # noqa: BLE001 - report per-case, never crash
                 results[key] = {"status": "error", "message": str(error)}
 
-    print(json.dumps({"sdk": "python", "results": results}))
+    print(json.dumps({"sdk": "python", "results": results, "content_hash": hashes}))
     return 0
 
 

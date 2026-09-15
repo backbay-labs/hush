@@ -55,6 +55,7 @@ from hushspec.extensions import (
     ThreatIntelDetection,
     TransitionTrigger,
 )
+from hushspec.canonical import CanonicalError, canonical_json, content_hash
 from hushspec.merge import merge
 from hushspec.middleware import (
     EnforcementConfig,
@@ -245,6 +246,9 @@ __all__ = [
     "check_panic_sentinel",
     "evaluate_audited",
     "compute_policy_hash",
+    "canonical_json",
+    "content_hash",
+    "CanonicalError",
     "receipt_to_dict",
     "DecisionReceipt",
     "ActionSummary",
