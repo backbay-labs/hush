@@ -1,6 +1,12 @@
 import type { HushSpec } from './schema.js';
-import { evaluate } from './evaluate.js';
-import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js';
+import { evaluateTraced } from './evaluate.js';
+import type {
+  EvaluationAction,
+  EvaluationResult,
+  Decision,
+  TracedEvaluation,
+} from './evaluate.js';
+import type { Condition, RuntimeContext } from './conditions.js';
 import type { DetectionLevel } from './extensions.js';
 
 export type DetectionCategory = 'prompt_injection' | 'jailbreak' | 'data_exfiltration';
@@ -279,6 +285,62 @@ export interface EvaluationWithDetection {
   detectionDecision?: Decision;
 }
 
+/**
+ * The level a normalized detector score maps to in a receipt's
+ * `detection_trace` (Receipt specification section 4.6).
+ *
+ * `none` is a zero score, `low` a non-zero score below every policy threshold
+ * floor, and the rest follow the prompt-injection level floors (0.25 / 0.5 /
+ * 0.75) applied to every detector's normalized 0-1 score.
+ */
+export type DetectorLevel = 'none' | 'low' | 'suspicious' | 'high' | 'critical';
+
+/** One detector's contribution, recorded as it ran (receipt spec 4.6). */
+export interface DetectorEvaluation {
+  /** Stable identifier with a version suffix, e.g. `regex_injection@1`. */
+  detector_id: string;
+  category: DetectionCategory;
+  /** Normalized score in [0, 1]. */
+  score: number;
+  level: DetectorLevel;
+  /** True when the finding met the policy's warn or block threshold. */
+  matched: boolean;
+}
+
+/** Version suffix appended to a built-in detector's name to form its id. */
+const DETECTOR_ID_VERSION = '@1';
+
+/** Map a normalized score to its {@link DetectorLevel}. */
+export function detectorLevel(score: number): DetectorLevel {
+  if (score <= 0) return 'none';
+  if (score < LEVEL_FLOORS.suspicious) return 'low';
+  if (score < LEVEL_FLOORS.high) return 'suspicious';
+  if (score < LEVEL_FLOORS.critical) return 'high';
+  return 'critical';
+}
+
+/** A traced evaluation with the detection pipeline folded in. */
+export interface TracedEvaluationWithDetection {
+  /** The rule-block evaluation and its recorded trace, before detection. */
+  traced: TracedEvaluation;
+  /** The final decision callers act on. */
+  evaluation: EvaluationResult;
+  detections: DetectionResult[];
+  detectionDecision?: Decision;
+  /**
+   * Per-detector receipt entries, in run order. `undefined` when the pipeline
+   * did not run (no `detection:` extension); an empty array when it ran and no
+   * detector was enabled or there was nothing to scan.
+   */
+  detectorTrace?: DetectorEvaluation[];
+}
+
+/**
+ * Default byte budget for one detection scan when the policy sets none.
+ * Applies to prompt_injection `max_scan_bytes` and jailbreak `max_input_bytes`.
+ */
+const DEFAULT_SCAN_BYTES = 200_000;
+
 const LEVEL_FLOORS: Record<DetectionLevel, number> = {
   safe: 0.0,
   suspicious: 0.25,
@@ -343,68 +405,123 @@ export function evaluateWithDetection(
   spec: HushSpec,
   action: EvaluationAction,
 ): EvaluationWithDetection {
-  const base = evaluate(spec, action);
+  const traced = evaluateWithDetectionTraced(spec, action);
+  return {
+    evaluation: traced.evaluation,
+    detections: traced.detections,
+    detectionDecision: traced.detectionDecision,
+  };
+}
+
+/**
+ * {@link evaluateWithDetection} with the evaluator's recorded rule trace and
+ * the per-detector receipt entries (Receipt specification section 4.6).
+ *
+ * This is what receipts are built from: `detectorTrace` is present whenever
+ * the pipeline ran -- even with nothing to scan -- so a receipt can say
+ * "detection ran and found nothing" as distinct from "detection never ran".
+ */
+export function evaluateWithDetectionTraced(
+  spec: HushSpec,
+  action: EvaluationAction,
+  context?: RuntimeContext,
+  conditions: Record<string, Condition> = {},
+): TracedEvaluationWithDetection {
+  const traced = evaluateTraced(spec, action, context, conditions);
+  const base = traced.result;
 
   const det = spec.extensions?.detection;
   if (det == null) {
-    return { evaluation: base, detections: [], detectionDecision: undefined };
+    return { traced, evaluation: base, detections: [] };
   }
 
   const content = action.content ?? '';
   if (content.length === 0) {
-    return { evaluation: base, detections: [], detectionDecision: undefined };
+    return { traced, evaluation: base, detections: [], detectorTrace: [] };
   }
 
   const detections: DetectionResult[] = [];
-  let detectionDecision: Decision | undefined;
-  let escalationCategory: DetectionCategory | undefined;
+  const detectorTrace: DetectorEvaluation[] = [];
+  // (category, contribution) for each detector that raised a warn/deny.
+  const contributions: [DetectionCategory, Decision][] = [];
 
   const promptInjection = det.prompt_injection;
   if (promptInjection != null && promptInjection.enabled !== false) {
-    const scan = truncateUtf8(content, promptInjection.max_scan_bytes ?? 200_000);
+    const scan = truncateUtf8(content, promptInjection.max_scan_bytes ?? DEFAULT_SCAN_BYTES);
     const result = INJECTION_DETECTOR.detect(scan);
-    detections.push(result);
 
     const blockFloor = LEVEL_FLOORS[promptInjection.block_at_or_above ?? 'high'];
     const warnFloor = LEVEL_FLOORS[promptInjection.warn_at_or_above ?? 'suspicious'];
-    const contribution: Decision | undefined =
-      result.score >= blockFloor ? 'deny' : result.score >= warnFloor ? 'warn' : undefined;
-
-    if (contribution != null && decisionRank(contribution) > decisionRank(detectionDecision)) {
-      detectionDecision = contribution;
-      escalationCategory = 'prompt_injection';
+    let matched = false;
+    if (result.score >= blockFloor) {
+      contributions.push(['prompt_injection', 'deny']);
+      matched = true;
+    } else if (result.score >= warnFloor) {
+      contributions.push(['prompt_injection', 'warn']);
+      matched = true;
     }
+    detectorTrace.push({
+      detector_id: `${result.detector_name}${DETECTOR_ID_VERSION}`,
+      category: 'prompt_injection',
+      score: result.score,
+      level: detectorLevel(result.score),
+      matched,
+    });
+    detections.push(result);
   }
 
   const jailbreak = det.jailbreak;
   if (jailbreak != null && jailbreak.enabled !== false) {
-    const scan = truncateUtf8(content, jailbreak.max_input_bytes ?? 200_000);
+    const scan = truncateUtf8(content, jailbreak.max_input_bytes ?? DEFAULT_SCAN_BYTES);
     const result = JAILBREAK_DETECTOR.detect(scan);
-    detections.push(result);
 
     // Compare directly against the 0-100 thresholds -- no rounding.
     const scaled = result.score * 100.0;
     const blockThreshold = jailbreak.block_threshold ?? 80;
     const warnThreshold = jailbreak.warn_threshold ?? 50;
-    const contribution: Decision | undefined =
-      scaled >= blockThreshold ? 'deny' : scaled >= warnThreshold ? 'warn' : undefined;
-
-    if (contribution != null && decisionRank(contribution) > decisionRank(detectionDecision)) {
-      detectionDecision = contribution;
-      escalationCategory = 'jailbreak';
+    let matched = false;
+    if (scaled >= blockThreshold) {
+      contributions.push(['jailbreak', 'deny']);
+      matched = true;
+    } else if (scaled >= warnThreshold) {
+      contributions.push(['jailbreak', 'warn']);
+      matched = true;
     }
+    detectorTrace.push({
+      detector_id: `${result.detector_name}${DETECTOR_ID_VERSION}`,
+      category: 'jailbreak',
+      score: result.score,
+      level: detectorLevel(result.score),
+      matched,
+    });
+    detections.push(result);
   }
 
   // threat_intel is NOT auto-wired: the built-in engine has only regex
   // detectors, no pattern-db / similarity model to satisfy it. Serving it
   // requires a custom Detector registered through DetectorRegistry.
 
-  const finalDecision = stricterDecision(base.decision, detectionDecision);
-  if (finalDecision === base.decision) {
-    return { evaluation: base, detections, detectionDecision };
+  let detectionDecision: Decision | undefined;
+  for (const [, decision] of contributions) {
+    if (decisionRank(decision) > decisionRank(detectionDecision)) {
+      detectionDecision = decision;
+    }
   }
 
+  const finalDecision = stricterDecision(base.decision, detectionDecision);
+  if (finalDecision === base.decision) {
+    // No escalation: return the base evaluation untouched so a policy deny
+    // keeps its own matched_rule and detection never weakens a decision.
+    return { traced, evaluation: base, detections, detectionDecision, detectorTrace };
+  }
+
+  // Detection escalated. Attribute it to the first detector whose
+  // contribution reached the strictest detection decision.
+  const escalationCategory =
+    contributions.find(([, decision]) => decision === detectionDecision)?.[0] ?? 'prompt_injection';
+
   return {
+    traced,
     evaluation: {
       decision: finalDecision,
       matched_rule: 'detection',
@@ -414,5 +531,6 @@ export function evaluateWithDetection(
     },
     detections,
     detectionDecision,
+    detectorTrace,
   };
 }

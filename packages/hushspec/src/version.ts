@@ -10,6 +10,18 @@
 /** The HushSpec version this engine writes by default. */
 export const HUSHSPEC_VERSION = '0.2.0';
 
+/**
+ * This package's own identity, as a receipt log's `sdk` member records it
+ * (spec/hushspec-log.md section 6). Distinct from {@link HUSHSPEC_VERSION},
+ * which is the *specification* version the engine implements.
+ *
+ * `tests/version.test.ts` pins {@link SDK_VERSION} to `package.json`.
+ */
+export const SDK_NAME = '@hushspec/core';
+
+/** @see {@link SDK_NAME} */
+export const SDK_VERSION = '0.1.1';
+
 /** Minor versions this engine accepts, as `X.Y` strings. */
 export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2'] as const;
 

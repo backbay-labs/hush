@@ -2,7 +2,6 @@ import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js
 import type { DecisionReceipt, EnforcementSummary } from './receipt.js';
 import type { HushSpec } from './schema.js';
 import { evaluate } from './evaluate.js';
-import { computePolicyHash } from './receipt.js';
 
 export interface EvaluationEvent {
   type: 'evaluation.completed' | 'policy.loaded' | 'policy.load_failed' | 'policy.reloaded';
@@ -21,6 +20,11 @@ export interface EvaluationCompletedEvent extends EvaluationEvent {
 export interface PolicyLoadedEvent extends EvaluationEvent {
   type: 'policy.loaded';
   policy_name?: string;
+  /**
+   * The canonical content hash of the resolved policy (`sha256:` + hex), the
+   * same value a receipt's `policy.content_hash` carries. Empty only when the
+   * emitter had no policy to hash.
+   */
   content_hash: string;
 }
 
@@ -33,6 +37,7 @@ export interface PolicyLoadFailedEvent extends EvaluationEvent {
 export interface PolicyReloadedEvent extends EvaluationEvent {
   type: 'policy.reloaded';
   policy_name?: string;
+  /** @see {@link PolicyLoadedEvent.content_hash} */
   content_hash: string;
   previous_hash?: string;
 }
