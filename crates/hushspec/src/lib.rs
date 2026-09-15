@@ -49,6 +49,8 @@ pub mod guard;
 pub mod log;
 pub mod merge;
 pub mod observer;
+#[cfg(feature = "otlp")]
+pub mod otlp;
 pub mod panic;
 pub mod policy;
 pub mod provider;
@@ -106,6 +108,8 @@ pub use observer::{
     JsonLineObserver, MetricsCollector, MetricsSnapshot, ObservableEvaluator, ObserverEvent,
     ObserverEventType, ObserverLevel, PolicyLoadedEvent, StderrObserver, decision_label,
 };
+#[cfg(feature = "otlp")]
+pub use otlp::{OtlpConfig, OtlpSink};
 pub use panic::{
     PanicState, activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active,
     panic_policy,
