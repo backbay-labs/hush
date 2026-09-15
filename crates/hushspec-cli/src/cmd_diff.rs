@@ -110,15 +110,19 @@ pub fn run(args: DiffArgs) -> i32 {
     0
 }
 
+/// Load a policy and resolve its `extends` chain (builtins plus files rooted
+/// at the policy's own directory).
+///
+/// Diffing the unresolved leaves would compare two documents no runtime ever
+/// evaluates: every block inherited from a base is missing from both sides, so
+/// adding `extends: builtin:default` to a policy would read as "no change".
 fn load_policy(path: &Path) -> Result<HushSpec, String> {
     if !path.exists() {
         return Err(format!("file not found: {}", path.display()));
     }
 
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-
-    HushSpec::parse(&content).map_err(|e| format!("failed to parse {}: {e}", path.display()))
+    hushspec::resolve_from_path_with_builtins(path)
+        .map_err(|e| format!("failed to load {}: {e}", path.display()))
 }
 
 fn generate_probes(old: &HushSpec, new: &HushSpec) -> Vec<ProbeAction> {

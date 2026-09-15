@@ -153,10 +153,62 @@ pub fn run(args: LintArgs) -> i32 {
             }
         };
 
-        let mut findings = run_all_checks(&spec, &path.display().to_string());
+        // Lint the *resolved* document. A policy that extends a base is
+        // enforced as the merged result, so linting the bare leaf both misses
+        // real problems inherited from the base and invents findings for
+        // blocks the base supplies (L009 fires on every `extends:` policy that
+        // inherits `secret_patterns`). A chain that will not resolve is an
+        // error finding, never a silent fall back to the leaf.
+        let resolved = if spec.extends.is_some() {
+            match hushspec::resolve_from_path_with_builtins(path) {
+                Ok(resolved) => Some(resolved),
+                Err(e) => {
+                    if matches!(args.format, LintOutputFormat::Text) {
+                        eprintln!(
+                            "{} failed to resolve {}: {e}",
+                            "error".red(),
+                            path.display()
+                        );
+                    }
+                    all_results.push(FileLintResult {
+                        file: path.display().to_string(),
+                        findings: vec![FindingJson {
+                            code: "E002".into(),
+                            severity: "error".into(),
+                            message: format!("failed to resolve extends: {e}"),
+                            location: path.display().to_string(),
+                            fixable: false,
+                        }],
+                        fixed: Vec::new(),
+                    });
+                    any_parse_error = true;
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
+        let file_label = path.display().to_string();
+        let mut findings = match resolved.as_ref() {
+            Some(resolved) => run_all_checks(resolved, &file_label),
+            None => run_all_checks(&spec, &file_label),
+        };
         let mut fixed_codes: Vec<String> = Vec::new();
 
-        if want_fix {
+        if want_fix && resolved.is_some() {
+            // Findings describe the resolved document, whose list indices do
+            // not line up with the on-disk leaf, so applying them in place
+            // would rewrite the wrong entries -- and materialize inherited
+            // rules into a file that deliberately delegates them.
+            if matches!(args.format, LintOutputFormat::Text) {
+                eprintln!(
+                    "{} {}: --fix/--dry-run is not supported for policies with `extends` (findings describe the resolved document)",
+                    "warning".yellow(),
+                    path.display()
+                );
+            }
+        } else if want_fix {
             fixed_codes = fix::apply_fixes(&mut spec, &findings);
 
             // Only touch the file when something was actually fixed. Writing
@@ -232,7 +284,7 @@ pub fn run(args: LintArgs) -> i32 {
             file: path.display().to_string(),
             findings: findings
                 .iter()
-                .map(|f| FindingJson::new(&spec, f))
+                .map(|f| FindingJson::new(resolved.as_ref().unwrap_or(&spec), f))
                 .collect(),
             fixed: fixed_codes,
         });
