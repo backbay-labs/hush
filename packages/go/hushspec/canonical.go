@@ -238,7 +238,7 @@ var canonicalSchemaRules = map[reflect.Type]canonicalRules{
 	reflect.TypeOf(OriginProfile{}): {
 		"id": canonicalRequired,
 		// An explicit `match: {}` is the default profile; an absent `match`
-		// never matches (origins spec section 3, D12).
+		// never matches (origins spec section 3).
 		"match": canonicalPreserveEmpty,
 	},
 	// OriginToolAccessOverlay and OriginEgressOverlay need no entry: their

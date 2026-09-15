@@ -1,3 +1,5 @@
+// Command hushspec-normalize parses a HushSpec document and prints its typed
+// model as JSON, for the cross-SDK normalization comparison.
 package main
 
 import (

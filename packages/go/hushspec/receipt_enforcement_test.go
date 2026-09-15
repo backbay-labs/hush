@@ -62,10 +62,10 @@ func TestReceiptEnforcementAlwaysPresent(t *testing.T) {
 	}
 }
 
-// TestImpliedEnforcementFollowsD16 locks in receipt spec 4.7: an engine with
-// no enforcement point records the disposition the decision implies, and a
-// warn with no confirmation channel is a deny (core spec D16).
-func TestImpliedEnforcementFollowsD16(t *testing.T) {
+// TestImpliedEnforcementBlocksUnconfirmedWarn locks in receipt spec 4.7: an
+// engine with no enforcement point records the disposition the decision
+// implies, and a warn with no confirmation channel is a deny (core spec 6).
+func TestImpliedEnforcementBlocksUnconfirmedWarn(t *testing.T) {
 	cases := []struct {
 		decision Decision
 		mode     EnforcementMode

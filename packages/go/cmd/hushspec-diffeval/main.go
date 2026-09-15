@@ -47,11 +47,10 @@ func defaultAudit() auditSpec {
 	}
 }
 
-// withDefaults fills in the members a bundle left out, member by member --
-// what the other three SDKs do, and what a bundle carrying only
-// `{"emit_receipts": true}` relies on. An *empty* actor (`"actor": {}`) is a
-// deliberate "no actor", which is why it is a pointer: only an absent one is
-// replaced.
+// withDefaults fills in the members a bundle left out, member by member, which
+// is what a bundle carrying only `{"emit_receipts": true}` relies on. An empty
+// actor (`"actor": {}`) is a deliberate "no actor", which is why it is a
+// pointer: only an absent one is replaced.
 func (s auditSpec) withDefaults() auditSpec {
 	fallback := defaultAudit()
 	if s.Clock == "" {
@@ -172,11 +171,10 @@ func (a auditInputs) context(position uint64) *hushspec.AuditContext {
 
 // policyIdentityHash is the group-level receipt_hash: a receipt carrying this
 // policy's summary and nothing else that varies (fixed id, the bundle's clock,
-// a reserved action, a deny with an empty trace). Hashing it with this SDK's
-// own receipt canonicalizer means a disagreement says the policy identity our
-// receipts would record -- name, version, spec_version, content_hash,
-// extends_chain, signature -- differs from the oracle's, independently of any
-// one action.
+// a reserved action, a deny with an empty trace). Hashing it through this SDK's
+// own receipt canonicalizer isolates the policy identity a receipt records --
+// name, version, spec_version, content_hash, extends_chain, signature -- so a
+// disagreement there is reported independently of any one action.
 func (a auditInputs) policyIdentityHash(spec *hushspec.HushSpec) (string, error) {
 	resolution, err := hushspec.NewResolutionFromResolved(spec, "")
 	if err != nil {
@@ -282,10 +280,10 @@ func main() {
 	fmt.Println(string(out))
 }
 
-// parsePolicy runs the same pipeline as the Rust oracle: parse, flatten the
-// `extends` chain (the generator emits only `builtin:` references, which the
-// default composite loader serves from the SDK's embedded rulesets), then
-// validate.
+// parsePolicy runs the pipeline every SDK in the differential run applies:
+// parse, flatten the `extends` chain (the generator emits only `builtin:`
+// references, which the default composite loader serves from the SDK's embedded
+// rulesets), then validate.
 func parsePolicy(policy map[string]any) (*hushspec.HushSpec, *verdict) {
 	policyBytes, err := yaml.Marshal(policy)
 	if err != nil {
@@ -320,9 +318,9 @@ func evaluateCase(
 	}
 	// The audited path is the one an enforcement point runs: it routes through
 	// the detection pipeline and records the evidence, so the verdict reported
-	// here is read back out of the receipt. The base evaluator's trace comes
-	// from an explicit EvaluateTraced call over the same inputs; detection
-	// never re-runs the rule blocks, so the two agree by construction.
+	// here is read back out of the receipt. The rule trace comes from an
+	// explicit EvaluateTraced call over the same inputs; detection never re-runs
+	// the rule blocks, so the two agree by construction.
 	traced := hushspec.EvaluateTraced(spec, &action, nil, nil)
 	receipt, err := hushspec.EvaluateAuditedSpec(spec, &action, &audit.config, audit.context(position))
 	if err != nil {

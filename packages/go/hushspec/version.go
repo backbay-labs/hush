@@ -4,50 +4,33 @@ package hushspec
 
 import "strings"
 
-// The four reference SDKs expose the same version surface under each
-// language's own spelling. The Go names below and their counterparts:
-//
-//	Go                  Rust                          TypeScript / Python
-//	Version             HUSHSPEC_VERSION              HUSHSPEC_VERSION
-//	SupportedMinors     HUSHSPEC_SUPPORTED_MINORS     HUSHSPEC_SUPPORTED_MINORS
-//	SupportedVersions   HUSHSPEC_SUPPORTED_VERSIONS   SUPPORTED_VERSIONS
-//	IsSupported         is_supported                  isSupported / is_supported
-//	SupportedMinor      supported_minor               supportedMinor / supported_minor
-//
 // [SDKName] is this package's own identity, as a receipt log's `sdk` member
-// records it (spec/hushspec-log.md section 6) -- distinct from Version, which
-// is the *specification* version the engine implements.
+// records it (spec/hushspec-log.md section 6) -- distinct from [Version],
+// which is the *specification* version the engine implements.
 
-// Version is the HushSpec version this engine writes by default. Rust spells
-// it HUSHSPEC_VERSION.
+// Version is the HushSpec version this engine writes by default.
 const Version = "0.2.0"
 
 // SupportedMinors lists the minor versions this engine accepts, as "X.Y"
-// strings. Version acceptance follows core spec 2.2 (D14): an engine that
-// supports a minor version X.Y accepts every X.Y.Z document, because patch
-// versions carry only clarifications and errata.
-//
-// Rust spells it HUSHSPEC_SUPPORTED_MINORS.
+// strings. Version acceptance follows core spec 2.2: an engine that supports a
+// minor version X.Y accepts every X.Y.Z document, because patch versions carry
+// only clarifications and errata.
 var SupportedMinors = []string{"0.1", "0.2"}
 
 // SupportedVersions lists one representative full version per supported minor.
 // It is for display only -- use [IsSupported] for acceptance, which accepts
 // every patch level of a supported minor.
-//
-// Rust spells it HUSHSPEC_SUPPORTED_VERSIONS; TypeScript and Python spell it
-// SUPPORTED_VERSIONS.
 var SupportedVersions = []string{"0.1.0", "0.2.0"}
 
 // IsSupported reports whether version is a well-formed "X.Y.Z" string whose
 // minor version this engine supports. Any patch level of a supported minor is
-// accepted (D14). Rust spells it is_supported.
+// accepted (core spec 2.2).
 func IsSupported(version string) bool {
 	return SupportedMinor(version) != ""
 }
 
 // SupportedMinor returns the "X.Y" minor of a well-formed, supported version
 // string, or "" when the version is malformed or its minor is unsupported.
-// Rust spells it supported_minor.
 func SupportedMinor(version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) != 3 {

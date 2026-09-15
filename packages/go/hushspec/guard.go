@@ -13,8 +13,8 @@ import (
 // action as `confirmed` (a human or a policy-aware confirmation channel
 // approved it); returning false blocks it.
 //
-// A guard with no handler denies every warn (core spec D16): a warn nobody can
-// confirm is a deny.
+// A guard with no handler denies every warn: a warn nobody can confirm is a
+// deny (core spec 6).
 type WarnHandler func(result EvaluationResult, action *EvaluationAction) bool
 
 // GuardRefusal is the verification failure a guard is holding a policy under.
@@ -642,7 +642,7 @@ func gateOutcome(
 		case onWarn != nil && onWarn(result, action):
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeConfirmed}
 		default:
-			// Fail closed: a warn nobody can confirm is a deny (D16).
+			// Fail closed: a warn nobody can confirm is a deny (core spec 6).
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeBlocked}
 		}
 	default:

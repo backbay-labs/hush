@@ -12,7 +12,7 @@ type ReceiptSink interface {
 }
 
 // PolicyEventSink is a sink that can also record which policy is in force
-// (RFC 09 P2-10, log spec 6).
+// (log spec 6).
 //
 // It is a separate, optional interface rather than a second method on
 // [ReceiptSink] so that every sink written against the 0.1 API keeps

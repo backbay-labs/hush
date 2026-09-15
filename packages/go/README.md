@@ -273,7 +273,7 @@ evaluations. It is safe to share across goroutines.
 guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
 	Actor:  &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
 	Sink:   sink,                      // receipts and policy_loaded / policy_swapped
-	OnWarn: confirmWithOperator,       // nil denies every warn (D16)
+	OnWarn: confirmWithOperator,       // nil denies every warn
 })
 if err != nil {
 	log.Fatal(err)

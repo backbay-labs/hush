@@ -188,11 +188,9 @@ func TestProfileRejectsRE2UnsafePatterns(t *testing.T) {
 }
 
 // TestRegexDialectFixtureEvaluates runs fixtures/core/evaluation/
-// regex-dialect.test.yaml through Evaluate. The shared Go fixture runner in
-// fixtures_test.go currently only parses and validates each evaluator fixture
-// (wiring it to Evaluate is work package P1-12), so this test asserts the Go
-// engine's decisions on the regex-profile fixture directly, matching what the
-// Rust testkit and the TypeScript and Python fixture runners assert.
+// regex-dialect.test.yaml through Evaluate. The shared fixture runner in
+// fixtures_test.go only parses and validates each evaluator fixture, so this
+// test asserts the engine's decisions on the regex-profile fixture directly.
 func TestRegexDialectFixtureEvaluates(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {

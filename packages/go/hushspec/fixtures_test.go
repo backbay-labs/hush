@@ -242,7 +242,7 @@ func TestSharedFixtures(t *testing.T) {
 						t.Fatalf("%s: cases[%d].expect.decision must be allow, warn, or deny", fixturePath, index)
 					}
 					// The evaluator-test schema accepts any non-empty action
-					// type so unknown-type vectors can assert the D1 deny.
+					// type so unknown-type vectors can assert their deny.
 					actionType, ok := testCase.Action["type"].(string)
 					if !ok || actionType == "" {
 						t.Fatalf("%s: cases[%d].action.type must be a non-empty string", fixturePath, index)
@@ -361,10 +361,10 @@ func mergeFixtureLoader(basePath string) ResolveLoader {
 }
 
 // mergeFixtureExpectsReject reports whether a merge vector is supposed to fail.
-// Two conventions are honoured, because the shared fixtures are written by the
-// Rust reference implementation and either may appear: an "expect-reject"
-// marker file (beside the child, named for it or for the whole directory), or
-// `reject: true` in a fixture.yaml manifest (per child or per directory).
+// The shared fixtures spell it two ways and either may appear: an
+// "expect-reject" marker file (beside the child, named for it or for the whole
+// directory), or `reject: true` in a fixture.yaml manifest (per child or per
+// directory).
 func mergeFixtureExpectsReject(t *testing.T, childPath string) bool {
 	t.Helper()
 	dir := filepath.Dir(childPath)

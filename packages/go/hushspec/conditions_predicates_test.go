@@ -6,7 +6,7 @@ import (
 )
 
 // --------------------------------------------------------------------------
-// capability and rate predicates (D19, core spec 3.13)
+// capability and rate predicates (core spec 3.13)
 // --------------------------------------------------------------------------
 
 func TestIsCapabilityIdentifier(t *testing.T) {
@@ -114,8 +114,8 @@ func TestValidateConditionRejectsBadIdentifiers(t *testing.T) {
 	}
 }
 
-// TestPostureTransitionPriority locks in D18 (posture spec 5.3): a transition
-// whose `from` names the current state outranks a wildcard listed before it.
+// TestPostureTransitionPriority locks in posture spec 5.3: a transition whose
+// `from` names the current state outranks a wildcard listed before it.
 func TestPostureTransitionPriority(t *testing.T) {
 	posture := &PostureExtension{
 		Initial: "standard",

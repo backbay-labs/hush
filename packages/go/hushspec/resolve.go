@@ -120,7 +120,7 @@ type ResolveOptions struct {
 // VerifiedAt records when the *verifier* ran, not when the signer signed: the
 // envelope's own `signed_at` is a claim of the signer, trustworthy only once
 // Verified is true, so the schema records the verifier's clock instead. It is
-// set only on success, mirroring the Rust reference.
+// set only on success.
 type SignatureStatus struct {
 	Verified   bool   `json:"verified"`
 	KeyID      string `json:"key_id,omitempty"`
@@ -175,8 +175,6 @@ const MemorySource = "memory"
 // `extends`) as a single-link resolution, which is what a receipt builder
 // needs for a policy it did not load through the resolver. source names the
 // document in the chain; "" means [MemorySource].
-//
-// It mirrors Rust's Resolution::from_resolved.
 func NewResolutionFromResolved(spec *HushSpec, source string) (*Resolution, error) {
 	if spec == nil {
 		return nil, errors.New("cannot resolve a nil HushSpec document")
@@ -435,9 +433,9 @@ func signatureSidecarPaths(path string) []string {
 }
 
 // createCompositeLoader serves `builtin:<name>` references from the embedded
-// rulesets and everything else from the filesystem (mirrors the Rust/TS
-// resolvers). A bare name with no path separators or dots is tried as a
-// builtin before falling back to the filesystem.
+// rulesets and everything else from the filesystem. A bare name with no path
+// separators or dots is tried as a builtin before falling back to the
+// filesystem.
 func createCompositeLoader() ResolveLoader {
 	return func(reference string, from string) (*LoadedSpec, error) {
 		if strings.HasPrefix(reference, "builtin:") {
@@ -452,9 +450,9 @@ func createCompositeLoader() ResolveLoader {
 		}
 
 		// Reject HTTP(S) references explicitly rather than letting them fall
-		// through to the filesystem loader (which would try to open a file
-		// literally named "https://..."). The composite loader has no network
-		// support, so mirror Rust/TS and fail with a clear error.
+		// through to the filesystem loader, which would try to open a file
+		// literally named "https://...". The composite loader has no network
+		// support, so say so plainly.
 		if strings.HasPrefix(reference, "https://") || strings.HasPrefix(reference, "http://") {
 			return nil, fmt.Errorf("HTTP-based policy loading is not supported by the composite loader: %q", reference)
 		}
@@ -542,8 +540,7 @@ func resolveChain(
 			}
 			// Verification was attempted, so the outcome is always recorded
 			// (signing spec section 6.5): a hop with no envelope carries
-			// missing_signature rather than "nothing was checked", matching
-			// the Rust reference and the other SDKs.
+			// missing_signature rather than "nothing was checked".
 			if status == nil {
 				failed := FailedSignature(ReasonMissingSignature, "")
 				status = &failed

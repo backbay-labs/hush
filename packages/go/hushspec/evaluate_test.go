@@ -288,7 +288,7 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 	}
 }
 
-// TestEvaluateUnknownActionType locks in D1 (core 5): an action type the
+// TestEvaluateUnknownActionType locks in core spec 5: an action type the
 // specification does not define denies, it does not fall through to allow.
 func TestEvaluateUnknownActionType(t *testing.T) {
 	spec := &HushSpec{
@@ -307,8 +307,9 @@ func TestEvaluateUnknownActionType(t *testing.T) {
 	}
 }
 
-// TestEvaluateCustomActionRequiresPostureCapability locks in D1: `custom` is
-// permitted only when the current posture state grants the `custom` capability.
+// TestEvaluateCustomActionRequiresPostureCapability locks in core spec 5:
+// `custom` is permitted only when the current posture state grants the `custom`
+// capability.
 func TestEvaluateCustomActionRequiresPostureCapability(t *testing.T) {
 	withoutPosture := &HushSpec{HushSpecVersion: "0.2.0"}
 	result := Evaluate(withoutPosture, &EvaluationAction{Type: "custom", Target: "anything"})
@@ -537,7 +538,7 @@ extensions:
 	}
 }
 
-// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in D12: an overlay
+// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in origins spec 4: an overlay
 // `default: allow` cannot relax a base `default: block` -- the stricter of the
 // two wins -- and the reported rule is the base's, since the base's `block` is
 // what determined the effective value.

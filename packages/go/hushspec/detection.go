@@ -65,8 +65,7 @@ func WithDefaultDetectors() *DetectorRegistry {
 	return r
 }
 
-// NewDefaultDetectorRegistry is [WithDefaultDetectors] under the name the
-// other SDKs use for it.
+// NewDefaultDetectorRegistry is an alias for [WithDefaultDetectors].
 func NewDefaultDetectorRegistry() *DetectorRegistry { return WithDefaultDetectors() }
 
 // DetectorsFor returns every registered detector of category, in registration
@@ -119,13 +118,12 @@ func NewRegexInjectionDetector() *RegexInjectionDetector {
 	return &RegexInjectionDetector{
 		patterns: []detectionPattern{
 			{
-				// Character classes below are explicit ASCII ([ \t\n\r\f],
-				// [0-9], [A-Za-z0-9_]) instead of \s/\d/\w: those shorthands
-				// are Unicode-aware in Rust `regex` & Python `re` but
-				// ASCII-only in Go RE2 & JS RegExp, so a pattern using \s+
-				// let Rust/Python match NBSP-obfuscated injection content
-				// that Go/JS missed. Must stay byte-for-byte identical to
-				// the Rust/TS/Python patterns.
+				// Character classes are written out as explicit ASCII
+				// ([ \t\n\r\f], [0-9], [A-Za-z0-9_]) rather than \s/\d/\w,
+				// whose meaning differs between regex engines: a Unicode-aware
+				// \s also matches NBSP and friends, so the same obfuscated
+				// payload would score differently depending on the engine.
+				// These patterns are normative and must not drift.
 				name:     "ignore_instructions",
 				regex:    regexp.MustCompile(`(?i)ignore[ \t\n\r\f]+(all[ \t\n\r\f]+)?(previous|prior|above)[ \t\n\r\f]+(instructions|rules|prompts)`),
 				weight:   0.4,
@@ -241,8 +239,8 @@ type HeuristicFamily struct {
 // NFC-normalized, ASCII-case-folded input, so they are lowercase. A family
 // contributes its weight at most once; the sum is clamped to 100.
 //
-// This table is normative: it must stay byte-for-byte identical to
-// HEURISTIC_FAMILIES in crates/hushspec/src/detection.rs and to the spec table.
+// This table is normative: it must stay byte-for-byte identical to the table
+// in detection spec 3.5.3.
 var HeuristicFamilies = []HeuristicFamily{
 	{
 		Name:   "instruction_override",
@@ -456,8 +454,8 @@ func NewRegexJailbreakDetector() *RegexJailbreakDetector {
 	return &RegexJailbreakDetector{
 		patterns: []detectionPattern{
 			{
-				// See the ignore_instructions comment above: explicit ASCII
-				// class instead of \s for cross-SDK parity.
+				// Explicit ASCII class instead of \s, for the reason given on
+				// ignore_instructions above.
 				name:     "jailbreak_dan",
 				regex:    regexp.MustCompile(`(?i)(DAN|do[ \t\n\r\f]+anything[ \t\n\r\f]+now|developer[ \t\n\r\f]+mode|jailbreak)`),
 				weight:   0.5,
@@ -525,17 +523,13 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 	return &RegexExfiltrationDetector{
 		patterns: []detectionPattern{
 			{
-				// Explicit ASCII non-digit boundaries instead of \b AND an
-				// explicit [0-9] body instead of \d: Go RE2's \b and \d are
-				// already ASCII-only, but Rust `regex` and Python `re` treat
-				// \b as a Unicode word boundary and \d as a Unicode digit
-				// class, so a run of digits preceded/followed by a non-ASCII
-				// letter (e.g. "café123-45-6789") or a fullwidth-digit SSN
-				// matched there but not here. The explicit (?:^|[^0-9]) /
-				// (?:[^0-9]|$) boundaries and [0-9] body make the ASCII-vs-
-				// Unicode distinction irrelevant -- only "is this an ASCII
-				// digit" matters -- so all four SDKs agree. Must stay
-				// byte-for-byte identical to the Rust/TS/Python patterns.
+				// Explicit ASCII non-digit boundaries instead of \b, and an
+				// explicit [0-9] body instead of \d. Engines disagree on both:
+				// a Unicode word boundary and a Unicode digit class would also
+				// match a run of digits next to a non-ASCII letter (say
+				// "café123-45-6789") or a fullwidth-digit SSN. Spelling the
+				// boundaries as (?:^|[^0-9]) / (?:[^0-9]|$) makes only "is this
+				// an ASCII digit" matter. The pattern is normative.
 				name:     "ssn",
 				regex:    regexp.MustCompile(`(?:^|[^0-9])[0-9]{3}-[0-9]{2}-[0-9]{4}(?:[^0-9]|$)`),
 				weight:   0.8,
@@ -549,21 +543,19 @@ func NewRegexExfiltrationDetector() *RegexExfiltrationDetector {
 				category: DetectionCategoryDataExfil,
 			},
 			{
-				// Explicit ASCII boundaries instead of \b: Rust `regex` and
-				// Python `re` treat \b as a Unicode word boundary while Go RE2
-				// and JS RegExp treat it as ASCII, so an address adjacent to a
-				// non-ASCII letter diverged. The explicit
-				// (?:^|[^A-Za-z0-9._%+-]) / (?:[^A-Za-z0-9.-]|$) boundaries make
-				// all four agree. Must stay byte-for-byte identical to the
-				// Rust/TS/Python patterns.
+				// Explicit ASCII boundaries instead of \b, whose meaning
+				// differs between engines: a Unicode word boundary would judge
+				// an address next to a non-ASCII letter differently. Spelling
+				// them as (?:^|[^A-Za-z0-9._%+-]) / (?:[^A-Za-z0-9.-]|$) leaves
+				// no room for that. The pattern is normative.
 				name:     "email_address",
 				regex:    regexp.MustCompile(`(?:^|[^A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:[^A-Za-z0-9.-]|$)`),
 				weight:   0.3,
 				category: DetectionCategoryDataExfil,
 			},
 			{
-				// See the ignore_instructions comment above: explicit ASCII
-				// classes instead of \s/\S for cross-SDK parity.
+				// Explicit ASCII classes instead of \s/\S, for the reason given
+				// on ignore_instructions above.
 				name:     "api_key_pattern",
 				regex:    regexp.MustCompile(`(?i)(api[_\-]?key|secret[_\-]?key|access[_\-]?token)[ \t\n\r\f]*[:=][ \t\n\r\f]*[^ \t\n\r\f]+`),
 				weight:   0.6,
@@ -758,11 +750,11 @@ func mergeDetectionDecision(
 // spec declares a `detection` extension, scans action.Content with the
 // built-in regex detectors and folds their signal into the decision.
 //
-// It is an EXACT no-op -- the returned Evaluation is `base` unchanged, with
-// no Detections and an empty DetectionDecision -- whenever
-// spec.Extensions.Detection is absent or action.Content is empty. Every
-// pre-existing evaluation fixture has no detection extension, so this keeps
-// them byte-for-byte unaffected.
+// It is an exact no-op -- the returned Evaluation is `base` unchanged, with no
+// Detections and an empty DetectionDecision -- whenever
+// spec.Extensions.Detection is absent or action.Content is empty, so a policy
+// that declares no detection extension is evaluated exactly as it would be
+// without this pipeline.
 //
 // prompt_injection and jailbreak are wired to the built-in regex detectors
 // (RegexInjectionDetector / RegexJailbreakDetector), each gated on being
@@ -957,11 +949,10 @@ func (p *CompiledPolicy) EvaluateWithDetectionTraced(
 	if p.detection == nil {
 		return TracedEvaluationWithDetection{Traced: traced, Evaluation: base}
 	}
-	// Detection is emptiness-gated, not presence-gated: Rust reads
-	// `content.unwrap_or_default()` and returns the base evaluation when the
-	// result is empty, so an explicitly empty payload is a no-op here (unlike
-	// secret_patterns, where presence alone makes the block applicable). The
-	// pipeline still counts as having run, so the trace is empty, not absent.
+	// Detection is emptiness-gated, not presence-gated: an explicitly empty
+	// payload is a no-op here, unlike secret_patterns, where presence alone
+	// makes the block applicable. The pipeline still counts as having run, so
+	// the trace is empty, not absent.
 	content := action.ContentOrEmpty()
 	if content == "" {
 		empty := []DetectorEvaluation{}
@@ -1006,8 +997,7 @@ func (p *CompiledPolicy) EvaluateWithDetectionTraced(
 		})
 	}
 
-	// threat_intel: intentionally not auto-wired -- see doc comment above.
-	// No detector runs for it; ThreatIntel is unused here on purpose.
+	// threat_intel is intentionally not auto-wired; see the doc comment above.
 
 	final := base
 	if decisionRank(decision) > decisionRank(base.Decision) {

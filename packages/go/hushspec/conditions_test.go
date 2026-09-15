@@ -279,7 +279,7 @@ func TestTimeWindowWrapsMidnightWithDayFilter(t *testing.T) {
 	}
 }
 
-// TestTimeWindowUnresolvableTimezoneLeavesBlockActive locks in D15/core 3.13:
+// TestTimeWindowUnresolvableTimezoneLeavesBlockActive locks in core spec 3.13:
 // fail-closed points toward enforcement, so a window the engine cannot
 // evaluate -- here an unresolvable time zone -- leaves its rule block ACTIVE
 // rather than silently switching a control off. Validation rejects such a
@@ -414,7 +414,7 @@ func TestEmptyConditionAlwaysTrue(t *testing.T) {
 	}
 }
 
-// TestMaxNestingDepthExceeded locks in D15: validation rejects a condition
+// TestMaxNestingDepthExceeded locks in core spec 3.13: validation rejects a condition
 // nested past MaxNestingDepth at parse time, and an out-of-band condition that
 // escapes validation cannot be evaluated -- so it leaves the block ACTIVE
 // rather than switching the control off.
@@ -434,8 +434,8 @@ func TestMaxNestingDepthExceeded(t *testing.T) {
 }
 
 // TestValidateConditionReportsEveryViolation covers the parse-time checks of
-// D15: bad HH:MM, an unknown zone, and an unknown day abbreviation, each
-// reported against its rule path.
+// core spec 3.13: bad HH:MM, an unknown zone, and an unknown day abbreviation,
+// each reported against its rule path.
 func TestValidateConditionReportsEveryViolation(t *testing.T) {
 	cond := &Condition{
 		AnyOf: []Condition{{
