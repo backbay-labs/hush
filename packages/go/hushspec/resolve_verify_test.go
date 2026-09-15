@@ -552,8 +552,11 @@ rules:
 	if err != nil {
 		t.Fatalf("a pinned base must satisfy the signature requirement: %v", err)
 	}
-	if resolution.Chain[0].Signature != nil {
-		t.Fatalf("the pinned base has no envelope, so nothing should be recorded: %+v", resolution.Chain[0].Signature)
+	// Verification was attempted (signatures are required), so the outcome
+	// is recorded even though the pin alone satisfied the hop: no envelope
+	// means missing_signature, never a silent nil (signing spec 6.5).
+	if got := resolution.Chain[0].Signature; got == nil || got.Verified || got.Reason != ReasonMissingSignature {
+		t.Fatalf("the pinned base has no envelope, so missing_signature should be recorded: %+v", got)
 	}
 	if resolution.Signature == nil || !resolution.Signature.Verified {
 		t.Fatalf("expected the leaf's own signature to be verified, got %+v", resolution.Signature)

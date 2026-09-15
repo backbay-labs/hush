@@ -66,6 +66,10 @@ const ReasonDigestMismatch = "digest_mismatch"
 // carried no digest pin. Also a resolver-level code.
 const ReasonMissingSignature = "missing_signature"
 
+// ReasonNoKeyring is recorded when a detached envelope was found but no
+// keyring was configured to check it against (signing spec section 6.5).
+const ReasonNoKeyring = "no_keyring"
+
 // ResolveLoader loads a HushSpec referenced by an extends field.
 // reference is the extends value with any digest pin already stripped; from is
 // the source of the referencing document.
@@ -536,6 +540,14 @@ func resolveChain(
 			if err != nil {
 				return nil, err
 			}
+			// Verification was attempted, so the outcome is always recorded
+			// (signing spec section 6.5): a hop with no envelope carries
+			// missing_signature rather than "nothing was checked", matching
+			// the Rust reference and the other SDKs.
+			if status == nil {
+				failed := FailedSignature(ReasonMissingSignature, "")
+				status = &failed
+			}
 			// A matching pin satisfies the hop on its own; otherwise the hop
 			// needs an envelope that verified valid.
 			if opts.RequireSignature && hop.pin == "" && (status == nil || !status.Verified) {
@@ -637,6 +649,10 @@ func verifyHopSignature(
 	}
 	if !found {
 		return nil, nil
+	}
+	if opts.Keyring == nil && len(opts.PublicKeyPEM) == 0 {
+		status := FailedSignature(ReasonNoKeyring, "")
+		return &status, nil
 	}
 
 	// Parse first so the envelope's `signed_at` claim can be recorded even
