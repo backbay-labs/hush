@@ -268,25 +268,26 @@ fn trace_candidates(
     candidates
 }
 
-/// Spellings of `expect.receipt`, most likely first: the hash alone, the hash
-/// in a wrapper, then the whole receipt.
+/// The one spelling of `expect.receipt` the evaluator-test schema (0.2.0)
+/// defines: a partial receipt object whose present members must equal the
+/// receipt produced under the fixed inputs, with the members the runner
+/// ignores (`actor`, `timestamp`, `receipt_id`) left out so the fixture pins
+/// content, not the clock.
 fn receipt_candidates(
     receipt: Option<&hushspec::receipt::DecisionReceipt>,
 ) -> Vec<serde_json::Value> {
     let Some(receipt) = receipt else {
         return Vec::new();
     };
-    let Ok(hash) = receipt.receipt_hash() else {
+    let Ok(mut value) = serde_json::to_value(receipt) else {
         return Vec::new();
     };
-    let mut candidates = vec![
-        serde_json::Value::String(hash.clone()),
-        serde_json::json!({"receipt_hash": hash}),
-    ];
-    if let Ok(value) = serde_json::to_value(receipt) {
-        candidates.push(value);
+    if let Some(object) = value.as_object_mut() {
+        for ignored in ["actor", "timestamp", "receipt_id"] {
+            object.remove(ignored);
+        }
     }
-    candidates
+    vec![value]
 }
 
 pub fn write_regression_fixture(
@@ -490,14 +491,20 @@ mod tests {
         let policy = flatten_extends(&min.policy).expect("flattens");
         let receipt = receipt_for(&min, &policy).expect("the case records a receipt");
         let candidates = receipt_candidates(Some(&receipt));
-        assert_eq!(candidates.len(), 3);
-        let hash = receipt.receipt_hash().expect("hashes");
-        assert_eq!(candidates[0], serde_json::Value::String(hash.clone()));
-        assert_eq!(candidates[1]["receipt_hash"], serde_json::json!(hash));
-        assert_eq!(candidates[2]["receipt_version"], "0.2");
-        // Reproducible: the fixed audit inputs, not the wall clock.
-        assert_eq!(candidates[2]["timestamp"], crate::bundle::AUDIT_CLOCK);
-        assert!(candidates[2].get("duration_us").is_none());
+        assert_eq!(candidates.len(), 1);
+        let pinned = candidates[0].as_object().expect("partial receipt object");
+        assert_eq!(pinned["receipt_version"], serde_json::json!("0.2"));
+        // The runner ignores these three, so pinning them would only tie the
+        // fixture to a clock; everything else is content and stays.
+        for ignored in ["actor", "timestamp", "receipt_id"] {
+            assert!(
+                !pinned.contains_key(ignored),
+                "{ignored} must not be pinned"
+            );
+        }
+        assert!(pinned.contains_key("policy"));
+        assert!(pinned.contains_key("rule_trace"));
+        assert!(pinned.get("duration_us").is_none());
         assert!(receipt_candidates(None).is_empty());
     }
 

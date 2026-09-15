@@ -1,8 +1,7 @@
 use crate::fixture::{FixtureCategory, TestFixture};
 use hushspec::receipt::{RuleOutcome, RuleTraceEntry};
 use hushspec::{
-    Decision, EvaluationAction, HushSpec, PostureResult, Resolution, evaluate_with_detection,
-    evaluate_with_detection_traced, merge,
+    Decision, EvaluationAction, HushSpec, PostureResult, Resolution, evaluate_with_detection_traced,
 };
 use jsonschema::JSONSchema;
 use serde::Deserialize;
