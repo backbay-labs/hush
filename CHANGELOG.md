@@ -8,6 +8,18 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added (RFC 09 Wave 5, Integrations)
+
+- GitHub composite Action (`action.yml`, `backbay-labs/hush@<ref>`): installs `h2h` --
+  downloading, `SHA256SUMS`- and provenance-attestation-verifying, and caching the prebuilt
+  release tarball for the runner's platform, or building `crates/hushspec-cli` from source via
+  `version: source` before any release with binaries exists -- and runs `validate`, `lint`,
+  `test`, `audit` or `bundle-verify` over glob-matched paths with `text`/`json`/`sarif`/`junit`
+  output, exposing `exit-code` and `report-path`. `.pre-commit-hooks.yaml` adds
+  `hushspec-validate`, `hushspec-lint`, `hushspec-lint-strict` and `hushspec-fmt-check`. A
+  multi-stage `Dockerfile` builds an `h2h` image, published to `ghcr.io/backbay-labs/h2h` on
+  every tagged release. New guide: `docs/src/guides/ci.md`.
+
 ### Added (RFC 09 Wave 4, Rust)
 
 - Receipt format 0.2 in the Rust SDK: `evaluate_audited` now takes a `Resolution` and an
