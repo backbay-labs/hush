@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D5 (core 3.3, 3.14.2): host normalization (port, case, trailing dot, URL, userinfo, IDNA), single-label wildcard scope, wildcards never match IP literals"
+description: "Host normalization -- port, case, trailing dot, URL, userinfo, IDNA -- single-label wildcard scope, and wildcards never matching IP literals (core spec 3.3, 3.14.2)"
 policy:
   hushspec: "0.1.0"
   rules:

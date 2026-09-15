@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D8 (core 3.4, 5): egress and tool_call actions are scanned by secret_patterns when they carry content"
+description: "Egress and tool_call actions are scanned by secret_patterns when they carry content (core spec 3.4, 5)"
 policy:
   hushspec: "0.1.0"
   rules:

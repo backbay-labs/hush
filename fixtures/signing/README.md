@@ -47,5 +47,5 @@ h2h verify fixtures/signing/policies/basic.yaml \
   --now 2026-09-15T12:00:00.000Z
 ```
 
-Expected outcomes and reason codes are defined in spec sections 6.2 and 6.4. No SDK runner walks
-this directory until RFC 09 P2-07 ports signing to all four SDKs.
+Expected outcomes and reason codes are defined in spec sections 6.2 and 6.4. These vectors are
+walked by the `h2h` CLI only; the SDKs do not implement signing yet.

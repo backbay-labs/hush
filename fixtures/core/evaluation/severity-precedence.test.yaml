@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D8 (core 3.4): warn severity warns; the highest matched severity wins regardless of pattern order"
+description: "Warn severity warns; the highest matched severity wins regardless of pattern order (core spec 3.4)"
 policy:
   hushspec: "0.1.0"
   rules:

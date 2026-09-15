@@ -1,6 +1,6 @@
 # Evidence report vectors
 
-Vectors for `h2h report` (RFC 09 P3-01) and
+Vectors for `h2h report` and
 [`schemas/hushspec-report.v0.schema.json`](../../schemas/hushspec-report.v0.schema.json).
 
 - `24h.jsonl` is a synthetic working day: a hash-linked log

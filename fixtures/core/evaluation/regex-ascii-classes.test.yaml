@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D7 (core 3.14.3): explicit ASCII classes behave identically in every engine"
+description: "Explicit ASCII classes behave identically in every engine (core spec 3.14.3)"
 policy:
   hushspec: "0.1.0"
   rules:

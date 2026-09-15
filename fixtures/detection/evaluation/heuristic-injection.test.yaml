@@ -1,5 +1,5 @@
 hushspec_test: "0.2.0"
-description: "D20 (detection 3.5): the normative heuristic_injection@1 detector scores identically on every engine; every case pins both prompt-injection trace entries"
+description: "The normative heuristic_injection@1 detector scores identically on every engine; every case pins both prompt-injection trace entries (detection spec 3.5)"
 policy:
   hushspec: "0.1.0"
   rules:

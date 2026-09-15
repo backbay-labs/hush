@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D13 (core 3.12): code_execution evaluation for code_exec"
+description: "code_execution evaluation for code_exec (core spec 3.12)"
 policy:
   hushspec: "0.1.0"
   rules:

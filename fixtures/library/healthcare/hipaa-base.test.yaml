@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
 #
-# Control-tagged suite for library/healthcare/hipaa-base.yaml (RFC 09 P3-03).
+# Control-tagged suite for library/healthcare/hipaa-base.yaml.
 # Every case names the control it is evidence for, and between them the
 # cases hit every rule block and every named secret pattern of the
 # resolved policy -- `h2h test --fail-on-uncovered` is the gate.

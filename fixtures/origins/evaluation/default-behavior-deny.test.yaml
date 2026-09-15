@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D12 (origins 2.1): default_behavior deny is enforced for unmatched origins and for requests without origin context"
+description: "default_behavior deny is enforced for unmatched origins and for requests without origin context (origins spec 2.1)"
 policy:
   hushspec: "0.1.0"
   rules:

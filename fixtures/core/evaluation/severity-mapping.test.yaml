@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D8 (core 3.4): critical and error severities deny; skip_paths bypasses scanning"
+description: "Critical and error severities deny; skip_paths bypasses scanning (core spec 3.4)"
 policy:
   hushspec: "0.1.0"
   rules:

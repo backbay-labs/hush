@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D1 (core 5): unknown and custom action types deny with __unknown_action_type__"
+description: "Unknown and custom action types deny with __unknown_action_type__ (core spec 5)"
 policy:
   hushspec: "0.1.0"
   rules:

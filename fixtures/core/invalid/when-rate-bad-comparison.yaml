@@ -1,4 +1,4 @@
-# D19 (core 3.13): comparison is gte or lt.
+# A rate condition's comparison is gte or lt (core spec 3.13).
 hushspec: "0.1.0"
 rules:
   shell_commands:

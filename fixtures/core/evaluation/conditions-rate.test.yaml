@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D19 (core 3.13): a when.rate condition compares an engine-supplied counter with a threshold (gte or lt); an absent counter is unevaluable and leaves the block active"
+description: "A when.rate condition compares an engine-supplied counter with a threshold, gte or lt; an absent counter is unevaluable and leaves the block active (core spec 3.13)"
 policy:
   hushspec: "0.1.0"
   rules:

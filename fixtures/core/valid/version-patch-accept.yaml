@@ -1,4 +1,4 @@
-# D14 (core 2.2): an engine supporting minor version 0.1 accepts every 0.1.Z document.
+# An engine supporting minor version 0.1 accepts every 0.1.Z document (core spec 2.2).
 hushspec: "0.1.1"
 name: patch-version
 rules:
