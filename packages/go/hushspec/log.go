@@ -714,7 +714,12 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			// this SDK materializes rather than the ones the file holds, and
 			// would report a payload it cannot model exactly as a hash
 			// mismatch instead of letting the check that names it run.
-			recomputed, err := entryHashOfLine(line)
+			object, err := entryObjectOfLine(line)
+			if err != nil {
+				return nil, fail("cannot canonicalize entry: %s", err)
+			}
+			receiptDocument := object["receipt"]
+			recomputed, err := entryHashOfObject(object)
 			if err != nil {
 				return nil, fail("cannot canonicalize entry: %s", err)
 			}
@@ -732,7 +737,8 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 					return nil, fail("receipt_version %q is not %q",
 						entry.Receipt.ReceiptVersion, ReceiptVersion)
 				}
-				if problems := entry.Receipt.structuralProblems(); len(problems) > 0 {
+				problems := documentProblems(receiptDocument, entry.Receipt)
+				if len(problems) > 0 {
 					return nil, fail(
 						"receipt does not validate against the 0.2 receipt schema: %s",
 						strings.Join(problems, "; "))
@@ -763,17 +769,29 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 	return report, nil
 }
 
-// entryHashOfLine is the `entry_hash` one JSON Lines record should carry:
-// "sha256:" over the RFC 8785 canonical form of the object with `entry_hash`
-// and `signature` removed (log spec 4).
-func entryHashOfLine(line string) (string, error) {
+// entryObjectOfLine reads one JSON Lines record as the object the line holds,
+// which is what both the entry hash and the receipt payload check read: the
+// typed entry cannot answer for members it does not model.
+func entryObjectOfLine(line string) (map[string]any, error) {
 	var object map[string]any
 	if err := json.Unmarshal([]byte(line), &object); err != nil {
-		return "", fmt.Errorf("cannot re-read the log entry: %w", err)
+		return nil, fmt.Errorf("cannot re-read the log entry: %w", err)
 	}
-	delete(object, "entry_hash")
-	delete(object, "signature")
-	canonical, err := canonicalJSONValue(object)
+	return object, nil
+}
+
+// entryHashOfObject is the `entry_hash` one record should carry: "sha256:"
+// over the RFC 8785 canonical form of the object with `entry_hash` and
+// `signature` removed (log spec 4).
+func entryHashOfObject(object map[string]any) (string, error) {
+	hashed := make(map[string]any, len(object))
+	for key, value := range object {
+		if key == "entry_hash" || key == "signature" {
+			continue
+		}
+		hashed[key] = value
+	}
+	canonical, err := canonicalJSONValue(hashed)
 	if err != nil {
 		return "", fmt.Errorf("the log entry has no canonical form: %w", err)
 	}

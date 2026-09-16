@@ -358,6 +358,77 @@ fn payload_must_match_entry_type() {
     assert!(error.message.contains("payload"), "{error}");
 }
 
+#[test]
+fn a_receipt_payload_must_validate_against_the_receipt_schema() {
+    let dir = temp_dir("receipt-payload");
+    let path = dir.join("log.jsonl");
+    write_basic(&path, false);
+    let text = fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+
+    // The entry hash covers whatever JSON the line held, so each break has to
+    // be reported by the receipt check rather than as a hash mismatch: edit
+    // the receipt on line 2 and restore the entry hash over the result.
+    let cases: [(&[&str], serde_json::Value, &str); 3] = [
+        (
+            &["receipt_id"],
+            serde_json::json!("0198f0e0-1111-4111-8111-111111111111"),
+            "receipt_id",
+        ),
+        (
+            &["policy", "content_hash"],
+            serde_json::json!("3".repeat(64)),
+            "policy.content_hash",
+        ),
+        (
+            &["rule_trace", "0", "rule_block"],
+            serde_json::json!("rules.egress"),
+            "rule_trace[0].rule_block",
+        ),
+    ];
+    for (pointer, broken, expected) in cases {
+        let mut value: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        let mut target = &mut value["receipt"];
+        for step in pointer {
+            target = match step.parse::<usize>() {
+                Ok(index) => &mut target[index],
+                Err(_) => &mut target[*step],
+            };
+        }
+        *target = broken;
+        value["entry_hash"] = serde_json::json!(value_entry_hash(&value));
+        let text = [lines[0], &value.to_string(), lines[2], lines[3]].join("\n");
+        let error = verify_log("t", &text, &LogVerifyOptions::default()).unwrap_err();
+        assert_eq!(error.line, 2);
+        assert!(
+            error
+                .message
+                .starts_with("receipt does not validate against the 0.2 receipt schema"),
+            "{error}"
+        );
+        assert!(error.message.contains(expected), "{error}");
+    }
+}
+
+#[test]
+fn an_explicit_null_in_a_receipt_is_a_break() {
+    let dir = temp_dir("receipt-null");
+    let path = dir.join("log.jsonl");
+    write_basic(&path, false);
+    let text = fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+
+    // An absent member and one set to `null` deserialize to the same receipt,
+    // but they are not the same document and the entry hash covers both.
+    let mut value: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+    value["receipt"]["reason"] = serde_json::Value::Null;
+    value["entry_hash"] = serde_json::json!(value_entry_hash(&value));
+    let text = [lines[0], &value.to_string(), lines[2], lines[3]].join("\n");
+    let error = verify_log("t", &text, &LogVerifyOptions::default()).unwrap_err();
+    assert_eq!(error.line, 2);
+    assert!(error.message.contains("reason must not be null"), "{error}");
+}
+
 // ----------------------------------------------------------------- vectors --
 
 fn vectors_dir() -> PathBuf {

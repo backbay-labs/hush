@@ -14,6 +14,7 @@ import { compiledFor, compiledForResolution } from './compiled.js';
 import type { ChainLink, Resolution, SignatureStatus } from './resolve.js';
 import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
+import { RULE_KEYS } from './generated/contract.js';
 import { utf8ByteLength } from './utf8.js';
 
 /**
@@ -343,6 +344,36 @@ const DETECTOR_LEVELS: ReadonlySet<string> = new Set([
   'critical',
 ]);
 
+/**
+ * `$defs.RuleEvaluation.rule_block`: the rule-block ids, which are the keys of
+ * `rules` exactly, followed by the engine stages of receipt spec 4.3, item 5.
+ *
+ * The bare spellings are normative: format 0.1 mixed `egress` and
+ * `rules.egress`, and 0.2 closed the enum on the bare ids.
+ */
+const RULE_BLOCKS: ReadonlySet<string> = new Set([
+  ...RULE_KEYS,
+  'posture_capability',
+  ORIGIN_PROFILE_BLOCK,
+  'panic',
+  UNKNOWN_ACTION_TYPE_BLOCK,
+  'default',
+]);
+
+/** `$.receipt_id`: a UUID v7, lowercase, with the version nibble 7 and the
+ * RFC 4122 variant bits. */
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** A `sha256:` content hash (canonical spec 5). */
+const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
+
+/** The message a member that is not one reports. */
+const NOT_A_CONTENT_HASH = 'is not `sha256:` and 64 lowercase hex digits';
+
+/** `$defs.PolicySummary.spec_version`: the v1 schema widened it to the 1.x
+ * lineage, so a receipt for a 1.0.z policy validates (core spec 10.2). */
+const SPEC_VERSION = /^(0|1)\.[0-9]+\.[0-9]+$/;
+
 function requireObject(
   value: unknown,
   label: string,
@@ -383,6 +414,24 @@ function requireString(value: unknown, label: string): string {
 
 function optionalString(value: unknown, label: string): void {
   if (value !== undefined) requireString(value, label);
+}
+
+function requireNonEmpty(value: unknown, label: string): void {
+  if (requireString(value, label) === '') {
+    throw new ReceiptError(`${label} is empty`);
+  }
+}
+
+function requirePattern(
+  value: unknown,
+  label: string,
+  pattern: RegExp,
+  expected: string,
+): void {
+  const text = requireString(value, label);
+  if (!pattern.test(text)) {
+    throw new ReceiptError(`${label} ${JSON.stringify(text)} ${expected}`);
+  }
 }
 
 function requireBoolean(value: unknown, label: string): void {
@@ -426,7 +475,7 @@ function validateReceiptShape(receipt: JsonObject): void {
     'rule_trace',
     'enforcement',
   ]);
-  requireString(receipt.receipt_id, 'receipt_id');
+  requirePattern(receipt.receipt_id, 'receipt_id', UUID_V7, 'is not a lowercase UUID v7');
   requireTimestamp(receipt.timestamp, 'timestamp');
   requireEnum(receipt.time_source, 'time_source', TIME_SOURCES);
   requireEnum(receipt.decision, 'decision', DECISIONS);
@@ -455,15 +504,20 @@ function validateReceiptShape(receipt: JsonObject): void {
   if (receipt.posture !== undefined) {
     const posture = requireObject(receipt.posture, 'posture', POSTURE_KEYS);
     requireMembers(posture, 'posture', ['current', 'next']);
-    requireString(posture.current, 'posture.current');
-    requireString(posture.next, 'posture.next');
+    requireNonEmpty(posture.current, 'posture.current');
+    requireNonEmpty(posture.next, 'posture.next');
   }
 }
 
 function validatePolicy(policy: JsonObject): void {
   requireMembers(policy, 'policy', ['spec_version', 'content_hash']);
-  requireString(policy.spec_version, 'policy.spec_version');
-  requireString(policy.content_hash, 'policy.content_hash');
+  requirePattern(
+    policy.spec_version,
+    'policy.spec_version',
+    SPEC_VERSION,
+    'is outside the 0.x and 1.x lineages',
+  );
+  requirePattern(policy.content_hash, 'policy.content_hash', CONTENT_HASH, NOT_A_CONTENT_HASH);
   optionalString(policy.name, 'policy.name');
   optionalSize(policy.version, 'policy.version');
 
@@ -472,8 +526,8 @@ function validatePolicy(policy: JsonObject): void {
       const label = `policy.extends_chain[${index}]`;
       const link = requireObject(raw, label, CHAIN_LINK_KEYS);
       requireMembers(link, label, ['source', 'content_hash']);
-      requireString(link.source, `${label}.source`);
-      requireString(link.content_hash, `${label}.content_hash`);
+      requireNonEmpty(link.source, `${label}.source`);
+      requirePattern(link.content_hash, `${label}.content_hash`, CONTENT_HASH, NOT_A_CONTENT_HASH);
     });
   }
 
@@ -481,7 +535,9 @@ function validatePolicy(policy: JsonObject): void {
     const status = requireObject(policy.signature, 'policy.signature', SIGNATURE_STATUS_KEYS);
     requireMembers(status, 'policy.signature', ['verified']);
     requireBoolean(status.verified, 'policy.signature.verified');
-    optionalString(status.key_id, 'policy.signature.key_id');
+    if (status.key_id !== undefined) {
+      requirePattern(status.key_id, 'policy.signature.key_id', CONTENT_HASH, NOT_A_CONTENT_HASH);
+    }
     optionalString(status.reason, 'policy.signature.reason');
     if (status.verified_at !== undefined) {
       requireTimestamp(status.verified_at, 'policy.signature.verified_at');
@@ -491,9 +547,11 @@ function validatePolicy(policy: JsonObject): void {
 
 function validateAction(action: JsonObject): void {
   requireMembers(action, 'action', ['type']);
-  requireString(action.type, 'action.type');
+  requireNonEmpty(action.type, 'action.type');
   optionalString(action.target, 'action.target');
-  optionalString(action.content_hash, 'action.content_hash');
+  if (action.content_hash !== undefined) {
+    requirePattern(action.content_hash, 'action.content_hash', CONTENT_HASH, NOT_A_CONTENT_HASH);
+  }
   optionalSize(action.content_size, 'action.content_size');
   optionalSize(action.args_size, 'action.args_size');
   // `origin` and `context` are the descriptors the caller supplied, carried
@@ -505,7 +563,7 @@ function validateRuleTrace(entries: readonly unknown[]): void {
     const label = `rule_trace[${index}]`;
     const entry = requireObject(raw, label, RULE_TRACE_KEYS);
     requireMembers(entry, label, ['rule_block', 'outcome', 'evaluated']);
-    requireString(entry.rule_block, `${label}.rule_block`);
+    requireEnum(entry.rule_block, `${label}.rule_block`, RULE_BLOCKS);
     optionalString(entry.rule_path, `${label}.rule_path`);
     requireEnum(entry.outcome, `${label}.outcome`, RULE_OUTCOMES);
     requireBoolean(entry.evaluated, `${label}.evaluated`);
@@ -518,7 +576,7 @@ function validateDetectionTrace(entries: readonly unknown[]): void {
     const label = `detection_trace[${index}]`;
     const entry = requireObject(raw, label, DETECTION_TRACE_KEYS);
     requireMembers(entry, label, ['detector_id', 'category', 'score', 'level', 'matched']);
-    requireString(entry.detector_id, `${label}.detector_id`);
+    requireNonEmpty(entry.detector_id, `${label}.detector_id`);
     requireEnum(entry.category, `${label}.category`, DETECTION_CATEGORIES);
     const score = entry.score;
     if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1) {

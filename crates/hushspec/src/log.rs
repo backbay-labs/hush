@@ -713,8 +713,14 @@ pub fn verify_logs(
                 line: line_no,
                 message,
             };
-            let entry: LogEntry =
-                serde_json::from_str(line).map_err(|e| fail(entry_parse_message(line, &e)))?;
+            // The entry is read from the line's own JSON object, which is also
+            // what step 7 hashes: hashing a re-serialization of the typed entry
+            // would cover the members this SDK materializes rather than the
+            // ones the file holds.
+            let document: serde_json::Value =
+                serde_json::from_str(line).map_err(|e| fail(format!("not a log entry: {e}")))?;
+            let entry = LogEntry::deserialize(&document)
+                .map_err(|e| fail(entry_parse_message(&document, &e)))?;
             if entry.log_version != LOG_VERSION {
                 return Err(fail(format!(
                     "unsupported log_version {:?}, expected {LOG_VERSION:?}",
@@ -767,8 +773,7 @@ pub fn verify_logs(
                     entry.prev_hash, prev_hash
                 )));
             }
-            let recomputed = entry
-                .compute_entry_hash()
+            let recomputed = entry_hash_of_document(&document)
                 .map_err(|e| fail(format!("cannot canonicalize entry: {e}")))?;
             if recomputed != entry.entry_hash {
                 return Err(fail(format!(
@@ -781,6 +786,20 @@ pub fn verify_logs(
                     return Err(fail(format!(
                         "receipt_version {:?} is not {RECEIPT_VERSION:?}",
                         receipt.receipt_version
+                    )));
+                }
+                // The entry hash covers whatever JSON the line held, so a
+                // hash-consistent line can still carry something that is not a
+                // receipt; the payload has to validate, not merely name the
+                // version (log spec 8, step 8).
+                let problems = crate::receipt::document_problems(
+                    document.get("receipt").unwrap_or(&serde_json::Value::Null),
+                    receipt,
+                );
+                if !problems.is_empty() {
+                    return Err(fail(format!(
+                        "receipt does not validate against the 0.2 receipt schema: {}",
+                        problems.join("; ")
                     )));
                 }
                 report.receipts += 1;
@@ -851,15 +870,26 @@ pub fn verify_logs(
     Ok(report)
 }
 
+/// The `entry_hash` one line should carry: `sha256:` over the RFC 8785
+/// canonical form of the object with `entry_hash` and `signature` removed
+/// (log spec 4).
+fn entry_hash_of_document(document: &serde_json::Value) -> Result<String, CanonicalError> {
+    let mut document = document.clone();
+    if let Some(object) = document.as_object_mut() {
+        object.remove("entry_hash");
+        object.remove("signature");
+    }
+    Ok(canonical::digest(&canonical::serialize_jcs(&document)?))
+}
+
 /// Why a line is not a log entry.
 ///
 /// A `receipt` member of the wrong shape is named as such (log spec 8, step 8)
 /// rather than reported as an opaque parse failure, so every SDK reports the
 /// same break for the same line.
-fn entry_parse_message(line: &str, error: &serde_json::Error) -> String {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
-        && let Some(receipt) = value.get("receipt")
-        && let Err(receipt_error) = serde_json::from_value::<DecisionReceipt>(receipt.clone())
+fn entry_parse_message(document: &serde_json::Value, error: &serde_json::Error) -> String {
+    if let Some(receipt) = document.get("receipt")
+        && let Err(receipt_error) = DecisionReceipt::from_document(receipt)
     {
         return format!(
             "receipt does not validate against the 0.2 receipt schema: {receipt_error}"

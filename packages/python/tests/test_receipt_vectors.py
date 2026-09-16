@@ -29,6 +29,7 @@ from hushspec.receipt import (
     Actor,
     AuditConfig,
     AuditContext,
+    ReceiptError,
     TimeSource,
     canonical_json,
     deterministic_uuid_v7,
@@ -216,3 +217,18 @@ def test_valid_vector_is_accepted(path: Path) -> None:
 def test_invalid_vector_is_rejected(path: Path) -> None:
     document = json.loads(path.read_text())
     assert not _validator().is_valid(document), f"{path.name} validated but must not"
+    with pytest.raises(ReceiptError):
+        parse_receipt(document)
+
+
+def test_an_explicit_null_is_not_an_absent_member() -> None:
+    """The one distinction a typed model cannot make.
+
+    ``"reason": null`` and no ``reason`` at all read back as the same receipt,
+    but they are different documents and a log entry's hash covers the
+    difference, so the schema admits only the second.
+    """
+    document = json.loads(VALID[0].read_text())
+    document["reason"] = None
+    with pytest.raises(ReceiptError, match="reason must be a string"):
+        parse_receipt(document)

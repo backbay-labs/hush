@@ -648,6 +648,60 @@ fn parse_rejects_wrong_version_and_unknown_fields() {
 }
 
 #[test]
+fn parse_rejects_a_document_the_schema_does_not_admit() {
+    let receipt = evaluate_audited(
+        &resolution(),
+        &action(serde_json::json!({"type": "tool_call", "target": "read_file"})),
+        &AuditConfig::default(),
+        &fixed_ctx(),
+    );
+    let good = serde_json::to_value(&receipt).unwrap();
+    DecisionReceipt::parse(&good.to_string()).expect("the receipt this SDK builds parses");
+
+    for (pointer, broken, expected) in [
+        ("/receipt_id", serde_json::json!("not-a-uuid"), "receipt_id"),
+        (
+            "/timestamp",
+            serde_json::json!("2026-06-30T23:59:60.000Z"),
+            "timestamp",
+        ),
+        (
+            "/policy/spec_version",
+            serde_json::json!("2.0.0"),
+            "policy.spec_version",
+        ),
+        (
+            "/policy/content_hash",
+            serde_json::json!("sha256:zz"),
+            "policy.content_hash",
+        ),
+        (
+            "/action/type",
+            serde_json::json!(""),
+            "action.type is empty",
+        ),
+        (
+            "/rule_trace/0/rule_block",
+            serde_json::json!("rules.egress"),
+            "rule_trace[0].rule_block",
+        ),
+        // An explicit null is not the document an absent member makes, and a
+        // log's entry hash covers the difference.
+        (
+            "/reason",
+            serde_json::Value::Null,
+            "reason must not be null",
+        ),
+    ] {
+        let mut value = good.clone();
+        *value.pointer_mut(pointer).expect(pointer) = broken;
+        let error = DecisionReceipt::parse(&value.to_string())
+            .expect_err(&format!("{pointer} must be rejected"));
+        assert!(error.to_string().contains(expected), "{pointer}: {error}");
+    }
+}
+
+#[test]
 fn evaluate_audited_spec_is_a_single_link_resolution() {
     let receipt = evaluate_audited_spec(
         &simple_spec(),
@@ -720,11 +774,14 @@ fn invalid_receipt_vectors_are_rejected() {
         }
         let text = std::fs::read_to_string(&path).unwrap();
         let value: serde_json::Value = serde_json::from_str(&text).unwrap();
-        let schema_ok = schema.validate(&value).is_ok();
-        let parse_ok = DecisionReceipt::parse(&text).is_ok();
         assert!(
-            !(schema_ok && parse_ok),
-            "{} must be rejected by the schema or the parser",
+            schema.validate(&value).is_err(),
+            "{} must be rejected by the schema",
+            path.display()
+        );
+        assert!(
+            DecisionReceipt::parse(&text).is_err(),
+            "{} must be rejected by the parser",
             path.display()
         );
         count += 1;
