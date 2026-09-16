@@ -57,7 +57,7 @@ A HushSpec document is authored in YAML (Core Section 2.4). Before projection it
 - YAML strings become JSON strings, byte-for-byte after YAML escape processing. No Unicode normalization is applied to values. (Path and host normalization in Core Sections 3.1 and 3.3 happen at evaluation time, on action inputs, never on the document.)
 - YAML integers become JSON numbers. YAML floats become JSON numbers. The distinction between `10` and `10.0` does not survive canonicalization (Section 4.3).
 - YAML booleans `true`/`false` become JSON booleans. Under the YAML 1.2 Core schema required by Core Section 2.4, `yes`, `no`, `on`, and `off` are strings.
-- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a null where the schema expects a value is a validation error and the document MUST NOT be canonicalized.
+- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a `null` written for a property the schema declares is a validation error and the document MUST NOT be canonicalized. Inside the free-form values the schema does not describe (`when.context` and everything below it) `null` is an ordinary JSON value and is canonicalized as one.
 
 A document supplied as JSON is already in the data model.
 
@@ -85,7 +85,8 @@ The canonical projection is computed by walking the resolved document alongside 
 For a JSON object `V` projected against a schema object `S` with property map `P`:
 
 1. Every key of `V` MUST be in `P` (Section 2.3).
-2. For each property `k` in `P`, in any order (order is irrelevant; serialization sorts keys):
+2. No value in `V` may be `null` (Section 2.2). An implementation MUST refuse the document rather than emit `null` for a property the schema declares.
+3. For each property `k` in `P`, in any order (order is irrelevant; serialization sorts keys):
    - If `k` is present in `V`, its value is projected against `P[k]` (following any `$ref`). The projected value is included unless Section 3.3 says to omit it.
    - If `k` is absent in `V` and `P[k]` declares a `default`, the default value is included verbatim. Defaults are leaf values in every HushSpec schema (booleans, strings, numbers, or empty arrays); they are never themselves projected further.
    - If `k` is absent and `P[k]` declares no `default`, it stays absent.
@@ -119,6 +120,8 @@ The origins profile overlay lists -- `ToolAccessRule.allow`, `block`, `require_c
 No other field in the current schemas is presence-significant. A future schema revision that adds one MUST extend this table in the same change.
 
 ### 3.4 Extensions
+
+A present `extensions` MUST be a JSON object, and every one of its keys MUST name a published extension schema. An implementation that finds anything else refuses the document rather than passing the value through unprojected (Section 2.3).
 
 The core schema declares `extensions.posture`, `extensions.origins`, and `extensions.detection` as opaque objects. For projection, each present extension block is projected against the **root** of its own schema document (`hushspec-posture.v1.schema.json`, `hushspec-origins.v1.schema.json`, `hushspec-detection.v1.schema.json`) using the same rules as Section 3.2, then subjected to Section 3.3. If every extension block projects to an omitted value, `extensions` itself is omitted.
 
@@ -208,9 +211,17 @@ Numbers are emitted using the ECMAScript `Number::toString` algorithm (RFC 8785 
 - Negative zero prints as `0`.
 - `NaN` and infinities have no JSON representation; a document containing one is invalid.
 
-HushSpec integers MUST lie within the IEEE 754 safe range (absolute value at most 2^53 − 1). An implementation that encounters a larger integer MUST refuse to canonicalize rather than round it.
-
 Consequently an integer `10` and a float `10.0` have the same canonical form. This is deliberate: it removes the most common cross-language divergence (serializers that print `10` versus `10.0`).
+
+#### The safe-integer bound
+
+A number written with **integer syntax** -- digits with an optional sign, no fraction and no exponent -- MUST have an absolute value of at most 2^53 − 1, the largest integer an IEEE 754 double represents exactly. An implementation that encounters a larger integer literal MUST refuse to canonicalize rather than round it.
+
+A number written with **float syntax** -- a fraction, an exponent, or both -- carries no such bound. It denotes a double, and the algorithm above emits it at any magnitude: `1.0e+16` → `10000000000000000`, `1.0e+21` → `1e+21`, `1.5e+300` → `1.5e+300`.
+
+The bound is syntactic because the syntax is the only thing that distinguishes the two cases: `10000000000000000` and `1.0e+16` denote the same double, and only the way each was written says whether the author meant an exact integer, which 2^53 − 1 bounds, or a double, which it does not. An implementation therefore applies the bound where the distinction still exists -- in its parser, which sees the literal -- rather than in its serializer, which sees a number.
+
+A value handed to an implementation directly, as a number of the host language rather than as a document to parse, carries no syntax to read. Section 2.3 already requires such a value to have come from a valid document, so the bound has been applied by the parser that read it.
 
 ### 4.4 Other values
 
@@ -267,6 +278,7 @@ Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushsp
 | `all-rule-blocks-defaults.yaml` | Section 3.2: every rule block present and empty; full default materialization. |
 | `defaults-partial.yaml` | Section 3.2: defaults fill only absent fields; absent blocks are not invented. |
 | `numbers.yaml` | Section 4.3: whole floats, fractions, integers. |
+| `numbers-large.yaml` | Section 4.3: float syntax beyond the safe-integer bound; negative zero. |
 | `strings-escapes.yaml` | Section 4.2: every escape class, non-ASCII, U+2028, astral, DEL, NBSP. |
 | `key-order-utf16.yaml` | Section 4.1: UTF-16 key order including a surrogate-pair key. |
 | `empty-containers.yaml` | Section 3.3: omission of empty no-default containers. |
@@ -277,6 +289,7 @@ Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushsp
 | `origins-overlay-empties.yaml` | Section 3.3: overlay lists written empty are omitted; `match: {}` is kept. |
 | `extension-detection.yaml` | Section 3.4: detector defaults. |
 | `extends-resolved.yaml` | Section 2.1: canonicalized after resolution; `source` shows the unresolved child. |
+| `empty-strings.yaml` | Sections 3.2 and 3.3: an optional string written `""` survives; only empty containers are omitted. |
 
 Verify with:
 
