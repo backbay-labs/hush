@@ -28,10 +28,10 @@ Known limits of this reference:
   * YAML is decoded by PyYAML with the YAML 1.2 Core boolean resolver and the
     profile's duplicate-key rule installed (see `_yaml12_loader`), so
     `yes`/`no`/`on`/`off` stay strings and a repeated mapping key is an error.
-    PyYAML resolves the remaining scalars as YAML 1.1, which parts from YAML
-    1.2 Core only for forms the HushSpec YAML profile (core spec 2.4) does not
-    use: sexagesimals, and floats written without a `.` or without a signed
-    exponent, which decode as strings here.
+    The remaining scalars keep PyYAML's YAML 1.1 resolution, which is narrower
+    than YAML 1.2 Core for floats: a float needs a `.` or a signed exponent
+    (`1.0e+16`, not `1e16`) to decode as a number here rather than a string.
+    The vectors are written in that form.
 """
 
 from __future__ import annotations
