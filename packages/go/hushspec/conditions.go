@@ -343,9 +343,10 @@ func parseHHMM(s string) (int, int, bool) {
 		return 0, 0, false
 	}
 	// Require pure ASCII digits in each component. strconv.Atoi would
-	// otherwise accept a leading sign (e.g. "+9"), which is not an HH:MM
-	// field, so a sign-prefixed token must fail to parse and leave the window
-	// inert (fail-closed).
+	// otherwise accept a leading sign (e.g. "+9:00"), which the other engines
+	// reject; the same token would then be a live window here and unevaluable
+	// there. A non-digit component fails to parse, and the window is
+	// unevaluable in every engine.
 	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
 		return 0, 0, false
 	}

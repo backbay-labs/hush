@@ -12,7 +12,7 @@ use serde::de::Error as _;
 /// Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default).
 pub const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
 /// Maximum accepted nesting depth (core spec 2.4, RECOMMENDED default).
-pub const MAX_NESTING_DEPTH: usize = 32;
+pub const MAX_DOCUMENT_DEPTH: usize = 32;
 /// Maximum accepted node count (core spec 2.4, RECOMMENDED default).
 pub const MAX_NODE_COUNT: usize = 100_000;
 
@@ -32,9 +32,9 @@ impl HushSpec {
         // aliases are already rejected above, so this cannot blow up.
         let value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
         let (depth, nodes) = measure(&value, 1);
-        if depth > MAX_NESTING_DEPTH {
+        if depth > MAX_DOCUMENT_DEPTH {
             return Err(serde_yaml::Error::custom(format!(
-                "document nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
+                "document nesting exceeds the maximum depth of {MAX_DOCUMENT_DEPTH}"
             )));
         }
         if nodes > MAX_NODE_COUNT {

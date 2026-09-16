@@ -23,7 +23,7 @@ from hushspec.schema import HushSpec
 #: Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default).
 MAX_DOCUMENT_BYTES = 1024 * 1024
 #: Maximum accepted nesting depth (core spec 2.4, RECOMMENDED default).
-MAX_NESTING_DEPTH = 32
+MAX_DOCUMENT_DEPTH = 32
 #: Maximum accepted node count (core spec 2.4, RECOMMENDED default).
 MAX_NODE_COUNT = 100_000
 
@@ -192,10 +192,10 @@ def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
         return False, _refused("HushSpec document must be a YAML mapping")
 
     depth, nodes = _measure(doc, 1)
-    if depth > MAX_NESTING_DEPTH:
+    if depth > MAX_DOCUMENT_DEPTH:
         return False, _refused(
             "YAML parse error: document nesting exceeds the maximum depth of "
-            f"{MAX_NESTING_DEPTH}"
+            f"{MAX_DOCUMENT_DEPTH}"
         )
     if nodes > MAX_NODE_COUNT:
         return False, _refused(
