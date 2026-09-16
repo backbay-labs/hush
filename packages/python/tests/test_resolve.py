@@ -269,3 +269,28 @@ class TestResolveFailureCodes:
         ok, err = resolve(spec, loader=create_composite_loader())
         assert ok is False
         assert err.code == ERROR_EXTENDS
+
+
+class TestResolvedDocumentIsClean:
+    def test_a_one_hop_chain_drops_merge_strategy(self):
+        # Core spec 2.3: a document that declares ``merge_strategy`` without
+        # ``extends`` never reaches ``merge``, and resolution still hands back
+        # a document carrying neither resolution instruction.
+        spec = parse_or_raise(
+            'hushspec: "0.1.0"\nname: leaf\nmerge_strategy: replace\n'
+        )
+        ok, resolved = resolve(spec)
+        assert ok is True
+        assert resolved.extends is None
+        assert resolved.merge_strategy is None
+
+    def test_a_merged_chain_drops_both(self, tmp_path: Path):
+        (tmp_path / "base.yaml").write_text('hushspec: "0.1.0"\nname: base\n')
+        (tmp_path / "child.yaml").write_text(
+            'hushspec: "0.1.0"\nname: child\nextends: base.yaml\n'
+            "merge_strategy: merge\n"
+        )
+        ok, resolved = resolve_file(tmp_path / "child.yaml")
+        assert ok is True
+        assert resolved.extends is None
+        assert resolved.merge_strategy is None

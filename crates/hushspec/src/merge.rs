@@ -6,6 +6,20 @@ use crate::generated_models::PromptInjectionHeuristics;
 use crate::rules::Rules;
 use crate::schema::{HushSpec, MergeStrategy};
 
+/// Fold a base and a child overlay into one resolved document (core spec 2.3).
+///
+/// `extends` and `merge_strategy` are resolution instructions, not policy:
+/// the merge consumes both, so the document that comes back declares neither,
+/// under every strategy. The canonical projection drops `merge_strategy` and
+/// refuses `extends` anyway, so dropping them here does not move any hash.
+///
+/// Top-level `metadata` is replaced wholesale, never field-merged: a child
+/// that declares `metadata` supplies the entire object (the base's
+/// `approved_by`, `controls` and the rest are gone even if the child restates
+/// none of them), and a child that declares none inherits the base's object
+/// unchanged. This holds under `merge` and `deep_merge` alike -- deep merging
+/// descends into `extensions`, not into governance metadata, because a
+/// half-inherited approval record would attest to something no one approved.
 #[must_use = "merged spec is returned, not applied in place"]
 pub fn merge(base: &HushSpec, child: &HushSpec) -> HushSpec {
     let strategy = child.merge_strategy.unwrap_or_default();
@@ -13,6 +27,7 @@ pub fn merge(base: &HushSpec, child: &HushSpec) -> HushSpec {
         MergeStrategy::Replace => {
             let mut result = child.clone();
             result.extends = None;
+            result.merge_strategy = None;
             result
         }
         MergeStrategy::Merge => merge_with_strategy(base, child, false),
@@ -29,13 +44,14 @@ fn merge_with_strategy(base: &HushSpec, child: &HushSpec, deep: bool) -> HushSpe
             .clone()
             .or_else(|| base.description.clone()),
         extends: None,
-        merge_strategy: child.merge_strategy,
+        merge_strategy: None,
         rules: merge_rules(&base.rules, &child.rules),
         extensions: if deep {
             merge_extensions_deep(&base.extensions, &child.extensions)
         } else {
             merge_extensions_merge(&base.extensions, &child.extensions)
         },
+        // Whole-object replacement, not a field merge: see `merge`.
         metadata: child.metadata.clone().or_else(|| base.metadata.clone()),
     }
 }

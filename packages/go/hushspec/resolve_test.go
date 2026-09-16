@@ -200,3 +200,28 @@ func writeFixtureFile(t *testing.T, path string, content string) {
 		t.Fatalf("failed to write fixture file %s: %v", path, err)
 	}
 }
+
+// TestResolutionDropsMergeStrategyFromAOneHopChain covers core spec 2.3: a
+// document that declares `merge_strategy` without `extends` never reaches
+// Merge, and resolution still hands back a document carrying neither
+// resolution instruction.
+func TestResolutionDropsMergeStrategyFromAOneHopChain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaf.yaml")
+	writeFixtureFile(t, path, `
+hushspec: "0.1.0"
+name: leaf
+merge_strategy: replace
+`)
+
+	resolved, err := ResolveFile(path)
+	if err != nil {
+		t.Fatalf("failed to resolve a one-hop chain: %v", err)
+	}
+	if resolved.Extends != "" {
+		t.Fatalf("expected no extends on a resolved document, got %q", resolved.Extends)
+	}
+	if resolved.MergeStrategy != "" {
+		t.Fatalf("expected no merge_strategy on a resolved document, got %q", resolved.MergeStrategy)
+	}
+}

@@ -339,7 +339,10 @@ func TestValidateDetectionTopK(t *testing.T) {
 	}
 }
 
-func TestMergeReplaceClearsExtends(t *testing.T) {
+// TestMergeReplaceClearsResolutionFields covers core spec 2.3: a resolved
+// document declares neither `extends` nor `merge_strategy`, `replace`
+// included.
+func TestMergeReplaceClearsResolutionFields(t *testing.T) {
 	base := mustParse(t, `
 hushspec: "0.1.0"
 name: base
@@ -363,8 +366,8 @@ rules:
 	if merged.Extends != "" {
 		t.Fatalf("expected replace merge to clear extends, got %q", merged.Extends)
 	}
-	if merged.MergeStrategy != MergeStrategyReplace {
-		t.Fatalf("expected merge strategy replace, got %q", merged.MergeStrategy)
+	if merged.MergeStrategy != "" {
+		t.Fatalf("expected replace merge to clear merge_strategy, got %q", merged.MergeStrategy)
 	}
 	if merged.Rules == nil || merged.Rules.Egress != nil || merged.Rules.ToolAccess == nil {
 		t.Fatal("expected replace merge to keep only child rules")

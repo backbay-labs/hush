@@ -338,4 +338,17 @@ describe('resolved documents validate', () => {
     expect(validation.valid).toBe(false);
     expect(validation.errors.some(error => error.message.includes('extends'))).toBe(true);
   });
+
+  // Core section 2.3: a document that declares `merge_strategy` without
+  // `extends` never reaches `merge`, and resolution still hands back a
+  // document carrying neither resolution instruction.
+  it('drops merge_strategy from a one-hop chain', () => {
+    const spec = parseOrThrow('hushspec: "0.1.0"\nname: leaf\nmerge_strategy: replace\n');
+    const resolved = resolve(spec);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+
+    expect(resolved.value.extends).toBeUndefined();
+    expect(resolved.value.merge_strategy).toBeUndefined();
+  });
 });

@@ -1,11 +1,10 @@
 hushspec: "0.1.0"
-name: child-merge
+name: child-strategy-consumed
 rules:
   egress:
-    block:
-      - "z.com"
+    allow:
+      - "child.example.com"
     default: block
   forbidden_paths:
     patterns:
       - "**/.ssh/**"
-      - "**/.aws/**"

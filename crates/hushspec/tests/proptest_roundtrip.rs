@@ -756,13 +756,15 @@ macro_rules! assert_block_preserved_or_overridden {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
 
-    /// `merge` with `replace` equals the child document, minus `extends`
-    /// (which `merge` always clears so the result is self-contained).
+    /// `merge` with `replace` equals the child document, minus the two
+    /// resolution instructions `merge` always consumes so the result is a
+    /// self-contained resolved document (core spec 2.3).
     #[test]
-    fn merge_replace_equals_child_minus_extends((base, child) in replace_pair_strategy()) {
+    fn merge_replace_equals_child_minus_resolution_fields((base, child) in replace_pair_strategy()) {
         let merged = merge(&base, &child);
         let mut expected = child.clone();
         expected.extends = None;
+        expected.merge_strategy = None;
         prop_assert_eq!(merged, expected);
     }
 

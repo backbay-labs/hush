@@ -151,7 +151,10 @@ export interface ChainLink {
 
 /** A resolved policy together with the evidence gathered while loading it. */
 export interface Resolution {
-  /** The merged document; `extends` is always absent. */
+  /**
+   * The merged document: resolution consumes `extends` and `merge_strategy`,
+   * so neither is ever present (Core section 2.3).
+   */
   spec: HushSpec;
   /** Content hash of {@link Resolution.spec} (Canonical Form section 5). */
   content_hash: string;
@@ -182,7 +185,10 @@ export type LoadReasonCode = ReasonCode | 'digest_mismatch' | 'missing_signature
 export function resolutionFromResolved(spec: HushSpec, source?: string): Resolution {
   const hash = contentHash(spec);
   return {
-    spec,
+    // A resolution's document carries no resolution instructions, however it
+    // was obtained: `contentHash` above already refused a lingering `extends`,
+    // and `merge_strategy` is inert here (Core section 2.3).
+    spec: stripResolutionFields(spec),
     content_hash: hash,
     chain: [{ source: source ?? MEMORY_SOURCE, content_hash: hash }],
   };
@@ -620,9 +626,10 @@ function startWalk(spec: HushSpec, source: string | undefined) {
  */
 function foldChain(hops: Hop[]): HushSpec[] {
   // The root carries no `extends` (that is what ended the walk) and its
-  // `merge_strategy`, if any, is inert with nothing above it -- so it enters
-  // the fold untouched and a chain of one comes back byte-identical.
-  const partials: HushSpec[] = [hops[0]!.spec];
+  // `merge_strategy`, if any, is inert with nothing above it -- but a resolved
+  // document declares neither field (Core section 2.3), and a chain of one
+  // never reaches `merge`, so the root is stripped on the way in.
+  const partials: HushSpec[] = [stripResolutionFields(hops[0]!.spec)];
   for (let index = 1; index < hops.length; index += 1) {
     partials.push(merge(partials[index - 1]!, hops[index]!.spec));
   }

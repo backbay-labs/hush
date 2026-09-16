@@ -1,11 +1,10 @@
 hushspec: "0.1.0"
-name: child-merge
+name: resolved-output-base
 rules:
   egress:
-    block:
-      - "z.com"
+    allow:
+      - "base.example.com"
     default: block
   forbidden_paths:
     patterns:
       - "**/.ssh/**"
-      - "**/.aws/**"

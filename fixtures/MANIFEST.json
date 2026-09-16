@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T00:36:09Z",
+  "generated_at": "2026-09-16T00:50:09Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -901,14 +901,14 @@
     },
     {
       "path": "fixtures/core/merge/expected-merge.yaml",
-      "sha256": "0bdc09b2fb1c873f8cb960ef7f4cad4ed8acec76ecad21c3d89591b6cf127474",
+      "sha256": "2b8aace97bbd21f43de06514dbac74f92774fe877bb23f54abc35c8e1499871d",
       "category": "merge",
       "module": "core",
       "level": 2
     },
     {
       "path": "fixtures/core/merge/expected-replace.yaml",
-      "sha256": "c00d02a44e7d048dc2ae38c88490936298f50eaa2a492be316ba8e54bbbc932a",
+      "sha256": "6bff887ac11379d43434d9c21aff22fa88f159000b7dddf3d0d522ae35300e56",
       "category": "merge",
       "module": "core",
       "level": 2
@@ -930,6 +930,34 @@
     {
       "path": "fixtures/core/merge/extends-cycle/fixture.yaml",
       "sha256": "a06d4fc0c6859d468491ebd355311cba1af86291edd3e2a8f72b61caad0af04d",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/metadata-replaces-whole/base.yaml",
+      "sha256": "22deea23462cee3cd50f5325c2c195b32e63121ec865b335fe89a5676beb3d5e",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/metadata-replaces-whole/child-deep-merge.yaml",
+      "sha256": "3c862d6ef2604d41dd7c8fa81ac90dcaf5338507804f8fe5d09c7b4516d65e1d",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/metadata-replaces-whole/expected-deep-merge.yaml",
+      "sha256": "944f245a8a046eb3156d308cf57fb5668d4a6b5d627e0b9177b0ab493413159f",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/metadata-replaces-whole/fixture.yaml",
+      "sha256": "992a4effcb0b5c373b4cc7f9adc4c7e9138f85f0e90ee7e65a03d836bcfb89a7",
       "category": "merge",
       "module": "core",
       "level": 2
@@ -972,6 +1000,34 @@
     {
       "path": "fixtures/core/merge/metadata/fixture.yaml",
       "sha256": "3261e78fc75bf0373cc45836694e0d56babbe357f7a44a4f01428bad9e13cdb1",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/resolved-output-is-clean/base.yaml",
+      "sha256": "8802f3176b9e739deff79762f916131b1de20aeccf61822361d9e7a055c706a0",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/resolved-output-is-clean/child-strategy-consumed.yaml",
+      "sha256": "57db51430ff90ea269851c338d757e316bda785ebf14b2f162b2dbc35e0424bd",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/resolved-output-is-clean/expected-strategy-consumed.yaml",
+      "sha256": "e147e1d4549575c4944c2ae2cee25c0fc30084a41920fac0a6e35781fff2ea1b",
+      "category": "merge",
+      "module": "core",
+      "level": 2
+    },
+    {
+      "path": "fixtures/core/merge/resolved-output-is-clean/fixture.yaml",
+      "sha256": "7f25d71555aa82b5b7db19f067458795e5aa1fe4381b275a0179a607312fc221",
       "category": "merge",
       "module": "core",
       "level": 2
@@ -1265,14 +1321,14 @@
     },
     {
       "path": "fixtures/detection/merge/expected-merge.yaml",
-      "sha256": "7b5dd13007fe1ca66fa8c90d9d8ae70e7f209271bb32c3a6da30066beb9fa86d",
+      "sha256": "d3ea69fda94800d6071305d3085faa13cebff61f29df12fc8f1be2a5addf7f71",
       "category": "merge",
       "module": "detection",
       "level": 2
     },
     {
       "path": "fixtures/detection/merge/expected-replace.yaml",
-      "sha256": "a8c87ba370dc184f2a9044d6ab1607a5a10fcb67b96d92e75e6a5ce8856fe4e0",
+      "sha256": "c96312447b9ea19e35833a30b5c5f89186968506d5cb8b86a5aafd0cfd791a80",
       "category": "merge",
       "module": "detection",
       "level": 2
@@ -1524,14 +1580,14 @@
     },
     {
       "path": "fixtures/origins/merge/expected-merge.yaml",
-      "sha256": "e1708ae1f535f85db27104691551d12de8048349eafead40c9cccec2dd7e705e",
+      "sha256": "5c97b48ef3f777f77f81543f51f37c5e53f44b7a70cd6622bc15e727d99e4641",
       "category": "merge",
       "module": "origins",
       "level": 2
     },
     {
       "path": "fixtures/origins/merge/expected-replace.yaml",
-      "sha256": "986353068a165ed0b1c8f1527e1445fd7674547c3f67a63d1e5ce91efda5b6d9",
+      "sha256": "f8a286d89ab5f0edb8f7899300ba26326b35359db5176d9b3ebbb4ef4a9cafd3",
       "category": "merge",
       "module": "origins",
       "level": 2
@@ -1636,14 +1692,14 @@
     },
     {
       "path": "fixtures/posture/merge/expected-merge.yaml",
-      "sha256": "d43c762bd34e52e38ae4b1a173f8120043a915c7fa0d5d0b461c106e71997567",
+      "sha256": "04ec6255e03b81cdc69d954a0930d52d59e3e4fabdaab6423b03936dc4c79d7a",
       "category": "merge",
       "module": "posture",
       "level": 2
     },
     {
       "path": "fixtures/posture/merge/expected-replace.yaml",
-      "sha256": "4f7795f3b45eb8e50de53aa401430f3041225914c4cd995435be45cf17b5b189",
+      "sha256": "5729d06128d1f9d238f1f7f6a5ede908441ad98a3e77261e3f8eb5afe66e617e",
       "category": "merge",
       "module": "posture",
       "level": 2
