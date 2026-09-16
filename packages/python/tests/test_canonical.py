@@ -1,7 +1,7 @@
 """Unit tests for the canonical projection and RFC 8785 serializer.
 
 The normative vectors live in ``test_canonical_vectors.py``. These cover the
-rules the 14 vectors cannot pin down on their own: ES6 exponent formatting,
+rules the 15 vectors cannot pin down on their own: ES6 exponent formatting,
 UTF-16 key order where it actually differs from code-point order, and the
 errors that keep an unresolved or unknown-field document from being hashed.
 """

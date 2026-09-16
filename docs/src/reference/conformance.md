@@ -222,7 +222,7 @@ fill in later. Paths are relative to
 
 | Requirement | Spec | Vectors | Level |
 |---|---|---|---|
-| Canonical form and `content_hash` | canonical 7 | `core/hash/` (14 vectors) | 4 |
+| Canonical form and `content_hash` | canonical 7 | `core/hash/` (15 vectors) | 4 |
 | Receipt format 0.2 | receipt 2 | `receipts/valid/`, `receipts/invalid/` | 4 |
 | Recorded `rule_trace`, per-case receipts | receipt 4.3 | `receipts/expected/<module>/<fixture>/<case>.json` | 4 |
 | Policy signing and verification | signing 2 | `signing/vectors.yaml` (16 cases) | 5 |

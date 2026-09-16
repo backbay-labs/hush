@@ -14,7 +14,7 @@ const hashVectorVersion = "0.1.0"
 
 // expectedHashVectors is the size of the normative vector set; keep it in step
 // with the table in fixtures/core/hash/README.md.
-const expectedHashVectors = 14
+const expectedHashVectors = 15
 
 // hashVector mirrors schemas/hushspec-hash-vector.v1.schema.json. `source` is
 // informational -- it records the unresolved document `policy` came from -- so

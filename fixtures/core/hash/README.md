@@ -31,7 +31,7 @@ every generated policy; `--ignore-content-hash` opts out of that comparison.
 Canonicalization presupposes validity ([canonical spec section
 2.3](../../../spec/hushspec-canonical.md)): a policy no conformant engine accepts could pin
 an identity no engine can ever produce. Every runner here validates before it canonicalizes,
-and `h2h hash` reproduces all fourteen.
+and `h2h hash` reproduces all fifteen.
 
 Project the `policy` as a generic tree of maps, arrays and scalars, the way [canonical spec
 section 6](../../../spec/hushspec-canonical.md) recommends -- but a typed model reaches the
@@ -59,3 +59,4 @@ other no-default empty container. `origins-overlay-empties.yaml` pins that.
 | `origins-overlay-empties.yaml` | 3.3 | Overlay lists written empty are omitted; `match: {}` is kept. |
 | `extension-detection.yaml` | 3.4 | Detector defaults. |
 | `extends-resolved.yaml` | 2.1 | Canonicalized after resolution; `source` is the unresolved child. |
+| `empty-strings.yaml` | 3.2, 3.3 | Every optional string written as `""` is kept; only empty containers are omitted. |

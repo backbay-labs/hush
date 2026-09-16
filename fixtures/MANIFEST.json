@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T15:22:24Z",
+  "generated_at": "2026-09-16T15:59:23Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -397,7 +397,7 @@
     },
     {
       "path": "fixtures/core/hash/README.md",
-      "sha256": "91eabe8ccdf8845890123b4d7d9e28dc6d5759825a05a68944a1c62df7c4b742",
+      "sha256": "ed41b85348796a514311bff65562971ac1ee6d7b7c926499dd39371861298e8b",
       "category": "doc",
       "module": "core",
       "level": 0
@@ -419,6 +419,13 @@
     {
       "path": "fixtures/core/hash/empty-containers.yaml",
       "sha256": "06693cdb24090054027814cc43f4ed12b1e4c28d28e71b3ab77d68a9ab31f5e2",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/empty-strings.yaml",
+      "sha256": "a874efae13482526aa2ec4cab4d0da26afae66af1559c4ec8be45f4fd089c9a2",
       "category": "canonical",
       "module": "core",
       "level": 4

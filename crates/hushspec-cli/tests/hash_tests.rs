@@ -197,7 +197,7 @@ fn reproduces_the_canonical_form_vectors() {
         checked += 1;
     }
     assert_eq!(
-        checked, 14,
-        "expected 14 canonical-form vectors in fixtures/core/hash/"
+        checked, 15,
+        "expected 15 canonical-form vectors in fixtures/core/hash/"
     );
 }

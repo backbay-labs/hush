@@ -15,7 +15,7 @@ const VECTOR_VERSION: &str = "0.1.0";
 
 /// Every vector in `fixtures/core/hash/`; keep in step with the table in
 /// `fixtures/core/hash/README.md`.
-const EXPECTED_VECTOR_COUNT: usize = 14;
+const EXPECTED_VECTOR_COUNT: usize = 15;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
