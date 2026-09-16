@@ -63,6 +63,7 @@ code" is the answer a relying party needs:
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Parse YAML to a document | `HushSpec::parse` | `parse`, `parseOrThrow` | `parse`, `parse_or_raise` | `Parse` | Fail-closed: unknown members at any depth, YAML aliases, merge keys, duplicate keys, multi-document streams and `yes`/`no` booleans are all parse errors (core spec 2.4) | Rust uses serde `deny_unknown_fields`; the ports check the closed key sets of their generated contract |
+| Optional string in the document | `Option<String>` | `string \| undefined` | `str \| None` | `*string` | An absent property and one written as `""` are distinct: the canonical form keeps the empty string, so the two hash differently | An optional *enum* is a plain string in Go; `""` is not one of its values |
 | Serialize back to YAML | `HushSpec::to_yaml` | -- | -- | `Marshal` | Round-trips a parsed document | TS and Python callers use their own YAML library |
 | YAML profile check alone | `schema::yaml_profile_violation` | `yamlProfileViolation` | -- | -- | Reports the profile violation without a full parse | Python and Go fold the check into `parse` / `Parse` |
 | Validate a document | `validate` | `validate` | `validate` | `Validate` | Types, enums, uniqueness, numeric bounds, the regex profile and `when` conditions. Never throws; collects every error | |
