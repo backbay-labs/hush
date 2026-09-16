@@ -76,6 +76,42 @@ FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
 
+#: The declared members of a ``when`` condition, each with the type its value
+#: must have (core spec 3.13).
+_CONDITION_MEMBER_TYPES = {
+    "time_window": "an object",
+    "context": "an object",
+    "all_of": "an array",
+    "any_of": "an array",
+    "not": "an object",
+    "capability": "a string",
+    "rate": "an object",
+}
+
+
+def _reject_null_condition_members(
+    raw: Any, errors: list[str], path: str
+) -> None:
+    """Refuse a ``null`` written for a declared member of a condition.
+
+    No HushSpec property is nullable (canonical spec 2.2), but a written null
+    reads as an absent member to :meth:`Condition.from_dict`, which is the
+    decoder both validation and evaluation run a ``when`` through.
+    """
+    if not isinstance(raw, dict):
+        return
+    for key, expected in _CONDITION_MEMBER_TYPES.items():
+        if key in raw and raw[key] is None:
+            errors.append(f"{path}.{key}: invalid type, expected {expected}")
+    for key in ("all_of", "any_of"):
+        children = raw.get(key)
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                _reject_null_condition_members(child, errors, f"{path}.{key}[{index}]")
+    if isinstance(raw.get("not"), dict):
+        _reject_null_condition_members(raw["not"], errors, f"{path}.not")
+
+
 def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """Structural check of a rule block's ``when`` condition (core spec 3.13).
 
@@ -86,6 +122,7 @@ def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """
     if "when" not in obj:
         return
+    _reject_null_condition_members(obj["when"], errors, f"{path}.when")
     try:
         Condition.from_dict(obj["when"])
     except (ValueError, TypeError, AttributeError) as exc:
