@@ -660,8 +660,8 @@ class HushGuard:
             )
             try:
                 self._sink.send(receipt)
-            except Exception:
-                pass  # sinks must not break evaluation
+            except Exception as exc:  # noqa: BLE001
+                self._report_sink_failure(exc)
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, receipt=receipt
@@ -813,10 +813,13 @@ class HushGuard:
         if receipt is not None:
             receipt.enforcement = enforcement
             if self._sink is not None:
+                # A sink must never break enforcement: a full disk is not a
+                # reason to let an action through, nor to stop one. The failure
+                # still reaches the observers, so the gap is visible.
                 try:
                     self._sink.send(receipt)
-                except Exception:
-                    pass  # sinks must not break enforcement
+                except Exception as exc:  # noqa: BLE001
+                    self._report_sink_failure(exc)
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, enforcement=enforcement, receipt=receipt
@@ -939,5 +942,17 @@ class HushGuard:
         )
         try:
             self._sink.record_policy_event(event)
-        except Exception:
-            pass  # sinks must not break a policy load
+        except Exception as exc:  # noqa: BLE001
+            self._report_sink_failure(exc)
+
+    def _report_sink_failure(self, exc: Exception) -> None:
+        """Put a sink failure on the observer channel as ``sink.error``.
+
+        Named by the sink that refused, so an operator can tell which
+        destination stopped taking evidence.
+        """
+        if self._observable_evaluator is None:
+            return
+        self._observable_evaluator.notify_sink_error(
+            str(exc), type(self._sink).__name__
+        )

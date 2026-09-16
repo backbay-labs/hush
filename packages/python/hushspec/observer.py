@@ -222,6 +222,19 @@ class ObservableEvaluator:
             "source": source,
         })
 
+    def notify_sink_error(self, error: str, source: Optional[str] = None) -> None:
+        """Announce a receipt sink that refused what it was handed.
+
+        The decision it belonged to stands: a sink is evidence, never
+        enforcement. *source* names the sink that refused.
+        """
+        self._emit({
+            "type": "sink.error",
+            "timestamp": _iso_now(),
+            "error": error,
+            "source": source,
+        })
+
     def notify_policy_reloaded(
         self,
         name: Optional[str] = None,
