@@ -1,4 +1,4 @@
-# core 2.3: `deep_merge` descends into `extensions`, not into `metadata`. The
+# core 4.1: `deep_merge` descends into `extensions`, not into `metadata`. The
 # child's object replaces the base's whole -- approved_by, approval_date,
 # classification, lifecycle_state and controls are gone, and policy_version is
 # the child's alone -- even though the child restates none of them.
