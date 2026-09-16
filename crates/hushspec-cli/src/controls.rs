@@ -135,10 +135,12 @@ pub enum RegistryVerdict {
 
 /// Check one mapping against the embedded framework registry.
 ///
-/// A pattern that fails to compile is reported as a mismatch rather than
-/// panicking or silently passing: the registry generator rejects uncompilable
-/// patterns, so this branch is unreachable in practice and fail-closed if it
-/// ever is not.
+/// A `control_id_pattern` that fails to compile yields
+/// [`RegistryVerdict::ControlIdMismatch`] for every control id: no id can be
+/// shown to match a pattern the engine cannot read, so the verdict is the same
+/// fail-closed one a genuine mismatch gets. The registry generator rejects
+/// patterns this crate's regex engine cannot compile, so a registered
+/// framework should not produce one.
 #[must_use]
 pub fn registry_verdict(framework: &str, control_id: &str) -> RegistryVerdict {
     let Some(entry) = generated_frameworks::framework(framework) else {
