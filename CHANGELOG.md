@@ -40,7 +40,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
   materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
   standard-library reference canonicalizer (`scripts/canonical_json.py`), the
-  `hushspec-hash-vector` schema, and 14 normative vectors under `fixtures/core/hash/`.
+  `hushspec-hash-vector` schema, and 15 normative vectors under `fixtures/core/hash/`.
 - `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
   millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
   `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
@@ -654,6 +654,12 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   leaving `baseDir`.
 - Auditing with the rule trace switched off records no trace at all; `AuditConfig`'s
   low-overhead mode no longer allocates a trace it discards.
+- Go: every optional free-text string of the document model is a `*string`, so a property
+  written as `""` is present in the canonical form and the content hash exactly as it is in the
+  other SDKs, instead of being dropped as if absent. Merging, the receipt policy summary, the
+  bundle subject and the observer events carry presence the same way. Vector:
+  `fixtures/core/hash/empty-strings.yaml`. The Python bundle subject and the Rust signer's
+  policy-name claim follow the same presence rule.
 
 **CLI and tooling**
 

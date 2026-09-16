@@ -605,7 +605,7 @@ def build_statement(
         statement_type=STATEMENT_TYPE,
         subject=(
             Subject(
-                name=subject_name or name or _leaf_file_name(chain) or "policy",
+                name=_subject_name(subject_name, name, chain),
                 # The prefix is stripped here and only here: in-toto requires a
                 # bare hex digest for a subject (spec section 4.1), while every
                 # content hash inside the predicate keeps it.
@@ -778,6 +778,21 @@ def _relative_source(source: str, base_dir: str | Path | None) -> str:
         return source
     # A bundle is JSON read on every platform, so the separator is `/`.
     return relative.as_posix() or source
+
+
+def _subject_name(
+    override: str | None, name: str | None, chain: Sequence[BundleChainLink]
+) -> str:
+    """The subject's informational label: the first of an explicit override,
+    the policy's own name, the leaf source's file name, and a constant. A
+    policy that declares ``name: ""`` has a name, so the fallbacks below it
+    never run for one."""
+    if override is not None:
+        return override
+    if name is not None:
+        return name
+    leaf = _leaf_file_name(chain)
+    return leaf if leaf is not None else "policy"
 
 
 def _leaf_file_name(chain: Sequence[BundleChainLink]) -> str | None:

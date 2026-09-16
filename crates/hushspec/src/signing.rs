@@ -891,7 +891,9 @@ pub fn sign_resolved(
 ) -> Result<Envelope, SigningError> {
     let mut options = options.clone();
     if options.policy_name.is_none() {
-        options.policy_name.clone_from(&policy.spec.name);
+        // A policy that declares `name: ""` makes no name claim: the envelope
+        // schema requires a present `policy_name` to be non-empty.
+        options.policy_name = policy.spec.name.clone().filter(|name| !name.is_empty());
     }
     if options.policy_version.is_none() {
         options.policy_version = policy
