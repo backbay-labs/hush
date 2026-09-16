@@ -1199,7 +1199,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "context": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Dot-delimited runtime-context paths that must equal the given values (JSON equality)."
+          "description": "Dot-delimited runtime-context paths matched against the given values. Comparison is type-sensitive and numbers compare exactly. A scalar matches an equal scalar, or membership in an array at that path; an array matches when it shares at least one element with the value at that path."
         },
         "all_of": {
           "type": "array",
@@ -1217,7 +1217,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "not": {
           "$ref": "#/$defs/Condition",
-          "description": "The sub-condition must not hold."
+          "description": "The sub-condition must not hold. Unevaluable when the sub-condition is unevaluable (the block stays active)."
         },
         "capability": {
           "type": "string",

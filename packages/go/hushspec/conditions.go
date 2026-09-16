@@ -795,7 +795,8 @@ func matchIntNumber(actual any, expected int64) bool {
 }
 
 // matchFloatNumber compares a float-shaped expected value: it matches an
-// int/int64/float64 actual whose numeric value is equal.
+// int/int64/float64 actual whose numeric value is exactly equal. There is no
+// tolerance, so 0.3 does not match 0.30000000000000004 (core spec 3.13).
 func matchFloatNumber(actual any, expected float64) bool {
 	switch av := actual.(type) {
 	case int:

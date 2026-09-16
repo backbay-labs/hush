@@ -100,6 +100,16 @@ class TestContextConditions:
         cond = Condition(context={"user.groups": "ml-team"})
         assert evaluate_condition(cond, ctx) is True
 
+    def test_numbers_compare_exactly(self):
+        cond = Condition(context={"custom.ratio": 0.3})
+        assert evaluate_condition(cond, RuntimeContext(custom={"ratio": 0.3})) is True
+        assert (
+            evaluate_condition(
+                cond, RuntimeContext(custom={"ratio": 0.30000000000000004})
+            )
+            is False
+        )
+
 
 
 # Array-vs-array intersection and number/bool array membership (core spec

@@ -1,11 +1,16 @@
-//! Conditional rules system for HushSpec.
+//! Conditional rules system for HushSpec (core spec 3.13).
 //!
-//! Provides a `Condition` type that can be attached to rule blocks via the
-//! `when` field. Conditions evaluate against a `RuntimeContext` to determine
-//! whether a rule block is active.
+//! A `Condition` gates whether a rule block is active. Conditions are a
+//! document field (`when`) on every rule block; the out-of-band map accepted by
+//! [`evaluate_with_context`](crate::evaluate_with_context) is kept as an
+//! override that is ANDed with each block's own `when`.
 //!
 //! Design principles:
-//! - **Fail-closed**: missing context fields cause conditions to evaluate to `false`.
+//! - **Fail-closed toward enforcement**: a missing context field makes the
+//!   condition false (the block goes inert), but a condition the engine cannot
+//!   evaluate at all -- unresolvable time zone, unparsable `current_time`, a
+//!   malformed `HH:MM` that escaped validation, or nesting past the depth cap --
+//!   leaves the block ACTIVE.
 //! - **Deterministic**: same context + condition = same result, always.
 //! - **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
 
@@ -632,14 +637,14 @@ fn resolve_map_field(
     }
 }
 
-/// Match an actual context value against an expected value.
+/// Leaf-level scalar equality for a `context` predicate (core spec 3.13).
 ///
-/// Matching rules:
-/// - String: exact equality
-/// - Boolean: exact equality
-/// - Integer: exact numeric equality
-/// - Array of expected values: actual must match at least one listed value
-/// - Scalar expected vs array actual: true if scalar is a member of the array
+/// `expected` is always a non-array scalar here -- array unwrapping happens one
+/// level up, in [`matches_scalar_or_membership`]. Strings and booleans compare
+/// exactly, and a boolean is never numeric. Numbers compare by exact value with
+/// no tolerance, so `0.3` does not match `0.30000000000000004`; an
+/// integer-shaped expected value matches only an integer-shaped actual value,
+/// while a fractional one widens an integer actual to a double.
 fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match expected {
         serde_json::Value::String(expected_str) => actual.as_str() == Some(expected_str.as_str()),
@@ -648,9 +653,7 @@ fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> boo
             if let Some(expected_i64) = expected_num.as_i64() {
                 actual.as_i64() == Some(expected_i64)
             } else if let Some(expected_f64) = expected_num.as_f64() {
-                actual
-                    .as_f64()
-                    .is_some_and(|n| (n - expected_f64).abs() < f64::EPSILON)
+                actual.as_f64() == Some(expected_f64)
             } else {
                 false
             }
@@ -728,6 +731,33 @@ mod tests {
             rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
+    }
+
+    fn ctx_with_custom(key: &str, value: serde_json::Value) -> RuntimeContext {
+        RuntimeContext {
+            custom: HashMap::from([(key.to_string(), value)]),
+            ..Default::default()
+        }
+    }
+
+    fn context_condition(key: &str, expected: serde_json::Value) -> Condition {
+        Condition {
+            context: Some(HashMap::from([(key.to_string(), expected)])),
+            ..Condition::default()
+        }
+    }
+
+    #[test]
+    fn context_numbers_compare_exactly() {
+        let cond = context_condition("custom.ratio", serde_json::json!(0.3));
+        assert!(evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.3))
+        ));
+        assert!(!evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.300_000_000_000_000_04))
+        ));
     }
 
     #[test]

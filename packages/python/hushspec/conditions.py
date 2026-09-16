@@ -862,11 +862,6 @@ def _resolve_context_value(path: str, context: RuntimeContext) -> Any:
         return None
 
 
-# One double-precision epsilon: the tolerance a float-shaped `expected` is
-# compared against `actual` with (see `_values_equal` below).
-_F64_EPSILON = 2.220446049250313e-16
-
-
 def _values_equal(actual: Any, expected: Any) -> bool:
     """Leaf-level scalar equality for a ``when.context`` predicate.
 
@@ -893,11 +888,12 @@ def _values_equal(actual: Any, expected: Any) -> bool:
         return actual == expected
 
     if isinstance(expected, float):
-        # Float-shaped expected: actual may be integer- or float-shaped
-        # (both widen to a double), compared within one epsilon.
+        # Float-shaped expected: actual may be integer- or float-shaped (both
+        # widen to a double), compared by exact value with no tolerance, so
+        # 0.3 does not match 0.30000000000000004.
         if isinstance(actual, bool) or not isinstance(actual, (int, float)):
             return False
-        return abs(float(actual) - float(expected)) < _F64_EPSILON
+        return float(actual) == float(expected)
 
     return False
 
