@@ -350,7 +350,7 @@ func TestGuardSwapPolicy(t *testing.T) {
 	first := guard.Resolution().ContentHash
 
 	next := guardSpec()
-	next.Name = "guard-policy-v2"
+	next.Name = strPtr("guard-policy-v2")
 	next.Rules.Egress.Allow = []string{"api.github.com", "api.example.com"}
 	if err := guard.SwapPolicy(guardResolution(t, next)); err != nil {
 		t.Fatalf("SwapPolicy: %v", err)
@@ -391,7 +391,7 @@ func TestGuardSwapPolicyKeepsLastGoodPolicy(t *testing.T) {
 	}
 
 	unresolved := guardSpec()
-	unresolved.Extends = "builtin:default"
+	unresolved.Extends = strPtr("builtin:default")
 	resolution := &Resolution{Spec: unresolved, ContentHash: "sha256:" + strings.Repeat("0", 64)}
 	if err := guard.SwapPolicy(resolution); err == nil {
 		t.Fatal("an unresolved policy must be rejected")
@@ -439,7 +439,7 @@ func TestGuardSwapPolicyClearsRefusal(t *testing.T) {
 
 func TestGuardRejectsUnresolvedPolicy(t *testing.T) {
 	spec := guardSpec()
-	spec.Extends = "builtin:default"
+	spec.Extends = strPtr("builtin:default")
 	resolution := &Resolution{Spec: spec}
 	if _, err := NewGuard(resolution, GuardOptions{}); err == nil {
 		t.Fatal("a guard must never hold an unresolved policy")

@@ -349,7 +349,7 @@ func TestBuildBundleStatementOmitsUnattemptedVerification(t *testing.T) {
 func TestBuildBundleStatementFallsBackToTheLeafFileName(t *testing.T) {
 	resolution := bundleVectorResolution(t)
 	unnamed := *resolution.Spec
-	unnamed.Name = ""
+	unnamed.Name = nil
 	statement, err := BuildBundleStatement(
 		&Resolution{Spec: &unnamed, ContentHash: resolution.ContentHash, Chain: resolution.Chain},
 		bundleVectorOptions(t, ""),
@@ -360,8 +360,8 @@ func TestBuildBundleStatementFallsBackToTheLeafFileName(t *testing.T) {
 	if statement.Subject[0].Name != "hipaa-base.yaml" {
 		t.Errorf("subject name = %q, want the leaf file name", statement.Subject[0].Name)
 	}
-	if statement.Predicate.Policy.Name != "" {
-		t.Errorf("policy.name = %q, want it absent", statement.Predicate.Policy.Name)
+	if statement.Predicate.Policy.Name != nil {
+		t.Errorf("policy.name = %q, want it absent", *statement.Predicate.Policy.Name)
 	}
 }
 

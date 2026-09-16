@@ -682,7 +682,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 	stack := []string{source}
 
 	current, currentSource := spec, source
-	for depth := 0; current.Extends != ""; depth++ {
+	for depth := 0; current.Extends != nil; depth++ {
 		// Cycle detection only catches an exact repeat of a prior source; a
 		// long acyclic chain would otherwise recurse without bound. Fail
 		// closed with a clean error before doing any further loading once the
@@ -691,7 +691,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 			return nil, &MaxDepthError{}
 		}
 
-		reference, pin, err := splitDigestPin(current.Extends)
+		reference, pin, err := splitDigestPin(*current.Extends)
 		if err != nil {
 			return nil, err
 		}
@@ -810,11 +810,11 @@ func hopContentHash(spec *HushSpec) (string, error) {
 // fields change, and neither canonicalization nor merging writes through the
 // shared pointers.
 func resolvedDocument(spec *HushSpec) *HushSpec {
-	if spec == nil || (spec.Extends == "" && spec.MergeStrategy == "") {
+	if spec == nil || (spec.Extends == nil && spec.MergeStrategy == "") {
 		return spec
 	}
 	own := *spec
-	own.Extends = ""
+	own.Extends = nil
 	own.MergeStrategy = ""
 	return &own
 }

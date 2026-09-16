@@ -106,7 +106,7 @@ func TestCompiledPolicyMatchesFreeFunctions(t *testing.T) {
 func TestCompilePolicyRejectsPatternOutsideProfile(t *testing.T) {
 	spec := &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "bad-pattern",
+		Name:            strPtr("bad-pattern"),
 		Rules: &Rules{
 			SecretPatterns: &SecretPatternsRule{
 				Enabled: true,

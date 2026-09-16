@@ -96,7 +96,7 @@ func parseVectorPolicy(t *testing.T, path string, policy map[string]any) *HushSp
 	if err != nil {
 		t.Fatalf("%s: failed to parse policy: %v", path, err)
 	}
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		resolved, err := Resolve(spec, "", nil)
 		if err != nil {
 			t.Fatalf("%s: failed to resolve policy: %v", path, err)

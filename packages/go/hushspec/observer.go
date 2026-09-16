@@ -34,7 +34,8 @@ const (
 // first load of a policy from a hot reload by its presence, which is also what
 // decides the event type a serializing observer writes.
 type PolicyLoadObservation struct {
-	Name                string
+	// Name is the policy's own `name`, nil when it declares none.
+	Name                *string
 	ContentHash         string
 	PreviousContentHash string
 	Source              string
@@ -210,7 +211,7 @@ type ObserverEvent struct {
 	DurationUs *int64            `json:"duration_us,omitempty"`
 	Receipt    *DecisionReceipt  `json:"receipt,omitempty"`
 
-	PolicyName      string          `json:"policy_name,omitempty"`
+	PolicyName      *string         `json:"policy_name,omitempty"`
 	ContentHash     string          `json:"content_hash,omitempty"`
 	PreviousHash    string          `json:"previous_hash,omitempty"`
 	Source          string          `json:"source,omitempty"`

@@ -24,14 +24,14 @@ var (
 func minimalSpec() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "test-policy",
+		Name:            strPtr("test-policy"),
 	}
 }
 
 func specWithToolAccess() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "tool-policy",
+		Name:            strPtr("tool-policy"),
 		Rules: &Rules{
 			ToolAccess: &ToolAccessRule{
 				Enabled: true,
@@ -135,8 +135,8 @@ func TestReceiptRecordsResolvedPolicyIdentity(t *testing.T) {
 	receipt := auditReceipt(t, minimalSpec(),
 		&EvaluationAction{Type: "tool_call", Target: "test"}, enabledConfig())
 
-	if receipt.Policy.Name != "test-policy" {
-		t.Errorf("expected policy name test-policy, got %q", receipt.Policy.Name)
+	if stringValue(receipt.Policy.Name) != "test-policy" {
+		t.Errorf("expected policy name test-policy, got %q", stringValue(receipt.Policy.Name))
 	}
 	// 0.2 moved the `hushspec` field to policy.spec_version; policy.version is
 	// now metadata.policy_version, which this document does not have.
@@ -388,7 +388,7 @@ func TestDeterministicUUIDv7IsStableAndWellFormed(t *testing.T) {
 
 func TestUnverifiedPolicyReceipt(t *testing.T) {
 	policy := PolicySummary{
-		Name:        "signed-basic",
+		Name:        strPtr("signed-basic"),
 		SpecVersion: "0.1.0",
 		ContentHash: DigestOf("whatever"),
 		Signature:   &SignatureStatus{Verified: false, Reason: ReasonContentHashMismatch},
@@ -430,7 +430,7 @@ func TestComputePolicyHashIsTheCanonicalHash(t *testing.T) {
 	if hash != ComputePolicyHash(spec) {
 		t.Error("hash not deterministic")
 	}
-	other := &HushSpec{HushSpecVersion: "0.1.0", Name: "different-policy"}
+	other := &HushSpec{HushSpecVersion: "0.1.0", Name: strPtr("different-policy")}
 	if hash == ComputePolicyHash(other) {
 		t.Error("expected different hashes for different specs")
 	}
@@ -440,7 +440,7 @@ func TestComputePolicyHashIsTheCanonicalHash(t *testing.T) {
 // still declaring `extends` has no canonical form and therefore no identity.
 func TestComputePolicyHashRefusesAnUnresolvedDocument(t *testing.T) {
 	spec := minimalSpec()
-	spec.Extends = "builtin:default"
+	spec.Extends = strPtr("builtin:default")
 	if got := ComputePolicyHash(spec); got != "" {
 		t.Errorf("an unresolved document has no content hash, got %q", got)
 	}

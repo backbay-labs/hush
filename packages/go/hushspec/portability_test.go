@@ -245,9 +245,8 @@ func TestEmptyPostureCurrentDenies(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // A present-but-empty match field (e.g. `provider: ""`) is a real,
-// unsatisfiable constraint. Because the generated Go model collapses "" and an
-// absent field, the empty sentinel is rejected at parse. An all-absent match
-// must still match every origin with score 0 (origins spec 3).
+// unsatisfiable constraint and is rejected at parse. An all-absent match must
+// still match every origin with score 0 (origins spec 3).
 // ---------------------------------------------------------------------------
 
 func TestOriginMatchEmptyProviderRejected(t *testing.T) {

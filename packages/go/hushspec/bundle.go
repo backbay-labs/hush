@@ -147,10 +147,13 @@ type BundleResolver struct {
 // receipt's `policy` block carries (receipt spec 4.2), so a receipt and a
 // bundle join on content_hash.
 type BundlePolicyIdentity struct {
-	ContentHash   string `json:"content_hash"`
-	SpecVersion   string `json:"spec_version"`
-	Name          string `json:"name,omitempty"`
-	PolicyVersion *int64 `json:"policy_version,omitempty"`
+	ContentHash string `json:"content_hash"`
+	SpecVersion string `json:"spec_version"`
+	// Name is the policy's own `name`, copied as written: a policy that
+	// declares an empty name claims an empty name, and only a policy that
+	// declares none leaves this absent.
+	Name          *string `json:"name,omitempty"`
+	PolicyVersion *int64  `json:"policy_version,omitempty"`
 }
 
 // PolicyBundlePredicate is the policy-bundle predicate (bundle spec 4.2).
@@ -421,15 +424,17 @@ func BuildBundleStatement(resolution *Resolution, opts CreateBundleOptions) (*Bu
 	}
 
 	spec := resolution.Spec
+	// The first label the bundler has, taken as written: an explicit override,
+	// then the policy's own name, then the leaf source's file name, then a
+	// constant. A policy that declares `name: ""` has a name, so the fallbacks
+	// below it never run for one.
 	name := opts.SubjectName
 	if name == "" {
-		name = spec.Name
-	}
-	if name == "" {
-		name = bundleLeafFileName(chain)
-	}
-	if name == "" {
-		name = "policy"
+		if spec.Name != nil {
+			name = *spec.Name
+		} else if name = bundleLeafFileName(chain); name == "" {
+			name = "policy"
+		}
 	}
 
 	tool := opts.Tool
@@ -563,10 +568,10 @@ func MarshalBundle(envelope *DSSEEnvelope) ([]byte, error) {
 // bundleResolvedValue is the canonical projection of a resolved document as
 // the plain JSON object `predicate.resolved` holds (canonical spec 3).
 func bundleResolvedValue(spec *HushSpec) (map[string]any, error) {
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		return nil, fmt.Errorf(
 			"cannot canonicalize an unresolved HushSpec document: resolve extends %q first",
-			spec.Extends,
+			*spec.Extends,
 		)
 	}
 	projected, err := canonicalProjectStruct(reflect.ValueOf(*spec))
@@ -665,8 +670,9 @@ type VerifyBundleResult struct {
 	SubjectName string
 	// ContentHash is the resolved policy's content hash, "sha256:"-prefixed.
 	ContentHash string
-	// PolicyName and PolicyVersion echo the predicate's claims.
-	PolicyName    string
+	// PolicyName and PolicyVersion echo the predicate's claims. PolicyName is
+	// nil when the bundle records no policy name.
+	PolicyName    *string
 	PolicyVersion *int64
 	// CreatedAt is the predicate's own timestamp.
 	CreatedAt string

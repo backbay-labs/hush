@@ -40,7 +40,7 @@ func TestResolveBareBuiltinName(t *testing.T) {
 }
 
 func TestResolveUnknownBuiltinErrors(t *testing.T) {
-	if _, err := Resolve(&HushSpec{Extends: "builtin:nope"}, "", nil); err == nil {
+	if _, err := Resolve(&HushSpec{Extends: strPtr("builtin:nope")}, "", nil); err == nil {
 		t.Fatal("expected unknown builtin error")
 	}
 }
@@ -49,10 +49,10 @@ func TestLoadBuiltin(t *testing.T) {
 	if _, ok := LoadBuiltin("builtin:nope"); ok {
 		t.Fatal("expected LoadBuiltin to return false for an unknown name")
 	}
-	if spec, ok := LoadBuiltin("strict"); !ok || spec == nil || spec.Name != "strict" {
+	if spec, ok := LoadBuiltin("strict"); !ok || spec == nil || stringValue(spec.Name) != "strict" {
 		t.Fatalf("expected LoadBuiltin to find strict, got ok=%v spec=%v", ok, spec)
 	}
-	if spec, ok := LoadBuiltin("builtin:default"); !ok || spec == nil || spec.Name != "default" {
+	if spec, ok := LoadBuiltin("builtin:default"); !ok || spec == nil || stringValue(spec.Name) != "default" {
 		t.Fatalf("expected LoadBuiltin to find default, got ok=%v spec=%v", ok, spec)
 	}
 }
@@ -65,11 +65,11 @@ func TestLoadBuiltinLibrary(t *testing.T) {
 		t.Fatal("expected the library to be embedded as a builtin")
 	}
 	// The prefix is a location, not a rename: the document keeps its own name.
-	if spec.Name != "hipaa-base" {
-		t.Errorf("expected name hipaa-base, got %q", spec.Name)
+	if stringValue(spec.Name) != "hipaa-base" {
+		t.Errorf("expected name hipaa-base, got %q", stringValue(spec.Name))
 	}
-	if spec.Extends != "builtin:strict" {
-		t.Errorf("expected the leaf to keep its base, got %q", spec.Extends)
+	if stringValue(spec.Extends) != "builtin:strict" {
+		t.Errorf("expected the leaf to keep its base, got %q", stringValue(spec.Extends))
 	}
 
 	child, err := Parse("hushspec: \"0.1.0\"\nname: c\nextends: \"builtin:library/healthcare/hipaa-base\"\n")
@@ -102,8 +102,8 @@ func TestBuiltinNamesAreAllLoadable(t *testing.T) {
 			t.Fatalf("builtin %q does not load", name)
 		}
 		want := name[strings.LastIndex(name, "/")+1:]
-		if spec.Name != want {
-			t.Errorf("builtin %q: expected document name %q, got %q", name, want, spec.Name)
+		if stringValue(spec.Name) != want {
+			t.Errorf("builtin %q: expected document name %q, got %q", name, want, stringValue(spec.Name))
 		}
 		if strings.HasPrefix(name, "library/") {
 			library++

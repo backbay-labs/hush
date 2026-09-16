@@ -578,8 +578,8 @@ func ParseEnvelope(data []byte) (*Envelope, error) {
 		return nil, envelopeErr(ReasonMalformedEnvelope, "%s", err)
 	}
 
-	// The Go model reads an optional string as absent when it is empty, so
-	// the one distinction it cannot make -- `"signer": ""` against no
+	// The envelope model reads an optional claim as absent when it is empty,
+	// so the one distinction it cannot make -- `"signer": ""` against no
 	// `signer` at all -- is made here, while the raw document is still
 	// available. Both are illegal: the schema gives each a minimum length.
 	var presence struct {
@@ -773,7 +773,7 @@ func SignPolicy(spec *HushSpec, privateKeyPEM []byte, opts SignOptions) (*Envelo
 	// `policy_name` and `policy_version` default to the policy's own
 	// (spec section 4.2); SignOptions overrides either.
 	if opts.PolicyName == "" {
-		opts.PolicyName = resolved.Name
+		opts.PolicyName = stringValue(resolved.Name)
 	}
 	if opts.PolicyVersion == nil &&
 		resolved.Metadata != nil && resolved.Metadata.PolicyVersion != nil {
@@ -1123,7 +1123,7 @@ func resolveForHashing(spec *HushSpec) (*HushSpec, error) {
 	if spec == nil {
 		return nil, errors.New("no policy was supplied")
 	}
-	if spec.Extends == "" {
+	if spec.Extends == nil {
 		return spec, nil
 	}
 	return Resolve(spec, "", nil)

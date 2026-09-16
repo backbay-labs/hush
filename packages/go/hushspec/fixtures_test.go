@@ -335,7 +335,7 @@ func composeMergeFixture(basePath string, base *HushSpec, childPath string) (*Hu
 	if err != nil {
 		return nil, err
 	}
-	if !strings.Contains(child.Extends, "#sha256:") {
+	if !strings.Contains(stringValue(child.Extends), "#sha256:") {
 		return Merge(base, child), nil
 	}
 	resolution, err := ResolveWithOptions(child, childPath, mergeFixtureLoader(basePath), ResolveOptions{})

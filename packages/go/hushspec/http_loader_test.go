@@ -283,8 +283,8 @@ func TestHTTPLoaderFetchesAndParses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if loaded.Spec.Name != "remote-base" {
-		t.Errorf("name = %q, want remote-base", loaded.Spec.Name)
+	if stringValue(loaded.Spec.Name) != "remote-base" {
+		t.Errorf("name = %q, want remote-base", stringValue(loaded.Spec.Name))
 	}
 	// The source is the URL, so a detached signature is looked for beside it
 	// and a receipt's chain names where the document came from.
@@ -302,8 +302,8 @@ func TestHTTPLoaderRevalidatesWithIfNoneMatch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("load %d: %v", i, err)
 		}
-		if loaded.Spec.Name != "remote-base" {
-			t.Fatalf("load %d returned %q", i, loaded.Spec.Name)
+		if stringValue(loaded.Spec.Name) != "remote-base" {
+			t.Fatalf("load %d returned %q", i, stringValue(loaded.Spec.Name))
 		}
 	}
 	// The server is always asked -- a changed policy is always refetched -- but
@@ -467,8 +467,8 @@ func TestInstallHTTPSLoaderTeachesTheCompositeLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the composite loader did not serve the URL: %v", err)
 	}
-	if loaded.Spec.Name != "remote-base" {
-		t.Errorf("name = %q, want remote-base", loaded.Spec.Name)
+	if stringValue(loaded.Spec.Name) != "remote-base" {
+		t.Errorf("name = %q, want remote-base", stringValue(loaded.Spec.Name))
 	}
 
 	// And the default signature locator now finds `<url>.sig`.
@@ -504,7 +504,7 @@ func TestNewDefaultLoaderStillServesBuiltinsAndFiles(t *testing.T) {
 		t.Fatalf("the default loader lost builtins: %v", err)
 	}
 	remote, err := loader(server.URL+"/base.yaml", "")
-	if err != nil || remote.Spec.Name != "remote-base" {
+	if err != nil || stringValue(remote.Spec.Name) != "remote-base" {
 		t.Fatalf("the default loader did not serve the URL: %v", err)
 	}
 }
@@ -520,8 +520,8 @@ func TestHTTPProviderLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if resolution.Spec.Name != "remote-base" {
-		t.Errorf("name = %q, want remote-base", resolution.Spec.Name)
+	if stringValue(resolution.Spec.Name) != "remote-base" {
+		t.Errorf("name = %q, want remote-base", stringValue(resolution.Spec.Name))
 	}
 	if provider.Source() != server.URL+"/base.yaml" {
 		t.Errorf("source = %q, want the URL", provider.Source())
@@ -555,7 +555,7 @@ func TestHTTPProviderResolvesABuiltinBase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if resolution.Spec.Extends != "" {
+	if resolution.Spec.Extends != nil {
 		t.Errorf("the resolved policy still declares extends")
 	}
 	want := []string{"builtin:strict", server.URL + "/extends-builtin.yaml"}
@@ -632,7 +632,7 @@ func TestAMatchingDigestPinResolvesOverHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("a matching pin was rejected: %v", err)
 	}
-	if resolution.Chain[0].Source != url || resolution.Spec.Name != "pinned-leaf" {
+	if resolution.Chain[0].Source != url || stringValue(resolution.Spec.Name) != "pinned-leaf" {
 		t.Errorf("resolution = %+v, want the pinned base merged under the leaf", resolution.Chain)
 	}
 }

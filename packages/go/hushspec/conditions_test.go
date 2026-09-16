@@ -22,7 +22,7 @@ func ctxWithUserRole(role string) *RuntimeContext {
 func makeEgressSpecForCond() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "conditional-test",
+		Name:            strPtr("conditional-test"),
 		Rules: &Rules{
 			Egress: &EgressRule{
 				Enabled: true,

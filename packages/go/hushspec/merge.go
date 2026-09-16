@@ -26,7 +26,7 @@ func Merge(base, child *HushSpec) *HushSpec {
 	switch strategy {
 	case MergeStrategyReplace:
 		result := deepCopySpec(child)
-		result.Extends = ""
+		result.Extends = nil
 		result.MergeStrategy = ""
 		return result
 	case MergeStrategyMerge:
@@ -59,13 +59,11 @@ func mergeSpecs(base, child *HushSpec, deep bool) *HushSpec {
 	}
 
 	result.HushSpecVersion = child.HushSpecVersion
-	if child.Name != "" {
-		result.Name = child.Name
-	}
-	if child.Description != "" {
-		result.Description = child.Description
-	}
-	result.Extends = ""
+	// A child overrides the base by declaring the property, not by giving it a
+	// non-empty value: a child `name: ""` is a name the child chose.
+	result.Name = firstNonNil(child.Name, result.Name)
+	result.Description = firstNonNil(child.Description, result.Description)
+	result.Extends = nil
 	result.MergeStrategy = ""
 	// Whole-object replacement, not a field merge: see Merge.
 	if child.Metadata != nil {

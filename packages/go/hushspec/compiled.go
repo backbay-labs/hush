@@ -380,7 +380,7 @@ func (c *compiledOrigins) selectProfile(origin *OriginContext) *compiledOriginPr
 		if !ok {
 			continue
 		}
-		if profile.match.SpaceID != "" {
+		if profile.match.SpaceID != nil {
 			return profile
 		}
 		if matchedFields > bestCount {

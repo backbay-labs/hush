@@ -136,9 +136,9 @@ func (p *HTTPProvider) Load() (*Resolution, error) {
 	// passes through untouched, so a caller can still read its
 	// [SignatureRequiredError].
 	var required *SignatureRequiredError
-	if loaded.Spec.Extends != "" && !errors.As(err, &required) {
+	if loaded.Spec.Extends != nil && !errors.As(err, &required) {
 		return nil, fmt.Errorf("failed to resolve 'extends: %s' from %s: %w",
-			loaded.Spec.Extends, p.url, err)
+			*loaded.Spec.Extends, p.url, err)
 	}
 	return nil, err
 }
