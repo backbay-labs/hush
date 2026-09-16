@@ -22,7 +22,7 @@ const bundleVectorsVersion = "0.1.0"
 // bundleVectorCaseCount is the number of cases the specification's table
 // enumerates. Pinning it means a vector added upstream cannot be silently
 // skipped by a runner that only iterates what it finds.
-const bundleVectorCaseCount = 8
+const bundleVectorCaseCount = 10
 
 type bundleVectorFile struct {
 	Version     string               `yaml:"hushspec_bundle_vectors"`
