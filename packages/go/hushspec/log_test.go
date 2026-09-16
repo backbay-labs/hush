@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,8 +239,11 @@ func writeVectorChain(t *testing.T, path string, signed bool) *ChainedFileSink {
 		t.Fatalf("cannot record the policy event: %v", err)
 	}
 	for index, action := range vectorActions() {
-		receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+		receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
 			expectedReceiptContext(index))
+		if err != nil {
+			t.Fatalf("audited: %v", err)
+		}
 		if err := sink.Send(&receipt); err != nil {
 			t.Fatalf("cannot append receipt %d: %v", index, err)
 		}
@@ -378,6 +382,91 @@ func TestRotationCarriesTheChain(t *testing.T) {
 	}
 }
 
+// TestRotateAtGenesisVerifies covers a writer that rotates before it has
+// written anything: the link it records is the genesis hash, and a verifier
+// given both files has to see one chain.
+func TestRotateAtGenesisVerifies(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "log-1.jsonl")
+	second := filepath.Join(dir, "log-2.jsonl")
+	if err := os.WriteFile(first, nil, 0o644); err != nil {
+		t.Fatalf("cannot create the file: %v", err)
+	}
+
+	sink, err := OpenChainedFileSink(first)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	clock := logVectorClock(t)
+	sink.WithClock(func() time.Time { return clock })
+
+	started, err := sink.Rotate(second)
+	if err != nil {
+		t.Fatalf("Rotate failed: %v", err)
+	}
+	if started.PrevHash != GenesisHash {
+		t.Errorf("expected the genesis hash, got %s", started.PrevHash)
+	}
+	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash != GenesisHash {
+		t.Fatalf("log_started must record the link even at genesis, got %+v", started.LogStarted)
+	}
+
+	resolution := vectorResolution(t)
+	receipt, err := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
+		expectedReceiptContext(0))
+	if err != nil {
+		t.Fatalf("cannot build the receipt: %v", err)
+	}
+	if err := sink.Send(&receipt); err != nil {
+		t.Fatalf("cannot append the receipt: %v", err)
+	}
+
+	report, err := VerifyLogFiles([]string{first, second}, nil)
+	if err != nil {
+		t.Fatalf("a chain rotated at genesis must verify: %v", err)
+	}
+	if report.Files != 2 || report.Entries != 2 {
+		t.Errorf("expected 2 files and 2 entries, got %d and %d", report.Files, report.Entries)
+	}
+}
+
+// TestOpenRefusesATailWithNoChainHead covers a tail that parses but carries
+// nothing to continue from. Reading it loosely would seed the next entry from
+// seq 0 and an empty hash, leaving a second, unlinked chain in the file.
+func TestOpenRefusesATailWithNoChainHead(t *testing.T) {
+	for name, tail := range map[string]string{
+		"no seq":        `{"log_version":"0.1","prev_hash":"x","entry_type":"receipt","entry_hash":"sha256:00"}`,
+		"no entry_hash": `{"log_version":"0.1","seq":5,"prev_hash":"x","entry_type":"receipt"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "log.jsonl")
+			if err := os.WriteFile(path, []byte(tail+"\n"), 0o644); err != nil {
+				t.Fatalf("cannot create the file: %v", err)
+			}
+			if sink, err := OpenChainedFileSink(path); err == nil {
+				t.Fatalf("a tail with no chain head must be refused, got %+v", sink)
+			}
+		})
+	}
+}
+
+// TestLastLineIsCappedBeforeItIsAssembled covers a file with no newline in it:
+// the cap has to stop the read before the whole file is in memory.
+func TestLastLineIsCappedBeforeItIsAssembled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("a"), maxLogLineBytes+1), 0o644); err != nil {
+		t.Fatalf("cannot create the file: %v", err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("cannot open the file: %v", err)
+	}
+	defer file.Close()
+	if _, err := lastLogLine(file, path); err == nil {
+		t.Fatal("a line longer than the cap must be refused")
+	}
+}
+
 // TestRotateRefusesAnExistingFile locks in that rotation never appends into a
 // file that already holds a chain: two chains in one file corrupt both.
 func TestRotateRefusesAnExistingFile(t *testing.T) {
@@ -413,9 +502,12 @@ func TestChainedSinkContinuesAnExistingChain(t *testing.T) {
 			seqAfter, headAfter, seqBefore, headBefore)
 	}
 
-	receipt := EvaluateAudited(vectorResolution(t),
+	receipt, err := EvaluateAudited(vectorResolution(t),
 		&EvaluationAction{Type: "egress", Target: "example.com"},
 		expectedReceiptConfig(), expectedReceiptContext(9))
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 	if err := reopened.Send(&receipt); err != nil {
 		t.Fatalf("cannot append: %v", err)
 	}
@@ -425,6 +517,56 @@ func TestChainedSinkContinuesAnExistingChain(t *testing.T) {
 	}
 	if report.LastSeq != seqBefore+1 {
 		t.Errorf("expected seq %d, got %d", seqBefore+1, report.LastSeq)
+	}
+}
+
+// TestTwoSinksOnOneFileExtendOneChain locks in log spec 4: a writer derives
+// `seq` and `prev_hash` from the file's current last entry while it holds the
+// write lock, so two sinks open on one log extend a single chain instead of
+// appending the same sequence number twice.
+func TestTwoSinksOnOneFileExtendOneChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	clock := logVectorClock(t)
+	first, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	second, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log twice: %v", err)
+	}
+	first.WithClock(func() time.Time { return clock })
+	second.WithClock(func() time.Time { return clock })
+
+	resolution := vectorResolution(t)
+	if err := first.RecordPolicyEvent(vectorPolicyEvent(t, resolution)); err != nil {
+		t.Fatalf("cannot record the policy event: %v", err)
+	}
+	for index, action := range vectorActions() {
+		sink := first
+		if index%2 == 0 {
+			sink = second
+		}
+		receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+			expectedReceiptContext(index))
+		if err != nil {
+			t.Fatalf("audited: %v", err)
+		}
+		if err := sink.Send(&receipt); err != nil {
+			t.Fatalf("cannot append receipt %d: %v", index, err)
+		}
+	}
+
+	report, err := VerifyLogFiles([]string{path}, nil)
+	if err != nil {
+		t.Fatalf("the shared chain must verify: %v", err)
+	}
+	if report.Entries != 4 || report.LastSeq != 4 {
+		t.Fatalf("expected four consecutive entries, got %+v", report)
+	}
+	hashes := entryHashes(t, path)
+	if seq, head := second.Head(); seq != 4 || head != hashes[3] {
+		t.Errorf("the last writer must hold the file head, got (%d, %s)", seq, head)
 	}
 }
 

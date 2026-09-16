@@ -23,8 +23,10 @@ with a mtime at all.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Optional,
@@ -37,7 +39,15 @@ from typing import (
 from hushspec.evaluate import check_panic_sentinel
 from hushspec.middleware import resolve_policy_resolution
 from hushspec.parse import parse_or_raise
-from hushspec.resolve import Resolution, ResolveOptions, Resolver
+from hushspec.resolve import (
+    PolicyVerificationError,
+    Resolution,
+    ResolveOptions,
+    Resolver,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from hushspec.http_loader import HttpLoaderConfig
 
 __all__ = [
     "DEFAULT_PANIC_SENTINEL",
@@ -45,6 +55,7 @@ __all__ = [
     "DEFAULT_POLL_INTERVAL_S",
     "PolicyProvider",
     "FileProvider",
+    "HttpProvider",
     "CallbackProvider",
     "PolicyWatcher",
     "PolicyPoller",
@@ -132,6 +143,79 @@ class FileProvider:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"FileProvider({self.source!r})"
+
+
+class HttpProvider:
+    """A policy served over HTTPS, refetched on every load.
+
+    The fetch goes through :mod:`hushspec.http_loader`, so every rule that
+    module enforces applies here: HTTPS only, the optional host allowlist, the
+    address check after DNS with the checked address pinned for the connection,
+    no redirects, a size cap and timeouts. ``ETag`` revalidation means a poller
+    that ticks every minute costs a conditional request, not a full body, while
+    a policy that *did* change is still always refetched.
+
+    ``options`` carries the trust requirements of the load. A URL is a location
+    and never an identity, so a deployment that fetches policy over the network
+    should set ``require_signature`` with a keyring: the resolver then looks for
+    ``<url>.sig`` through the same transport (signing spec section 7.1) and
+    refuses to hand over a policy that does not verify.
+
+    A remote policy may only extend a ``builtin:`` ruleset. A remote *base* --
+    ``extends`` naming another URL from a document that itself came over the
+    network -- fails closed here with a message saying so, rather than being
+    merged from a second location the deployment never named. Pass an explicit
+    ``loader`` to allow one.
+    """
+
+    def __init__(
+        self,
+        url: str,
+        options: Optional[ResolveOptions] = None,
+        *,
+        config: Optional["HttpLoaderConfig"] = None,
+        loader: Optional[Resolver] = None,
+    ) -> None:
+        from hushspec.http_loader import HttpLoaderConfig, create_http_loader
+
+        self.url = url
+        #: The URL the policy is fetched from, and what a receipt's chain and a
+        #: detached-signature lookup name.
+        self.source = url
+        self.options = options
+        self._config = config or HttpLoaderConfig()
+        self._fetch = create_http_loader(self._config)
+        self._loader = loader
+
+    def load(self) -> Resolution:
+        from hushspec.http_loader import signature_locator
+        from hushspec.resolve import create_builtin_loader
+
+        loaded = self._fetch(self.url)
+        options = self.options
+        if options is not None and options.signature_locator is None:
+            # The policy came over the network, so its sidecar has to as well:
+            # the on-disk default would look for a file named after a URL.
+            options = replace(options, signature_locator=signature_locator(self._config))
+        try:
+            return resolve_policy_resolution(
+                loaded.spec,
+                loader=self._loader or create_builtin_loader(),
+                source=loaded.source,
+                options=options,
+            )
+        except PolicyVerificationError:
+            raise
+        except ValueError as exc:
+            if loaded.spec.extends is None:
+                raise
+            raise ValueError(
+                f"failed to resolve 'extends: {loaded.spec.extends}' from "
+                f"{self.url}: {exc}"
+            ) from exc
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"HttpProvider({self.url!r})"
 
 
 class CallbackProvider:
@@ -261,15 +345,22 @@ class _ReloadLoop:
         thread = self._thread
         return thread is not None and thread.is_alive()
 
-    def adopt(self, resolution: Resolution) -> None:
+    def adopt(self, resolution: Resolution, fingerprint: Any = None) -> None:
         """Seed the loop with a policy loaded elsewhere, without calling back.
 
         Used when a guard was already built from ``provider.load()``: the loop
         starts from what is in force rather than announcing it as a change.
+
+        *fingerprint* is the source's fingerprint as it stood **before** that
+        load, which only the caller that performed the load can observe; a tick
+        takes its own the same way round. Without it the loop keeps none, so
+        its first tick is a full load: a source rewritten between the read and
+        this call would otherwise be recorded as already seen, and the writer's
+        version would never be picked up.
         """
         with self._lock:
             self._current = resolution
-            self._fingerprint = self._stat_fingerprint()
+            self._fingerprint = fingerprint
 
     # -- ticking ------------------------------------------------------------ #
 
@@ -374,8 +465,9 @@ class _ReloadLoop:
             raise RuntimeError("already started")
         initial: Optional[Resolution] = None
         if load:
+            fingerprint = self._stat_fingerprint()
             initial = self._provider.load()
-            self.adopt(initial)
+            self.adopt(initial, fingerprint)
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._run,

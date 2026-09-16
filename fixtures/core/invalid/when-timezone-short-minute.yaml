@@ -1,0 +1,13 @@
+# One-digit hour and minute fields.
+# A fixed offset is a sign and then HH or HH:MM, two ASCII digits per field
+# (core spec 3.13), and a `timezone` outside that grammar and the engine's
+# time-zone database is a parse error.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      time_window:
+        start: "09:00"
+        end: "17:00"
+        timezone: "+5:0"
+    forbidden_patterns: ["mkfs"]

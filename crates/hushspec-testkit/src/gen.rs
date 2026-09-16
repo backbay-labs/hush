@@ -71,6 +71,11 @@ const NFD_HOST: &str = "cafe\u{301}.example.com";
 const NFC_PATH: &str = "/data/caf\u{e9}/report.txt";
 const NFD_PATH: &str = "/data/cafe\u{301}/report.txt";
 
+/// Time zones for a `time_window` condition (core spec 3.13). The last four are
+/// deliberately malformed: a fixed offset is a sign and then `HH` or `HH:MM`
+/// with two ASCII digits per field, and a `timezone` outside that grammar and
+/// the engine's database must be refused by every SDK rather than resolved by
+/// some of them.
 const TIMEZONE_POOL: &[&str] = &[
     "UTC",
     "America/New_York",
@@ -79,6 +84,10 @@ const TIMEZONE_POOL: &[&str] = &[
     "Australia/Sydney",
     "+05:30",
     "-08:00",
+    "+5",
+    "+0530",
+    "+5:0",
+    "++5",
 ];
 const DAY_POOL: &[&str] = &["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -107,6 +116,14 @@ const CONTEXT_VALUE_POOL: &[&str] = &[
     "us-east-1",
     "agent-1",
 ];
+
+/// Fractional expected values for `context` predicates. Numbers compare by
+/// exact value (core spec 3.13), so the pool holds two adjacent doubles: an
+/// engine that compares within a tolerance accepts one for the other. Every
+/// value is non-integral, because the bundle's JSON numbers reach the Go
+/// harness as doubles and an integral one would re-encode as an integer there
+/// and change shape on the way in.
+const CONTEXT_FLOAT_POOL: &[f64] = &[0.3, 0.300_000_000_000_000_04, 1.5, 12.25];
 
 /// RFC 3339 instants covering weekdays, a weekend, both sides of midnight and
 /// non-UTC offsets. Every generated action carries one so `time_window`
@@ -459,6 +476,11 @@ fn context_match_strategy() -> impl Strategy<Value = HashMap<String, serde_json:
             .prop_map(|text| serde_json::Value::String(text.to_string())),
         1 => any::<bool>().prop_map(serde_json::Value::Bool),
         1 => (0i64..5).prop_map(|number| serde_json::Value::Number(number.into())),
+        1 => prop::sample::select(CONTEXT_FLOAT_POOL).prop_map(|number| {
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(number).expect("the pool holds finite doubles"),
+            )
+        }),
         1 => prop::collection::vec(prop::sample::select(CONTEXT_VALUE_POOL), 1..3).prop_map(
             |values| serde_json::Value::Array(
                 values
@@ -1500,12 +1522,7 @@ fn content_strategy(harvest: &TargetHarvest) -> BoxedStrategy<Option<String>> {
     // the profile's ASCII one.
     for pattern in harvest.secret_regexes.iter().take(2) {
         if let Ok(matching) = string_regex(pattern) {
-            options.push((
-                1,
-                matching
-                    .prop_map(|text| Some(sanitize_content(&text)))
-                    .boxed(),
-            ));
+            options.push((1, matching.prop_map(Some).boxed()));
         }
     }
     proptest::strategy::Union::new_weighted(options).boxed()
@@ -1544,8 +1561,9 @@ fn detection_scan_edge_strategy() -> impl Strategy<Value = String> {
 /// digits (a Unicode `\d`), a non-ASCII letter (a Unicode `\w`, and so a `\b`
 /// boundary or not), NBSP (whitespace to JavaScript's `\s`), the vertical tab
 /// (absent from Go RE2's `\s`), `\r` (excluded by JavaScript's `.`), `\n`
-/// (Python's `$` matches before a trailing one) and an astral code point (two
-/// UTF-16 code units to JavaScript).
+/// (Python's `$` matches before a trailing one), an astral code point (two
+/// UTF-16 code units to JavaScript), and U+017F / U+212A, which the full
+/// Unicode case-folding table folds to ASCII `s` and `k` under `(?i)`.
 fn dialect_content_strategy() -> impl Strategy<Value = String> {
     let piece = prop_oneof![
         string_regex("[a-z]{1,6}").expect("valid generator regex"),
@@ -1560,6 +1578,8 @@ fn dialect_content_strategy() -> impl Strategy<Value = String> {
         Just(" ".to_string()),
         Just("_".to_string()),
         Just("\u{1F600}".to_string()),
+        Just("\u{17F}".to_string()),
+        Just("\u{212A}".to_string()),
     ];
     prop::collection::vec(piece, 0..10).prop_map(|pieces| pieces.concat())
 }
@@ -1634,18 +1654,6 @@ fn module_content_strategy() -> impl Strategy<Value = String> {
             .prop_map(|name| format!("my{name} = 1\nprint(my{name})")),
         module.prop_map(|name| format!("# {name}\nprint('hi')")),
     ]
-}
-
-/// Drop the two characters whose *case folding* still differs across the SDKs:
-/// U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII `s`/`k`
-/// in Rust `regex` and Go RE2, but not in JavaScript `RegExp` (no `u` flag) or
-/// Python `re` under `re.ASCII`. That is the one regex-profile divergence left
-/// open (see `hushspec::regex_profile`), so generated haystacks stay clear of
-/// it rather than reporting it as a fresh difference on every run.
-fn sanitize_content(text: &str) -> String {
-    text.chars()
-        .filter(|c| *c != '\u{17F}' && *c != '\u{212A}')
-        .collect()
 }
 
 fn diff_content_strategy() -> impl Strategy<Value = String> {

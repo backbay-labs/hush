@@ -48,6 +48,9 @@ pub struct GovernanceFinding {
 
 /// Historical name for [`GovernanceFinding`], kept so callers that only read
 /// `code`/`message` keep compiling.
+#[deprecated(
+    note = "use `GovernanceFinding`: a finding carries a severity and is not always a warning"
+)]
 pub type GovernanceWarning = GovernanceFinding;
 
 fn warn(code: &str, path: &str, message: String) -> GovernanceFinding {

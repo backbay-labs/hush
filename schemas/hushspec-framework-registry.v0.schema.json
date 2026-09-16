@@ -1,10 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-framework-registry.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Framework Registry v0",
   "description": "Schema for spec/registries/frameworks.yaml, the registry of compliance frameworks that metadata.controls[].framework may name.",
   "type": "object",
-  "required": ["registry_version", "frameworks"],
+  "required": [
+    "registry_version",
+    "frameworks"
+  ],
   "additionalProperties": false,
   "properties": {
     "registry_version": {
@@ -15,14 +19,22 @@
     "frameworks": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/Framework" },
+      "items": {
+        "$ref": "#/$defs/Framework"
+      },
       "description": "Registered frameworks, ordered by id."
     }
   },
   "$defs": {
     "Framework": {
       "type": "object",
-      "required": ["id", "name", "version", "url", "control_id_pattern"],
+      "required": [
+        "id",
+        "name",
+        "version",
+        "url",
+        "control_id_pattern"
+      ],
       "additionalProperties": false,
       "description": "One registered compliance framework.",
       "properties": {

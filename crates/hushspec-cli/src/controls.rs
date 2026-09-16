@@ -52,7 +52,7 @@ fn parse_path(rule_path: &str) -> Option<ParsedPath<'_>> {
 }
 
 /// The rule blocks the document declares, as dot paths (`rules.egress`), in
-/// document order. Drives the L011 coverage check and the audit coverage line.
+/// name order. Drives the L011 coverage check and the audit coverage line.
 #[must_use]
 pub fn rule_block_paths(doc: &Value) -> Vec<String> {
     doc.get("rules")
@@ -67,12 +67,17 @@ pub fn rule_block_paths(doc: &Value) -> Vec<String> {
 /// that block, as does any mapping *inside* it (`rules.secret_patterns` covers
 /// its patterns, and `rules.secret_patterns.patterns[ssn]` still counts the
 /// `secret_patterns` block as mapped).
+///
+/// A mapping that does not resolve against `doc` covers nothing: a path that
+/// points at no part of the policy is a broken claim about what the policy
+/// implements (lint L012), and counting it as coverage would overstate how
+/// much of the policy the controls account for.
 #[must_use]
-pub fn path_covers_block(rule_path: &str, block_path: &str) -> bool {
+pub fn path_covers_block(doc: &Value, rule_path: &str, block_path: &str) -> bool {
     let Some(parsed) = parse_path(rule_path) else {
         return false;
     };
-    if parsed.segments[0] != "rules" {
+    if parsed.segments[0] != "rules" || !path_resolves(doc, rule_path) {
         return false;
     }
     match parsed.segments.get(1) {
@@ -130,10 +135,12 @@ pub enum RegistryVerdict {
 
 /// Check one mapping against the embedded framework registry.
 ///
-/// A pattern that fails to compile is reported as a mismatch rather than
-/// panicking or silently passing: the registry generator rejects uncompilable
-/// patterns, so this branch is unreachable in practice and fail-closed if it
-/// ever is not.
+/// A `control_id_pattern` that fails to compile yields
+/// [`RegistryVerdict::ControlIdMismatch`] for every control id: no id can be
+/// shown to match a pattern the engine cannot read, so the verdict is the same
+/// fail-closed one a genuine mismatch gets. The registry generator rejects
+/// patterns this crate's regex engine cannot compile, so a registered
+/// framework should not produce one.
 #[must_use]
 pub fn registry_verdict(framework: &str, control_id: &str) -> RegistryVerdict {
     let Some(entry) = generated_frameworks::framework(framework) else {
@@ -199,15 +206,49 @@ mod tests {
 
     #[test]
     fn coverage_flows_down_from_rules_and_from_a_block() {
-        assert!(path_covers_block("rules", "rules.egress"));
-        assert!(path_covers_block("rules.egress", "rules.egress"));
-        assert!(path_covers_block("rules.egress.allow", "rules.egress"));
+        let doc = doc();
+        assert!(path_covers_block(&doc, "rules", "rules.egress"));
+        assert!(path_covers_block(&doc, "rules.egress", "rules.egress"));
         assert!(path_covers_block(
+            &doc,
+            "rules.egress.allow",
+            "rules.egress"
+        ));
+        assert!(path_covers_block(
+            &doc,
             "rules.secret_patterns.patterns[ssn]",
             "rules.secret_patterns"
         ));
-        assert!(!path_covers_block("rules.egress", "rules.tool_access"));
-        assert!(!path_covers_block("extensions.posture", "rules.egress"));
+        assert!(!path_covers_block(
+            &doc,
+            "rules.egress",
+            "rules.tool_access"
+        ));
+        assert!(!path_covers_block(
+            &doc,
+            "extensions.posture",
+            "rules.egress"
+        ));
+    }
+
+    #[test]
+    fn a_path_that_does_not_resolve_covers_nothing() {
+        let doc = doc();
+        for rule_path in [
+            "rules.egress.nope",
+            "rules.secret_patterns.patterns[nope]",
+            "rules..egress",
+        ] {
+            assert!(!path_resolves(&doc, rule_path), "{rule_path} resolves");
+            assert!(
+                !path_covers_block(&doc, rule_path, "rules.egress"),
+                "{rule_path} covers rules.egress"
+            );
+            assert!(
+                !path_covers_block(&doc, rule_path, "rules.secret_patterns"),
+                "{rule_path} covers rules.secret_patterns"
+            );
+        }
     }
 
     #[test]

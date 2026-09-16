@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -95,8 +96,10 @@ type ReceiptChainLink struct {
 // PolicySummary is the identity of the resolved policy a decision was
 // evaluated against (receipt spec 4.2).
 type PolicySummary struct {
-	// Name is the policy's `name`, when present.
-	Name string `json:"name,omitempty"`
+	// Name is the policy's `name`, copied as written: a policy that declares
+	// an empty name is summarized with one, and only a policy that declares no
+	// name leaves this absent.
+	Name *string `json:"name,omitempty"`
 	// Version is the policy's `metadata.policy_version`, when present. An
 	// integer, never a string -- a pointer so an explicit 0 survives.
 	Version *int64 `json:"version,omitempty"`
@@ -276,8 +279,13 @@ func ParseReceipt(data []byte) (*DecisionReceipt, error) {
 		return nil, fmt.Errorf(
 			"unsupported receipt_version %q, expected %q", receipt.ReceiptVersion, ReceiptVersion)
 	}
-	if err := receipt.Validate(); err != nil {
-		return nil, err
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("receipt is not a well-formed 0.2 document: %w", err)
+	}
+	if problems := documentProblems(document, &receipt); len(problems) > 0 {
+		return nil, fmt.Errorf(
+			"receipt does not satisfy the 0.2 schema: %s", strings.Join(problems, "; "))
 	}
 	return &receipt, nil
 }
@@ -458,12 +466,17 @@ func (ctx *AuditContext) timeSource() TimeSource {
 //
 // config nil means [DefaultAuditConfig]; ctx nil means the zero context (no
 // actor, enforce mode, the system clock, a fresh receipt id).
+//
+// It returns an error when the policy has no canonical form and so no content
+// hash -- a document that still declares `extends`, say. A receipt names the
+// policy a decision was made under (receipt spec 4.2), so there is no receipt
+// to hand back for a document that cannot be named.
 func EvaluateAudited(
 	resolution *Resolution,
 	action *EvaluationAction,
 	config *AuditConfig,
 	ctx *AuditContext,
-) DecisionReceipt {
+) (DecisionReceipt, error) {
 	var spec *HushSpec
 	if resolution != nil {
 		spec = resolution.Spec
@@ -478,12 +491,15 @@ func EvaluateAudited(
 // compiled from. A nil resolution records the compiled policy's own identity,
 // with its cached content hash and no provenance -- what [EvaluateAuditedSpec]
 // reports, without re-canonicalizing the document per action.
+//
+// It returns an error when a nil resolution leaves the policy with no
+// canonical form and so no content hash; see [EvaluateAudited].
 func (p *CompiledPolicy) EvaluateAudited(
 	resolution *Resolution,
 	action *EvaluationAction,
 	config *AuditConfig,
 	ctx *AuditContext,
-) DecisionReceipt {
+) (DecisionReceipt, error) {
 	effective := DefaultAuditConfig()
 	if config != nil {
 		effective = *config
@@ -516,7 +532,10 @@ func (p *CompiledPolicy) EvaluateAudited(
 
 	policy := NewPolicySummary(resolution)
 	if resolution == nil {
-		policy = p.policySummary()
+		var err error
+		if policy, err = p.policySummary(); err != nil {
+			return DecisionReceipt{}, err
+		}
 	}
 
 	return DecisionReceipt{
@@ -536,7 +555,7 @@ func (p *CompiledPolicy) EvaluateAudited(
 		OriginProfile:  result.OriginProfile,
 		Posture:        result.Posture,
 		DurationUs:     durationUs,
-	}
+	}, nil
 }
 
 // EvaluateAuditedSpec is [EvaluateAudited] for a document that is already
@@ -552,7 +571,7 @@ func EvaluateAuditedSpec(
 	if err != nil {
 		return DecisionReceipt{}, err
 	}
-	return EvaluateAudited(resolution, action, config, ctx), nil
+	return EvaluateAudited(resolution, action, config, ctx)
 }
 
 // UnverifiedPolicyReceipt is the receipt an enforcement point that requires
@@ -587,13 +606,17 @@ func UnverifiedPolicyReceipt(
 // policySummary is the policy identity of a compiled policy that was not
 // resolved through the resolver: name, version and the cached content hash,
 // with no chain and no signature.
-func (p *CompiledPolicy) policySummary() PolicySummary {
+//
+// A document with no canonical form has no content hash, and a receipt whose
+// `policy.content_hash` is empty is not a receipt the schema admits, so the
+// failure is reported rather than papered over.
+func (p *CompiledPolicy) policySummary() (PolicySummary, error) {
 	if p == nil || p.spec == nil {
-		return PolicySummary{}
+		return PolicySummary{}, errors.New("cannot name a policy with no document")
 	}
 	hash, err := p.ContentHash()
 	if err != nil {
-		hash = ""
+		return PolicySummary{}, err
 	}
 	summary := PolicySummary{
 		Name:        p.spec.Name,
@@ -604,7 +627,7 @@ func (p *CompiledPolicy) policySummary() PolicySummary {
 		version := int64(*p.spec.Metadata.PolicyVersion)
 		summary.Version = &version
 	}
-	return summary
+	return summary, nil
 }
 
 // NewPolicySummary is the policy identity a receipt carries, taken from the

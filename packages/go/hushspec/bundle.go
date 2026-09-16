@@ -5,8 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -28,12 +32,16 @@ import (
 // statement, and `keyid` is the signing specification's key id, so one keyring
 // serves policies, receipts, log entries, and bundles.
 //
-// This SDK verifies bundles; it does not create them. [VerifyBundle] runs the
-// four ordered checks of bundle spec 5.2 and stops at the first failure,
-// reporting the reason code that check owns. Signature verification precedes
-// the subject-digest check on purpose: an edit in transit breaks the signature
-// first, so subject_digest_mismatch means an internally inconsistent statement
-// that was signed anyway.
+// [CreateBundle] builds one and [VerifyBundle] checks one. Creation is
+// deterministic: the payload is the RFC 8785 serialization of the statement
+// and Ed25519 is deterministic, so the same resolution, CreatedAt and resolver
+// always produce the same bytes (bundle spec 4).
+//
+// [VerifyBundle] runs the four ordered checks of bundle spec 5.2 and stops at
+// the first failure, reporting the reason code that check owns. Signature
+// verification precedes the subject-digest check on purpose: an edit in
+// transit breaks the signature first, so subject_digest_mismatch means an
+// internally inconsistent statement that was signed anyway.
 
 const (
 	// BundleVersion is the predicate format version this SDK accepts.
@@ -59,7 +67,13 @@ const (
 	// BundleReasonUnknownKeyID: no signature names a key the keyring holds
 	// (check 2).
 	BundleReasonUnknownKeyID = "unknown_key_id"
-	// BundleReasonSignatureMismatch: a trusted key was found but no signature
+	// BundleReasonKeyRevoked: the only keys that signed are revoked
+	// (check 2, signing spec 5.3).
+	BundleReasonKeyRevoked = "key_revoked"
+	// BundleReasonKeyRetired: the only keys that signed were retired before
+	// the bundle was created (check 2, signing spec 5.3).
+	BundleReasonKeyRetired = "key_retired"
+	// BundleReasonSignatureMismatch: a usable key was found but no signature
 	// verifies over the PAE; also an empty `signatures` array (check 2).
 	BundleReasonSignatureMismatch = "dsse_signature_mismatch"
 	// BundleReasonSubjectDigestMismatch: `predicate.resolved` does not hash to
@@ -74,12 +88,29 @@ const (
 var BundleReasons = []string{
 	BundleReasonMalformed,
 	BundleReasonUnknownKeyID,
+	BundleReasonKeyRevoked,
+	BundleReasonKeyRetired,
 	BundleReasonSignatureMismatch,
 	BundleReasonSubjectDigestMismatch,
 	BundleReasonPolicyMismatch,
 }
 
-// Patterns transcribed from schemas/hushspec-bundle.v0.schema.json, so shape
+// bundleReasonPrecedence ranks the reason a failed signature contributes,
+// lowest first: bundle spec 5.2 check 2 reports a withdrawn key ahead of a
+// wrong signature, the way the signing specification's own checks 5 and 6
+// precede its check 8.
+func bundleReasonPrecedence(reason string) int {
+	switch reason {
+	case BundleReasonKeyRevoked:
+		return 0
+	case BundleReasonKeyRetired:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// Patterns transcribed from schemas/hushspec-bundle.v1.schema.json, so shape
 // validation is the schema rather than an approximation of it.
 var (
 	bundleHexDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -139,10 +170,13 @@ type BundleResolver struct {
 // receipt's `policy` block carries (receipt spec 4.2), so a receipt and a
 // bundle join on content_hash.
 type BundlePolicyIdentity struct {
-	ContentHash   string `json:"content_hash"`
-	SpecVersion   string `json:"spec_version"`
-	Name          string `json:"name,omitempty"`
-	PolicyVersion *int64 `json:"policy_version,omitempty"`
+	ContentHash string `json:"content_hash"`
+	SpecVersion string `json:"spec_version"`
+	// Name is the policy's own `name`, absent when it declares none and
+	// absent when it declares an empty one: the bundle schema admits no
+	// empty name claim.
+	Name          *string `json:"name,omitempty"`
+	PolicyVersion *int64  `json:"policy_version,omitempty"`
 }
 
 // PolicyBundlePredicate is the policy-bundle predicate (bundle spec 4.2).
@@ -340,6 +374,294 @@ func (s *BundleStatement) checkShape() error {
 }
 
 // --------------------------------------------------------------------------
+// Creation (bundle spec 4)
+// --------------------------------------------------------------------------
+
+// CreateBundleOptions is what a bundler decides beyond the resolution itself.
+type CreateBundleOptions struct {
+	// PrivateKeyPEM is the PKCS#8 PEM Ed25519 key that signs the bundle. Nil
+	// produces an *unsigned* bundle: a well-formed envelope with an empty
+	// signatures array, which bundle spec 3 says is not evidence and
+	// [VerifyBundle] rejects. A tool that produces one must say so.
+	PrivateKeyPEM []byte
+	// CreatedAt is `predicate.created_at`. The zero time means now. Pinning it
+	// is what makes a bundle byte-reproducible: two bundlers given the same
+	// resolution, the same CreatedAt and the same resolver produce identical
+	// bytes (bundle spec 4).
+	CreatedAt time.Time
+	// Tool is `resolver.tool`. Empty means [SDKName]. Overriding it is how a
+	// bundle some other tool produced is reproduced byte-for-byte: the vectors
+	// in fixtures/bundle/ come from the reference CLI, so rebuilding them here
+	// needs [BundleResolverTool] and that CLI's version.
+	Tool string
+	// Version is `resolver.version`. Empty means this SDK's [Version].
+	Version string
+	// SubjectName overrides the subject name, which otherwise comes from the
+	// policy.
+	SubjectName string
+	// BaseDir is the directory filesystem chain sources are recorded relative
+	// to (bundle spec 4.4), so a bundle built in CI neither leaks nor depends
+	// on a runner's workspace path. `builtin:` and URL sources are already
+	// portable and are recorded unchanged, as is any path outside BaseDir.
+	BaseDir string
+}
+
+// BuildBundleStatement builds the in-toto statement for a resolved policy
+// (bundle spec 4).
+//
+// The subject digest is recomputed here from the canonical projection that
+// goes into `predicate.resolved`, never copied from the resolution, so the
+// statement is internally consistent by construction: there is no path by
+// which a bundle names the hash of a document other than the one it carries.
+func BuildBundleStatement(resolution *Resolution, opts CreateBundleOptions) (*BundleStatement, error) {
+	if resolution == nil || resolution.Spec == nil {
+		return nil, errors.New("cannot bundle a nil resolution")
+	}
+	resolved, err := bundleResolvedValue(resolution.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("the resolved policy has no canonical form: %w", err)
+	}
+	canonical, err := canonicalJSONValue(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("the resolved policy has no canonical form: %w", err)
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	contentHash := contentHashPrefix + hex.EncodeToString(sum[:])
+
+	createdAt := opts.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	created, err := formatEnvelopeTime(createdAt, "created_at")
+	if err != nil {
+		return nil, err
+	}
+
+	chain := make([]ChainLink, len(resolution.Chain))
+	for i, link := range resolution.Chain {
+		chain[i] = ChainLink{
+			Source:      bundleRelativeSource(link.Source, opts.BaseDir),
+			ContentHash: link.ContentHash,
+			Signature:   link.Signature,
+		}
+	}
+
+	spec := resolution.Spec
+	name := bundleSubjectName(opts.SubjectName, spec, chain)
+
+	tool := opts.Tool
+	if tool == "" {
+		tool = SDKName
+	}
+	version := opts.Version
+	if version == "" {
+		version = Version
+	}
+
+	var policyVersion *int64
+	if spec.Metadata != nil && spec.Metadata.PolicyVersion != nil {
+		value := int64(*spec.Metadata.PolicyVersion)
+		policyVersion = &value
+	}
+
+	return &BundleStatement{
+		Type: BundleStatementType,
+		Subject: []BundleSubject{{
+			Name: name,
+			// The prefix is stripped here and only here: in-toto requires a
+			// bare hex digest for a subject (bundle spec 4.1), while every
+			// content hash inside the predicate keeps it.
+			Digest: BundleSubjectDigest{SHA256: strings.TrimPrefix(contentHash, contentHashPrefix)},
+		}},
+		PredicateType: BundlePredicateType,
+		Predicate: PolicyBundlePredicate{
+			BundleVersion: BundleVersion,
+			Policy: BundlePolicyIdentity{
+				ContentHash:   contentHash,
+				SpecVersion:   spec.HushSpecVersion,
+				Name:          bundlePolicyName(spec),
+				PolicyVersion: policyVersion,
+			},
+			Chain:     chain,
+			Resolved:  resolved,
+			Resolver:  BundleResolver{Tool: tool, Version: version},
+			CreatedAt: created,
+			// A bundler that attempted no verification leaves this nil rather
+			// than recording `verified: false`, which would assert a check
+			// that never ran (bundle spec 4.5).
+			SignatureVerification: resolution.Signature,
+		},
+	}, nil
+}
+
+// BundleStatementBytes is the payload a bundle carries: the RFC 8785 canonical
+// serialization of the statement, UTF-8 encoded (bundle spec 4).
+func BundleStatementBytes(statement *BundleStatement) ([]byte, error) {
+	if statement == nil {
+		return nil, errors.New("cannot serialize a nil statement")
+	}
+	// Round-tripping through encoding/json applies the struct's own json tags
+	// -- including every omitempty an optional member depends on -- and yields
+	// the plain value tree writeJCS canonicalizes. It is the same path a
+	// bundle takes on the way in, so a statement this SDK builds and one it
+	// parses canonicalize identically.
+	value, err := bundleValueOf(statement)
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := canonicalJSONValue(value)
+	if err != nil {
+		return nil, fmt.Errorf("the statement has no canonical form: %w", err)
+	}
+	return []byte(canonical), nil
+}
+
+// CreateBundle builds a bundle for a resolution: signed when
+// [CreateBundleOptions.PrivateKeyPEM] is set, unsigned otherwise (bundle spec
+// 3 and 4).
+//
+// The payload is canonical and Ed25519 is deterministic, so the result is a
+// pure function of the resolution, CreatedAt, the resolver and the key.
+// bundle_create_test.go proves it by rebuilding
+// fixtures/bundle/bundles/valid.bundle.json byte for byte.
+func CreateBundle(resolution *Resolution, opts CreateBundleOptions) (*DSSEEnvelope, error) {
+	statement, err := BuildBundleStatement(resolution, opts)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := BundleStatementBytes(statement)
+	if err != nil {
+		return nil, err
+	}
+	envelope := &DSSEEnvelope{
+		PayloadType: BundlePayloadType,
+		Payload:     base64.StdEncoding.EncodeToString(payload),
+		Signatures:  []DSSESignature{},
+	}
+	if len(opts.PrivateKeyPEM) == 0 {
+		return envelope, nil
+	}
+
+	private, err := ParsePrivateKeyPEM(opts.PrivateKeyPEM)
+	if err != nil {
+		return nil, err
+	}
+	public, ok := private.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, errors.New("the private key has no Ed25519 public half")
+	}
+	// The id is derived from the key itself, never declared independently: a
+	// verifier recomputes it and would reject any other value (signing 5.2).
+	keyID, err := keyIDFromKey(public)
+	if err != nil {
+		return nil, err
+	}
+	signature := ed25519.Sign(private, BundlePAE(BundlePayloadType, payload))
+	envelope.Signatures = []DSSESignature{{
+		KeyID: keyID,
+		Sig:   base64.StdEncoding.EncodeToString(signature),
+	}}
+	return envelope, nil
+}
+
+// MarshalBundle writes a bundle the way the reference CLI writes one:
+// pretty-printed with a trailing newline.
+func MarshalBundle(envelope *DSSEEnvelope) ([]byte, error) {
+	if envelope == nil {
+		return nil, errors.New("cannot marshal a nil bundle")
+	}
+	encoded, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(encoded, '\n'), nil
+}
+
+// bundleResolvedValue is the canonical projection of a resolved document as
+// the plain JSON object `predicate.resolved` holds (canonical spec 3).
+func bundleResolvedValue(spec *HushSpec) (map[string]any, error) {
+	if spec.Extends != nil {
+		return nil, fmt.Errorf(
+			"cannot canonicalize an unresolved HushSpec document: resolve extends %q first",
+			*spec.Extends,
+		)
+	}
+	projected, err := canonicalProjectStruct(reflect.ValueOf(*spec))
+	if err != nil {
+		return nil, err
+	}
+	return bundleValueOf(projected)
+}
+
+// bundleValueOf is a value as encoding/json sees it: a tree of map[string]any,
+// []any, string, float64, bool and nil, which is what writeJCS canonicalizes.
+func bundleValueOf(value any) (map[string]any, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var plain map[string]any
+	if err := json.Unmarshal(encoded, &plain); err != nil {
+		return nil, err
+	}
+	return plain, nil
+}
+
+// bundleRelativeSource records a filesystem source relative to base when it
+// lies beneath it (bundle spec 4.4). `builtin:` and URL sources are already
+// portable and are returned unchanged, as is any path not beneath base.
+func bundleRelativeSource(source, base string) string {
+	if base == "" || strings.HasPrefix(source, "builtin:") || strings.Contains(source, "://") {
+		return source
+	}
+	relative, err := filepath.Rel(base, source)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return source
+	}
+	// A bundle is JSON read on every platform, so the separator is `/`.
+	return filepath.ToSlash(relative)
+}
+
+// bundlePolicyName is the policy's `name` when it has one character or more:
+// the bundle schema admits no empty subject name or policy name claim.
+func bundlePolicyName(spec *HushSpec) *string {
+	if spec.Name == nil || *spec.Name == "" {
+		return nil
+	}
+	return spec.Name
+}
+
+// bundleSubjectName is the subject's informational label: the first of an
+// explicit override, the policy's own name, the leaf source's file name, and a
+// constant. The subject needs at least one character (bundle spec 4.1), so a
+// policy that declares an empty name falls through to the file name.
+func bundleSubjectName(override string, spec *HushSpec, chain []ChainLink) string {
+	if override != "" {
+		return override
+	}
+	if name := bundlePolicyName(spec); name != nil {
+		return *name
+	}
+	if leaf := bundleLeafFileName(chain); leaf != "" {
+		return leaf
+	}
+	return "policy"
+}
+
+// bundleLeafFileName is the leaf's file name, for a policy with no `name`.
+func bundleLeafFileName(chain []ChainLink) string {
+	if len(chain) == 0 {
+		return ""
+	}
+	source := strings.ReplaceAll(chain[len(chain)-1].Source, `\`, "/")
+	name := path.Base(source)
+	if name == "." || name == "/" {
+		return ""
+	}
+	return name
+}
+
+// --------------------------------------------------------------------------
 // Verification (bundle spec 5)
 // --------------------------------------------------------------------------
 
@@ -386,8 +708,9 @@ type VerifyBundleResult struct {
 	SubjectName string
 	// ContentHash is the resolved policy's content hash, "sha256:"-prefixed.
 	ContentHash string
-	// PolicyName and PolicyVersion echo the predicate's claims.
-	PolicyName    string
+	// PolicyName and PolicyVersion echo the predicate's claims. PolicyName is
+	// nil when the bundle records no policy name.
+	PolicyName    *string
 	PolicyVersion *int64
 	// CreatedAt is the predicate's own timestamp.
 	CreatedAt string
@@ -469,8 +792,12 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 		return result
 	}
 
-	namedATrustedKey := false
-	mismatchDetail := ""
+	refusalReason, refusalDetail := "", ""
+	record := func(reason, detail string) {
+		if refusalReason == "" || bundleReasonPrecedence(reason) < bundleReasonPrecedence(refusalReason) {
+			refusalReason, refusalDetail = reason, detail
+		}
+	}
 	for _, signature := range envelope.Signatures {
 		entry := keyring.Find(signature.KeyID)
 		if entry == nil {
@@ -481,22 +808,35 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 		if keyErr != nil || recomputed != signature.KeyID {
 			continue
 		}
-		namedATrustedKey = true
+		// The keyring holds the key; whether it still vouches for it is the
+		// next question (signing spec 5.3).
+		if entry.Revoked {
+			record(BundleReasonKeyRevoked, fmt.Sprintf("key %s is revoked", signature.KeyID))
+			continue
+		}
+		if bundleKeyRetired(entry, predicate.CreatedAt) {
+			record(BundleReasonKeyRetired, fmt.Sprintf(
+				"key %s was retired at %s; the bundle is dated %s",
+				signature.KeyID, entry.NotAfter, predicate.CreatedAt))
+			continue
+		}
 		raw, decodeErr := base64.StdEncoding.DecodeString(signature.Sig)
 		if decodeErr != nil || len(raw) != ed25519.SignatureSize {
-			mismatchDetail = fmt.Sprintf("signature by %s is not 64 bytes", signature.KeyID)
+			record(BundleReasonSignatureMismatch,
+				fmt.Sprintf("signature by %s is not 64 bytes", signature.KeyID))
 			continue
 		}
 		if ed25519.Verify(public, pae, raw) {
 			result.KeyIDs = append(result.KeyIDs, signature.KeyID)
 			continue
 		}
-		mismatchDetail = fmt.Sprintf("Ed25519 verification failed for %s", signature.KeyID)
+		record(BundleReasonSignatureMismatch,
+			fmt.Sprintf("Ed25519 verification failed for %s", signature.KeyID))
 	}
 	if len(result.KeyIDs) == 0 {
 		switch {
-		case namedATrustedKey:
-			result.Reason, result.Detail = BundleReasonSignatureMismatch, mismatchDetail
+		case refusalReason != "":
+			result.Reason, result.Detail = refusalReason, refusalDetail
 		case len(envelope.Signatures) == 0:
 			result.Reason = BundleReasonSignatureMismatch
 			result.Detail = "the bundle is unsigned; an unsigned bundle is not evidence"
@@ -549,6 +889,25 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 
 	result.OK = true
 	return result
+}
+
+// bundleKeyRetired reports whether entry had already been retired when a bundle
+// dated createdAt was produced (bundle spec 5.2 check 2).
+//
+// An entry with no `not_after` is never retired. Both instants are fixed to
+// `YYYY-MM-DDTHH:MM:SS.sssZ` -- by the keyring schema and by the statement
+// shape check -- so one that will not parse is a retirement this verifier will
+// not read out of the keyring, and the key counts as current.
+func bundleKeyRetired(entry *TrustedKey, createdAt string) bool {
+	notAfter, err := entry.NotAfterTime()
+	if err != nil || notAfter == nil {
+		return false
+	}
+	created, err := parseEnvelopeTime(createdAt, "created_at")
+	if err != nil {
+		return false
+	}
+	return !created.Before(*notAfter)
 }
 
 // compareBundlePolicy is check 4 (bundle spec 5.3): the resolved documents and

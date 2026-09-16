@@ -1,6 +1,6 @@
 # Expected rejection for bad-severity.yaml (core spec 8, Level 1).
 # Registry: spec/registries/error-codes.yaml
-# Schema:   schemas/hushspec-error-codes.v0.schema.json#/$defs/ExpectedError
+# Schema:   schemas/hushspec-error-codes.v1.schema.json#/$defs/ExpectedError
 reject: true
 code: "E001"
 message_contains: "unknown variant `banana`"

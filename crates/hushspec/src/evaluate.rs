@@ -184,6 +184,17 @@ pub struct TracedEvaluation {
     pub trace: Vec<RuleEvaluation>,
 }
 
+/// Whether an evaluation records its rule trace.
+///
+/// Recording allocates an entry for every applicable rule block, evaluated or
+/// skipped. Callers that discard the trace ask for [`Recording::Off`] and get
+/// an empty one; nothing else about the evaluation changes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Recording {
+    On,
+    Off,
+}
+
 /// Evaluate `action` against a resolved document.
 ///
 /// `when` conditions are evaluated against `action.context` (an empty context
@@ -232,6 +243,7 @@ pub fn evaluate_traced(
         action,
         context,
         conditions,
+        Recording::On,
     )
 }
 
@@ -245,6 +257,7 @@ pub(crate) fn run_evaluation(
     action: &EvaluationAction,
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
+    recording: Recording,
 ) -> TracedEvaluation {
     let default_context = RuntimeContext::default();
     let context = context
@@ -257,11 +270,28 @@ pub(crate) fn run_evaluation(
         action,
         context,
         conditions,
+        recording,
         active: Vec::new(),
         trace: Vec::new(),
     }
     .run()
 }
+
+/// The action types core spec Section 5 fixes rule blocks for. An action type
+/// outside this list is unknown to the specification and denied fail-closed.
+pub const REFERENCE_ACTION_TYPES: &[&str] = &[
+    "file_read",
+    "file_write",
+    "patch_apply",
+    "shell_command",
+    "tool_call",
+    "egress",
+    "computer_use",
+    "input_inject",
+    "browser_action",
+    "code_exec",
+    "custom",
+];
 
 /// Rule blocks applicable to each reference action type, in evaluation order
 /// (core spec Section 5). `None` means the type is unknown to the specification.
@@ -319,6 +349,8 @@ enum Inactive {
     Disabled,
     ConditionFalse,
     OutOfBandConditionFalse,
+    ContentNotSupplied,
+    TargetNotAChannel,
 }
 
 impl Inactive {
@@ -328,6 +360,12 @@ impl Inactive {
             Inactive::Disabled => "rule disabled".to_string(),
             Inactive::ConditionFalse => "when condition is false".to_string(),
             Inactive::OutOfBandConditionFalse => "out-of-band condition is false".to_string(),
+            Inactive::ContentNotSupplied => {
+                format!("content not supplied; {block} not consulted")
+            }
+            Inactive::TargetNotAChannel => {
+                format!("target is not a remote desktop channel; {block} not consulted")
+            }
         }
     }
 }
@@ -351,6 +389,7 @@ struct Evaluator<'a> {
     /// Empty when no applicable block carries a condition at all, which is
     /// the common case and costs nothing.
     active: Vec<BlockActivity>,
+    recording: Recording,
     trace: Vec<RuleEvaluation>,
 }
 
@@ -539,6 +578,9 @@ impl Evaluator<'_> {
         reason: Option<&str>,
         evaluated: bool,
     ) {
+        if self.recording == Recording::Off {
+            return;
+        }
         self.trace.push(RuleEvaluation {
             rule_block: block.to_string(),
             outcome,
@@ -665,7 +707,7 @@ impl Evaluator<'_> {
                     matches!(action.action_type.as_str(), "file_write" | "patch_apply");
                 // egress and tool_call are scanned only when they carry content.
                 if !path_bearing && content.is_none() {
-                    return Err(Inactive::Absent);
+                    return Err(Inactive::ContentNotSupplied);
                 }
                 self.activity(index, rule.enabled)?;
                 let compiled = compiled.secret_patterns(rule);
@@ -760,7 +802,7 @@ impl Evaluator<'_> {
                     .ok_or(Inactive::Absent)?;
                 self.activity(index, rule.enabled)?;
                 evaluate_remote_desktop_channels(rule, action.target.as_deref().unwrap_or_default())
-                    .ok_or(Inactive::Absent)
+                    .ok_or(Inactive::TargetNotAChannel)
             }
             "input_injection" => {
                 let rule = rules
@@ -801,7 +843,6 @@ impl Evaluator<'_> {
             .extensions
             .as_ref()
             .and_then(|extensions| extensions.posture.as_ref())?;
-        let capability = required_capability(self.action.action_type.as_str())?;
         let Some(current_state) = posture_extension.states.get(&posture_result.current) else {
             let rule = format!("extensions.posture.states.{}", posture_result.current);
             let reason = format!("unknown posture state '{}'", posture_result.current);
@@ -814,6 +855,10 @@ impl Evaluator<'_> {
             );
             return Some(BlockDecision::deny(&rule, &reason));
         };
+        // The state is looked up before the capability table is consulted, so
+        // an unknown state denies even the action types the table does not
+        // gate (posture spec 3.3).
+        let capability = required_capability(self.action.action_type.as_str())?;
 
         if current_state
             .capabilities
@@ -1813,7 +1858,11 @@ pub fn normalize_host(target: &str) -> Option<String> {
         Some(index) => &target[index + 3..],
         None => target,
     };
-    let end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    // A backslash ends the authority exactly as a slash does (core spec
+    // 3.14.2), the way a browser reads a special-scheme URL.
+    let end = authority
+        .find(['/', '\\', '?', '#'])
+        .unwrap_or(authority.len());
     authority = &authority[..end];
     if let Some(at) = authority.rfind('@') {
         authority = &authority[at + 1..];
@@ -2079,6 +2128,37 @@ struct PatchStats {
 mod tests {
     use super::*;
 
+    /// Every block the applicability table names is a key of `rules`, and
+    /// between them the reference action types reach every key: a name that
+    /// drifts from the generated contract would silently skip a rule block.
+    #[test]
+    fn applicable_blocks_name_exactly_the_rule_keys() {
+        use std::collections::BTreeSet;
+
+        let mut reached = BTreeSet::new();
+        for action_type in REFERENCE_ACTION_TYPES {
+            let blocks =
+                applicable_blocks(action_type).expect("a reference action type has a block list");
+            for block in blocks {
+                assert!(
+                    crate::generated_contract::RULE_KEYS.contains(block),
+                    "{action_type} names {block}, which is not a key of `rules`"
+                );
+                reached.insert(*block);
+            }
+        }
+        let expected: BTreeSet<&str> = crate::generated_contract::RULE_KEYS
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(reached, expected);
+    }
+
+    #[test]
+    fn applicable_blocks_rejects_an_unknown_action_type() {
+        assert!(applicable_blocks("teleport").is_none());
+    }
+
     #[test]
     fn normalizes_paths_lexically() {
         assert_eq!(normalize_path("/proj/../.env"), "/.env");
@@ -2122,6 +2202,14 @@ mod tests {
             Some("api.example.com")
         );
         assert_eq!(normalize_host("[::1]:8080").as_deref(), Some("[::1]"));
+        assert_eq!(
+            normalize_host("http://blocked.com\\@allowed.com/x").as_deref(),
+            Some("blocked.com"),
+        );
+        assert_eq!(
+            normalize_host("blocked.com\\@allowed.com").as_deref(),
+            Some("blocked.com"),
+        );
         assert_eq!(
             normalize_host("B\u{dc}CHER.example").as_deref(),
             Some("xn--bcher-kva.example")

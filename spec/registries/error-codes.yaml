@@ -5,18 +5,16 @@
 # `<name>.expect.yaml` sidecar naming the code its rejection MUST carry, so
 # "the document was rejected" can be checked as "rejected for this reason".
 #
-# This registry describes shipped behavior, not a wish list: it lists the codes
-# the Rust and Python SDKs emit today (in Rust, `crates/hushspec/src/validate.rs`
-# and `crates/hushspec/src/parse.rs`, surfaced by `h2h validate --format json`).
-# Core spec Section 8 Level 1 requires the codes of every implementation only
-# once the TypeScript and Go validators emit them as well; until then those two
-# are required to reject the vector, not to name the code.
+# This registry describes shipped behavior: every reference SDK emits these
+# codes, `h2h validate --format json` surfaces them, and Core Section 8 Level 1
+# requires an implementation to name the registered code for every `invalid/`
+# vector, not merely to reject it.
 #
 # Stability: a registered code's meaning never changes. A code may gain
 # `superseded_by` and stop being emitted; it is never reused for a different
 # condition.
 #
-# Schema: schemas/hushspec-error-codes.v0.schema.json
+# Schema: schemas/hushspec-error-codes.v1.schema.json
 registry_version: "0.1.0"
 
 codes:

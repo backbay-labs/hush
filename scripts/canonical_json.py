@@ -22,12 +22,16 @@ nothing extra. The script canonicalizes *resolved* documents only: it does
 not resolve `extends` (use `h2h resolve --format json` for that).
 
 Known limits of this reference:
-  * It trusts that the input is a valid HushSpec document. Unknown keys are
-    reported as errors, but no other validation is performed.
-  * YAML is decoded by PyYAML's SafeLoader (YAML 1.1 scalars). Documents
-    that follow the HushSpec YAML profile (core spec 2.4) decode identically
-    under YAML 1.1 and 1.2; documents that rely on `yes`/`no` booleans do
-    not, and are rejected by conformant parsers anyway.
+  * It trusts that the input is a valid HushSpec document. Unknown keys,
+    unknown extensions, nulls and duplicate keys are reported as errors, but
+    no other validation is performed.
+  * YAML is decoded by PyYAML with the YAML 1.2 Core boolean resolver and the
+    profile's duplicate-key rule installed (see `_yaml12_loader`), so
+    `yes`/`no`/`on`/`off` stay strings and a repeated mapping key is an error.
+    The remaining scalars keep PyYAML's YAML 1.1 resolution, which is narrower
+    than YAML 1.2 Core for floats: a float needs a `.` or a signed exponent
+    (`1.0e+16`, not `1e16`) to decode as a number here rather than a string.
+    The vectors are written in that form.
 """
 
 from __future__ import annotations
@@ -44,11 +48,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 
-CORE_SCHEMA = "hushspec-core.v0.schema.json"
+CORE_SCHEMA = "hushspec-core.v1.schema.json"
 EXTENSION_SCHEMAS = {
-    "posture": "hushspec-posture.v0.schema.json",
-    "origins": "hushspec-origins.v0.schema.json",
-    "detection": "hushspec-detection.v0.schema.json",
+    "posture": "hushspec-posture.v1.schema.json",
+    "origins": "hushspec-origins.v1.schema.json",
+    "detection": "hushspec-detection.v1.schema.json",
 }
 
 # Fields consumed by resolution; never part of a resolved document.
@@ -64,8 +68,12 @@ INLINE_SIGNATURE_FIELD = "signature"
 # the origins profile overlay lists included, because an absent overlay list
 # and an empty one evaluate identically (origins spec section 4).
 PRESERVE_EMPTY = {
-    ("hushspec-origins.v0.schema.json", "OriginProfile", "match"),
+    ("hushspec-origins.v1.schema.json", "OriginProfile", "match"),
 }
+
+#: Sentinel for a key the document does not carry, so that a key written
+#: with a `null` value is told apart from an absent one.
+_ABSENT = object()
 
 SAFE_INTEGER_MAX = 2**53 - 1
 HASH_PREFIX = "sha256:"
@@ -141,6 +149,11 @@ def _project_object(
     for key in value:
         if key not in props:
             raise CanonicalError(f"unknown field {path}.{key}")
+        # Section 2.2: no HushSpec property is nullable, so a `null` written
+        # for one is a validation error and has no canonical form. Nulls
+        # inside free-form values never reach here -- they are leaves.
+        if value[key] is None:
+            raise CanonicalError(f"{path}.{key} is null; no property is nullable")
     for key, sub in props.items():
         if key in value:
             projected = _project_node(value[key], sub, root, root_name, f"{path}.{key}")
@@ -185,6 +198,16 @@ def project(document: dict) -> dict:
     if not isinstance(document, dict):
         raise CanonicalError("document must be a mapping")
     doc = copy.deepcopy(document)
+    # Section 2.1: the canonical form identifies the policy that is enforced,
+    # so a document that still names a base has none. Resolve it first, for
+    # example with `h2h resolve --format json`.
+    # A written `extends: null` is an absent base, as it is to every SDK's
+    # typed model.
+    if doc.get("extends") is not None:
+        raise CanonicalError(
+            "cannot canonicalize an unresolved document (extends: "
+            f"{doc['extends']!r}); resolve the extends chain first"
+        )
     for field in RESOLUTION_FIELDS:
         doc.pop(field, None)
     meta = doc.get("metadata")
@@ -192,10 +215,12 @@ def project(document: dict) -> dict:
         meta.pop(INLINE_SIGNATURE_FIELD, None)
 
     core = load_schema(CORE_SCHEMA)
-    extensions = doc.pop("extensions", None)
+    extensions = doc.pop("extensions", _ABSENT)
     out = _project_object(doc, core, core, CORE_SCHEMA, None, "$", skip_defaults=RESOLUTION_FIELDS)
 
-    if isinstance(extensions, dict):
+    if extensions is not _ABSENT:
+        if not isinstance(extensions, dict):
+            raise CanonicalError("$.extensions must be an object")
         projected_ext: dict = {}
         for name, block in extensions.items():
             if name not in EXTENSION_SCHEMAS:
@@ -250,7 +275,7 @@ def es6_number(value: float) -> str:
         digits.pop()
         exponent += 1
     k = len(digits)
-    n = exponent + k  # value == 0.d1..dk x 10**n
+    n = exponent + k  # value == 0.<k digits> x 10**n
     ds = "".join(str(d) for d in digits)
     if k <= n <= 21:
         body = ds + "0" * (n - k)
@@ -314,13 +339,18 @@ _yaml_loader = None
 
 
 def _yaml12_loader():
-    """PyYAML SafeLoader with YAML 1.2 Core booleans.
+    """PyYAML SafeLoader with YAML 1.2 Core booleans and unique mapping keys.
 
     PyYAML implements YAML 1.1, where bare `yes`, `no`, `on`, and `off` are
     booleans. The HushSpec YAML profile (core spec 2.4) is YAML 1.2 Core, in
     which only true/false (any capitalization of the whole word) are booleans;
     the posture extension even uses `on` as a mapping key. This loader swaps
     the boolean resolver so both agree.
+
+    PyYAML also lets a repeated mapping key through, last one winning, where
+    the profile rejects it (canonical spec 4.1): two documents that differ only
+    in a key the loader silently dropped would share a content hash. The
+    mapping constructor below refuses the repeat instead.
     """
     global _yaml_loader
     if _yaml_loader is not None:
@@ -330,7 +360,18 @@ def _yaml12_loader():
     import yaml  # type: ignore[import-not-found]
 
     class Loader(yaml.SafeLoader):
-        pass
+        def construct_mapping(self, node, deep=False):
+            self.flatten_mapping(node)
+            seen: list = []
+            for key_node, _value_node in node.value:
+                key = self.construct_object(key_node, deep=deep)
+                if key in seen:
+                    raise CanonicalError(
+                        f"line {key_node.start_mark.line + 1}: duplicate entry "
+                        f"with key {key!r} (YAML profile)"
+                    )
+                seen.append(key)
+            return super().construct_mapping(node, deep=deep)
 
     bool_tag = "tag:yaml.org,2002:bool"
     Loader.yaml_implicit_resolvers = {
@@ -372,7 +413,10 @@ def iter_vector_files(target: Path):
 
 
 def check_vector(path: Path) -> list[str]:
-    vector = load_document(path)
+    try:
+        vector = load_document(path)
+    except CanonicalError as exc:
+        return [f"{path}: {exc}"]
     if not isinstance(vector, dict) or vector.get("hushspec_hash_vector") != VECTOR_VERSION:
         return [f"{path}: not a hushspec_hash_vector {VECTOR_VERSION} file"]
     try:
@@ -462,8 +506,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"filled {path}")
         return 0
 
-    document = load_document(args.target)
     try:
+        document = load_document(args.target)
         canonical, digest = canonicalize(document)  # type: ignore[arg-type]
     except CanonicalError as exc:
         print(f"error: {exc}", file=sys.stderr)

@@ -13,6 +13,16 @@ pub enum SinkError {
     /// A hash-linked log could not be continued or written consistently.
     #[error("log chain error: {0}")]
     Chain(String),
+    /// A sink behind a [`MultiSink`] refused what it was handed, named so an
+    /// operator can tell which destination stopped taking evidence.
+    #[error("sink {sink}: {source}")]
+    Fanout {
+        /// The sink that refused, by [`ReceiptSink::name`].
+        sink: &'static str,
+        /// What it reported.
+        #[source]
+        source: Box<SinkError>,
+    },
 }
 
 /// Where an engine puts the receipts it records.
@@ -33,6 +43,21 @@ pub trait ReceiptSink: Send + Sync {
     fn record_policy_event(&self, _event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
         Ok(())
     }
+
+    /// How a `sink.error` observer event names this sink in its `source`.
+    ///
+    /// Defaults to the implementing type's own name, which is what the other
+    /// SDKs report; a sink with a more telling constant name overrides it.
+    fn name(&self) -> &'static str {
+        short_type_name(std::any::type_name::<Self>())
+    }
+}
+
+/// The last segment of a fully qualified type path, with any generic
+/// arguments left off: `hushspec::sink::FilteredSink` is `FilteredSink`.
+fn short_type_name(path: &'static str) -> &'static str {
+    let bare = path.split('<').next().unwrap_or(path);
+    bare.rsplit("::").next().unwrap_or(bare)
 }
 
 /// Appends receipts as JSON Lines to a file.
@@ -107,7 +132,12 @@ impl ReceiptSink for FilteredSink {
     }
 }
 
-/// Fans out to multiple sinks. Returns the first error but invokes all sinks.
+/// Fans out to several sinks.
+///
+/// Every sink is attempted whatever the ones before it did -- one destination
+/// refusing a receipt must not cost the others theirs -- and the first failure
+/// is reported as a [`SinkError::Fanout`] naming the sink that refused, so a
+/// guard raises a `sink.error` observer event for it.
 pub struct MultiSink {
     sinks: Vec<Box<dyn ReceiptSink>>,
 }
@@ -118,31 +148,33 @@ impl MultiSink {
     pub fn new(sinks: Vec<Box<dyn ReceiptSink>>) -> Self {
         Self { sinks }
     }
-}
 
-impl ReceiptSink for MultiSink {
-    fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+    fn fan_out(
+        &self,
+        deliver: impl Fn(&dyn ReceiptSink) -> Result<(), SinkError>,
+    ) -> Result<(), SinkError> {
         let mut first_error: Option<SinkError> = None;
         for sink in &self.sinks {
-            if let Err(e) = sink.send(receipt)
+            if let Err(error) = deliver(sink.as_ref())
                 && first_error.is_none()
             {
-                first_error = Some(e);
+                first_error = Some(SinkError::Fanout {
+                    sink: sink.name(),
+                    source: Box::new(error),
+                });
             }
         }
         first_error.map_or(Ok(()), Err)
     }
+}
+
+impl ReceiptSink for MultiSink {
+    fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+        self.fan_out(|sink| sink.send(receipt))
+    }
 
     fn record_policy_event(&self, event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
-        let mut first_error: Option<SinkError> = None;
-        for sink in &self.sinks {
-            if let Err(e) = sink.record_policy_event(event)
-                && first_error.is_none()
-            {
-                first_error = Some(e);
-            }
-        }
-        first_error.map_or(Ok(()), Err)
+        self.fan_out(|sink| sink.record_policy_event(event))
     }
 }
 

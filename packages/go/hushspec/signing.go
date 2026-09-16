@@ -107,8 +107,8 @@ const (
 	ReasonPolicyVersionRollback = "policy_version_rollback"
 )
 
-// Patterns from schemas/hushspec-signature.v0.schema.json and
-// hushspec-keyring.v0.schema.json (0.2). Shape validation (check 1) is the
+// Patterns from schemas/hushspec-signature.v1.schema.json and
+// hushspec-keyring.v1.schema.json (0.2). Shape validation (check 1) is the
 // schema, so these are transcribed rather than approximated.
 var (
 	signingDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -128,11 +128,12 @@ var (
 // could only ever change bytes the signature covers. [Envelope.SignedAtTime]
 // and [Envelope.ExpiresAtTime] parse them on demand.
 //
-// Optional string members follow the SDK-wide convention that "" means
-// absent (see canonicalPresence in canonical.go). The schema gives
-// `policy_name` and `signer` a minimum length of one, so an explicitly empty
-// one is not a legal envelope anyway; [ParseEnvelope], which can still see
-// the raw document, rejects it as [ReasonMalformedEnvelope].
+// Optional string members are pointers, because presence is part of what is
+// signed: the signing input carries a member that is present and omits one
+// that is absent, so `"signer": ""` and no `signer` at all are different
+// claims. The schema gives `policy_name` and `signer` a minimum length of one,
+// so an explicitly empty one is not a legal envelope and fails check 1 of spec
+// section 6.2 as [ReasonMalformedEnvelope].
 type Envelope struct {
 	// FormatVersion is always "0.2" in this SDK.
 	FormatVersion string `json:"format_version"`
@@ -145,20 +146,20 @@ type Envelope struct {
 	SignedAt string `json:"signed_at"`
 	// ExpiresAt is the optional instant at or after which the signature is
 	// invalid, in the same format.
-	ExpiresAt string `json:"expires_at,omitempty"`
+	ExpiresAt *string `json:"expires_at,omitempty"`
 	// PolicyVersion is the policy's metadata.policy_version at signing time,
 	// when it has one. It drives rollback protection (check 10).
 	PolicyVersion *int64 `json:"policy_version,omitempty"`
 	// PolicyName is the policy's name at signing time, when present. It
 	// scopes rollback protection.
-	PolicyName string `json:"policy_name,omitempty"`
+	PolicyName *string `json:"policy_name,omitempty"`
 	// ContentHash is the content hash of the resolved policy: the signed
 	// claim itself.
 	ContentHash string `json:"content_hash"`
 	// Signer is an optional human-readable signer identity. It is covered by
 	// the signature but carries no authority of its own; trust comes from
 	// KeyID.
-	Signer string `json:"signer,omitempty"`
+	Signer *string `json:"signer,omitempty"`
 	// Signature is the 64-byte Ed25519 signature over the signing input,
 	// base64url encoded without padding.
 	Signature string `json:"signature"`
@@ -578,23 +579,6 @@ func ParseEnvelope(data []byte) (*Envelope, error) {
 		return nil, envelopeErr(ReasonMalformedEnvelope, "%s", err)
 	}
 
-	// The Go model reads an optional string as absent when it is empty, so
-	// the one distinction it cannot make -- `"signer": ""` against no
-	// `signer` at all -- is made here, while the raw document is still
-	// available. Both are illegal: the schema gives each a minimum length.
-	var presence struct {
-		PolicyName *string `json:"policy_name"`
-		Signer     *string `json:"signer"`
-	}
-	if err := json.Unmarshal(data, &presence); err == nil {
-		if presence.PolicyName != nil && *presence.PolicyName == "" {
-			return nil, envelopeErr(ReasonMalformedEnvelope, "policy_name must not be empty")
-		}
-		if presence.Signer != nil && *presence.Signer == "" {
-			return nil, envelopeErr(ReasonMalformedEnvelope, "signer must not be empty")
-		}
-	}
-
 	if err := env.validateShape(); err != nil {
 		return nil, envelopeErr(ReasonMalformedEnvelope, "%s", err)
 	}
@@ -656,17 +640,17 @@ func (e *Envelope) claims() map[string]any {
 		"signed_at":      e.SignedAt,
 		"content_hash":   e.ContentHash,
 	}
-	if e.ExpiresAt != "" {
-		members["expires_at"] = e.ExpiresAt
+	if e.ExpiresAt != nil {
+		members["expires_at"] = *e.ExpiresAt
 	}
 	if e.PolicyVersion != nil {
 		members["policy_version"] = *e.PolicyVersion
 	}
-	if e.PolicyName != "" {
-		members["policy_name"] = e.PolicyName
+	if e.PolicyName != nil {
+		members["policy_name"] = *e.PolicyName
 	}
-	if e.Signer != "" {
-		members["signer"] = e.Signer
+	if e.Signer != nil {
+		members["signer"] = *e.Signer
 	}
 	return members
 }
@@ -683,14 +667,14 @@ func (e *Envelope) SignedAtTime() (time.Time, error) {
 // ExpiresAtTime parses the envelope's `expires_at`, returning nil when the
 // envelope carries none.
 func (e *Envelope) ExpiresAtTime() (*time.Time, error) {
-	if e.ExpiresAt == "" {
+	if e.ExpiresAt == nil {
 		return nil, nil
 	}
-	return parseEnvelopeTime(e.ExpiresAt, "expires_at")
+	return parseEnvelopeTime(*e.ExpiresAt, "expires_at")
 }
 
 // validateShape is check 1 of spec section 6.2: the envelope against
-// schemas/hushspec-signature.v0.schema.json.
+// schemas/hushspec-signature.v1.schema.json.
 //
 // The two `const` members are deliberately excluded. The schema pins
 // `format_version` to "0.2" and `algorithm` to "ed25519", but section 6.2
@@ -712,15 +696,24 @@ func (e *Envelope) validateShape() error {
 		return fmt.Errorf(
 			"signed_at %q is not RFC 3339 UTC with millisecond precision and a Z suffix", e.SignedAt)
 	}
-	if e.ExpiresAt != "" && !envelopeTimePattern.MatchString(e.ExpiresAt) {
+	if e.ExpiresAt != nil && !envelopeTimePattern.MatchString(*e.ExpiresAt) {
 		return fmt.Errorf(
-			"expires_at %q is not RFC 3339 UTC with millisecond precision and a Z suffix", e.ExpiresAt)
+			"expires_at %q is not RFC 3339 UTC with millisecond precision and a Z suffix",
+			*e.ExpiresAt)
 	}
 	if e.PolicyVersion != nil && *e.PolicyVersion < 0 {
 		return fmt.Errorf("policy_version %d is negative", *e.PolicyVersion)
 	}
+	// The schema gives each a minimum length of one, so a member that is
+	// present and empty is an envelope no verifier may read past.
+	if e.PolicyName != nil && *e.PolicyName == "" {
+		return errors.New("policy_name must not be empty")
+	}
 	if !signingDigestPattern.MatchString(e.ContentHash) {
 		return fmt.Errorf("content_hash %q is not `sha256:` and 64 lowercase hex digits", e.ContentHash)
+	}
+	if e.Signer != nil && *e.Signer == "" {
+		return errors.New("signer must not be empty")
 	}
 	if !envelopeSignaturePattern.MatchString(e.Signature) {
 		return errors.New(
@@ -773,7 +766,7 @@ func SignPolicy(spec *HushSpec, privateKeyPEM []byte, opts SignOptions) (*Envelo
 	// `policy_name` and `policy_version` default to the policy's own
 	// (spec section 4.2); SignOptions overrides either.
 	if opts.PolicyName == "" {
-		opts.PolicyName = resolved.Name
+		opts.PolicyName = stringValue(resolved.Name)
 	}
 	if opts.PolicyVersion == nil &&
 		resolved.Metadata != nil && resolved.Metadata.PolicyVersion != nil {
@@ -824,8 +817,17 @@ func SignContentHash(contentHash string, privateKeyPEM []byte, opts SignOptions)
 		KeyID:         keyID,
 		SignedAt:      signedAtText,
 		ContentHash:   contentHash,
-		PolicyName:    opts.PolicyName,
-		Signer:        opts.Signer,
+	}
+	// An optional claim is present exactly when the signer set it: an empty
+	// [SignOptions] member means unset, and an empty claim is not a legal
+	// envelope.
+	if opts.PolicyName != "" {
+		name := opts.PolicyName
+		env.PolicyName = &name
+	}
+	if opts.Signer != "" {
+		signer := opts.Signer
+		env.Signer = &signer
 	}
 
 	if opts.ExpiresAt != nil {
@@ -840,7 +842,7 @@ func SignContentHash(contentHash string, privateKeyPEM []byte, opts SignOptions)
 			return nil, fmt.Errorf(
 				"cannot sign: expires_at %s is not after signed_at %s", expiresAtText, signedAtText)
 		}
-		env.ExpiresAt = expiresAtText
+		env.ExpiresAt = &expiresAtText
 	}
 
 	if opts.PolicyVersion != nil {
@@ -889,7 +891,7 @@ func VerifyPolicyBytes(spec *HushSpec, envelopeJSON []byte, opts VerifyOptions) 
 		var partial Envelope
 		if json.Unmarshal(envelopeJSON, &partial) == nil {
 			result.KeyID = partial.KeyID
-			result.PolicyName = partial.PolicyName
+			result.PolicyName = stringValue(partial.PolicyName)
 			result.PolicyVersion = partial.PolicyVersion
 		}
 		return result
@@ -965,7 +967,7 @@ func verifyEnvelope(env *Envelope, opts VerifyOptions, content envelopeContent) 
 	}
 	result := VerifyResult{
 		KeyID:         env.KeyID,
-		PolicyName:    env.PolicyName,
+		PolicyName:    stringValue(env.PolicyName),
 		PolicyVersion: env.PolicyVersion,
 	}
 	fail := func(reason, format string, args ...any) VerifyResult {
@@ -1063,7 +1065,7 @@ func verifyEnvelope(env *Envelope, opts VerifyOptions, content envelopeContent) 
 		return fail(ReasonMalformedEnvelope, "%s", err)
 	}
 	if expiresAt != nil && !now.Before(*expiresAt) {
-		return fail(ReasonExpired, "the signature expired at %s", env.ExpiresAt)
+		return fail(ReasonExpired, "the signature expired at %s", *env.ExpiresAt)
 	}
 
 	// 8. Signature over the canonical envelope.
@@ -1105,7 +1107,7 @@ func verifyEnvelope(env *Envelope, opts VerifyOptions, content envelopeContent) 
 		*env.PolicyVersion < *opts.LastSeenVersion {
 		return fail(ReasonPolicyVersionRollback,
 			"policy_version %d is below the last accepted version %d for %q",
-			*env.PolicyVersion, *opts.LastSeenVersion, env.PolicyName)
+			*env.PolicyVersion, *opts.LastSeenVersion, stringValue(env.PolicyName))
 	}
 
 	result.OK = true
@@ -1123,7 +1125,7 @@ func resolveForHashing(spec *HushSpec) (*HushSpec, error) {
 	if spec == nil {
 		return nil, errors.New("no policy was supplied")
 	}
-	if spec.Extends == "" {
+	if spec.Extends == nil {
 		return spec, nil
 	}
 	return Resolve(spec, "", nil)

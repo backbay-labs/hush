@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+  workflow_dispatch:
+
+# Read-only by default; the jobs that need more widen it themselves.
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,6 +25,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - run: python3 -m pip install pyyaml
 
       - uses: actions/setup-go@v5
         with:
@@ -55,6 +62,11 @@ jobs:
         run: python3 scripts/generate_testkit_schemas.py --check
       - name: Check the fixture manifest
         run: python3 scripts/generate_fixture_manifest.py --check
+      # The reference canonicalizer generated the normative vectors, so it has
+      # to keep reproducing them: a drift between it and the SDKs is a
+      # conformance failure either way round.
+      - name: Check the canonical form vectors
+        run: python3 scripts/canonical_json.py --check fixtures/core/hash
       # Re-derives the three hand-built bundle vectors from the committed
       # valid one, signing with OpenSSL: a standing cross-check of the Rust
       # signer as well as a staleness guard.
@@ -335,10 +347,16 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
-      - name: Publish schemas at their $id URLs
+      # The same commands the deploy runs (.github/workflows/docs.yml), so a
+      # rename under schemas/ or spec/registries/, or a change that makes
+      # build_schema_index.py refuse, fails on the pull request rather than
+      # on the push to main that publishes the site.
+      - name: Publish schemas and registries at their canonical URLs
         run: |
-          mkdir -p docs/book/schemas
+          mkdir -p docs/book/schemas docs/book/registries
           cp schemas/*.json docs/book/schemas/
+          cp spec/registries/*.yaml docs/book/registries/
+          python3 scripts/build_schema_index.py --out docs/book/schemas/index.json
 
   # ── Shipped policies must lint clean ───────────────────────────────
   policy-lint:

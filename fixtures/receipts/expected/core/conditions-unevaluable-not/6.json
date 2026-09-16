@@ -1,0 +1,45 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7006-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:08ec6a283867cf38e0321a0e38978d1708423bca2342d77afe171574f8f5d7ea"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com",
+    "context": {
+      "current_time": "2026-09-16T20:00:00Z"
+    }
+  },
+  "decision": "deny",
+  "matched_rule": "rules.egress.default",
+  "reason": "domain matched default block",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.default",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "domain matched default block"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

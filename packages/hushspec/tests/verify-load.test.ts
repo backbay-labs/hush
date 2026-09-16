@@ -237,7 +237,12 @@ name: pinned
       keyring: TRUSTED_KEYRING,
     });
     expect(resolution.signature?.verified).toBe(true);
-    expect(resolution.chain[0]!.signature).toBeUndefined();
+    // The base was checked and had no envelope, which the link records: a pin
+    // satisfies the requirement without turning into a signature.
+    expect(resolution.chain[0]!.signature).toEqual({
+      verified: false,
+      reason: 'missing_signature',
+    });
   });
 });
 
@@ -387,6 +392,21 @@ describe('opportunistic verification', () => {
 
     const resolution = resolveFromFileWithOptions(leafPath, { keyring: TRUSTED_KEYRING });
     expect(resolution.signature).toEqual({ verified: false, reason: 'malformed_envelope' });
+  });
+
+  it('surfaces a claimed key_id only when it is well formed', () => {
+    // The receipt schema admits `sha256:` plus 64 lowercase hex and nothing
+    // else, so an envelope that failed its own shape check contributes the
+    // reason code but never its `key_id`.
+    const leafPath = write('leaf.yaml', ROOT_POLICY);
+    writeFileSync(`${leafPath}.sig`, JSON.stringify({ format_version: '0.2', key_id: 'nonsense' }));
+    expect(resolveFromFileWithOptions(leafPath, { keyring: TRUSTED_KEYRING }).signature)
+      .toEqual({ verified: false, reason: 'malformed_envelope' });
+
+    const claimed = `sha256:${'0'.repeat(64)}`;
+    writeFileSync(`${leafPath}.sig`, JSON.stringify({ format_version: '0.2', key_id: claimed }));
+    expect(resolveFromFileWithOptions(leafPath, { keyring: TRUSTED_KEYRING }).signature)
+      .toMatchObject({ verified: false, key_id: claimed });
   });
 
   it('attempts nothing at all without a keyring', () => {

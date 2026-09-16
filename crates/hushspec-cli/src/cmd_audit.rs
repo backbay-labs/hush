@@ -312,11 +312,13 @@ pub fn run(args: AuditArgs) -> i32 {
 
     match args.format {
         OutputFormat::Text => print_text_report(&report),
-        OutputFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(&report) {
-                println!("{json}");
+        OutputFormat::Json => match serde_json::to_string_pretty(&report) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("{} cannot serialize the report: {error}", "\u{2717}".red());
+                return 2;
             }
-        }
+        },
     }
 
     // Governance is advisory -- without --strict the command exits 0 whatever
@@ -388,7 +390,7 @@ fn build_controls_report(spec: &HushSpec) -> ControlsReport {
                 mapping
                     .rule_paths
                     .iter()
-                    .any(|path| crate::controls::path_covers_block(path, block))
+                    .any(|path| crate::controls::path_covers_block(&doc, path, block))
             })
         })
         .cloned()

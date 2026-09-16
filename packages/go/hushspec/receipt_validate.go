@@ -5,10 +5,11 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Structural validation of a decision receipt against
-// schemas/hushspec-receipt.v0.schema.json.
+// schemas/hushspec-receipt.v1.schema.json.
 //
 // Parsing already enforces the schema's types and `additionalProperties:
 // false` (unknown members are a parse error). What a typed model cannot say is
@@ -30,8 +31,10 @@ var (
 	// fractional digits and a Z suffix.
 	receiptTimestampPattern = regexp.MustCompile(
 		`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$`)
-	// receiptSpecVersionPattern is $defs.PolicySummary.spec_version.
-	receiptSpecVersionPattern = regexp.MustCompile(`^0\.[0-9]+\.[0-9]+$`)
+	// receiptSpecVersionPattern is $defs.PolicySummary.spec_version. The v1
+	// schema widened it to the 1.x lineage, so a receipt for a 1.0.z policy
+	// validates (core spec 10.2).
+	receiptSpecVersionPattern = regexp.MustCompile(`^(0|1)\.[0-9]+\.[0-9]+$`)
 )
 
 // receiptTimeSources is $.time_source (receipt spec 3.3).
@@ -97,6 +100,54 @@ var (
 	}
 )
 
+// documentProblems is every way a receipt document departs from the 0.2
+// schema.
+//
+// Both forms are needed: receipt carries the typed members to check, and
+// document is the JSON it was read from, which is the only place an explicit
+// null still shows.
+func documentProblems(document any, receipt *DecisionReceipt) []string {
+	return append(nullMembers(document, ""), receipt.structuralProblems()...)
+}
+
+// nullMembers reports every member of document that is explicitly null.
+//
+// No member the schema defines admits null, so `"reason": null` is not the
+// document a receipt without a `reason` is -- unmarshalling collapses the two,
+// while a log's `entry_hash` covers the difference. `action.origin` and
+// `action.context` are skipped: they carry the descriptor the caller supplied
+// verbatim, whose own members are not this schema's to constrain.
+func nullMembers(document any, path string) []string {
+	var problems []string
+	switch value := document.(type) {
+	case nil:
+		return []string{path + " must not be null"}
+	case map[string]any:
+		// Sorted, so a receipt that breaks several rules reports them in the
+		// same order every time.
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			if path == "action" && (key == "origin" || key == "context") {
+				continue
+			}
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
+			problems = append(problems, nullMembers(value[key], child)...)
+		}
+	case []any:
+		for index, item := range value {
+			problems = append(problems, nullMembers(item, fmt.Sprintf("%s[%d]", path, index))...)
+		}
+	}
+	return problems
+}
+
 // Validate checks a receipt against the structural rules of the 0.2 schema
 // that a typed model cannot express: closed enums, string patterns, required
 // members, and non-negative sizes.
@@ -125,12 +176,23 @@ func (r *DecisionReceipt) structuralProblems() []string {
 	requireContentHash := func(field, value string) {
 		requirePattern(field, value, signingDigestPattern)
 	}
+	// The pattern fixes the spelling; parsing rejects an impossible calendar
+	// date such as February 30, as the other SDKs do.
+	requireTimestamp := func(field, value string) {
+		if !receiptTimestampPattern.MatchString(value) {
+			report("%s %q does not match %s", field, value, receiptTimestampPattern)
+			return
+		}
+		if _, err := time.Parse("2006-01-02T15:04:05.000Z", value); err != nil {
+			report("%s %q is not a calendar instant", field, value)
+		}
+	}
 
 	if r.ReceiptVersion != ReceiptVersion {
 		report("receipt_version %q is not %q", r.ReceiptVersion, ReceiptVersion)
 	}
 	requirePattern("receipt_id", r.ReceiptID, receiptIDPattern)
-	requirePattern("timestamp", r.Timestamp, receiptTimestampPattern)
+	requireTimestamp("timestamp", r.Timestamp)
 	if !slices.Contains(receiptTimeSources, r.TimeSource) {
 		report("time_source %q is outside the closed enum", r.TimeSource)
 	}
@@ -152,7 +214,7 @@ func (r *DecisionReceipt) structuralProblems() []string {
 			requireContentHash("policy.signature.key_id", status.KeyID)
 		}
 		if status.VerifiedAt != "" {
-			requirePattern("policy.signature.verified_at", status.VerifiedAt, receiptTimestampPattern)
+			requireTimestamp("policy.signature.verified_at", status.VerifiedAt)
 		}
 	}
 

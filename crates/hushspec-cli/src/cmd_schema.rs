@@ -6,7 +6,7 @@ use crate::generated_schemas::{SCHEMA_FILE_NAMES, SCHEMA_NAMES, schema_body};
 #[derive(clap::Args)]
 pub struct SchemaArgs {
     /// Schema to print: a short name (core, posture, ...) or a published file
-    /// name (hushspec-core.v0.schema.json)
+    /// name (hushspec-core.v1.schema.json)
     #[arg(required_unless_present = "list")]
     name: Option<String>,
 
@@ -34,8 +34,7 @@ struct SchemaEntry {
 
 pub fn run(args: SchemaArgs) -> i32 {
     if args.list {
-        print_list(args.format);
-        return 0;
+        return print_list(args.format);
     }
 
     // clap's `required_unless_present` guarantees a name here.
@@ -62,7 +61,8 @@ pub fn run(args: SchemaArgs) -> i32 {
     }
 }
 
-fn print_list(format: SchemaOutputFormat) {
+/// Print the schema table, returning the process exit code.
+fn print_list(format: SchemaOutputFormat) -> i32 {
     let entries: Vec<SchemaEntry> = SCHEMA_FILE_NAMES
         .iter()
         .map(|(name, file)| SchemaEntry {
@@ -73,16 +73,21 @@ fn print_list(format: SchemaOutputFormat) {
         .collect();
 
     match format {
-        SchemaOutputFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(&entries) {
-                println!("{json}");
+        SchemaOutputFormat::Json => match serde_json::to_string_pretty(&entries) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!(
+                    "{} cannot serialize the schema list: {error}",
+                    "error".red()
+                );
+                return 2;
             }
-        }
+        },
         SchemaOutputFormat::Text => {
-            // Width is computed, not fixed: a schema name longer than the old
-            // hard-coded 16 columns (`framework-registry`) ran into the file
-            // name. Padding is applied to the plain name -- a ColoredString
-            // pads to the width of its escape sequences, not its visible text.
+            // The column is as wide as the longest name, so no name runs into
+            // the file name beside it. Padding is applied to the plain name --
+            // a ColoredString pads to the width of its escape sequences, not
+            // its visible text.
             let width = entries
                 .iter()
                 .map(|entry| entry.name.chars().count())
@@ -93,6 +98,7 @@ fn print_list(format: SchemaOutputFormat) {
             }
         }
     }
+    0
 }
 
 fn ensure_trailing_newline(body: &str) -> String {
@@ -125,7 +131,7 @@ mod tests {
     #[test]
     fn schema_body_accepts_published_file_names() {
         assert_eq!(
-            schema_body("hushspec-core.v0.schema.json"),
+            schema_body("hushspec-core.v1.schema.json"),
             schema_body("core")
         );
     }
@@ -144,10 +150,10 @@ mod tests {
         let mut seen = 0;
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "json") {
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            if !file.ends_with(".schema.json") {
                 continue;
             }
-            let file = path.file_name().unwrap().to_string_lossy().to_string();
             let on_disk = std::fs::read_to_string(&path).unwrap();
             assert_eq!(
                 schema_body(&file),

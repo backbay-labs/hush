@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Conformance Report v0",
   "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
   "type": "object",
@@ -30,27 +31,51 @@
     },
     "levels": {
       "type": "object",
-      "required": ["0", "1", "2", "3", "4", "5"],
+      "required": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
       "additionalProperties": false,
       "description": "One outcome per conformance level. Levels subsume, so a report whose highest passing level is N MUST report \"pass\" for every level below N.",
       "properties": {
-        "0": { "$ref": "#/$defs/LevelResult" },
-        "1": { "$ref": "#/$defs/LevelResult" },
-        "2": { "$ref": "#/$defs/LevelResult" },
-        "3": { "$ref": "#/$defs/LevelResult" },
-        "4": { "$ref": "#/$defs/LevelResult" },
-        "5": { "$ref": "#/$defs/LevelResult" }
+        "0": {
+          "$ref": "#/$defs/LevelResult"
+        },
+        "1": {
+          "$ref": "#/$defs/LevelResult"
+        },
+        "2": {
+          "$ref": "#/$defs/LevelResult"
+        },
+        "3": {
+          "$ref": "#/$defs/LevelResult"
+        },
+        "4": {
+          "$ref": "#/$defs/LevelResult"
+        },
+        "5": {
+          "$ref": "#/$defs/LevelResult"
+        }
       }
     },
     "highest_level": {
-      "type": ["integer", "null"],
+      "type": [
+        "integer",
+        "null"
+      ],
       "minimum": 0,
       "maximum": 5,
       "description": "The highest level that passed with every level below it also passing; null when even Level 0 did not pass. Derived from `levels`, and repeated here so a consumer need not re-derive it."
     },
     "results": {
       "type": "array",
-      "items": { "$ref": "#/$defs/VectorResult" },
+      "items": {
+        "$ref": "#/$defs/VectorResult"
+      },
       "description": "Every vector the run attempted, in corpus order."
     },
     "generated_at": {
@@ -63,7 +88,11 @@
   "$defs": {
     "Implementation": {
       "type": "object",
-      "required": ["name", "version", "language"],
+      "required": [
+        "name",
+        "version",
+        "language"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -84,15 +113,26 @@
       }
     },
     "Status": {
-      "enum": ["pass", "fail", "not_attempted"],
+      "enum": [
+        "pass",
+        "fail",
+        "not_attempted"
+      ],
       "description": "pass: every vector the level requires was run and passed. fail: at least one required vector ran and did not pass. not_attempted: the runner did not exercise this level -- never a synonym for pass."
     },
     "LevelResult": {
       "type": "object",
-      "required": ["status", "passed", "failed", "skipped"],
+      "required": [
+        "status",
+        "passed",
+        "failed",
+        "skipped"
+      ],
       "additionalProperties": false,
       "properties": {
-        "status": { "$ref": "#/$defs/Status" },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
         "passed": {
           "type": "integer",
           "minimum": 0,
@@ -117,7 +157,11 @@
     },
     "VectorResult": {
       "type": "object",
-      "required": ["path", "category", "status"],
+      "required": [
+        "path",
+        "category",
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
         "path": {
@@ -136,7 +180,9 @@
           "maximum": 5,
           "description": "The conformance level the vector belongs to."
         },
-        "status": { "$ref": "#/$defs/Status" },
+        "status": {
+          "$ref": "#/$defs/Status"
+        },
         "message": {
           "type": "string",
           "description": "Diagnostic for a failure, or a short note for a pass."

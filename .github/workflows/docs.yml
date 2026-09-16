@@ -10,10 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
   # Checks relative links inside the book source and the top-level README,
   # plus the external URLs they point at. Deliberately NOT a dependency of
@@ -35,8 +31,12 @@ jobs:
           # Code blocks are not checked (no --include-verbatim): the example
           # policies carry `$schema=` comments pointing at a host that is not
           # serving yet. Exclusions live in .lycheeignore, one justified line
-          # each. Verified with lychee 0.24 against this tree: 91 OK,
-          # 0 errors, 1 exclusion.
+          # each.
+          #
+          # Run on `main`, where the many github.com/backbay-labs/hush links
+          # resolve. On a branch whose files have not merged yet they 404, so
+          # a local run is only meaningful for the links a branch adds, not as
+          # a pass/fail count.
           args: >-
             --no-progress
             --max-retries 3
@@ -50,13 +50,34 @@ jobs:
           # references do not trip the unauthenticated rate limit.
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Publishes the book and, next to it, the schemas at the URLs their own
+  # `$id` fields declare -- so the deploy is what makes those identifiers
+  # resolve.
+  #
+  # `main` only. `workflow_dispatch` is offered so a maintainer can re-run a
+  # deploy without an empty commit, but a dispatch can be raised from any
+  # branch, and publishing a branch's `schemas/` would serve documents at the
+  # canonical `$id` URLs that no commit on `main` ever contained.
+  #
+  # A deploy is never cancelled: `cancel-in-progress` would abort
+  # `deploy-pages` mid-publish, which leaves the Pages deployment in progress
+  # and blocks the run that superseded it. Queuing behind the previous deploy
+  # costs a few minutes; cancelling costs the environment. The group is on
+  # this job rather than the workflow so a second push does not also kill the
+  # link check, which shares nothing with it.
   deploy:
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
 
       - uses: peaceiris/actions-mdbook@v2
         with:
@@ -65,12 +86,37 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
-      - name: Publish schemas at their $id URLs
+      # Serves each schema at the URL its own `$id` declares
+      # (https://hushspec.dev/schemas/<file>) and each spec registry at
+      # https://hushspec.dev/registries/<file>, next to the book. `index.json`
+      # is built from the directory that is being copied, so it can never name
+      # a schema the site does not serve.
+      - name: Publish schemas and registries at their canonical URLs
+        env:
+          HUSHSPEC_COMMIT: ${{ github.sha }}
         run: |
-          mkdir -p docs/book/schemas
+          mkdir -p docs/book/schemas docs/book/registries
           cp schemas/*.json docs/book/schemas/
+          cp spec/registries/*.yaml docs/book/registries/
+          python3 scripts/build_schema_index.py --out docs/book/schemas/index.json
 
-      - uses: actions/configure-pages@v5
+      # `hushspec.dev` is the host every `$id` names. Under Actions-based
+      # Pages the custom domain is configured in the repository's Pages
+      # settings, not by this file -- an artifact CNAME is simply served as
+      # /CNAME -- so this step is for parity with branch-based publishing and
+      # so the domain the site expects is readable from the site itself.
+      #
+      # It does not assume the domain is bound: Pages serves the site at its
+      # *.github.io URL regardless, and the file is copied, never verified, so
+      # an unbound domain cannot fail the deploy. Making the domain resolve is
+      # a one-time, maintainer-side step outside this workflow: point
+      # hushspec.dev at GitHub Pages (an ALIAS or ANAME record at the apex, or
+      # four A records for the Pages IPv4 addresses) and set it as the custom
+      # domain in the repository's Pages settings. Until then,
+      # docs/src/reference/json-schema.md documents the raw-GitHub fallback
+      # the schemas can be fetched from.
+      - name: Ship the schema host's CNAME
+        run: cp docs/CNAME docs/book/CNAME
 
       - uses: actions/upload-pages-artifact@v3
         with:

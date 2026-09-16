@@ -267,7 +267,7 @@ rules:
 
     expect(result.decision).toBe('deny');
     expect(result.matched_rule).toBe('rules.shell_commands.forbidden_patterns[0]');
-    expect(result.reason).toContain('RE2 subset');
+    expect(result.reason).toContain('group form');
   });
 
   // Core spec 3.7: tool names are exact strings. Glob metacharacters in an

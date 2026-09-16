@@ -1,0 +1,9 @@
+# Every optional string the core schema types -- `description`, `extends`, the
+# governance metadata strings -- holds the same rule as `name`: a written
+# `null` is a value of the wrong type, not an absent property.
+hushspec: "1.0.0"
+name: null-description
+description: null
+rules:
+  egress:
+    default: block

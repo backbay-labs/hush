@@ -5,6 +5,10 @@ on:
     - cron: '17 3 * * *'
   workflow_dispatch:
 
+# The job only reads the repository and uploads its own artifacts.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

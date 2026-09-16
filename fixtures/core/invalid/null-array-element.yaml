@@ -1,0 +1,11 @@
+# The core schema types every array element -- `rules.egress.allow` holds
+# strings -- so a written `null` is a value of the wrong type. Coerced into an
+# empty string it would become an allowlist entry the author never wrote, and
+# the document would hash as one (canonical spec 2.2).
+hushspec: "1.0.0"
+name: null-array-element
+rules:
+  egress:
+    default: block
+    allow:
+      - null

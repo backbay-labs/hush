@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -130,7 +131,16 @@ type SignatureStatus struct {
 
 // FailedSignature is the status recorded for a document whose verification
 // failed at the check named by reason.
+//
+// keyID is what the envelope *claimed*, which is worth recording even though
+// nothing about it was trusted -- it is how a rotation mistake stays
+// distinguishable from an attack. It is dropped unless it is a well-formed
+// key id: the receipt schema admits only `sha256:` plus 64 lowercase hex, and
+// an envelope that failed its own shape check may carry anything at all.
 func FailedSignature(reason, keyID string) SignatureStatus {
+	if !digestPinPattern.MatchString(keyID) {
+		keyID = ""
+	}
 	return SignatureStatus{Verified: false, KeyID: keyID, Reason: reason}
 }
 
@@ -159,6 +169,8 @@ type ChainLink struct {
 // Signature is the leaf's outcome -- what `receipt.policy.signature` carries.
 // It is nil when verification was not attempted.
 type Resolution struct {
+	// Spec is the merged document: resolution consumes `extends` and
+	// `merge_strategy`, so neither is ever set on it (core spec 2.3).
 	Spec        *HushSpec
 	ContentHash string
 	Chain       []ChainLink
@@ -187,7 +199,10 @@ func NewResolutionFromResolved(spec *HushSpec, source string) (*Resolution, erro
 		return nil, fmt.Errorf("no canonical form for %s: %w", describeSource(source), err)
 	}
 	return &Resolution{
-		Spec:        spec,
+		// A resolution's document carries no resolution instructions, however
+		// it was obtained: ContentHash above already refused a lingering
+		// `extends`, and `merge_strategy` is inert here (core spec 2.3).
+		Spec:        resolvedDocument(spec),
 		ContentHash: contentHash,
 		Chain:       []ChainLink{{Source: source, ContentHash: contentHash}},
 	}, nil
@@ -219,9 +234,6 @@ const (
 	ReasonCycle = "cycle"
 	// ReasonMaxDepth is an extends chain longer than [maxExtendsDepth].
 	ReasonMaxDepth = "max_depth"
-	// ReasonSignatureRequired is a hop that required a signature and had none
-	// that verified. [SignatureRequiredError.Status] carries the finer code.
-	ReasonSignatureRequired = "signature_required"
 )
 
 // InvalidPinError reports an `extends` reference whose digest-pin fragment is
@@ -267,11 +279,11 @@ func (e *MaxDepthError) Error() string {
 // ResolveReason maps a resolution failure onto its reason code, so a vector
 // runner or a CLI reports the same vocabulary the spec uses. It reports false
 // for an error that carries no code of its own (an I/O or parse failure).
+//
+// The codes below are the ones only the walk can produce; everything a
+// verifier also produces comes from [ReasonFromError], so one error never
+// reports two different codes depending on which helper read it.
 func ResolveReason(err error) (string, bool) {
-	var digestErr *DigestMismatchError
-	if errors.As(err, &digestErr) {
-		return ReasonDigestMismatch, true
-	}
 	var pinErr *InvalidPinError
 	if errors.As(err, &pinErr) {
 		return ReasonInvalidPin, true
@@ -288,11 +300,7 @@ func ResolveReason(err error) (string, bool) {
 	if errors.As(err, &depthErr) {
 		return ReasonMaxDepth, true
 	}
-	var signatureErr *SignatureRequiredError
-	if errors.As(err, &signatureErr) {
-		return ReasonSignatureRequired, true
-	}
-	return "", false
+	return ReasonFromError(err)
 }
 
 // SignatureRequiredError reports the first chain hop that [ResolveOptions]
@@ -394,18 +402,26 @@ func ResolveWithOptions(spec *HushSpec, source string, loader ResolveLoader, opt
 // 0.1-compatible `<stem>.sig` (so `policy.yaml` is matched by both
 // `policy.yaml.sig` and `policy.sig`, preferring the former).
 //
-// `builtin:` sources have no sidecar and report not-found. So do `https:` and
-// `http:` sources: their conventional location is `<url>.sig`, but this SDK
-// ships no network loader, so a caller that resolves over the network supplies
-// its own locator. Not-found is not silently permissive -- under
-// [ResolveOptions.RequireSignature] an unpinned hop with no envelope fails.
+// `builtin:` sources have no sidecar and report not-found. A URL source is
+// `<url>.sig`, fetched by whatever [RegisterSchemeLoader] installed for its
+// scheme -- fetching a signature over the network must happen under the same
+// rules as fetching the policy did, so it belongs to the transport rather than
+// here. With no transport registered a URL source reports not-found, exactly as
+// a reference to one would be refused. Not-found is not silently permissive --
+// under [ResolveOptions.RequireSignature] an unpinned hop with no envelope
+// fails.
 func DefaultSignatureLocator(source string) ([]byte, bool, error) {
 	switch {
 	case source == "",
 		source == MemorySource,
-		strings.HasPrefix(source, "builtin:"),
-		strings.HasPrefix(source, "https://"),
-		strings.HasPrefix(source, "http://"):
+		strings.HasPrefix(source, "builtin:"):
+		return nil, false, nil
+	}
+
+	if locator, ok := locatorForScheme(source); ok {
+		return locator(source)
+	}
+	if strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
 		return nil, false, nil
 	}
 
@@ -432,6 +448,83 @@ func signatureSidecarPaths(path string) []string {
 	return []string{appended, stem}
 }
 
+// schemeLoaders holds the loaders registered for URL schemes, and the
+// signature locators that go with them. A transport lives outside this file --
+// http_loader.go is the one this SDK ships -- and registers itself here, so the
+// built-in loaders gain a scheme without this file growing a network client.
+// Empty until something registers, which is why a URL reference is refused by
+// default.
+var schemeLoaders = struct {
+	sync.RWMutex
+	loaders  map[string]ResolveLoader
+	locators map[string]SignatureLocator
+}{
+	loaders:  map[string]ResolveLoader{},
+	locators: map[string]SignatureLocator{},
+}
+
+// RegisterSchemeLoader serves `<scheme>://` references through loader in the
+// loaders [ResolveFile] and [NewFileProvider] use by default.
+//
+// Registering a scheme is a deployment decision, never a document's: a policy
+// that names an `https:` base is refused until the process loading it has said
+// that fetching over the network is acceptable.
+//
+// locator, when non-nil, is consulted by [DefaultSignatureLocator] for sources
+// with this scheme, so a transport that can fetch a policy can also fetch the
+// `<source>.sig` beside it (signing spec 7.1).
+func RegisterSchemeLoader(scheme string, loader ResolveLoader, locator SignatureLocator) {
+	schemeLoaders.Lock()
+	defer schemeLoaders.Unlock()
+	schemeLoaders.loaders[scheme] = loader
+	if locator != nil {
+		schemeLoaders.locators[scheme] = locator
+	} else {
+		delete(schemeLoaders.locators, scheme)
+	}
+}
+
+// UnregisterSchemeLoader undoes [RegisterSchemeLoader], restoring the refusal.
+func UnregisterSchemeLoader(scheme string) {
+	schemeLoaders.Lock()
+	defer schemeLoaders.Unlock()
+	delete(schemeLoaders.loaders, scheme)
+	delete(schemeLoaders.locators, scheme)
+}
+
+// referenceScheme is the URL scheme of a reference, or "" when it is not a URL.
+func referenceScheme(reference string) string {
+	scheme, _, found := strings.Cut(reference, "://")
+	if !found || scheme == "" {
+		return ""
+	}
+	return scheme
+}
+
+// loaderForScheme is the loader registered for a reference's scheme, if any.
+func loaderForScheme(reference string) (ResolveLoader, bool) {
+	scheme := referenceScheme(reference)
+	if scheme == "" {
+		return nil, false
+	}
+	schemeLoaders.RLock()
+	defer schemeLoaders.RUnlock()
+	loader, ok := schemeLoaders.loaders[scheme]
+	return loader, ok
+}
+
+// locatorForScheme is the signature locator registered for a source's scheme.
+func locatorForScheme(source string) (SignatureLocator, bool) {
+	scheme := referenceScheme(source)
+	if scheme == "" {
+		return nil, false
+	}
+	schemeLoaders.RLock()
+	defer schemeLoaders.RUnlock()
+	locator, ok := schemeLoaders.locators[scheme]
+	return locator, ok
+}
+
 // createCompositeLoader serves `builtin:<name>` references from the embedded
 // rulesets and everything else from the filesystem. A bare name with no path
 // separators or dots is tried as a builtin before falling back to the
@@ -449,12 +542,18 @@ func createCompositeLoader() ResolveLoader {
 			return &LoadedSpec{Source: reference, Spec: spec}, nil
 		}
 
+		if loader, ok := loaderForScheme(reference); ok {
+			return loader(reference, from)
+		}
+
 		// Reject HTTP(S) references explicitly rather than letting them fall
 		// through to the filesystem loader, which would try to open a file
-		// literally named "https://...". The composite loader has no network
-		// support, so say so plainly.
+		// literally named "https://...". No transport is registered, so say so
+		// plainly.
 		if strings.HasPrefix(reference, "https://") || strings.HasPrefix(reference, "http://") {
-			return nil, fmt.Errorf("HTTP-based policy loading is not supported by the composite loader: %q", reference)
+			return nil, fmt.Errorf(
+				"HTTP-based policy loading is not supported by the composite loader "+
+					"until InstallHTTPSLoader is called: %q", reference)
 		}
 
 		if !strings.ContainsAny(reference, `/\.`) {
@@ -527,7 +626,10 @@ func resolveChain(
 		// the resolved content hash, spec section 3), and at the leaf it is
 		// the document the caller will enforce.
 		if index == 0 {
-			resolved = hop.spec
+			// The root is cleaned on the way in: a resolved document declares
+			// neither resolution field (core spec 2.3), Merge clears both for
+			// every longer chain, and a one-hop chain never reaches Merge.
+			resolved = resolvedDocument(hop.spec)
 		} else {
 			resolved = Merge(resolved, hop.spec)
 		}
@@ -582,7 +684,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 	stack := []string{source}
 
 	current, currentSource := spec, source
-	for depth := 0; current.Extends != ""; depth++ {
+	for depth := 0; current.Extends != nil; depth++ {
 		// Cycle detection only catches an exact repeat of a prior source; a
 		// long acyclic chain would otherwise recurse without bound. Fail
 		// closed with a clean error before doing any further loading once the
@@ -591,7 +693,7 @@ func collectHops(spec *HushSpec, source string, loader ResolveLoader) ([]resolve
 			return nil, &MaxDepthError{}
 		}
 
-		reference, pin, err := splitDigestPin(current.Extends)
+		reference, pin, err := splitDigestPin(*current.Extends)
 		if err != nil {
 			return nil, err
 		}
@@ -700,12 +802,23 @@ func hopContentHash(spec *HushSpec) (string, error) {
 	if spec == nil {
 		return "", errors.New("cannot hash a nil HushSpec document")
 	}
-	// A shallow copy is enough: only the two scalar fields are cleared and
-	// canonicalization never writes.
+	return ContentHash(resolvedDocument(spec))
+}
+
+// resolvedDocument is a document with its resolution instructions cleared.
+// `extends` and `merge_strategy` say how to assemble a policy, not what it
+// permits, so they never appear in what an engine enforces or in what a chain
+// link hashes (core spec 2.3). A shallow copy is enough: only the two scalar
+// fields change, and neither canonicalization nor merging writes through the
+// shared pointers.
+func resolvedDocument(spec *HushSpec) *HushSpec {
+	if spec == nil || (spec.Extends == nil && spec.MergeStrategy == "") {
+		return spec
+	}
 	own := *spec
-	own.Extends = ""
+	own.Extends = nil
 	own.MergeStrategy = ""
-	return ContentHash(&own)
+	return &own
 }
 
 var (

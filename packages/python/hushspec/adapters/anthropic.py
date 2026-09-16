@@ -15,12 +15,11 @@ dependency of the application rather than of the policy engine.
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Callable, Optional
-from urllib.parse import urlparse
+from typing import Any, Callable
 
-from hushspec.evaluate import EvaluationAction
+from hushspec.adapters.mcp import extract_domain
+from hushspec.evaluate import EvaluationAction, args_size_of
 from hushspec.middleware import HushGuard
 
 __all__ = [
@@ -54,26 +53,6 @@ def _member(block: Any, name: str) -> Any:
 
 def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
-
-
-def _args_size(tool_input: Any) -> Optional[int]:
-    try:
-        return len(json.dumps(tool_input, default=str))
-    except (TypeError, ValueError):  # pragma: no cover - json.dumps default=str
-        return None
-
-
-def _host(url: str) -> str:
-    """The host a fetch would reach, or the raw value when there is none.
-
-    Falling back to the raw string keeps the action evaluable: a policy's egress
-    rules see *something* to match, and an unparseable destination is denied by
-    a default-deny egress rule rather than quietly skipped.
-    """
-    try:
-        return urlparse(url).hostname or url
-    except ValueError:
-        return url
 
 
 def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
@@ -138,7 +117,7 @@ def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
     if base in _FETCH_TOOLS:
         return EvaluationAction(
             type="egress",
-            target=_host(_text(tool_input.get("url"))),
+            target=extract_domain(_text(tool_input.get("url"))),
         )
 
     if name.startswith("mcp__"):
@@ -149,13 +128,13 @@ def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
         return EvaluationAction(
             type="tool_call",
             target=inner,
-            args_size=_args_size(tool_input),
+            args_size=args_size_of(tool_input),
         )
 
     return EvaluationAction(
         type="tool_call",
         target=name,
-        args_size=_args_size(tool_input),
+        args_size=args_size_of(tool_input),
     )
 
 

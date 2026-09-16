@@ -18,7 +18,7 @@ SHA-256, its category, and the level at which it becomes required, and a claim
 names the corpus by the SHA-256 of that manifest.
 
 The machine-readable form of a claim is a
-[conformance report](json-schema.md): `hushspec-conformance-report.v0.schema.json`.
+[conformance report](json-schema.md): `hushspec-conformance-report.v1.schema.json`.
 The reference runner writes one, and validates it against its own schema before
 writing:
 
@@ -102,7 +102,7 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document
 - Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision, under the semantics of core spec sections 3, 5 and 6 -- including the normalization and matching algorithms of section 3.14
 - Implements aggregation and precedence per core spec 6.1 (`deny` > `warn` > `allow`) and denies unknown action types per section 5
-- Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v0.schema.json`
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v1.schema.json`
 
 This is the full engine level. All four HushSpec SDKs pass it, and go on to
 Levels 4 and 5; Clawdstrike is a Level 3 implementation.
@@ -171,7 +171,7 @@ fill in later. Paths are relative to
 | `patch_integrity` | 3.5 | `core/evaluation/patch-integrity`, `patch-integrity-defaults`, `patch-balance`, `patch-balance-zero` | 3 |
 | `shell_commands` | 3.9 | `core/evaluation/shell-commands`, `regex-dialect` | 3 |
 | `tool_access` | 3.7 | `core/evaluation/tool-access`, `tool-exact-match`, `tool-allowlist-deny`, `tool-glob-literal`, `tool-max-args-size` | 3 |
-| `computer_use` | 3.8 | `core/evaluation/computer-use`, `computer-use-guardrail-deny` | 3 |
+| `computer_use` | 3.8 | `core/evaluation/computer-use` | 3 |
 | `remote_desktop_channels` | 3.10 | `core/valid/remote-desktop-channels-rule`, `core/evaluation/rule-blocks-disabled` | 3 |
 | `input_injection` | 3.10 | `core/evaluation/input-injection` | 3 |
 | `browser_automation` | 3.11 | `core/evaluation/browser-automation` | 3 |
@@ -202,7 +202,8 @@ fill in later. Paths are relative to
 | `deep_merge` (core and all three extensions) | 4.1 | `core/merge/child-deep-merge`, `posture/merge`, `origins/merge`, `detection/merge` | 2 |
 | `merge` (core and all three extensions) | 4.1 | `core/merge/child-merge`, `posture/merge/child-merge`, `origins/merge/child-merge`, `detection/merge/child-merge` | 2 |
 | `replace` (core and all three extensions) | 4.1 | `core/merge/child-replace`, `posture/merge/child-replace`, `origins/merge/child-replace`, `detection/merge/child-replace` | 2 |
-| `metadata` merge behaviour | 2.5, 4.1 | `core/merge/metadata/` (replaced and inherited) | 2 |
+| `metadata` merge behaviour | 2.5, 4.1 | `core/merge/metadata/` (replaced and inherited), `core/merge/metadata-replaces-whole/` (under `deep_merge`) | 2 |
+| A resolved document declares no `extends` or `merge_strategy` | 2.3 | `core/merge/resolved-output-is-clean/` | 2 |
 | Circular inheritance is refused | 2.3 | `core/merge/extends-cycle/` | 2 |
 | Multi-hop chain, folded root to leaf | 2.3, 4.2 | `core/merge/three-hop-chain/` and `core/evaluation/extends-three-hop-resolved` | 2, 3 |
 | Digest pinning (`#sha256:`) | 2.3 | `core/resolve/pin-valid`, `pin-mismatch`, `pin-malformed` | 4 |
@@ -221,10 +222,10 @@ fill in later. Paths are relative to
 
 | Requirement | Spec | Vectors | Level |
 |---|---|---|---|
-| Canonical form and `content_hash` | canonical 7 | `core/hash/` (14 vectors) | 4 |
+| Canonical form and `content_hash` | canonical 7 | `core/hash/` (16 vectors) | 4 |
 | Receipt format 0.2 | receipt 2 | `receipts/valid/`, `receipts/invalid/` | 4 |
 | Recorded `rule_trace`, per-case receipts | receipt 4.3 | `receipts/expected/<module>/<fixture>/<case>.json` | 4 |
-| Policy signing and verification | signing 2 | `signing/vectors.yaml` (16 cases) | 5 |
+| Policy signing and verification | signing 2 | `signing/vectors.yaml` (18 cases) | 5 |
 | Receipt signing | signing 8 | `receipts/signed/valid/`, `receipts/signed/invalid/` | 5 |
 | Hash-linked log | log | `log/valid/`, `log/invalid/` | 5 |
-| Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (8 cases) | 5 |
+| Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (10 cases) | 5 |

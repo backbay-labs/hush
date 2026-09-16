@@ -6,13 +6,17 @@
 //! filesystem. The expectation is either the resolved content hash plus the
 //! chain links (root first, the leaf recorded as `memory`), or a rejection
 //! reason. This file generates the vectors (`HUSHSPEC_UPDATE_RESOLVE_VECTORS=1`)
-//! and checks the committed ones against the resolver.
+//! and checks the committed ones against the resolver; the reader itself is
+//! `hushspec_testkit::resolve_vector`, shared with the conformance runner.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use hushspec::{
     HushSpec, ResolveError, ResolveOptions, create_composite_loader, resolve_with_options,
+};
+use hushspec_testkit::resolve_vector::{
+    ResolveExpect, ResolveLink, ResolveVector, VECTORS_VERSION, chain_of, check,
 };
 
 fn repo_root() -> PathBuf {
@@ -23,100 +27,9 @@ fn vectors_dir() -> PathBuf {
     repo_root().join("fixtures/core/resolve")
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Vector {
-    hushspec_resolve: String,
-    description: String,
-    policy: serde_yaml::Value,
-    expect: Expect,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Expect {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    resolves: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    content_hash: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    chain: Option<Vec<Link>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    rejects: Option<String>,
-}
-
-#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Link {
-    source: String,
-    content_hash: String,
-}
-
-/// The reason a rejection is reported under, matching the spec's vocabulary.
-fn reason(error: &ResolveError) -> &'static str {
-    match error {
-        ResolveError::DigestMismatch { .. } => "digest_mismatch",
-        ResolveError::InvalidPin { .. } => "invalid_pin",
-        ResolveError::Cycle { .. } => "cycle",
-        ResolveError::MaxDepth => "max_depth",
-        ResolveError::NotFound { .. } => "not_found",
-        ResolveError::SignatureRequired { .. } => "signature_required",
-        _ => "error",
-    }
-}
-
 fn own_hash_of_builtin(name: &str) -> String {
     let spec = HushSpec::parse(hushspec::load_builtin(name).unwrap()).unwrap();
     hushspec::own_content_hash(&spec, &format!("builtin:{name}")).unwrap()
-}
-
-/// Run one vector against the resolver, returning a failure message.
-fn check(vector: &Vector) -> Result<(), String> {
-    if vector.hushspec_resolve != "0.1.0" {
-        return Err(format!("unsupported version {}", vector.hushspec_resolve));
-    }
-    let yaml = serde_yaml::to_string(&vector.policy).unwrap();
-    let spec = HushSpec::parse(&yaml).map_err(|e| format!("policy does not parse: {e}"))?;
-    let loader = create_composite_loader();
-    let result = resolve_with_options(&spec, None, &loader, &ResolveOptions::default());
-    match (&vector.expect.rejects, result) {
-        (Some(expected), Err(error)) => {
-            if reason(&error) == expected {
-                Ok(())
-            } else {
-                Err(format!(
-                    "expected rejection {expected}, got {}: {error}",
-                    reason(&error)
-                ))
-            }
-        }
-        (Some(expected), Ok(_)) => Err(format!("expected rejection {expected}, but it resolved")),
-        (None, Err(error)) => Err(format!("expected to resolve, got {error}")),
-        (None, Ok(resolution)) => {
-            if let Some(hash) = &vector.expect.content_hash
-                && hash != &resolution.content_hash
-            {
-                return Err(format!(
-                    "content_hash: expected {hash}, got {}",
-                    resolution.content_hash
-                ));
-            }
-            if let Some(chain) = &vector.expect.chain {
-                let actual: Vec<Link> = resolution
-                    .chain
-                    .iter()
-                    .map(|link| Link {
-                        source: link.source.clone(),
-                        content_hash: link.content_hash.clone(),
-                    })
-                    .collect();
-                if &actual != chain {
-                    return Err(format!("chain: expected {chain:?}, got {actual:?}"));
-                }
-            }
-            Ok(())
-        }
-    }
 }
 
 /// Vector definitions: name, description, leaf YAML, expected rejection
@@ -169,14 +82,14 @@ fn definitions() -> Vec<(&'static str, &'static str, String, Option<&'static str
     ]
 }
 
-fn generate() -> Vec<(String, Vector)> {
+fn generate() -> Vec<(String, ResolveVector)> {
     let loader = create_composite_loader();
     definitions()
         .into_iter()
         .map(|(name, description, yaml, rejects)| {
             let policy: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
             let expect = match rejects {
-                Some(reason) => Expect {
+                Some(reason) => ResolveExpect {
                     resolves: Some(false),
                     content_hash: None,
                     chain: None,
@@ -187,27 +100,18 @@ fn generate() -> Vec<(String, Vector)> {
                     let resolution =
                         resolve_with_options(&spec, None, &loader, &ResolveOptions::default())
                             .unwrap_or_else(|e| panic!("{name}: {e}"));
-                    Expect {
+                    ResolveExpect {
                         resolves: Some(true),
-                        content_hash: Some(resolution.content_hash),
-                        chain: Some(
-                            resolution
-                                .chain
-                                .iter()
-                                .map(|link| Link {
-                                    source: link.source.clone(),
-                                    content_hash: link.content_hash.clone(),
-                                })
-                                .collect(),
-                        ),
+                        content_hash: Some(resolution.content_hash.clone()),
+                        chain: Some(chain_of(&resolution)),
                         rejects: None,
                     }
                 }
             };
             (
                 format!("{name}.yaml"),
-                Vector {
-                    hushspec_resolve: "0.1.0".to_string(),
+                ResolveVector {
+                    hushspec_resolve: VECTORS_VERSION.to_string(),
                     description: description.to_string(),
                     policy,
                     expect,
@@ -256,7 +160,7 @@ fn resolve_vectors_are_current_and_pass() {
         if path.extension().is_none_or(|e| e != "yaml") {
             continue;
         }
-        let vector: Vector = serde_yaml::from_str(&fs::read_to_string(&path).unwrap())
+        let vector: ResolveVector = serde_yaml::from_str(&fs::read_to_string(&path).unwrap())
             .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         check(&vector).unwrap_or_else(|message| panic!("{}: {message}", path.display()));
         count += 1;
@@ -264,6 +168,39 @@ fn resolve_vectors_are_current_and_pass() {
     assert!(
         count >= 7,
         "expected at least 7 resolve vectors, found {count}"
+    );
+}
+
+/// A vector that says it resolves and also names a rejection describes nothing
+/// a runner can check, so the reader refuses it rather than reading one field
+/// and ignoring the other.
+#[test]
+fn a_vector_that_contradicts_itself_is_refused() {
+    let mut vector = generate().remove(0).1;
+    assert_eq!(vector.expect.resolves, Some(true));
+    vector.expect.rejects = Some("not_found".to_string());
+    let message = check(&vector).expect_err("a self-contradicting vector is not a vector");
+    assert!(message.contains("expect.resolves"), "{message}");
+
+    vector.expect.rejects = None;
+    vector.expect.resolves = Some(false);
+    let message = check(&vector).expect_err("a self-contradicting vector is not a vector");
+    assert!(message.contains("expect.resolves"), "{message}");
+}
+
+/// The rejection vocabulary is closed. A failure it does not name is a failure
+/// the runner reports, never one it quietly relabels.
+#[test]
+fn a_failure_the_vocabulary_does_not_name_has_no_reason_code() {
+    use hushspec_testkit::resolve_vector::reason_code;
+
+    assert_eq!(reason_code(&ResolveError::MaxDepth), Some("max_depth"));
+    assert_eq!(
+        reason_code(&ResolveError::Parse {
+            path: "p.yaml".to_string(),
+            message: "bad".to_string(),
+        }),
+        None
     );
 }
 
@@ -295,4 +232,21 @@ fn pins_satisfy_a_signature_requirement_for_that_hop() {
 /// silently turns a verifying run into a rubber stamp.
 fn update_requested(var: &str) -> bool {
     matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
+}
+
+/// The chain shape the vectors record is the resolution's own, so a change to
+/// one is a change to the other.
+#[test]
+fn a_chain_is_recorded_hop_for_hop() {
+    let spec = HushSpec::parse("hushspec: \"0.1.0\"\nextends: \"builtin:default\"\n").unwrap();
+    let resolution = resolve_with_options(
+        &spec,
+        None,
+        &create_composite_loader(),
+        &ResolveOptions::default(),
+    )
+    .unwrap();
+    let recorded: Vec<ResolveLink> = chain_of(&resolution);
+    assert_eq!(recorded.len(), resolution.chain.len());
+    assert_eq!(recorded[0].source, "builtin:default");
 }

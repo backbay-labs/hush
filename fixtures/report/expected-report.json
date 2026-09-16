@@ -13,7 +13,7 @@
     "policy_events": 2,
     "signed_entries": 0,
     "last_seq": 20,
-    "last_entry_hash": "sha256:721a4fe7fcf638c34785c7b3857f3067ba46956fa02725306f129b6bd0329f96"
+    "last_entry_hash": "sha256:4e60e69621e329e53d43029ff89173025c83e54eb57f41f03cc80a33d469613a"
   },
   "window": {
     "first_receipt": "2026-09-15T01:05:00.000Z",

@@ -33,7 +33,11 @@ from hushspec.receipt import (
 from hushspec.generated_models import (
     EgressRule,
     HushSpec,
+    RemoteDesktopChannelsRule,
     Rules,
+    SecretPattern,
+    SecretPatternsRule,
+    Severity,
     ShellCommandsRule,
     ToolAccessRule,
     DefaultAction,
@@ -447,6 +451,83 @@ class TestRuleTraceActionTypes:
         assert len(tool_trace) == 1
         assert tool_trace[0].evaluated is False
         assert tool_trace[0].outcome == "skip"
+        assert tool_trace[0].reason == "no tool_access rule configured"
+
+    def test_a_configured_secret_scan_without_content_says_so(self):
+        # Core spec 5: a tool_call is scanned only when it carries content.
+        # The skip reason has to separate "the policy configures no scan" from
+        # "the policy configures one and the action gave it nothing to read" --
+        # a reader of the receipt cannot otherwise tell the two apart.
+        rule = SecretPatternsRule(
+            patterns=[
+                SecretPattern(
+                    name="aws_key",
+                    pattern="AKIA[0-9A-Z]{16}",
+                    severity=Severity.CRITICAL,
+                )
+            ]
+        )
+        spec = HushSpec(hushspec="1.0.0", rules=Rules(secret_patterns=rule))
+        action = EvaluationAction(type="tool_call", target="test")
+        receipt = evaluate_audited(spec, action, _enabled_config())
+        scan = [t for t in receipt.rule_trace if t.rule_block == "secret_patterns"]
+        assert len(scan) == 1
+        assert scan[0].evaluated is False
+        assert scan[0].outcome == "skip"
+        assert scan[0].reason == "content not supplied; secret_patterns not consulted"
+
+        # Absent from the document, the same block reads as unconfigured.
+        bare = HushSpec(hushspec="1.0.0")
+        bare_scan = [
+            t
+            for t in evaluate_audited(bare, action, _enabled_config()).rule_trace
+            if t.rule_block == "secret_patterns"
+        ]
+        assert bare_scan[0].reason == "no secret_patterns rule configured"
+
+    def test_a_computer_use_target_that_is_not_a_channel_says_so(self):
+        # Core spec 3.9: remote_desktop_channels decides only the four
+        # `remote.*` channel targets; any other computer_use target leaves the
+        # configured block unconsulted rather than unconfigured.
+        spec = HushSpec(
+            hushspec="1.0.0",
+            rules=Rules(
+                remote_desktop_channels=RemoteDesktopChannelsRule(
+                    enabled=True, clipboard=True
+                )
+            ),
+        )
+        action = EvaluationAction(type="computer_use", target="screenshot")
+        receipt = evaluate_audited(spec, action, _enabled_config())
+        channels = [
+            t for t in receipt.rule_trace if t.rule_block == "remote_desktop_channels"
+        ]
+        assert len(channels) == 1
+        assert channels[0].evaluated is False
+        assert channels[0].outcome == "skip"
+        assert channels[0].reason == (
+            "target is not a remote desktop channel; "
+            "remote_desktop_channels not consulted"
+        )
+
+        # A target that *is* a channel reaches the rule.
+        on_channel = evaluate_audited(
+            spec,
+            EvaluationAction(type="computer_use", target="remote.clipboard"),
+            _enabled_config(),
+        )
+        decided = [
+            t for t in on_channel.rule_trace if t.rule_block == "remote_desktop_channels"
+        ]
+        assert decided[0].evaluated is True
+
+        bare = HushSpec(hushspec="1.0.0")
+        bare_channels = [
+            t
+            for t in evaluate_audited(bare, action, _enabled_config()).rule_trace
+            if t.rule_block == "remote_desktop_channels"
+        ]
+        assert bare_channels[0].reason == "no remote_desktop_channels rule configured"
 
     def test_handles_unknown_action_type(self):
         # Core spec 5: an action type unknown to the specification denies, and
@@ -512,7 +593,7 @@ class TestParseReceiptRefusals:
             parse_receipt(body)
 
     def test_an_unknown_decision_is_a_receipt_error(self):
-        with pytest.raises(ReceiptError, match="receipt.decision"):
+        with pytest.raises(ReceiptError, match="decision .* closed enum"):
             parse_receipt(self._receipt(decision="bogus"))
 
     def test_an_unknown_rule_trace_outcome_is_a_receipt_error(self):
@@ -521,5 +602,5 @@ class TestParseReceiptRefusals:
                 {"rule_block": "egress", "outcome": "nope", "evaluated": True}
             ]
         )
-        with pytest.raises(ReceiptError, match="rule_trace.outcome"):
+        with pytest.raises(ReceiptError, match=r"rule_trace\[0\].outcome"):
             parse_receipt(body)

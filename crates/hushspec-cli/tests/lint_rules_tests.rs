@@ -1,4 +1,4 @@
-//! Integration coverage for lint L014 through L020 -- the posture checks added
+//! Integration coverage for lint L014 through L022 -- the posture checks added
 //! alongside spans and SARIF.
 //!
 //! The per-check logic is unit-tested in `cmd_lint::checks`; what is asserted
@@ -398,4 +398,59 @@ fn permissive_yaml_reports_warnings_but_no_errors() {
         .assert()
         .code(1)
         .stdout(predicate::str::contains("warning[L017]"));
+}
+
+#[test]
+fn l022_reports_an_empty_tool_name_at_its_index() {
+    let findings = findings_of(
+        r#"hushspec: "0.1.0"
+name: empty-tool-entry
+rules:
+  tool_access:
+    allow: ["read_file", ""]
+    default: block
+"#,
+    );
+    let (_, severity, path) = find(&findings, "L022").expect("L022");
+    assert_eq!(severity, "warning");
+    assert_eq!(path, "rules.tool_access.allow[1]");
+}
+
+#[test]
+fn l022_reports_an_empty_origins_overlay_entry() {
+    let findings = findings_of(
+        r#"hushspec: "0.1.0"
+name: empty-overlay-entry
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block
+extensions:
+  origins:
+    profiles:
+      - id: partner
+        match:
+          provider: slack
+        egress:
+          allow: [""]
+"#,
+    );
+    let (_, severity, path) = find(&findings, "L022").expect("L022");
+    assert_eq!(severity, "warning");
+    assert_eq!(path, "extensions.origins.profiles.partner.egress.allow[0]");
+}
+
+#[test]
+fn l022_is_silent_for_populated_entries() {
+    let findings = findings_of(
+        r#"hushspec: "0.1.0"
+name: populated-entries
+rules:
+  tool_access:
+    allow: ["read_file"]
+    block: ["shell_exec"]
+    default: block
+"#,
+    );
+    assert!(find(&findings, "L022").is_none());
 }

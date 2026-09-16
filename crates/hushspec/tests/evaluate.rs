@@ -248,3 +248,84 @@ extensions:
         Some("unknown posture state 'typo'")
     );
 }
+
+/// Core spec 10.2: 1.0 freezes the 0.2 semantics without changing them, so
+/// one document declared under either version validates alike and reaches the
+/// same decision by the same rule, for every action the document can decide.
+#[test]
+fn a_one_point_zero_document_is_evaluated_as_a_zero_point_two_document() {
+    let document = |version: &str| {
+        format!(
+            r#"
+hushspec: "{version}"
+name: version-equivalence
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+  egress:
+    allow:
+      - api.example.com
+    default: block
+  tool_access:
+    block:
+      - shell_exec
+    default: allow
+"#
+        )
+    };
+    let actions = [
+        ("file_read", "/home/agent/.ssh/id_ed25519"),
+        ("egress", "api.example.com"),
+        ("egress", "blocked.example.net"),
+        ("tool_call", "shell_exec"),
+    ];
+
+    let zero = HushSpec::parse(&document("0.2.0")).expect("valid 0.2.0 spec");
+    let one = HushSpec::parse(&document("1.0.0")).expect("valid 1.0.0 spec");
+    assert!(
+        hushspec::validate(&zero).is_valid(),
+        "0.2.0 did not validate"
+    );
+    assert!(
+        hushspec::validate(&one).is_valid(),
+        "1.0.0 did not validate"
+    );
+
+    for (action_type, target) in actions {
+        let action = EvaluationAction {
+            action_type: action_type.into(),
+            target: Some(target.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(&zero, &action),
+            evaluate(&one, &action),
+            "{action_type} {target} decided differently under 1.0.0"
+        );
+    }
+
+    // A forbidden path is the case that would go unnoticed if the version
+    // gate quietly skipped a block rather than accepting the document.
+    let denied = evaluate(
+        &one,
+        &EvaluationAction {
+            action_type: "file_read".into(),
+            target: Some("/home/agent/.ssh/id_ed25519".into()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(denied.decision, Decision::Deny);
+    assert_eq!(
+        denied.matched_rule.as_deref(),
+        Some("rules.forbidden_paths.patterns")
+    );
+
+    // The `hushspec` field is part of the canonical form, so the two hashes
+    // differ; what must not differ is the decisions they are hashes of.
+    assert_ne!(
+        hushspec::content_hash(&zero).expect("hashable"),
+        hushspec::content_hash(&one).expect("hashable"),
+        "two documents declaring different versions hashed the same"
+    );
+}

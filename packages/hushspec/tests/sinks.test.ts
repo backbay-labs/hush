@@ -3,6 +3,8 @@ import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { DecisionReceipt } from '../src/receipt.js';
+import type { PolicyEvent } from '../src/log.js';
+import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from '../src/version.js';
 import {
   FileReceiptSink,
   ConsoleReceiptSink,
@@ -10,6 +12,7 @@ import {
   MultiSink,
   CallbackSink,
   NullSink,
+  type ReceiptSink,
 } from '../src/sinks.js';
 
 // ---------------------------------------------------------------------------
@@ -138,6 +141,21 @@ describe('FilteredSink', () => {
   });
 });
 
+function makePolicyEvent(): PolicyEvent {
+  return {
+    event: 'loaded',
+    timestamp: '2026-03-15T00:00:00.000Z',
+    policy: {
+      name: 'test-policy',
+      spec_version: '0.2.0',
+      content_hash: `sha256:${'ab'.repeat(32)}`,
+    },
+    enforcement_mode: 'enforce',
+    sdk: { name: SDK_NAME, version: SDK_VERSION },
+    spec_version: HUSHSPEC_VERSION,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // MultiSink
 // ---------------------------------------------------------------------------
@@ -157,13 +175,35 @@ describe('MultiSink', () => {
     expect(count2).toBe(2);
   });
 
-  it('continues after error in one sink', () => {
+  it('delivers to every sink after one fails, then reports the first failure', () => {
     let count = 0;
     const failingSink = new CallbackSink(() => { throw new Error('test error'); });
     const countingSink = new CallbackSink(() => { count++; });
 
     const multi = new MultiSink([failingSink, countingSink]);
-    expect(() => multi.send(makeReceipt('allow'))).not.toThrow();
+    expect(() => multi.send(makeReceipt('allow'))).toThrow(/sink CallbackSink: test error/);
+    expect(count).toBe(1);
+  });
+
+  it('reports the first failure of a policy event too', () => {
+    let count = 0;
+    const failingSink: ReceiptSink = {
+      send() {},
+      recordPolicyEvent() {
+        throw new Error('no space left on device');
+      },
+    };
+    const countingSink: ReceiptSink = {
+      send() {},
+      recordPolicyEvent() {
+        count++;
+      },
+    };
+
+    const multi = new MultiSink([failingSink, countingSink]);
+    expect(() => multi.recordPolicyEvent(makePolicyEvent())).toThrow(
+      /no space left on device/,
+    );
     expect(count).toBe(1);
   });
 });

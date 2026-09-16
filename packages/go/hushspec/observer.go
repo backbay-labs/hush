@@ -25,6 +25,7 @@ const (
 	ObserverEventPolicyLoaded   = "policy.loaded"
 	ObserverEventPolicyReloaded = "policy.reloaded"
 	ObserverEventPolicyFailed   = "policy.load_failed"
+	ObserverEventSinkError      = "sink.error"
 	ObserverEventError          = "error"
 )
 
@@ -34,7 +35,8 @@ const (
 // first load of a policy from a hot reload by its presence, which is also what
 // decides the event type a serializing observer writes.
 type PolicyLoadObservation struct {
-	Name                string
+	// Name is the policy's own `name`, nil when it declares none.
+	Name                *string
 	ContentHash         string
 	PreviousContentHash string
 	Source              string
@@ -210,7 +212,7 @@ type ObserverEvent struct {
 	DurationUs *int64            `json:"duration_us,omitempty"`
 	Receipt    *DecisionReceipt  `json:"receipt,omitempty"`
 
-	PolicyName      string          `json:"policy_name,omitempty"`
+	PolicyName      *string         `json:"policy_name,omitempty"`
 	ContentHash     string          `json:"content_hash,omitempty"`
 	PreviousHash    string          `json:"previous_hash,omitempty"`
 	Source          string          `json:"source,omitempty"`
@@ -279,6 +281,12 @@ func errorObserverEvent(err error) ObserverEvent {
 	if errors.As(err, &loadErr) {
 		event.Type = ObserverEventPolicyFailed
 		event.Source = loadErr.Source
+		return event
+	}
+	var sinkErr *SinkError
+	if errors.As(err, &sinkErr) {
+		event.Type = ObserverEventSinkError
+		event.Source = sinkErr.Sink
 	}
 	return event
 }
@@ -296,6 +304,23 @@ func (e *PolicyLoadError) Error() string {
 }
 
 func (e *PolicyLoadError) Unwrap() error { return e.Err }
+
+// SinkError is a receipt sink that refused what it was handed: a receipt, or
+// the policy-in-effect record for a load. The decision it belonged to stands
+// and the policy still takes effect -- a full disk is not a reason to let an
+// action through, nor to stop one -- so it is reported to the observers as a
+// `sink.error` event and never returned to the caller.
+type SinkError struct {
+	// Sink names the sink that refused, by its type.
+	Sink string
+	Err  error
+}
+
+func (e *SinkError) Error() string {
+	return fmt.Sprintf("sink %s: %v", e.Sink, e.Err)
+}
+
+func (e *SinkError) Unwrap() error { return e.Err }
 
 // ---------------------------------------------------------------------------
 // JSONLineObserver
@@ -401,11 +426,15 @@ func (o *StderrObserver) printf(format string, args ...any) {
 
 // OnPolicyLoaded reports the policy now in force.
 func (o *StderrObserver) OnPolicyLoaded(load PolicyLoadObservation) {
+	name := "<unnamed>"
+	if load.Name != nil {
+		name = *load.Name
+	}
 	if load.IsSwap() {
-		o.printf("policy swapped: %s %s (was %s)", load.Name, load.ContentHash, load.PreviousContentHash)
+		o.printf("policy swapped: %s %s (was %s)", name, load.ContentHash, load.PreviousContentHash)
 		return
 	}
-	o.printf("policy loaded: %s %s", load.Name, load.ContentHash)
+	o.printf("policy loaded: %s %s", name, load.ContentHash)
 }
 
 // OnEvaluation reports one decision.
@@ -560,12 +589,19 @@ func (m *MetricsCollector) OnEvaluation(
 	}
 }
 
-// OnError counts a failure the guard absorbed, and a policy load that failed.
+// OnError counts a failure the guard absorbed. A policy that would not load
+// is counted as a failed load as well; a sink that refused a receipt is not,
+// since the policy in force is unaffected by it.
 func (m *MetricsCollector) OnError(err error) {
+	var loadErr *PolicyLoadError
+	loadFailed := errors.As(err, &loadErr)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errors++
-	m.policyLoads["failure"]++
+	if loadFailed {
+		m.policyLoads["failure"]++
+	}
 }
 
 // Snapshot copies every counter.

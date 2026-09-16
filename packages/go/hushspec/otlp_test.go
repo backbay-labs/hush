@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -194,19 +196,70 @@ func TestOTLPSinkExportsReceiptShape(t *testing.T) {
 	}
 }
 
+func TestOTLPRecordMembersAreTheSameForEveryEntry(t *testing.T) {
+	// The wire mapping every HushSpec SDK's exporter emits, so one collector
+	// pipeline and one set of dashboard queries read all four.
+	want := []string{
+		"attributes",
+		"body",
+		"observedTimeUnixNano",
+		"severityNumber",
+		"severityText",
+		"timeUnixNano",
+	}
+
+	resolution, err := NewResolutionFromResolved(guardSpec(), "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	event := NewPolicyLoadedEvent(resolution, EnforcementModeEnforce, SdkInfo{})
+	eventRecord, err := policyEventLogRecord(&event)
+	if err != nil {
+		t.Fatalf("policyEventLogRecord: %v", err)
+	}
+	receiptRecord, err := receiptLogRecord(otlpTestReceipt(t, DecisionDeny))
+	if err != nil {
+		t.Fatalf("receiptLogRecord: %v", err)
+	}
+
+	for _, record := range []otlpLogRecord{receiptRecord, eventRecord} {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			t.Fatalf("marshal record: %v", err)
+		}
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(encoded, &members); err != nil {
+			t.Fatalf("unmarshal record: %v", err)
+		}
+		got := make([]string, 0, len(members))
+		for member := range members {
+			got = append(got, member)
+		}
+		sort.Strings(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("record members = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestOTLPSinkSeverityPerDecision(t *testing.T) {
-	cases := map[Decision]string{
-		DecisionAllow: "INFO",
-		DecisionWarn:  "WARN",
-		DecisionDeny:  "ERROR",
+	type severity struct {
+		text   string
+		number int
+	}
+	cases := map[Decision]severity{
+		DecisionAllow: {"INFO", 9},
+		DecisionWarn:  {"WARN", 13},
+		DecisionDeny:  {"ERROR", 17},
 	}
 	for decision, want := range cases {
 		record, err := receiptLogRecord(otlpTestReceipt(t, decision))
 		if err != nil {
 			t.Fatalf("receiptLogRecord: %v", err)
 		}
-		if record.SeverityText != want {
-			t.Fatalf("%s severity = %q, want %q", decision, record.SeverityText, want)
+		if record.SeverityText != want.text || record.SeverityNumber != want.number {
+			t.Fatalf("%s severity = %q/%d, want %q/%d",
+				decision, record.SeverityText, record.SeverityNumber, want.text, want.number)
 		}
 	}
 }
@@ -463,15 +516,20 @@ func TestOTLPRecordFallsBackToExportTime(t *testing.T) {
 		t.Fatalf("parse timeUnixNano %q: %v", record.TimeUnixNano, err)
 	}
 	// A record with no time at all is dropped by collectors, so an unreadable
-	// clock falls back to the export time rather than to zero.
+	// clock falls back to the time the sink took the entry rather than to zero.
 	if time.Since(time.Unix(0, nanos)) > time.Minute {
-		t.Fatalf("expected the export time, got %q", record.TimeUnixNano)
+		t.Fatalf("expected the observed time, got %q", record.TimeUnixNano)
+	}
+	if record.TimeUnixNano != record.ObservedTimeUnixNano {
+		t.Fatalf("the fallback is the observed time, got %q and %q",
+			record.TimeUnixNano, record.ObservedTimeUnixNano)
 	}
 }
 
 func TestOTLPSeverityFailsClosed(t *testing.T) {
-	if got := severityOf(Decision("quarantine")); got != "ERROR" {
-		t.Fatalf("an unknown decision is not an INFO, got %q", got)
+	text, number := severityOf(Decision("quarantine"))
+	if text != "ERROR" || number != 17 {
+		t.Fatalf("an unknown decision is not an INFO, got %q/%d", text, number)
 	}
 }
 

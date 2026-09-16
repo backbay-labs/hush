@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-capabilities.v0.schema.json",
+  "title": "HushSpec Capability Registry v0",
+  "description": "Shape of spec/registries/capabilities.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "capabilities"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "summary",
+          "gates",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+            },
+            "uniqueItems": true
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -12,6 +12,7 @@ from hushspec.observer import (
 )
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
+from hushspec.sinks import MultiSink, ReceiptSink
 
 
 
@@ -45,6 +46,16 @@ class EventCollector(EvaluationObserver):
 
     def on_event(self, event):
         self.events.append(event)
+
+
+class FailingSink(ReceiptSink):
+    """Refuses everything it is handed, and says so."""
+
+    def send(self, receipt):
+        raise OSError("no space left on device")
+
+    def record_policy_event(self, event):
+        raise OSError("no space left on device")
 
 
 
@@ -365,6 +376,52 @@ class TestHushGuardObserverIntegration:
     def test_guard_without_observer_works_normally(self):
         guard = HushGuard.from_yaml(ALLOW_POLICY)
         assert guard.check(EvaluationAction(type="tool_call", target="test")) is True
+
+    def test_a_sink_that_refuses_a_receipt_leaves_the_decision_and_raises_sink_error(self):
+        observer = EventCollector()
+        guard = HushGuard.from_yaml(DENY_POLICY, observer=observer, sink=FailingSink())
+        observer.events.clear()
+
+        assert guard.check(EvaluationAction(type="tool_call", target="dangerous_tool")) is False
+        assert guard.check(EvaluationAction(type="tool_call", target="anything")) is False
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 2
+        assert errors[0]["error"] == "no space left on device"
+        assert errors[0]["source"] == "FailingSink"
+        assert errors[0]["timestamp"].endswith("Z")
+
+    def test_a_sink_that_refuses_the_policy_event_raises_sink_error(self):
+        observer = EventCollector()
+        HushGuard.from_yaml(ALLOW_POLICY, observer=observer, sink=FailingSink())
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 1
+        assert errors[0]["error"] == "no space left on device"
+        assert errors[0]["source"] == "FailingSink"
+
+    def test_a_sink_that_refuses_behind_a_multi_sink_names_the_child(self):
+        recorded: list[object] = []
+
+        class Recording(ReceiptSink):
+            def send(self, receipt):
+                recorded.append(receipt)
+
+        observer = EventCollector()
+        guard = HushGuard.from_yaml(
+            DENY_POLICY,
+            observer=observer,
+            sink=MultiSink([FailingSink(), Recording()]),
+        )
+        observer.events.clear()
+
+        assert guard.check(EvaluationAction(type="tool_call", target="dangerous_tool")) is False
+        assert len(recorded) == 1
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 1
+        assert errors[0]["error"] == "sink FailingSink: no space left on device"
+        assert errors[0]["source"] == "MultiSink"
 
 
 

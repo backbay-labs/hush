@@ -1,9 +1,9 @@
 # HushSpec Receipt Log Specification
 
-**Version:** 0.1 (Draft)
-**Status:** Draft
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
-**Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 0.2.0
+**Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 1.0.0
 
 ---
 
@@ -15,7 +15,7 @@ The key words "MUST", "MUST NOT", "SHOULD", and "MAY" are to be interpreted as d
 
 ## 2. Conformance
 
-A writer conforms if every entry it emits validates against `schemas/hushspec-log-entry.v0.schema.json`, links to the previous entry as Section 4 requires, and carries a correct `entry_hash`. A verifier conforms if it accepts every file under `fixtures/log/valid/` and rejects every file under `fixtures/log/invalid/` with the first breaking line identified.
+A writer conforms if every entry it emits validates against `schemas/hushspec-log-entry.v1.schema.json`, links to the previous entry as Section 4 requires, and carries a correct `entry_hash`. A verifier conforms if it accepts every file under `fixtures/log/valid/` and rejects every file under `fixtures/log/invalid/` with the first breaking line identified.
 
 ## 3. File layout
 
@@ -32,22 +32,26 @@ A log is a JSON Lines file: one entry per line, UTF-8, `\n`-terminated. Blank li
 | `receipt` | when `receipt` | A format 0.2 decision receipt, verbatim. |
 | `policy_event` | when `policy_loaded` / `policy_swapped` | Section 6. |
 | `log_started` | when `log_started` | Section 5. |
-| `entry_hash` | yes | `sha256:` over the RFC 8785 canonical form (Canonical Form spec, Section 4; no projection) of the entry with `entry_hash` and `signature` removed. |
-| `signature` | no | A policy-signature envelope (Signing spec, Section 4) whose `content_hash` is this entry's `entry_hash`. |
+| `entry_hash` | yes | `sha256:` over the RFC 8785 canonical form (Canonical Form specification, Section 4; no projection) of the entry with `entry_hash` and `signature` removed. |
+| `signature` | no | A policy-signature envelope (Signing specification, Section 4) whose `content_hash` is this entry's `entry_hash`. |
 
 Because `prev_hash` is inside the hashed content, every entry's hash commits to the entire history before it. Editing any earlier line changes its `entry_hash` and breaks the link the next line declares.
 
+A writer MUST derive `seq` and `prev_hash` from the file's current last entry while it holds the write lock, not from a head cached when it opened the file, so that two writers of the same log never build entries from the same predecessor and fork the chain.
+
+The write lock is a **sentinel file** named by appending `.lock` to the log's path, created with `O_EXCL` so that creating it is acquiring it and removing it is releasing it. Every implementation MUST use this lock, because it is the one mechanism available in every language and on every platform, and a lock one writer cannot see is not a lock. A writer whose platform also offers an advisory lock on an open file (`flock`) SHOULD hold one on the log file as well, taken after the sentinel: the kernel releases it even if the writer dies, and it excludes a writer that takes only the advisory lock. A writer that cannot acquire the lock within a bounded wait MUST fail the append; it MUST NOT break a sentinel it cannot prove is stale, because two writers appending to one file interleave chains and corrupt both.
+
 ## 5. Rotation
 
-A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.
+A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). `previous_entry_hash` is recorded even when the previous file was empty and the value is therefore the genesis hash: a verifier compares it against the previous file's last hash, and an omitted member is not that hash. A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.
 
 ## 6. Policy-in-effect records
 
-An enforcement point MUST write a `policy_loaded` entry when it starts enforcing a policy and a `policy_swapped` entry when it replaces one (hot reload, panic policy), before any receipt evaluated under the new policy. The `policy_event` carries the same `policy` identity a receipt does (Receipt spec, Section 4.2: content hash, `extends_chain`, `signature` outcome), the `enforcement_mode` in force, the SDK name and version, and the HushSpec version the engine implements. `policy_swapped` also names the `previous_content_hash`. A reader can therefore map every receipt to the exact policy in force by walking back to the nearest policy event.
+An enforcement point MUST write a `policy_loaded` entry when it starts enforcing a policy and a `policy_swapped` entry when it replaces one (hot reload, panic policy), before any receipt evaluated under the new policy. The `policy_event` carries the same `policy` identity a receipt does (Receipt specification, Section 4.2: content hash, `extends_chain`, `signature` outcome), the `enforcement_mode` in force, the SDK name and version, and the HushSpec version the engine implements. `policy_swapped` also names the `previous_content_hash`. A reader can therefore map every receipt to the exact policy in force by walking back to the nearest policy event.
 
 ## 7. Signing
 
-When a writer holds a signing key it SHOULD sign every entry: `signature` is the 0.2 envelope produced over the entry hash exactly as a policy signature is produced over a policy hash (Signing spec, Section 4.2), with `content_hash` set to `entry_hash`. A verifier with a keyring MUST verify every signed entry with the ordered checks of Signing spec Section 6.2 and MUST report a signed entry it cannot verify as a break. A verifier configured to require signatures MUST reject an unsigned entry (reason `entry_unsigned`).
+When a writer holds a signing key it SHOULD sign every entry: `signature` is the 0.2 envelope produced over the entry hash exactly as a policy signature is produced over a policy hash (Signing specification, Section 4.2), with `content_hash` set to `entry_hash`. A verifier with a keyring MUST verify every signed entry with the ordered checks of Signing specification, Section 6.2 and MUST report a signed entry it cannot verify as a break. A verifier configured to require signatures MUST reject an unsigned entry (reason `entry_unsigned`).
 
 ## 8. Verification algorithm
 
@@ -67,6 +71,8 @@ The first failing step identifies the break by file and line. Test vectors: `fix
 
 ## 9. Security considerations
 
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
+
 - **Truncation.** Deleting entries from the end of a log leaves a valid chain. Detecting truncation needs an external anchor: the `entry_hash` a signer published, a receipt's presence in another system, or a `policy_swapped` entry expected on a schedule. Writers SHOULD publish the head hash periodically.
 - **Key custody.** An entry signature proves the writer held the key; it does not prove the clock. Auditors weigh `timestamp` by the receipt's `time_source`.
-- **Locking.** Two writers appending to one file interleave chains and corrupt both. The reference implementation uses a lock file and fails rather than bypasses a lock it cannot acquire.
+- **Locking.** Two writers appending to one file interleave chains and corrupt both. Section 4 defines the lock: a `<path>.lock` sentinel every implementation takes, plus an advisory lock on the log file where the platform has one. A writer that cannot acquire it fails rather than bypasses it, so a sentinel left behind by a writer that died is a condition for an operator to clear, not one a second writer may assume.

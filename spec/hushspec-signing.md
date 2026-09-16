@@ -1,10 +1,10 @@
 # HushSpec Policy Signing Specification
 
-**Version:** 0.2 (Draft)
-**Status:** Draft
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
-**Supersedes:** Signature format 0.1.0 (schemas/hushspec-signature.v0.schema.json as shipped with HushSpec 0.1.x)
-**Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2
+**Supersedes:** Signature format 0.1.0, as shipped with HushSpec 0.1.x
+**Companion to:** HushSpec Core 1.0.0, Canonical Form 1.0.0, Decision Receipts 1.0.0
 
 ---
 
@@ -59,7 +59,7 @@ Signers MUST resolve and validate the policy before signing, using the same reso
 
 ## 4. The envelope
 
-An envelope is a JSON object validating against `schemas/hushspec-signature.v0.schema.json` (0.2). Every member except `signature` is a signed claim.
+An envelope is a JSON object validating against `schemas/hushspec-signature.v1.schema.json` (0.2). Every member except `signature` is a signed claim.
 
 | Member | Required | Value |
 |---|---|---|
@@ -116,7 +116,7 @@ The DER SubjectPublicKeyInfo for an Ed25519 key is the 44-byte structure `30 2a 
 
 ### 5.3 Keyring
 
-A verifier's trust is a **keyring**: a JSON document validating against `schemas/hushspec-keyring.v0.schema.json`.
+A verifier's trust is a **keyring**: a JSON document validating against `schemas/hushspec-keyring.v1.schema.json`.
 
 ```json
 {
@@ -153,7 +153,7 @@ A verifier receives: the policy (unresolved, as loaded), the envelope, a keyring
 
 Verifiers MUST perform these checks in this order and stop at the first failure, reporting its reason code:
 
-1. **Envelope shape.** The envelope validates against the schema. Else `malformed_envelope`.
+1. **Envelope shape.** The envelope validates against the schema, with the `format_version` and `algorithm` value constraints deferred to checks 2 and 3 so that those reason codes remain reachable. Else `malformed_envelope`.
 2. **Format.** `format_version` is `"0.2"`. Else `unsupported_format_version`.
 3. **Algorithm.** `algorithm` is `"ed25519"`. Else `unsupported_algorithm`.
 4. **Key lookup.** A keyring entry has `key_id` equal to the envelope's, and its recomputed id matches. Else `unknown_key_id`.
@@ -260,12 +260,16 @@ Signatures were produced with the reference canonicalizer for the signing input 
 | `edited-envelope` | `signature_mismatch` |
 | `retired-key` | `key_retired` |
 | `revoked-key` | `key_revoked` |
+| `impossible-signed-at-date` | `malformed_envelope` |
+| `leap-second-signed-at` | `malformed_envelope` |
 
 Every SDK runs these vectors; a divergence between engines is a conformance failure.
 
 ---
 
 ## 10. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **Key compromise.** Revoke the key in every keyring (`revoked: true`), re-sign affected policies with a new key, and rotate. Because `key_id` is inside the signed envelope, an attacker cannot re-point an existing signature at a different key.
 - **Replay.** A valid old envelope for an older policy version remains cryptographically valid forever. Rollback protection (`policy_version`, check 10) and expiry (`expires_at`) are the two defenses; deployments that need either MUST populate the corresponding fields.

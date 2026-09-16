@@ -3,7 +3,7 @@
 Normative vectors for [`spec/hushspec-receipt.md`](../../spec/hushspec-receipt.md), format 0.2.
 
 - `valid/*.json` MUST be accepted by a conformant receipt parser and validate against the 0.2
-  schema (`schemas/hushspec-receipt.v0.schema.json`).
+  schema (`schemas/hushspec-receipt.v1.schema.json`).
 - `invalid/*.json` MUST be rejected. Each file name says which rule it breaks; section 8 of the
   spec lists them.
 
@@ -12,7 +12,7 @@ Validate with any JSON Schema 2020-12 validator, for example:
 ```bash
 python3 -c "
 import json, glob, jsonschema
-s = json.load(open('schemas/hushspec-receipt.v0.schema.json'))
+s = json.load(open('schemas/hushspec-receipt.v1.schema.json'))
 v = jsonschema.Draft202012Validator(s)
 for f in glob.glob('fixtures/receipts/valid/*.json'): v.validate(json.load(open(f)))
 for f in glob.glob('fixtures/receipts/invalid/*.json'): assert not v.is_valid(json.load(open(f))), f

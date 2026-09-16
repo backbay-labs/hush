@@ -32,7 +32,7 @@
       "rule_block": "secret_patterns",
       "outcome": "skip",
       "evaluated": false,
-      "reason": "no secret_patterns rule configured"
+      "reason": "content not supplied; secret_patterns not consulted"
     }
   ],
   "enforcement": {

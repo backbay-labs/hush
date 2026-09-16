@@ -1,0 +1,44 @@
+# HushSpec media-type registry
+#
+# Normative companion to spec/hushspec-core.md Section 11 and
+# spec/hushspec-grammars.md Section 12. Lists the media types the family
+# defines for its documents and evidence formats, with the file-name
+# conventions tooling uses. Registration with IANA is a future step; until
+# then the `vnd.` tree is used.
+#
+# Status: closed.
+#
+# Schema: schemas/hushspec-registry-media-types.v0.schema.json
+registry: media-types
+registry_version: "1.0.0"
+status: closed
+
+entries:
+  - id: application/vnd.hushspec+yaml
+    carries: A HushSpec policy document
+    extensions: [".yaml", ".yml"]
+    spec: core 2
+  - id: application/vnd.hushspec+json
+    carries: A HushSpec policy document in its JSON form, or a canonical form
+    extensions: [".json"]
+    spec: canonical 2.2
+  - id: application/vnd.hushspec.receipt+json
+    carries: One decision receipt
+    extensions: [".receipt.json"]
+    spec: receipt 3
+  - id: application/vnd.hushspec.log+jsonl
+    carries: A hash-linked receipt log, one entry per line
+    extensions: [".jsonl"]
+    spec: log 3
+  - id: application/vnd.hushspec.signature+json
+    carries: A detached policy signature envelope
+    extensions: [".sig"]
+    spec: signing 7.1
+  - id: application/vnd.hushspec.keyring+json
+    carries: A trusted keyring
+    extensions: [".keyring.json"]
+    spec: signing 5.3
+  - id: application/vnd.hushspec.bundle+json
+    carries: A policy bundle attestation
+    extensions: [".bundle.json"]
+    spec: bundle 3

@@ -1,6 +1,6 @@
 # Decision Receipts
 
-The full normative specification is at [`spec/hushspec-receipt.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-receipt.md). The format 0.2 schema is [`schemas/hushspec-receipt.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-receipt.v0.schema.json); the Rust SDK emits it, and `fixtures/receipts/expected/` holds the receipts every SDK must reproduce.
+The full normative specification is at [`spec/hushspec-receipt.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-receipt.md). The format 0.2 schema is [`schemas/hushspec-receipt.v1.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-receipt.v1.schema.json); the Rust SDK emits it, and `fixtures/receipts/expected/` holds the receipts every SDK must reproduce.
 
 A receipt is the unit of compliance evidence: one JSON object per evaluation that records
 
@@ -12,6 +12,6 @@ A receipt is the unit of compliance evidence: one JSON object per evaluation tha
 - **what the runtime did** with the decision (`enforcement`: enforce or monitor, allowed, confirmed, blocked, would_block);
 - **when**, at millisecond precision, with a `time_source` that says how much to trust the clock.
 
-Receipts have a canonical form and a hash of their own, so a log can chain them and a signer can sign them. Format 0.2 replaces the 0.1 receipts the SDKs currently emit; the migration table in the spec lists every change.
+Receipts have a canonical form and a hash of their own, so a log can chain them and a signer can sign them.
 
 Vectors: `fixtures/receipts/valid/` must be accepted, `fixtures/receipts/invalid/` must be rejected.

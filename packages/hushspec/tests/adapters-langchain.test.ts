@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalizeValue } from '../src/canonical.js';
 import { HushGuard, HushSpecDenied } from '../src/middleware.js';
+import { utf8ByteLength } from '../src/utf8.js';
 import {
   createLangChainCallbackHandler,
   createLangChainGuard,
@@ -73,7 +75,7 @@ describe('mapLangChainToolCall', () => {
     expect(mapLangChainToolCall('read_file', '/etc/hosts')).toEqual({
       type: 'file_read',
       target: '/etc/hosts',
-      args_size: '/etc/hosts'.length,
+      args_size: utf8ByteLength('/etc/hosts'),
     });
     expect(mapLangChainToolCall('bash', 'ls -la').target).toBe('ls -la');
     expect(mapLangChainToolCall('fetch', 'https://api.example.com/x').target).toBe(
@@ -95,7 +97,7 @@ describe('mapLangChainToolCall', () => {
     const action = mapLangChainToolCall('search', { query: 'weather' });
     expect(action.type).toBe('tool_call');
     expect(action.target).toBe('search');
-    expect(action.args_size).toBe(JSON.stringify({ query: 'weather' }).length);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue({ query: 'weather' })));
   });
 });
 

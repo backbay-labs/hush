@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:08ec6a283867cf38e0321a0e38978d1708423bca2342d77afe171574f8f5d7ea"
+  },
+  "action": {
+    "type": "shell_command",
+    "target": "rm -rf /tmp/x",
+    "context": {
+      "counters": {
+        "shell_calls": 5
+      }
+    }
+  },
+  "decision": "allow",
+  "rule_trace": [
+    {
+      "rule_block": "shell_commands",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "when condition is false"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

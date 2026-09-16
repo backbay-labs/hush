@@ -84,7 +84,7 @@ pub struct VerifyArgs {
     #[arg(short, long, conflicts_with = "keyring", value_name = "PATH")]
     key: Option<PathBuf>,
 
-    /// Trusted keyring JSON (hushspec-keyring.v0.schema.json)
+    /// Trusted keyring JSON (hushspec-keyring.v1.schema.json)
     #[arg(long, value_name = "PATH")]
     keyring: Option<PathBuf>,
 
@@ -126,10 +126,6 @@ pub fn run(args: BundleArgs) -> i32 {
         BundleCommand::Inspect(args) => inspect(args),
     }
 }
-
-// --------------------------------------------------------------------------
-// create
-// --------------------------------------------------------------------------
 
 fn create(args: CreateArgs) -> i32 {
     // The verify-on-load flags `eval`, `explain`, and `resolve` share, minus
@@ -310,10 +306,6 @@ fn report_create(statement: &Statement, envelope: &DsseEnvelope, out: &Path, for
     }
 }
 
-// --------------------------------------------------------------------------
-// verify
-// --------------------------------------------------------------------------
-
 fn verify(args: VerifyArgs) -> i32 {
     if !args.bundle.exists() {
         eprintln!(
@@ -358,17 +350,17 @@ fn verify(args: VerifyArgs) -> i32 {
     };
 
     // Check 4's input: the caller's own resolution of the policy file. A
-    // policy that will not resolve is a `policy_mismatch`, not a crash --
-    // there is nothing to compare.
+    // policy that will not resolve -- because it is absent, or because the
+    // chain will not merge -- is a `policy_mismatch` (bundle spec 5.2): there
+    // is nothing to compare the bundle against.
     let resolution = match args.policy.as_deref() {
         Some(reference) => {
             match crate::cmd_resolve::load_with(reference, &hushspec::ResolveOptions::default()) {
                 Ok(resolution) => Some(resolution),
-                Err(crate::cmd_resolve::LoadError::NotFound(message)) => {
-                    eprintln!("{} {message}", "error:".red());
-                    return 2;
-                }
-                Err(crate::cmd_resolve::LoadError::Failed(message)) => {
+                Err(
+                    crate::cmd_resolve::LoadError::NotFound(message)
+                    | crate::cmd_resolve::LoadError::Failed(message),
+                ) => {
                     report_failure(
                         &BundleVerifyError {
                             reason: hushspec::bundle::BundleReason::PolicyMismatch,
@@ -492,10 +484,6 @@ fn report_failure(error: &BundleVerifyError, format: OutputFormat) {
     );
     eprintln!("  {}", error.detail);
 }
-
-// --------------------------------------------------------------------------
-// inspect
-// --------------------------------------------------------------------------
 
 fn inspect(args: InspectArgs) -> i32 {
     let text = match std::fs::read_to_string(&args.bundle) {

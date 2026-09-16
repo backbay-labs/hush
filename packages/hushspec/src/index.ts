@@ -132,6 +132,10 @@ export {
 } from './resolve.js';
 export {
   verifyBundle,
+  createBundle,
+  buildBundleStatement,
+  bundleStatementBytes,
+  bundleToJson,
   parseBundle,
   bundleStatement,
   pae,
@@ -141,6 +145,8 @@ export {
   BUNDLE_PAYLOAD_TYPE,
   BUNDLE_STATEMENT_TYPE,
   BUNDLE_PREDICATE_TYPE,
+  BUNDLE_RESOLVER_TOOL,
+  type CreateBundleOptions,
   type DsseEnvelope,
   type DsseSignature,
   type BundleStatement,
@@ -160,7 +166,15 @@ export {
   createHttpLoader,
   createSyncHttpLoader,
   fetchSignature,
+  httpSignatureLocator,
+  isBlockedAddress,
+  resolveTarget,
+  CLOUD_METADATA_ADDRESSES,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_READ_TIMEOUT_MS,
+  DEFAULT_MAX_SIZE,
   type HttpLoaderConfig,
+  type HttpTarget,
 } from './http-loader.js';
 export {
   compilePolicy,
@@ -383,5 +397,6 @@ export {
   type PolicyLoadedEvent,
   type PolicyLoadFailedEvent,
   type PolicyReloadedEvent,
+  type SinkErrorEvent,
   type ObserverEvent,
 } from './observer.js';

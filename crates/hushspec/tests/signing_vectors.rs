@@ -169,8 +169,8 @@ fn every_vector_returns_its_expected_outcome() {
     );
     assert_eq!(
         manifest.cases.len(),
-        16,
-        "signing spec 9 publishes 16 vectors"
+        18,
+        "signing spec 9 publishes 18 vectors"
     );
 }
 
@@ -284,7 +284,7 @@ fn write_policy(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 fn envelope_schema() -> jsonschema::JSONSchema {
-    let raw = std::fs::read_to_string(schemas().join("hushspec-signature.v0.schema.json"))
+    let raw = std::fs::read_to_string(schemas().join("hushspec-signature.v1.schema.json"))
         .expect("the signature schema is published");
     let document: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
     jsonschema::JSONSchema::options()

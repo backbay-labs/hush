@@ -107,18 +107,20 @@ import { truncateUtf8 } from './utf8.js';
 // ---------------------------------------------------------------------------
 
 /**
- * A policy could not be compiled: a pattern outside the HushSpec regex profile
- * (core spec 3.14.3).
+ * A document could not be compiled: it still declares `extends`, or it carries
+ * a pattern outside the HushSpec regex profile (core spec 3.14.3).
  *
  * {@link compilePolicy} raises this rather than handing back a policy that
  * would deny at evaluation time with the same message -- an operator who
  * compiles ahead of time learns about a broken pattern before an action does.
  * The non-throwing form ({@link compilePolicy} with `strict: false`, which is
  * what the free `evaluate()` functions and `HushGuard` use) keeps the
- * fail-closed evaluation-time deny instead, so those paths are unchanged.
+ * fail-closed evaluation-time deny instead, so those paths are unchanged. An
+ * unresolved document is refused either way: core spec 2.3 forbids evaluating
+ * one, whatever the caller asked for.
  */
 export class CompileError extends Error {
-  /** The `matched_rule` path of the offending pattern. */
+  /** The document path the refusal is about: `extends`, or a pattern's path. */
   readonly path: string;
 
   constructor(path: string, detail: string) {
@@ -500,8 +502,21 @@ function blockDeny(matchedRule: string, reason: string): BlockDecision {
   return { decision: 'deny', matched_rule: matchedRule, reason };
 }
 
-/** Why an applicable block was not evaluated. */
-type InactiveReason = 'absent' | 'disabled' | 'condition_false' | 'out_of_band_condition_false';
+/**
+ * Why an applicable block was not evaluated.
+ *
+ * A configured block that the action gave nothing to work on is distinguished
+ * from one the document never declared: reading `no secret_patterns rule
+ * configured` off a trace whose policy does configure the block would misread
+ * the receipt as evidence that the scan was never asked for.
+ */
+type InactiveReason =
+  | 'absent'
+  | 'disabled'
+  | 'condition_false'
+  | 'out_of_band_condition_false'
+  | 'content_not_supplied'
+  | 'target_not_a_channel';
 
 function inactiveReasonText(reason: InactiveReason, block: string): string {
   switch (reason) {
@@ -509,6 +524,9 @@ function inactiveReasonText(reason: InactiveReason, block: string): string {
     case 'disabled': return 'rule disabled';
     case 'condition_false': return 'when condition is false';
     case 'out_of_band_condition_false': return 'out-of-band condition is false';
+    case 'content_not_supplied': return `content not supplied; ${block} not consulted`;
+    case 'target_not_a_channel':
+      return `target is not a remote desktop channel; ${block} not consulted`;
   }
 }
 
@@ -520,6 +538,8 @@ const ABSENT: Inactive = { inactive: 'absent' };
 const DISABLED: Inactive = { inactive: 'disabled' };
 const CONDITION_FALSE: Inactive = { inactive: 'condition_false' };
 const OUT_OF_BAND_FALSE: Inactive = { inactive: 'out_of_band_condition_false' };
+const CONTENT_NOT_SUPPLIED: Inactive = { inactive: 'content_not_supplied' };
+const TARGET_NOT_A_CHANNEL: Inactive = { inactive: 'target_not_a_channel' };
 
 function isInactive(value: BlockDecision | Inactive): value is Inactive {
   return (value as Inactive).inactive !== undefined;
@@ -573,7 +593,21 @@ export interface CompileOptions {
  * @throws {CompileError}
  */
 export function compilePolicy(spec: HushSpec, options?: CompileOptions): CompiledPolicy {
+  refuseUnresolved(spec);
   return new CompiledPolicy(spec, undefined, options?.strict !== false);
+}
+
+/**
+ * An engine MUST refuse to evaluate a document that still declares `extends`
+ * (core spec 2.3): its rules are not the rules that would be in force, and
+ * every block its base contributes would silently be missing.
+ */
+function refuseUnresolved(spec: HushSpec): void {
+  if (spec.extends == null) return;
+  throw new CompileError(
+    'extends',
+    `policy still declares 'extends: ${spec.extends}'; resolve the chain before compiling it`,
+  );
 }
 
 /**
@@ -583,6 +617,7 @@ export function compilePolicy(spec: HushSpec, options?: CompileOptions): Compile
  * from the document.
  */
 export function compileResolution(resolution: Resolution, options?: CompileOptions): CompiledPolicy {
+  refuseUnresolved(resolution.spec);
   return new CompiledPolicy(resolution.spec, resolution, options?.strict !== false);
 }
 
@@ -1282,7 +1317,7 @@ class Evaluation {
         if (rule == null) return ABSENT;
         const pathBearing = action.type === 'file_write' || action.type === 'patch_apply';
         // egress and tool_call are scanned only when they carry content.
-        if (!pathBearing && content == null) return ABSENT;
+        if (!pathBearing && content == null) return CONTENT_NOT_SUPPLIED;
         const inactive = this.activity(block, rule);
         if (inactive) return inactive;
         const skipPath = pathBearing ? normalizedPath : undefined;
@@ -1335,7 +1370,7 @@ class Evaluation {
         if (rule == null) return ABSENT;
         const inactive = this.activity(block, rule);
         if (inactive) return inactive;
-        return evaluateRemoteDesktopChannels(rule, action.target ?? '') ?? ABSENT;
+        return evaluateRemoteDesktopChannels(rule, action.target ?? '') ?? TARGET_NOT_A_CHANNEL;
       }
       case 'input_injection': {
         const rule = rules.input_injection;
@@ -1367,9 +1402,6 @@ class Evaluation {
     if (posture == null) return undefined;
     const compiled = this.posture;
     if (compiled == null) return undefined;
-    const capability = REQUIRED_CAPABILITY.get(this.action.type);
-    if (capability == null) return undefined;
-
     const currentState = compiled.states.get(posture.current);
     if (currentState == null) {
       const rule = `extensions.posture.states.${posture.current}`;
@@ -1377,6 +1409,11 @@ class Evaluation {
       this.record('posture_capability', 'deny', rule, reason, true);
       return blockDeny(rule, reason);
     }
+    // The state is looked up before the capability table is consulted, so an
+    // unknown state denies even the action types the table does not gate
+    // (posture spec 3.3).
+    const capability = REQUIRED_CAPABILITY.get(this.action.type);
+    if (capability == null) return undefined;
 
     if (currentState.capabilities.has(capability)) {
       this.record('posture_capability', 'allow', undefined, 'posture capabilities satisfied', true);

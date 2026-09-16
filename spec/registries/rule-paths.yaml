@@ -1,0 +1,86 @@
+# HushSpec rule-path registry
+#
+# Normative companion to spec/hushspec-receipt.md Section 4.3 and
+# spec/hushspec-grammars.md Section 5. Lists the closed set of `rule_block`
+# identifiers a receipt's rule trace may carry, and the reserved `matched_rule`
+# values that name engine stages rather than document paths.
+#
+# Status: closed. A receipt naming any other `rule_block` is invalid; a
+# `matched_rule` that is not a document path must be one of the reserved
+# values.
+#
+# Schema: schemas/hushspec-registry-rule-paths.v0.schema.json
+registry: rule-paths
+registry_version: "1.0.0"
+status: closed
+
+entries:
+  # Rule blocks (core 3): the trace entry's rule_block is the block's name.
+  - id: forbidden_paths
+    kind: rule_block
+    spec: core 3.1
+  - id: path_allowlist
+    kind: rule_block
+    spec: core 3.2
+  - id: egress
+    kind: rule_block
+    spec: core 3.3
+  - id: secret_patterns
+    kind: rule_block
+    spec: core 3.4
+  - id: patch_integrity
+    kind: rule_block
+    spec: core 3.5
+  - id: shell_commands
+    kind: rule_block
+    spec: core 3.6
+  - id: tool_access
+    kind: rule_block
+    spec: core 3.7
+  - id: computer_use
+    kind: rule_block
+    spec: core 3.8
+  - id: remote_desktop_channels
+    kind: rule_block
+    spec: core 3.9
+  - id: input_injection
+    kind: rule_block
+    spec: core 3.10
+  - id: browser_automation
+    kind: rule_block
+    spec: core 3.11
+  - id: code_execution
+    kind: rule_block
+    spec: core 3.12
+  # Engine stages (core 6.1 step 1) that precede rule-block evaluation.
+  - id: panic
+    kind: engine_stage
+    matched_rule: __hushspec_panic__
+    spec: core 6.3
+  - id: unknown_action_type
+    kind: engine_stage
+    matched_rule: __unknown_action_type__
+    spec: core 5
+  - id: origin_profile
+    kind: engine_stage
+    spec: origins 4
+  - id: posture_capability
+    kind: engine_stage
+    spec: posture 3
+  - id: default
+    kind: engine_stage
+    summary: The trace entry for an action no block decided, recording the default allow
+    spec: core 6.1
+  # Reserved matched_rule values that are not document paths.
+  - id: __hushspec_policy_unverified__
+    kind: reserved_matched_rule
+    summary: The enforcement point refused its policy after signature verification failed
+    spec: signing 6.5
+  - id: __hushspec_policy_provider__
+    kind: reserved_matched_rule
+    summary: The enforcement point's policy provider could not serve a policy to evaluate against
+    spec: core 1.2
+  - id: detection
+    kind: reserved_matched_rule
+    summary: A decision produced by the detection pipeline
+    spec: detection 9

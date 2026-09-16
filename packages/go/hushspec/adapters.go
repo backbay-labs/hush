@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -24,7 +23,7 @@ import (
 // revision, so the suffix is stripped before the name is matched.
 var datedToolSuffix = regexp.MustCompile(`_20[0-9]{6}$`)
 
-// MapAnthropicToolUse maps a Claude `tool_use` block onto an action.
+// MapClaudeToolToAction maps a Claude `tool_use` block onto an action.
 //
 // Recognized: `bash` and `terminal` (shell_command), the text editor tools
 // (file_read for `view`, file_write otherwise), `computer` (computer_use), and
@@ -32,7 +31,7 @@ var datedToolSuffix = regexp.MustCompile(`_20[0-9]{6}$`)
 // `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
 // policy names the tool rather than the transport. Everything else is a
 // `tool_call` carrying the serialized size of its input.
-func MapAnthropicToolUse(name string, input json.RawMessage) EvaluationAction {
+func MapClaudeToolToAction(name string, input json.RawMessage) EvaluationAction {
 	fields, argsSize := decodeToolArguments(input)
 
 	switch datedToolSuffix.ReplaceAllString(name, "") {
@@ -77,12 +76,19 @@ func MapAnthropicToolUse(name string, input json.RawMessage) EvaluationAction {
 //
 // Function names are defined by whoever wrote the tool schema, so there is no
 // protocol-fixed vocabulary to recognize: every call is a `tool_call` against
-// the function name, carrying the byte size of the arguments JSON as the
-// runtime sent it (which is what `tool_access.max_args_size` bounds). A
-// runtime whose functions do have fixed meanings should map them itself, or
-// route them through [MapMCPToolCall].
+// the function name, carrying the canonical size of the arguments JSON (which
+// is what `tool_access.max_args_size` bounds). A runtime whose functions do
+// have fixed meanings should map them itself, or route them through
+// [MapMCPToolCall].
 func MapOpenAIToolCall(name string, arguments string) EvaluationAction {
+	// The model hands these over already serialized, so the string is parsed
+	// only to re-measure it canonically; arguments that are not JSON at all
+	// are measured as received rather than left unmeasured, because an
+	// unmeasured call is one `max_args_size` cannot bound.
 	size := len(arguments)
+	if canonical, ok := canonicalArgsSize(json.RawMessage(arguments)); ok {
+		size = canonical
+	}
 	return EvaluationAction{Type: "tool_call", Target: name, ArgsSize: &size}
 }
 
@@ -110,47 +116,96 @@ func MapMCPToolCall(name string, arguments map[string]any) EvaluationAction {
 
 	action := EvaluationAction{Type: "tool_call", Target: name}
 	if arguments != nil {
-		if encoded, err := json.Marshal(arguments); err == nil {
-			size := len(encoded)
+		// The caller passes a live Go map, so it goes through JSON first and
+		// is then measured canonically: `max_args_size` must mean the same
+		// number here as it does behind an adapter handed raw bytes.
+		if size, ok := canonicalGoValueArgsSize(arguments); ok {
 			action.ArgsSize = &size
 		}
 	}
 	return action
 }
 
-// ExtractDomain is the host of a URL, or the string unchanged when it is not
-// one. `egress` rules match hosts, and a malformed URL must not silently
-// become a host that matches an allowlist pattern.
+// ExtractDomain is the host a URL names, reduced as the evaluator reduces an
+// egress target (core spec 3.14.2), or the string unchanged when it names no
+// host. Reducing here with the evaluator's own algorithm keeps a URL a browser
+// would read one way from being read another way by a URL parser with
+// different delimiter rules, and the raw fallback keeps a malformed URL from
+// silently becoming a host that matches an allowlist pattern.
 func ExtractDomain(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Hostname() == "" {
-		return rawURL
+	if host := NormalizeHost(rawURL); host != nil {
+		return *host
 	}
-	return parsed.Hostname()
+	return rawURL
 }
 
-// decodeToolArguments decodes a tool input object and measures its serialized
+// decodeToolArguments decodes a tool input object and measures its canonical
 // size, which is what `tool_access.max_args_size` bounds.
 //
-// The size is measured over the compact re-encoding rather than the bytes as
-// received, so the same call measured through any SDK reports the same number
-// whatever whitespace the transport inserted. Input that is not a JSON object
-// is measured as received and decodes to no fields -- a target of "" then
-// matches no allowlist entry, which is the fail-closed reading.
+// Input that is not a JSON object decodes to no fields but is still measured
+// -- a target of "" then matches no allowlist entry, which is the fail-closed
+// reading. Input that is not JSON at all is measured as received, because an
+// unmeasured call is one `max_args_size` cannot bound.
 func decodeToolArguments(input json.RawMessage) (map[string]any, *int) {
 	if len(input) == 0 {
 		return nil, nil
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(input, &fields); err != nil {
+	var decoded any
+	if err := json.Unmarshal(input, &decoded); err != nil {
 		size := len(input)
 		return nil, &size
 	}
 	size := len(input)
-	if encoded, err := json.Marshal(fields); err == nil {
-		size = len(encoded)
+	if canonical, ok := canonicalJSONSize(decoded); ok {
+		size = canonical
 	}
+	fields, _ := decoded.(map[string]any)
 	return fields, &size
+}
+
+// canonicalArgsSize measures already-serialized arguments as core spec 3.7
+// requires, reporting false when they are not JSON.
+func canonicalArgsSize(raw json.RawMessage) (int, bool) {
+	if len(raw) == 0 {
+		return 0, false
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return 0, false
+	}
+	return canonicalJSONSize(decoded)
+}
+
+// canonicalGoValueArgsSize measures a caller's live Go value by rendering it
+// as the JSON tree a decoder would see first, so an `int`, a struct or a typed
+// slice is measured as the JSON it serializes to rather than refused.
+func canonicalGoValueArgsSize(value any) (int, bool) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return 0, false
+	}
+	return canonicalArgsSize(encoded)
+}
+
+// canonicalJSONSize is `args_size` as core spec 3.7 defines it: the length in
+// bytes of the UTF-8 encoding of the arguments serialized in the canonical
+// JSON form of spec/hushspec-canonical.md section 4 (RFC 8785). Measuring the
+// canonical form rather than the bytes as received is what makes the number
+// portable -- the same call reports the same size whatever whitespace, member
+// order, or `\uXXXX` escaping the transport chose -- so one `max_args_size`
+// bounds the same payload behind every adapter and in every SDK. Non-ASCII
+// text is measured in UTF-8 bytes, never in UTF-16 code units or in the
+// characters of an escaped form.
+//
+// value must be a decoded JSON tree; false means it has no canonical form.
+func canonicalJSONSize(value any) (int, bool) {
+	canonical, err := canonicalJSONValue(value)
+	if err != nil {
+		return 0, false
+	}
+	// Go string length is the UTF-8 byte count, which is the unit the
+	// specification names.
+	return len(canonical), true
 }
 
 func stringField(fields map[string]any, key string) string {
@@ -201,9 +256,8 @@ type ToolHandler[T any] func(ctx context.Context, name string, arguments T) (any
 // the action may proceed. A refused call returns a [ToolDeniedError] and the
 // handler is never invoked.
 //
-// It is stricter than [Guard.Check] in one way: a decision the guard could not
-// record (a sink that failed) also stops the call. A tool whose decision left
-// no evidence is not a tool that was allowed.
+// An error from [Guard.Check] -- a cancelled context, an action the guard
+// could not take -- stops the call too, the same way a denial does.
 func GuardedToolHandler[T any](
 	guard *Guard,
 	mapper ToolActionMapper[T],
@@ -229,13 +283,14 @@ func GuardedToolHandler[T any](
 	}
 }
 
-// GuardedAnthropicToolHandler guards a Claude tool handler with
-// [MapAnthropicToolUse].
-func GuardedAnthropicToolHandler(
+// CreateSecureToolHandler guards a Claude tool handler with
+// [MapClaudeToolToAction]. The name is the one the other SDKs publish for the
+// same thing.
+func CreateSecureToolHandler(
 	guard *Guard,
 	next ToolHandler[json.RawMessage],
 ) ToolHandler[json.RawMessage] {
-	return GuardedToolHandler(guard, MapAnthropicToolUse, next)
+	return GuardedToolHandler(guard, MapClaudeToolToAction, next)
 }
 
 // GuardedOpenAIToolHandler guards an OpenAI function handler with

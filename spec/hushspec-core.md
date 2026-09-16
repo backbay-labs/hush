@@ -1,8 +1,8 @@
 # HushSpec Core Specification
 
-**Version:** 0.2.0 (Draft)
-**Status:** Draft
-**Date:** 2026-09-14
+**Version:** 1.0.0
+**Status:** Stable
+**Date:** 2026-09-15
 **Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of changes.
 
 ---
@@ -35,7 +35,7 @@ A HushSpec document is a YAML file (see Section 2.4 for the YAML profile) with t
 | Field            | Type   | Required | Default        | Description                                      |
 |------------------|--------|----------|----------------|--------------------------------------------------|
 | `hushspec`       | string | REQUIRED | --             | Spec version. See Section 2.2.                   |
-| `name`           | string | OPTIONAL | --             | Human-readable policy name.                      |
+| `name`           | string | OPTIONAL | --             | Human-readable policy name. In the 1.0 document format it MUST NOT be empty when present; the frozen 0.x format places no length constraint on it (Section 10; `fixtures/core/invalid/empty-name.yaml`, `fixtures/core/valid/empty-name-0-2.yaml`). |
 | `description`    | string | OPTIONAL | --             | Policy description.                              |
 | `extends`        | string | OPTIONAL | --             | Reference to a base policy.                      |
 | `merge_strategy` | string | OPTIONAL | `"deep_merge"` | One of `replace`, `merge`, `deep_merge`.         |
@@ -51,11 +51,11 @@ Test vectors: `fixtures/core/invalid/unknown-top-level.yaml`, `fixtures/core/inv
 
 ### 2.2 Version Field
 
-The `hushspec` field is the only REQUIRED field. Its value MUST be a string matching the pattern `^0\.\d+\.\d+$` for the v0.x series. Parsers MUST reject documents where this field is absent, is not a string (a YAML float such as `0.1` MUST be rejected), or does not match the expected pattern.
+The `hushspec` field is the only REQUIRED field. Its value MUST be a string of the form `MAJOR.MINOR.PATCH` (Appendix A; Grammars specification, Section 8). Parsers MUST reject documents where this field is absent, is not a string (a YAML float such as `0.1` MUST be rejected), or does not match that form.
 
 **Version acceptance.** An engine that declares support for minor version `X.Y` MUST accept every document whose `hushspec` value is `X.Y.Z` for any non-negative integer `Z`. Patch versions contain only clarifications and errata (see Section 10.1) and never change document validity or evaluation semantics, so rejecting them is a conformance failure. Engines MUST reject documents whose `X.Y` they do not support.
 
-Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/version-patch-accept.yaml`.
+Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/version-patch-accept.yaml`, `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
 
 ### 2.3 Extends Field
 
@@ -142,7 +142,7 @@ Unknown keys within a mapping MUST be rejected (Section 2.1).
 rule-path = root *( "." segment ) [ selector ]
 root      = "rules" / "extensions"
 segment   = 1*( ALPHA / DIGIT / "_" )
-selector  = "[" 1*( %x20-5A / %x5C-7C / %x7E ) "]"   ; any character except "[" and "]"
+selector  = "[" 1*( %x20-5A / %x5C / %x5E-7E ) "]"   ; any character except "[" and "]"
 ```
 
 A selector names one entry of the list or mapping the preceding path resolves to, matching a list entry by its `name` or `id` field and a mapping by its key. Examples: `rules` (the whole rules object), `rules.egress` (one rule block), `rules.egress.allow` (one field), `rules.secret_patterns.patterns[ssn]` (one named secret pattern), `extensions.posture` (an extension subtree).
@@ -167,6 +167,79 @@ Unknown keys within an entry MUST be rejected (Section 2.1). Entries SHOULD run 
 **Changelog entries MUST NOT influence evaluation.** Like control mappings, they are a claim about the policy, never an input to a rule.
 
 Test vectors: `fixtures/core/valid/metadata.yaml`, `fixtures/core/valid/metadata-governance-full.yaml`, `fixtures/core/valid/metadata-controls.yaml`, `fixtures/core/invalid/metadata-bad-date.yaml`, `fixtures/core/invalid/metadata-changelog-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-empty-paths.yaml`, `fixtures/core/invalid/metadata-controls-bad-framework-id.yaml`.
+
+---
+
+### 2.6 Resolution
+
+Resolution turns a document that declares `extends` into the resolved document Section 2.3 requires. This section defines the reference forms every engine MUST accept, the limits every resolver MUST enforce, and the loader an engine MAY provide for remote documents.
+
+#### 2.6.1 Reference Forms
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| Built-in ruleset | `builtin:strict` | A ruleset embedded in the engine. The reference implementation embeds the documents under `rulesets/` and, under `builtin:library/`, the vertical policy library (`builtin:library/healthcare/hipaa-base`). |
+| Bare built-in name | `strict` | Equivalent to `builtin:strict` when the name is a known built-in; otherwise a relative path. |
+| Relative path | `../base.yaml` | Resolved against the directory of the referencing document. A document supplied in memory has no directory; a relative reference from it resolves against the working directory or is refused, as the engine documents. |
+| Absolute path | `/etc/hush/base.yaml` | Loaded from the filesystem as given. |
+| HTTPS URL | `https://policies.example.com/base.yaml` | Fetched with the loader of Section 2.6.4. An engine without an HTTPS loader MUST refuse the reference rather than treat it as a path. |
+
+Any form MAY carry a digest pin fragment (Section 2.3). The `builtin:` prefix is stripped exactly once: `builtin:builtin:strict` names nothing. `http://` references MUST be refused.
+
+The source recorded for a document in receipts and resolution results is the reference as the loader saw it (`builtin:strict`, the path, the URL); a document supplied in memory records the source `memory`.
+
+#### 2.6.2 Chain Walk and Limits
+
+A resolver walks the chain from the leaf to the root, loading each reference, then merges from the root back down (Section 4.2). It MUST:
+
+1. Detect a cycle (a reference naming a document already on the chain) and reject the resolution, reporting the cycle.
+2. Reject a chain of more than 32 `extends` hops: a leaf with 32 base documents is the longest chain that resolves.
+3. Check every digest pin and reject on mismatch, whether or not signatures are required.
+4. Verify signatures when required (Signing specification, Section 6.5) and refuse to produce a resolved document for a chain that fails verification.
+5. Fail closed on any loader error: an unreadable file, a network failure, an unparseable document, or an unknown built-in name MUST refuse the resolution. A resolver MUST NOT fall back to evaluating the leaf alone.
+
+#### 2.6.3 Loader Composition
+
+The reference implementation's default loader tries, in order: the built-in loader for `builtin:` references and bare names that match a built-in; the HTTPS loader for `https://` references when one is compiled in; and the filesystem loader for everything else. Engines MAY offer additional loaders (a registry, an object store) and MUST document their order and the reference forms each accepts.
+
+#### 2.6.4 HTTPS Loader
+
+A URL in `extends` is a request an attacker partly controls: the URL comes out of a document. An engine that loads documents over the network MUST apply all of the following rules, and every SDK of the reference implementation enforces exactly these.
+
+1. **TLS only.** The scheme MUST be `https`. An `http://` reference MUST be refused outright, never upgraded. Certificate verification MUST be on by default; an option to disable it exists for test harnesses only and MUST be documented as unsafe.
+2. **Host allowlist, checked before DNS.** A loader MAY be configured with the set of hosts it may fetch from. When one is configured, a reference whose host is outside it MUST be refused before the host is resolved. Matching MUST be exact and case-insensitive, never a suffix rule: `evil-example.com` ends in nothing a suffix test would be safe about.
+3. **Address filtering after resolution.** The host MUST be resolved before a connection is opened, and *every* address it resolves to MUST be checked -- one blocked address among several refuses the reference, because a name with one public and one private address is a name that reaches the private one. An address the loader cannot parse MUST be treated as blocked. These networks MUST be refused:
+
+| Network | What it is |
+|---------|------------|
+| `0.0.0.0/8` | "this network", including `0.0.0.0` itself |
+| `10.0.0.0/8` | private (RFC 1918) |
+| `100.64.0.0/10` | carrier-grade NAT (RFC 6598) |
+| `127.0.0.0/8` | loopback |
+| `169.254.0.0/16` | link-local, including the cloud metadata endpoint |
+| `172.16.0.0/12` | private (RFC 1918) |
+| `192.0.0.0/24` | IETF protocol assignments |
+| `192.168.0.0/16` | private (RFC 1918) |
+| `198.18.0.0/15` | benchmarking |
+| `224.0.0.0/4` | multicast |
+| `240.0.0.0/4` | reserved, including the `255.255.255.255` broadcast address |
+| `::/128` | unspecified |
+| `::1/128` | loopback |
+| `fc00::/7` | unique local, including the IPv6 metadata endpoint |
+| `fe80::/10` | link-local |
+| `ff00::/8` | multicast |
+
+4. **IPv4-in-IPv6 unwrapping.** An IPv6 address carrying an IPv4 address in its low 32 bits MUST be unwrapped and judged on the address inside, in both the IPv4-mapped form (`::ffff:127.0.0.1`) and the deprecated IPv4-compatible form (`::7f00:1`, which is `127.0.0.1`). `::` and `::1` are covered by the table and are not unwrapped.
+5. **Address pinning.** The connection MUST go to an address that passed rule 3, not to a name resolved a second time at connect time. The host name MUST still be used for SNI, for certificate validation and in the `Host` header, so a pinned connection is still authenticated against the name the document wrote. This is what closes DNS rebinding between the check and the connection.
+6. **No redirects.** A 3xx response MUST be treated as a failure; a loader MUST NOT follow it, not even to the same host. A redirect moves the request to a location the scheme check, the allowlist and the address check never saw.
+7. **Bounded body.** The response body MUST be capped at the document size limit of Section 2.4; a longer body is a failure. A body of exactly the limit is accepted.
+8. **Bounded time.** Establishing the connection and reading the response MUST have separate budgets, so a server that accepts a connection and then stalls does not inherit the connect timeout's patience. The reference default is 10 seconds for each.
+9. **Revalidation, not staleness.** A loader MAY cache a document by URL against the `ETag` the server returned, and MUST then revalidate it with `If-None-Match`. The server is asked every time: a cached body MAY be used only on a `304 Not Modified`, a `304` answered with no cached body to revalidate MUST be a failure rather than an empty document, and a cached document MUST NOT be served after a failed revalidation.
+10. **The signature sidecar follows the same rules.** A detached envelope at `<url>.sig` (Signing specification, Section 7.1) MUST be fetched under every rule above -- the same allowlist, the same address check and pinning, no redirects, the same caps. A `404` or `410` means the policy is unsigned and is not itself a failure; every other failure is one. A `.sig` URL MUST NOT be able to reach anything the policy URL could not.
+
+Integrity is not the loader's job. A URL is a location, never an identity: digest pins and detached signatures apply to remote documents as to local ones, and they are what makes a remote base trustworthy. The Security Considerations (`hushspec-security.md`, Section 4) discuss the residual risk rules 3 and 5 leave.
+
+Test vectors: `fixtures/core/resolve/`, `fixtures/core/merge/`.
 
 ---
 
@@ -232,7 +305,7 @@ Network egress control by host.
 2. If the host matches any entry in `allow`, the decision is **allow** (`rules.egress.allow`).
 3. Otherwise, the `default` value applies (`rules.egress.default`).
 
-Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
+Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`, `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
 
 ### 3.4 `rules.secret_patterns`
 
@@ -272,6 +345,8 @@ Detect secrets in content before it is written or transmitted.
 `<name>` is the first pattern in document order among those at the highest matched severity. Engines MUST NOT stop at the first match: a later `critical` pattern MUST outrank an earlier `warn` pattern.
 
 Test vectors: `fixtures/core/evaluation/secret-patterns.test.yaml`, `fixtures/core/evaluation/severity-mapping.test.yaml`, `fixtures/core/evaluation/severity-precedence.test.yaml`, `fixtures/core/evaluation/content-scan-egress-tool.test.yaml`.
+
+**Which actions are scanned.** `file_write` and `patch_apply` actions are always scanned, and `skip_paths` applies to their target path. `egress` and `tool_call` actions are scanned only when the action carries `content`; an egress or tool call without content is not a secret-scanning event. Other action types are never scanned by this block.
 
 ### 3.5 `rules.patch_integrity`
 
@@ -332,7 +407,7 @@ Control tool and MCP (Model Context Protocol) invocations.
 **Tool name matching.** Tool names MUST be compared as exact, case-sensitive strings after Unicode NFC normalization of both sides. Glob and regex metacharacters (`*`, `?`, `[`, `{`) have no special meaning in tool names: the entry `danger_*` matches only a tool literally named `danger_*`. Engines MUST NOT apply glob matching to tool names.
 
 **Semantics:** For a given tool invocation:
-1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps.
+1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps. `args_size` is supplied by the enforcement point; the evaluator never sees the arguments themselves. It MUST be the length in bytes of the UTF-8 encoding of the arguments serialized as JSON in the canonical form of the Canonical Form specification, Section 4 (RFC 8785). An enforcement point that receives arguments already serialized as compact JSON MAY measure the bytes it received; it MUST NOT measure a pretty-printed or re-encoded form, and MUST NOT report a count of UTF-16 code units or of escaped characters. The supplied value is what the decision uses and what a receipt records as `action.args_size`.
 2. If the tool name equals any entry in `block`, the decision is **deny** (`rules.tool_access.block`). Block takes precedence.
 3. If the tool name equals any entry in `require_confirmation`, the decision is **warn** (`rules.tool_access.require_confirmation`). Confirmation semantics are engine-specific; see Section 6.
 4. If `allow` is non-empty and the tool name equals an entry, the decision is **allow** (`rules.tool_access.allow`).
@@ -360,7 +435,7 @@ Version 0.1.0 described `guardrail` as permitting engine heuristics on borderlin
 
 Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`) compared as exact strings. This specification does not mandate a fixed set of action identifiers.
 
-Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`, `fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml`.
+Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`.
 
 ### 3.9 `rules.remote_desktop_channels`
 
@@ -455,7 +530,7 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `context`     | object (string -> any)  | Every key is a dot-delimited path into the runtime context; every value must equal the context value at that path. |
 | `all_of`      | array of Condition      | Every sub-condition must be true.                                                           |
 | `any_of`      | array of Condition      | At least one sub-condition must be true. An empty array is treated as absent.               |
-| `not`         | Condition               | The sub-condition must be false.                                                            |
+| `not`         | Condition               | The sub-condition must be false. Unevaluable when the sub-condition is unevaluable.         |
 | `capability`  | string                  | The effective posture state MUST grant this capability. Unevaluable when the policy has no posture extension. |
 | `rate`        | object                  | An engine-supplied counter compared with a threshold. See below.                          |
 
@@ -465,8 +540,18 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 |------------|-----------------|----------|-----------|---------------------------------------------------------------|
 | `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
 | `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
-| `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset `+HH:MM`/`-HH:MM`. |
+| `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset (grammar below).  |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
+
+**Fixed-offset grammar.** A `timezone` that is not an IANA identifier MUST be a fixed offset in exactly one of two shapes, with ASCII digits only:
+
+```abnf
+offset = ("+" / "-") hour [ ":" minute ]
+hour   = ("0" / "1") DIGIT / "2" %x30-33   ; 00-23, always two digits
+minute = %x30-35 DIGIT                     ; 00-59, always two digits
+```
+
+`+05:30` and `-08` conform; `+5`, `+0530`, `+5:0`, and `++5` do not. A `timezone` outside both this grammar and the engine's time-zone database is a parse error.
 
 **Rate condition object.**
 
@@ -478,7 +563,7 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 
 The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation.
 
-**Capability condition.** `capability` names a posture capability (posture spec Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
+**Capability condition.** `capability` names a posture capability (Posture specification, Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
 
 **Identifier grammar.** Capability names and counter names are one or more dot-separated segments, each a lowercase ASCII letter followed by lowercase ASCII letters, digits, or underscores:
 
@@ -489,7 +574,18 @@ segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
 
 The window is half-open: it contains the current local time `t` when `start <= t < end`. When `start > end` the window wraps midnight and contains `t` when `t >= start` or `t < end`; for wrapped windows, a time before `end` counts toward the *previous* calendar day when `days` is checked. When `start == end` the window is the whole day. The current time is the engine's clock converted to `timezone`, or the runtime context's `current_time` when supplied.
 
-**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
+**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string.
+
+**Context comparison.** Only strings, booleans and numbers compare equal; an expected object or `null` never matches. Comparison is type-sensitive -- the number `1` equals neither the string `"1"` nor the boolean `true` -- and numbers compare by exact value with no tolerance, so `0.3` does not match `0.30000000000000004`. Either side MAY be an array:
+
+| Expected | Context value | Matches when                                        |
+|----------|---------------|-----------------------------------------------------|
+| scalar   | scalar        | the two are equal                                   |
+| scalar   | array         | the array contains the expected scalar              |
+| array    | scalar        | the expected array contains the context scalar      |
+| array    | array         | the two arrays share at least one element           |
+
+Equivalently: an expected array matches when at least one of its elements matches the context value under the two scalar rows.
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
@@ -500,15 +596,16 @@ The window is half-open: it contains the current local time `t` when `start <= t
 - has a `rate` object missing `counter`, `threshold`, or `comparison`, a negative `threshold`, or a `comparison` other than `gte` / `lt`;
 - nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep. `capability` and `rate` are leaf predicates and do not add nesting.
 
-**Evaluation (fail-closed toward enforcement).**
+**Evaluation (fail-closed toward enforcement).** A condition evaluates to one of three values: `true`, `false`, or **unevaluable**. A block is inert only when its condition evaluates to `false`; `true` and unevaluable both leave the block active. An unevaluable condition MUST NOT switch a security control off.
 - A `context` key that is absent from the runtime context makes the condition `false`.
-- An engine that cannot resolve the `timezone` at evaluation time (for example because its time-zone database lacks the identifier) MUST treat the block as **active**, not inert: an unresolvable condition MUST NOT switch a security control off.
-- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are **unevaluable** and MUST be treated as held: the block stays active. An unevaluable condition MUST NOT switch a security control off.
+- A `time_window` the engine cannot evaluate -- because its time-zone database lacks the `timezone` identifier, or the runtime context's `current_time` does not parse -- is unevaluable: the block stays active, not inert.
+- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are unevaluable: the block stays active.
+- Unevaluable propagates through the combinators instead of collapsing to a boolean. `not` of an unevaluable condition is unevaluable. `all_of` is `false` when any member is `false`, otherwise unevaluable when any member is unevaluable, otherwise `true`; the fields of one condition object combine the same way. `any_of` is `true` when any member is `true`, otherwise unevaluable when any member is unevaluable, otherwise `false`. A `not` over a missing counter or an absent posture extension therefore leaves the block active rather than switching it off.
 - Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation. Because `capability` depends on the effective posture state, engines resolve posture (and the origins profile it may come from) before evaluating conditions.
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
 
 ### 3.14 Pattern Matching
 
@@ -548,7 +645,7 @@ Test vectors: `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures
 #### 3.14.2 Host Patterns
 
 **Target normalization.** The egress target MAY be a bare host, a `host:port`, or a URL. It MUST be reduced to a host, in order:
-1. If the target contains `://`, parse it as a URL and take the authority; otherwise the whole target is the authority.
+1. If the target contains `://`, the authority is everything after it up to the first `/`, `\`, `?` or `#`; otherwise the whole target, cut at the same characters, is the authority. A backslash ends the authority exactly as a slash does, which is how browsers parse URLs with a special scheme: `http://blocked.example\@allowed.example` names the host `blocked.example`, never `allowed.example`.
 2. Remove any userinfo (`user:pass@`).
 3. If the authority begins with `[`, the host is the bracketed IPv6 literal including the brackets, and anything after the closing `]` (a `:port`) is removed. Otherwise remove a trailing `:` followed by one or more digits.
 4. Remove any path, query, or fragment.
@@ -568,15 +665,17 @@ Patterns undergo steps 5-7 only.
 
 The apex host is never implied by a wildcard; a document that intends to allow `example.com` MUST list it. If the normalized host is an IPv4 literal or a bracketed IPv6 literal, it matches a pattern only when the pattern is character-for-character equal to it; wildcards MUST NOT match IP literals. A target that cannot be reduced to a syntactically valid host MUST be treated as matching nothing (so `default` applies).
 
-Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
+Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`, `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
 
 #### 3.14.3 Regex Profile
 
 Regular expressions in HushSpec documents MUST conform to the **HushSpec regex profile**, a portable subset of RE2 syntax with fixed semantics. Version 0.1.0 said engines SHOULD support "PCRE2-compatible syntax"; that text is withdrawn.
 
-**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )` and non-capturing `(?: )` groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
+**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )`, non-capturing `(?: )`, and named groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
 
-A pattern MUST NOT use: lookahead or lookbehind; backreferences; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; named groups or named references; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
+A named group is written `(?<name>...)` or `(?P<name>...)`; the two spellings are equivalent, and `name` is one or more ASCII letters, digits, and underscores that does not start with a digit. Group names carry no matching semantics in HushSpec: a decision depends only on whether the pattern matched.
+
+A pattern MUST NOT use: lookahead or lookbehind; backreferences, named ones included; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; comment groups `(?#...)`; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); an unescaped `[` inside a bracket class, which excludes POSIX bracket expressions such as `[[:alpha:]]`; a bracket-class range with an endpoint outside the Basic Multilingual Plane; the `{,n}` quantifier, which some engines read as `{0,n}` and others as literal text; or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
 
 **Semantics.** Every engine MUST match with these semantics regardless of its host regex library:
 - The subject is a sequence of Unicode scalar values; `.` and negated classes consume exactly one scalar value.
@@ -613,7 +712,9 @@ Shallow merge at the `rules` level. If the child defines a rule block (e.g., `ru
 **`replace`:**
 The child document entirely replaces the base document. The base document is loaded only to validate that the reference is resolvable; its content is discarded.
 
-Under every strategy, `metadata` follows Section 2.5.
+Under every strategy the child's `metadata` object, when present, replaces the base's `metadata` object as a whole; a child without `metadata` inherits the base's. Members of `metadata` are never merged individually (Section 2.5).
+
+**Extensions by strategy.** Under `merge`, an extension block present in the child (`extensions.posture`, `extensions.origins`, `extensions.detection`) replaces the base's block as a whole. Under `deep_merge`, each companion specification defines the field-level merge of its block (Posture specification Section 7, Origins specification Section 9, Detection specification Section 8); a block absent in the child is inherited unchanged. Under `replace`, the base's extensions are discarded with the rest of the base.
 
 ### 4.2 Merge Order
 
@@ -676,9 +777,41 @@ Evaluation of one action proceeds as follows:
 
 Test vectors: `fixtures/core/evaluation/decision-precedence.test.yaml`, `fixtures/core/evaluation/no-early-return.test.yaml`.
 
-### 6.2 Monitor (Shadow) Enforcement
+### 6.2 Enforcement
 
-Engines MAY provide an explicit, operator-configured monitor mode in which decisions are evaluated and recorded but not enforced (a `deny` does not block execution). Monitor mode is engine configuration, never a property of the HushSpec document. When monitoring, engines MUST compute and record the evaluated decision unchanged, and SHOULD tag emitted receipts and events with the enforcement disposition (see the decision receipt schema's `enforcement` field). Emergency panic mode MUST always enforce, regardless of monitor configuration.
+A policy decision is what the evaluator computed; enforcement is what the enforcement point (an SDK guard, a proxy, a CLI) did with it. The two are recorded separately in a receipt (`decision` and `enforcement`, Receipt specification Sections 4.5 and 4.7). This section defines the enforcement configuration a conformant enforcement point MUST support and the outcomes it MUST record.
+
+**Modes.** An enforcement point runs in one of two modes: `enforce`, in which `deny` blocks the action and `warn` requires confirmation, and `monitor`, in which every decision is computed and recorded but the action proceeds. Mode is engine configuration, never a property of the HushSpec document.
+
+**Per-rule overrides.** An enforcement point MAY override the mode for a rule-path prefix (`rules.egress`, `rules.secret_patterns.patterns`, `extensions.detection`). An override applies to a decision whose `matched_rule` equals the prefix or continues past it at a segment boundary (`.` or `[`); the longest matching prefix wins over the mode. A prefix MUST begin with `rules.` and name a rule block of this specification, or begin with `extensions.` and name an extension module (Section 9); any other prefix MUST be rejected at configuration time. For override matching, the `matched_rule` value `detection` that the detection pipeline reports is treated as `extensions.detection`.
+
+**Monitor mode fails closed.** An enforcement point configured so that monitor mode is reachable, as the mode or through an override, MUST refuse that configuration unless a receipt sink or an observer is attached: a shadow decision nobody records is indistinguishable from no policy.
+
+**Outcomes.** Every enforcement records one of four outcomes:
+
+| Decision | Mode | Outcome |
+|----------|------|---------|
+| `allow` | either | `allowed` |
+| `warn` | `enforce`, confirmation obtained | `confirmed` |
+| `warn` | `enforce`, no confirmation channel or confirmation refused | `blocked` |
+| `deny` | `enforce` | `blocked` |
+| `warn` or `deny` | `monitor` | `would_block` |
+
+An enforcement point with no confirmation channel MUST treat `warn` as `deny` (Section 6). Whatever the configured mode, two decisions MUST always be enforced, and no override reaches them: a deny produced by panic mode (Section 6.3), and a deny produced because the enforcement point refused its policy after signature verification failed (`__hushspec_policy_unverified__`, Signing specification Section 6.5). The refused-policy state persists until a policy that verifies replaces it; every action in that state is denied and recorded.
+
+Test vectors: `fixtures/receipts/expected/` (the `enforcement` member of every expected receipt).
+
+### 6.3 Panic Mode
+
+Panic mode is an operator-controlled kill switch that denies every action without consulting the policy.
+
+- **Latch.** Panic is a boolean latch. While it is set, every evaluation MUST return `deny` with `matched_rule` `__hushspec_panic__`, the receipt's rule trace MUST contain a single `panic` entry and no rule block entries, and the decision MUST be enforced whatever the enforcement mode.
+- **Activation.** The latch is set programmatically or through a sentinel file. An engine that supports the sentinel MUST arm the latch when the file exists at the configured path (the reference implementation's default is `.hushspec_panic` in the working directory, and its `h2h panic activate` creates that file). Checking the sentinel MUST fail closed: if the file's existence cannot be determined, the latch is armed.
+- **Latching.** The absence of the sentinel does not disarm the latch; only an explicit deactivation does. An enforcement point SHOULD consult the sentinel before each evaluation or on a short interval so that activation takes effect within one evaluation cycle.
+- **Scope.** The reference implementation's latch is process-wide by default; an embedder MAY give a policy or guard an independent latch so that arming one tenant's kill switch does not deny every tenant in the process. Which latch a guard consults MUST be documented.
+- **Panic policy.** Engines MAY also expose a deny-all policy document (the reference implementation embeds `builtin:panic`) for deployments that prefer to swap policies rather than set a latch; the two mechanisms are independent.
+
+Test vectors: the receipt vectors under `fixtures/receipts/valid/` include a panic receipt.
 
 ---
 
@@ -714,7 +847,7 @@ Test vectors: `fixtures/core/invalid/`.
 
 Implementations of HushSpec declare conformance at one of six levels. Each level subsumes all requirements of the levels below it: an implementation claiming Level N MUST satisfy every requirement of Levels 0 through N.
 
-A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v0.schema.json`; a level reported as `not_attempted` is not a pass.
+A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v1.schema.json`; a level reported as `not_attempted` is not a pass.
 
 
 ### Level 0: Parser
@@ -730,7 +863,7 @@ A Level 1 implementation additionally:
 - Validates all field types and constraints as specified in Section 7.
 - Rejects documents with unknown fields at any nesting level.
 - Validates enum values, uniqueness constraints, numeric constraints, the regex profile, and conditions.
-- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v0.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
+- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v1.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
 
 ### Level 2: Merger
 
@@ -745,14 +878,14 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document.
 - Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Sections 3, 5, and 6, including the normalization and matching algorithms of Section 3.14.
 - Implements aggregation and precedence as defined in Section 6.1 and denies unknown action types per Section 5.
-- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v0.schema.json`.
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v1.schema.json`.
 
 ### Level 4: Auditor
 
 Level 3 says an engine reaches the right decision. Level 4 says it can prove which document it reached it under, and why, to someone who was not there.
 
 A Level 4 implementation additionally:
-- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v0.schema.json`, per the Receipt specification Section 2.
+- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v1.schema.json`, per the Receipt specification Section 2.
 - Computes `policy.content_hash` as the canonical content hash of the **resolved** document, per the Canonical Form specification. Passes every vector under `fixtures/core/hash/`: for each, the canonical text byte for byte and the resulting digest.
 - **Records** `rule_trace` during evaluation rather than reconstructing it afterwards, satisfying Receipt specification Section 4.3. Every applicable rule block MUST appear in evaluation order, with the closed `rule_block` identifiers of the receipt schema.
 - Produces, for every case of every evaluation vector, a receipt byte-identical after RFC 8785 canonicalization to the committed vector under `fixtures/receipts/expected/<module>/<fixture stem>/<case index>.json`, under the fixed inputs that directory's README states.
@@ -800,7 +933,7 @@ The detection extension schema is defined in a separate specification document. 
 
 ### 9.4 Extension Versioning
 
-In the HushSpec v0 series, extension modules do **not** declare independent version fields inside documents. The posture, origins, and detection companion specs are versioned alongside the core HushSpec release. A future major version MAY add in-document extension versioning if interoperability needs require it.
+Extension modules are versioned with the core specification and do not declare independent version fields inside documents: a document's `hushspec` value names the release of the whole specification family, and the posture, origins, and detection companion specifications carry that release. The member name `version` under each extension block is reserved and MUST be rejected as unknown in 1.x. A future major version MAY introduce in-document extension versioning; the versioning policy (`versioning.md`) states the stability guarantee this rests on.
 
 ### 9.5 Unknown Extensions
 
@@ -810,20 +943,22 @@ Conformant parsers MUST reject unknown keys under `extensions`. Only the keys de
 
 ## 10. Versioning
 
-HushSpec uses semantic versioning (SemVer 2.0.0).
+HushSpec uses semantic versioning (SemVer 2.0.0). The normative policy is `versioning.md`; this section summarizes it.
 
 ### 10.1 v0.x Series
 
-The v0.x series is the initial development series. Breaking changes (field removals, semantic changes, structural reorganization) MAY occur between minor versions (e.g., 0.1.0 to 0.2.0). Patch versions (e.g., 0.2.0 to 0.2.1) are reserved for clarifications and errata that do not change document validity or evaluation semantics; an engine supporting `0.2` MUST therefore accept every `0.2.Z` document (Section 2.2).
+The v0.x series was the development series. Breaking changes (field removals, semantic changes, structural reorganization) could occur between minor versions. Patch versions were reserved for clarifications and errata that do not change document validity or evaluation semantics; an engine supporting `0.2` MUST therefore accept every `0.2.Z` document (Section 2.2). Engines MUST document which v0.x minor version(s) they support.
 
-Implementations MUST document which v0.x minor version(s) they support.
+### 10.2 v1.0 and Later
 
-### 10.2 v1.0+ Series
+HushSpec 1.0.0 was declared on 2026-09-15 (`versioning.md`, Section 10; `CHANGELOG.md`). Its evaluation semantics are identical to 0.2.0: an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them, and the reference implementation accepts `0.1.Z`, `0.2.Z`, and `1.0.Z`. The one validation difference is that a present `name` MUST be non-empty (Section 2), which a `0.Y.Z` document is not held to. The stability guarantee of `versioning.md` Section 5 applies from this release. Test vectors: `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/valid/empty-name-0-2.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
 
-Upon reaching v1.0.0, HushSpec guarantees backward compatibility within each major version:
-- Minor versions (1.1.0, 1.2.0, ...) MAY add new optional fields and new rule blocks. Existing documents remain valid.
-- Patch versions (1.0.1, 1.0.2, ...) contain only clarifications and errata.
-- Major versions (2.0.0) MAY introduce breaking changes.
+From 1.0.0, within a major version:
+- Minor versions MAY add new optional fields, rule blocks, and open-registry entries. Existing valid documents remain valid, keep their semantics, and keep their canonical content hash (Canonical Form specification, Section 3.2).
+- Patch versions contain only clarifications and errata (`errata.md`).
+- Major versions MAY introduce breaking changes.
+
+What 1.0 freezes: the document format and validation rules, evaluation semantics, the canonical form and content hash, the receipt, log entry, signature envelope, keyring, and bundle wire formats, the error and reason codes, and the closed registries (`spec/registries/`).
 
 ### 10.3 Independence
 
@@ -831,11 +966,22 @@ HushSpec versioning is independent of any engine, SDK, or implementation. An eng
 
 ---
 
+## 11. Security Considerations
+
+The security considerations for the whole specification family are collected in `hushspec-security.md`. The ones that bear directly on this document are regular-expression denial of service (Section 3.14.3; Security Section 2), path traversal and normalization (Section 3.14.1; Security Section 3), remote resolution (Section 2.6.4; Security Section 4), and the panic sentinel (Section 6.3; Security Section 11).
+
+---
+
 ## Appendix A. ABNF for Version Field
 
 ```abnf
-hushspec-version = "0." 1*DIGIT "." 1*DIGIT
+hushspec-version = major "." minor "." patch
+major            = 1*DIGIT
+minor            = 1*DIGIT
+patch            = 1*DIGIT
 ```
+
+An engine accepts a document whose `major.minor` it supports (Section 2.2). The grammar collection for the whole family is `hushspec-grammars.md`.
 
 ## Appendix B. Minimal Valid Document
 

@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import { PolicyWatcher } from '../src/watcher.js';
 import { PolicyPoller } from '../src/poller.js';
 import { FileProvider, HttpProvider } from '../src/policy-provider.js';
+import type { HttpLoaderConfig } from '../src/http-loader.js';
+import { loadKeyring } from '../src/signing.js';
+import { startTestServer, type Handler, type TestServer } from './helpers/https-server.js';
+import { TEST_TLS_CERT } from './helpers/tls-cert.js';
 
 const VALID_POLICY = `
 hushspec: "0.1.0"
@@ -285,6 +290,58 @@ describe('PolicyPoller', () => {
     expect(loadCount).toBeGreaterThan(1);
   });
 
+  it('reports a throwing onChange through onError and keeps polling', async () => {
+    const errors: Error[] = [];
+    let loadCount = 0;
+
+    poller = new PolicyPoller({
+      loader: async () => {
+        loadCount++;
+        return loadCount === 1 ? VALID_POLICY : UPDATED_POLICY;
+      },
+      intervalMs: 50,
+      onChange: () => {
+        throw new Error('subscriber blew up');
+      },
+      onError: (error) => {
+        errors.push(error);
+      },
+    });
+
+    await poller.start();
+    await new Promise((r) => setTimeout(r, 300));
+    poller.stop();
+
+    expect(errors.map((error) => error.message)).toContain('subscriber blew up');
+    expect(loadCount).toBeGreaterThan(1);
+  });
+
+  it('survives an onError handler that throws', async () => {
+    let loadCount = 0;
+
+    poller = new PolicyPoller({
+      loader: async () => {
+        loadCount++;
+        if (loadCount > 1) {
+          throw new Error('network down');
+        }
+        return VALID_POLICY;
+      },
+      intervalMs: 50,
+      onChange: () => {},
+      onError: () => {
+        throw new Error('handler blew up');
+      },
+    });
+
+    await poller.start();
+    await new Promise((r) => setTimeout(r, 300));
+    poller.stop();
+
+    expect(loadCount).toBeGreaterThan(2);
+    expect(poller.current()?.name).toBe('test-policy');
+  });
+
   it('handles loader errors gracefully', async () => {
     let loadCount = 0;
     const errors: Error[] = [];
@@ -502,78 +559,165 @@ describe('FileProvider', () => {
 
 describe('HttpProvider', () => {
   let provider: HttpProvider | null = null;
+  const servers: TestServer[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     if (provider) {
       provider.stop();
       provider = null;
     }
+    while (servers.length > 0) await servers.pop()!.close();
     vi.restoreAllMocks();
   });
 
-  it('loads from a URL using fetch', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => VALID_POLICY,
-    });
-    vi.stubGlobal('fetch', mockFetch);
+  // A real `node:https` server, because the loader dials the address it checked
+  // rather than going through a global `fetch` a test could stand in for. The
+  // certificate is trusted through `tlsCa` -- verification stays on, so it is
+  // still checked against `localhost` -- and `allowInsecureLoopback` is the
+  // loader's documented test-only exemption for the address check.
+  async function serve(handler: Handler): Promise<string> {
+    const server = await startTestServer(handler);
+    servers.push(server);
+    return server.origin;
+  }
 
-    provider = new HttpProvider('https://example.com/policy.yaml');
+  function options(extra?: HttpLoaderConfig): HttpLoaderConfig {
+    return { allowInsecureLoopback: true, tlsCa: TEST_TLS_CERT, ...extra };
+  }
+
+  it('loads from a URL', async () => {
+    const origin = await serve((_req, res) => res.end(VALID_POLICY));
+
+    provider = new HttpProvider(`${origin}/policy.yaml`, options());
     const spec = await provider.load();
 
     expect(spec.name).toBe('test-policy');
     expect(provider.current()?.name).toBe('test-policy');
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://example.com/policy.yaml',
-      expect.objectContaining({ headers: {} }),
-    );
   });
 
   it('passes auth header when configured', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () => VALID_POLICY,
+    let seen: string | undefined;
+    const origin = await serve((req, res) => {
+      seen = req.headers.authorization;
+      res.end(VALID_POLICY);
     });
-    vi.stubGlobal('fetch', mockFetch);
 
-    provider = new HttpProvider('https://example.com/policy.yaml', {
-      authHeader: 'Bearer test-token',
-    });
+    provider = new HttpProvider(
+      `${origin}/policy.yaml`,
+      options({ authHeader: 'Bearer test-token' }),
+    );
     await provider.load();
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      'https://example.com/policy.yaml',
-      expect.objectContaining({
-        headers: { Authorization: 'Bearer test-token' },
-      }),
-    );
+    expect(seen).toBe('Bearer test-token');
   });
 
   it('throws on HTTP error', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: async () => 'Not Found',
+    const origin = await serve((_req, res) => {
+      res.writeHead(404);
+      res.end('Not Found');
     });
-    vi.stubGlobal('fetch', mockFetch);
 
-    provider = new HttpProvider('https://example.com/policy.yaml');
+    provider = new HttpProvider(`${origin}/policy.yaml`, options());
     await expect(provider.load()).rejects.toThrow('returned status 404');
   });
 
   it('rejects insecure HTTP URLs', async () => {
-    const mockFetch = vi.fn();
-    vi.stubGlobal('fetch', mockFetch);
-
     provider = new HttpProvider('http://127.0.0.1/policy.yaml');
     await expect(provider.load()).rejects.toThrow('only HTTPS URLs are allowed');
-    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a URL that resolves to a blocked address', async () => {
+    provider = new HttpProvider('https://169.254.169.254/policy.yaml');
+    await expect(provider.load()).rejects.toThrow('SSRF protection');
   });
 
   it('current() returns null before load', () => {
-    provider = new HttpProvider('https://example.com/policy.yaml');
+    provider = new HttpProvider('https://policies.example.com/policy.yaml');
     expect(provider.current()).toBeNull();
+  });
+
+  // The published signing vectors, served over HTTPS: a signed remote policy
+  // is a policy plus a `<url>.sig` sidecar, and the sidecar has to be fetched
+  // under the provider's own HTTP configuration. With the resolver's
+  // configuration-free default locator the TLS trust anchor and the loopback
+  // exemption are dropped and the sidecar can never be read, so
+  // `requireSignature` refuses a policy that is in fact correctly signed.
+  const signingFixtures = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../fixtures/signing',
+  );
+  const signedFixture = (relative: string): string =>
+    readFileSync(path.join(signingFixtures, relative), 'utf8');
+
+  /** The clock the signing vectors are pinned to. */
+  const VECTOR_NOW = '2026-09-15T12:00:00.000Z';
+
+  function signedPolicyOptions(extra?: HttpLoaderConfig) {
+    return {
+      ...options(extra),
+      resolveOptions: {
+        requireSignature: true,
+        keyring: loadKeyring(signedFixture('keys/keyring.json')),
+        verify: { now: VECTOR_NOW },
+      },
+    };
+  }
+
+  it('verifies a signed policy against its .sig sidecar', async () => {
+    const paths: string[] = [];
+    const origin = await serve((req, res) => {
+      const url = req.url ?? '';
+      paths.push(url);
+      res.end(signedFixture(url.endsWith('.sig') ? 'policies/basic.sig' : 'policies/basic.yaml'));
+    });
+
+    provider = new HttpProvider(`${origin}/policy.yaml`, signedPolicyOptions());
+    const spec = await provider.load();
+
+    expect(spec.name).toBe('signed-basic');
+    expect(paths).toEqual(['/policy.yaml', '/policy.yaml.sig']);
+    expect(provider.resolution()?.signature?.verified).toBe(true);
+  });
+
+  it('sends the auth header when fetching the .sig sidecar', async () => {
+    const authorized: string[] = [];
+    const origin = await serve((req, res) => {
+      const url = req.url ?? '';
+      if (req.headers.authorization !== 'Bearer test-token') {
+        res.writeHead(401);
+        res.end('Unauthorized');
+        return;
+      }
+      authorized.push(url);
+      res.end(signedFixture(url.endsWith('.sig') ? 'policies/basic.sig' : 'policies/basic.yaml'));
+    });
+
+    provider = new HttpProvider(
+      `${origin}/policy.yaml`,
+      signedPolicyOptions({ authHeader: 'Bearer test-token' }),
+    );
+    await provider.load();
+
+    expect(authorized).toEqual(['/policy.yaml', '/policy.yaml.sig']);
+    expect(provider.resolution()?.signature?.verified).toBe(true);
+  });
+
+  it('keeps a signature locator the caller supplied', async () => {
+    const origin = await serve((_req, res) => res.end(signedFixture('policies/basic.yaml')));
+    const sources: string[] = [];
+
+    provider = new HttpProvider(`${origin}/policy.yaml`, {
+      ...signedPolicyOptions(),
+      resolveOptions: {
+        ...signedPolicyOptions().resolveOptions,
+        signatureLocator: (source: string) => {
+          sources.push(source);
+          return signedFixture('policies/basic.sig');
+        },
+      },
+    });
+    await provider.load();
+
+    expect(sources).toEqual([`${origin}/policy.yaml`]);
   });
 });

@@ -24,10 +24,10 @@ def load_schema(filename: str) -> dict:
     return json.loads((SCHEMAS_DIR / filename).read_text())
 
 
-CORE = load_schema("hushspec-core.v0.schema.json")
-POSTURE = load_schema("hushspec-posture.v0.schema.json")
-ORIGINS = load_schema("hushspec-origins.v0.schema.json")
-DETECTION = load_schema("hushspec-detection.v0.schema.json")
+CORE = load_schema("hushspec-core.v1.schema.json")
+POSTURE = load_schema("hushspec-posture.v1.schema.json")
+ORIGINS = load_schema("hushspec-origins.v1.schema.json")
+DETECTION = load_schema("hushspec-detection.v1.schema.json")
 
 
 def top_props(schema: dict) -> list[str]:
@@ -236,10 +236,13 @@ def render_rust() -> str:
     content = "\n".join(lines).rstrip() + "\n"
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is required to generate formatted Rust; install it with "
+            "`rustup component add rustfmt`"
+        )
 
     result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        [rustfmt, "--emit", "stdout", "--edition", "2024"],
         input=content,
         text=True,
         capture_output=True,

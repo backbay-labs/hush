@@ -186,6 +186,12 @@ receipt records only its hash and size (receipt spec 4.4); the event's
 `content_redacted` flag records that it happened. Observers run inline on the
 evaluation thread, so do fallible or slow work off-thread.
 
+A receipt sink that refuses a receipt or a policy event never changes a
+decision and never reaches the caller -- a full disk is no reason to let an
+action through, nor to stop one -- but it is never silent either: every SDK
+reports it here as a `sink.error` event carrying the failure and the name of
+the sink that refused.
+
 `ObservableEvaluator` is the fan-out, usable on its own when you want telemetry
 without enforcement.
 
@@ -313,7 +319,7 @@ entry, in a single `resourceLogs` → `scopeLogs` envelope per request.
 | Log record field | Value |
 |---|---|
 | `timeUnixNano` | The receipt's (or policy event's) `timestamp`, in nanoseconds since the epoch, as a decimal string |
-| `observedTimeUnixNano` | When the batch was assembled |
+| `observedTimeUnixNano` | When the sink took the entry |
 | `severityText` / `severityNumber` | `INFO`/9 for `allow`, `WARN`/13 for `warn`, `ERROR`/17 for `deny`; a policy event is `INFO` |
 | `body.stringValue` | The canonical JSON (RFC 8785) of the receipt, or of the policy event |
 

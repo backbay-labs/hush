@@ -23,9 +23,12 @@ feature-depth = 1
 
 # ── Security advisories ─────────────────────────────────────────────
 [advisories]
-# Deny anything with a known advisory, and anything unmaintained or
-# yanked. `ignore` stays empty on purpose: an accepted risk should be a
-# reviewed, commented entry, never a silent default.
+# Deny anything with a known advisory, and anything unmaintained or yanked.
+# `unmaintained = "all"` covers transitive dependencies too, not just the ones
+# the workspace names. `ignore` stays empty on purpose: an accepted risk should
+# be a reviewed, commented entry, never a silent default.
+yanked = "deny"
+unmaintained = "all"
 ignore = []
 
 # ── Licenses ────────────────────────────────────────────────────────

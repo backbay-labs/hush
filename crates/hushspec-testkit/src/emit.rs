@@ -19,15 +19,17 @@ fn schema_expect_members() -> &'static BTreeSet<String> {
     MEMBERS.get_or_init(|| {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../schemas/hushspec-evaluator-test.v0.schema.json"
+            "/../../schemas/hushspec-evaluator-test.v1.schema.json"
         );
         let text = std::fs::read_to_string(path)
             .map(std::borrow::Cow::Owned)
             // Falling back to the compiled-in copy keeps a published binary
             // (no repo around it) emitting exactly what it was built against.
-            .unwrap_or(std::borrow::Cow::Borrowed(include_str!(
-                "../../../schemas/hushspec-evaluator-test.v0.schema.json"
-            )));
+            .unwrap_or_else(|_| {
+                std::borrow::Cow::Borrowed(
+                    crate::generated_schemas::schema_body("evaluator-test").unwrap_or_default(),
+                )
+            });
         let Ok(schema) = serde_json::from_str::<serde_json::Value>(&text) else {
             return BTreeSet::new();
         };

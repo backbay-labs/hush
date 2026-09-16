@@ -211,7 +211,7 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 	}
 	// A fixture whose embedded policy extends is resolved before it runs: a
 	// bare leaf would drop every block its base declares.
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		resolved, err := Resolve(spec, fixturePath, createCompositeLoader())
 		if err != nil {
 			t.Fatalf("embedded policy failed to resolve: %v", err)
@@ -275,8 +275,11 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 				if err != nil {
 					t.Fatalf("expect.rule_trace/receipt needs a resolvable policy: %v", err)
 				}
-				receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+				receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
 					expectedReceiptContext(i))
+				if err != nil {
+					t.Fatalf("audited: %v", err)
+				}
 				if len(tc.Expect.RuleTrace) > 0 {
 					assertRuleTrace(t, tc.Expect.RuleTrace, receipt.RuleTrace)
 				}

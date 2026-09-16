@@ -59,21 +59,32 @@ Concretely:
 ## Versioning
 
 Specification version numbers follow [`spec/versioning.md`](./spec/versioning.md):
-the `0.x` series permits breaking changes between minor versions; patch versions
-(`0.1.0` -> `0.1.1`) are non-breaking, editorial/errata-only changes. SDK and CLI
-package version numbers are independent of the specification version they implement --
-there is no coupling between "HushSpec 0.1.0" and, say, "`@hushspec/core` 0.1.1".
+within the `1.x` series a minor version only adds, never removes, renames, or changes a
+default or a decision; patch versions (`1.0.0` -> `1.0.1`) are editorial and errata-only
+changes; anything that would break an existing document, evaluation, canonical form or
+wire format is a major version. SDK and CLI package version numbers are independent of
+the specification version they implement -- there is no coupling between "HushSpec 1.0.0"
+and, say, "`@hushspec/core` 1.0.2".
 
 ## Errata
 
-There is not yet a formalized errata submission process (defining one, along with a
-security-considerations section and stable registries, is tracked as an open RFC under
-[`docs/plans/`](./docs/plans/)). Until then, treat a spec/implementation divergence or
-an ambiguous normative sentence as a bug: open an issue or a pull request against
-`spec/` describing the divergence and the proposed clarification. Errata-level fixes
-(patch versions) must not change document validity or evaluation semantics for
-previously-valid documents; anything that would is a breaking (minor-version) change and
-needs an RFC.
+Errata follow [`spec/errata.md`](./spec/errata.md): file an issue titled
+`Erratum: <specification> <section>`, get it numbered `E-<year>-<n>`, and resolve it
+with a pull request that changes prose, examples, grammars, or behavior-pinning vectors
+only. Errata are folded into patch versions and recorded in the affected specification's
+change appendix. A correction that would change document validity, evaluation
+semantics, the canonical form, or a wire format is a change proposal, not an erratum.
+
+## Change Proposals
+
+A behavior change is proposed as a document under [`docs/plans/`](./docs/plans/) that
+states the new normative text and the vectors that will pin it. It lands in this order:
+the vectors and the prose first, then the reference implementations, then the ports;
+no SDK changes behavior before a fixture exists for the new behavior
+([`CONTRIBUTING.md`](./CONTRIBUTING.md)). What a minor version may and may not change
+is defined in [`spec/versioning.md`](./spec/versioning.md), Section 6; anything outside
+it is a major version, which additionally requires a migration note and a new schema
+line.
 
 ## Who Can Merge
 

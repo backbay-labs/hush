@@ -17,7 +17,7 @@ struct Cli {
     output: OutputFormat,
 
     /// Also write a conformance report
-    /// (schemas/hushspec-conformance-report.v0.schema.json) to this path
+    /// (schemas/hushspec-conformance-report.v1.schema.json) to this path
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
 

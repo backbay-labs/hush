@@ -81,8 +81,8 @@ func TestVerifyBundleReportsThePredicateClaims(t *testing.T) {
 	if !result.OK {
 		t.Fatalf("expected a valid bundle: %s (%s)", result.Reason, result.Detail)
 	}
-	if result.SubjectName != "hipaa-base" || result.PolicyName != "hipaa-base" {
-		t.Errorf("unexpected labels: subject %q, policy %q", result.SubjectName, result.PolicyName)
+	if result.SubjectName != "hipaa-base" || stringValue(result.PolicyName) != "hipaa-base" {
+		t.Errorf("unexpected labels: subject %q, policy %q", result.SubjectName, stringValue(result.PolicyName))
 	}
 	if !strings.HasPrefix(result.ContentHash, "sha256:") {
 		t.Errorf("the content hash keeps its prefix inside the predicate, got %q", result.ContentHash)

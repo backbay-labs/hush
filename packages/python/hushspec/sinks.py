@@ -102,10 +102,12 @@ class FilteredSink(ReceiptSink):
 class MultiSink(ReceiptSink):
     """Fans a receipt out to several sinks.
 
-    One sink failing must not stop the others, or the enforcement point, so a
-    failure is counted in :attr:`dropped` and passed to *on_error* rather than
-    raised. Without a handler the loss is silent, which is why the counter is
-    there.
+    Every sink is attempted whatever the ones before it did -- one destination
+    refusing a receipt must not cost the others theirs -- and the first failure
+    is then raised, naming the sink that refused, so a guard reports it as a
+    ``sink.error`` observer event instead of losing the evidence quietly.
+    Each failure is also counted in :attr:`dropped` and passed to *on_error*,
+    which sees every sink that refused rather than only the first.
     """
 
     def __init__(
@@ -119,18 +121,23 @@ class MultiSink(ReceiptSink):
         self.dropped = 0
 
     def send(self, receipt: DecisionReceipt) -> None:
-        for sink in self._sinks:
-            try:
-                sink.send(receipt)
-            except Exception as exc:  # noqa: BLE001
-                self._failed(sink, exc)
+        self._fan_out(lambda sink: sink.send(receipt))
 
     def record_policy_event(self, event: "PolicyEvent") -> None:
+        self._fan_out(lambda sink: sink.record_policy_event(event))
+
+    def _fan_out(self, deliver: Callable[[ReceiptSink], None]) -> None:
+        first_failure: Optional[tuple[ReceiptSink, Exception]] = None
         for sink in self._sinks:
             try:
-                sink.record_policy_event(event)
+                deliver(sink)
             except Exception as exc:  # noqa: BLE001
                 self._failed(sink, exc)
+                if first_failure is None:
+                    first_failure = (sink, exc)
+        if first_failure is not None:
+            sink, exc = first_failure
+            raise SinkFanoutError(type(sink).__name__, exc) from exc
 
     def _failed(self, sink: ReceiptSink, exc: Exception) -> None:
         self.dropped += 1
@@ -140,6 +147,17 @@ class MultiSink(ReceiptSink):
             self._on_error(sink, exc)
         except Exception:  # noqa: BLE001 - a broken handler is not fatal
             pass
+
+
+class SinkFanoutError(RuntimeError):
+    """A sink behind a :class:`MultiSink` refused what it was handed."""
+
+    def __init__(self, sink: str, error: Exception) -> None:
+        super().__init__(f"sink {sink}: {error}")
+        #: The sink that refused, by type name.
+        self.sink = sink
+        #: What it raised.
+        self.error = error
 
 
 class CallbackSink(ReceiptSink):

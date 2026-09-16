@@ -27,11 +27,11 @@ OUTPUT = ROOT / "crates" / "hushspec-testkit" / "src" / "generated_schemas.rs"
 
 #: (short name, file name) for every schema the testkit validates against.
 NEEDED = [
-    ("conformance-report", "hushspec-conformance-report.v0.schema.json"),
-    ("error-codes", "hushspec-error-codes.v0.schema.json"),
-    ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
-    ("merge-vector", "hushspec-merge-vector.v0.schema.json"),
-    ("receipt", "hushspec-receipt.v0.schema.json"),
+    ("conformance-report", "hushspec-conformance-report.v1.schema.json"),
+    ("error-codes", "hushspec-error-codes.v1.schema.json"),
+    ("evaluator-test", "hushspec-evaluator-test.v1.schema.json"),
+    ("merge-vector", "hushspec-merge-vector.v1.schema.json"),
+    ("receipt", "hushspec-receipt.v1.schema.json"),
 ]
 
 
@@ -84,7 +84,7 @@ def render() -> str:
             "];",
             "",
             "/// Look up a schema body by short name (`receipt`) or published file",
-            "/// name (`hushspec-receipt.v0.schema.json`).",
+            "/// name (`hushspec-receipt.v1.schema.json`).",
             "#[must_use]",
             "pub fn schema_body(name: &str) -> Option<&'static str> {",
             "    let short = SCHEMA_FILE_NAMES",
@@ -104,10 +104,13 @@ def render() -> str:
 
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is required to generate formatted Rust; install it with "
+            "`rustup component add rustfmt`"
+        )
 
     result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        [rustfmt, "--emit", "stdout", "--edition", "2024"],
         input=content,
         text=True,
         capture_output=True,

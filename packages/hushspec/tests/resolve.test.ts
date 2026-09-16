@@ -1,13 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { parseOrThrow } from '../src/parse.js';
 import { resolve, resolveFromFile, createCompositeLoader } from '../src/resolve.js';
 import { loadBuiltin, BUILTIN_NAMES } from '../src/builtin.js';
 import { validate } from '../src/validate.js';
-import { createHttpLoader, isPrivateIp } from '../src/http-loader.js';
 
 describe('resolve', () => {
   it('resolves extends chains from the filesystem', () => {
@@ -269,50 +268,6 @@ name: custom-strict
   });
 });
 
-describe('http loader', () => {
-  it('rejects private IPv6 targets before fetching', async () => {
-    const mockFetch = vi.fn();
-    vi.stubGlobal('fetch', mockFetch);
-    const loader = createHttpLoader();
-
-    await expect(loader('https://[fc00::1]/policy.yaml')).rejects.toThrow('SSRF protection');
-    await expect(loader('https://[fe80::1]/policy.yaml')).rejects.toThrow('SSRF protection');
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-});
-
-// Parity fix (v3, item S3): the SSRF filter recognized the IPv4-*mapped* form
-// (`::ffff:a.b.c.d`) but not the deprecated IPv4-*compatible* form (`::a.b.c.d`
-// / `::hextet:hextet`, all high bits zero), so `::a9fe:a9fe` (169.254.169.254
-// cloud metadata) and `::7f00:1` (127.0.0.1 loopback) were not flagged. The
-// low 32 bits are now extracted as IPv4 and run through the IPv4 private check.
-describe('isPrivateIp: IPv4-compatible IPv6 (SSRF)', () => {
-  it('flags the deprecated IPv4-compatible form (::a.b.c.d / ::hextet:hextet)', () => {
-    expect(isPrivateIp('::a9fe:a9fe')).toBe(true); // 169.254.169.254 cloud metadata
-    expect(isPrivateIp('::7f00:1')).toBe(true); // 127.0.0.1 loopback
-    expect(isPrivateIp('::0.0.0.0')).toBe(true); // all-zero unspecified
-    expect(isPrivateIp('::a0a:a0a')).toBe(true); // 10.10.10.10 private
-  });
-
-  it('still flags the IPv4-mapped form and native private ranges', () => {
-    expect(isPrivateIp('::ffff:169.254.169.254')).toBe(true);
-    expect(isPrivateIp('::ffff:a9fe:a9fe')).toBe(true);
-    expect(isPrivateIp('::1')).toBe(true);
-    expect(isPrivateIp('::')).toBe(true);
-    expect(isPrivateIp('fc00::1')).toBe(true);
-    expect(isPrivateIp('fe80::1')).toBe(true);
-    expect(isPrivateIp('127.0.0.1')).toBe(true);
-  });
-
-  it('leaves genuine public IPs public', () => {
-    expect(isPrivateIp('8.8.8.8')).toBe(false);
-    expect(isPrivateIp('1.1.1.1')).toBe(false);
-    expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
-    // ::2606:4700 -> 38.6.71.0 is a PUBLIC IPv4, so the compatible form stays public.
-    expect(isPrivateIp('::2606:4700')).toBe(false);
-  });
-});
-
 describe('resolved documents validate', () => {
   // `merge()` clears the fields it consumes by setting them to `undefined`
   // rather than deleting them, so a resolved document reaches `validate()` as
@@ -337,5 +292,18 @@ describe('resolved documents validate', () => {
     const validation = validate({ hushspec: '0.2.0', extends: 42 } as never);
     expect(validation.valid).toBe(false);
     expect(validation.errors.some(error => error.message.includes('extends'))).toBe(true);
+  });
+
+  // Core section 2.3: a document that declares `merge_strategy` without
+  // `extends` never reaches `merge`, and resolution still hands back a
+  // document carrying neither resolution instruction.
+  it('drops merge_strategy from a one-hop chain', () => {
+    const spec = parseOrThrow('hushspec: "0.1.0"\nname: leaf\nmerge_strategy: replace\n');
+    const resolved = resolve(spec);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+
+    expect(resolved.value.extends).toBeUndefined();
+    expect(resolved.value.merge_strategy).toBeUndefined();
   });
 });

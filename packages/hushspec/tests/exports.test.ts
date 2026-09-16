@@ -35,6 +35,8 @@ describe('package entry point', () => {
     'verifyLog',
     'verifyBundle',
     'parseBundle',
+    // Rust `create_bundle`, Go `CreateBundle`, Python `create_bundle`.
+    'createBundle',
     // Signing
     'signPolicy',
     'verifyPolicy',
@@ -69,12 +71,12 @@ describe('isomorphism aliases', () => {
   });
 
   it('HUSHSPEC_SUPPORTED_VERSIONS is the spelling Rust and Python use', () => {
-    expect(HUSHSPEC_SUPPORTED_VERSIONS).toEqual(['0.1.0', '0.2.0']);
+    expect(HUSHSPEC_SUPPORTED_VERSIONS).toEqual(['0.1.0', '0.2.0', '1.0.0']);
     expect(SUPPORTED_VERSIONS).toBe(HUSHSPEC_SUPPORTED_VERSIONS);
   });
 
   it('names the specification version it writes and the minors it accepts', () => {
-    expect(hushspec.HUSHSPEC_VERSION).toBe('0.2.0');
-    expect(hushspec.HUSHSPEC_SUPPORTED_MINORS).toEqual(['0.1', '0.2']);
+    expect(hushspec.HUSHSPEC_VERSION).toBe('1.0.0');
+    expect(hushspec.HUSHSPEC_SUPPORTED_MINORS).toEqual(['0.1', '0.2', '1.0']);
   });
 });

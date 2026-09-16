@@ -353,7 +353,7 @@ func (e *evaluator) skipAll(blocks []blockID, reason string) {
 // computeMask derives the active-block mask for this evaluation. Applicability
 // is checked in the order the specification states it -- presence, then the
 // action-shaped preconditions, then `enabled` and the conditions -- so an
-// inactive block carries exactly the reason the trace has always recorded.
+// inactive block carries the reason the trace records for that order.
 func (e *evaluator) computeMask(blocks []blockID, profile *compiledOriginProfile) blockMask {
 	var mask blockMask
 	for _, block := range blocks {
@@ -375,10 +375,13 @@ func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile)
 		if !present {
 			return inactiveAbsentBlocks[block]
 		}
-		// egress and tool_call are scanned only when they carry content.
+		// egress and tool_call are scanned only when they carry content. The
+		// block is configured, so the trace says the scan was not consulted
+		// rather than that no scan exists -- checked before `enabled` and the
+		// conditions, as the reference implementation checks it.
 		pathBearing := e.action.Type == "file_write" || e.action.Type == "patch_apply"
 		if !pathBearing && !e.action.HasContent() {
-			return inactiveAbsentBlocks[block]
+			return inactiveContentNotSupplied[block]
 		}
 		return e.activity(block)
 
@@ -410,9 +413,10 @@ func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile)
 		if reason := e.activity(block); reason != nil {
 			return reason
 		}
-		// A target that names no channel leaves the block unevaluated.
+		// A target that names no channel leaves the configured block
+		// unevaluated, which the trace distinguishes from an absent block.
 		if remoteDesktopChannel(e.action.Target) == "" {
-			return inactiveAbsentBlocks[block]
+			return inactiveTargetNotAChannel[block]
 		}
 		return nil
 
@@ -431,12 +435,12 @@ func (e *evaluator) activity(block blockID) *inactive {
 	if !gate.enabled {
 		return inactiveDisabled
 	}
-	if gate.when != nil && !evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) {
+	if gate.when != nil && evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) == verdictFalse {
 		return inactiveConditionFalse
 	}
 	if len(e.conditions) > 0 {
 		condition, ok := e.conditions[blockNames[block]]
-		if ok && condition != nil && !evaluateConditionDepth(condition, e.context, e.capabilities, 0) {
+		if ok && condition != nil && evaluateConditionDepth(condition, e.context, e.capabilities, 0) == verdictFalse {
 			return inactiveOutOfBandCondition
 		}
 	}
@@ -517,17 +521,14 @@ func (e *evaluator) evaluateBlock(
 	}
 }
 
-// postureCapabilityGuard denies when the current posture state lacks the
-// capability required by the action type.
+// postureCapabilityGuard denies when the current posture state is not
+// declared, or lacks the capability the action type requires. The state is
+// looked up first, so an unknown state denies even the action types the
+// capability table does not gate (posture spec 3.3).
 func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecision {
 	if posture == nil || e.policy.posture == nil {
 		return nil
 	}
-	capability := requiredCapability(e.action.Type)
-	if capability == "" {
-		return nil
-	}
-
 	currentState, ok := e.policy.posture.States[posture.Current]
 	if !ok {
 		rule := fmt.Sprintf("extensions.posture.states.%s", posture.Current)
@@ -535,6 +536,11 @@ func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecisio
 		e.record("posture_capability", RuleOutcomeDeny, rule, reason, true)
 		denied := denyDecision(rule, reason)
 		return &denied
+	}
+
+	capability := requiredCapability(e.action.Type)
+	if capability == "" {
+		return nil
 	}
 
 	for _, granted := range currentState.Capabilities {
@@ -656,10 +662,16 @@ func (c *compiledPatchIntegrity) evaluate(content string) blockDecision {
 			)
 		}
 		if stats.additions > 0 && stats.deletions > 0 {
-			limit := 10.0
-			if rule.MaxImbalanceRatio != nil {
-				limit = *rule.MaxImbalanceRatio
+			// applyParseDefaults materializes max_imbalance_ratio, so a parsed
+			// document always carries the limit; an unset one is a document
+			// assembled in memory, which the engine cannot bound and refuses.
+			if rule.MaxImbalanceRatio == nil {
+				return denyDecision(
+					"rules.patch_integrity.max_imbalance_ratio",
+					"patch integrity declares no imbalance ratio limit",
+				)
 			}
+			limit := *rule.MaxImbalanceRatio
 			larger := math.Max(float64(stats.additions), float64(stats.deletions))
 			smaller := math.Min(float64(stats.additions), float64(stats.deletions))
 			if larger/smaller > limit {
@@ -1200,11 +1212,11 @@ func postureCapabilities(extension *PostureExtension, posture *PostureResult) gr
 // and there is no per-field weighting (origins spec 3).
 func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 	count := 0
-	checkString := func(expected, actual string) bool {
-		if expected == "" {
+	checkString := func(expected *string, actual string) bool {
+		if expected == nil {
 			return true
 		}
-		if actual != expected {
+		if actual != *expected {
 			return false
 		}
 		count++
@@ -1242,10 +1254,7 @@ func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 	}
 	// A match rule with all fields absent legitimately matches every origin
 	// with count 0 (the explicit `match: {}` default profile), so count 0 must
-	// NOT be read as "no match". A present-but-empty match field such as
-	// `provider: ""` is a real, unsatisfiable constraint, which the generated
-	// Go model cannot tell from an absent field; validateRawDocument rejects it
-	// at parse instead.
+	// NOT be read as "no match".
 	return count, true
 }
 
@@ -1383,7 +1392,9 @@ func NormalizeHost(target string) *string {
 	if index := strings.Index(authority, "://"); index >= 0 {
 		authority = authority[index+3:]
 	}
-	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+	// A backslash ends the authority exactly as a slash does (core spec
+	// 3.14.2), the way a browser reads a special-scheme URL.
+	if end := strings.IndexAny(authority, `/\?#`); end >= 0 {
 		authority = authority[:end]
 	}
 	if at := strings.LastIndex(authority, "@"); at >= 0 {

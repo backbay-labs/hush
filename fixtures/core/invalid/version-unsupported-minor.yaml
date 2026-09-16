@@ -1,0 +1,4 @@
+# A minor version no engine supports yet is rejected (core spec 2.2): the
+# engine implements 1.0 and accepts 0.1 and 0.2, never a future minor.
+hushspec: "1.7.0"
+name: future-minor

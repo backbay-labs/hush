@@ -189,6 +189,32 @@ describe('ChainedFileSink', () => {
     expect(report.entries).toBe(5);
   });
 
+  it('extends one chain when two sinks share a file', () => {
+    const file = path.join(dir, 'log.jsonl');
+    const resolved = resolution();
+    const first = ChainedFileSink.open(file).withClock(clock());
+    const second = ChainedFileSink.open(file).withClock(clock());
+
+    first.recordPolicyEvent(fixtureLoadedEvent());
+    actions().forEach((action, index) => {
+      const sink = index % 2 === 0 ? second : first;
+      sink.send(evaluateAudited(resolved, action, CONFIG, ctx(index)));
+    });
+
+    const text = readFileSync(file, 'utf8');
+    const entries = text
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => JSON.parse(line) as LogEntry);
+    expect(entries.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
+
+    const report = verifyLog('log.jsonl', text);
+    expect(report.ok).toBe(true);
+    expect(report.entries).toBe(4);
+    expect(report.last_seq).toBe(4);
+    expect(second.head()).toEqual({ seq: 4, entry_hash: entries[3].entry_hash });
+  });
+
   it('creates the log directory on demand', () => {
     const file = path.join(dir, 'nested', 'deeper', 'log.jsonl');
     ChainedFileSink.open(file).withClock(clock()).recordPolicyEvent(fixtureLoadedEvent());
@@ -289,12 +315,43 @@ describe('ChainedFileSink', () => {
     expect(reversed.break!.line).toBe(1);
   });
 
+  it('carries the genesis hash into a file rotated before anything was written', () => {
+    const first = path.join(dir, 'log-1.jsonl');
+    const second = path.join(dir, 'log-2.jsonl');
+    writeFileSync(first, '');
+    const sink = ChainedFileSink.open(first).withClock(clock());
+
+    const started = sink.rotate(second);
+    expect(started.prev_hash).toBe(GENESIS_HASH);
+    // Recorded even at genesis: a verifier compares it against the previous
+    // file's last hash, and an omitted member is not that hash.
+    expect(started.log_started!.previous_entry_hash).toBe(GENESIS_HASH);
+    sink.send(evaluateAudited(resolution(), actions()[0], CONFIG, ctx(0)));
+
+    const both = verifyLogFiles([first, second]);
+    expect(both.ok, JSON.stringify(both.break)).toBe(true);
+    expect(both.files).toBe(2);
+    expect(both.entries).toBe(2);
+  });
+
   it('refuses to rotate into a file that already exists', () => {
     const first = path.join(dir, 'log-1.jsonl');
     const second = path.join(dir, 'log-2.jsonl');
     writeBasic(first, false);
     writeBasic(second, false);
     expect(() => ChainedFileSink.open(first).rotate(second)).toThrow(LogChainError);
+  });
+
+  it('refuses to continue a file whose tail has no usable chain head', () => {
+    // A tail read loosely would seed the next entry from a `seq` that is not a
+    // number or an `entry_hash` that is not a string, forking the chain.
+    const file = path.join(dir, 'log.jsonl');
+    writeBasic(file, false);
+    const text = readFileSync(file, 'utf8');
+    for (const tail of ['{"seq":"5","entry_hash":"sha256:00"}', '{"seq":5}', '[]']) {
+      writeFileSync(file, `${text}${tail}\n`);
+      expect(() => ChainedFileSink.open(file)).toThrow(LogChainError);
+    }
   });
 
   it('refuses to continue a file whose last line is not an entry', () => {
@@ -308,6 +365,38 @@ describe('ChainedFileSink', () => {
 });
 
 describe('verifyLog', () => {
+  it('reports a null payload member instead of dereferencing it', () => {
+    const file = path.join(dir, 'log.jsonl');
+    writeBasic(file, false);
+    const lines = readFileSync(file, 'utf8').split('\n').filter((line) => line !== '');
+
+    // A receipt entry that carries no receipt is a payload mismatch, the break
+    // the other three SDKs report for it.
+    const withoutReceipt = { ...(JSON.parse(lines[1]!) as object), receipt: null };
+    const broken = verifyLog('t', [lines[0], JSON.stringify(withoutReceipt)].join('\n'));
+    expect(broken.ok).toBe(false);
+    expect(broken.break!.line).toBe(2);
+    expect(broken.break!.message).toContain('payload');
+
+    // `signature` is outside the entry hash, so a null one is simply an
+    // unsigned entry.
+    const unsigned = lines.map((line) => JSON.stringify({ ...(JSON.parse(line) as object), signature: null }));
+    const report = verifyLog('t', unsigned.join('\n'));
+    expect(report.ok, JSON.stringify(report.break)).toBe(true);
+    expect(report.signed).toBe(0);
+  });
+
+  it('rejects an unknown field inside a policy event', () => {
+    const file = path.join(dir, 'log.jsonl');
+    writeBasic(file, false);
+    const first = readFileSync(file, 'utf8').split('\n')[0]!;
+    const entry = JSON.parse(first) as { policy_event: { policy: Record<string, unknown> } };
+    entry.policy_event.policy.rogue = 1;
+    const report = verifyLog('t', JSON.stringify(entry));
+    expect(report.ok).toBe(false);
+    expect(report.break!.message).toContain('rogue');
+  });
+
   it('detects tampering, deletion and reordering at the first broken line', () => {
     const file = path.join(dir, 'log.jsonl');
     writeBasic(file, false);
@@ -412,7 +501,7 @@ describe('verifyLog', () => {
 // ----------------------------------------------------------------- vectors --
 
 const logEntrySchema = JSON.parse(
-  readFileSync(path.join(repoRoot, 'schemas/hushspec-log-entry.v0.schema.json'), 'utf8'),
+  readFileSync(path.join(repoRoot, 'schemas/hushspec-log-entry.v1.schema.json'), 'utf8'),
 ) as SchemaDocument;
 
 /** `invalid/<what>-line-<n>.jsonl` names the line the break must be found on. */

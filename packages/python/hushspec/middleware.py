@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Union, TYPE_CHECKING
 
 from hushspec.compiled import CompiledPolicy, compile_policy
-from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
+from hushspec.evaluate import (
+    Decision,
+    EvaluationAction,
+    EvaluationResult,
+    args_size_of,
+    is_panic_active,
+)
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
 from hushspec.resolve import (
@@ -47,12 +52,6 @@ _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 #: can never be relaxed by an enforcement override. It is the same reserved
 #: name the receipt carries -- one spelling per fact.
 POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
-
-#: ``policy.content_hash`` of a receipt for a load the guard refused. A 0.2
-#: receipt requires the field, but the guard will not vouch for the hash of a
-#: document it would not evaluate, so it records the all-zero digest: a
-#: well-formed content hash that joins to nothing.
-UNVERIFIED_POLICY_HASH = "sha256:" + "0" * 64
 
 
 @dataclass
@@ -232,10 +231,11 @@ class _GuardState:
     resolution: Optional[Resolution]
     #: Why the guard is denying everything, or ``None`` when it is enforcing.
     refusal: Optional[SignatureStatus]
+    #: The document a refusal is about: merged and hashed, never verified, and
+    #: never evaluated. It is what a refusal receipt names (signing spec
+    #: section 6.5), which is why it is kept apart from :attr:`resolution`.
+    refused: Optional[Resolution]
     policy_hash: Optional[str]
-    #: What the caller asked for, which a refused load still names.
-    requested_name: Optional[str]
-    requested_version: str
 
 
 class HushSpecDenied(Exception):
@@ -287,13 +287,15 @@ class HushGuard:
             verify=verify,
         )
         self._watcher: Any = None
-        requested = policy.spec if isinstance(policy, Resolution) else policy
         resolution: Optional[Resolution] = None
+        refused: Optional[Resolution] = None
         refusal: Optional[SignatureStatus] = None
         # Resolve before anything else touches the spec: a guard never holds an
         # unresolved document, and the receipt hash covers the resolved policy.
         # A policy that cannot be *verified* does not raise -- the guard has to
         # stay alive to deny, and to record the refusal (signing spec 6.5).
+        # A chain that would not merge at all does raise: there is no document
+        # to refuse against, so there is nothing a receipt could name.
         try:
             resolution = (
                 self._adopt_resolution(policy)
@@ -302,7 +304,10 @@ class HushGuard:
             )
             resolved = resolution.spec
         except PolicyVerificationError as exc:
+            if exc.resolution is None:
+                raise
             refusal = exc.status
+            refused = exc.resolution
             # A deny-everything policy as a backstop: nothing should reach it
             # (every evaluation short-circuits on the refusal), and if anything
             # ever did, it must not be the document that failed verification.
@@ -321,11 +326,10 @@ class HushGuard:
             ),
             resolution=resolution,
             refusal=refusal,
+            refused=refused,
             policy_hash=(
                 resolution.content_hash if resolution is not None else None
             ),
-            requested_name=requested.name,
-            requested_version=requested.hushspec,
         )
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
@@ -477,6 +481,7 @@ class HushGuard:
                     "guard requires one",
                     source=leaf,
                     status=status,
+                    resolution=resolution,
                 )
         return resolution
 
@@ -618,8 +623,9 @@ class HushGuard:
     def resolution(self) -> Optional[Resolution]:
         """Evidence from the policy load: chain hashes and signature outcomes.
 
-        ``None`` while the guard is refusing an unverified policy -- there is no
-        resolution to report. :attr:`refusal` says why.
+        ``None`` while the guard is refusing an unverified policy: there is a
+        document, and its hash and chain go into every refusal receipt, but it
+        is not a resolution this guard will enforce. :attr:`refusal` says why.
         """
         return self._state.resolution
 
@@ -655,8 +661,8 @@ class HushGuard:
             )
             try:
                 self._sink.send(receipt)
-            except Exception:
-                pass  # sinks must not break evaluation
+            except Exception as exc:  # noqa: BLE001
+                self._report_sink_failure(exc)
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, receipt=receipt
@@ -768,10 +774,10 @@ class HushGuard:
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
         """Deny without evaluating: the policy was never verified (signing 6.5).
 
-        No rule ran, so the receipt carries an empty ``rule_trace`` and no
-        content hash -- the guard refuses to vouch for the hash of a document it
-        would not evaluate. It still names the policy, so an auditor can see
-        *which* load was refused and why.
+        No rule ran, so the receipt carries an empty ``rule_trace``. It names
+        the refused document by its real content hash and chain, so an auditor
+        can see *which* load was refused, and carries the verifier's own
+        outcome, so nobody can read it as a policy that was proven.
         """
         refusal = state.refusal
         reason = (refusal.reason if refusal is not None else None) or "unverified"
@@ -780,21 +786,17 @@ class HushGuard:
             matched_rule=POLICY_SIGNATURE_RULE,
             reason=f"policy signature verification failed: {reason}",
         )
-        if self._sink is None:
+        if self._sink is None or state.refused is None:
             return result, 0, None
 
-        from hushspec.receipt import PolicySummary, unverified_policy_receipt
+        from hushspec.receipt import policy_summary, unverified_policy_receipt
 
-        receipt = unverified_policy_receipt(
-            PolicySummary(
-                name=state.requested_name,
-                spec_version=state.requested_version,
-                content_hash=UNVERIFIED_POLICY_HASH,
-                signature=refusal,
-            ),
-            action,
-            self._audit_context(),
-        )
+        summary = policy_summary(state.refused)
+        if summary.signature is None:
+            # The resolver stopped at the failing hop, so the leaf has no
+            # outcome of its own; the refusal is that outcome.
+            summary.signature = refusal
+        receipt = unverified_policy_receipt(summary, action, self._audit_context())
         return result, 0, receipt
 
     def _record(
@@ -808,10 +810,13 @@ class HushGuard:
         if receipt is not None:
             receipt.enforcement = enforcement
             if self._sink is not None:
+                # A sink must never break enforcement: a full disk is not a
+                # reason to let an action through, nor to stop one. The failure
+                # still reaches the observers, so the gap is visible.
                 try:
                     self._sink.send(receipt)
-                except Exception:
-                    pass  # sinks must not break enforcement
+                except Exception as exc:  # noqa: BLE001
+                    self._report_sink_failure(exc)
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, enforcement=enforcement, receipt=receipt
@@ -825,7 +830,8 @@ class HushGuard:
         return EvaluationAction(
             type="tool_call",
             target=tool_name,
-            args_size=len(json.dumps(args)) if args is not None else None,
+            # Core spec 3.7: the UTF-8 byte length of the canonical JSON.
+            args_size=args_size_of(args) if args is not None else None,
         )
 
     @staticmethod
@@ -850,12 +856,7 @@ class HushGuard:
         # rejected here rather than swapped in, leaving the policy in force. A
         # failed swap therefore raises and changes nothing -- including a guard
         # that is already refusing, which keeps refusing.
-        resolution = self._resolve(new_policy)
-        self._swap(
-            resolution,
-            requested_name=new_policy.name,
-            requested_version=new_policy.hushspec,
-        )
+        self._swap(self._resolve(new_policy))
 
     def swap_resolution(self, resolution: Resolution) -> None:
         """Swap in a policy a provider already resolved (the hot-reload path).
@@ -867,20 +868,9 @@ class HushGuard:
         resolution this guard will not accept is rejected here, leaving the
         policy in force untouched.
         """
-        adopted = self._adopt_resolution(resolution)
-        self._swap(
-            adopted,
-            requested_name=adopted.spec.name,
-            requested_version=adopted.spec.hushspec,
-        )
+        self._swap(self._adopt_resolution(resolution))
 
-    def _swap(
-        self,
-        resolution: Resolution,
-        *,
-        requested_name: Optional[str],
-        requested_version: str,
-    ) -> None:
+    def _swap(self, resolution: Resolution) -> None:
         resolved = resolution.spec
         # Compile before anything is swapped in: the guard never holds a
         # policy it has not prepared.
@@ -894,9 +884,8 @@ class HushGuard:
             compiled=compiled,
             resolution=resolution,
             refusal=None,
+            refused=None,
             policy_hash=resolution.content_hash,
-            requested_name=requested_name,
-            requested_version=requested_version,
         )
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_policy_reloaded(
@@ -933,5 +922,17 @@ class HushGuard:
         )
         try:
             self._sink.record_policy_event(event)
-        except Exception:
-            pass  # sinks must not break a policy load
+        except Exception as exc:  # noqa: BLE001
+            self._report_sink_failure(exc)
+
+    def _report_sink_failure(self, exc: Exception) -> None:
+        """Put a sink failure on the observer channel as ``sink.error``.
+
+        Named by the sink that refused, so an operator can tell which
+        destination stopped taking evidence.
+        """
+        if self._observable_evaluator is None:
+            return
+        self._observable_evaluator.notify_sink_error(
+            str(exc), type(self._sink).__name__
+        )

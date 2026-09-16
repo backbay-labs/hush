@@ -11,6 +11,7 @@ from hushspec.adapters.anthropic import (
 from hushspec.adapters.openai import map_openai_tool_call, create_openai_guard
 from hushspec.adapters.mcp import map_mcp_tool_call, extract_domain, create_mcp_guard
 from hushspec.adapters.crewai import secure_tool
+from hushspec.canonical import canonical_json_value
 from hushspec.evaluate import Decision
 from hushspec.middleware import HushGuard, HushSpecDenied
 
@@ -57,6 +58,11 @@ rules:
 
 
 
+def canonical_size(value) -> int:
+    """``args_size`` as core spec 3.7 defines it: UTF-8 bytes of the JCS text."""
+    return len(canonical_json_value(value).encode("utf-8"))
+
+
 class TestMapOpenAIToolCall:
     def test_maps_function_name_and_string_args(self):
         action = map_openai_tool_call("get_weather", '{"location":"NYC"}')
@@ -69,12 +75,35 @@ class TestMapOpenAIToolCall:
         action = map_openai_tool_call("get_weather", args)
         assert action.type == "tool_call"
         assert action.target == "get_weather"
-        assert action.args_size == len(json.dumps(args))
+        assert action.args_size == canonical_size(args)
+        # The spaced-out form json.dumps writes is the wrong unit.
+        assert action.args_size < len(json.dumps(args))
 
-    def test_preserves_exact_string_length(self):
+    def test_measures_a_string_payload_in_its_canonical_form(self):
         raw_args = '{"key":   "value"}'  # note extra spaces
         action = map_openai_tool_call("fn", raw_args)
-        assert action.args_size == len(raw_args)
+        assert action.args_size == canonical_size({"key": "value"})
+        assert action.args_size == len('{"key":"value"}')
+
+    def test_measures_non_ascii_arguments_in_utf_8_bytes(self):
+        # Core spec 3.7: bytes of the UTF-8 encoding, not characters and not
+        # the escaped form. JCS leaves a non-ASCII character unescaped, so the
+        # byte count exceeds the character count.
+        args = {"city": "S\u00e3o Paulo", "lock": "\U0001f512"}
+        action = map_openai_tool_call("locate", args)
+        canonical = canonical_json_value(args)
+        assert action.args_size == len(canonical.encode("utf-8"))
+        assert action.args_size == len(canonical) + 4
+
+    def test_measures_escaped_characters_as_the_bytes_jcs_writes(self):
+        # The arguments arrive with a quote, a newline and a tab escaped. JCS
+        # keeps the two-character escapes for the quote and the newline and
+        # rewrites \u0009 as \t, so the count is of the escapes the canonical
+        # form writes, never of the ones the caller happened to send.
+        raw_args = '{"note": "a \\"b\\" \\n c", "tab": "\\u0009"}'
+        action = map_openai_tool_call("note", raw_args)
+        assert action.args_size == canonical_size(json.loads(raw_args))
+        assert action.args_size == len('{"note":"a \\"b\\" \\n c","tab":"\\t"}')
 
     def test_handles_empty_dict_args(self):
         action = map_openai_tool_call("noop", {})
@@ -151,17 +180,37 @@ class TestMapMCPToolCall:
         assert action.target == "evil.com"
 
     def test_maps_unknown_tools_to_tool_call(self):
-        action = map_mcp_tool_call("custom_search", {"query": "test"})
+        args = {"query": "test"}
+        action = map_mcp_tool_call("custom_search", args)
         assert action.type == "tool_call"
         assert action.target == "custom_search"
-        assert action.args_size is not None
-        assert action.args_size > 0
+        assert action.args_size == canonical_size(args)
+
+    def test_measures_non_ascii_and_escaped_arguments_in_utf_8_bytes(self):
+        # Core spec 3.7: bytes of the UTF-8 encoding of the canonical JSON.
+        # The accented character is one character and two bytes; the quote is
+        # one character and two bytes once JCS has escaped it.
+        args = {"query": 'caf\u00e9 "au lait"'}
+        action = map_mcp_tool_call("custom_search", args)
+        canonical = canonical_json_value(args)
+        assert action.args_size == len(canonical.encode("utf-8"))
+        assert action.args_size == len('{"query":"caf\u00e9 \\"au lait\\""}'.encode("utf-8"))
 
     def test_maps_unknown_tools_without_args(self):
         action = map_mcp_tool_call("ping")
         assert action.type == "tool_call"
         assert action.target == "ping"
         assert action.args_size is None
+
+    def test_an_empty_arguments_object_is_two_bytes_not_no_measurement(self):
+        # An MCP call carrying `"arguments": {}` did carry arguments, and `{}`
+        # is two bytes of canonical JSON. Reporting no size instead would let
+        # it past a `max_args_size` of 1 that the TypeScript and Go adapters
+        # deny, so one limit would bound three different payloads.
+        action = map_mcp_tool_call("custom_search", {})
+        assert action.type == "tool_call"
+        assert action.args_size == 2
+        assert action.args_size == canonical_size({})
 
     def test_missing_path_in_read_file(self):
         action = map_mcp_tool_call("read_file", {})
@@ -189,6 +238,11 @@ class TestExtractDomain:
 
     def test_returns_empty_string_for_empty_input(self):
         assert extract_domain("") == ""
+
+    def test_reduces_the_authority_as_a_browser_would(self):
+        assert extract_domain("http://blocked.example\\@allowed.example/x") == "blocked.example"
+        assert extract_domain("https://user:pw@Host.Example:8443/") == "host.example"
+        assert extract_domain("http://[::1]:8080/health") == "[::1]"
 
 
 class TestCreateMCPGuard:
@@ -411,14 +465,14 @@ class TestMapClaudeToolToAction:
         )
         assert action.type == "tool_call"
         assert action.target == "create_issue"
-        assert action.args_size == len(json.dumps({"title": "x"}))
+        assert action.args_size == canonical_size({"title": "x"})
 
     def test_maps_an_unknown_tool_to_a_tool_call(self):
         args = {"query": "select 1"}
         action = map_claude_tool_to_action(_block("run_query", args))
         assert action.type == "tool_call"
         assert action.target == "run_query"
-        assert action.args_size == len(json.dumps(args))
+        assert action.args_size == canonical_size(args)
 
     def test_reads_sdk_objects_structurally(self):
         action = map_claude_tool_to_action(_ToolUseBlock("bash", {"command": "whoami"}))

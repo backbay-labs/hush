@@ -10,12 +10,12 @@ use hushspec::{HushSpec, create_composite_loader, resolve_with_loader, validate}
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
-/// Vector format version (`schemas/hushspec-hash-vector.v0.schema.json`).
+/// Vector format version (`schemas/hushspec-hash-vector.v1.schema.json`).
 const VECTOR_VERSION: &str = "0.1.0";
 
 /// Every vector in `fixtures/core/hash/`; keep in step with the table in
 /// `fixtures/core/hash/README.md`.
-const EXPECTED_VECTOR_COUNT: usize = 14;
+const EXPECTED_VECTOR_COUNT: usize = 16;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

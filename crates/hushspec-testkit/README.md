@@ -33,7 +33,7 @@ hushspec-testkit --fixtures fixtures --report report.json \
 ```
 
 The report validates against
-`schemas/hushspec-conformance-report.v0.schema.json` before it is written: it
+`schemas/hushspec-conformance-report.v1.schema.json` before it is written: it
 names the implementation, pins the corpus by the SHA-256 of
 `fixtures/MANIFEST.json`, gives an outcome for each of levels 0-5, and lists
 every vector it ran. `highest_level` is the largest N for which levels 0..=N
@@ -42,11 +42,11 @@ all pass; a level with any unattempted vector is never a pass.
 ## The conformance bundle
 
 ```bash
-hushspec-testkit bundle --root . --out hushspec-conformance-0.2.0.tar.gz
+hushspec-testkit bundle --root . --out hushspec-conformance-1.0.0.tar.gz
 ```
 
-The archive holds `spec/`, `schemas/`, and `fixtures/` (minus `staged/`, which
-is not normative yet) plus a README on running it against an implementation.
+The archive holds `spec/`, `schemas/`, and `fixtures/` plus a README on
+running it against an implementation.
 It is reproducible -- sorted entries, fixed modes, zeroed mtimes, no gzip
 timestamp -- so the same tree always produces the same bytes and the digest in
 a release attestation means something. `release.yml` attaches it to every
@@ -90,7 +90,7 @@ Exit codes: `0` no divergence, `1` divergence found, `2` infrastructure error
 {
   "hushspec_diff": "0.1.0",
   "seed": 42,
-  "generated_by": "hushspec-gen 0.1.1",
+  "generated_by": "hushspec-gen 1.0.0",
   "groups": [
     {
       "id": "g0001",

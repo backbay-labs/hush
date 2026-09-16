@@ -32,11 +32,11 @@ rules:
 	if err != nil {
 		t.Fatalf("ResolveFile returned error: %v", err)
 	}
-	if resolved.Extends != "" {
-		t.Fatalf("expected resolved spec to clear extends, got %q", resolved.Extends)
+	if resolved.Extends != nil {
+		t.Fatalf("expected resolved spec to clear extends, got %q", *resolved.Extends)
 	}
-	if resolved.Name != "child" {
-		t.Fatalf("expected child name to win, got %q", resolved.Name)
+	if stringValue(resolved.Name) != "child" {
+		t.Fatalf("expected child name to win, got %q", stringValue(resolved.Name))
 	}
 	if resolved.Rules == nil || resolved.Rules.ToolAccess == nil {
 		t.Fatal("expected merged tool_access rule")
@@ -97,7 +97,7 @@ name: parent
 	if err != nil {
 		t.Fatalf("Resolve returned error: %v", err)
 	}
-	if resolved.Extends != "" || resolved.Name != "parent" {
+	if resolved.Extends != nil || stringValue(resolved.Name) != "parent" {
 		t.Fatalf("unexpected resolved output: %#v", resolved)
 	}
 }
@@ -118,7 +118,7 @@ func TestCompositeLoaderRejectsHTTPReferences(t *testing.T) {
 		"http://example.com/policy.yaml",
 		"https://example.com/policy.yaml",
 	} {
-		spec := &HushSpec{HushSpecVersion: "0.1.0", Extends: ref}
+		spec := &HushSpec{HushSpecVersion: "0.1.0", Extends: &ref}
 		if _, err := Resolve(spec, "", nil); err == nil {
 			t.Errorf("expected Resolve to reject an %q extends reference, got no error", ref)
 		}
@@ -186,11 +186,11 @@ func TestResolveShallowExtendsChainStillResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected a 3-deep extends chain to resolve cleanly, got error: %v", err)
 	}
-	if resolved.Extends != "" {
-		t.Fatalf("expected resolved spec to clear extends, got %q", resolved.Extends)
+	if resolved.Extends != nil {
+		t.Fatalf("expected resolved spec to clear extends, got %q", *resolved.Extends)
 	}
-	if resolved.Name != "spec0" {
-		t.Fatalf("expected resolved spec name to be spec0, got %q", resolved.Name)
+	if stringValue(resolved.Name) != "spec0" {
+		t.Fatalf("expected resolved spec name to be spec0, got %q", stringValue(resolved.Name))
 	}
 }
 
@@ -198,5 +198,30 @@ func writeFixtureFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {
 		t.Fatalf("failed to write fixture file %s: %v", path, err)
+	}
+}
+
+// TestResolutionDropsMergeStrategyFromAOneHopChain covers core spec 2.3: a
+// document that declares `merge_strategy` without `extends` never reaches
+// Merge, and resolution still hands back a document carrying neither
+// resolution instruction.
+func TestResolutionDropsMergeStrategyFromAOneHopChain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaf.yaml")
+	writeFixtureFile(t, path, `
+hushspec: "0.1.0"
+name: leaf
+merge_strategy: replace
+`)
+
+	resolved, err := ResolveFile(path)
+	if err != nil {
+		t.Fatalf("failed to resolve a one-hop chain: %v", err)
+	}
+	if resolved.Extends != nil {
+		t.Fatalf("expected no extends on a resolved document, got %q", *resolved.Extends)
+	}
+	if resolved.MergeStrategy != "" {
+		t.Fatalf("expected no merge_strategy on a resolved document, got %q", resolved.MergeStrategy)
 	}
 }

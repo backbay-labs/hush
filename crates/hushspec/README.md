@@ -8,20 +8,20 @@ Agentic compliance as code: a portable, open specification for declaring, enforc
 
 ```toml
 [dependencies]
-hushspec = "0.1"
+hushspec = "1.0"
 ```
 
 Optional features:
 
 ```toml
 # Ed25519 policy signing and verification
-hushspec = { version = "0.1", features = ["signing"] }
+hushspec = { version = "1.0", features = ["signing"] }
 
 # HTTPS-based extends resolution, remote policy providers, webhook observer
-hushspec = { version = "0.1", features = ["http"] }
+hushspec = { version = "1.0", features = ["http"] }
 
 # OTLP/HTTP export of receipts and policy events (implies `http`)
-hushspec = { version = "0.1", features = ["otlp"] }
+hushspec = { version = "1.0", features = ["otlp"] }
 ```
 
 ## Quick Start

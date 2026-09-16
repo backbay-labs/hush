@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "python"))
@@ -42,7 +41,10 @@ def main() -> int:
 
         with tempfile.TemporaryDirectory(prefix="hushspec-roundtrip-") as tmpdir:
             roundtrip_path = Path(tmpdir) / path.name
-            roundtrip_path.write_text(yaml.safe_dump(baseline, sort_keys=False))
+            # JSON is a YAML 1.2 document with every string quoted, so the
+            # round trip cannot depend on how a YAML 1.1 dumper spells a scalar
+            # such as "-08", which the SDKs' YAML 1.2 parsers read as a number.
+            roundtrip_path.write_text(json.dumps(baseline, indent=2) + "\n")
             for sdk in SDKS:
                 normalized = canonicalize(run_sdk(sdk, roundtrip_path))
                 if normalized != baseline:

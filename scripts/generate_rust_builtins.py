@@ -147,7 +147,13 @@ def render() -> str:
     # generator's `--check` from disagreeing about the committed bytes.
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is not on PATH, and generated_builtins.rs is committed as rustfmt "
+            "output. Generating without it would write a file that `cargo fmt` "
+            "immediately reformats, which this script's --check then reports "
+            "as out of date forever. Install it with `rustup component add "
+            "rustfmt`."
+        )
 
     result = subprocess.run(
         [rustfmt, "--emit", "stdout", "--edition", "2024"],

@@ -1,4 +1,4 @@
-//! The conformance report (`schemas/hushspec-conformance-report.v0.schema.json`).
+//! The conformance report (`schemas/hushspec-conformance-report.v1.schema.json`).
 //!
 //! A report is the evidence behind a conformance statement: it names the
 //! implementation, pins the corpus by the digest of `fixtures/MANIFEST.json`,

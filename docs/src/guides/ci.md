@@ -12,7 +12,7 @@ The action at the repository root (`action.yml`, named `HushSpec`) installs
 `h2h` and runs one subcommand over a set of files.
 
 ```yaml
-- uses: backbay-labs/hush@v0.2.0
+- uses: backbay-labs/hush@v1.0.0
   with:
     command: validate
     paths: policies/*.yaml
@@ -22,7 +22,7 @@ The action at the repository root (`action.yml`, named `HushSpec`) installs
 |---|---|---|
 | `command` | `validate` | `validate`, `lint`, `test`, `audit`, or `bundle-verify`. |
 | `paths` | *(required)* | Glob pattern(s), one per line or space-separated. A run that matches no files fails closed (exit `2`), it does not silently pass. |
-| `version` | `latest` | A release tag (`v0.2.0`), `latest`, or `source` to build `crates/hushspec-cli` from the action's own checkout -- no released binaries required. |
+| `version` | `latest` | A release tag (`v1.0.0`), `latest`, or `source` to build `crates/hushspec-cli` from the action's own checkout -- no released binaries required. |
 | `fail-on-warnings` | `false` | Adds `--fail-on-warnings` to `h2h lint`. |
 | `format` | `text` | Forwarded as `h2h --format`: `text`/`json` everywhere, `sarif` for `lint`, `junit` for `test`. An unsupported combination is rejected by `h2h` itself, not silently downgraded. |
 | `report-file` | `hushspec-<command>-report.<ext>` | Where the command's output is written. |
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: backbay-labs/hush@v0.2.0
+      - uses: backbay-labs/hush@v1.0.0
         with:
           command: validate
           paths: policies/**/*.yaml
@@ -67,7 +67,7 @@ jobs:
 scanning:
 
 ```yaml
-      - uses: backbay-labs/hush@v0.2.0
+      - uses: backbay-labs/hush@v1.0.0
         id: lint
         with:
           command: lint
@@ -91,7 +91,7 @@ failing step.
 ### Run policy test suites with JUnit
 
 ```yaml
-      - uses: backbay-labs/hush@v0.2.0
+      - uses: backbay-labs/hush@v1.0.0
         with:
           command: test
           paths: fixtures/policy-suite
@@ -127,7 +127,7 @@ under a different naming convention.
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/backbay-labs/hush
-    rev: v0.2.0
+    rev: v1.0.0
     hooks:
       - id: hushspec-validate
       - id: hushspec-fmt-check

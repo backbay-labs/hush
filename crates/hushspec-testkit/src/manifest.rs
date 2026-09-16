@@ -16,11 +16,6 @@ use sha2::{Digest, Sha256};
 /// version is an error, not a best-effort parse.
 pub const MANIFEST_VERSION: &str = "0.1";
 
-/// Directories excluded from the manifest. `staged/` holds vectors for
-/// behavior ratified in the spec but not yet shipped (core spec 1.1); they
-/// are not part of any conformance level until promoted.
-pub const EXCLUDED_PREFIXES: &[&str] = &["fixtures/staged/"];
-
 /// The manifest file name, relative to the fixtures root.
 pub const MANIFEST_FILE: &str = "MANIFEST.json";
 
@@ -134,11 +129,7 @@ impl Manifest {
             let Some(relative) = relative_fixture_path(&path) else {
                 continue;
             };
-            if relative == format!("fixtures/{MANIFEST_FILE}")
-                || EXCLUDED_PREFIXES
-                    .iter()
-                    .any(|prefix| relative.starts_with(prefix))
-            {
+            if relative == format!("fixtures/{MANIFEST_FILE}") {
                 continue;
             }
             on_disk.push(relative.clone());
@@ -230,18 +221,6 @@ mod tests {
             drift.is_empty(),
             "fixtures/MANIFEST.json is stale -- rerun scripts/generate_fixture_manifest.py:\n  {}",
             drift.join("\n  ")
-        );
-    }
-
-    #[test]
-    fn the_manifest_excludes_staged_vectors() {
-        let manifest = Manifest::load(&fixtures_dir()).unwrap();
-        assert!(
-            !manifest
-                .files
-                .iter()
-                .any(|entry| entry.path.starts_with("fixtures/staged/")),
-            "staged vectors are not normative and must stay out of the manifest"
         );
     }
 

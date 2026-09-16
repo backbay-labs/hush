@@ -63,6 +63,7 @@ code" is the answer a relying party needs:
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Parse YAML to a document | `HushSpec::parse` | `parse`, `parseOrThrow` | `parse`, `parse_or_raise` | `Parse` | Fail-closed: unknown members at any depth, YAML aliases, merge keys, duplicate keys, multi-document streams and `yes`/`no` booleans are all parse errors (core spec 2.4) | Rust uses serde `deny_unknown_fields`; the ports check the closed key sets of their generated contract |
+| Optional string in the document | `Option<String>` | `string \| undefined` | `str \| None` | `*string` | An absent property and one written as `""` are distinct: the canonical form keeps the empty string, so the two hash differently | An optional *enum* is a plain string in Go; `""` is not one of its values |
 | Serialize back to YAML | `HushSpec::to_yaml` | -- | -- | `Marshal` | Round-trips a parsed document | TS and Python callers use their own YAML library |
 | YAML profile check alone | `schema::yaml_profile_violation` | `yamlProfileViolation` | -- | -- | Reports the profile violation without a full parse | Python and Go fold the check into `parse` / `Parse` |
 | Validate a document | `validate` | `validate` | `validate` | `Validate` | Types, enums, uniqueness, numeric bounds, the regex profile and `when` conditions. Never throws; collects every error | |
@@ -70,8 +71,8 @@ code" is the answer a relying party needs:
 | One validation error | `ValidationError` (enum) | `ValidationError` (`.code`) | `ValidationError` (`.code`, `.kind`) | `ValidationError` (`.Code`, `.Kind`) | Carries the document path and message | Rust's is a typed enum with no code string; see [Error codes](#error-codes) |
 | Condition validation | `conditions::validate_condition` | `validateCondition`, `validateConditions` | `validate_condition`, `validate_conditions` | `ValidateCondition`, `ValidateConditions` | A malformed `when` is a document error, not a runtime deny | |
 | Regex profile | `compile_profile_regex` | `isSafeRegex` | `is_safe_regex` | `CompileProfileRegex` | The ReDoS-safe profile of core spec 3.14; a pattern outside it is `E005` | Rust and Go return the compiled regex, TS and Python a boolean |
-| Document limits | `schema::MAX_DOCUMENT_BYTES`, `MAX_NESTING_DEPTH`, `MAX_NODE_COUNT` | `MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_DEPTH`, `MAX_NODE_COUNT` | `parse.MAX_DOCUMENT_BYTES`, `parse.MAX_NESTING_DEPTH`, `parse.MAX_NODE_COUNT` | `MaxDocumentBytes`, `MaxDocumentNestingDepth`, `MaxDocumentNodeCount` | 1 MiB, depth 32, 100 000 nodes -- identical in all four | TS spells the depth limit `MAX_DOCUMENT_DEPTH`; Python's three are module-level, not in `__all__` |
-| Governance findings | `validate_governance`, `GovernanceWarning` | -- | -- | -- | Separation of duties, overdue review, changelog order (core spec 2.5) | Rust and `h2h audit` only. The `metadata` date format (`E011`) is checked inside `validate` in all four |
+| Document limits | `schema::MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_DEPTH`, `MAX_NODE_COUNT` | `MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_DEPTH`, `MAX_NODE_COUNT` | `parse.MAX_DOCUMENT_BYTES`, `parse.MAX_DOCUMENT_DEPTH`, `parse.MAX_NODE_COUNT` | `MaxDocumentBytes`, `MaxDocumentNestingDepth`, `MaxDocumentNodeCount` | 1 MiB, depth 32, 100 000 nodes -- identical in all four | Go spells the depth limit `MaxDocumentNestingDepth`; Python's three are module-level, not in `__all__` |
+| Governance findings | `validate_governance`, `GovernanceFinding`, `GovernanceSeverity` | -- | -- | -- | Separation of duties, overdue review, changelog order (core spec 2.5) | Rust and `h2h audit` only. The `metadata` date format (`E011`) is checked inside `validate` in all four |
 
 ## Merge, resolve, verify-on-load, digest pins
 
@@ -89,7 +90,7 @@ code" is the answer a relying party needs:
 | Digest pin | `split_digest_pin`, `own_content_hash` | `splitDigestPin` | `resolve.DIGEST_PIN_MARKER` | `ReasonInvalidPin`, `ReasonDigestMismatch`, `OwnContentHash` | `extends: "<ref>#sha256:<hex>"`. A mismatch always rejects, and a matching pin satisfies `require_signature` for that hop | Enforced identically in all four; only the helper spelling differs |
 | Built-in rulesets | `load_builtin`, `BUILTIN_NAMES` | `loadBuiltin`, `BUILTIN_NAMES` | `load_builtin`, `BUILTIN_NAMES` | `LoadBuiltin`, `BuiltinNames` | `builtin:<name>` and `builtin:library/<vertical>/<name>` resolve with no file system | Generated from `rulesets/` and `library/` by `scripts/generate_*_builtins.py` |
 | Composite loader | `create_composite_loader` | `createCompositeLoader`, `createBuiltinLoader` | `create_composite_loader`, `create_builtin_loader` | `ResolveLoader` | Builtin first, then file | Go takes a loader function rather than a factory |
-| HTTPS loader | `resolve::http::load_from_https` *(feature `http`)* | `createHttpLoader`, `createSyncHttpLoader` | -- | -- | ETag caching, SSRF and IPv6 hardening, redirect limits | **Rust and TypeScript only.** Python and Go ship no HTTP client and reject an `https:` reference outright rather than resolving it unverified -- supply your own loader, or resolve ahead of time and hand them the `Resolution` |
+| HTTPS loader | `resolve::http::load_from_https`, `resolve::http::fetch_signature` *(feature `http`)* | `createHttpLoader`, `createSyncHttpLoader` | `create_http_loader`, `fetch_signature` | `NewHTTPLoader`, `ValidateURL` | `https:` only; host allowlist; every resolved address checked against the reserved-range block list after DNS, then pinned for the connection; no redirects; 1 MiB cap; connect and read timeouts; ETag revalidation; `<url>.sig` lookup (core spec 2.6, security spec) | Identical rule set in all four SDKs. Python and Go loaders are opt-in through `ResolveOptions`/loader registration; supply the loader or a pre-resolved `Resolution` |
 | Resolve failure reason | `ResolveError` | `ResolveError`, `resolveErrorReason` | `ResolveRejected` | `ResolveReason`, `InvalidPinError`, `NotFoundError`, `CycleError`, `MaxDepthError` | A machine-readable reason (`invalid_pin`, `not_found`, `cycle`, `max_depth`, ...) rather than a bare string | |
 
 ## Compiled policies
@@ -162,7 +163,7 @@ code" is the answer a relying party needs:
 | Format version | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `ReceiptVersion` | `"0.2"` | |
 | Evaluate and record | `evaluate_audited` | `evaluateAudited` | `evaluate_audited` | `EvaluateAudited` | Takes a **`Resolution`**, an action, an `AuditConfig` and an `AuditContext`; returns a format 0.2 receipt | Content is never carried -- only `action.content_hash` and `content_size` |
 | From a bare document | `evaluate_audited_spec` | `evaluateAuditedSpec` | `evaluate_audited_spec` | `EvaluateAuditedSpec` | Resolves the leaf as `memory` first | |
-| Receipt value | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `receipt_version`, UUID v7 `receipt_id`, millisecond `timestamp` with `time_source`, `actor`, `policy`, `action`, decision, recorded `rule_trace`, `detection_trace`, required `enforcement` | Validates against `hushspec-receipt.v0.schema.json` |
+| Receipt value | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `receipt_version`, UUID v7 `receipt_id`, millisecond `timestamp` with `time_source`, `actor`, `policy`, `action`, decision, recorded `rule_trace`, `detection_trace`, required `enforcement` | Validates against `hushspec-receipt.v1.schema.json` |
 | Parse a receipt | `DecisionReceipt::parse` | `parseReceipt` | `parse_receipt` | `ParseReceipt` | Accepts exactly what the 0.2 schema accepts; every `receipts/invalid/` vector is rejected | |
 | Receipt hash | `DecisionReceipt::receipt_hash` | `receiptHash` | `receipt_hash` | `(*DecisionReceipt).ReceiptHash` | `sha256:` over the JCS form of the receipt -- what the log chains and the signer signs | |
 | Receipt canonical JSON | `DecisionReceipt::canonical_json` | `receiptCanonicalJson` | `receipt_to_dict` + `canonical_json_value` | `(*DecisionReceipt).CanonicalJSON` | | TS re-exports `canonicalJson as receiptCanonicalJson` so the policy one stays unambiguous |
@@ -199,11 +200,11 @@ good.
 | Envelope version | `signing::FORMAT_VERSION` | `SIGNATURE_FORMAT_VERSION` | `ENVELOPE_FORMAT_VERSION` | `SignatureFormatVersion` | `"0.2"` | Format 0.1 signed file bytes and cannot be verified by 0.2 |
 | Algorithm | `signing::ALGORITHM` | `SIGNATURE_ALGORITHM` | `SIGNATURE_ALGORITHM` | `SignatureAlgorithm` | `"ed25519"` | |
 | Sign a policy | `signing::sign_policy` | `signPolicy` | `sign_policy` | `SignPolicy` | Signs the **content hash of the resolved policy**, not the file's bytes: reformatting keeps a signature valid, changing a base reached through `extends` invalidates it | |
-| Verify a policy | `signing::verify_policy` | `verifyPolicy` | `verify_policy` | `VerifyPolicy` | Returns valid, or invalid with one of the eleven closed reason codes of signing spec 6.4 | All four pass all 16 `fixtures/signing/vectors.yaml` cases |
+| Verify a policy | `signing::verify_policy` | `verifyPolicy` | `verify_policy` | `VerifyPolicy` | Returns valid, or invalid with one of the eleven closed reason codes of signing spec 6.4 | All four pass all 18 `fixtures/signing/vectors.yaml` cases |
 | Sign / verify a bare hash | `signing::sign_content_hash`, `verify_content_hash` | `signContentHash`, `verifyContentHash` | `sign_content_hash`, `verify_content_hash` | `SignContentHash`, `VerifyContentHash` | The primitive the policy, receipt and log signers share | |
-| Envelope | `signing::Envelope` | `Envelope`, `parseEnvelope`, `envelopeSigningInput` | `Envelope`, `parse_envelope`, `signing_input` | `Envelope`, `ParseEnvelope`, `MarshalEnvelope` | `hushspec-signature.v0.schema.json` | |
+| Envelope | `signing::Envelope` | `Envelope`, `parseEnvelope`, `envelopeSigningInput` | `Envelope`, `parse_envelope`, `signing_input` | `Envelope`, `ParseEnvelope`, `MarshalEnvelope` | `hushspec-signature.v1.schema.json` | |
 | Reason codes | `signing::ReasonCode` (`ALL`, `as_str`, `from_code`) | `ReasonCode` | `REASON_CODES` | `ReasonMalformedEnvelope` ... `ReasonPolicyVersionRollback` | The closed set of signing spec 6.4 -- identical strings in all four | Rust's is an enum with a `&'static str` wire form; TS's is a type-level union only |
-| Keyring | `signing::Keyring` | `Keyring`, `loadKeyring`, `keyringFromPublicKey` | `Keyring`, `load_keyring` | `Keyring`, `LoadKeyring`, `KeyringFromPublicKey` | `hushspec-keyring.v0.schema.json`, with retirement and revocation | |
+| Keyring | `signing::Keyring` | `Keyring`, `loadKeyring`, `keyringFromPublicKey` | `Keyring`, `load_keyring` | `Keyring`, `LoadKeyring`, `KeyringFromPublicKey` | `hushspec-keyring.v1.schema.json`, with retirement and revocation | |
 | Key id | `signing::key_id` | `keyIdFromPublicKey` | `key_id_from_public_key` | `KeyIDFromPublicKey` | SHA-256 of the SPKI DER -- never chosen by the signer | |
 | Keypair | `signing::generate_keypair` | `generateKeypair` | `cryptography` | `ParsePrivateKeyPEM`, `MarshalPrivateKeyPEM` | PKCS#8 and SubjectPublicKeyInfo PEM | |
 | Sign a receipt | `signing::sign_receipt` | `signReceipt` | `sign_receipt` | `SignReceipt` | Signs the receipt hash | `SignedReceipt` in all four |
@@ -215,8 +216,8 @@ good.
 | Operation | Rust *(feature `signing`)* | TypeScript | Python *(extra `signing`)* | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Parse a bundle | `DsseEnvelope::parse` | `parseBundle` | `parse_bundle` | `ParseBundle` | A DSSE envelope over an in-toto Statement v1 | Readable by generic DSSE and in-toto tooling |
-| Verify a bundle | `verify_bundle` | `verifyBundle` | `verify_bundle` | `VerifyBundle` | The four ordered checks of bundle spec 5.2, returning valid or one of the five closed reason codes of 5.4 | All four pass all 8 `fixtures/bundle/vectors.yaml` cases |
-| Reason codes | `BundleReason` | `BUNDLE_REASONS`, `BundleReason` | `BUNDLE_REASON_CODES` | `BundleReasons`, `BundleReasonMalformed` ... | `malformed_bundle`, `unknown_key_id`, `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch` | |
+| Verify a bundle | `verify_bundle` | `verifyBundle` | `verify_bundle` | `VerifyBundle` | The four ordered checks of bundle spec 5.2, returning valid or one of the seven closed reason codes of 5.4 | All four pass all 10 `fixtures/bundle/vectors.yaml` cases |
+| Reason codes | `BundleReason` | `BUNDLE_REASONS`, `BundleReason` | `BUNDLE_REASON_CODES` | `BundleReasons`, `BundleReasonMalformed` ... | `malformed_bundle`, `unknown_key_id`, `key_revoked`, `key_retired`, `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch` | |
 | Statement and predicate | `Statement`, `PolicyBundlePredicate`, `Subject` | `BundleStatement`, `PolicyBundlePredicate`, `BundleSubject` | `hushspec.bundle` | `BundleStatement`, `PolicyBundlePredicate`, `BundleSubject` | The subject is the canonical form of the resolved document; the predicate carries every hop with its hash and signature status | |
 | PAE | `pae` | `pae` | `hushspec.bundle` | `BundlePAE` | DSSE pre-authentication encoding | |
 | Create and sign | `build_statement`, `sign_statement`, `unsigned_envelope` | -- | -- | -- | Production is Rust and `h2h bundle create` only | Verification is what a relying party depends on, and all four verify |
@@ -270,7 +271,7 @@ good.
 
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Sink interface | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `send(receipt)`, plus an optional `record_policy_event` | A sink that fails must not break an evaluation |
+| Sink interface | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `send(receipt)`, plus an optional `record_policy_event` | A sink that fails must not break an evaluation; the guard reports it as `sink.error` naming the sink. Rust adds a defaulted `name()` a sink may override; all four otherwise report the sink's own type name |
 | File | `FileReceiptSink` | `FileReceiptSink` | `FileReceiptSink` | `NewFileReceiptSink` | JSONL | |
 | Stderr | `StderrReceiptSink` | `StderrReceiptSink` (alias of `ConsoleReceiptSink`) | `StderrReceiptSink` | `StderrReceiptSink` | | `StderrReceiptSink` is the isomorphic name; TS keeps `ConsoleReceiptSink` as the original and pins the alias by identity |
 | Filtered | `FilteredSink` | `FilteredSink` | `FilteredSink` | `NewFilteredSink`, `NewDenyOnlySink` | Route only the decisions you keep | |
@@ -284,7 +285,7 @@ good.
 
 | Framework | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Anthropic / Claude | -- | `mapClaudeToolToAction`, `createSecureToolHandler` | `adapters.map_claude_tool_to_action`, `adapters.create_secure_tool_handler` | `MapAnthropicToolUse`, `GuardedAnthropicToolHandler` | Maps a `tool_use` block onto the action a policy evaluates: `bash` to `shell_command`, text editor to `file_read` / `file_write`, `computer` to `computer_use`, `web_fetch` to `egress` on the host, `mcp__server__tool` to the inner tool name | No adapter imports the framework it adapts -- blocks are read structurally |
+| Anthropic / Claude | -- | `mapClaudeToolToAction`, `createSecureToolHandler` | `adapters.map_claude_tool_to_action`, `adapters.create_secure_tool_handler` | `MapClaudeToolToAction`, `CreateSecureToolHandler` | Maps a `tool_use` block onto the action a policy evaluates: `bash` to `shell_command`, text editor to `file_read` / `file_write`, `computer` to `computer_use`, `web_fetch` to `egress` on the host, `mcp__server__tool` to the inner tool name | No adapter imports the framework it adapts -- blocks are read structurally |
 | OpenAI | -- | `mapOpenAIToolCall`, `createOpenAIGuard` | `adapters.map_openai_tool_call`, `adapters.create_openai_guard` | `MapOpenAIToolCall`, `GuardedOpenAIToolHandler` | | |
 | MCP | -- | `mapMCPToolCall`, `extractDomain`, `createMCPGuard` | `adapters.map_mcp_tool_call`, `adapters.extract_domain`, `adapters.create_mcp_guard` | `MapMCPToolCall`, `ExtractDomain`, `GuardedMCPToolHandler` | | |
 | Vercel AI SDK | -- | `mapVercelToolCall`, `createVercelGuard` | -- | -- | Gates each tool's `execute` | |
@@ -311,9 +312,9 @@ through a guard, a chained sink and an OTLP sink.
 
 | Constant | Rust | TypeScript | Python | Go | Value |
 |---|---|---|---|---|---|
-| Spec version written | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `Version` | `"0.2.0"` |
-| Minors accepted | `version::HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS`, `SUPPORTED_MINORS` | `SupportedMinors` | `["0.1", "0.2"]` |
-| Representative versions | `version::HUSHSPEC_SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `SupportedVersions` | `["0.1.0", "0.2.0"]` |
+| Spec version written | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `Version` | `"1.0.0"` |
+| Minors accepted | `version::HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS`, `SUPPORTED_MINORS` | `SupportedMinors` | `["0.1", "0.2", "1.0"]` |
+| Representative versions | `version::HUSHSPEC_SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `SupportedVersions` | `["0.1.0", "0.2.0", "1.0.0"]` |
 | Acceptance test | `version::is_supported` | `isSupported` | `is_supported` | `IsSupported` | Accepts every `X.Y.Z` of a supported minor (core spec 2.2) |
 | Minor of a version | `version::supported_minor` | `supportedMinor` | `supported_minor` | `SupportedMinor` | |
 | Package identity | Cargo metadata | `SDK_NAME`, `SDK_VERSION` | `__version__` | `SDKName` | The SDK's own release, distinct from the spec version |
@@ -370,10 +371,10 @@ each is enforced by a check that fails CI.
 | Invariant | Enforced by |
 |---|---|
 | **Identical decisions.** For any document and action, all four return the same `decision`, `matched_rule`, `reason`, `origin_profile` and `posture`. | The shared corpus (`fixtures/{core,posture,origins,detection}/evaluation`) run natively by each SDK, plus `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the Rust oracle. |
-| **Identical canonical form and content hash.** The same resolved document canonicalizes to the same bytes and hashes to the same `sha256:` in all four. | `fixtures/core/hash/` (14 vectors) run by all four; `scripts/check_cross_sdk_roundtrip.py`; `content_hash` compared per group by `hushspec-difftest`. |
+| **Identical canonical form and content hash.** The same resolved document canonicalizes to the same bytes and hashes to the same `sha256:` in all four. | `fixtures/core/hash/` (16 vectors) run by all four; `scripts/check_cross_sdk_roundtrip.py`; `content_hash` compared per group by `hushspec-difftest`. |
 | **Byte-identical receipts after JCS under fixed inputs.** With the actor, clock, receipt id and audit config that `fixtures/receipts/expected/README.md` pins, every evaluation case produces the committed receipt byte for byte after RFC 8785. | `fixtures/receipts/expected/<module>/<fixture>/<case>.json` run by all four; `receipt_hash` compared per group by `hushspec-difftest`. |
 | **Identical recorded rule traces.** The same entries, in the same order, under the same closed `rule_block` ids. | The `expect.rule_trace` assertions of evaluator-test format 0.2, plus the expected receipts. |
-| **Identical reason codes.** The 11 signing reasons, the 5 bundle reasons and the resolve reasons are the same strings everywhere. | `fixtures/signing/vectors.yaml` (16 cases) and `fixtures/bundle/vectors.yaml` (8 cases), each asserting the exact code, run by all four. |
+| **Identical reason codes.** The 11 signing reasons, the 7 bundle reasons and the resolve reasons are the same strings everywhere. | `fixtures/signing/vectors.yaml` (18 cases) and `fixtures/bundle/vectors.yaml` (10 cases), each asserting the exact code, run by all four. |
 | **Identical error codes.** Every `invalid/` vector is rejected with the code its sidecar names. | The four fixture runners, against the `.expect.yaml` sidecars. |
 | **Identical public names.** One concept, one name across the four, modulo language casing. | `tests/exports.test.ts`, `tests/test_public_surface.py`, `isomorphism_test.go`. |
 | **Identical parse refusals.** The YAML profile, the document limits and the closed key sets reject the same inputs. | `fixtures/*/invalid/` plus the generated contract (`scripts/generate_sdk_contracts.py`), checked for drift by the `generated-sources` CI job. |

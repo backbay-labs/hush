@@ -58,10 +58,10 @@ func CanonicalJSON(spec *HushSpec) (string, error) {
 	if spec == nil {
 		return "", fmt.Errorf("cannot canonicalize a nil HushSpec document")
 	}
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		return "", fmt.Errorf(
 			"cannot canonicalize an unresolved HushSpec document: resolve extends %q first",
-			spec.Extends,
+			*spec.Extends,
 		)
 	}
 	projected, err := canonicalProjectStruct(reflect.ValueOf(*spec))
@@ -119,7 +119,7 @@ func emptyArrayDefault() any { return []any{} }
 
 // canonicalSchemaRules mirrors, per generated model type, the `default` and
 // `required` declarations of schemas/hushspec-{core,posture,origins,detection}
-// .v0.schema.json plus the presence-significant exceptions listed in
+// .v1.schema.json plus the presence-significant exceptions listed in
 // spec/hushspec-canonical.md section 3.3. A type absent from this map, or a
 // property absent from its entry, has no default, is not required, and is not
 // presence-significant.
@@ -344,12 +344,16 @@ func canonicalProjectStruct(v reflect.Value) (map[string]any, error) {
 // is present in the document, and returns the value to project.
 //
 //   - Pointers, slices and maps model presence directly: nil is absent, and a
-//     non-nil empty slice or map is a present-but-empty container, which
-//     section 3.3 (and its exception table) then judges.
-//   - Strings use the SDK-wide omitempty convention: "" is absent. The Go
-//     model cannot express a present-but-empty optional string, and every
-//     such property is either an enum (where "" is invalid and rejected by
-//     validateRawDocument) or free text that is inert when empty.
+//     non-nil empty slice, map or string is a present-but-empty value, which
+//     section 3.3 (and its exception table) then judges. Every string property
+//     whose presence the canonical form can observe -- an optional free-text
+//     one, and `time_window.timezone`, whose absence takes a schema default --
+//     is a *string for exactly this reason, so one written as the empty string
+//     reaches the canonical form as it does in the other SDKs. See
+//     is_optional_go_string in scripts/generate_sdk_models.py.
+//   - The remaining bare strings are required properties and enums, for which
+//     "" is not a value: the empty enum sentinel is absence, and
+//     validateRawDocument refuses a document that writes one.
 //   - Booleans, numbers and nested structs cannot express absence at all, so
 //     they are always present; Parse materializes the schema defaults whose
 //     value is not the Go zero value (see applyParseDefaults).

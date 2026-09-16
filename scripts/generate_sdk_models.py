@@ -294,7 +294,7 @@ STRUCTS = [
             field("from", "string", required=True, py_name="from_state"),
             field("to", "string", required=True),
             field("on", "TransitionTrigger", required=True),
-            field("after", "string", go_pointer=True),
+            field("after", "string"),
         ],
     },
     {
@@ -309,13 +309,13 @@ STRUCTS = [
         "fields": [
             field("id", "string", required=True, go_name="ID"),
             field("match", "OriginMatch", py_name="match_rules", rs_name="match_rules", go_name="Match"),
-            field("posture", "string", go_pointer=True),
+            field("posture", "string"),
             field("tool_access", "OriginToolAccessOverlay"),
             field("egress", "OriginEgressOverlay"),
             field("data", "OriginDataPolicy"),
             field("budgets", "OriginBudgets"),
             field("bridge", "BridgePolicy"),
-            field("explanation", "string", go_pointer=True),
+            field("explanation", "string"),
         ],
     },
     {
@@ -421,7 +421,7 @@ STRUCTS = [
         "name": "ThreatIntelDetection",
         "fields": [
             field("enabled", "bool", go_pointer=True),
-            field("pattern_db", "string", go_pointer=True, go_name="PatternDB"),
+            field("pattern_db", "string", go_name="PatternDB"),
             field("similarity_threshold", "float", go_pointer=True),
             field("top_k", "count", go_pointer=True),
         ],
@@ -500,7 +500,26 @@ def go_type(field_info: dict) -> str:
         return f"*{base}"
     if (is_struct(field_info["type"]) or is_external(field_info["type"])) and not field_info["required"]:
         return f"*{base}"
+    if is_optional_go_string(field_info):
+        return f"*{base}"
     return base
+
+
+def is_optional_go_string(field_info: dict) -> bool:
+    """Whether a field is an optional free-text string.
+
+    Go has no zero value left over to mean "absent", so such a field is a
+    `*string`: nil is absent and a pointer to "" is a present empty value. The
+    other three SDKs model the same distinction with `Option<String>`,
+    `str | None` and `string | undefined`, and the canonical form keeps a
+    present empty string, so Go must be able to hold one. Enums need no pointer
+    -- "" is not one of their values, and validation rejects it.
+    """
+    return (
+        field_info["type"] == "string"
+        and not field_info["required"]
+        and field_info["default"] is None
+    )
 
 
 def render_type(type_info: object, language: str) -> str:
@@ -774,15 +793,96 @@ def render_rust() -> str:
     content = "\n".join(lines).rstrip() + "\n"
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is required to generate formatted Rust; install it with "
+            "`rustup component add rustfmt`"
+        )
     result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        [rustfmt, "--emit", "stdout", "--edition", "2024"],
         input=content,
         text=True,
         capture_output=True,
         check=True,
     )
     return result.stdout
+
+
+def go_needs_init() -> set[str]:
+    """Structs that own an `emit_empty` collection, or can reach one.
+
+    `initEmptyCollections` recurses, so a struct needs the method when any
+    struct it holds -- directly, in a list, or in a map -- needs it too.
+    """
+    needs = {
+        struct["name"]
+        for struct in STRUCTS
+        if any(f["emit_empty"] for f in struct["fields"])
+    }
+    changed = True
+    while changed:
+        changed = False
+        for struct in STRUCTS:
+            if struct["name"] in needs:
+                continue
+            if any(go_item_type(f["type"]) in needs for f in struct["fields"]):
+                needs.add(struct["name"])
+                changed = True
+    return needs
+
+
+def go_item_type(type_info: object) -> object:
+    """The struct a field holds: itself, its list item, or its map value."""
+    if isinstance(type_info, dict):
+        return type_info["item"] if type_info["kind"] == "list" else type_info["value"]
+    return type_info
+
+
+def go_empty_literal(type_info: dict) -> str:
+    return f"{render_type(type_info, 'go')}{{}}"
+
+
+def render_go_init(struct: dict, needs: set[str]) -> list[str]:
+    """`initEmptyCollections` for one struct, or nothing when it needs none.
+
+    Go cannot give a field a default, and encoding/json writes a nil slice as
+    `null` rather than `[]`, so a required collection is given an empty value
+    at decode time -- the same place the Python model does it, with
+    `data.get(wire, [])` in `from_dict`.
+    """
+    if struct["name"] not in needs:
+        return []
+    lines = [
+        "// initEmptyCollections gives every required collection a non-nil value and",
+        "// recurses into the structs below it, so a collection that is empty serializes",
+        "// as an empty container in Go exactly as it does in the other three SDKs.",
+        f"func (x *{struct['name']}) initEmptyCollections() {{",
+        "\tif x == nil {",
+        "\t\treturn",
+        "\t}",
+    ]
+    for field_info in struct["fields"]:
+        name = field_info["go_name"]
+        if field_info["emit_empty"] and is_collection(field_info["type"]):
+            lines.append(f"\tif x.{name} == nil {{")
+            lines.append(f"\t\tx.{name} = {go_empty_literal(field_info['type'])}")
+            lines.append("\t}")
+        item = go_item_type(field_info["type"])
+        if item not in needs:
+            continue
+        if not isinstance(field_info["type"], dict):
+            lines.append(f"\tx.{name}.initEmptyCollections()")
+        elif field_info["type"]["kind"] == "list":
+            lines.append(f"\tfor i := range x.{name} {{")
+            lines.append(f"\t\tx.{name}[i].initEmptyCollections()")
+            lines.append("\t}")
+        else:
+            lines.append(f"\tfor key, value := range x.{name} {{")
+            lines.append("\t\tvalue.initEmptyCollections()")
+            lines.append(f"\t\tx.{name}[key] = value")
+            lines.append("\t}")
+    lines.append("}")
+    lines.append("")
+    return lines
 
 
 def render_go() -> str:
@@ -804,15 +904,25 @@ def render_go() -> str:
         lines.append(")")
         lines.append("")
 
+    needs_init = go_needs_init()
     for struct in STRUCTS:
         lines.append(f"type {struct['name']} struct {{")
         for field_info in struct["fields"]:
-            tag_suffix = ",omitempty" if (not field_info["required"] or is_collection(field_info["type"])) else ""
+            # `emit_empty` fields are serialized whether or not they hold
+            # anything, so `omitempty` would make Go the one SDK that drops an
+            # empty required collection from the wire.
+            if field_info["emit_empty"]:
+                tag_suffix = ""
+            elif not field_info["required"] or is_collection(field_info["type"]):
+                tag_suffix = ",omitempty"
+            else:
+                tag_suffix = ""
             lines.append(
                 f'\t{field_info["go_name"]} {go_type(field_info)} `yaml:"{field_info["wire"]}{tag_suffix}" json:"{field_info["wire"]}{tag_suffix}"`'
             )
         lines.append("}")
         lines.append("")
+        lines.extend(render_go_init(struct, needs_init))
 
     content = "\n".join(lines).rstrip() + "\n"
     gofmt = shutil.which("gofmt")

@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 /// the testkit (never published) does. `evaluator_schema_matches_workspace_copy`
 /// in `tests/resolve_tests.rs` fails if the two ever drift.
 const EVALUATOR_TEST_SCHEMA: &str =
-    include_str!("../schemas/hushspec-evaluator-test.v0.schema.json");
+    include_str!("../schemas/hushspec-evaluator-test.v1.schema.json");
 
 /// Fixture format versions this runner accepts (evaluator-test schema).
 const SUPPORTED_TEST_VERSIONS: &[&str] = &["0.1.0", "0.2.0"];
@@ -290,7 +290,7 @@ pub fn run(args: TestArgs) -> i32 {
     }
 
     // Fail closed before a single case runs: a fixture with a typo in `expect`
-    // (`matched_rul:`) or an unknown top-level key used to be silently ignored
+    // (`matched_rul:`) or an unknown top-level key would otherwise be ignored
     // and reported green. A malformed suite is a config error, not a failure.
     let mut malformed = false;
     for file in &test_files {
@@ -445,9 +445,9 @@ fn evaluator_schema() -> &'static JSONSchema {
 /// Validate one fixture file against the evaluator-test schema, reporting each
 /// violation with its JSON-pointer path.
 ///
-/// This mirrors what the conformance testkit already does
-/// (`hushspec-testkit`'s `validate_evaluator_schema`); without it, `h2h test`
-/// accepted anything its structs happened to deserialize and skipped the rest.
+/// This applies the same schema the conformance testkit does
+/// (`hushspec-testkit`'s `validate_evaluator_schema`), so a suite is held to
+/// the published contract rather than to whatever its structs deserialize.
 fn validate_fixture_schema(path: &Path) -> Result<(), Vec<String>> {
     let content =
         std::fs::read_to_string(path).map_err(|e| vec![format!("failed to read file: {e}")])?;

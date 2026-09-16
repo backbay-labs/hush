@@ -1,0 +1,16 @@
+# core 4.1: `deep_merge` descends into `extensions`, not into `metadata`. The
+# child's object replaces the base's whole -- approved_by, approval_date,
+# classification, lifecycle_state and controls are gone, and policy_version is
+# the child's alone -- even though the child restates none of them.
+hushspec: "0.2.0"
+name: child-deep-merge
+extends: base
+merge_strategy: deep_merge
+metadata:
+  author: platform@example.com
+  policy_version: 8
+rules:
+  egress:
+    allow:
+      - "child.example.com"
+    default: block

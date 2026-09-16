@@ -1,11 +1,12 @@
 //! `h2h report`: turn a window of receipts into an evidence report.
 //!
 //! The input is either a hash-linked log (`spec/hushspec-log.md`) or a plain
-//! receipt JSONL; each line is classified on its own. A log's chain is
-//! verified before anything is counted, because a report over a chain that
-//! does not verify is not evidence -- it is a summary of whatever the last
-//! writer left behind. Reporting on a broken chain therefore takes an
-//! explicit `--unverified`, and stamps the document `chain_verified: false`.
+//! receipt JSONL; each line is classified on its own, and a file holding any
+//! log entry is treated as a log. A log's chain is verified before anything is
+//! counted, because a report over a chain that does not verify is not evidence
+//! -- it is a summary of whatever the last writer left behind. Reporting on a
+//! broken chain therefore takes an explicit `--unverified`, and stamps the
+//! document `chain_verified: false`.
 //!
 //! The aggregation itself is [`hushspec::report`]. What lives here is the
 //! reading (auto-detection, the window, fail-closed line handling), the
@@ -15,13 +16,14 @@
 
 use clap::ValueEnum;
 use colored::Colorize;
-use hushspec::log::{LogEntry, LogVerifyOptions, PolicyEvent, verify_log};
+use hushspec::log::{LogEntry, LogError, LogVerifyOptions, PolicyEvent, verify_log};
 use hushspec::report::{
     ChainSummary, ControlEvidenceRow, ControlsEvidence, FrameworkEvidence, Report, ReportOptions,
     build_report, in_window,
 };
 use hushspec::signing::SignedReceipt;
 use hushspec::{DecisionReceipt, HushSpec, ResolveOptions, RuleTraceEntry};
+use jsonschema::JSONSchema;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -66,6 +68,22 @@ pub struct ReportArgs {
     /// Report even though an input log's hash chain did not verify
     #[arg(long)]
     unverified: bool,
+
+    /// Trusted keyring JSON for entry signatures
+    #[arg(long, value_name = "PATH", conflicts_with = "key")]
+    keyring: Option<PathBuf>,
+
+    /// A single trusted public key (PEM) for entry signatures
+    #[arg(long, value_name = "PATH")]
+    key: Option<PathBuf>,
+
+    /// Every log entry must carry a signature that verifies
+    #[arg(long)]
+    require_signatures: bool,
+
+    /// Allowed signer clock skew in seconds
+    #[arg(long, default_value_t = 300, value_name = "SECONDS")]
+    max_skew: i64,
 
     /// Stamp the report with this RFC 3339 time instead of the wall clock
     #[arg(long, value_name = "TIMESTAMP")]
@@ -150,9 +168,38 @@ pub fn run(args: ReportArgs) -> i32 {
         },
     };
 
+    // A report's chain check is `h2h log verify`'s, so it reads the same
+    // flags and runs the same receipt schema pass. The report's own instant is
+    // the verifier's clock, so a report pinned with `--now` verifies the
+    // signatures as of the moment it claims to describe.
+    let verify_args = crate::verify_opts::VerifyOnLoadArgs {
+        require_signature: false,
+        keyring: args.keyring.clone(),
+        key: args.key.clone(),
+        now: args.now.clone(),
+        max_skew: args.max_skew,
+        last_seen_version: None,
+    };
+    let resolve_options = match verify_args.to_options() {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    let log_options = LogVerifyOptions {
+        require_signatures: args.require_signatures,
+        keyring: resolve_options.keyring,
+        verify: resolve_options.verify,
+    };
+    let receipt_schema = match crate::cmd_log::receipt_schema() {
+        Ok(schema) => schema,
+        Err(message) => {
+            eprintln!("{} {message}", "error:".red());
+            return 2;
+        }
+    };
+
     let mut loaded = Loaded::default();
     for path in &args.files {
-        if let Err(code) = read_file(path, &mut loaded) {
+        if let Err(code) = read_file(path, &log_options, &receipt_schema, &mut loaded) {
             return code;
         }
     }
@@ -287,7 +334,59 @@ fn check_timestamp(timestamp: &str) -> Result<(), String> {
         .map_err(|error| format!("timestamp {timestamp:?} is not RFC 3339: {error}"))
 }
 
-fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
+/// Line numbers for a diagnostic, listing the first few and counting the rest.
+fn line_list(lines: &[usize]) -> String {
+    const SHOWN: usize = 5;
+    let mut text = lines
+        .iter()
+        .take(SHOWN)
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if lines.len() > SHOWN {
+        let _ = write!(text, " (and {} more)", lines.len() - SHOWN);
+    }
+    text
+}
+
+/// Validate every receipt entry of `text` against the receipt schema.
+///
+/// The chain verifier reads receipts through the typed model, which is not the
+/// schema: a line whose receipt is hash-consistent can still carry a document
+/// no auditor would accept as evidence.
+fn receipts_match_schema(name: &str, text: &str, schema: &JSONSchema) -> Result<(), LogError> {
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<LogEntry>(line) else {
+            continue; // already reported by the chain verifier
+        };
+        let Some(receipt) = &entry.receipt else {
+            continue;
+        };
+        let value = serde_json::to_value(receipt).unwrap_or_default();
+        if let Err(errors) = schema.validate(&value) {
+            let messages: Vec<String> = errors.map(|error| error.to_string()).collect();
+            return Err(LogError {
+                file: name.to_string(),
+                line: index + 1,
+                message: format!(
+                    "receipt does not validate against the receipt schema: {}",
+                    messages.join("; ")
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn read_file(
+    path: &Path,
+    options: &LogVerifyOptions,
+    receipt_schema: &JSONSchema,
+    loaded: &mut Loaded,
+) -> Result<(), i32> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) => {
@@ -298,22 +397,40 @@ fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
     let name = path.display().to_string();
 
     let mut classified: Vec<(usize, Line)> = Vec::new();
-    let mut is_log = false;
+    let mut entry_lines = 0usize;
+    let mut receipt_lines: Vec<usize> = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
+        let line_no = index + 1;
         match classify(line) {
             Ok(parsed) => {
-                if classified.is_empty() {
-                    is_log = matches!(parsed, Line::Entry(_));
+                match &parsed {
+                    Line::Entry(_) => entry_lines += 1,
+                    Line::Receipt(_) => receipt_lines.push(line_no),
                 }
-                classified.push((index + 1, parsed));
+                classified.push((line_no, parsed));
             }
             Err(message) => loaded
                 .malformed
-                .push(format!("{name}:{}: {message}", index + 1)),
+                .push(format!("{name}:{line_no}: {message}")),
         }
+    }
+
+    // Any log entry makes the whole file a log. Verifying only the files that
+    // *open* with one would let a plain receipt prepended to a hash-linked log
+    // carry the rest of that log past chain verification entirely.
+    let is_log = entry_lines > 0;
+    if is_log && !receipt_lines.is_empty() {
+        eprintln!(
+            "{} {name} mixes record types: {entry_lines} log entry line(s) and {} plain \
+             receipt line(s) at {}; the file is verified as a log, so its plain receipt \
+             lines break the chain",
+            "warning:".yellow(),
+            receipt_lines.len(),
+            line_list(&receipt_lines),
+        );
     }
 
     // A log's chain is verified before its receipts are counted (log spec 8).
@@ -322,7 +439,14 @@ fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
     // carries the previous file's hash); checking the link *between* two
     // rotated files is `h2h log verify`'s job, and it takes them in order.
     if is_log {
-        let summary = match verify_log(&name, &text, &LogVerifyOptions::default()) {
+        let verified = verify_log(&name, &text, options)
+            // The chain verifier checks `receipt_version`; the schema pass
+            // covers every other member of every receipt entry (log spec 8,
+            // step 8), exactly as `h2h log verify` runs it.
+            .and_then(|report| {
+                receipts_match_schema(&name, &text, receipt_schema).map(|()| report)
+            });
+        let summary = match verified {
             Ok(report) => ChainSummary {
                 verified: true,
                 files: 1,
@@ -411,10 +535,11 @@ fn merge_chain(previous: ChainSummary, next: ChainSummary) -> ChainSummary {
 /// mapping (`rules.egress.block`) is only evidenced by an entry whose recorded
 /// `rule_path` is at or under it -- otherwise a report would credit
 /// `rules.egress.block` for an evaluation that matched the allowlist.
-fn mapping_covers(rule_path: &str, entry: &RuleTraceEntry) -> bool {
+fn mapping_covers(doc: &serde_json::Value, rule_path: &str, entry: &RuleTraceEntry) -> bool {
     let depth = rule_path.split('.').count();
     if rule_path.starts_with("rules") && depth <= 2 && !rule_path.contains('[') {
         return crate::controls::path_covers_block(
+            doc,
             rule_path,
             &format!("rules.{}", entry.rule_block),
         );
@@ -501,6 +626,7 @@ fn control_evidence(
         return Ok(None);
     };
 
+    let doc = crate::controls::document_json(&spec);
     let mappings = spec
         .metadata
         .as_ref()
@@ -545,7 +671,7 @@ fn control_evidence(
                 if !mapping
                     .rule_paths
                     .iter()
-                    .any(|path| mapping_covers(path, entry))
+                    .any(|path| mapping_covers(&doc, path, entry))
                 {
                     continue;
                 }
@@ -1362,7 +1488,7 @@ fn oscal(report: &Report) -> serde_json::Value {
             }));
             findings.push(serde_json::json!({
                 "uuid": stable_uuid(&format!("finding:{id}")),
-                "title": format!("{id}"),
+                "title": id.as_str(),
                 "description": format!(
                     "HushSpec rule paths {} were exercised {} time(s) in this window.",
                     row.rule_paths.join(", "),
@@ -1430,31 +1556,48 @@ mod tests {
         }
     }
 
+    fn policy() -> serde_json::Value {
+        serde_json::json!({
+            "rules": {
+                "egress": { "allow": ["api.example.com"], "block": [], "default": "block" },
+                "tool_access": { "allow": ["read_file"], "default": "block" },
+                "forbidden_paths": { "patterns": ["/etc/**"] }
+            }
+        })
+    }
+
     #[test]
     fn a_block_mapping_covers_every_entry_of_that_block() {
+        let doc = policy();
         let egress = entry("egress", Some("rules.egress.allow"));
-        assert!(mapping_covers("rules", &egress));
-        assert!(mapping_covers("rules.egress", &egress));
-        assert!(!mapping_covers("rules.tool_access", &egress));
+        assert!(mapping_covers(&doc, "rules", &egress));
+        assert!(mapping_covers(&doc, "rules.egress", &egress));
+        assert!(!mapping_covers(&doc, "rules.tool_access", &egress));
+        // A block mapping that names no block of this policy evidences nothing.
+        assert!(!mapping_covers(&doc, "rules.nope", &egress));
     }
 
     #[test]
     fn a_deep_mapping_needs_the_recorded_path_under_it() {
+        let doc = policy();
         let blocked = entry("egress", Some("rules.egress.block"));
         let allowed = entry("egress", Some("rules.egress.allow"));
-        assert!(mapping_covers("rules.egress.block", &blocked));
-        assert!(!mapping_covers("rules.egress.block", &allowed));
+        assert!(mapping_covers(&doc, "rules.egress.block", &blocked));
+        assert!(!mapping_covers(&doc, "rules.egress.block", &allowed));
         // A block that recorded no path evidences nothing deeper than itself.
         assert!(!mapping_covers(
+            &doc,
             "rules.egress.block",
             &entry("egress", None)
         ));
         // Segment boundaries: `rules.egress.blocklist` is not under `.block`.
         assert!(!mapping_covers(
+            &doc,
             "rules.egress.block",
             &entry("egress", Some("rules.egress.blocklist"))
         ));
         assert!(mapping_covers(
+            &doc,
             "rules.forbidden_paths.patterns",
             &entry("forbidden_paths", Some("rules.forbidden_paths.patterns"))
         ));

@@ -1,9 +1,9 @@
 # HushSpec Canonical Form Specification
 
-**Version:** 0.2.0 (Draft)
-**Status:** Draft
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
-**Companion to:** HushSpec Core 0.2.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
+**Companion to:** HushSpec Core 1.0.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
 
 ---
 
@@ -25,7 +25,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHOULD", "SHOULD NOT", "
 
 **Resolved document.** The output of resolving a document's `extends` chain (Core Section 2.3). It contains neither `extends` nor `merge_strategy`.
 
-**Schema.** The JSON Schema documents under `schemas/`: `hushspec-core.v0.schema.json` and the three extension schemas (`posture`, `origins`, `detection`).
+**Schema.** The JSON Schema documents under `schemas/`: `hushspec-core.v1.schema.json` and the three extension schemas (`posture`, `origins`, `detection`).
 
 **Canonical projection.** The JSON value produced by Section 3.
 
@@ -57,7 +57,7 @@ A HushSpec document is authored in YAML (Core Section 2.4). Before projection it
 - YAML strings become JSON strings, byte-for-byte after YAML escape processing. No Unicode normalization is applied to values. (Path and host normalization in Core Sections 3.1 and 3.3 happen at evaluation time, on action inputs, never on the document.)
 - YAML integers become JSON numbers. YAML floats become JSON numbers. The distinction between `10` and `10.0` does not survive canonicalization (Section 4.3).
 - YAML booleans `true`/`false` become JSON booleans. Under the YAML 1.2 Core schema required by Core Section 2.4, `yes`, `no`, `on`, and `off` are strings.
-- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a null where the schema expects a value is a validation error and the document MUST NOT be canonicalized.
+- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a `null` written anywhere the schema types a value (a declared property, an array element, or a schema-map entry) is a validation error and the document MUST NOT be canonicalized. Inside the free-form values the schema does not describe (`when.context` and everything below it) `null` is an ordinary JSON value and is canonicalized as one.
 
 A document supplied as JSON is already in the data model.
 
@@ -85,7 +85,8 @@ The canonical projection is computed by walking the resolved document alongside 
 For a JSON object `V` projected against a schema object `S` with property map `P`:
 
 1. Every key of `V` MUST be in `P` (Section 2.3).
-2. For each property `k` in `P`, in any order (order is irrelevant; serialization sorts keys):
+2. No value in `V` may be `null` (Section 2.2). An implementation MUST refuse the document rather than emit `null` for a property the schema declares.
+3. For each property `k` in `P`, in any order (order is irrelevant; serialization sorts keys):
    - If `k` is present in `V`, its value is projected against `P[k]` (following any `$ref`). The projected value is included unless Section 3.3 says to omit it.
    - If `k` is absent in `V` and `P[k]` declares a `default`, the default value is included verbatim. Defaults are leaf values in every HushSpec schema (booleans, strings, numbers, or empty arrays); they are never themselves projected further.
    - If `k` is absent and `P[k]` declares no `default`, it stays absent.
@@ -120,7 +121,9 @@ No other field in the current schemas is presence-significant. A future schema r
 
 ### 3.4 Extensions
 
-The core schema declares `extensions.posture`, `extensions.origins`, and `extensions.detection` as opaque objects. For projection, each present extension block is projected against the **root** of its own schema document (`hushspec-posture.v0.schema.json`, `hushspec-origins.v0.schema.json`, `hushspec-detection.v0.schema.json`) using the same rules as Section 3.2, then subjected to Section 3.3. If every extension block projects to an omitted value, `extensions` itself is omitted.
+A present `extensions` MUST be a JSON object, and every one of its keys MUST name a published extension schema. An implementation that finds anything else refuses the document rather than passing the value through unprojected (Section 2.3).
+
+The core schema declares `extensions.posture`, `extensions.origins`, and `extensions.detection` as opaque objects. For projection, each present extension block is projected against the **root** of its own schema document (`hushspec-posture.v1.schema.json`, `hushspec-origins.v1.schema.json`, `hushspec-detection.v1.schema.json`) using the same rules as Section 3.2, then subjected to Section 3.3. If every extension block projects to an omitted value, `extensions` itself is omitted.
 
 ### 3.5 Worked example
 
@@ -208,9 +211,17 @@ Numbers are emitted using the ECMAScript `Number::toString` algorithm (RFC 8785 
 - Negative zero prints as `0`.
 - `NaN` and infinities have no JSON representation; a document containing one is invalid.
 
-HushSpec integers MUST lie within the IEEE 754 safe range (absolute value at most 2^53 − 1). An implementation that encounters a larger integer MUST refuse to canonicalize rather than round it.
-
 Consequently an integer `10` and a float `10.0` have the same canonical form. This is deliberate: it removes the most common cross-language divergence (serializers that print `10` versus `10.0`).
+
+#### The safe-integer bound
+
+A number written with **integer syntax** -- digits with an optional sign, no fraction and no exponent -- MUST have an absolute value of at most 2^53 − 1, the largest integer an IEEE 754 double represents exactly. An implementation that encounters a larger integer literal MUST refuse to canonicalize rather than round it.
+
+A number written with **float syntax** -- a fraction, an exponent, or both -- carries no such bound. It denotes a double, and the algorithm above emits it at any magnitude: `1.0e+16` → `10000000000000000`, `1.0e+21` → `1e+21`, `1.5e+300` → `1.5e+300`.
+
+The bound is syntactic because the syntax is the only thing that distinguishes the two cases: `10000000000000000` and `1.0e+16` denote the same double, and only the way each was written says whether the author meant an exact integer, which 2^53 − 1 bounds, or a double, which it does not. An implementation therefore applies the bound where the distinction still exists -- in its parser, which sees the literal -- rather than in its serializer, which sees a number.
+
+A value handed to an implementation directly, as a number of the host language rather than as a document to parse, carries no syntax to read. Section 2.3 already requires such a value to have come from a valid document, so the bound has been applied by the parser that read it.
 
 ### 4.4 Other values
 
@@ -250,7 +261,7 @@ The **reference implementation** is `scripts/canonical_json.py`, a standard-libr
 
 ## 7. Test Vectors
 
-Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushspec-hash-vector.v0.schema.json`:
+Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushspec-hash-vector.v1.schema.json`:
 
 | Field | Meaning |
 |---|---|
@@ -267,6 +278,7 @@ Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushsp
 | `all-rule-blocks-defaults.yaml` | Section 3.2: every rule block present and empty; full default materialization. |
 | `defaults-partial.yaml` | Section 3.2: defaults fill only absent fields; absent blocks are not invented. |
 | `numbers.yaml` | Section 4.3: whole floats, fractions, integers. |
+| `numbers-large.yaml` | Section 4.3: float syntax beyond the safe-integer bound; negative zero. |
 | `strings-escapes.yaml` | Section 4.2: every escape class, non-ASCII, U+2028, astral, DEL, NBSP. |
 | `key-order-utf16.yaml` | Section 4.1: UTF-16 key order including a surrogate-pair key. |
 | `empty-containers.yaml` | Section 3.3: omission of empty no-default containers. |
@@ -277,6 +289,7 @@ Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushsp
 | `origins-overlay-empties.yaml` | Section 3.3: overlay lists written empty are omitted; `match: {}` is kept. |
 | `extension-detection.yaml` | Section 3.4: detector defaults. |
 | `extends-resolved.yaml` | Section 2.1: canonicalized after resolution; `source` shows the unresolved child. |
+| `empty-strings.yaml` | Sections 3.2 and 3.3: an optional string written `""` survives; only empty containers are omitted. |
 
 Verify with:
 
@@ -290,6 +303,8 @@ All four SDKs walk `fixtures/core/hash/`, as does the conformance testkit's `has
 
 ## 8. Security Considerations
 
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
+
 - **Hash identity, not authenticity.** A content hash proves that two parties hold the same policy; it does not prove who wrote it. Authenticity comes from the signature specification.
 - **Canonicalization must precede validation of nothing.** Validate first (Section 2.3). A canonicalizer that tolerates unknown fields could be made to hash a document that no conformant engine would accept.
 - **Resolution is part of identity.** Because the hash covers the resolved document, changing a base policy changes the hash of every child, even if the child file is untouched. This is the intended behavior: the enforced policy changed.
@@ -299,4 +314,3 @@ All four SDKs walk `fixtures/core/hash/`, as does the conformance testkit's `has
 
 HushSpec 0.1 defined no canonical form. Each SDK hashed its own serialization of the parsed document, so identical policies produced four different `content_hash` values. This specification replaces all of those with one definition and moves the wire form from bare hex to `sha256:`-prefixed hex.
 
-Within the 0.2 draft, an earlier revision of Section 3.3 also declared the five origins profile overlay lists presence-significant. It no longer does: Origins Section 4 makes an absent overlay list and an empty one evaluate identically, so the distinction never reached a decision, while no SDK's typed model could express it. `OriginProfile.match` is now the only presence-significant field. A document that writes an empty overlay list has a different content hash under this revision than under that earlier draft.

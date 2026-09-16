@@ -5,6 +5,7 @@ import pytest
 from hushspec import (
     DefaultAction,
     DetectionExtension,
+    EvaluationAction,
     Extensions,
     GovernanceMetadata,
     HushSpec,
@@ -15,6 +16,8 @@ from hushspec import (
     Rules,
     ThreatIntelDetection,
     TransitionTrigger,
+    content_hash,
+    evaluate,
     is_supported,
     merge,
     parse,
@@ -201,6 +204,80 @@ hushspec: "99.0.0"
         result = validate(spec)
         assert not result.is_valid
         assert any("unsupported" in str(e) for e in result.errors)
+
+    def test_empty_name_only_refused_in_the_1_0_format(self):
+        """Core spec 2 requires a present ``name`` to be non-empty, but only
+        from the 1.0 document format: the frozen 0.x format allows ``name: ""``,
+        the one validation difference between the two (versioning spec 10).
+        """
+        for version in ("0.1.0", "0.2.0", "0.2.7"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            assert validate(spec).is_valid, version
+        for version in ("1.0.0", "1.0.3"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            result = validate(spec)
+            assert not result.is_valid, version
+            assert any(
+                "name: must not be empty when present" in str(error)
+                for error in result.errors
+            )
+
+    def test_empty_name_under_an_unreadable_version(self):
+        """A version that cannot be read as MAJOR.MINOR.PATCH is refused on its
+        own account, and must never be a way to relax a constraint as well.
+        """
+        spec = HushSpec(hushspec="not-a-version", name="")
+        codes = [error.code for error in validate(spec).errors]
+        assert "E004" in codes
+
+    @pytest.mark.parametrize(
+        ("yaml", "expected"),
+        [
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress: null\n',
+                "rules.egress: invalid type, expected an object",
+            ),
+            (
+                'hushspec: "1.0.0"\nname: null\n',
+                "name: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\ndescription: null\n',
+                "description: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nmetadata:\n  author: null\n',
+                "metadata.author: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n      capability: null\n',
+                "rules.egress.when.capability: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n'
+                "      all_of:\n        - rate: null\n",
+                "rules.egress.when.all_of[0].rate: invalid type, expected an object",
+            ),
+        ],
+    )
+    def test_a_written_null_is_refused_for_a_declared_property(self, yaml, expected):
+        """Canonical spec 2.2: no HushSpec property is nullable, so a written
+        null is a value of the wrong type rather than an absent property.
+        """
+        with pytest.raises(ValueError) as caught:
+            parse_or_raise(yaml)
+        assert expected in str(caught.value)
+
+    def test_a_null_inside_a_context_value_is_a_leaf(self):
+        """``when.context`` holds values to compare against the runtime
+        context, so a null there is data, not a property of the format.
+        """
+        yaml = (
+            'hushspec: "1.0.0"\nrules:\n  egress:\n    default: block\n'
+            "    when:\n      context:\n        user.tenant: null\n"
+        )
+        when = parse_or_raise(yaml).rules.egress.when
+        assert when["context"] == {"user.tenant": None}
 
     def test_parse_rejects_duplicate_secret_pattern_names(self):
         yaml = """
@@ -584,7 +661,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "nested unbounded quantifier" in err
 
     def test_accepts_valid_browser_automation_rule(self):
         yaml = """
@@ -946,15 +1023,69 @@ class TestVersionAcceptance:
     """Core spec 2.2: an engine supporting minor X.Y accepts every X.Y.Z."""
 
     def test_accepts_every_patch_of_a_supported_minor(self):
-        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"):
+        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7", "1.0.0", "1.0.3"):
             assert is_supported(version) is True, version
             ok, spec = parse(f'hushspec: "{version}"\nname: v\n')
             assert ok is True, version
             assert validate(spec).is_valid, version
 
     def test_rejects_unsupported_or_malformed_versions(self):
-        for version in ("0.3.0", "1.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
+        for version in ("0.3.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
             assert is_supported(version) is False, version
+
+    def test_a_one_point_zero_document_is_evaluated_as_a_zero_point_two_one(self):
+        # Core spec 10.2: 1.0 freezes the 0.2 semantics without changing them,
+        # so one document declared under either version validates alike and
+        # reaches the same decision by the same rule.
+        def document(version: str) -> str:
+            return f"""
+hushspec: "{version}"
+name: version-equivalence
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+  egress:
+    allow:
+      - api.example.com
+    default: block
+  tool_access:
+    block:
+      - shell_exec
+    default: allow
+"""
+
+        zero = parse_or_raise(document("0.2.0"))
+        one = parse_or_raise(document("1.0.0"))
+        assert validate(zero).is_valid
+        assert validate(one).is_valid
+
+        actions = [
+            ("file_read", "/home/agent/.ssh/id_ed25519"),
+            ("egress", "api.example.com"),
+            ("egress", "blocked.example.net"),
+            ("tool_call", "shell_exec"),
+        ]
+        for action_type, target in actions:
+            action = EvaluationAction(type=action_type, target=target)
+            under_zero = evaluate(zero, action)
+            under_one = evaluate(one, action)
+            assert under_one.decision == under_zero.decision, (action_type, target)
+            assert under_one.matched_rule == under_zero.matched_rule, (
+                action_type,
+                target,
+            )
+            assert under_one.reason == under_zero.reason, (action_type, target)
+
+        denied = evaluate(
+            one, EvaluationAction(type="file_read", target="/home/agent/.ssh/id_rsa")
+        )
+        assert denied.decision == "deny"
+        assert denied.matched_rule == "rules.forbidden_paths.patterns"
+
+        # The `hushspec` field is part of the canonical form, so the two
+        # hashes differ; what must not differ is the decisions they hash.
+        assert content_hash(zero) != content_hash(one)
 
     def test_unsupported_version_names_the_supported_minors(self):
         spec = parse_or_raise('hushspec: "0.9.0"\nname: v\n')
@@ -962,7 +1093,7 @@ class TestVersionAcceptance:
         assert not result.is_valid
         message = str(result.errors[0])
         assert message.startswith("unsupported hushspec version: 0.9.0")
-        assert "0.1, 0.2" in message
+        assert "0.1, 0.2, 1.0" in message
         assert result.errors[0].kind == "unsupported_version"
         # And the registry code the shared `invalid/` sidecars pin.
         assert result.errors[0].code == "E002"

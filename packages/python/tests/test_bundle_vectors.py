@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VECTOR_DIR = REPO_ROOT / "fixtures" / "bundle"
 VECTOR_FILE = VECTOR_DIR / "vectors.yaml"
 VECTOR_VERSION = "0.1.0"
-BUNDLE_SCHEMA = REPO_ROOT / "schemas" / "hushspec-bundle.v0.schema.json"
+BUNDLE_SCHEMA = REPO_ROOT / "schemas" / "hushspec-bundle.v1.schema.json"
 
 pytest.importorskip(
     "cryptography",
@@ -97,7 +97,7 @@ def _resolved(path: Path):
 
 
 def test_vector_manifest_is_populated() -> None:
-    assert len(CASES) == 8, "spec section 7 lists eight bundle vectors"
+    assert len(CASES) == 10, "spec section 7 lists ten bundle vectors"
     names = [case["name"] for case in CASES]
     assert len(set(names)) == len(names), "vector names must be unique"
 

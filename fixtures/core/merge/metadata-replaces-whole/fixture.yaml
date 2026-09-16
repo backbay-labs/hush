@@ -1,0 +1,9 @@
+description: >-
+  The `metadata` rule under a strategy the child names outright (core spec 4.1,
+  final paragraph, and 2.5): the child's whole `metadata` object replaces the
+  base's under every strategy, `deep_merge` included. Deep merging descends into
+  `extensions`, never into governance metadata, because a half-inherited
+  approval record would attest to something no one approved. The neighbouring
+  `metadata/` vectors make the claim for the default strategy; this directory
+  spells `deep_merge` out, and needs its own base carrying a full governance
+  block, which the shared core/merge base deliberately does not.

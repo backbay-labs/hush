@@ -77,10 +77,10 @@ fn lint_reports_l009_when_no_base_supplies_secret_patterns() {
 }
 
 #[test]
-fn lint_no_longer_reports_l009_on_the_extends_fixture() {
+fn lint_reports_an_unresolvable_extends_instead_of_l009() {
     // fixtures/core/valid/extends-basic.yaml carries `extends:
     // "hushspec:default"`, a reference form no loader in this repo resolves,
-    // so linting it now reports the resolution failure instead of inventing
+    // so linting it reports the resolution failure rather than inventing
     // findings about blocks its base would have supplied.
     h2h()
         .arg("lint")
@@ -331,19 +331,19 @@ fn test_accepts_the_repo_fixtures() {
 #[test]
 fn evaluator_schema_matches_workspace_copy() {
     let vendored: serde_json::Value = serde_json::from_str(include_str!(
-        "../schemas/hushspec-evaluator-test.v0.schema.json"
+        "../schemas/hushspec-evaluator-test.v1.schema.json"
     ))
     .unwrap();
     let canonical: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(
-            workspace_root().join("schemas/hushspec-evaluator-test.v0.schema.json"),
+            workspace_root().join("schemas/hushspec-evaluator-test.v1.schema.json"),
         )
         .unwrap(),
     )
     .unwrap();
     assert_eq!(
         vendored, canonical,
-        "crates/hushspec-cli/schemas/hushspec-evaluator-test.v0.schema.json is out of date -- \
-         copy schemas/hushspec-evaluator-test.v0.schema.json over it"
+        "crates/hushspec-cli/schemas/hushspec-evaluator-test.v1.schema.json is out of date -- \
+         copy schemas/hushspec-evaluator-test.v1.schema.json over it"
     );
 }

@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/backbay-labs/hush/actions"><img src="https://github.com/backbay-labs/hush/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/backbay-labs/hush/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/spec-v0.2.0--draft-orange.svg" alt="Spec Version">
+  <img src="https://img.shields.io/badge/spec-v1.0.0-brightgreen.svg" alt="Spec Version">
   <a href="https://crates.io/crates/hushspec"><img src="https://img.shields.io/crates/v/hushspec.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/@hushspec/core"><img src="https://img.shields.io/npm/v/@hushspec/core.svg" alt="npm"></a>
   <a href="https://pypi.org/project/hushspec/"><img src="https://img.shields.io/pypi/v/hushspec.svg" alt="PyPI"></a>
@@ -26,12 +26,12 @@
 
 HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under — filesystem access, network egress, tool usage, secret detection, and more. It defines **what** an agent may do at runtime without prescribing **how** those controls must be enforced, and it pairs each policy with structured decision receipts so enforcement can become evidence. That separation, plus fail-closed defaults, makes policies portable across runtimes, frameworks, and languages — and auditable wherever they run.
 
-**Spec 0.2.0 (draft).** The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published and functional. Parse, validate, merge, resolve, evaluate, detect, sign, audit and attest your way through 12 rule blocks and 3 extension modules, across 22 CLI subcommands. All four SDKs reach [Level 5 (Attested)](./docs/src/reference/sdk-conformance.md) against the published vector corpus. The API surface is stabilizing but not yet frozen — expect refinements before the 1.0 freeze.
+**Spec 1.0.0 (stable).** The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published at 1.0.0. Parse, validate, merge, resolve, evaluate, detect, sign, audit and attest your way through 12 rule blocks and 3 extension modules, across 22 CLI subcommands. All four SDKs reach [Level 5 (Attested)](./docs/src/reference/sdk-conformance.md) against the published vector corpus. The document format, evaluation semantics, canonical form, and wire formats are frozen for the 1.x series ([versioning policy](./spec/versioning.md)).
 
 ## Quick Example
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: production-agent
 
 rules:
@@ -105,7 +105,7 @@ Every "No" is deliberate, and here is why:
 
 - **Bundle creation** lives in Rust and `h2h bundle create`. Producing an
   attestation is a build-time act; verifying one is what a relying party depends
-  on, and all four SDKs verify against all 8 bundle vectors.
+  on, and all four SDKs verify against all 10 bundle vectors.
 - **Rust ships no framework adapters**, because that is not where agent
   frameworks live. The worked example
   `cargo run --example guarded_agent --features otlp` wires a policy through a
@@ -132,14 +132,14 @@ groups, comparing every port against the Rust oracle on decision, rule trace,
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+> Homebrew, npm, and prebuilt binaries become available once the release pipeline has run for the `v1.0.0` tag and published the artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
 
 All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 
 ### GitHub Action
 
 ```yaml
-- uses: backbay-labs/hush@v0.2.0
+- uses: backbay-labs/hush@v1.0.0
   with:
     command: validate       # validate | lint | test | audit | bundle-verify
     paths: policies/**/*.yaml
@@ -158,7 +158,7 @@ the `Dockerfile`/`ghcr.io/backbay-labs/h2h` container image.
 
 ```toml
 [dependencies]
-hushspec = "0.1"
+hushspec = "1.0"
 ```
 
 ### TypeScript
@@ -176,8 +176,12 @@ pip install hushspec
 ### Go
 
 ```bash
-go get github.com/backbay-labs/hush/packages/go@main
+go get github.com/backbay-labs/hush/packages/go@v1.0.0
 ```
+
+The SDK is a nested module, so Go resolves that version from the
+`packages/go/v1.0.0` tag rather than from a plain `v1.0.0` at the repository
+root ([packaging notes](./packages/go/README.md#versioning-and-tags)).
 
 ## Getting Started
 
@@ -187,7 +191,7 @@ go get github.com/backbay-labs/hush/packages/go@main
 ```rust
 use hushspec::HushSpec;
 
-let yaml_str = "hushspec: \"0.1.0\"\nname: example\n";
+let yaml_str = "hushspec: \"1.0.0\"\nname: example\n";
 let spec = HushSpec::parse(yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
@@ -199,7 +203,7 @@ assert!(result.is_valid());
 ```typescript
 import { parseOrThrow, validate } from '@hushspec/core';
 
-const yamlString = 'hushspec: "0.1.0"\nname: example\n';
+const yamlString = 'hushspec: "1.0.0"\nname: example\n';
 const spec = parseOrThrow(yamlString);
 const result = validate(spec);
 console.log(result.valid); // true
@@ -211,7 +215,7 @@ console.log(result.valid); // true
 ```python
 from hushspec import parse_or_raise, validate
 
-yaml_string = 'hushspec: "0.1.0"\nname: example\n'
+yaml_string = 'hushspec: "1.0.0"\nname: example\n'
 spec = parse_or_raise(yaml_string)
 result = validate(spec)
 assert result.is_valid
@@ -227,7 +231,7 @@ import (
     "github.com/backbay-labs/hush/packages/go/hushspec"
 )
 
-yamlString := "hushspec: \"0.1.0\"\nname: example\n"
+yamlString := "hushspec: \"1.0.0\"\nname: example\n"
 spec, err := hushspec.Parse(yamlString)
 if err != nil {
     panic(err)
@@ -377,9 +381,11 @@ h2h completions zsh > "${fpath[1]}/_h2h"
 h2h version --format json
 ```
 
-Every subcommand supports `--format json`, and exit codes are uniform: `0`
-success, `1` policy failure, `2` input or usage failure (`4` for a `warn`
-decision from `eval`/`explain`). Full flag and exit-code tables live in the
+Every reporting subcommand supports `--format json` -- `init`, `keygen`,
+`sign`, `panic` and `completions` take no `--format`, and `hash` takes
+`digest|canonical` -- and exit codes are uniform: `0` success, `1` policy
+failure, `2` input or usage failure (`4` for a `warn` decision from
+`eval`/`explain`). Full flag and exit-code tables live in the
 [CLI reference](docs/src/reference/cli.md).
 
 See [Installation](#installation) above for install options — Homebrew, npm, Cargo, or prebuilt binaries.
@@ -391,7 +397,7 @@ See [Installation](#installation) above for install options — Homebrew, npm, C
 resolved policy's canonical content hash, its `extends` chain with each hop's signature
 outcome, the actor, the **recorded** rule and detection traces, and the enforcement
 disposition. Content is never carried -- only its `sha256:` hash and byte size -- so a receipt
-log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v0.schema.json` and
+log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v1.schema.json` and
 are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
 
 Receipts chain: `ChainedFileSink` writes a hash-linked JSONL log that `h2h log verify` checks,
@@ -505,12 +511,12 @@ with retirement and revocation.
 Verification runs **on load**: every hop of an `extends` chain is checked against the keyring
 or its digest pin, the load fails closed when a signature is required and absent or invalid,
 and the outcome is recorded in every receipt's `policy.signature`. All four SDKs return the
-exact reason code for each of the 16 vectors in `fixtures/signing/vectors.yaml`. Rust needs the
+exact reason code for each of the 18 vectors in `fixtures/signing/vectors.yaml`. Rust needs the
 `signing` Cargo feature; Python needs the `signing` extra
 (`pip install "hushspec[signing]"`), without which the signature entry points raise
 `SigningUnavailable` rather than reporting an unverified signature as good. The format is
 specified in [`spec/hushspec-signing.md`](./spec/hushspec-signing.md) and
-`hushspec-signature.v0.schema.json`.
+`hushspec-signature.v1.schema.json`.
 
 ```bash
 # Generate a keypair (writes h2h.key.pem and h2h.pub.pem, prints the key id)

@@ -25,7 +25,7 @@ func TestIsCapabilityIdentifier(t *testing.T) {
 }
 
 func TestCapabilityPredicateIsUnevaluableWithoutPosture(t *testing.T) {
-	condition := &Condition{Capability: "shell"}
+	condition := &Condition{Capability: strPtr("shell")}
 	// No posture extension: unevaluable, so the block stays active.
 	if !EvaluateCondition(condition, &RuntimeContext{}) {
 		t.Error("a capability predicate with no posture state must hold")
@@ -49,10 +49,10 @@ func TestCapabilityPredicateUnderCompoundOperators(t *testing.T) {
 		condition Condition
 		want      bool
 	}{
-		{"not of a granted capability", Condition{Not: &Condition{Capability: "shell"}}, false},
-		{"not of an ungranted capability", Condition{Not: &Condition{Capability: "net"}}, true},
-		{"any_of reaches a granted leaf", Condition{AnyOf: []Condition{{Capability: "net"}, {Capability: "shell"}}}, true},
-		{"all_of fails on an ungranted leaf", Condition{AllOf: []Condition{{Capability: "shell"}, {Capability: "net"}}}, false},
+		{"not of a granted capability", Condition{Not: &Condition{Capability: strPtr("shell")}}, false},
+		{"not of an ungranted capability", Condition{Not: &Condition{Capability: strPtr("net")}}, true},
+		{"any_of reaches a granted leaf", Condition{AnyOf: []Condition{{Capability: strPtr("net")}, {Capability: strPtr("shell")}}}, true},
+		{"all_of fails on an ungranted leaf", Condition{AllOf: []Condition{{Capability: strPtr("shell")}, {Capability: strPtr("net")}}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,8 +93,26 @@ func TestRatePredicate(t *testing.T) {
 	}
 }
 
+func TestValidateConditionRejectsAPresentEmptyCapability(t *testing.T) {
+	// An empty name is a present predicate that names no capability, so it is
+	// a malformed identifier rather than an absent field.
+	errs := ValidateCondition(&Condition{Capability: strPtr("")}, "rules.egress.when")
+	if len(errs) != 1 || !strings.Contains(errs[0], "is not a capability identifier") {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	spec, err := Parse("hushspec: \"0.1.0\"\nrules:\n  egress:\n    when:\n      capability: \"\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	result := Validate(spec)
+	if len(result.Errors) != 1 || result.Errors[0].Code != ErrorCodeConstraint {
+		t.Fatalf("expected one E004 error, got %v", result.Errors)
+	}
+}
+
 func TestValidateConditionRejectsBadIdentifiers(t *testing.T) {
-	errs := ValidateCondition(&Condition{Capability: "Shell-Access"}, "rules.egress.when")
+	errs := ValidateCondition(&Condition{Capability: strPtr("Shell-Access")}, "rules.egress.when")
 	if len(errs) != 1 || !strings.Contains(errs[0], "is not a capability identifier") {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -105,7 +123,7 @@ func TestValidateConditionRejectsBadIdentifiers(t *testing.T) {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
 	// A leaf predicate adds no nesting: eight levels of `not` around one is fine.
-	deep := &Condition{Capability: "shell"}
+	deep := &Condition{Capability: strPtr("shell")}
 	for i := 0; i < 8; i++ {
 		deep = &Condition{Not: deep}
 	}

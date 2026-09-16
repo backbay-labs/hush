@@ -1,0 +1,62 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.2, 3.3: an optional string written as \"\" is a present value and is projected as\
+  \ written; the empty-container rule omits only empty arrays and objects, so every empty string below survives\
+  \ into the canonical form and the content hash"
+"policy":
+  "hushspec": "1.0.0"
+  "name": "empty-strings"
+  "description": ""
+  "rules":
+    "egress":
+      "allow":
+      - "api.example.com"
+      "default": "block"
+    "secret_patterns":
+      "patterns":
+      - "name": "session_token"
+        "pattern": "tok_[0-9a-f]{8}"
+        "severity": "error"
+        "description": ""
+  "extensions":
+    "posture":
+      "initial": "normal"
+      "states":
+        "normal":
+          "description": ""
+          "capabilities":
+          - "egress"
+      "transitions":
+      - "from": "normal"
+        "to": "normal"
+        "on": "user_approval"
+    "origins":
+      "profiles":
+      - "id": "default"
+        "match": {}
+        "explanation": ""
+        "bridge":
+          "allowed_targets":
+          - "provider": ""
+    "detection":
+      "threat_intel":
+        "pattern_db": ""
+  "metadata":
+    "author": ""
+    "approved_by": ""
+    "approval_date": "2026-01-05"
+    "change_ticket": ""
+    "owner": ""
+    "supersedes": ""
+    "changelog":
+    - "version": "1.0.0"
+      "date": "2026-01-05"
+      "summary": "Initial revision"
+      "author": ""
+    "controls":
+    - "framework": "soc2"
+      "control_id": "CC6.1"
+      "rule_paths":
+      - "rules.egress"
+      "notes": ""
+canonical: "{\"description\":\"\",\"extensions\":{\"detection\":{\"threat_intel\":{\"enabled\":false,\"pattern_db\":\"\",\"similarity_threshold\":0.7,\"top_k\":5}},\"origins\":{\"default_behavior\":\"deny\",\"profiles\":[{\"bridge\":{\"allow_cross_origin\":false,\"allowed_targets\":[{\"provider\":\"\"}],\"require_approval\":false},\"explanation\":\"\",\"id\":\"default\",\"match\":{}}]},\"posture\":{\"initial\":\"normal\",\"states\":{\"normal\":{\"capabilities\":[\"egress\"],\"description\":\"\"}},\"transitions\":[{\"from\":\"normal\",\"on\":\"user_approval\",\"to\":\"normal\"}]}},\"hushspec\":\"1.0.0\",\"metadata\":{\"approval_date\":\"2026-01-05\",\"approved_by\":\"\",\"author\":\"\",\"change_ticket\":\"\",\"changelog\":[{\"author\":\"\",\"date\":\"2026-01-05\",\"summary\":\"Initial revision\",\"version\":\"1.0.0\"}],\"controls\":[{\"control_id\":\"CC6.1\",\"framework\":\"soc2\",\"notes\":\"\",\"rule_paths\":[\"rules.egress\"]}],\"owner\":\"\",\"supersedes\":\"\"},\"name\":\"empty-strings\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true},\"secret_patterns\":{\"enabled\":true,\"patterns\":[{\"description\":\"\",\"name\":\"session_token\",\"pattern\":\"tok_[0-9a-f]{8}\",\"severity\":\"error\"}],\"skip_paths\":[]}}}"
+content_hash: "sha256:44655c76801c29210949dd8cb39fe4fec283b43e364827b50aed7b0ec97cb42d"

@@ -149,6 +149,31 @@ class TestChainedFileSink:
         )
         assert verify_log("log.jsonl", path.read_text()).entries == 5
 
+    def test_two_sinks_on_one_file_extend_one_chain(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        resolution = _resolution()
+        first = ChainedFileSink.open(path).with_clock(CLOCK)
+        second = ChainedFileSink.open(path).with_clock(CLOCK)
+
+        first.record_policy_event(
+            PolicyEvent.loaded(
+                policy_summary(resolution),
+                "enforce",
+                timestamp="2026-09-15T12:00:00.000Z",
+                sdk=SdkInfo(name="hushspec-conformance", version="0.2"),
+            )
+        )
+        for index, action in enumerate(_actions()):
+            sink = second if index % 2 == 0 else first
+            sink.send(evaluate_audited(resolution, action, _config(), _context(index)))
+
+        entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert [entry["seq"] for entry in entries] == [1, 2, 3, 4]
+        report = verify_log("log.jsonl", path.read_text())
+        assert report.entries == 4
+        assert report.last_seq == 4
+        assert second.head() == (4, entries[3]["entry_hash"])
+
     def test_rotation_carries_the_chain_into_the_next_file(self, tmp_path: Path) -> None:
         first, second = tmp_path / "log-1.jsonl", tmp_path / "log-2.jsonl"
         sink = _write_basic(first)
@@ -172,6 +197,35 @@ class TestChainedFileSink:
         with pytest.raises(LogError) as caught:
             verify_log_files([second, first])
         assert caught.value.line == 1
+
+    def test_a_chain_rotated_at_genesis_verifies(self, tmp_path: Path) -> None:
+        """A writer that rotates before writing anything carries the genesis
+        hash into the new file. The link is recorded all the same, so a
+        verifier given both files sees one chain."""
+        first, second = tmp_path / "log-1.jsonl", tmp_path / "log-2.jsonl"
+        first.write_text("")
+        sink = ChainedFileSink.open(first).with_clock(CLOCK)
+
+        started = sink.rotate(second)
+        assert started.prev_hash == GENESIS_HASH
+        assert started.log_started.previous_entry_hash == GENESIS_HASH
+        sink.send(evaluate_audited(_resolution(), _actions()[0], _config(), _context(0)))
+
+        report = verify_log_files([first, second])
+        assert (report.files, report.entries) == (2, 2)
+
+    def test_an_unknown_field_inside_a_policy_event_is_a_break(
+        self, tmp_path: Path
+    ) -> None:
+        """The log-entry schema closes every object it defines, not only the
+        ones the entry names directly."""
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        first = json.loads(path.read_text().splitlines()[0])
+        first["policy_event"]["policy"]["rogue"] = 1
+        with pytest.raises(LogError) as caught:
+            verify_log("log.jsonl", json.dumps(first))
+        assert "rogue" in caught.value.message
 
     def test_rotating_into_an_existing_file_is_refused(self, tmp_path: Path) -> None:
         first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"

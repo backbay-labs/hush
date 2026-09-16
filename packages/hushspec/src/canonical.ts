@@ -35,7 +35,7 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-/** The document cannot be canonicalized (spec sections 2.1, 2.3, 4.3). */
+/** The document cannot be canonicalized (spec sections 2.1, 2.2, 2.3, 3.4, 4.3). */
 export class CanonicalError extends Error {
   constructor(message: string) {
     super(message);
@@ -53,8 +53,10 @@ export class CanonicalError extends Error {
 // schemas matters here -- types, patterns and enums are validation's job, and
 // `validate()` has already run by the time a document reaches this file.
 //
-// `tests/canonical-vectors.test.ts` diffs this table against the real schema
-// files, so a default added or changed in `schemas/` fails CI here.
+// The property lists are exhaustive, because a key the table does not declare
+// is refused (spec section 2.3). `tests/canonical-vectors.test.ts` diffs the
+// table against the real schema files in both directions, so a property added,
+// removed or given a default in `schemas/` fails CI here.
 
 /** @internal Exported for the schema drift test in `tests/canonical-vectors.test.ts`. */
 export type SchemaNode =
@@ -274,6 +276,16 @@ const CONTROL_MAPPING = object(
   ['framework', 'control_id', 'rule_paths'],
 );
 
+const CHANGELOG_ENTRY = object(
+  {
+    version: { schema: LEAF },
+    date: { schema: LEAF },
+    summary: { schema: LEAF },
+    author: { schema: LEAF },
+  },
+  ['version', 'date', 'summary'],
+);
+
 const GOVERNANCE_METADATA = object({
   author: { schema: LEAF },
   approved_by: { schema: LEAF },
@@ -284,6 +296,11 @@ const GOVERNANCE_METADATA = object({
   policy_version: { schema: LEAF },
   effective_date: { schema: LEAF },
   expiry_date: { schema: LEAF },
+  owner: { schema: LEAF },
+  reviewers: { schema: STRING_ARRAY },
+  next_review_date: { schema: LEAF },
+  changelog: { schema: array(CHANGELOG_ENTRY) },
+  supersedes: { schema: LEAF },
   controls: { schema: array(CONTROL_MAPPING) },
 });
 
@@ -494,15 +511,15 @@ function isEmptyContainer(value: JsonValue): boolean {
  */
 function projectProperty(
   value: unknown,
-  property: PropertySchema | undefined,
+  property: PropertySchema,
   required: boolean,
   path: string,
 ): JsonValue | undefined {
-  const projected = projectNode(value, property?.schema ?? LEAF, path);
-  if (required || property?.presenceSignificant === true) {
+  const projected = projectNode(value, property.schema, path);
+  if (required || property.presenceSignificant === true) {
     return projected;
   }
-  if (property?.default !== undefined) {
+  if (property.default !== undefined) {
     return projected;
   }
   // No schema default, not required, not presence-significant: an empty
@@ -523,12 +540,17 @@ function projectObject(
     // `undefined` is JavaScript's spelling of "absent"; a typed HushSpec
     // object built in code carries it where YAML would simply omit the key.
     if (raw === undefined) continue;
-    const projected = projectProperty(
-      raw,
-      node.properties[key],
-      required.has(key),
-      `${path}.${key}`,
-    );
+    const property = node.properties[key];
+    if (property === undefined) {
+      throw new CanonicalError(`unknown field ${path}.${key}`);
+    }
+    // Spec section 2.2: no HushSpec property is nullable, so a `null` written
+    // for one is a validation error with no canonical form. A `null` inside a
+    // free-form value is an ordinary leaf and never reaches here.
+    if (raw === null) {
+      throw new CanonicalError(`${path}.${key} is null; no property is nullable`);
+    }
+    const projected = projectProperty(raw, property, required.has(key), `${path}.${key}`);
     if (projected !== undefined) {
       out[key] = projected;
     }
@@ -621,12 +643,19 @@ function project(spec: HushSpec): JsonValue {
     document['metadata'] = stripped;
   }
 
+  const declaresExtensions = Object.prototype.hasOwnProperty.call(document, 'extensions');
   const extensions = document['extensions'];
   delete document['extensions'];
 
   const out = projectObject(document, CORE, '$');
-  if (!isPlainObject(extensions)) {
+  if (!declaresExtensions || extensions === undefined) {
     return out;
+  }
+  // Spec section 3.4: `extensions` is an object of published extension names.
+  // Passing anything else through unprojected would hash a block no schema
+  // describes.
+  if (!isPlainObject(extensions)) {
+    throw new CanonicalError('$.extensions must be an object');
   }
 
   const projectedExtensions: Record<string, JsonValue> = Object.create(null) as Record<
@@ -634,13 +663,13 @@ function project(spec: HushSpec): JsonValue {
     JsonValue
   >;
   for (const name of Object.keys(extensions)) {
-    const block = (extensions as Record<string, unknown>)[name];
+    const block = extensions[name];
     if (block === undefined) continue;
-    const projected = projectNode(
-      block,
-      EXTENSION_SCHEMAS[name] ?? LEAF,
-      `$.extensions.${name}`,
-    );
+    const schema = EXTENSION_SCHEMAS[name];
+    if (schema === undefined) {
+      throw new CanonicalError(`unknown extension \`${name}\``);
+    }
+    const projected = projectNode(block, schema, `$.extensions.${name}`);
     if (isEmptyContainer(projected)) continue;
     projectedExtensions[name] = projected;
   }
@@ -673,11 +702,14 @@ function compareKeys(left: string, right: string): number {
  * round-trips through an IEEE 754 double.
  *
  * `String(n)` *is* that algorithm, so there is nothing to reimplement: whole
- * values lose their fraction (`10.0` -> `10`), `1e21` becomes `1e+21`, and
- * negative zero prints as `0`. JavaScript has a single number type, so the
- * safe-integer bound of spec section 4.3 cannot be enforced here -- by the
- * time a value reaches this function the YAML/JSON parser has already rounded
- * an oversized integer literal to the nearest double.
+ * values lose their fraction (`10.0` -> `10`), `1e16` spells itself out as
+ * `10000000000000000`, `1e21` becomes `1e+21`, and negative zero prints as
+ * `0`.
+ *
+ * Spec section 4.3 bounds integer *syntax* by the IEEE 754 safe range and
+ * leaves float syntax unbounded. A `number` no longer carries that
+ * distinction, so the bound is applied by `parse()`, which reads the literal;
+ * every finite double that reaches here is emitted.
  */
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) {
@@ -750,8 +782,10 @@ function serialize(value: JsonValue, out: string[]): void {
  * rather than the policy that is enforced, so it is rejected instead of
  * hashed. `merge_strategy` and `metadata.signature` are never emitted.
  *
- * @throws {CanonicalError} if `extends` is set, or the document holds a value
- * with no JSON representation.
+ * @throws {CanonicalError} if `extends` is set, if a key is not one the
+ * schema declares, if a declared property is `null`, if `extensions` is not an
+ * object of published extension names, or if the document holds a value with
+ * no JSON representation (spec sections 2.1, 2.2, 2.3, 3.4 and 4.3).
  */
 export function canonicalJson(spec: HushSpec): string {
   const out: string[] = [];
@@ -771,7 +805,7 @@ export function canonicalJson(spec: HushSpec): string {
  * canonicalized by the same code as the policy hash inside them.
  *
  * @throws {CanonicalError} if the value holds something with no JSON
- * representation (NaN, Infinity, a function, a symbol).
+ * representation: NaN, Infinity, a function, a symbol.
  */
 export function canonicalizeValue(value: JsonValue): string {
   const out: string[] = [];

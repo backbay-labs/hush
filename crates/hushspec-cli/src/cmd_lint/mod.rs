@@ -55,8 +55,7 @@ pub(crate) struct LintFinding {
     /// that can't point at a single list entry fall back to the file path.
     ///
     /// This is deliberately *not* the span lookup key: `fix::parse_location`
-    /// parses this grammar and must keep seeing exactly what it saw before
-    /// spans existed.
+    /// parses this grammar and must keep seeing exactly it.
     location: String,
     /// Document path of the offending key or list entry, used to look up a
     /// source span. `None` only for findings about the document as a whole.
@@ -604,6 +603,9 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     // L021: a `when.capability` no posture state grants
     checks::check_ungranted_capability_conditions(spec, file, &mut findings);
 
+    // L022: an empty string in a tool or host list
+    checks::check_empty_list_entries(spec, file, &mut findings);
+
     findings
 }
 
@@ -684,7 +686,7 @@ fn check_control_mappings(spec: &HushSpec, file: &str, findings: &mut Vec<LintFi
             control
                 .rule_paths
                 .iter()
-                .any(|rule_path| crate::controls::path_covers_block(rule_path, &block_path))
+                .any(|rule_path| crate::controls::path_covers_block(&doc, rule_path, &block_path))
         });
         if !covered {
             findings.push(LintFinding::keyed(

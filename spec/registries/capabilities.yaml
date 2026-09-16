@@ -1,0 +1,46 @@
+# HushSpec capability registry
+#
+# Normative companion to spec/hushspec-posture.md Section 3. Lists the
+# capability identifiers the specification defines and the action types each
+# one gates. A posture state grants capabilities by name; an action requiring
+# a capability the effective state does not grant is denied.
+#
+# Status: open. An engine MAY define further capabilities and a policy MAY
+# name them (posture 3.2); identifiers follow the grammar of
+# spec/hushspec-grammars.md Section 7. Only the entries below carry meaning
+# for the standard action types.
+#
+# Schema: schemas/hushspec-registry-capabilities.v0.schema.json
+registry: capabilities
+registry_version: "1.0.0"
+status: open
+
+entries:
+  - id: file_access
+    summary: Read and navigate filesystem paths
+    gates: [file_read]
+    spec: posture 3.1
+  - id: file_write
+    summary: Write, create, or modify files
+    gates: [file_write]
+    spec: posture 3.1
+  - id: egress
+    summary: Make outbound network requests
+    gates: [egress]
+    spec: posture 3.1
+  - id: shell
+    summary: Execute shell commands
+    gates: [shell_command]
+    spec: posture 3.1
+  - id: tool_call
+    summary: Invoke tools or MCP endpoints
+    gates: [tool_call]
+    spec: posture 3.1
+  - id: patch
+    summary: Apply patches or diffs to files
+    gates: [patch_apply]
+    spec: posture 3.1
+  - id: custom
+    summary: Engine-defined custom actions
+    gates: [custom]
+    spec: posture 3.1

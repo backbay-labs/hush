@@ -1,0 +1,12 @@
+# A schema map -- posture `states`, whose keys are the author's and whose
+# values the module schema types -- is no more nullable than a declared
+# property. A written `null` there is a value of the wrong type, not a state
+# the document leaves out (canonical spec 2.2, 3.4).
+hushspec: "1.0.0"
+name: null-map-entry
+extensions:
+  posture:
+    initial: standard
+    transitions: []
+    states:
+      standard: null

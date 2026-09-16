@@ -1,6 +1,6 @@
 {
   "name": "@hushspec/core",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Agentic compliance as code: portable policy spec for AI agent security controls",
   "type": "module",
   "main": "./dist/index.js",

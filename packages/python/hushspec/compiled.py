@@ -124,18 +124,20 @@ __all__ = [
 
 
 class CompileError(ValueError):
-    """A policy pattern is outside the HushSpec regex profile.
+    """A document cannot be compiled: it still declares ``extends``, or a
+    pattern is outside the HushSpec regex profile.
 
     Raised by :func:`compile_policy` (which is strict by default) so a caller
     that compiles ahead of time learns about an unusable pattern then, rather
-    than as a deny on the first action that reaches it.
+    than as a deny on the first action that reaches it. An unresolved document
+    is refused whatever ``strict`` says: core spec 2.3 forbids evaluating one.
     """
 
     def __init__(self, rule_path: str, message: str) -> None:
         super().__init__(f"{rule_path}: {message}")
-        #: Document path of the offending pattern, as a receipt would spell it.
+        #: The document path the refusal is about, as a receipt would spell it.
         self.rule_path = rule_path
-        #: The regex-profile rejection message.
+        #: Why, in the words of the check that refused it.
         self.message = message
 
 
@@ -196,6 +198,16 @@ _INACTIVE_OUT_OF_BAND = _Inactive("out-of-band condition is false")
 
 def _absent(block: str) -> _Inactive:
     return _Inactive(f"no {block} rule configured")
+
+
+def _content_not_supplied(block: str) -> _Inactive:
+    """A content-scanning block the action carries no content for."""
+    return _Inactive(f"content not supplied; {block} not consulted")
+
+
+def _target_not_a_channel(block: str) -> _Inactive:
+    """A channel block whose target names no remote desktop channel."""
+    return _Inactive(f"target is not a remote desktop channel; {block} not consulted")
 
 
 def _allow(matched_rule: Optional[str], reason: Optional[str]) -> _BlockDecision:
@@ -450,7 +462,7 @@ class _SecretPatternsStep(_Step):
         "_patterns",
         "_invalid",
         "_clean",
-        "_absent",
+        "_no_content",
     )
 
     def __init__(
@@ -468,7 +480,7 @@ class _SecretPatternsStep(_Step):
             "path is excluded from secret scanning",
         )
         self._clean = _allow(None, "content did not match any secret pattern")
-        self._absent = _absent("secret_patterns")
+        self._no_content = _content_not_supplied("secret_patterns")
         # (rank, search, decision) in document order. Fail closed: the first
         # pattern outside the profile denies, whatever the others match.
         patterns: list[tuple[int, Any, _BlockDecision]] = []
@@ -518,7 +530,7 @@ class _SecretPatternsStep(_Step):
         action = ev.action
         content = action.content
         if not self._path_bearing and content is None:
-            return self._absent
+            return self._no_content
         inactive = self._inactive(ev)
         if inactive is not None:
             return inactive
@@ -1039,7 +1051,7 @@ class _ComputerUseStep(_Step):
 
 
 class _RemoteDesktopChannelsStep(_Step):
-    __slots__ = ("_channels", "_absent")
+    __slots__ = ("_channels", "_not_a_channel")
 
     def __init__(self, rule: RemoteDesktopChannelsRule) -> None:
         super().__init__("remote_desktop_channels", rule.enabled, rule.when)
@@ -1061,7 +1073,7 @@ class _RemoteDesktopChannelsStep(_Step):
                 )
             )
         self._channels = channels
-        self._absent = _absent("remote_desktop_channels")
+        self._not_a_channel = _target_not_a_channel("remote_desktop_channels")
 
     def run(self, ev: _Eval) -> Union[_BlockDecision, _Inactive]:
         inactive = self._inactive(ev)
@@ -1070,7 +1082,7 @@ class _RemoteDesktopChannelsStep(_Step):
         decision = self._channels.get(ev.action.target or "")
         if decision is None:
             # Not a remote-desktop channel target: the block does not apply.
-            return self._absent
+            return self._not_a_channel
         return decision
 
 
@@ -1675,12 +1687,32 @@ class CompiledPolicy:
         conditions: Optional[dict[str, Condition]] = None,
     ) -> TracedEvaluation:
         """Full evaluation with the recorded rule trace (used by receipts)."""
+        return self._traced(action, context, conditions, record_trace=True)
+
+    def _traced(
+        self,
+        action: EvaluationAction,
+        context: Optional[RuntimeContext],
+        conditions: Optional[dict[str, Condition]],
+        *,
+        record_trace: bool,
+    ) -> TracedEvaluation:
+        """:meth:`evaluate_traced` with the rule trace made optional.
+
+        ``record_trace=False`` returns an empty trace and skips recording one;
+        nothing else about the evaluation changes.
+        """
         if context is None:
             context = action.context
             if context is None:
                 context = _EMPTY_CONTEXT
         trace: list[RuleEvaluation] = []
-        result = self._run(action, context, conditions or _NO_CONDITIONS, trace)
+        result = self._run(
+            action,
+            context,
+            conditions or _NO_CONDITIONS,
+            trace if record_trace else None,
+        )
         return TracedEvaluation(result=result, trace=trace)
 
     def evaluate_with_context(
@@ -1879,16 +1911,21 @@ class CompiledPolicy:
         capability: Optional[str],
         trace: Optional[list[RuleEvaluation]],
     ) -> Optional[tuple[str, str]]:
-        if posture is None or capability is None:
+        if posture is None:
             return None
         posture_extension = self._posture
         if posture_extension is None:
             return None
 
+        # The state is looked up before the capability table is consulted, so
+        # an unknown state denies even the action types the table does not
+        # gate (posture spec 3.3).
         current_state = posture_extension.states.get(posture.current)
         if current_state is None:
             rule = f"extensions.posture.states.{posture.current}"
             reason = f"unknown posture state '{posture.current}'"
+        elif capability is None:
+            return None
         elif capability in current_state.capabilities:
             if trace is not None:
                 trace.append(
@@ -1924,7 +1961,7 @@ class CompiledPolicy:
         self, action: EvaluationAction
     ) -> EvaluationWithDetection:
         """Evaluate, then fold in the configured content detectors."""
-        traced = self.evaluate_with_detection_traced(action)
+        traced = self.run_with_detection(action, record_trace=False)
         return EvaluationWithDetection(
             evaluation=traced.evaluation,
             detections=traced.detections,
@@ -1938,15 +1975,33 @@ class CompiledPolicy:
         conditions: Optional[dict[str, Condition]] = None,
     ) -> TracedEvaluationWithDetection:
         """:meth:`evaluate_with_detection` with the rule and detector traces."""
+        return self.run_with_detection(action, context, conditions, record_trace=True)
+
+    def run_with_detection(
+        self,
+        action: EvaluationAction,
+        context: Optional[RuntimeContext] = None,
+        conditions: Optional[dict[str, Condition]] = None,
+        *,
+        record_trace: bool = True,
+    ) -> TracedEvaluationWithDetection:
+        """:meth:`evaluate_with_detection_traced` with the rule trace optional.
+
+        The detector trace is recorded either way: a receipt has to say whether
+        the detection pipeline ran (receipt spec 4.6) however little else it
+        keeps.
+        """
         detection = self._detection
         if detection is None:
             # Exact no-op for a policy with no `detection:` extension: no
             # detector trace at all (receipt spec 4.6).
-            traced = self.evaluate_traced(action, context, conditions)
+            traced = self._traced(
+                action, context, conditions, record_trace=record_trace
+            )
             return TracedEvaluationWithDetection(
                 traced=traced, evaluation=traced.result
             )
-        traced = self.evaluate_traced(action, context, conditions)
+        traced = self._traced(action, context, conditions, record_trace=record_trace)
         base = traced.result
         content = action.content or ""
         if not content:
@@ -2144,17 +2199,29 @@ def compile_policy(
     :class:`~hushspec.resolve.Resolution` (whose provenance the compiled policy
     then carries into receipts).
 
-    Raises :class:`CompileError` for the first pattern outside the HushSpec
-    regex profile. Pass ``strict=False`` to keep the reference evaluator's
-    deferred behaviour instead: the offending pattern is recorded in
+    Raises :class:`CompileError` for a document that still declares ``extends``
+    and for the first pattern outside the HushSpec regex profile. Pass
+    ``strict=False`` to keep the reference evaluator's deferred behaviour for
+    patterns instead: the offending pattern is recorded in
     :attr:`CompiledPolicy.errors` and denies the actions that reach it, with
-    the same ``matched_rule`` and ``reason`` an uncompiled evaluation gave.
+    the same ``matched_rule`` and ``reason`` an uncompiled evaluation gave. An
+    unresolved document is refused either way (core spec 2.3).
     """
     resolution = None
     spec = policy
     if not isinstance(policy, HushSpec):
         resolution = policy
         spec = policy.spec
+    if spec.extends is not None:
+        # Core spec 2.3: an engine MUST refuse to evaluate a document that
+        # still declares `extends`. Its rules are not the rules that would be
+        # in force -- every block its base contributes would silently be
+        # missing -- so there is nothing safe to compile.
+        raise CompileError(
+            "extends",
+            f"policy still declares 'extends: {spec.extends}'; resolve the chain "
+            "before compiling it",
+        )
     compiled = CompiledPolicy(spec, strict)
     if resolution is not None:
         compiled._resolution = resolution

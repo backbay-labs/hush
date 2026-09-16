@@ -1,6 +1,7 @@
 use hushspec::{
-    BUILTIN_NAMES, LoadedSpec, ResolveError, create_composite_loader, load_builtin,
-    resolve_from_path, resolve_from_path_with_builtins, resolve_with_loader,
+    BUILTIN_NAMES, LoadedSpec, ResolveError, ResolveOptions, create_composite_loader, load_builtin,
+    own_content_hash, resolve_from_path, resolve_from_path_with_builtins,
+    resolve_path_with_options, resolve_with_loader, validate,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -214,4 +215,91 @@ fn temp_dir(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("hushspec-{prefix}-{unique}"));
     fs::create_dir_all(&dir).unwrap();
     dir
+}
+
+/// Core spec 2.3: a document that declares `merge_strategy` without `extends`
+/// never reaches `merge`, and resolution still hands back a document carrying
+/// neither resolution instruction.
+#[test]
+fn resolution_drops_merge_strategy_from_a_one_hop_chain() {
+    let dir = temp_dir("resolve-one-hop");
+    fs::write(
+        dir.join("leaf.yaml"),
+        "hushspec: \"0.1.0\"\nname: leaf\nmerge_strategy: replace\n",
+    )
+    .unwrap();
+
+    let resolved = resolve_from_path(dir.join("leaf.yaml")).unwrap();
+    assert!(resolved.extends.is_none());
+    assert!(resolved.merge_strategy.is_none());
+}
+
+/// Core spec 2.3 holds for every shape a chain can take, not just the shapes
+/// the merge vectors cover: a built-in base, a hop pinned by digest, and three
+/// hops each naming a strategy all end in a document that declares neither
+/// resolution instruction and still validates.
+#[test]
+fn no_chain_shape_leaves_a_resolution_instruction_behind() {
+    let dir = temp_dir("resolve-chain-shapes");
+
+    let builtin_leaf = dir.join("builtin-leaf.yaml");
+    fs::write(
+        &builtin_leaf,
+        "hushspec: \"0.1.0\"\nname: builtin-leaf\nextends: builtin:strict\nmerge_strategy: merge\n",
+    )
+    .unwrap();
+
+    let root = dir.join("root.yaml");
+    fs::write(
+        &root,
+        "hushspec: \"0.2.0\"\nname: root\nrules:\n  egress:\n    allow: [\"a.example.com\"]\n    default: block\n",
+    )
+    .unwrap();
+    let root_pin = own_content_hash(&parse_file(&root), "root.yaml").unwrap();
+
+    let mid = dir.join("mid.yaml");
+    fs::write(
+        &mid,
+        format!(
+            "hushspec: \"0.2.0\"\nname: mid\nextends: \"root.yaml#{root_pin}\"\nmerge_strategy: merge\nrules:\n  tool_access:\n    allow: [read_file]\n    default: block\n"
+        ),
+    )
+    .unwrap();
+    let mid_pin = own_content_hash(&parse_file(&mid), "mid.yaml").unwrap();
+
+    let pinned_leaf = dir.join("pinned-leaf.yaml");
+    fs::write(
+        &pinned_leaf,
+        format!(
+            "hushspec: \"0.2.0\"\nname: pinned-leaf\nextends: \"mid.yaml#{mid_pin}\"\nmerge_strategy: deep_merge\n"
+        ),
+    )
+    .unwrap();
+
+    for (shape, path) in [
+        ("builtin base", &builtin_leaf),
+        ("digest-pinned hop", &mid),
+        ("three hops", &pinned_leaf),
+    ] {
+        let resolution = resolve_path_with_options(path, &ResolveOptions::default())
+            .unwrap_or_else(|error| panic!("{shape}: {error}"));
+        assert!(
+            resolution.spec.extends.is_none(),
+            "{shape}: `extends` survived resolution"
+        );
+        assert!(
+            resolution.spec.merge_strategy.is_none(),
+            "{shape}: `merge_strategy` survived resolution"
+        );
+        let report = validate(&resolution.spec);
+        assert!(
+            report.is_valid(),
+            "{shape}: the resolved document does not validate: {:?}",
+            report.errors
+        );
+    }
+}
+
+fn parse_file(path: &PathBuf) -> hushspec::HushSpec {
+    hushspec::HushSpec::parse(&fs::read_to_string(path).unwrap()).unwrap()
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,6 +59,111 @@ func (p *FileProvider) Load() (*Resolution, error) {
 // guard can record every action it denies under it.
 func (p *FileProvider) LoadForGuard() (*Resolution, *GuardRefusal, error) {
 	return resolveFileForGuard(p.path, p.options, p.loader)
+}
+
+// HTTPProvider loads a policy from an HTTPS URL, refetching on every load.
+//
+// The fetch goes through [NewHTTPLoader], so every rule that loader enforces
+// applies here: HTTPS only, the optional host allowlist, the address check
+// after DNS with the checked address pinned for the connection, no redirects, a
+// size cap and timeouts. ETag revalidation means a poller that ticks every
+// minute costs a conditional request, not a full body, while a policy that
+// *did* change is still always refetched.
+//
+// Options carries the trust requirements of the load. A URL is a location and
+// never an identity, so a deployment fetching policy over the network should
+// set RequireSignature with a keyring: the provider then looks for `<url>.sig`
+// through the same transport (signing spec 7.1) and refuses to hand over a
+// policy that does not verify.
+//
+// A remote policy may only extend a `builtin:` ruleset. A remote *base* --
+// `extends` naming another URL from a document that itself came over the
+// network -- fails closed with a message saying so, rather than being merged
+// from a second location the deployment never named. [HTTPProvider.WithLoader]
+// allows one.
+type HTTPProvider struct {
+	url     string
+	config  HTTPLoaderConfig
+	options ResolveOptions
+	fetch   ResolveLoader
+	loader  ResolveLoader
+}
+
+// NewHTTPProvider provides the policy at url, fetched under config and verified
+// under options.
+func NewHTTPProvider(url string, config HTTPLoaderConfig, options ResolveOptions) *HTTPProvider {
+	if options.SignatureLocator == nil {
+		// The policy came over the network, so its sidecar has to as well: the
+		// on-disk default would look for a file named after a URL.
+		options.SignatureLocator = HTTPSignatureLocator(config)
+	}
+	return &HTTPProvider{
+		url:     url,
+		config:  config,
+		options: options,
+		fetch:   NewHTTPLoader(config),
+		loader:  builtinOnlyLoader(),
+	}
+}
+
+// WithLoader resolves the fetched policy's own `extends` through loader instead
+// of the builtin-only default, which is what permits a remote base. It returns
+// the provider so it can be chained.
+func (p *HTTPProvider) WithLoader(loader ResolveLoader) *HTTPProvider {
+	p.loader = loader
+	return p
+}
+
+// URL is the address this provider fetches from.
+func (p *HTTPProvider) URL() string { return p.url }
+
+// Source is the URL the policy came from, and what a receipt's chain and a
+// detached-signature lookup name.
+func (p *HTTPProvider) Source() string { return p.url }
+
+// Load fetches, resolves and verifies the policy.
+func (p *HTTPProvider) Load() (*Resolution, error) {
+	loaded, err := p.fetch(p.url, "")
+	if err != nil {
+		return nil, err
+	}
+	resolution, err := ResolveWithOptions(loaded.Spec, loaded.Source, p.loader, p.options)
+	if err == nil {
+		return resolution, nil
+	}
+	// A base that could not be loaded is the interesting failure here, so name
+	// the reference and the document that declared it. A verification failure
+	// passes through untouched, so a caller can still read its
+	// [SignatureRequiredError].
+	var required *SignatureRequiredError
+	if loaded.Spec.Extends != nil && !errors.As(err, &required) {
+		return nil, fmt.Errorf("failed to resolve 'extends: %s' from %s: %w",
+			*loaded.Spec.Extends, p.url, err)
+	}
+	return nil, err
+}
+
+// builtinOnlyLoader serves `builtin:<name>` and refuses everything else, so a
+// policy fetched over the network cannot pull a base from a second location.
+func builtinOnlyLoader() ResolveLoader {
+	return func(reference string, _ string) (*LoadedSpec, error) {
+		spec, ok := LoadBuiltin(reference)
+		if ok {
+			source := reference
+			if !strings.HasPrefix(reference, "builtin:") {
+				source = "builtin:" + reference
+			}
+			return &LoadedSpec{Source: source, Spec: spec}, nil
+		}
+		if strings.HasPrefix(reference, "builtin:") {
+			return nil, &NotFoundError{Reference: reference, Message: "unknown builtin ruleset"}
+		}
+		return nil, &NotFoundError{
+			Reference: reference,
+			Message: "a policy fetched over the network may only extend a builtin ruleset; " +
+				"pass a loader to allow another base",
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

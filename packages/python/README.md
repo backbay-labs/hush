@@ -267,8 +267,9 @@ sink = MultiSink(
 
 `FilteredSink(inner, ["deny", "warn"])` passes on the decisions you name;
 `deny_only` is the common case. A sink that raises never breaks enforcement:
-`MultiSink` counts the loss in `sink.dropped` and reports it through
-`on_error`.
+`MultiSink` delivers to every sink whatever the ones before it did, counts each
+loss in `sink.dropped`, reports it through `on_error`, and then raises the
+first failure so a guard records it as a `sink.error` observer event.
 
 ### OTLP export
 
@@ -293,7 +294,9 @@ sink.close()      # flushes what is queued
 
 | Field | Value |
 |---|---|
-| `severityText` | `INFO` allow, `WARN` warn, `ERROR` deny (`INFO` for policy events) |
+| `timeUnixNano` | The receipt's or event's own `timestamp` |
+| `observedTimeUnixNano` | When the sink took the entry |
+| `severityText` / `severityNumber` | `INFO`/9 allow, `WARN`/13 warn, `ERROR`/17 deny (`INFO`/9 for policy events) |
 | `body.stringValue` | canonical JSON of the receipt or policy event |
 | attributes | `hushspec.entry_type` (`receipt`/`policy_loaded`/`policy_swapped`), `hushspec.receipt_version`, `hushspec.decision`, `hushspec.action_type`, `hushspec.matched_rule`, `hushspec.policy.content_hash`, `hushspec.receipt_hash`, `hushspec.enforcement.mode`, `hushspec.enforcement.outcome` |
 | resource | `service.name`, `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |

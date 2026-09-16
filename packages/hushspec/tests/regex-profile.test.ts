@@ -58,11 +58,37 @@ describe('compileProfileRegex', () => {
     expect(profileMatches('a.b', 'a\nb')).toBe(false);
     expect(profileMatches('(?s)a.b', 'a\nb')).toBe(true);
     expect(compileProfileRegex('a.b').source).toBe(
-      'a(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])b',
+      'a(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF\\n]' +
+        '|[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF])b',
     );
-    // One astral code point, like Rust/Python/Go `.` (a bare `[^\n]` would
-    // match only half the surrogate pair).
+  });
+
+  // Rust, Python and Go all match over code points, so a `.` takes an astral
+  // character whole and never half of one. JavaScript strings are UTF-16, so
+  // the translation has to say so explicitly; a fallback that admitted
+  // surrogate code units would let `^..$` backtrack through the two halves of
+  // one emoji and match where the other three SDKs do not.
+  it('counts an astral character as one code point', () => {
     expect(profileMatches('^a.b$', 'a\u{1F600}b')).toBe(true);
+    expect(profileMatches('^.$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^..$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('^..$', '\u{1F600}\u{1F600}')).toBe(true);
+    expect(profileMatches('^..$', 'ab')).toBe(true);
+    expect(profileMatches('(?s)^..$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('(?s)^.$', '\u{1F600}')).toBe(true);
+    // A negated class and a negated shorthand are "one code point outside this
+    // set", so they take an astral character whole as well.
+    expect(profileMatches('^[^a]$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^[^a]{2}$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('^\\D$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^\\W$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^\\S$', '\u{1F600}')).toBe(true);
+    // A quantifier after an astral literal applies to the whole character.
+    expect(profileMatches('^\u{1F600}+$', '\u{1F600}\u{1F600}')).toBe(true);
+    expect(profileMatches('^\u{1F600}+$', '\u{1F600}\u{1F600}b')).toBe(false);
+    // A trailing `-` in a negated class must stay a literal member.
+    expect(profileMatches('^[^a-]$', '-')).toBe(false);
+    expect(profileMatches('^[^a-]$', 'b')).toBe(true);
   });
 
   it('makes \\s ASCII whitespace including the vertical tab', () => {
@@ -116,9 +142,9 @@ describe('compileProfileRegex', () => {
   it('rejects non-portable escapes', () => {
     expect(profileRejects('\\Qa.b\\E')).toContain('\\Q');
     expect(profileRejects('\\Afoo')).toContain('anchor with');
-    // \Z / \z are caught by the shared RE2 portability pre-check.
-    expect(profileRejects('foo\\Z')).toContain('RE2 subset');
-    expect(profileRejects('foo\\z')).toContain('RE2 subset');
+    // \Z / \z are caught by the shared portability pre-check.
+    expect(profileRejects('foo\\Z')).toContain('end-anchors');
+    expect(profileRejects('foo\\z')).toContain('end-anchors');
     expect(profileRejects('\\p{L}')).toContain('Unicode property');
     expect(profileRejects('\\P{L}')).toContain('Unicode property');
     expect(profileRejects('\\u00a0')).toContain('profile escape');
@@ -139,9 +165,9 @@ describe('compileProfileRegex', () => {
   });
 
   it('rejects empty character classes', () => {
-    // Caught by the shared RE2 portability pre-check.
-    expect(profileRejects('[]')).toContain('RE2 subset');
-    expect(profileRejects('[^]')).toContain('RE2 subset');
+    // Caught by the shared portability pre-check.
+    expect(profileRejects('[]')).toContain('empty character class');
+    expect(profileRejects('[^]')).toContain('empty character class');
   });
 
   it('rewrites the Python named-group spelling for JavaScript', () => {
@@ -162,8 +188,80 @@ describe('compileProfileRegex', () => {
 
   it('rejects the RE2-unsafe patterns the validator rejects', () => {
     expect(profileRejects('(a+)+')).toContain('nested unbounded quantifier');
-    expect(profileRejects('(?=foo)bar')).toContain('RE2 subset');
-    expect(profileRejects('(foo)\\1')).toContain('RE2 subset');
-    expect(profileRejects('a*+')).toContain('RE2 subset');
+    expect(profileRejects('(?=foo)bar')).toContain('group form');
+    expect(profileRejects('(foo)\\1')).toContain('profile escape');
+    expect(profileRejects('a*+')).toContain('possessive');
+  });
+
+  it('accepts only the profile group names', () => {
+    expect(profileRejects('(?<1st>x)')).toContain("named group's name");
+    expect(profileRejects('(?<année>x)')).toContain("named group's name");
+    expect(profileRejects('(?<year x)')).toContain("named group's name");
+  });
+
+  it('rejects every group opener outside the profile', () => {
+    for (const pattern of [
+      'a(?#comment)b',
+      'a(?=b)',
+      'a(?!b)',
+      '(?<=a)b',
+      '(?<!a)b',
+      '(?>a)',
+      '(?(1)a|b)',
+      '(?R)',
+      '(?1)',
+      '(?P<a>x)(?P=a)',
+    ]) {
+      expect(profileRejects(pattern)).toContain('group form');
+    }
+    expect(() => compileProfileRegex('(?:ab)+')).not.toThrow();
+  });
+
+  it('rejects POSIX bracket expressions', () => {
+    expect(profileRejects('[[:alpha:]]')).toContain('unescaped [');
+    expect(profileRejects('[a[b]')).toContain('unescaped [');
+    expect(profileMatches('[a\\[]', '[')).toBe(true);
+  });
+
+  it('rejects the {,n} quantifier', () => {
+    expect(profileRejects('a{,3}')).toContain('{,n} quantifier');
+    expect(() => compileProfileRegex('a{0,3}')).not.toThrow();
+  });
+
+  it('rejects a pattern over the profile size limit', () => {
+    expect(profileRejects('a'.repeat(2049))).toContain('2048 bytes');
+    expect(() => compileProfileRegex('a'.repeat(2048))).not.toThrow();
+  });
+
+  it('takes an astral class member as one scalar value', () => {
+    expect(profileRejects('[\u{1F600}-\u{1F64F}]')).toContain('Basic Multilingual Plane');
+    expect(profileMatches('^[\u{1F600}a]$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^[\u{1F600}a]$', 'a')).toBe(true);
+    expect(profileMatches('^[\u{1F600}a]$', '\uD83D')).toBe(false);
+    expect(profileMatches('^[^\u{1F600}]$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('^[^\u{1F600}]$', 'a')).toBe(true);
+    expect(profileMatches('^[^\u{1F600}]$', '\u{1F64F}')).toBe(true);
+  });
+
+  it('folds ASCII letters only under (?i)', () => {
+    expect(profileMatches('(?i)stra', 'STRA')).toBe(true);
+    expect(profileMatches('(?i)stra', 'Stra')).toBe(true);
+    // U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII under
+    // the full Unicode table; the profile folds ASCII only.
+    expect(profileMatches('(?i)s', 'ſ')).toBe(false);
+    expect(profileMatches('(?i)k', 'K')).toBe(false);
+  });
+
+  it('folds class members and ranges under (?i)', () => {
+    expect(profileMatches('(?i)^[a-f]$', 'C')).toBe(true);
+    expect(profileMatches('(?i)^[a-f]$', 'G')).toBe(false);
+    expect(profileMatches('(?i)^[sq]$', 'S')).toBe(true);
+    expect(profileMatches('(?i)^[sq]$', 'ſ')).toBe(false);
+    expect(profileMatches('(?i)^[^s]$', 'S')).toBe(false);
+    expect(profileMatches('(?i)^[^s]$', 'ſ')).toBe(true);
+    expect(profileMatches('(?i)\\x41', 'a')).toBe(true);
+    expect(profileMatches('(?i)\\x61', 'A')).toBe(true);
+    expect(compileProfileRegex('(?i)[0-9]').source).toBe('[0-9]');
+    expect(compileProfileRegex('(?i)(?P<ab>c)').source).toBe('(?<ab>[cC])');
   });
 });

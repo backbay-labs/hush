@@ -2,13 +2,20 @@ import { describe, it, expect, vi } from 'vitest';
 import { Writable } from 'node:stream';
 import type { HushSpec } from '../src/schema.js';
 import type { EvaluationAction } from '../src/evaluate.js';
-import type { ObserverEvent, EvaluationCompletedEvent, EvaluationObserver } from '../src/observer.js';
+import type {
+  ObserverEvent,
+  EvaluationCompletedEvent,
+  EvaluationObserver,
+  SinkErrorEvent,
+} from '../src/observer.js';
 import {
   ObservableEvaluator,
   MetricsCollector,
   JsonLineObserver,
   ConsoleObserver,
 } from '../src/observer.js';
+import type { ReceiptSink } from '../src/sinks.js';
+import { MultiSink } from '../src/sinks.js';
 import { HushGuard } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 
@@ -41,6 +48,16 @@ class TestObserver implements EvaluationObserver {
   events: ObserverEvent[] = [];
   onEvent(event: ObserverEvent): void {
     this.events.push(event);
+  }
+}
+
+/** Refuses everything it is handed, and says so. */
+class FailingSink implements ReceiptSink {
+  send(): void {
+    throw new Error('no space left on device');
+  }
+  recordPolicyEvent(): void {
+    throw new Error('no space left on device');
   }
 }
 
@@ -390,5 +407,57 @@ rules:
   it('guard without observer works normally', () => {
     const guard = HushGuard.fromYaml(ALLOW_POLICY);
     expect(guard.check({ type: 'tool_call', target: 'test' })).toBe(true);
+  });
+
+  it('reports a sink that refuses a receipt as sink.error, leaving the decision', () => {
+    const observer = new TestObserver();
+    const guard = HushGuard.fromYaml(DENY_POLICY, {
+      observer,
+      sink: new FailingSink(),
+    });
+    observer.events.length = 0;
+
+    expect(guard.check({ type: 'tool_call', target: 'dangerous_tool' })).toBe(false);
+    expect(guard.check({ type: 'tool_call', target: 'anything' })).toBe(false);
+
+    const errors = observer.events.filter(e => e.type === 'sink.error') as SinkErrorEvent[];
+    expect(errors).toHaveLength(2);
+    expect(errors[0].error).toBe('no space left on device');
+    expect(errors[0].source).toBe('FailingSink');
+    expect(errors[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('reports a sink that refuses the policy event as sink.error', () => {
+    const observer = new TestObserver();
+    HushGuard.fromYaml(ALLOW_POLICY, { observer, sink: new FailingSink() });
+
+    const errors = observer.events.filter(e => e.type === 'sink.error') as SinkErrorEvent[];
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toBe('no space left on device');
+    expect(errors[0].source).toBe('FailingSink');
+  });
+
+  it('reports a sink that refuses behind a MultiSink, naming the child', () => {
+    const observer = new TestObserver();
+    let recorded = 0;
+    const counting: ReceiptSink = {
+      send() {
+        recorded++;
+      },
+      recordPolicyEvent() {},
+    };
+    const guard = HushGuard.fromYaml(DENY_POLICY, {
+      observer,
+      sink: new MultiSink([new FailingSink(), counting]),
+    });
+    observer.events.length = 0;
+
+    expect(guard.check({ type: 'tool_call', target: 'dangerous_tool' })).toBe(false);
+    expect(recorded).toBe(1);
+
+    const errors = observer.events.filter(e => e.type === 'sink.error') as SinkErrorEvent[];
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toBe('sink FailingSink: no space left on device');
+    expect(errors[0].source).toBe('MultiSink');
   });
 });

@@ -10,7 +10,7 @@ use hushspec::bundle::{
     BundleOptions, BundleReason, DsseEnvelope, VerifyBundleOptions, build_statement,
     sign_statement, unsigned_envelope, verify_bundle,
 };
-use hushspec::resolve::{Resolution, ResolveOptions, resolve_path_with_options};
+use hushspec::resolve::{Resolution, ResolveError, ResolveOptions, resolve_path_with_options};
 use hushspec::signing::{Keyring, generate_keypair};
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -91,8 +91,8 @@ fn instant(value: &str) -> chrono::DateTime<chrono::Utc> {
 }
 
 /// Resolve a policy the way `h2h bundle verify --policy` does.
-fn resolve(path: &Path) -> Option<Resolution> {
-    resolve_path_with_options(path, &ResolveOptions::default()).ok()
+fn resolve(path: &Path) -> Result<Resolution, ResolveError> {
+    resolve_path_with_options(path, &ResolveOptions::default())
 }
 
 // --------------------------------------------------------------------------
@@ -127,26 +127,30 @@ fn every_vector_returns_its_expected_outcome() {
             panic!("{}: {} is unreadable: {error}", case.name, case.bundle)
         });
 
-        // A policy that will not resolve has nothing to compare, which is
-        // check 4's own failure -- never a panic.
-        let resolution = case
-            .policy
-            .as_deref()
-            .map(|policy| resolve(&root.join(policy)));
-        let policy_missing = matches!(resolution, Some(None));
+        // Check 4's input. A case that names a policy names one the suite can
+        // resolve: an unresolvable one would report `policy_mismatch` whatever
+        // the bundle said, so the case would pass without testing anything.
+        let resolution = match case.policy.as_deref() {
+            None => None,
+            Some(policy) => match resolve(&root.join(policy)) {
+                Ok(resolution) => Some(resolution),
+                Err(error) => {
+                    failures.push(format!("{}: {policy} did not resolve: {error}", case.name));
+                    continue;
+                }
+            },
+        };
 
         let outcome = match DsseEnvelope::parse(&text) {
             Ok(envelope) => {
-                verify_bundle(&envelope, &keyring, resolution.flatten().as_ref(), &options)
-                    .map(|_| ())
+                verify_bundle(&envelope, &keyring, resolution.as_ref(), &options).map(|_| ())
             }
             Err(error) => Err(error),
         };
 
-        let actual = match (&outcome, policy_missing) {
-            (_, true) => "policy_mismatch".to_string(),
-            (Ok(()), _) => "valid".to_string(),
-            (Err(error), _) => error.reason_code().to_string(),
+        let actual = match &outcome {
+            Ok(()) => "valid".to_string(),
+            Err(error) => error.reason_code().to_string(),
         };
         let expected = match &case.expect {
             Expect::Valid(ValidMarker::Valid) => "valid".to_string(),
@@ -170,7 +174,11 @@ fn every_vector_returns_its_expected_outcome() {
         "bundle vectors failed:\n  {}",
         failures.join("\n  ")
     );
-    assert_eq!(manifest.cases.len(), 8, "bundle spec 7 publishes 8 vectors");
+    assert_eq!(
+        manifest.cases.len(),
+        10,
+        "bundle spec 7 publishes 10 vectors"
+    );
 }
 
 /// Every reason code a vector names is one this implementation can produce,
@@ -216,7 +224,7 @@ fn the_vectors_cover_every_reason_code() {
 // --------------------------------------------------------------------------
 
 fn bundle_schema() -> serde_json::Value {
-    let raw = std::fs::read_to_string(schemas().join("hushspec-bundle.v0.schema.json"))
+    let raw = std::fs::read_to_string(schemas().join("hushspec-bundle.v1.schema.json"))
         .expect("the bundle schema is published");
     serde_json::from_str(&raw).expect("it is JSON")
 }
@@ -228,20 +236,23 @@ fn compile(schema: &serde_json::Value) -> jsonschema::JSONSchema {
         .expect("the schema compiles")
 }
 
+/// `#/$defs/Statement` as a schema in its own right: the definitions come
+/// along so its internal `#/$defs/...` refs still resolve.
+fn statement_schema() -> jsonschema::JSONSchema {
+    let document = bundle_schema();
+    let mut statement_document = document["$defs"]["Statement"].clone();
+    statement_document["$schema"] = document["$schema"].clone();
+    statement_document["$defs"] = document["$defs"].clone();
+    compile(&statement_document)
+}
+
 /// Every vector -- valid or not -- is a well-formed DSSE envelope, and every
 /// vector whose statement is meant to be readable validates against
 /// `#/$defs/Statement`.
 #[test]
 fn every_vector_validates_against_the_published_schema() {
-    let document = bundle_schema();
-    let envelope_schema = compile(&document);
-
-    // `#/$defs/Statement` as a schema in its own right: the definitions come
-    // along so its internal `#/$defs/...` refs still resolve.
-    let mut statement_document = document["$defs"]["Statement"].clone();
-    statement_document["$schema"] = document["$schema"].clone();
-    statement_document["$defs"] = document["$defs"].clone();
-    let statement_schema = compile(&statement_document);
+    let envelope_schema = compile(&bundle_schema());
+    let statement_schema = statement_schema();
 
     let root = fixtures();
     for case in manifest().cases {
@@ -307,6 +318,90 @@ fn hipaa_base() -> PathBuf {
         .expect("the library policy is readable")
 }
 
+/// A 0.x policy that declares `name: ""`, which the frozen 0.x format admits.
+fn empty_name_policy() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/core/valid/empty-name-0-2.yaml")
+        .canonicalize()
+        .expect("the fixture is readable")
+}
+
+/// The `created_at` the bundle vectors pin, reused so these bundles are
+/// byte-reproducible too.
+const PINNED_CREATED_AT: &str = "2026-09-15T12:00:00.000Z";
+
+/// An empty name is a name the bundle schema will not accept: both
+/// `subject[0].name` and `predicate.policy.name` need a character. The subject
+/// falls through to the leaf file name and the policy claim is left out
+/// altogether.
+#[test]
+fn a_policy_with_an_empty_name_bundles_under_its_file_name() {
+    let resolution = resolve(&empty_name_policy()).expect("the fixture resolves");
+    let statement = build_statement(
+        &resolution,
+        &BundleOptions {
+            created_at: Some(instant(PINNED_CREATED_AT)),
+            ..BundleOptions::default()
+        },
+    )
+    .expect("the statement builds");
+
+    assert_eq!(statement.subject[0].name, "empty-name-0-2.yaml");
+    assert_eq!(statement.predicate.policy.name, None);
+
+    // Absent, not present and empty: read off the payload bytes rather than
+    // the typed statement, because it is the serialized form the schema and
+    // every other verifier see.
+    let payload: serde_json::Value =
+        serde_json::from_slice(&statement.to_canonical_bytes().expect("canonical bytes"))
+            .expect("the payload is JSON");
+    assert!(
+        !payload["predicate"]["policy"]
+            .as_object()
+            .expect("policy is an object")
+            .contains_key("name")
+    );
+    if let Err(errors) = statement_schema().validate(&payload) {
+        let messages: Vec<String> = errors.map(|error| error.to_string()).collect();
+        panic!("the statement does not match the schema: {messages:?}");
+    }
+
+    let (signing_key, verifying_key) = generate_keypair();
+    let envelope = sign_statement(&statement, &signing_key).expect("it signs");
+    let keyring = Keyring::from_verifying_keys([verifying_key]).expect("a one-key keyring");
+    let verified = verify_bundle(
+        &envelope,
+        &keyring,
+        Some(&resolution),
+        &VerifyBundleOptions {
+            now: instant(PINNED_CREATED_AT),
+        },
+    )
+    .expect("the bundle verifies");
+    assert_eq!(verified.subject_name, "empty-name-0-2.yaml");
+    assert_eq!(verified.policy_name, None);
+    assert!(verified.policy_checked);
+}
+
+/// An override is a choice the caller makes, and an empty string is not one:
+/// it falls through to the policy's own name rather than producing a subject
+/// the schema rejects.
+#[test]
+fn an_empty_subject_name_override_falls_through_to_the_policy_name() {
+    let resolution = resolve(&hipaa_base()).expect("the library policy resolves");
+    let statement = build_statement(
+        &resolution,
+        &BundleOptions {
+            created_at: Some(instant(PINNED_CREATED_AT)),
+            subject_name: Some(String::new()),
+            ..BundleOptions::default()
+        },
+    )
+    .expect("the statement builds");
+
+    assert_eq!(statement.subject[0].name, "hipaa-base");
+}
+
 #[test]
 fn a_freshly_built_bundle_verifies() {
     let resolution = resolve(&hipaa_base()).expect("the library policy resolves");
@@ -346,12 +441,46 @@ fn a_freshly_built_bundle_verifies() {
     assert_eq!(DsseEnvelope::load(&path).expect("it reads back"), envelope);
 }
 
+/// Retirement is graceful (bundle spec 5.2 check 2): a bundle produced while
+/// the key was current keeps verifying after it is retired, and one produced
+/// at or after `not_after` does not.
+#[test]
+fn a_retired_key_still_attests_the_bundles_it_signed_while_current() {
+    let resolution = resolve(&hipaa_base()).expect("the library policy resolves");
+    let (signing_key, verifying_key) = generate_keypair();
+    let statement = build_statement(
+        &resolution,
+        &BundleOptions {
+            created_at: Some(instant(PINNED_CREATED_AT)),
+            ..BundleOptions::default()
+        },
+    )
+    .expect("the statement builds");
+    let envelope = sign_statement(&statement, &signing_key).expect("it signs");
+
+    let mut keyring = Keyring::from_verifying_keys([verifying_key]).expect("a one-key keyring");
+    keyring.keys[0].not_after = Some("2026-09-16T00:00:00.000Z".to_string());
+    verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect("a bundle dated before not_after still verifies");
+
+    keyring.keys[0].not_after = Some(PINNED_CREATED_AT.to_string());
+    let error = verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect_err("a bundle dated at not_after does not");
+    assert_eq!(error.reason, BundleReason::KeyRetired);
+
+    keyring.keys[0].not_after = None;
+    keyring.keys[0].revoked = true;
+    let error = verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect_err("a revoked key attests nothing");
+    assert_eq!(error.reason, BundleReason::KeyRevoked);
+}
+
 #[test]
 fn bundling_the_same_inputs_twice_produces_identical_bytes() {
     let resolution = resolve(&hipaa_base()).expect("the library policy resolves");
     let (signing_key, _) = generate_keypair();
     let options = BundleOptions {
-        created_at: Some(instant("2026-09-15T12:00:00.000Z")),
+        created_at: Some(instant(PINNED_CREATED_AT)),
         ..BundleOptions::default()
     };
 

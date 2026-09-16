@@ -3,12 +3,13 @@
 
 `fixtures/bundle/bundles/valid.bundle.json`, `wrong-key.bundle.json`, and
 `unsigned.bundle.json` are produced by `h2h bundle create` (see
-fixtures/bundle/README.md). The three remaining cases cannot be: they are
+fixtures/bundle/README.md). The three remaining cases cannot be. Two are
 bundles that are *correctly signed* over a statement that is wrong, which the
-CLI refuses to produce by construction. This script builds them the way an
-attacker or a broken bundler would -- by editing the statement and signing the
-result with the published test key -- so the vectors exercise checks 1 and 3
-of bundle spec 5.2 rather than stopping at check 2.
+CLI refuses to produce by construction, so they exercise checks 1 and 3 of
+bundle spec 5.2 rather than stopping at check 2. The third,
+`tampered-payload`, is the valid bundle's signature left in place over an
+edited payload, which is check 2 itself. This script builds all three the way
+an attacker or a broken bundler would.
 
 The signature is made with `openssl pkeyutl -sign -rawin` over the DSSE PAE,
 independently of the Rust implementation, so the vectors cross-check it.

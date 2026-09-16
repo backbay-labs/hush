@@ -1,4 +1,4 @@
-"""Policy bundle verification (``spec/hushspec-bundle.md``, format 0.1).
+"""Policy bundles (``spec/hushspec-bundle.md``, format 0.1).
 
 A bundle is a DSSE envelope whose payload is an in-toto Statement v1 attesting
 to one resolved policy: the canonical projection it resolved to, the content
@@ -12,8 +12,9 @@ The four checks of spec section 5.2, in order, stopping at the first failure:
 1. **Shape** -- the envelope and the statement it carries are well formed and
    name the constants this build knows (:data:`REASON_MALFORMED_BUNDLE`).
 2. **Signature** -- some signature verifies as Ed25519 over the PAE, under a
-   key the keyring holds whose id is *recomputed* from the public key
-   (:data:`REASON_UNKNOWN_KEY_ID`, :data:`REASON_DSSE_SIGNATURE_MISMATCH`).
+   key the keyring holds and still trusts, whose id is *recomputed* from the
+   public key (:data:`REASON_UNKNOWN_KEY_ID`, :data:`REASON_KEY_REVOKED`,
+   :data:`REASON_KEY_RETIRED`, :data:`REASON_DSSE_SIGNATURE_MISMATCH`).
 3. **Subject** -- ``predicate.resolved`` canonicalizes to the content hash the
    predicate declares, and to the subject digest
    (:data:`REASON_SUBJECT_DIGEST_MISMATCH`).
@@ -34,8 +35,13 @@ Without it :func:`verify_bundle` raises :class:`~hushspec.signing.SigningUnavail
 before any check can look like a verdict. :func:`parse_bundle` is pure standard
 library.
 
-This module verifies; it does not create. And a verified bundle is *not* a
-policy: nothing here loads ``predicate.resolved`` and enforces it.
+:func:`create_bundle` builds one (spec section 4). Creation is deterministic:
+the payload is the RFC 8785 serialization of the statement and Ed25519 is
+deterministic, so the same resolution, ``created_at`` and resolver always
+produce the same bytes.
+
+A verified bundle is *not* a policy: nothing here loads ``predicate.resolved``
+and enforces it.
 """
 
 from __future__ import annotations
@@ -43,9 +49,11 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 from hushspec.canonical import (
@@ -55,17 +63,22 @@ from hushspec.canonical import (
     content_hash,
     digest,
     is_content_hash,
+    project,
 )
 from hushspec.signing import (
     MalformedEnvelope,
     SigningError,
+    _coerce_moment,
     _ed25519,
+    _load_private_key,
     _parse_timestamp,
+    _public_key_pem,
     _verify_raw,
     format_timestamp,
     key_id_from_public_key,
     load_keyring,
 )
+from hushspec.log import SDK_NAME, _sdk_version
 
 __all__ = [
     "BUNDLE_VERSION",
@@ -74,6 +87,8 @@ __all__ = [
     "PREDICATE_TYPE",
     "STATEMENT_TYPE",
     "REASON_DSSE_SIGNATURE_MISMATCH",
+    "REASON_KEY_RETIRED",
+    "REASON_KEY_REVOKED",
     "REASON_MALFORMED_BUNDLE",
     "REASON_POLICY_MISMATCH",
     "REASON_SUBJECT_DIGEST_MISMATCH",
@@ -82,8 +97,14 @@ __all__ = [
     "DsseEnvelope",
     "DsseSignature",
     "BundleVerifyResult",
+    "Statement",
+    "build_statement",
+    "bundle_to_json",
+    "create_bundle",
     "parse_bundle",
     "pae",
+    "statement_bytes",
+    "statement_to_dict",
     "verify_bundle",
 ]
 
@@ -106,6 +127,8 @@ _PAE_PREFIX = b"DSSEv1"
 REASON_MALFORMED_BUNDLE = "malformed_bundle"
 REASON_DSSE_SIGNATURE_MISMATCH = "dsse_signature_mismatch"
 REASON_UNKNOWN_KEY_ID = "unknown_key_id"
+REASON_KEY_REVOKED = "key_revoked"
+REASON_KEY_RETIRED = "key_retired"
 REASON_SUBJECT_DIGEST_MISMATCH = "subject_digest_mismatch"
 REASON_POLICY_MISMATCH = "policy_mismatch"
 
@@ -113,11 +136,18 @@ REASON_POLICY_MISMATCH = "policy_mismatch"
 #: verifier never invents a code.
 BUNDLE_REASON_CODES: tuple[str, ...] = (
     REASON_MALFORMED_BUNDLE,
-    REASON_DSSE_SIGNATURE_MISMATCH,
     REASON_UNKNOWN_KEY_ID,
+    REASON_KEY_REVOKED,
+    REASON_KEY_RETIRED,
+    REASON_DSSE_SIGNATURE_MISMATCH,
     REASON_SUBJECT_DIGEST_MISMATCH,
     REASON_POLICY_MISMATCH,
 )
+
+#: Rank of the reason a failed signature contributes, lowest first: spec
+#: section 5.2 check 2 reports a withdrawn key ahead of a wrong signature, the
+#: way the signing specification's own checks 5 and 6 precede its check 8.
+_REASON_PRECEDENCE = {REASON_KEY_REVOKED: 0, REASON_KEY_RETIRED: 1}
 
 
 class BundleError(ValueError):
@@ -535,6 +565,270 @@ def _parse_chain_link(value: Any, index: int) -> BundleChainLink:
 
 
 # --------------------------------------------------------------------------- #
+# Creation (spec section 4)
+# --------------------------------------------------------------------------- #
+
+
+def build_statement(
+    resolution: Any,
+    *,
+    created_at: datetime | str | None = None,
+    tool: str | None = None,
+    version: str | None = None,
+    subject_name: str | None = None,
+    base_dir: str | Path | None = None,
+) -> Statement:
+    """Build the in-toto statement for a resolved policy (spec section 4).
+
+    ``resolution`` is a :class:`~hushspec.resolve.Resolution`: the merged
+    document, its content hash, and the chain that produced it.
+
+    The subject digest is recomputed here from the canonical projection that
+    goes into ``predicate.resolved``, never copied from the resolution, so the
+    statement is internally consistent by construction: there is no path by
+    which a bundle names the hash of a document other than the one it carries.
+
+    ``created_at`` defaults to now. Pinning it is what makes a bundle
+    byte-reproducible (spec section 4). ``base_dir`` records filesystem chain
+    sources relative to a directory (spec section 4.4) so a bundle built in CI
+    neither leaks nor depends on a runner's workspace path.
+
+    Raises :class:`~hushspec.canonical.CanonicalError` when the resolved
+    document has no canonical form, which for a resolution means a resolver
+    bug.
+    """
+    spec = getattr(resolution, "spec", resolution)
+    resolved = project(spec)
+    hash_value = digest(canonical_json_value(resolved))
+
+    chain = tuple(
+        BundleChainLink(
+            source=_relative_source(link.source, base_dir),
+            content_hash=link.content_hash,
+            signature=_signature_dict(getattr(link, "signature", None)),
+        )
+        for link in getattr(resolution, "chain", ())
+    )
+
+    moment = _coerce_moment(created_at, "created_at") or datetime.now(timezone.utc)
+    name = getattr(spec, "name", None)
+    metadata = getattr(spec, "metadata", None)
+
+    return Statement(
+        statement_type=STATEMENT_TYPE,
+        subject=(
+            Subject(
+                name=_subject_name(subject_name, name, chain),
+                # The prefix is stripped here and only here: in-toto requires a
+                # bare hex digest for a subject (spec section 4.1), while every
+                # content hash inside the predicate keeps it.
+                digest=SubjectDigest(sha256=hash_value[len(HASH_PREFIX):]),
+            ),
+        ),
+        predicate_type=PREDICATE_TYPE,
+        predicate=PolicyBundlePredicate(
+            bundle_version=BUNDLE_VERSION,
+            policy=PolicyIdentity(
+                content_hash=hash_value,
+                spec_version=getattr(spec, "hushspec", ""),
+                name=name or None,
+                policy_version=getattr(metadata, "policy_version", None),
+            ),
+            chain=chain,
+            resolved=resolved,
+            resolver=Resolver(tool=tool or SDK_NAME, version=version or _sdk_version()),
+            created_at=format_timestamp(moment),
+            # A bundler that attempted no verification omits the member rather
+            # than recording ``verified: false``, which would assert a check
+            # that never ran (spec section 4.5).
+            signature_verification=_signature_dict(
+                getattr(resolution, "signature", None)
+            ),
+        ),
+    )
+
+
+def statement_bytes(statement: Statement) -> bytes:
+    """The payload bytes of a statement: its RFC 8785 form, UTF-8 (section 4)."""
+    return canonical_json_value(statement_to_dict(statement)).encode("utf-8")
+
+
+def statement_to_dict(statement: Statement) -> dict[str, Any]:
+    """The statement as the plain JSON object the payload carries."""
+    predicate = statement.predicate
+    policy: dict[str, Any] = {
+        "content_hash": predicate.policy.content_hash,
+        "spec_version": predicate.policy.spec_version,
+    }
+    if predicate.policy.name is not None:
+        policy["name"] = predicate.policy.name
+    if predicate.policy.policy_version is not None:
+        policy["policy_version"] = predicate.policy.policy_version
+
+    predicate_out: dict[str, Any] = {
+        "bundle_version": predicate.bundle_version,
+        "policy": policy,
+        "chain": [_chain_link_to_dict(link) for link in predicate.chain],
+        "resolved": predicate.resolved,
+        "resolver": {
+            "tool": predicate.resolver.tool,
+            "version": predicate.resolver.version,
+        },
+        "created_at": predicate.created_at,
+    }
+    if predicate.signature_verification is not None:
+        predicate_out["signature_verification"] = predicate.signature_verification
+
+    return {
+        "_type": statement.statement_type,
+        "subject": [
+            {"name": subject.name, "digest": {"sha256": subject.digest.sha256}}
+            for subject in statement.subject
+        ],
+        "predicateType": statement.predicate_type,
+        "predicate": predicate_out,
+    }
+
+
+def create_bundle(
+    resolution: Any,
+    *,
+    private_key_pem: str | bytes | None = None,
+    created_at: datetime | str | None = None,
+    tool: str | None = None,
+    version: str | None = None,
+    subject_name: str | None = None,
+    base_dir: str | Path | None = None,
+) -> DsseEnvelope:
+    """Build a bundle for a resolution (spec sections 3 and 4).
+
+    With ``private_key_pem`` the envelope carries one Ed25519 signature over
+    ``PAE(payloadType, payload)`` whose ``keyid`` is the signing spec's key id,
+    derived from the key itself (signing spec section 5.2). Without one the
+    envelope is **unsigned**: a well-formed DSSE envelope with an empty
+    ``signatures`` array, which spec section 3 says is not evidence and
+    :func:`verify_bundle` rejects. A tool that produces one must say so.
+
+    The payload is canonical and Ed25519 is deterministic, so the result is a
+    pure function of the resolution, ``created_at``, the resolver and the key.
+
+    ``tool`` and ``version`` default to this SDK; overriding them is how a
+    bundle another tool produced is reproduced byte-for-byte.
+
+    Raises :class:`~hushspec.signing.SigningUnavailable` when a key is given
+    without the optional ``cryptography`` extra, and
+    :class:`~hushspec.canonical.CanonicalError` when the policy has no
+    canonical form.
+    """
+    statement = build_statement(
+        resolution,
+        created_at=created_at,
+        tool=tool,
+        version=version,
+        subject_name=subject_name,
+        base_dir=base_dir,
+    )
+    payload = statement_bytes(statement)
+    signatures: tuple[DsseSignature, ...] = ()
+    if private_key_pem is not None:
+        key = _load_private_key(private_key_pem)
+        signatures = (
+            DsseSignature(
+                keyid=key_id_from_public_key(_public_key_pem(key)),
+                sig=base64.b64encode(key.sign(pae(PAYLOAD_TYPE, payload))).decode("ascii"),
+            ),
+        )
+    return DsseEnvelope(
+        payload_type=PAYLOAD_TYPE,
+        payload=base64.b64encode(payload).decode("ascii"),
+        signatures=signatures,
+    )
+
+
+def bundle_to_json(envelope: DsseEnvelope) -> str:
+    """Serialize a bundle as the reference CLI writes one: pretty, newline-ended."""
+    return json.dumps(envelope.to_dict(), indent=2) + "\n"
+
+
+def _chain_link_to_dict(link: BundleChainLink) -> dict[str, Any]:
+    out: dict[str, Any] = {"source": link.source, "content_hash": link.content_hash}
+    if link.signature is not None:
+        out["signature"] = link.signature
+    return out
+
+
+def _signature_dict(status: Any) -> dict[str, Any] | None:
+    """A :class:`~hushspec.resolve.SignatureStatus` as the predicate records it.
+
+    ``None`` stays ``None``: an omitted member says verification was never
+    attempted, which is not the same claim as ``verified: false``
+    (spec section 4.5). Members that were never set are dropped for the same
+    reason.
+    """
+    if status is None:
+        return None
+    if isinstance(status, Mapping):
+        return {key: value for key, value in status.items() if value is not None}
+    out: dict[str, Any] = {"verified": bool(getattr(status, "verified", False))}
+    for field_name in ("key_id", "verified_at", "reason"):
+        value = getattr(status, field_name, None)
+        if value is not None:
+            out[field_name] = value
+    return out
+
+
+def _relative_source(source: str, base_dir: str | Path | None) -> str:
+    """Record a filesystem source relative to *base_dir* (spec section 4.4).
+
+    ``builtin:`` and URL sources are already portable and are returned
+    unchanged, as is any path that is not beneath *base_dir*.
+
+    The comparison is lexical, and deliberately so: resolving symlinks would
+    make the same policy reached through a symlinked base record a different
+    ``source`` than one reached directly, and a chain link's ``source`` is a
+    provenance label that every SDK must spell the same way.
+    """
+    if base_dir is None or source.startswith("builtin:") or "://" in source:
+        return source
+    try:
+        relative = os.path.relpath(source, os.fspath(base_dir))
+    except (OSError, ValueError):
+        return source
+    # Only a `..` *segment* leaves the base directory: a name that merely
+    # starts with two dots (`..cache/policy.yaml`) is beneath it like any other.
+    if (
+        relative in (os.curdir, os.pardir)
+        or relative.startswith(os.pardir + os.sep)
+        or os.path.isabs(relative)
+    ):
+        return source
+    # A bundle is JSON read on every platform, so the separator is `/`.
+    return PurePath(relative).as_posix()
+
+
+def _subject_name(
+    override: str | None, name: str | None, chain: Sequence[BundleChainLink]
+) -> str:
+    """The subject's informational label: the first of an explicit override,
+    the policy's own name, the leaf source's file name, and a constant. The
+    subject needs at least one character (bundle spec 4.1), so a policy that
+    declares an empty name falls through to the file name."""
+    if override:
+        return override
+    if name:
+        return name
+    leaf = _leaf_file_name(chain)
+    return leaf if leaf is not None else "policy"
+
+
+def _leaf_file_name(chain: Sequence[BundleChainLink]) -> str | None:
+    """The leaf's file name, for a policy that declares no ``name``."""
+    if not chain:
+        return None
+    return PurePosixPath(chain[-1].source.replace("\\", "/")).name or None
+
+
+# --------------------------------------------------------------------------- #
 # The result
 # --------------------------------------------------------------------------- #
 
@@ -627,7 +921,9 @@ def verify_bundle(
     predicate = statement.predicate
 
     # -- check 2: DSSE signature ------------------------------------------- #
-    signature_failure = _check_signatures(envelope, trusted, pae_bytes)
+    signature_failure = _check_signatures(
+        envelope, trusted, pae_bytes, predicate.created_at
+    )
     if isinstance(signature_failure, BundleVerifyResult):
         return signature_failure
     key_ids = signature_failure
@@ -676,17 +972,26 @@ def verify_bundle(
 
 
 def _check_signatures(
-    envelope: DsseEnvelope, trusted: Any, pae_bytes: bytes
+    envelope: DsseEnvelope, trusted: Any, pae_bytes: bytes, created_at: str
 ) -> "list[str] | BundleVerifyResult":
     """Check 2: the keys that verified, or the failure to report.
 
     A signature entry counts only when the keyring holds its ``keyid`` *and*
     the id recomputed from that key's public bytes matches what the bundle
-    declared -- a verifier must not trust the id a bundle names itself.
+    declared -- a verifier must not trust the id a bundle names itself -- *and*
+    the keyring still vouches for that key: a revoked entry attests nothing,
+    and a retired one attests nothing dated at or after its ``not_after``
+    (signing spec section 5.3).
     """
     key_ids: list[str] = []
-    named_a_trusted_key = False
-    mismatch_detail = ""
+    refusal: BundleVerifyResult | None = None
+
+    def record(reason: str, detail: str) -> None:
+        nonlocal refusal
+        if refusal is None or _REASON_PRECEDENCE.get(reason, 2) < _REASON_PRECEDENCE.get(
+            refusal.reason or "", 2
+        ):
+            refusal = BundleVerifyResult.fail(reason, detail)
 
     for signature in envelope.signatures:
         entry = trusted.find(signature.keyid)
@@ -697,29 +1002,42 @@ def _check_signatures(
                 continue
         except SigningError:
             continue
-        named_a_trusted_key = True
+        if entry.revoked:
+            record(REASON_KEY_REVOKED, f"key {signature.keyid} is revoked")
+            continue
+        if entry.not_after is not None and _retired_at(entry.not_after, created_at):
+            record(
+                REASON_KEY_RETIRED,
+                f"key {signature.keyid} was retired at {entry.not_after}; the bundle "
+                f"is dated {created_at}",
+            )
+            continue
         try:
             raw = base64.b64decode(signature.sig, validate=True)
         except (binascii.Error, ValueError):
-            mismatch_detail = f"signature by {signature.keyid} is not valid base64"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"signature by {signature.keyid} is not valid base64",
+            )
             continue
         if len(raw) != 64:
-            mismatch_detail = (
-                f"signature by {signature.keyid} is {len(raw)} bytes, not 64"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"signature by {signature.keyid} is {len(raw)} bytes, not 64",
             )
             continue
         if _verify_raw(entry.public_key, raw, pae_bytes):
             key_ids.append(signature.keyid)
         else:
-            mismatch_detail = f"Ed25519 verification failed for {signature.keyid}"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"Ed25519 verification failed for {signature.keyid}",
+            )
 
     if key_ids:
         return key_ids
-    if named_a_trusted_key:
-        return BundleVerifyResult.fail(
-            REASON_DSSE_SIGNATURE_MISMATCH,
-            mismatch_detail or "no signature verified under a trusted key",
-        )
+    if refusal is not None:
+        return refusal
     if not envelope.signatures:
         return BundleVerifyResult.fail(
             REASON_DSSE_SIGNATURE_MISMATCH,
@@ -730,6 +1048,23 @@ def _check_signatures(
         f"none of the {len(envelope.signatures)} signature(s) names a key in the "
         f"keyring ({len(trusted.keys)} trusted)",
     )
+
+
+def _retired_at(not_after: str, created_at: str) -> bool:
+    """Whether a key retired at *not_after* was already retired when a bundle
+    dated *created_at* was produced (spec section 5.2 check 2).
+
+    Both are ``YYYY-MM-DDTHH:MM:SS.sssZ`` -- the keyring schema and the
+    statement shape check admit no other form -- so an unparseable one is a
+    keyring this verifier will not read a retirement out of, and the key is
+    treated as current.
+    """
+    try:
+        retired = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return created >= retired
 
 
 def _compare_policy(

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
 #
 # Control-tagged suite for library/education/ferpa-student.yaml.
 # Every case names the control it is evidence for, and between them the

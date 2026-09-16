@@ -633,7 +633,7 @@ fn eval_format_receipt_conforms_to_receipt_schema() {
     assert!(receipt["receipt_id"].is_string());
 
     let schema_text =
-        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v1.schema.json"))
             .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
     // Explicit options (rather than relying on the draft's default) so format
@@ -682,7 +682,7 @@ fn eval_format_receipt_schema_rejects_invalid_timestamp() {
     receipt["timestamp"] = serde_json::Value::String("not-a-date".to_string());
 
     let schema_text =
-        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v1.schema.json"))
             .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
     let compiled = jsonschema::JSONSchema::options()

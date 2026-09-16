@@ -248,6 +248,55 @@ describe('validate', () => {
     expect(result.errors[0].code).toBe('E002');
   });
 
+  // Core spec 2: `name` is optional, but a present one must not be empty --
+  // a bundle's subject and a receipt's policy summary both carry it, and an
+  // empty name names nothing. The v1 core schema says the same with
+  // `minLength: 1`; the shared vector is `fixtures/core/invalid/empty-name.yaml`.
+  // The constraint arrived with 1.0 (versioning spec 10), so a 0.x document is
+  // held to the frozen format, which allows an empty name.
+  describe('name', () => {
+    it('rejects an empty name with E004', () => {
+      const result = validate({ hushspec: '1.0.0', name: '' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].code).toBe('E004');
+      expect(result.errors[0].message).toBe('name: must not be empty when present');
+    });
+
+    it('refuses the document at parse time, before it can be evaluated', () => {
+      const result = parse('hushspec: "1.0.0"\nname: ""\n');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe('E004');
+      expect(result.error).toContain('name: must not be empty');
+    });
+
+    it('rejects an empty name only in the 1.0 document format', () => {
+      // The one validation difference between the 0.2 and 1.0 formats
+      // (versioning spec 10), so it is gated on the declared major version.
+      for (const version of ['0.1.0', '0.2.0', '0.2.7']) {
+        expect(validate({ hushspec: version, name: '' }).valid, version).toBe(true);
+      }
+      for (const version of ['1.0.0', '1.0.3']) {
+        expect(validate({ hushspec: version, name: '' }).valid, version).toBe(false);
+      }
+    });
+
+    it('holds a version it cannot read to the current format', () => {
+      // Unsupported and unreadable versions are refused on their own account;
+      // an unreadable one must never be a way to relax a constraint.
+      const result = validate({ hushspec: 'not-a-version', name: '' });
+      expect(result.errors.map((error) => error.code)).toContain('E004');
+    });
+
+    it('accepts an absent name and a non-empty one', () => {
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\n')).valid).toBe(true);
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: a\n')).valid).toBe(true);
+      // Whitespace is a name; only the empty string is refused, exactly as
+      // the schema's `minLength: 1` reads.
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: " "\n')).valid).toBe(true);
+    });
+  });
+
   it('rejects duplicate secret pattern names', () => {
     const result = parse(`
 hushspec: "0.1.0"

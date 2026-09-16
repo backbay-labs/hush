@@ -171,6 +171,81 @@ func TestProfileNormalizesJavaScriptNamedGroups(t *testing.T) {
 	assertMatch(t, `(?P<year>[0-9]{4})`, "in 2026", true)
 }
 
+func TestProfileRejectsNonIdentifierGroupNames(t *testing.T) {
+	assertRejectContains(t, `(?<1st>x)`, "named group's name")
+	assertRejectContains(t, `(?<année>x)`, "named group's name")
+	assertRejectContains(t, `(?<year x)`, "named group's name")
+}
+
+func TestProfileRejectsNonProfileGroupOpeners(t *testing.T) {
+	for _, pattern := range []string{
+		"a(?#comment)b",
+		"a(?=b)",
+		"a(?!b)",
+		"(?<=a)b",
+		"(?<!a)b",
+		"(?>a)",
+		"(?(1)a|b)",
+		"(?R)",
+		"(?1)",
+		"(?P<a>x)(?P=a)",
+	} {
+		assertRejectContains(t, pattern, "group form")
+	}
+	if _, err := CompileProfileRegex("(?:ab)+"); err != nil {
+		t.Fatalf("(?:ab)+ should compile: %v", err)
+	}
+}
+
+func TestProfileRejectsPOSIXBracketExpressions(t *testing.T) {
+	assertRejectContains(t, "[[:alpha:]]", "unescaped [")
+	assertRejectContains(t, "[a[b]", "unescaped [")
+	assertMatch(t, `[a\[]`, "[", true)
+}
+
+func TestProfileRejectsOpenLowerBoundQuantifier(t *testing.T) {
+	assertRejectContains(t, "a{,3}", "{,n} quantifier")
+	if _, err := CompileProfileRegex("a{0,3}"); err != nil {
+		t.Fatalf("a{0,3} should compile: %v", err)
+	}
+}
+
+func TestProfileRejectsOverLongPatterns(t *testing.T) {
+	assertRejectContains(t, strings.Repeat("a", 2049), "2048 bytes")
+	if _, err := CompileProfileRegex(strings.Repeat("a", 2048)); err != nil {
+		t.Fatalf("a 2048-byte pattern should compile: %v", err)
+	}
+}
+
+func TestProfileClassRangesStayInsideTheBMP(t *testing.T) {
+	assertRejectContains(t, "[\U0001F600-\U0001F64F]", "Basic Multilingual Plane")
+	assertMatch(t, "^[\U0001F600a]$", "\U0001F600", true)
+	assertMatch(t, "^[\U0001F600a]$", "a", true)
+	assertMatch(t, "^[^\U0001F600]$", "\U0001F600", false)
+	assertMatch(t, "^[^\U0001F600]$", "a", true)
+}
+
+func TestProfileCaseInsensitiveFoldsASCIIOnly(t *testing.T) {
+	assertMatch(t, "(?i)stra", "STRA", true)
+	assertMatch(t, "(?i)stra", "Stra", true)
+	// U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII under
+	// the full Unicode table, which RE2's own (?i) applies; the profile folds
+	// ASCII only.
+	assertMatch(t, "(?i)s", "ſ", false)
+	assertMatch(t, "(?i)k", "K", false)
+}
+
+func TestProfileCaseInsensitiveFoldsClassMembersAndRanges(t *testing.T) {
+	assertMatch(t, "(?i)^[a-f]$", "C", true)
+	assertMatch(t, "(?i)^[a-f]$", "G", false)
+	assertMatch(t, "(?i)^[sq]$", "S", true)
+	assertMatch(t, "(?i)^[sq]$", "ſ", false)
+	assertMatch(t, "(?i)^[^s]$", "S", false)
+	assertMatch(t, "(?i)^[^s]$", "ſ", true)
+	assertMatch(t, `(?i)\x41`, "a", true)
+	assertMatch(t, `(?i)\x61`, "A", true)
+}
+
 func TestProfileLibraryPatternsStillMatch(t *testing.T) {
 	assertMatch(t, `\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b`, "ssn 123-45-6789.", true)
 	assertMatch(t, `(AKIA|ASIA)[0-9A-Z]{16}`, "AKIA1234567890ABCDEF", true)

@@ -84,6 +84,9 @@ pub enum CanonicalError {
     /// A key the schema does not define (canonical spec 2.3).
     #[error("unknown field {0}")]
     UnknownField(String),
+    /// A `null` written for a property the schema declares (canonical spec 2.2).
+    #[error("{0} is null; no property is nullable")]
+    NullProperty(String),
     /// An `extensions` key with no published schema (canonical spec 3.4).
     #[error("unknown extension `{0}`")]
     UnknownExtension(String),
@@ -206,13 +209,15 @@ fn canonicalize(document: &Value) -> Result<String, CanonicalError> {
 // Schemas
 // --------------------------------------------------------------------------
 
-struct SchemaSet {
-    core: Value,
+pub(crate) struct SchemaSet {
+    pub(crate) core: Value,
     /// `(extensions key, schema file name, parsed schema)`.
-    extensions: Vec<(&'static str, &'static str, Value)>,
+    pub(crate) extensions: Vec<(&'static str, &'static str, Value)>,
 }
 
-fn schemas() -> Result<&'static SchemaSet, CanonicalError> {
+/// The embedded schemas, parsed once. The canonical projection walks them, and
+/// so does the parse-time check that no declared property is written `null`.
+pub(crate) fn schemas() -> Result<&'static SchemaSet, CanonicalError> {
     static SCHEMAS: OnceLock<Result<SchemaSet, (String, String)>> = OnceLock::new();
     match SCHEMAS.get_or_init(load_schemas) {
         Ok(set) => Ok(set),
@@ -237,7 +242,9 @@ fn load_schemas() -> Result<SchemaSet, (String, String)> {
 // --------------------------------------------------------------------------
 
 fn project(document: &Map<String, Value>) -> Result<Value, CanonicalError> {
-    if document.contains_key("extends") {
+    // A written `extends: null` is an absent base, as it is to the typed
+    // model and to the other SDKs.
+    if document.get("extends").is_some_and(|base| !base.is_null()) {
         return Err(CanonicalError::Unresolved);
     }
     let schemas = schemas()?;
@@ -307,9 +314,16 @@ fn project_object(
         .and_then(Value::as_object)
         .unwrap_or_else(|| NO_PROPERTIES.get_or_init(Map::new));
 
-    for key in value.keys() {
+    for (key, present) in value {
         if !properties.contains_key(key) {
             return Err(CanonicalError::UnknownField(format!("{path}.{key}")));
+        }
+        // Canonical spec 2.2: no HushSpec property is nullable, so a `null`
+        // written for one is a validation error with no canonical form. A
+        // `null` inside a free-form value is an ordinary leaf and never
+        // reaches here.
+        if present.is_null() {
+            return Err(CanonicalError::NullProperty(format!("{path}.{key}")));
         }
     }
 
@@ -416,7 +430,7 @@ fn project_value(
 
 /// Follow a local `#/$defs/...` reference, returning the target schema and
 /// the `$defs` name it was reached through (`None` for an inline schema).
-fn resolve_ref<'a>(
+pub(crate) fn resolve_ref<'a>(
     root: &'a Value,
     node: &'a Value,
     depth: usize,
@@ -733,7 +747,36 @@ mod tests {
     }
 
     #[test]
-    fn integers_beyond_the_safe_range_are_refused() {
+    fn a_null_written_for_a_declared_property_is_refused() {
+        assert_eq!(
+            canonical_json_value(&json!({"hushspec": "0.1.0", "rules": {"egress": null}})),
+            Err(CanonicalError::NullProperty("$.rules.egress".to_string()))
+        );
+        assert_eq!(
+            canonical_json_value(&json!({"hushspec": "0.1.0", "name": null})),
+            Err(CanonicalError::NullProperty("$.name".to_string()))
+        );
+        // A `null` inside a free-form value is an ordinary JSON leaf.
+        let free_form =
+            json!({"hushspec": "0.1.0", "rules": {"egress": {"when": {"context": {"a": null}}}}});
+        assert!(canonical(&free_form).contains(r#""context":{"a":null}"#));
+    }
+
+    /// A written `extends: null` names no base, so the document is resolved.
+    #[test]
+    fn a_null_extends_is_an_absent_base() {
+        assert_eq!(
+            canonical(&json!({"hushspec": "0.1.0", "extends": null})),
+            r#"{"hushspec":"0.1.0"}"#
+        );
+    }
+
+    /// Canonical spec 4.3: an integer literal beyond the safe range is refused
+    /// rather than rounded. `serde_yaml` refuses one that overflows `u64`
+    /// outright, so the two literals are refused at different layers and the
+    /// document has no canonical form either way.
+    #[test]
+    fn integer_literals_beyond_the_safe_range_are_refused() {
         let document =
             json!({"hushspec": "0.1.0", "metadata": {"policy_version": 9_007_199_254_740_993u64}});
         assert_eq!(
@@ -741,6 +784,39 @@ mod tests {
             Err(CanonicalError::UnsafeInteger(
                 "9007199254740993".to_string()
             ))
+        );
+
+        let context = |literal: &str| {
+            format!(
+                "hushspec: \"0.1.0\"\nrules:\n  egress:\n    when:\n      context:\n        budget: {literal}\n"
+            )
+        };
+        let safe_overflow: Value =
+            serde_yaml::from_str(&context("9007199254740993")).expect("parses as a value tree");
+        assert_eq!(
+            canonical_json_value(&safe_overflow),
+            Err(CanonicalError::UnsafeInteger(
+                "9007199254740993".to_string()
+            ))
+        );
+        assert!(serde_yaml::from_str::<Value>(&context("18446744073709551617")).is_err());
+        assert!(HushSpec::parse(&context("18446744073709551617")).is_err());
+    }
+
+    /// Canonical spec 4.3: float syntax carries no safe-integer bound, so a
+    /// magnitude an integer literal could not have keeps its ECMAScript form.
+    #[test]
+    fn float_syntax_is_unbounded() {
+        let document: Value = serde_yaml::from_str(concat!(
+            "hushspec: \"0.1.0\"\nrules:\n  egress:\n    when:\n      context:\n",
+            "        a: 1.0e+16\n        b: 1.0e+21\n        c: 1.5e+300\n        d: -0.0\n",
+        ))
+        .expect("parses as a value tree");
+        assert!(
+            canonical(&document)
+                .contains(r#""context":{"a":10000000000000000,"b":1e+21,"c":1.5e+300,"d":0}"#),
+            "{}",
+            canonical(&document)
         );
     }
 

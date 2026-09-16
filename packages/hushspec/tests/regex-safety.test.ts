@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '../src/parse.js';
 import { validate, isSafeRegex } from '../src/validate.js';
+import { compileProfileRegex } from '../src/regex.js';
 import { parseOrThrow } from '../src/parse.js';
 
 // ---------------------------------------------------------------------------
@@ -148,20 +149,23 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('\\\\z')).toBe(true);
   });
 
-  // `\Z`/`\z` inside a character class. Engines that reject the anchor at
-  // compile time reject it in a class too, but `new RegExp('[\\Z]')`
-  // succeeds, so the scan has to refuse it here or the accepted set would
-  // differ from every other engine's.
-  it('rejects \\Z inside a character class ([\\Z])', () => {
-    expect(isSafeRegex('[\\Z]')).toBe(false);
+  // `\Z`/`\z` inside a character class is an escaped literal letter, not an
+  // anchor, so this scan passes it through; the profile translation refuses it
+  // instead, because `new RegExp('[\\Z]')` succeeds where every other engine
+  // rejects the escape.
+  it('leaves \\Z inside a character class to the profile translation ([\\Z])', () => {
+    expect(isSafeRegex('[\\Z]')).toBe(true);
+    expect(() => compileProfileRegex('[\\Z]')).toThrow('anchor with');
   });
 
-  it('rejects \\z inside a character class ([\\z])', () => {
-    expect(isSafeRegex('[\\z]')).toBe(false);
+  it('leaves \\z inside a character class to the profile translation ([\\z])', () => {
+    expect(isSafeRegex('[\\z]')).toBe(true);
+    expect(() => compileProfileRegex('[\\z]')).toThrow('anchor with');
   });
 
-  it('rejects \\Z inside a non-empty character class ([x\\Z])', () => {
-    expect(isSafeRegex('[x\\Z]')).toBe(false);
+  it('leaves \\Z inside a non-empty character class to the translation ([x\\Z])', () => {
+    expect(isSafeRegex('[x\\Z]')).toBe(true);
+    expect(() => compileProfileRegex('[x\\Z]')).toThrow('anchor with');
   });
 
   // The escaped-literal `\\Z` (backslash-backslash then Z) is still NOT an
@@ -347,7 +351,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('not a HushSpec regex profile escape');
     }
   });
 
@@ -361,7 +365,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 
@@ -376,7 +380,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 
@@ -415,7 +419,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 });

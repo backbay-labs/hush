@@ -55,6 +55,12 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
         errors.push(ValidationError::UnsupportedVersion(spec.hushspec.clone()));
     }
 
+    if spec.name.as_deref() == Some("") && requires_non_empty_name(&spec.hushspec) {
+        errors.push(ValidationError::Custom(
+            "name: must not be empty when present".to_string(),
+        ));
+    }
+
     if let Some(rules) = &spec.rules {
         validate_rules(rules, &mut errors);
 
@@ -98,6 +104,18 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
     }
 
     ValidationResult { errors, warnings }
+}
+
+/// Whether a document declaring `version` must give a present `name` a
+/// non-empty value.
+///
+/// This is the one constraint the 1.0 document format adds to 0.2
+/// (spec/versioning.md section 10): the frozen 0.x format allows `name: ""`.
+/// A version this engine cannot read as `MAJOR.MINOR.PATCH` is already refused
+/// as unsupported, and is held to the current format's constraints here so an
+/// unreadable version can never relax one.
+fn requires_non_empty_name(version: &str) -> bool {
+    version::major_version(version).is_none_or(|major| major >= 1)
 }
 
 fn validate_rules(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>) {
@@ -385,10 +403,9 @@ fn validate_origins(ext: &crate::extensions::Extensions, errors: &mut Vec<Valida
                 }
 
                 // A present-but-empty free-text match field (e.g. `provider: ""`)
-                // is an unsatisfiable constraint that Go's plain-string model
-                // cannot distinguish from an absent field, so reject the empty
-                // sentinel here to keep accept/reject parity across the SDKs. The
-                // enum fields above already reject "" as an invalid enum value.
+                // is an unsatisfiable constraint: no origin carries an empty
+                // provider or tenant. The enum fields above already reject ""
+                // as an invalid enum value.
                 for (field_name, value) in [
                     ("provider", &match_rules.provider),
                     ("tenant_id", &match_rules.tenant_id),
@@ -462,6 +479,15 @@ fn validate_detection(
             if matches!(prompt_injection.max_scan_bytes, Some(0)) {
                 errors.push(ValidationError::Custom(
                     "detection.prompt_injection.max_scan_bytes must be >= 1".to_string(),
+                ));
+            }
+
+            if let Some(heuristics) = &prompt_injection.heuristics
+                && matches!(heuristics.min_score, Some(value) if value > 100)
+            {
+                errors.push(ValidationError::Custom(
+                    "detection.prompt_injection.heuristics.min_score must be between 0 and 100"
+                        .to_string(),
                 ));
             }
 
@@ -626,50 +652,51 @@ fn is_framework_id(value: &str) -> bool {
 }
 
 fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) {
+    let mut reject = |message: String| {
+        errors.push(ValidationError::InvalidRegex {
+            field: path.to_string(),
+            pattern: pattern.to_string(),
+            message,
+        });
+    };
+
     // Portability pre-check first: reject constructs that are unsupported by, or
     // behave differently across, the four SDK regex engines (possessive
-    // quantifiers, `\Z`/`\z` end-anchors, empty character classes) so a pattern
-    // validates identically everywhere, regardless of what any single engine
-    // does with them. The HushSpec regex profile check follows it.
+    // quantifiers, `\Z`/`\z` end-anchors, `{,n}`, empty character classes) so a
+    // pattern validates identically everywhere, regardless of what any single
+    // engine does with them.
     if let Some(message) = disallowed_regex_feature(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: message.to_string(),
-        });
+        reject(message.to_string());
         return;
     }
 
-    // Profile check second: `compile_profile_regex` applies the HushSpec regex
-    // profile (ASCII `\d`/`\w`/`\s`/`\b`, leading-only inline flags, portable
-    // escapes) and then compiles, so the `regex` crate's own rejection of
-    // non-RE2 features (backreferences, lookaround, ...) comes for free. This
-    // is the *same* call the evaluator makes, so a pattern that validates here
-    // can never fail to compile at evaluation time -- and vice versa.
-    if let Err(error) = compile_profile_regex(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: error.message().to_string(),
-        });
-        return;
-    }
-
-    // Nested-quantifier check third: RE2 tolerates shapes like `(a+)+` that
+    // Nested-quantifier check second: RE2 tolerates shapes like `(a+)+` that
     // catastrophically backtrack on the backtracking SDK engines, so reject them
     // here to keep the safety contract identical across all four SDKs.
     if has_nested_quantifier(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: crate::regex_profile::NESTED_QUANTIFIER_MESSAGE.to_string(),
-        });
+        reject(crate::regex_profile::NESTED_QUANTIFIER_MESSAGE.to_string());
+        return;
+    }
+
+    // Profile check last: `compile_profile_regex` repeats the two checks above,
+    // applies the HushSpec regex profile (ASCII `\d`/`\w`/`\s`/`\b`,
+    // leading-only inline flags, portable escapes) and then compiles, so the
+    // `regex` crate's own rejection of non-RE2 features (backreferences,
+    // lookaround, ...) comes for free. This is the *same* call the evaluator
+    // makes, so a pattern that validates here can never fail to compile at
+    // evaluation time -- and vice versa.
+    if let Err(error) = compile_profile_regex(pattern) {
+        reject(error.message().to_string());
     }
 }
 
 /// Shared rejection message for possessive quantifiers.
 const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable \
      across the HushSpec SDK regex engines";
+
+/// Shared rejection message for the open-lower-bound quantifier `{,n}`.
+const OPEN_LOWER_BOUND_MESSAGE: &str = "the {,n} quantifier is not portable across the HushSpec SDK regex engines \
+     (Python reads it as {0,n}, the others as literal text); write {0,n}";
 
 /// Portability pre-check: reject regex constructs that are unsupported by, or
 /// behave differently across, the four SDK engines so a pattern validates
@@ -682,7 +709,9 @@ const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}
 ///     semantics; JavaScript reads `\Z`/`\z` as a literal letter -- users
 ///     anchor with `$`),
 ///   * empty character classes `[]` and `[^]` (JavaScript accepts them; the
-///     others reject them).
+///     others reject them),
+///   * the `{,n}` quantifier (Python reads it as `{0,n}`; the others read the
+///     whole brace as literal text).
 ///
 /// Must stay byte-identical to the TypeScript, Python, and Go implementations.
 pub(crate) fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
@@ -746,6 +775,9 @@ pub(crate) fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
                 if j < n {
                     let inner: String = chars[i + 1..j].iter().collect();
                     if brace_kind(&inner) != QuantKind::None {
+                        if inner.starts_with(',') {
+                            return Some(OPEN_LOWER_BOUND_MESSAGE);
+                        }
                         if j + 1 < n && chars[j + 1] == '+' {
                             return Some(POSSESSIVE_MESSAGE);
                         }
@@ -917,4 +949,45 @@ fn is_valid_duration(value: &str) -> bool {
     ) && value[..value.len() - 1]
         .bytes()
         .all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generated_contract::RULE_KEYS;
+
+    /// Every key of `rules` has its `when` validated. A block missing from the
+    /// table in `validate_conditions` would let a malformed condition through
+    /// on that block alone, which is the kind of gap a hand-maintained list
+    /// grows silently.
+    #[test]
+    fn validate_conditions_walks_every_rule_key() {
+        let mut yaml = String::new();
+        for key in RULE_KEYS {
+            yaml.push_str(&format!(
+                "{key}:\n  when:\n    time_window:\n      start: \"99:00\"\n      end: \"17:00\"\n"
+            ));
+        }
+        let rules: crate::rules::Rules =
+            serde_yaml::from_str(&yaml).expect("every rule block accepts a bare `when`");
+
+        let mut errors = Vec::new();
+        validate_conditions(&rules, &mut errors);
+
+        let reported: Vec<String> = errors
+            .iter()
+            .map(|error| match error {
+                ValidationError::Custom(message) => message.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(reported.len(), RULE_KEYS.len(), "{reported:?}");
+        for key in RULE_KEYS {
+            let path = format!("rules.{key}.when");
+            assert!(
+                reported.iter().any(|message| message.starts_with(&path)),
+                "no violation reported for {path}: {reported:?}"
+            );
+        }
+    }
 }

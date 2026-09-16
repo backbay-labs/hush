@@ -1,7 +1,9 @@
 package hushspec
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +35,7 @@ func makeTestReceipt(decision Decision) *DecisionReceipt {
 			},
 		},
 		Policy: PolicySummary{
-			Name:        "test-policy",
+			Name:        strPtr("test-policy"),
 			SpecVersion: "0.1.0",
 			ContentHash: DigestOf("test-policy"),
 		},
@@ -180,6 +182,61 @@ func TestMultiSinkContinuesAfterError(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("counting sink should still execute, got count=%d", count)
+	}
+
+	var sinkErr *SinkError
+	if !errors.As(err, &sinkErr) {
+		t.Fatalf("expected a *SinkError, got %T", err)
+	}
+	if sinkErr.Sink != "CallbackSink" {
+		t.Errorf("the failure names the sink that refused, got %q", sinkErr.Sink)
+	}
+	if !strings.Contains(err.Error(), "test error") {
+		t.Errorf("the failure carries the sink's own error, got %q", err)
+	}
+}
+
+func TestMultiSinkFailureReachesTheObserversAsSinkError(t *testing.T) {
+	counted := 0
+	failing := NewCallbackSink(func(*DecisionReceipt) error {
+		return fmt.Errorf("no space left on device")
+	})
+	counting := NewCallbackSink(func(*DecisionReceipt) error {
+		counted++
+		return nil
+	})
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{
+		Sink:     NewMultiSink([]ReceiptSink{failing, counting}),
+		Observer: observer,
+	})
+
+	allowed, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "api.github.com",
+	})
+	if err != nil {
+		t.Fatalf("a sink failure must not reach the caller, got %v", err)
+	}
+	if !allowed.Allowed() {
+		t.Fatal("the decision stands even when recording it failed")
+	}
+	if counted != 1 {
+		t.Fatalf("the sinks after the failing one still get the receipt, got %d", counted)
+	}
+
+	errs := observer.errors()
+	if len(errs) != 1 {
+		t.Fatalf("expected one sink failure report, got %d", len(errs))
+	}
+	event := errorObserverEvent(errs[0])
+	if event.Type != ObserverEventSinkError {
+		t.Fatalf("expected a %s event, got %s", ObserverEventSinkError, event.Type)
+	}
+	if !strings.Contains(event.Error, "CallbackSink") {
+		t.Errorf("the event names the child sink that refused, got %q", event.Error)
+	}
+	if !strings.Contains(event.Error, "no space left on device") {
+		t.Errorf("the event carries the child sink's own error, got %q", event.Error)
 	}
 }
 

@@ -48,7 +48,7 @@ review; it requires only that the numbers are true.
    report yourself.
 
 5. **Emit a report** conforming to
-   `schemas/hushspec-conformance-report.v0.schema.json`. Validate it with any
+   `schemas/hushspec-conformance-report.v1.schema.json`. Validate it with any
    JSON Schema 2020-12 validator before publishing. Publish it alongside the
    statement; the statement without the report is an assertion, not evidence.
 
@@ -76,7 +76,7 @@ review; it requires only that the numbers are true.
 | **Implementation** | <name>, version <x.y.z> |
 | **Language / runtime** | <e.g. Go 1.22> |
 | **Claimed level** | Level <N> (<Parser / Validator / Merger / Evaluator / Auditor / Attested>) |
-| **Specification version** | <e.g. 0.2.0> |
+| **Specification version** | <e.g. 1.0.0> |
 | **Corpus** | `hushspec-conformance-<version>.tar.gz` |
 | **`manifest_sha256`** | `<64 hex characters>` |
 | **Report** | <link to the conformance report JSON> |
@@ -128,10 +128,10 @@ The reference implementation's own statement, for the shape of a filled-in one:
 
 | | |
 |---|---|
-| **Implementation** | `hushspec` (the Rust crate), version 0.1.1 |
+| **Implementation** | `hushspec` (the Rust crate), version 1.0.0 |
 | **Language / runtime** | Rust 1.88+ |
 | **Claimed level** | Level 5 (Attested) |
-| **Specification version** | 0.2.0 |
+| **Specification version** | 1.0.0 |
 | **Corpus** | the `fixtures/` tree of the commit under test |
 | **Report** | produced by `hushspec-testkit --fixtures fixtures --report report.json` in CI |
 

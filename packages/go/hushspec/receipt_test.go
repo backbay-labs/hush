@@ -24,14 +24,14 @@ var (
 func minimalSpec() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "test-policy",
+		Name:            strPtr("test-policy"),
 	}
 }
 
 func specWithToolAccess() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "tool-policy",
+		Name:            strPtr("tool-policy"),
 		Rules: &Rules{
 			ToolAccess: &ToolAccessRule{
 				Enabled: true,
@@ -135,8 +135,8 @@ func TestReceiptRecordsResolvedPolicyIdentity(t *testing.T) {
 	receipt := auditReceipt(t, minimalSpec(),
 		&EvaluationAction{Type: "tool_call", Target: "test"}, enabledConfig())
 
-	if receipt.Policy.Name != "test-policy" {
-		t.Errorf("expected policy name test-policy, got %q", receipt.Policy.Name)
+	if stringValue(receipt.Policy.Name) != "test-policy" {
+		t.Errorf("expected policy name test-policy, got %q", stringValue(receipt.Policy.Name))
 	}
 	// 0.2 moved the `hushspec` field to policy.spec_version; policy.version is
 	// now metadata.policy_version, which this document does not have.
@@ -182,8 +182,11 @@ func TestReceiptRecordsTheExtendsChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	receipt := EvaluateAudited(resolution,
+	receipt, err := EvaluateAudited(resolution,
 		&EvaluationAction{Type: "tool_call", Target: "test"}, enabledConfig(), nil)
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 
 	chain := receipt.Policy.ExtendsChain
 	if len(chain) != 2 {
@@ -388,7 +391,7 @@ func TestDeterministicUUIDv7IsStableAndWellFormed(t *testing.T) {
 
 func TestUnverifiedPolicyReceipt(t *testing.T) {
 	policy := PolicySummary{
-		Name:        "signed-basic",
+		Name:        strPtr("signed-basic"),
 		SpecVersion: "0.1.0",
 		ContentHash: DigestOf("whatever"),
 		Signature:   &SignatureStatus{Verified: false, Reason: ReasonContentHashMismatch},
@@ -430,7 +433,7 @@ func TestComputePolicyHashIsTheCanonicalHash(t *testing.T) {
 	if hash != ComputePolicyHash(spec) {
 		t.Error("hash not deterministic")
 	}
-	other := &HushSpec{HushSpecVersion: "0.1.0", Name: "different-policy"}
+	other := &HushSpec{HushSpecVersion: "0.1.0", Name: strPtr("different-policy")}
 	if hash == ComputePolicyHash(other) {
 		t.Error("expected different hashes for different specs")
 	}
@@ -440,7 +443,7 @@ func TestComputePolicyHashIsTheCanonicalHash(t *testing.T) {
 // still declaring `extends` has no canonical form and therefore no identity.
 func TestComputePolicyHashRefusesAnUnresolvedDocument(t *testing.T) {
 	spec := minimalSpec()
-	spec.Extends = "builtin:default"
+	spec.Extends = strPtr("builtin:default")
 	if got := ComputePolicyHash(spec); got != "" {
 		t.Errorf("an unresolved document has no content hash, got %q", got)
 	}
@@ -607,4 +610,21 @@ func findTraceEntry(t *testing.T, receipt DecisionReceipt, block string) RuleTra
 	}
 	t.Fatalf("no %q trace entry found in %+v", block, receipt.RuleTrace)
 	return RuleTraceEntry{}
+}
+
+// A receipt names the policy a decision was made under (receipt spec 4.2), so
+// a document with no canonical form -- and therefore no content hash -- has no
+// receipt, rather than one carrying an empty hash the schema would reject.
+func TestEvaluateAuditedRefusesAPolicyWithNoContentHash(t *testing.T) {
+	spec, err := Parse("hushspec: \"0.1.0\"\nextends: \"builtin:default\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	action := &EvaluationAction{Type: "egress", Target: "example.com"}
+	if _, err := EvaluateAudited(nil, action, nil, nil); err == nil {
+		t.Error("expected an error with no policy at all")
+	}
+	if _, err := cachedCompile(spec).EvaluateAudited(nil, action, nil, nil); err == nil {
+		t.Error("expected an error for a document that still declares extends")
+	}
 }

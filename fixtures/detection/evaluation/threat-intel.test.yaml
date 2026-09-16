@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.1.0"
 description: "detection 3.3 (threat_intel): a configured threat_intel detector is a declaration of intent, not a built-in signal. The built-in registry has no pattern database or similarity model to back it, so it is never auto-wired: a policy that declares threat_intel MUST evaluate exactly as the same policy without it, and only a detector registered through the engine's registry API can make it contribute. Declaring it must not weaken, strengthen, or error out on any decision."
 policy:

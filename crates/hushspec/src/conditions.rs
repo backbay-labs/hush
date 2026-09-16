@@ -1,11 +1,16 @@
-//! Conditional rules system for HushSpec.
+//! Conditional rules system for HushSpec (core spec 3.13).
 //!
-//! Provides a `Condition` type that can be attached to rule blocks via the
-//! `when` field. Conditions evaluate against a `RuntimeContext` to determine
-//! whether a rule block is active.
+//! A `Condition` gates whether a rule block is active. Conditions are a
+//! document field (`when`) on every rule block; the out-of-band map accepted by
+//! [`evaluate_with_context`](crate::evaluate_with_context) is kept as an
+//! override that is ANDed with each block's own `when`.
 //!
 //! Design principles:
-//! - **Fail-closed**: missing context fields cause conditions to evaluate to `false`.
+//! - **Fail-closed toward enforcement**: a missing context field makes the
+//!   condition false (the block goes inert), but a condition the engine cannot
+//!   evaluate at all -- unresolvable time zone, unparsable `current_time`, a
+//!   malformed `HH:MM` that escaped validation, or nesting past the depth cap --
+//!   leaves the block ACTIVE.
 //! - **Deterministic**: same context + condition = same result, always.
 //! - **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
 
@@ -151,14 +156,19 @@ pub struct RuntimeContext {
     pub current_time: Option<String>,
 }
 
-/// Missing context fields cause the condition to evaluate to false (fail-closed).
+/// Whether a block gated by `condition` is active: `true` unless the
+/// condition evaluates to `false` (core spec 3.13).
+///
+/// Missing context fields make a `context` predicate false. A predicate the
+/// engine cannot evaluate is unevaluable and holds, so the block stays active;
+/// `not`, `all_of` and `any_of` propagate unevaluable rather than turning it
+/// into a boolean.
 ///
 /// A `capability` predicate is unevaluable through this entry point (no
-/// posture state is known) and therefore holds; use
-/// [`evaluate_condition_with_capabilities`] from an evaluator that has
-/// resolved the effective posture state.
+/// posture state is known); use [`evaluate_condition_with_capabilities`] from
+/// an evaluator that has resolved the effective posture state.
 pub fn evaluate_condition(condition: &Condition, context: &RuntimeContext) -> bool {
-    evaluate_condition_depth(condition, context, None, 0)
+    evaluate_condition_depth(condition, context, None, 0).is_active()
 }
 
 /// [`evaluate_condition`] with the capabilities the effective posture state
@@ -170,7 +180,54 @@ pub fn evaluate_condition_with_capabilities(
     context: &RuntimeContext,
     capabilities: Option<&[String]>,
 ) -> bool {
-    evaluate_condition_depth(condition, context, capabilities, 0)
+    evaluate_condition_depth(condition, context, capabilities, 0).is_active()
+}
+
+/// What a condition evaluates to (core spec 3.13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Verdict {
+    True,
+    False,
+    /// The engine lacks what the predicate needs -- a posture extension, a
+    /// counter, a clock it can read. Never switches a block off.
+    Unevaluable,
+}
+
+impl Verdict {
+    fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
+
+    /// A block is inert only on an evaluated `false`.
+    fn is_active(self) -> bool {
+        self != Self::False
+    }
+
+    fn negate(self) -> Self {
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unevaluable => Self::Unevaluable,
+        }
+    }
+
+    /// AND: `false` wins, then unevaluable, then `true`.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::False, _) | (_, Self::False) => Self::False,
+            (Self::Unevaluable, _) | (_, Self::Unevaluable) => Self::Unevaluable,
+            (Self::True, Self::True) => Self::True,
+        }
+    }
+
+    /// OR: `true` wins, then unevaluable, then `false`.
+    fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::True, _) | (_, Self::True) => Self::True,
+            (Self::Unevaluable, _) | (_, Self::Unevaluable) => Self::Unevaluable,
+            (Self::False, Self::False) => Self::False,
+        }
+    }
 }
 
 /// Parse-time validation of a condition (core spec 3.13): unknown keys are
@@ -275,86 +332,112 @@ fn evaluate_condition_depth(
     context: &RuntimeContext,
     capabilities: Option<&[String]>,
     depth: usize,
-) -> bool {
+) -> Verdict {
     if depth > MAX_NESTING_DEPTH {
         // Validation rejects this at parse time; an out-of-band condition that
         // exceeds the depth cannot be evaluated, and an unevaluable condition
-        // must not switch a control off (core spec 3.13), so treat it as held.
-        return true;
+        // must not switch a control off (core spec 3.13).
+        return Verdict::Unevaluable;
     }
 
-    if let Some(tw) = &condition.time_window
-        && !check_time_window(tw, context)
-    {
-        return false;
-    }
+    // The fields of one condition object are ANDed. An evaluated `false`
+    // settles the object, so later fields are not consulted.
+    let mut verdict = Verdict::True;
 
-    if let Some(ctx) = &condition.context
-        && !check_context_match(ctx, context)
-    {
-        return false;
-    }
-
-    // `capability`: unevaluable without a posture extension (held); otherwise
-    // the effective state must list the capability.
-    if let Some(name) = &condition.capability
-        && let Some(granted) = capabilities
-        && !granted.iter().any(|granted| granted == name)
-    {
-        return false;
-    }
-
-    // `rate`: unevaluable when the engine supplied no such counter (held).
-    if let Some(rate) = &condition.rate
-        && let Some(&count) = context.counters.get(&rate.counter)
-        && !match rate.comparison {
-            RateComparison::Gte => count >= rate.threshold,
-            RateComparison::Lt => count < rate.threshold,
+    if let Some(tw) = &condition.time_window {
+        verdict = verdict.and(check_time_window(tw, context));
+        if verdict == Verdict::False {
+            return verdict;
         }
-    {
-        return false;
     }
 
-    if let Some(all) = &condition.all_of
-        && !all
-            .iter()
-            .all(|c| evaluate_condition_depth(c, context, capabilities, depth + 1))
-    {
-        return false;
+    if let Some(ctx) = &condition.context {
+        verdict = verdict.and(Verdict::from_bool(check_context_match(ctx, context)));
+        if verdict == Verdict::False {
+            return verdict;
+        }
+    }
+
+    // `capability`: unevaluable without a posture extension; otherwise the
+    // effective state must list the capability.
+    if let Some(name) = &condition.capability {
+        verdict = verdict.and(match capabilities {
+            None => Verdict::Unevaluable,
+            Some(granted) => Verdict::from_bool(granted.iter().any(|granted| granted == name)),
+        });
+        if verdict == Verdict::False {
+            return verdict;
+        }
+    }
+
+    // `rate`: unevaluable when the engine supplied no such counter.
+    if let Some(rate) = &condition.rate {
+        verdict = verdict.and(match context.counters.get(&rate.counter) {
+            None => Verdict::Unevaluable,
+            Some(&count) => Verdict::from_bool(match rate.comparison {
+                RateComparison::Gte => count >= rate.threshold,
+                RateComparison::Lt => count < rate.threshold,
+            }),
+        });
+        if verdict == Verdict::False {
+            return verdict;
+        }
+    }
+
+    if let Some(all) = &condition.all_of {
+        let combined = all.iter().fold(Verdict::True, |acc, c| {
+            acc.and(evaluate_condition_depth(
+                c,
+                context,
+                capabilities,
+                depth + 1,
+            ))
+        });
+        verdict = verdict.and(combined);
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
     if let Some(any) = &condition.any_of
         && !any.is_empty()
-        && !any
-            .iter()
-            .any(|c| evaluate_condition_depth(c, context, capabilities, depth + 1))
     {
-        return false;
+        let combined = any.iter().fold(Verdict::False, |acc, c| {
+            acc.or(evaluate_condition_depth(
+                c,
+                context,
+                capabilities,
+                depth + 1,
+            ))
+        });
+        verdict = verdict.and(combined);
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
-    if let Some(not_cond) = &condition.not
-        && evaluate_condition_depth(not_cond, context, capabilities, depth + 1)
-    {
-        return false;
+    if let Some(not_cond) = &condition.not {
+        verdict = verdict
+            .and(evaluate_condition_depth(not_cond, context, capabilities, depth + 1).negate());
     }
 
-    true
+    verdict
 }
 
-fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> bool {
-    // Fail closed toward enforcement (core spec 3.13): a window the engine
-    // cannot evaluate -- unresolvable time zone, unparsable current_time, or a
-    // malformed HH:MM that escaped validation -- leaves the block ACTIVE.
+fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> Verdict {
+    // A window the engine cannot evaluate -- unresolvable time zone,
+    // unparsable current_time, or a malformed HH:MM that escaped validation --
+    // is unevaluable and leaves the block active (core spec 3.13).
     let now = resolve_current_time(context, tw.timezone.as_deref());
     let Some((hour, minute, day_of_week)) = now else {
-        return true;
+        return Verdict::Unevaluable;
     };
 
     let Some((start_h, start_m)) = parse_hhmm(&tw.start) else {
-        return true;
+        return Verdict::Unevaluable;
     };
     let Some((end_h, end_m)) = parse_hhmm(&tw.end) else {
-        return true;
+        return Verdict::Unevaluable;
     };
 
     let current_minutes = hour as u32 * 60 + minute as u32;
@@ -370,20 +453,20 @@ fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> bool
         };
         let day_abbrev = day_abbreviation(effective_day);
         if !tw.days.iter().any(|d| d.eq_ignore_ascii_case(day_abbrev)) {
-            return false;
+            return Verdict::False;
         }
     }
 
     if start_minutes == end_minutes {
-        return true;
+        return Verdict::True;
     }
 
-    if start_minutes < end_minutes {
+    Verdict::from_bool(if start_minutes < end_minutes {
         current_minutes >= start_minutes && current_minutes < end_minutes
     } else {
         // Wraps midnight (e.g., 22:00 to 06:00)
         current_minutes >= start_minutes || current_minutes < end_minutes
-    }
+    })
 }
 
 fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
@@ -392,10 +475,10 @@ fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
         return None;
     }
     // Reject any HH:MM component that is not pure ASCII digits. `u8::from_str`
-    // otherwise accepts a leading `+` (e.g. `+9:00`), which the TS (`^\d+$`) and
-    // Python (strict-uint) parsers reject; without this the same token would be
-    // an active window in Rust but permanently inactive there. A non-digit
-    // component fails to parse -> the time-window condition is inert (fail-closed).
+    // otherwise accepts a leading `+` (e.g. `+9:00`), which the other engines
+    // reject; the same token would then be a live window here and unevaluable
+    // there. A non-digit component fails to parse, and the window is
+    // unevaluable in every engine.
     for part in &parts {
         if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
             return None;
@@ -488,20 +571,33 @@ fn parse_timezone_offset(tz: &str) -> Option<i32> {
     }
 }
 
+/// Minutes for a fixed offset body, the part of a `timezone` after its sign:
+/// `HH` or `HH:MM`, two ASCII digits per field (core spec 3.13).
+///
+/// Anything else is not an offset. A zone that cannot be resolved leaves the
+/// rule block active, so accepting a one-digit field, a missing colon or a
+/// second sign here would resolve a zone another engine refuses and could
+/// switch a control off.
 fn parse_offset_value(s: &str) -> Option<i32> {
-    if let Some((hours, minutes)) = s.split_once(':') {
-        let hours = hours.parse::<i32>().ok()?;
-        let minutes = minutes.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
-            return None;
+    let (hours, minutes) = match s.split_once(':') {
+        Some((hours, minutes)) => (hours, minutes),
+        None => (s, "00"),
+    };
+    let hours = parse_two_digits(hours)?;
+    let minutes = parse_two_digits(minutes)?;
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(hours * 60 + minutes)
+}
+
+/// Exactly two ASCII digits as a number, or `None`.
+fn parse_two_digits(field: &str) -> Option<i32> {
+    match field.as_bytes() {
+        [tens @ b'0'..=b'9', ones @ b'0'..=b'9'] => {
+            Some(i32::from(tens - b'0') * 10 + i32::from(ones - b'0'))
         }
-        Some(hours.saturating_mul(60).saturating_add(minutes))
-    } else {
-        let hours = s.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) {
-            return None;
-        }
-        Some(hours.saturating_mul(60))
+        _ => None,
     }
 }
 
@@ -554,14 +650,14 @@ fn resolve_map_field(
     }
 }
 
-/// Match an actual context value against an expected value.
+/// Leaf-level scalar equality for a `context` predicate (core spec 3.13).
 ///
-/// Matching rules:
-/// - String: exact equality
-/// - Boolean: exact equality
-/// - Integer: exact numeric equality
-/// - Array of expected values: actual must match at least one listed value
-/// - Scalar expected vs array actual: true if scalar is a member of the array
+/// `expected` is always a non-array scalar here -- array unwrapping happens one
+/// level up, in [`matches_scalar_or_membership`]. Strings and booleans compare
+/// exactly, and a boolean is never numeric. Numbers compare by exact value with
+/// no tolerance, so `0.3` does not match `0.30000000000000004`; an
+/// integer-shaped expected value matches only an integer-shaped actual value,
+/// while a fractional one widens an integer actual to a double.
 fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match expected {
         serde_json::Value::String(expected_str) => actual.as_str() == Some(expected_str.as_str()),
@@ -570,9 +666,7 @@ fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> boo
             if let Some(expected_i64) = expected_num.as_i64() {
                 actual.as_i64() == Some(expected_i64)
             } else if let Some(expected_f64) = expected_num.as_f64() {
-                actual
-                    .as_f64()
-                    .is_some_and(|n| (n - expected_f64).abs() < f64::EPSILON)
+                actual.as_f64() == Some(expected_f64)
             } else {
                 false
             }
@@ -650,6 +744,33 @@ mod tests {
             rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
+    }
+
+    fn ctx_with_custom(key: &str, value: serde_json::Value) -> RuntimeContext {
+        RuntimeContext {
+            custom: HashMap::from([(key.to_string(), value)]),
+            ..Default::default()
+        }
+    }
+
+    fn context_condition(key: &str, expected: serde_json::Value) -> Condition {
+        Condition {
+            context: Some(HashMap::from([(key.to_string(), expected)])),
+            ..Condition::default()
+        }
+    }
+
+    #[test]
+    fn context_numbers_compare_exactly() {
+        let cond = context_condition("custom.ratio", serde_json::json!(0.3));
+        assert!(evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.3))
+        ));
+        assert!(!evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.300_000_000_000_000_04))
+        ));
     }
 
     #[test]
@@ -1016,6 +1137,18 @@ mod tests {
         };
         assert!(evaluate_condition(&cond, &ctx));
         assert!(!validate_condition(&cond, "rules.x.when").is_empty());
+    }
+
+    #[test]
+    fn fixed_offset_grammar_is_two_digit_fields() {
+        for zone in ["+05:30", "-08:00", "+05", "-08", "+00:00"] {
+            assert!(timezone_is_known(zone), "{zone} should conform");
+        }
+        // A zone the engine cannot resolve leaves the rule block active, so an
+        // offset another engine refuses must not resolve here either.
+        for zone in ["+5", "+0530", "+5:0", "++5", "+05:3", "+ 5:30", "+05:30 "] {
+            assert!(!timezone_is_known(zone), "{zone} should be refused");
+        }
     }
 
     #[test]

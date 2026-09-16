@@ -1,0 +1,64 @@
+# HushSpec rule-block registry
+#
+# Normative companion to spec/hushspec-core.md Section 3. Lists the members
+# of a document's `rules` object. Parsers reject any other key (core 2.1).
+#
+# Status: closed. Adding a rule block is a minor-version change to the
+# specification family only when the block is optional and absent blocks keep
+# their meaning (versioning 6); the registry is closed in the sense that a
+# document may not name a block outside it.
+#
+# Schema: schemas/hushspec-registry-rule-blocks.v0.schema.json
+registry: rule-blocks
+registry_version: "1.0.0"
+status: closed
+
+entries:
+  - id: forbidden_paths
+    summary: Block access to sensitive filesystem paths
+    enabled_default: true
+    spec: core 3.1
+  - id: path_allowlist
+    summary: Allowlist-based path access control
+    enabled_default: false
+    spec: core 3.2
+  - id: egress
+    summary: Network egress control by host
+    enabled_default: true
+    spec: core 3.3
+  - id: secret_patterns
+    summary: Secret detection in content
+    enabled_default: true
+    spec: core 3.4
+  - id: patch_integrity
+    summary: Limits on patch size and content
+    enabled_default: true
+    spec: core 3.5
+  - id: shell_commands
+    summary: Forbidden shell command patterns
+    enabled_default: true
+    spec: core 3.6
+  - id: tool_access
+    summary: Tool and MCP invocation control
+    enabled_default: true
+    spec: core 3.7
+  - id: computer_use
+    summary: Computer-use action control
+    enabled_default: false
+    spec: core 3.8
+  - id: remote_desktop_channels
+    summary: Remote desktop side-channel control
+    enabled_default: false
+    spec: core 3.9
+  - id: input_injection
+    summary: Input injection control
+    enabled_default: false
+    spec: core 3.10
+  - id: browser_automation
+    summary: Browser automation control
+    enabled_default: false
+    spec: core 3.11
+  - id: code_execution
+    summary: Code execution control
+    enabled_default: false
+    spec: core 3.12

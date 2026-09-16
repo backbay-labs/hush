@@ -229,12 +229,41 @@ impl HttpProvider {
     pub fn url(&self) -> &str {
         &self.url
     }
+
+    /// The options a load resolves under: the caller's, with the sidecar
+    /// locator filled in when the caller left it unset.
+    ///
+    /// A policy fetched over the network needs its `<url>.sig` fetched the
+    /// same way and under the same rules: the TLS trust, the size cap and the
+    /// authorization header the policy was fetched with. The resolver's own
+    /// default locator knows no URL sources, so without this a signed remote
+    /// policy could never satisfy `require_signature`.
+    fn resolve_options(&self) -> ResolveOptions {
+        ResolveOptions {
+            require_signature: self.options.require_signature,
+            #[cfg(feature = "signing")]
+            keyring: self.options.keyring.clone(),
+            #[cfg(feature = "signing")]
+            verify: self.options.verify.clone(),
+            signature_locator: match &self.options.signature_locator {
+                Some(_) => None,
+                None => Some(crate::resolve::http::signature_locator(self.config.clone())),
+            },
+        }
+    }
 }
 
 #[cfg(feature = "http")]
 impl PolicyProvider for HttpProvider {
     fn load(&self) -> Result<Resolution, ProviderError> {
         let loaded = crate::resolve::http::load_from_https(&self.url, &self.config)?;
+        let configured;
+        let options = if self.options.signature_locator.is_some() {
+            &self.options
+        } else {
+            configured = self.resolve_options();
+            &configured
+        };
         let extends = loaded.spec.extends.clone();
         // Builtin-only loader: `source` is the URL, so the default locator
         // looks for `<url>.sig`.
@@ -255,19 +284,14 @@ impl PolicyProvider for HttpProvider {
             };
             Ok(crate::resolve::LoadedSpec { source, spec })
         };
-        crate::resolve::resolve_with_options(
-            &loaded.spec,
-            Some(&loaded.source),
-            &builtins,
-            &self.options,
-        )
-        .map_err(|error| match extends {
-            Some(reference) => ProviderError::Other(format!(
-                "failed to resolve policy 'extends: {reference}' from {}: {error}",
-                self.url
-            )),
-            None => ProviderError::Resolve(error),
-        })
+        crate::resolve::resolve_with_options(&loaded.spec, Some(&loaded.source), &builtins, options)
+            .map_err(|error| match extends {
+                Some(reference) => ProviderError::Other(format!(
+                    "failed to resolve policy 'extends: {reference}' from {}: {error}",
+                    self.url
+                )),
+                None => ProviderError::Resolve(error),
+            })
     }
 
     fn source(&self) -> &str {
@@ -799,6 +823,31 @@ rules:
             "a provider never hands over an unresolved leaf"
         );
         assert_eq!(resolution.chain.len(), 2);
+    }
+
+    #[cfg(feature = "http")]
+    #[test]
+    fn an_http_provider_locates_a_sidecar_under_its_own_configuration() {
+        let provider = HttpProvider::new("https://policies.example.test/policy.yaml");
+        let options = provider.resolve_options();
+        let locate = options
+            .signature_locator
+            .as_ref()
+            .expect("a provider without a locator installs the HTTPS one");
+        // The HTTPS locator answers only URL sources; a file source is not its
+        // business, so it reports no envelope rather than reaching the network.
+        assert!(matches!(locate("policy.yaml"), Ok(None)));
+
+        let supplied = HttpProvider::new("https://policies.example.test/policy.yaml").with_options(
+            ResolveOptions {
+                signature_locator: Some(Box::new(|_: &str| Ok(Some(b"envelope".to_vec())))),
+                ..ResolveOptions::default()
+            },
+        );
+        assert!(
+            supplied.options.signature_locator.is_some(),
+            "a caller's locator is kept as given"
+        );
     }
 
     #[test]

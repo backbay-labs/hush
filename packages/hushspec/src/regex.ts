@@ -11,54 +11,151 @@
  * - Lookahead: (?=...), (?!...)
  * - Lookbehind: (?<=...), (?<!...)
  * - Atomic groups: (?>...)
- * - Possessive quantifiers: *+, ++, ?+, and possessive braces {n}+, {n,}+,
- *   {n,m}+ (checked separately by hasPossessiveQuantifier below, since
- *   distinguishing a genuine possessive quantifier from possessive-looking
- *   characters that are actually literal class members (`[*+]`, `[?+]`) or
- *   an unrelated literal brace (`a{b}+`) needs escape/class-aware scanning,
- *   not a fixed substring)
  * - Conditional patterns: (?(...)...|...)
  * - Recursive patterns: (?R), (?1), (?2), ...
  * - Named backreferences: (?P=name)
  * - Subroutine calls: \g<name>
- * - \Z / \z end-of-string anchors (engines disagree on their meaning, and
- *   JavaScript reads them as literal letters). Use $ instead. (checked
- *   separately by hasEndAnchorEscape below, since a fixed substring can't
- *   distinguish the anchor `\Z` from an escaped backslash followed by a
- *   literal Z, i.e. the pattern text `\\Z`)
- * - Empty character classes: [], [^] (checked separately by
- *   hasEmptyCharacterClass below; JavaScript accepts them where most engines
- *   reject them)
+ *
+ * Possessive quantifiers (`*+`, `++`, `?+`, `{n}+`, `{n,}+`, `{n,m}+`), the
+ * `\Z` / `\z` end-of-string anchors, the `{,n}` quantifier and empty character
+ * classes (`[]`, `[^]`) are disallowed too, but are intentionally NOT part of
+ * this substring regex: a raw substring match over-rejects those constructs
+ * when they appear inside a character class (`[*+]`, `[?+]`), as an escaped
+ * backslash followed by a literal Z/z rather than the real anchor (`\\Z`), and
+ * so on. `disallowedRegexFeature` below distinguishes those cases with an
+ * escape- and class-aware scan, and names which construct it refused.
  */
 const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g</;
 
 export interface CompiledPolicyRegex {
   source: string;
-  flags: string;
   regex: RegExp;
 }
 
 export function isSafeRegex(pattern: string): boolean {
-  // RE2-feature check first: reject the constructs outside the subset
-  // (backreferences, lookaround, atomic groups, ...). On an RE2-backed engine
-  // this alone is enough for the linear-time guarantee.
-  if (RE2_DISALLOWED.test(pattern)) {
+  // Portability pre-check first: possessive quantifiers, `\Z`/`\z` anchors,
+  // `{,n}` and empty character classes, via the escape/class-aware scanner.
+  if (disallowedRegexFeature(pattern) !== undefined) {
     return false;
   }
-  // Possessive quantifiers (bare `*+`/`++`/`?+` and braced `{n}+`, `{n,}+`,
-  // `{n,m}+`), `\Z`/`\z` end-anchors, and empty character classes (`[]`,
-  // `[^]`) all need escape/class-aware scanning to detect precisely -- a
-  // fixed substring would also misfire inside an unrelated character class
-  // (`[*+]`, `[a{2}+]`) or on an escaped backslash followed by a literal Z/z
-  // (`\\Z`), so each gets a dedicated walk rather than a RE2_DISALLOWED
-  // alternative.
-  if (hasPossessiveQuantifier(pattern) || hasEndAnchorEscape(pattern) || hasEmptyCharacterClass(pattern)) {
+  // RE2-feature check second: backreferences, lookaround, atomic groups,
+  // conditional and recursive patterns. On an RE2-backed engine this alone is
+  // enough for the linear-time guarantee.
+  if (RE2_DISALLOWED.test(pattern)) {
     return false;
   }
   // Nested-quantifier check last: RE2 tolerates shapes like `(a+)+` that
   // catastrophically backtrack on a backtracking engine, so they are rejected
   // here too and the accepted set is the same whatever the engine.
   return !hasNestedQuantifier(pattern);
+}
+
+/** Shared rejection message for possessive quantifiers. */
+const POSSESSIVE_MESSAGE =
+  'possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines';
+
+/** Shared rejection message for the open-lower-bound quantifier `{,n}`. */
+const OPEN_LOWER_BOUND_MESSAGE =
+  'the {,n} quantifier is not portable across the HushSpec SDK regex engines (Python reads it as {0,n}, the others as literal text); write {0,n}';
+
+/** Shared rejection message for the `\Z` / `\z` end-of-string anchors. */
+const END_ANCHOR_MESSAGE =
+  '\\Z and \\z end-anchors are not portable across the HushSpec SDK regex engines; anchor with $';
+
+/** Shared rejection message for an empty character class. */
+const EMPTY_CLASS_MESSAGE =
+  'empty character classes [] and [^] are not portable across the HushSpec SDK regex engines';
+
+/**
+ * Portability pre-check: reject regex constructs that are unsupported by, or
+ * behave differently across, the four SDK engines so a pattern validates
+ * identically everywhere. Scanning outside character classes and honoring
+ * `\`-escapes, it rejects:
+ * - possessive quantifiers `*+`, `++`, `?+` and possessive braces `{n}+`,
+ *   `{n,}+`, `{n,m}+` (Rust's `regex` silently downgrades possessive to
+ *   greedy; JavaScript `RegExp` and Go RE2 reject them at compile time),
+ * - `\Z` and `\z` end-anchors (Rust/Python/Go accept them with differing
+ *   semantics; JavaScript reads `\Z`/`\z` as a literal letter -- users anchor
+ *   with `$`),
+ * - empty character classes `[]` and `[^]` (JavaScript accepts them; the
+ *   others reject them),
+ * - the `{,n}` quantifier (Python reads it as `{0,n}`; the others read the
+ *   whole brace as literal text).
+ *
+ * Must stay byte-identical to the Rust, Python, and Go implementations.
+ */
+function disallowedRegexFeature(pattern: string): string | undefined {
+  const chars = Array.from(pattern);
+  const n = chars.length;
+  let inClass = false;
+  let i = 0;
+  while (i < n) {
+    const c = chars[i];
+    if (c === '\\') {
+      // `\Z` / `\z` are end-anchors only outside a character class; inside one
+      // they are an escaped literal letter, so ignore them there.
+      if (!inClass && i + 1 < n && (chars[i + 1] === 'Z' || chars[i + 1] === 'z')) {
+        return END_ANCHOR_MESSAGE;
+      }
+      i += 2; // skip the escaped char
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') {
+        inClass = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '[') {
+      // Empty class `[]` or negated-empty `[^]` (JavaScript matches none/any;
+      // the other engines reject the bare form).
+      let j = i + 1;
+      if (j < n && chars[j] === '^') {
+        j += 1;
+      }
+      if (j < n && chars[j] === ']') {
+        return EMPTY_CLASS_MESSAGE;
+      }
+      inClass = true;
+      i += 1;
+      continue;
+    }
+    if (c === '*' || c === '+' || c === '?') {
+      // A quantifier immediately followed by `+` is possessive.
+      if (i + 1 < n && chars[i + 1] === '+') {
+        return POSSESSIVE_MESSAGE;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '{') {
+      // Treat `{...}` as a quantifier only when it parses as one; a literal `{`
+      // is scanned through. A quantifier brace followed by `+` is possessive
+      // (`{n}+`, `{n,}+`, `{n,m}+`).
+      let j = i + 1;
+      while (j < n && chars[j] !== '}') {
+        j += 1;
+      }
+      if (j < n) {
+        const inner = chars.slice(i + 1, j).join('');
+        if (braceKind(inner) !== 'none') {
+          if (inner.startsWith(',')) {
+            return OPEN_LOWER_BOUND_MESSAGE;
+          }
+          if (j + 1 < n && chars[j + 1] === '+') {
+            return POSSESSIVE_MESSAGE;
+          }
+          i = j + 1;
+          continue;
+        }
+      }
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return undefined;
 }
 
 type QuantKind = 'none' | 'bounded' | 'unbounded';
@@ -198,156 +295,6 @@ function braceKind(inner: string): QuantKind {
   return 'none';
 }
 
-/**
- * Fail-closed, escape/class-aware scan for possessive quantifiers: the bare
- * forms `*+`, `++`, `?+` and the brace forms `{n}+`, `{n,}+`, `{n,m}+`.
- *
- * A fixed substring would over-reject: `*`, `+`, `?` and `}+` are ordinary
- * literal members inside a character class (`[*+]`, `[?+]`, `[a{2}+]`), and a
- * `{...}` that is not digit-shaped is a literal brace whose trailing `+`
- * genuinely quantifies the `}` (`a{b}+`). So the scan tracks class state and
- * reuses `braceKind` to confirm a real quantifier. A `?` after the closing
- * brace is the allowed lazy marker (`{n,m}?`), not a possessive one.
- */
-function hasPossessiveQuantifier(pattern: string): boolean {
-  const chars = Array.from(pattern);
-  const n = chars.length;
-  let inClass = false;
-  let i = 0;
-  while (i < n) {
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
-      continue;
-    }
-    if (inClass) {
-      if (c === ']') {
-        inClass = false;
-      }
-      i += 1;
-      continue;
-    }
-    if (c === '[') {
-      inClass = true;
-      i += 1;
-      continue;
-    }
-    if ((c === '*' || c === '+' || c === '?') && chars[i + 1] === '+') {
-      return true;
-    }
-    if (c === '{') {
-      let j = i + 1;
-      while (j < n && chars[j] !== '}') {
-        j += 1;
-      }
-      if (j < n && braceKind(chars.slice(i + 1, j).join('')) !== 'none' && chars[j + 1] === '+') {
-        return true;
-      }
-    }
-    i += 1;
-  }
-  return false;
-}
-
-/**
- * Fail-closed, escape/class-aware scan for the `\Z` / `\z` end-of-string
- * anchors, which the profile forbids in favour of `$`: engines that treat
- * them as anchors disagree with each other about whether a trailing newline
- * is inside the match, and JavaScript `RegExp` reads them as a literal
- * letter instead.
- *
- * The escaped pair is consumed (`i += 2`) only *after* checking whether the
- * next character is `Z`/`z`, which is what distinguishes the anchor `\Z`
- * (one backslash then Z) from the pattern text `\\Z` -- an escaped backslash
- * followed by a literal Z, matching `\` then `Z` and not an anchor at all.
- * In the latter the first backslash's escape pair swallows the second before
- * `Z` is ever examined, so `\\Z` stays accepted.
- *
- * Deliberately not class-aware for the anchor: `[\Z]`, `[\z]` and `[x\Z]` are
- * flagged too. Engines that reject `\Z` at compile time also reject it inside
- * a class, but `new RegExp('[\\Z]')` succeeds, so a pattern accepted here
- * would be a compile error elsewhere unless this scan refuses it.
- */
-function hasEndAnchorEscape(pattern: string): boolean {
-  const chars = Array.from(pattern);
-  const n = chars.length;
-  let inClass = false;
-  let i = 0;
-  while (i < n) {
-    const c = chars[i];
-    if (c === '\\') {
-      if (chars[i + 1] === 'Z' || chars[i + 1] === 'z') {
-        return true;
-      }
-      i += 2;
-      continue;
-    }
-    if (inClass) {
-      if (c === ']') {
-        inClass = false;
-      }
-      i += 1;
-      continue;
-    }
-    if (c === '[') {
-      inClass = true;
-      i += 1;
-      continue;
-    }
-    i += 1;
-  }
-  return false;
-}
-
-/**
- * Fail-closed scan for empty character classes: `[]`, `[^]`. Most regex
- * engines reject an empty class as a compile error, but JavaScript's `RegExp`
- * accepts `[]` (matches nothing) and `[^]` (matches any character, including
- * newline) as valid syntax, so neither `new RegExp(...)` nor
- * `hasNestedQuantifier`'s class handling catches them.
- *
- * A class is empty when the first content character right after `[`
- * (or after the `[^` negation marker) is an unescaped `]`, which in
- * JavaScript/PCRE-family semantics closes the class immediately rather than
- * being read as a literal `]` member (unlike POSIX bracket expressions).
- * Escaping it (`[\]abc]`) makes it a literal first member instead, and is
- * correctly not flagged.
- */
-function hasEmptyCharacterClass(pattern: string): boolean {
-  const chars = Array.from(pattern);
-  const n = chars.length;
-  let inClass = false;
-  let i = 0;
-  while (i < n) {
-    const c = chars[i];
-    if (c === '\\') {
-      i += 2;
-      continue;
-    }
-    if (inClass) {
-      if (c === ']') {
-        inClass = false;
-      }
-      i += 1;
-      continue;
-    }
-    if (c === '[') {
-      let j = i + 1;
-      if (chars[j] === '^') {
-        j += 1;
-      }
-      if (chars[j] === ']') {
-        return true;
-      }
-      inClass = true;
-      i += 1;
-      continue;
-    }
-    i += 1;
-  }
-  return false;
-}
-
 /* ---------------------------------------------------------------------------
  * The HushSpec regex profile
  * ------------------------------------------------------------------------ */
@@ -367,7 +314,10 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  *
  * 1. Syntax is RE2-class -- lookaround, backreferences, possessive
  *    quantifiers, atomic/conditional/recursive groups and nested unbounded
- *    quantifiers are rejected (`isSafeRegex`).
+ *    quantifiers are rejected. The group forms are `(...)`, `(?:...)` and the
+ *    named pair `(?<name>...)` / `(?P<name>...)`, whose names are ASCII
+ *    letters, digits and underscores not starting with a digit; any other
+ *    `(?...)` opener is rejected.
  * 2. Inline flags only as a leading group: `(?i)`, `(?s)`, `(?m)`, `(?is)` at
  *    the very start (one or more consecutive groups). A flag group anywhere
  *    else -- including the scoped form `(?i:...)` and negations like `(?-i)` --
@@ -380,20 +330,32 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  *    inside character classes (`[\d_]` -> `[0-9_]`). The negated shorthands
  *    `\D \W \S` and the boundaries `\b \B` are rejected *inside* a class,
  *    where they cannot be expressed as members.
- * 4. `.` matches any character except `\n` -- one *code point*, and with a
- *    leading `(?s)` any code point at all. JavaScript's `.` also excludes `\r`,
- *    U+2028 and U+2029, and consumes a single UTF-16 code unit, so it is
- *    rewritten to an explicit alternation that takes a surrogate pair as one
- *    character (see `DOT_SOURCE`/`DOT_ALL_SOURCE`). The `u` flag would give the
- *    same code-point semantics but would also reject patterns the profile
- *    accepts (identity escapes like `\-`, a literal `{`), so it is not used.
+ * 4. `.` matches any scalar value except `\n`, and with a leading `(?s)` any
+ *    scalar value at all. JavaScript's `.` also excludes `\r`, U+2028 and
+ *    U+2029, and consumes a single UTF-16 code unit, so it is rewritten to an
+ *    explicit alternation that takes a surrogate pair as one character (see
+ *    `DOT_SOURCE`/`DOT_ALL_SOURCE`). The `u` flag would give the same
+ *    code-point semantics but would also reject patterns the profile accepts
+ *    (identity escapes like `\-`, a literal `{`), so it is not used.
  * 5. `$` matches only at end of text, and `^` only at start, unless a leading
  *    `(?m)` makes them line anchors around `\n`. JavaScript's `m` flag also
  *    treats `\r`, U+2028 and U+2029 as line terminators, so `(?m)` is compiled
  *    by rewriting `^`/`$` to `\n`-only lookarounds rather than by setting `m`.
- * 6. Unanchored search semantics.
- * 7. Compile failure at evaluation time denies, carrying the offending rule
+ * 6. `(?i)` folds ASCII letters only. Each ASCII letter is expanded into a
+ *    two-member class (`s` -> `[sS]`) and no flag reaches the `RegExp`, so the
+ *    profile answers the same way as an engine whose own `(?i)` would apply the
+ *    full Unicode case-folding table.
+ * 7. Unanchored search semantics.
+ * 8. Compile failure at evaluation time denies, carrying the offending rule
  *    path (see `evaluate.ts`).
+ *
+ * A character class is a set of scalar values: an unescaped `[` inside one is
+ * rejected (so POSIX bracket expressions are not mistaken for a class of their
+ * own), a range endpoint outside the Basic Multilingual Plane is rejected
+ * because the SDKs cannot express such a range alike, and an astral member is
+ * lifted out of the class into an alternation of its surrogate pair, which is
+ * what makes the class match the scalar value rather than either half of it.
+ * A pattern is limited to 2048 UTF-8 bytes (core spec 3.14.3).
  *
  * Escapes are restricted to the intersection the four engines agree on:
  * `\n \r \t \f \v`, `\xHH`, `\d \D \w \W \s \S \b \B`, and any escaped ASCII
@@ -401,11 +363,6 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  * `\0`, `\a`, `\cX` and every other alphanumeric escape are rejected: each is
  * unsupported by at least one engine, or -- worse -- silently reinterpreted by
  * JavaScript as the bare letter.
- *
- * Known residual divergence: under a leading `(?i)`, an engine that applies
- * the full Unicode simple case-folding table matches U+017F (long s) and
- * U+212A (Kelvin sign) against `(?i)s` / `(?i)k`. JavaScript without the `u`
- * flag folds only ASCII, so they do not match here.
  */
 
 /** Character-class body for ASCII `\d`. */
@@ -415,18 +372,48 @@ const WORD_BODY = '0-9A-Za-z_';
 /** Character-class body for ASCII `\s` -- includes `\v`, excludes NBSP. */
 const SPACE_BODY = '\\t\\n\\v\\f\\r ';
 
+/** A UTF-16 surrogate pair: the two code units of one astral code point. */
+const SURROGATE_PAIR_SOURCE = '[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]';
+
+/** Character-class body covering every surrogate code unit. */
+const SURROGATE_BODY = '\\uD800-\\uDFFF';
+
+/**
+ * A surrogate code unit with no partner.
+ *
+ * Valid UTF-8 input cannot contain one, but a JavaScript string can, and
+ * leaving it unmatchable would make a negated construct silently skip a
+ * character the other engines would have matched.
+ */
+const LONE_SURROGATE_SOURCE =
+  '[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]';
+
+/**
+ * One code point that is not a member of the character-class body `body`.
+ *
+ * The four alternatives are mutually exclusive and between them cover every
+ * code point, so exactly one matches at any position: a surrogate pair is
+ * always consumed whole, and the fallback excludes surrogate code units rather
+ * than letting the engine backtrack into half of a pair. That is what makes
+ * `^..$` refuse a single astral character here as it does in the other SDKs.
+ *
+ * The surrogate range leads the negated class so that a body ending in a
+ * trailing `-` (`[^a-]`) cannot form a range with what follows it.
+ */
+function codePointOutside(body: string): string {
+  return `(?:${SURROGATE_PAIR_SOURCE}|[^${SURROGATE_BODY}${body}]|${LONE_SURROGATE_SOURCE})`;
+}
+
 /**
  * One code point that is not `\n` -- the profile's `.`.
  *
- * The surrogate-pair alternation comes first so an astral code point is
- * consumed whole, as one character; a bare `[^\n]` would consume half of it.
- * `[^\n]` (unlike JavaScript's own `.`) deliberately keeps `\r`, U+2028 and
- * U+2029 as ordinary characters.
+ * Unlike JavaScript's own `.` this deliberately keeps `\r`, U+2028 and U+2029
+ * as ordinary characters.
  */
-const DOT_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])';
+const DOT_SOURCE = codePointOutside('\\n');
 
 /** One code point, `\n` included -- the profile's `.` under a leading `(?s)`. */
-const DOT_ALL_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\s\\S])';
+const DOT_ALL_SOURCE = codePointOutside('');
 
 /**
  * `^` and `$` under a leading `(?m)`. The profile breaks lines only at `\n`,
@@ -439,6 +426,31 @@ const MULTILINE_END_SOURCE = '(?:$|(?=\\n))';
 /** Shared rejection message for nested unbounded quantifiers. */
 const NESTED_QUANTIFIER_MESSAGE =
   'pattern contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)';
+
+/** Size limit of a policy-authored pattern, in UTF-8 bytes (core spec 3.14.3). */
+const MAX_PATTERN_BYTES = 2048;
+
+/** Shared rejection message for an over-long pattern. */
+const PATTERN_TOO_LONG_MESSAGE =
+  'pattern exceeds the HushSpec regex profile limit of 2048 bytes';
+
+/** Shared rejection message for group openers outside the profile. */
+const GROUP_FORM_MESSAGE =
+  'this group form is not portable across the HushSpec SDK regex engines; the profile allows (?:...), the named forms (?<name>...) and (?P<name>...), and a leading inline flag group such as (?i)';
+
+/** Shared rejection message for a malformed or non-portable group name. */
+const GROUP_NAME_MESSAGE =
+  "a named group's name must be ASCII letters, digits and underscores, must not start with a digit, and must be closed by >";
+
+/** Shared rejection message for an unescaped `[` inside a character class. */
+const NESTED_CLASS_MESSAGE =
+  'an unescaped [ inside a character class is not portable across the HushSpec SDK regex engines (Rust and Go read [[:alpha:]] as a POSIX class, JavaScript and Python as a literal [); escape it as \\[';
+
+/** Shared rejection message for a class range reaching outside the BMP. */
+const ASTRAL_RANGE_MESSAGE =
+  'a character-class range with an endpoint outside the Basic Multilingual Plane is not portable across the HushSpec SDK regex engines';
+
+const PATTERN_ENCODER = new TextEncoder();
 
 interface ProfileFlags {
   caseInsensitive: boolean;
@@ -528,10 +540,50 @@ function isAsciiAlphanumeric(c: string): boolean {
   return /^[0-9A-Za-z]$/.test(c);
 }
 
-/** Translate one escape sequence into JavaScript `RegExp` source. */
+/** The other ASCII case of `c`, or `undefined` when `c` is not an ASCII letter. */
+function asciiCaseCounterpart(c: string): string | undefined {
+  if (c >= 'a' && c <= 'z') return c.toUpperCase();
+  if (c >= 'A' && c <= 'Z') return c.toLowerCase();
+  return undefined;
+}
+
+/**
+ * The class-body ranges that fold `low`-`high` to its other ASCII case.
+ *
+ * A range is emitted for the part of `low`-`high` inside `a-z` and for the part
+ * inside `A-Z`, so `[a-f]` under `(?i)` becomes `[a-fA-F]` and a range over
+ * digits is left alone.
+ */
+function foldedClassRange(low: string, high: string): string {
+  const lowerA = 0x61;
+  const lowerZ = 0x7a;
+  const upperA = 0x41;
+  const upperZ = 0x5a;
+  const lo = low.codePointAt(0) ?? 0;
+  const hi = high.codePointAt(0) ?? 0;
+  let out = '';
+  const lowerStart = Math.max(lo, lowerA);
+  const lowerEnd = Math.min(hi, lowerZ);
+  if (lowerStart <= lowerEnd) {
+    out += `${String.fromCodePoint(lowerStart - lowerA + upperA)}-${String.fromCodePoint(lowerEnd - lowerA + upperA)}`;
+  }
+  const upperStart = Math.max(lo, upperA);
+  const upperEnd = Math.min(hi, upperZ);
+  if (upperStart <= upperEnd) {
+    out += `${String.fromCodePoint(upperStart - upperA + lowerA)}-${String.fromCodePoint(upperEnd - upperA + lowerA)}`;
+  }
+  return out;
+}
+
+/**
+ * Translate one escape sequence into JavaScript `RegExp` source. `fold` asks
+ * for the profile's ASCII case folding, which applies only outside a character
+ * class -- `translateCharacterClass` folds its own members.
+ */
 function translateEscape(
   escaped: string,
   inClass: boolean,
+  fold: boolean,
   chars: string[],
   index: number,
 ): string {
@@ -546,7 +598,7 @@ function translateEscape(
       );
     }
     const body = escaped === 'D' ? DIGIT_BODY : escaped === 'W' ? WORD_BODY : SPACE_BODY;
-    return `[^${body}]`;
+    return codePointOutside(body);
   }
   if (escaped === 'b' || escaped === 'B') {
     if (inClass) {
@@ -581,6 +633,12 @@ function translateEscape(
         '\\x must be followed by exactly two hex digits (\\x41); the braced form \\x{...} is not portable across the HushSpec SDK regex engines',
       );
     }
+    if (fold) {
+      const other = asciiCaseCounterpart(String.fromCharCode(parseInt(`${hi}${lo}`, 16)));
+      if (other !== undefined) {
+        return `[\\x${hi}${lo}${other}]`;
+      }
+    }
     return `\\x${hi}${lo}`;
   }
   if (
@@ -604,17 +662,224 @@ function translateEscape(
 }
 
 /**
- * Walk the pattern body, translating profile constructs into JavaScript
- * `RegExp` source and rejecting anything outside the profile. `dotAll` and
- * `multiLine` carry a leading `(?s)` / `(?m)`: both are
- * compiled by rewriting the affected constructs rather than by setting the `s`
- * and `m` flags, whose JavaScript definitions of "any character" and "line
- * terminator" both differ from the profile's.
+ * The scalar value an escape sequence stands for, or `undefined` when it stands
+ * for a set of them. Only reached for escapes `translateEscape` accepted.
  */
-function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boolean): string {
+function escapeLiteralValue(chars: string[], index: number): string | undefined {
+  const escaped = chars[index + 1];
+  switch (escaped) {
+    case 'd':
+    case 'w':
+    case 's':
+      return undefined;
+    case 'n':
+      return '\n';
+    case 'r':
+      return '\r';
+    case 't':
+      return '\t';
+    case 'f':
+      return '\f';
+    case 'v':
+      return '\v';
+    case 'x':
+      return String.fromCharCode(parseInt(`${chars[index + 2]}${chars[index + 3]}`, 16));
+    default:
+      return escaped;
+  }
+}
+
+/**
+ * One member of a character class: its translated source, the scalar value it
+ * stands for (absent for a multi-member shorthand such as `\d`), and the number
+ * of chars it spans.
+ */
+interface ClassAtom {
+  source: string;
+  value?: string;
+  length: number;
+}
+
+/** Read the class member starting at `chars[index]`. */
+function readClassAtom(chars: string[], index: number): ClassAtom {
+  const c = chars[index];
+  if (c === '\\') {
+    if (index + 1 >= chars.length) {
+      throw new Error('pattern ends with a trailing backslash');
+    }
+    return {
+      source: translateEscape(chars[index + 1], true, false, chars, index),
+      value: escapeLiteralValue(chars, index),
+      length: escapeLength(chars, index),
+    };
+  }
+  if (c === '[') {
+    throw new Error(NESTED_CLASS_MESSAGE);
+  }
+  return { source: c, value: c, length: 1 };
+}
+
+/**
+ * Translate the character class starting at `chars[start]`, returning its
+ * JavaScript source and the index just past its closing `]`.
+ *
+ * Members are read one at a time so that an unescaped `[` can be refused, a
+ * range can be checked for a non-BMP endpoint, an astral member can be lifted
+ * into an alternation of its surrogate pair -- a class over UTF-16 code units
+ * would match either half on its own -- and, under `(?i)`, both the members and
+ * the ranges can be folded to their other ASCII case.
+ *
+ * A negated class means "one code point outside this set" to every other
+ * HushSpec engine, so it is rewritten the same way `.` is.
+ */
+function translateCharacterClass(
+  chars: string[],
+  start: number,
+  caseInsensitive: boolean,
+): [string, number] {
+  const n = chars.length;
+  let index = start + 1;
+  const negated = chars[index] === '^';
+  if (negated) {
+    index += 1;
+  }
+  // `[]` / `[^]` are a compile error in most engines but read as "match
+  // nothing" / "match anything" in JavaScript.
+  if (index >= n || chars[index] === ']') {
+    throw new Error(EMPTY_CLASS_MESSAGE);
+  }
+
+  let body = '';
+  const astral: string[] = [];
+  while (index < n && chars[index] !== ']') {
+    const atom = readClassAtom(chars, index);
+    const after = index + atom.length;
+    // A `-` is a range only between two single members and never just before
+    // the closing `]`, where it is a literal hyphen.
+    if (
+      atom.value !== undefined &&
+      chars[after] === '-' &&
+      after + 1 < n &&
+      chars[after + 1] !== ']'
+    ) {
+      const high = readClassAtom(chars, after + 1);
+      if (high.value !== undefined) {
+        if (isAstral(atom.value) || isAstral(high.value)) {
+          throw new Error(ASTRAL_RANGE_MESSAGE);
+        }
+        body += `${atom.source}-${high.source}`;
+        if (caseInsensitive) {
+          body += foldedClassRange(atom.value, high.value);
+        }
+        index = after + 1 + high.length;
+        continue;
+      }
+    }
+    if (atom.value !== undefined && isAstral(atom.value)) {
+      astral.push(atom.source);
+    } else {
+      body += atom.source;
+      if (caseInsensitive && atom.value !== undefined) {
+        const other = asciiCaseCounterpart(atom.value);
+        if (other !== undefined) {
+          body += other;
+        }
+      }
+    }
+    index = after;
+  }
+
+  if (index >= n) {
+    // Unterminated: hand it to `RegExp`, whose own diagnostic names the class.
+    return [`[${negated ? '^' : ''}${body}${astral.join('')}`, index];
+  }
+  if (negated) {
+    const rest = codePointOutside(body);
+    return [
+      astral.length === 0 ? rest : `(?:(?!${astral.join('|')})${rest})`,
+      index + 1,
+    ];
+  }
+  if (astral.length === 0) {
+    return [`[${body}]`, index + 1];
+  }
+  const branches = body === '' ? astral : [...astral, `[${body}]`];
+  return [`(?:${branches.join('|')})`, index + 1];
+}
+
+function isAstral(value: string): boolean {
+  return (value.codePointAt(0) ?? 0) > 0xffff;
+}
+
+/**
+ * Translate the group opener starting at `chars[start]`, returning its source
+ * and the index just past it.
+ *
+ * `(`, `(?:` and the two named spellings are the profile's only group forms;
+ * `(?=`, `(?!`, `(?>`, `(?#`, `(?(`, `(?R)` and `(?P=name)` are rejected here
+ * rather than left to a host engine that may accept them.
+ */
+function translateGroup(chars: string[], start: number): [string, number] {
+  if (chars[start + 1] !== '?') {
+    return ['(', start + 1];
+  }
+  const error = inlineFlagGroupError(chars, start);
+  if (error != null) {
+    throw new Error(error);
+  }
+  const marker = chars[start + 2];
+  if (marker === ':') {
+    return ['(?:', start + 3];
+  }
+  // The `(?P<name>...)` named-group spelling is a syntax error in JavaScript;
+  // `(?<name>...)` means the same thing and is accepted by every engine the
+  // profile targets.
+  if (marker === '<' && chars[start + 3] !== '=' && chars[start + 3] !== '!') {
+    return translateGroupName(chars, start + 3);
+  }
+  if (marker === 'P' && chars[start + 3] === '<') {
+    return translateGroupName(chars, start + 4);
+  }
+  throw new Error(GROUP_FORM_MESSAGE);
+}
+
+/**
+ * Copy the group name that starts at `start` and ends at `>`, returning the
+ * index just past the `>`. The name is never case-folded: it is an identifier,
+ * not subject text.
+ */
+function translateGroupName(chars: string[], start: number): [string, number] {
+  let cursor = start;
+  while (cursor < chars.length && chars[cursor] !== '>') {
+    cursor += 1;
+  }
+  if (cursor >= chars.length) {
+    throw new Error(GROUP_NAME_MESSAGE);
+  }
+  const name = chars.slice(start, cursor).join('');
+  if (!/^[A-Za-z_][0-9A-Za-z_]*$/.test(name)) {
+    throw new Error(GROUP_NAME_MESSAGE);
+  }
+  return [`(?<${name}>`, cursor + 1];
+}
+
+/**
+ * Walk the pattern body, translating profile constructs into JavaScript
+ * `RegExp` source and rejecting anything outside the profile. `dotAll`,
+ * `multiLine` and `caseInsensitive` carry a leading `(?s)` / `(?m)` / `(?i)`:
+ * all three are compiled by rewriting the affected constructs rather than by
+ * setting the `s`, `m` and `i` flags, whose JavaScript definitions of "any
+ * character", "line terminator" and "same letter" each differ from the
+ * profile's.
+ */
+function translateProfileBody(
+  chars: string[],
+  dotAll: boolean,
+  multiLine: boolean,
+  caseInsensitive: boolean,
+): string {
   const n = chars.length;
   let out = '';
-  let inClass = false;
   let index = 0;
 
   while (index < n) {
@@ -624,53 +889,22 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
       if (index + 1 >= n) {
         throw new Error('pattern ends with a trailing backslash');
       }
-      out += translateEscape(chars[index + 1], inClass, chars, index);
+      out += translateEscape(chars[index + 1], false, caseInsensitive, chars, index);
       index += escapeLength(chars, index);
       continue;
     }
 
-    if (inClass) {
-      if (c === ']') {
-        inClass = false;
-      }
-      out += c;
-      index += 1;
-      continue;
-    }
-
     if (c === '[') {
-      // `[]` / `[^]` are a compile error in most engines but read as "match
-      // nothing" / "match anything" in JavaScript.
-      let cursor = index + 1;
-      if (chars[cursor] === '^') {
-        cursor += 1;
-      }
-      if (cursor >= n || chars[cursor] === ']') {
-        throw new Error(
-          'empty character classes [] and [^] are not portable across the HushSpec SDK regex engines',
-        );
-      }
-      inClass = true;
-      out += '[';
-      index += 1;
+      const [source, next] = translateCharacterClass(chars, index, caseInsensitive);
+      out += source;
+      index = next;
       continue;
     }
 
     if (c === '(') {
-      const error = inlineFlagGroupError(chars, index);
-      if (error != null) {
-        throw new Error(error);
-      }
-      // The `(?P<name>...)` named-group spelling is a syntax error in
-      // JavaScript; `(?<name>...)` means the same thing and is accepted by
-      // every engine the profile targets.
-      if (chars[index + 1] === '?' && chars[index + 2] === 'P' && chars[index + 3] === '<') {
-        out += '(?<';
-        index += 4;
-        continue;
-      }
-      out += '(';
-      index += 1;
+      const [source, next] = translateGroup(chars, index);
+      out += source;
+      index = next;
       continue;
     }
 
@@ -686,7 +920,15 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
       continue;
     }
 
-    out += c;
+    const other = caseInsensitive ? asciiCaseCounterpart(c) : undefined;
+    if (other !== undefined) {
+      out += `[${c}${other}]`;
+    } else {
+      // `Array.from` splits by code point, so an astral literal is one element
+      // of two UTF-16 code units. Grouping it keeps a following quantifier on
+      // the whole character instead of on its trailing code unit.
+      out += c.length > 1 ? `(?:${c})` : c;
+    }
     index += 1;
   }
 
@@ -702,16 +944,17 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
  * profile -- the evaluator turns that throw into a deny.
  */
 export function compileProfileRegex(pattern: string): CompiledPolicyRegex {
+  if (PATTERN_ENCODER.encode(pattern).length > MAX_PATTERN_BYTES) {
+    throw new Error(PATTERN_TOO_LONG_MESSAGE);
+  }
   // Portability pre-check and the ReDoS heuristic run here, not only in
   // `validate`, so the evaluator denies on exactly the patterns the validator
-  // rejects even for a hand-built, never-validated policy object.
-  if (
-    RE2_DISALLOWED.test(pattern) ||
-    hasPossessiveQuantifier(pattern) ||
-    hasEndAnchorEscape(pattern) ||
-    hasEmptyCharacterClass(pattern)
-  ) {
-    throw new Error('pattern uses features not in the RE2 subset');
+  // rejects even for a hand-built, never-validated policy object. The rest of
+  // the RE2 subset -- lookaround, backreferences, atomic and recursive groups
+  // -- is refused by the translation below, which names the construct.
+  const feature = disallowedRegexFeature(pattern);
+  if (feature !== undefined) {
+    throw new Error(feature);
   }
   if (hasNestedQuantifier(pattern)) {
     throw new Error(NESTED_QUANTIFIER_MESSAGE);
@@ -723,11 +966,11 @@ export function compileProfileRegex(pattern: string): CompiledPolicyRegex {
     chars.slice(bodyStart),
     profileFlags.dotAll,
     profileFlags.multiLine,
+    profileFlags.caseInsensitive,
   );
-  // Only `i` reaches the RegExp: `(?s)` and `(?m)` are compiled into the source
-  // above, because JavaScript's `s` and `m` flags do not mean what the profile
-  // means (see DOT_ALL_SOURCE / MULTILINE_END_SOURCE).
-  const flags = profileFlags.caseInsensitive ? 'i' : '';
-
-  return { source, flags, regex: new RegExp(source, flags) };
+  // No flag reaches the `RegExp`: `(?i)`, `(?s)` and `(?m)` are each compiled
+  // into the source above, because JavaScript's `i`, `s` and `m` flags do not
+  // mean what the profile means (see DOT_ALL_SOURCE / MULTILINE_END_SOURCE and
+  // the ASCII-only folding in `translateProfileBody`).
+  return { source, regex: new RegExp(source) };
 }

@@ -305,13 +305,13 @@ impl Envelope {
     fn check_shape(&self) -> Result<(), VerifyError> {
         let bad = |detail: String| VerifyError::new(ReasonCode::MalformedEnvelope, detail);
 
-        if !is_sha256_digest(&self.key_id) {
+        if !is_content_hash(&self.key_id) {
             return Err(bad(format!(
                 "key_id {:?} is not sha256:<64 lowercase hex>",
                 self.key_id
             )));
         }
-        if !is_sha256_digest(&self.content_hash) {
+        if !is_content_hash(&self.content_hash) {
             return Err(bad(format!(
                 "content_hash {:?} is not sha256:<64 lowercase hex>",
                 self.content_hash
@@ -705,7 +705,7 @@ impl Keyring {
                     entry.key_id, entry.algorithm
                 )));
             }
-            if !is_sha256_digest(&entry.key_id) {
+            if !is_content_hash(&entry.key_id) {
                 return Err(bad(format!(
                     "key_id {:?} is not sha256:<64 lowercase hex>",
                     entry.key_id
@@ -826,7 +826,7 @@ pub fn sign_content_hash(
     signing_key: &SigningKey,
     options: &SignOptions,
 ) -> Result<Envelope, SigningError> {
-    if !is_sha256_digest(content_hash) {
+    if !is_content_hash(content_hash) {
         return Err(SigningError::MalformedEnvelope(format!(
             "content_hash {content_hash:?} is not sha256:<64 lowercase hex>"
         )));
@@ -891,7 +891,9 @@ pub fn sign_resolved(
 ) -> Result<Envelope, SigningError> {
     let mut options = options.clone();
     if options.policy_name.is_none() {
-        options.policy_name.clone_from(&policy.spec.name);
+        // A policy that declares `name: ""` makes no name claim: the envelope
+        // schema requires a present `policy_name` to be non-empty.
+        options.policy_name = policy.spec.name.clone().filter(|name| !name.is_empty());
     }
     if options.policy_version.is_none() {
         options.policy_version = policy
@@ -1350,19 +1352,8 @@ fn decode_legacy_key_body(content: &str, kind: &str) -> Result<[u8; 32], Signing
 // Shared helpers
 // --------------------------------------------------------------------------
 
-/// `sha256:` followed by 64 lowercase hex digits.
-fn is_sha256_digest(value: &str) -> bool {
-    let Some(hex) = value.strip_prefix(canonical::CONTENT_HASH_PREFIX) else {
-        return false;
-    };
-    hex.len() == 64
-        && hex
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-}
-
 /// `YYYY-MM-DDTHH:MM:SS.mmmZ`, and a real instant.
-use crate::receipt::{format_timestamp, is_millisecond_timestamp};
+use crate::receipt::{format_timestamp, is_content_hash, is_millisecond_timestamp};
 
 fn parse_timestamp(value: &str) -> Result<DateTime<Utc>, String> {
     if !is_millisecond_timestamp(value) {
@@ -1558,10 +1549,10 @@ MCowBQYDK2VwAyEAoe42nUGYC2vRO56gfvX8YOl50EwsnCsN5tBwtwdULpo=
 
     #[test]
     fn digest_and_timestamp_shapes() {
-        assert!(is_sha256_digest(&format!("sha256:{}", "a".repeat(64))));
-        assert!(!is_sha256_digest(&format!("sha256:{}", "A".repeat(64))));
-        assert!(!is_sha256_digest(&"a".repeat(64)));
-        assert!(!is_sha256_digest("sha256:abc"));
+        assert!(is_content_hash(&format!("sha256:{}", "a".repeat(64))));
+        assert!(!is_content_hash(&format!("sha256:{}", "A".repeat(64))));
+        assert!(!is_content_hash(&"a".repeat(64)));
+        assert!(!is_content_hash("sha256:abc"));
 
         assert!(is_millisecond_timestamp("2026-09-15T09:00:00.000Z"));
         assert!(!is_millisecond_timestamp("2026-09-15T09:00:00Z"));

@@ -25,10 +25,14 @@ var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 // optionally restricted to named days (core spec 3.13). A window the engine
 // cannot evaluate leaves the block active.
 type TimeWindowCondition struct {
-	Start    string   `yaml:"start" json:"start"`                           // HH:MM (24-hour)
-	End      string   `yaml:"end" json:"end"`                               // HH:MM (24-hour)
-	Timezone string   `yaml:"timezone,omitempty" json:"timezone,omitempty"` // IANA tz, defaults to UTC
-	Days     []string `yaml:"days,omitempty" json:"days,omitempty"`         // mon..sun
+	Start string `yaml:"start" json:"start"` // HH:MM (24-hour)
+	End   string `yaml:"end" json:"end"`     // HH:MM (24-hour)
+	// Timezone is an IANA identifier or a fixed offset; an absent one is UTC.
+	// It is a *string because presence is part of the wire format: an absent
+	// timezone takes the schema default and a written one is kept as it
+	// stands, so the two carry different content hashes.
+	Timezone *string  `yaml:"timezone,omitempty" json:"timezone,omitempty"`
+	Days     []string `yaml:"days,omitempty" json:"days,omitempty"` // mon..sun
 }
 
 // RateComparison is how a [RateCondition] compares its counter with its
@@ -76,8 +80,10 @@ type Condition struct {
 	// Capability is true when the effective posture state -- the state the
 	// posture guard uses, after origins profile selection and the action's
 	// posture input -- grants it. Unevaluable, and therefore held, when the
-	// policy has no posture extension (core spec 3.13).
-	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	// policy has no posture extension (core spec 3.13). It is a *string
+	// because presence is part of the wire format: a written "" is a present
+	// value the canonical form keeps, and validation refuses it.
+	Capability *string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	// Rate compares an engine-supplied counter with a threshold. Unevaluable,
 	// and therefore held, when the context carries no such counter.
 	Rate *RateCondition `yaml:"rate,omitempty" json:"rate,omitempty"`
@@ -124,7 +130,7 @@ func (g grantedCapabilities) grants(name string) bool {
 // resolved the effective posture state calls
 // [EvaluateConditionWithCapabilities] instead.
 func EvaluateCondition(condition *Condition, context *RuntimeContext) bool {
-	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0)
+	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0) != verdictFalse
 }
 
 // EvaluateConditionWithCapabilities is [EvaluateCondition] with the
@@ -139,7 +145,59 @@ func EvaluateConditionWithCapabilities(
 	hasPosture bool,
 ) bool {
 	return evaluateConditionDepth(condition, context,
-		grantedCapabilities{known: hasPosture, list: capabilities}, 0)
+		grantedCapabilities{known: hasPosture, list: capabilities}, 0) != verdictFalse
+}
+
+// conditionVerdict is what a condition evaluates to (core spec 3.13).
+// verdictUnevaluable is a predicate the engine lacks the means to decide --
+// no posture extension, no such counter, a clock it cannot read -- and it
+// never switches a block off: a block is inert only on an evaluated false.
+type conditionVerdict uint8
+
+const (
+	verdictTrue conditionVerdict = iota
+	verdictFalse
+	verdictUnevaluable
+)
+
+func verdictOf(value bool) conditionVerdict {
+	if value {
+		return verdictTrue
+	}
+	return verdictFalse
+}
+
+func (v conditionVerdict) negate() conditionVerdict {
+	switch v {
+	case verdictTrue:
+		return verdictFalse
+	case verdictFalse:
+		return verdictTrue
+	default:
+		return verdictUnevaluable
+	}
+}
+
+// and is AND: false wins, then unevaluable, then true.
+func (v conditionVerdict) and(other conditionVerdict) conditionVerdict {
+	if v == verdictFalse || other == verdictFalse {
+		return verdictFalse
+	}
+	if v == verdictUnevaluable || other == verdictUnevaluable {
+		return verdictUnevaluable
+	}
+	return verdictTrue
+}
+
+// or is OR: true wins, then unevaluable, then false.
+func (v conditionVerdict) or(other conditionVerdict) conditionVerdict {
+	if v == verdictTrue || other == verdictTrue {
+		return verdictTrue
+	}
+	if v == verdictUnevaluable || other == verdictUnevaluable {
+		return verdictUnevaluable
+	}
+	return verdictFalse
 }
 
 func evaluateConditionDepth(
@@ -147,91 +205,108 @@ func evaluateConditionDepth(
 	context *RuntimeContext,
 	capabilities grantedCapabilities,
 	depth int,
-) bool {
+) conditionVerdict {
 	if depth > MaxNestingDepth {
 		// Validation rejects this at parse time; an out-of-band condition that
 		// exceeds the depth cannot be evaluated, and an unevaluable condition
-		// must not switch a control off (core spec 3.13), so treat it as held.
-		return true
+		// must not switch a control off (core spec 3.13).
+		return verdictUnevaluable
 	}
 
+	// The fields of one condition object are ANDed. An evaluated false
+	// settles the object, so later fields are not consulted.
+	verdict := verdictTrue
+
 	if condition.TimeWindow != nil {
-		if !checkTimeWindow(condition.TimeWindow, context) {
-			return false
+		verdict = verdict.and(checkTimeWindow(condition.TimeWindow, context))
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if condition.Context != nil {
-		if !checkContextMatch(condition.Context, context) {
-			return false
+		verdict = verdict.and(verdictOf(checkContextMatch(condition.Context, context)))
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
-	// `capability`: unevaluable without a posture extension (held); otherwise
-	// the effective state must list the capability.
-	if condition.Capability != "" && capabilities.known && !capabilities.grants(condition.Capability) {
-		return false
+	// `capability`: unevaluable without a posture extension; otherwise the
+	// effective state must list the capability.
+	if condition.Capability != nil {
+		if capabilities.known {
+			verdict = verdict.and(verdictOf(capabilities.grants(*condition.Capability)))
+		} else {
+			verdict = verdict.and(verdictUnevaluable)
+		}
+		if verdict == verdictFalse {
+			return verdict
+		}
 	}
 
-	// `rate`: unevaluable when the engine supplied no such counter (held).
+	// `rate`: unevaluable when the engine supplied no such counter.
 	if rate := condition.Rate; rate != nil {
 		if count, ok := context.Counters[rate.Counter]; ok {
 			satisfied := count >= rate.Threshold
 			if rate.Comparison == RateComparisonLt {
 				satisfied = count < rate.Threshold
 			}
-			if !satisfied {
-				return false
-			}
+			verdict = verdict.and(verdictOf(satisfied))
+		} else {
+			verdict = verdict.and(verdictUnevaluable)
+		}
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
-	for index := range condition.AllOf {
-		if !evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1) {
-			return false
+	if len(condition.AllOf) > 0 {
+		combined := verdictTrue
+		for index := range condition.AllOf {
+			combined = combined.and(evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1))
+		}
+		verdict = verdict.and(combined)
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if len(condition.AnyOf) > 0 {
-		found := false
+		combined := verdictFalse
 		for index := range condition.AnyOf {
-			if evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1) {
-				found = true
-				break
-			}
+			combined = combined.or(evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1))
 		}
-		if !found {
-			return false
+		verdict = verdict.and(combined)
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if condition.Not != nil {
-		if evaluateConditionDepth(condition.Not, context, capabilities, depth+1) {
-			return false
-		}
+		verdict = verdict.and(evaluateConditionDepth(condition.Not, context, capabilities, depth+1).negate())
 	}
 
-	return true
+	return verdict
 }
 
-func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) bool {
-	// Fail closed toward enforcement (core spec 3.13): a window the engine
-	// cannot evaluate -- unresolvable time zone, unparsable current_time, or a
-	// malformed HH:MM that escaped validation -- leaves the block ACTIVE.
+func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) conditionVerdict {
+	// A window the engine cannot evaluate -- unresolvable time zone,
+	// unparsable current_time, or a malformed HH:MM that escaped validation --
+	// is unevaluable and leaves the block active (core spec 3.13).
 	now := resolveCurrentTimeForCondition(context, tw.Timezone)
 	if now == nil {
-		return true
+		return verdictUnevaluable
 	}
 
 	hour, minute, dayOfWeek := now[0], now[1], now[2]
 
 	startH, startM, ok := parseHHMM(tw.Start)
 	if !ok {
-		return true
+		return verdictUnevaluable
 	}
 	endH, endM, ok := parseHHMM(tw.End)
 	if !ok {
-		return true
+		return verdictUnevaluable
 	}
 
 	currentMinutes := hour*60 + minute
@@ -253,17 +328,17 @@ func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) bool {
 			}
 		}
 		if !found {
-			return false
+			return verdictFalse
 		}
 	}
 
 	if startMinutes == endMinutes {
-		return true
+		return verdictTrue
 	}
 	if startMinutes < endMinutes {
-		return currentMinutes >= startMinutes && currentMinutes < endMinutes
+		return verdictOf(currentMinutes >= startMinutes && currentMinutes < endMinutes)
 	}
-	return currentMinutes >= startMinutes || currentMinutes < endMinutes
+	return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes)
 }
 
 func parseHHMM(s string) (int, int, bool) {
@@ -272,9 +347,10 @@ func parseHHMM(s string) (int, int, bool) {
 		return 0, 0, false
 	}
 	// Require pure ASCII digits in each component. strconv.Atoi would
-	// otherwise accept a leading sign (e.g. "+9"), which is not an HH:MM
-	// field, so a sign-prefixed token must fail to parse and leave the window
-	// inert (fail-closed).
+	// otherwise accept a leading sign (e.g. "+9:00"), which the other engines
+	// reject; the same token would then be a live window here and unevaluable
+	// there. A non-digit component fails to parse, and the window is
+	// unevaluable in every engine.
 	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
 		return 0, 0, false
 	}
@@ -389,9 +465,9 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 					"%s.time_window.%s: %q is not a valid HH:MM time", path, field.name, field.value))
 			}
 		}
-		if tw.Timezone != "" && !TimezoneIsKnown(tw.Timezone) {
+		if tw.Timezone != nil && !TimezoneIsKnown(*tw.Timezone) {
 			*errs = append(*errs, fmt.Sprintf(
-				"%s.time_window.timezone: %q is neither an IANA time zone nor a fixed offset", path, tw.Timezone))
+				"%s.time_window.timezone: %q is neither an IANA time zone nor a fixed offset", path, *tw.Timezone))
 		}
 		for _, day := range tw.Days {
 			known := false
@@ -407,10 +483,10 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			}
 		}
 	}
-	if name := condition.Capability; name != "" && !IsCapabilityIdentifier(name) {
+	if name := condition.Capability; name != nil && !IsCapabilityIdentifier(*name) {
 		*errs = append(*errs, fmt.Sprintf(
 			"%s.capability: %q is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
-			path, name))
+			path, *name))
 	}
 	if rate := condition.Rate; rate != nil && !IsCapabilityIdentifier(rate.Counter) {
 		*errs = append(*errs, fmt.Sprintf(
@@ -465,7 +541,7 @@ func TimezoneIsKnown(tz string) bool {
 }
 
 // resolveCurrentTimeForCondition returns [hour, minute, dayOfWeek (0=Mon..6=Sun)].
-func resolveCurrentTimeForCondition(context *RuntimeContext, tz string) []int {
+func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 	var t time.Time
 
 	if context.CurrentTime != "" {
@@ -483,9 +559,11 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz string) []int {
 		t = time.Now().UTC()
 	}
 
-	tzName := tz
-	if tzName == "" {
-		tzName = "UTC"
+	// An absent timezone is UTC (core spec 3.13); a written one is resolved as
+	// it stands, so an unresolvable identifier leaves the window unevaluable.
+	tzName := "UTC"
+	if tz != nil {
+		tzName = *tz
 	}
 	location := resolveConditionLocation(tzName)
 	if location == nil {
@@ -557,23 +635,27 @@ func resolveConditionLocation(tz string) *time.Location {
 	return nil
 }
 
+// parseTimezoneOffset returns the minutes of a fixed offset body, the part of a
+// `timezone` after its sign: `HH` or `HH:MM`, two ASCII digits per field (core
+// spec 3.13). Anything else is not an offset and leaves the time window
+// unresolvable, which keeps the rule block active rather than inert.
 func parseTimezoneOffset(s string) (int, bool) {
+	hoursField, minutesField := s, "00"
 	if idx := strings.Index(s, ":"); idx >= 0 {
-		hours, err := strconv.Atoi(s[:idx])
-		if err != nil {
-			return 0, false
-		}
-		minutes, err := strconv.Atoi(s[idx+1:])
-		if err != nil || hours < 0 || hours > 23 || minutes < 0 || minutes > 59 {
-			return 0, false
-		}
-		return hours*60 + minutes, true
+		hoursField, minutesField = s[:idx], s[idx+1:]
 	}
-	hours, err := strconv.Atoi(s)
-	if err != nil || hours < 0 || hours > 23 {
+	if len(hoursField) != 2 || len(minutesField) != 2 {
 		return 0, false
 	}
-	return hours * 60, true
+	if !isASCIIDigits(hoursField) || !isASCIIDigits(minutesField) {
+		return 0, false
+	}
+	hours := int(hoursField[0]-'0')*10 + int(hoursField[1]-'0')
+	minutes := int(minutesField[0]-'0')*10 + int(minutesField[1]-'0')
+	if hours > 23 || minutes > 59 {
+		return 0, false
+	}
+	return hours*60 + minutes, true
 }
 
 func checkContextMatch(expected map[string]any, context *RuntimeContext) bool {
@@ -726,7 +808,8 @@ func matchIntNumber(actual any, expected int64) bool {
 }
 
 // matchFloatNumber compares a float-shaped expected value: it matches an
-// int/int64/float64 actual whose numeric value is equal.
+// int/int64/float64 actual whose numeric value is exactly equal. There is no
+// tolerance, so 0.3 does not match 0.30000000000000004 (core spec 3.13).
 func matchFloatNumber(actual any, expected float64) bool {
 	switch av := actual.(type) {
 	case int:

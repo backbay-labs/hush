@@ -9,7 +9,7 @@
 #
 #   repos:
 #     - repo: https://github.com/backbay-labs/hush
-#       rev: v0.2.0          # a released tag; see docs/src/guides/ci.md
+#       rev: v1.0.0          # a released tag; see docs/src/guides/ci.md
 #       hooks:
 #         - id: hushspec-validate
 #         - id: hushspec-lint

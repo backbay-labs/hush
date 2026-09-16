@@ -3,15 +3,31 @@
 All notable changes to HushSpec are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioning.md);
-until 1.0.0 the specification and SDKs are an unstable `0.x` series.
+HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioning.md).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-09-15
+
+HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
+1.0.0 with status Stable, and the document format, evaluation semantics, canonical form, wire
+formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series
+(`spec/versioning.md` section 5). A `1.0.z` document is evaluated exactly as a `0.2.z` document,
+and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was developed in the
+0.x series and ships for the first time in this release.
 
 ### Added
 
 **Spec**
 
+- **HushSpec 1.0.0 is declared** (core spec 10.2; versioning spec 10). A `1.0.Z` document is
+  treated exactly as a `0.2.Z` document; the reference implementation accepts `0.1`, `0.2`, and
+  `1.0` and rejects any other minor with E002. The one validation change from 0.2 is that `name`,
+  when present, MUST be non-empty (core spec 2), rejected with E004; a `0.Y.Z` document keeps the
+  frozen format's behaviour and is not held to it. Vectors:
+  `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`,
+  `fixtures/core/invalid/version-unsupported-minor.yaml`, `fixtures/core/invalid/empty-name.yaml`,
+  `fixtures/core/valid/empty-name-0-2.yaml`.
 - **Conformance levels 4 and 5** are normative in `spec/hushspec-core.md` section 8, closing the
   forward references the receipt and signing specifications already made. **Level 4 (Auditor)**:
   receipt format 0.2, a canonical `policy.content_hash` over the resolved document, a `rule_trace`
@@ -24,15 +40,15 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
   materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
   standard-library reference canonicalizer (`scripts/canonical_json.py`), the
-  `hushspec-hash-vector` schema, and 14 normative vectors under `fixtures/core/hash/`.
+  `hushspec-hash-vector` schema, and 16 normative vectors under `fixtures/core/hash/`.
 - `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
   millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
   `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
   hash for chaining), with 12 valid and 14 invalid vectors under `fixtures/receipts/`.
-  `schemas/hushspec-receipt.v0.schema.json` is the 0.2 schema.
+  `schemas/hushspec-receipt.v1.schema.json` is the 0.2 schema.
 - `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
   (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
-  expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
+  expiry, rollback protection, and 18 verification vectors under `fixtures/signing/` signed
   with a published test-only key.
 - `spec/hushspec-log.md` and `spec/hushspec-bundle.md`: the hash-linked receipt log and the
   policy bundle attestation format, with their schemas and vectors.
@@ -64,18 +80,28 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **Schemas**
 
+- **The `.v1.` schema lineage.** The sixteen document-format schemas are published as
+  `hushspec-<name>.v1.schema.json` under `https://hushspec.dev/schemas/`, and every SDK, the CLI,
+  the testkit, the fixture modelines, and the docs reference them. `hushspec-core.v1.schema.json`
+  differs from its `.v0.` predecessor in exactly two keywords: `hushspec` matches
+  `^(0|1)\.\d+\.\d+$` and `name` carries `minLength: 1`. The receipt, log-entry, and report
+  schemas widen their `spec_version` patterns the same way, so a receipt for a `1.0.z` policy
+  validates; every other `.v1.` file is its `.v0.` predecessor under a new `$id`. The `.v0.` files are frozen for documents that declare a 0.x
+  version: each carries a `$comment` saying so, `schemas/frozen-v0.json` records their digests,
+  and a test fails when one changes. The seven registry schemas keep the `.v0.` name.
+  `h2h schema core` prints the v1 file; `h2h schema core.v0` prints the frozen one.
 - **Expected error codes on every `invalid/` vector.** `spec/registries/error-codes.yaml`
   registers the codes the validator emits (`E000`-`E005`, `E010`, `E011`), validated by
-  `schemas/hushspec-error-codes.v0.schema.json`, whose `$defs/ExpectedError` is the shape of the
+  `schemas/hushspec-error-codes.v1.schema.json`, whose `$defs/ExpectedError` is the shape of the
   new `fixtures/<module>/invalid/<name>.expect.yaml` sidecars. All four SDK fixture runners
   assert the registered code and any `message_contains` substring.
-- **`schemas/hushspec-merge-vector.v0.schema.json`** writes down the merge vector directory
+- **`schemas/hushspec-merge-vector.v1.schema.json`** writes down the merge vector directory
   convention (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, the digest-pin path through the
   resolver, and the two refusal markings all four runners honour), validated against every merge
   directory in the corpus by a testkit test.
-- **`schemas/hushspec-conformance-report.v0.schema.json`**: the shape of a conformance report.
-- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v0.schema.json`,
-  same file name): a case may declare `controls: [{framework, control_id}]` -- the controls it
+- **`schemas/hushspec-conformance-report.v1.schema.json`**: the shape of a conformance report.
+- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v1.schema.json`):
+  a case may declare `controls: [{framework, control_id}]` -- the controls it
   is evidence for -- and free-form `tags`, and its `expect` may assert `rule_trace` (the
   recorded trace of receipt spec 4.3, compared in order and in full, with `rule_path` compared
   only where it is spelled) and `receipt` (a partial format 0.2 receipt whose members must equal
@@ -85,6 +111,10 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **Rust**
 
+- `version::HUSHSPEC_VERSION` is `1.0.0` and `HUSHSPEC_SUPPORTED_MINORS` lists `0.1`, `0.2`,
+  and `1.0`.
+- `HttpLoaderConfig::cache_max_entries` (default `DEFAULT_CACHE_MAX_ENTRIES`, 64) bounds the
+  on-disk ETag cache; a write that would exceed it removes the oldest entries first.
 - `hushspec::guard` -- `HushGuard`, the Rust enforcement point, at parity with the
   TypeScript SDK's. Built from a `Policy`, a `Resolution` or a `CompiledPolicy`; carries the
   enforcement mode (with per-rule-path overrides, longest prefix wins), an `on_warn`
@@ -132,10 +162,10 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 - Verify-on-load and digest pinning: `resolve_with_options` / `resolve_path_with_options`
   return a `Resolution` with per-hop chain links and verification outcomes;
   `extends: "<ref>#sha256:<hex>"` pins a base document.
-- Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v0.schema.json`):
+- Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v1.schema.json`):
   `ChainedFileSink`, `PolicyEvent` records, `verify_logs`, and `h2h log verify`.
 - Receipt signing (`sign_receipt` / `verify_receipt`) and `h2h receipts verify`.
-- Policy bundle attestation (`spec/hushspec-bundle.md`, `schemas/hushspec-bundle.v0.schema.json`):
+- Policy bundle attestation (`spec/hushspec-bundle.md`, `schemas/hushspec-bundle.v1.schema.json`):
   `h2h bundle create` resolves a policy and wraps it in a DSSE envelope over an in-toto Statement
   v1 whose subject is the canonical form of the resolved document and whose predicate carries that
   document, every `extends` hop with its hash and signature status, and the resolver. `h2h bundle
@@ -152,7 +182,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   reports the closed reason-code set of signing spec 6.4 (`malformed_envelope`,
   `unsupported_format_version`, `unsupported_algorithm`, `unknown_key_id`, `key_revoked`,
   `key_retired`, `signed_at_in_future`, `expired`, `signature_mismatch`,
-  `content_hash_mismatch`, `policy_version_rollback`). All 16 vectors under `fixtures/signing/`
+  `content_hash_mismatch`, `policy_version_rollback`). All 18 vectors under `fixtures/signing/`
   pass.
 - `when.capability` and `when.rate` support: `RateCondition`, `RateComparison`,
   `evaluate_condition_with_capabilities` and `is_capability_identifier` are exported.
@@ -276,6 +306,9 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **CLI**
 
+- Lint **L022** `empty-list-entry` (warning): an empty string in `rules.tool_access.allow`,
+  `block`, or `require_confirmation`, or in an origins profile overlay list, can never match and
+  is reported at its index.
 - `h2h report <log.jsonl|receipts.jsonl>...`: compliance evidence over a window of receipts.
   Reads a hash-linked log or a plain receipt JSONL (classified line by line, signed receipts
   included), verifies the chain before counting anything and refuses to report on a broken one
@@ -286,7 +319,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   detections by detector and level. With `--policy`, joins `metadata.controls` into a per-control
   evidence table (evaluated / fired / denied / last seen, plus the rule blocks that fired with no
   control behind them). `--format json` is validated by the new
-  `schemas/hushspec-report.v0.schema.json` (`h2h schema report`), `--format csv` writes one table
+  `schemas/hushspec-report.v1.schema.json` (`h2h schema report`), `--format csv` writes one table
   per file into `--out` (or the `--by` table to stdout), and `--format oscal` behind
   `--experimental-oscal` emits a minimal OSCAL 1.1.2 assessment-results skeleton. The aggregation
   itself is the new `hushspec::report` module. Vectors: `fixtures/report/` -- a synthetic 24-hour
@@ -354,7 +387,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   conformance claim cites the corpus by this file's digest.
 - `hushspec-testkit --fixtures fixtures --report report.json`, which runs the evidence-chain
   vectors as well as the document corpus, computes the highest fully passing level, validates
-  the report against `schemas/hushspec-conformance-report.v0.schema.json`, and writes it.
+  the report against `schemas/hushspec-conformance-report.v1.schema.json`, and writes it.
 - **`hushspec-testkit bundle`** packages `spec/`, `schemas/` and `fixtures/` with
   a README on running them. Reproducible byte for byte; `release.yml` builds it, checks
   reproducibility with a second build, and adds it to the release assets and the attestation
@@ -421,15 +454,77 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ### Changed
 
+**Spec**
+
+- **One HTTPS `extends` loader rule set.** Core spec 2.6.4 is rewritten as ten MUSTs that say
+  exactly what every SDK enforces: `https:` only with `http://` refused outright, an optional
+  exact and case-insensitive host allowlist checked before DNS, a tabulated blocked-network list
+  (`0.0.0.0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`,
+  `192.168/16`, `198.18/15`, `224/4`, `240/4`, `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`,
+  `ff00::/8`) that *every* resolved address must clear, IPv4-mapped and IPv4-compatible IPv6
+  forms unwrapped and judged on the address inside, an unparseable address treated as blocked,
+  the checked address pinned for the connection while the host name still carries SNI,
+  certificate validation and the `Host` header, no redirects, separate connect and read budgets,
+  a capped body, `ETag` revalidation that serves a cached body only on a `304`, and `<url>.sig`
+  fetched under the identical rules. The previous text named a looser list, said nothing about
+  allowlists, pinning or the sidecar, and left the size and time bounds as one budget.
+  `spec/hushspec-security.md` section 4 is aligned with it and its residual-risk paragraph now
+  describes what the list and the pin actually leave open.
+
 **SDKs**
 
+- Package versions are 1.0.0: `hushspec`, `hushspec-cli`, and `hushspec-testkit` on crates.io,
+  `@hushspec/core` on npm, and `hushspec` on PyPI.
 - **All four SDKs are Level 5 (Attested)**, not Rust alone: TypeScript, Python and Go now run
   the bundle vectors, which were the last Level 5 gap, and all four fixture runners assert the
   `.expect.yaml` sidecar's registered error code and `message_contains` substring, closing the
   Level 1 error-code gap.
+- A skipped rule block records why it was not consulted instead of reporting itself inactive.
+  `secret_patterns` evaluated without content records
+  `content not supplied; secret_patterns not consulted`, and `remote_desktop_channels` with a
+  target that is not a channel records
+  `target is not a remote desktop channel; remote_desktop_channels not consulted`. Both strings
+  are byte-identical in all four evaluators, since a receipt records them; the expected receipts
+  under `fixtures/receipts/expected/` and the log and report vectors are regenerated.
+- **`args_size` is measured in UTF-8 bytes of the canonical JSON** (core spec 3.7) by every
+  adapter and guard mapping in TypeScript, Python and Go. The previous measurements were the
+  ones the spec names as wrong: `JSON.stringify(args).length` counts UTF-16 code units, so
+  TypeScript undercounted every non-ASCII payload -- a 12-byte argument of emoji measured as 10
+  slipped under a `max_args_size` of 11; `len(json.dumps(args))` counts the spaces Python's
+  encoder writes; and measuring a string payload as received counts whatever whitespace and
+  `\uXXXX` escaping the transport chose. One limit now bounds the same payload behind every
+  adapter and in every SDK. Rust has no adapters and was already correct. Affects any
+  `max_args_size` decision on a non-ASCII or non-compact payload, and the `action.args_size` a
+  receipt records for it.
+
+**Rust**
+
+- The HTTPS `extends` loader (`hushspec::resolve::http`, the `http` feature) enforces the full
+  rule set of core spec 2.6.4. The blocked-network list grows from the loopback, RFC 1918,
+  link-local and unique-local ranges to every network the spec tabulates, IPv4-mapped and
+  IPv4-compatible IPv6 forms are unwrapped and judged on the address inside, and an address that
+  cannot be parsed is blocked. The connection is then **pinned** to the address that was checked
+  -- `reqwest`'s `ClientBuilder::resolve` maps the host to the vetted socket address, so the
+  socket goes there while TLS still validates the hostname the document wrote -- which closes the
+  DNS-rebinding window between the check and the connect. A 3xx is refused with a message naming
+  the refusal rather than reported as a generic non-2xx, `HttpLoaderConfig` gains
+  `allowed_hosts` (exact, case-insensitive, checked before DNS) and splits `timeout_ms` into
+  `connect_timeout_ms` and `read_timeout_ms`, and `fetch_signature` / `signature_locator` fetch
+  `<url>.sig` under the identical rules. `is_blocked_address`, `validate_url` and `HttpTarget`
+  are public, as they are in the Python and Go SDKs.
 
 **TypeScript**
 
+- The HTTPS `extends` loader (`http-loader.ts`) enforces the same rule set, over `node:https`
+  rather than `fetch`, because a pinned connection is not something `fetch` can express. A
+  `lookup` that returns only the checked address pins the socket while `servername` keeps SNI,
+  certificate validation and the `Host` header on the hostname the document wrote; a 3xx is
+  refused explicitly. The blocked-network list is the spec's, addresses are parsed rather than
+  string-matched (so `100.64/10`, `192.0.0/24`, `198.18/15`, `224/4`, `240/4` and `ff00::/8` are
+  covered and an unparseable address is blocked), and `HttpLoaderConfig` gains `allowedHosts`,
+  `connectTimeoutMs` and `readTimeoutMs`. `isPrivateIp` is renamed `isBlockedAddress`, and it,
+  `resolveTarget`, `CLOUD_METADATA_ADDRESSES` and the default bounds are exported.
+  `HttpProvider`'s options are now the loader's, so a provider cannot quietly relax a rule.
 - Evaluation no longer compiles patterns per call: the free `evaluate()` functions compile the
   document on first use and cache the compilation against the document object (a `WeakMap`), so
   decisions, receipts, hashes and traces are unchanged while a mixed action set against
@@ -519,6 +614,112 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   reports `L004` and `L017` by design.
 
 ### Fixed
+
+**Spec and SDKs**
+
+- `when` conditions evaluate to true, false, or unevaluable (core spec 3.13). `not` over an
+  unevaluable predicate (a `rate` counter the engine did not supply, a `capability` on a policy
+  with no posture extension, a time window whose clock cannot be read) is itself unevaluable and
+  leaves the block active; `all_of` and `any_of` propagate unevaluable the same way. Previously
+  `not` negated the held result into false and switched the block off. Vectors:
+  `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`,
+  `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
+- The posture guard looks the current state up before consulting the capability table (posture
+  spec 3.3), so an action whose `posture.current` names an undeclared state is denied whatever
+  its action type, including the types the table does not gate. Vector:
+  `fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml`.
+- Host normalization ends the URL authority at a backslash as well as at `/`, `?` and `#` (core
+  spec 3.14.2), the way browsers parse special-scheme URLs, so
+  `http://blocked.example\@allowed.example` names `blocked.example`. Vector:
+  `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
+- `ChainedFileSink` in every SDK derives `seq` and `prev_hash` from the file's last entry while
+  holding the write lock (log spec 4), so two sinks or processes appending to one log extend a
+  single chain instead of forking it.
+- Log verification validates every receipt payload as a 0.2 receipt (log spec 8, step 8). The
+  TypeScript, Python and Go verifiers previously checked only `receipt_version`; their receipt
+  parsers now enforce the required members, types, closed enums and timestamp spelling the Rust
+  model enforces, and every SDK rejects a timestamp naming an impossible calendar date. Vector:
+  `fixtures/log/invalid/malformed-receipt-line-2.jsonl`.
+- The v1 schemas bound the month, day, hour, minute and second of every timestamp to its
+  calendar range and carry `format: date-time`.
+- Signing spec 6.2 step 1 defers the `format_version` and `algorithm` value constraints to
+  steps 2 and 3, so `unsupported_format_version` and `unsupported_algorithm` stay reachable. The
+  vector `impossible-signed-at-date` expects `malformed_envelope` for a February 30 `signed_at`.
+- TypeScript: the regex profile's `.`, negated classes and negated shorthands consume an astral
+  character as one code point and no longer backtrack into half a surrogate pair
+  (`fixtures/core/evaluation/regex-dialect.test.yaml`); canonicalization refuses an integer
+  outside the safe range (canonical spec 4.3) instead of hashing the rounded double;
+  `HttpProvider` fetches a policy's `.sig` sidecar under the same TLS, loopback and
+  authorization configuration as the policy; bundle creation treats only a `..` path segment as
+  leaving `baseDir`.
+- Auditing with the rule trace switched off records no trace at all; `AuditConfig`'s
+  low-overhead mode no longer allocates a trace it discards.
+- Go: every optional free-text string of the document model is a `*string`, so a property
+  written as `""` is present in the canonical form and the content hash exactly as it is in the
+  other SDKs, instead of being dropped as if absent. Merging, the receipt policy summary, the
+  bundle subject and the observer events carry presence the same way. Vector:
+  `fixtures/core/hash/empty-strings.yaml`. The Python bundle subject and the Rust signer's
+  policy-name claim follow the same presence rule.
+
+- The regex profile reads every pattern the same way in all four SDKs: one group grammar
+  (named groups in either spelling are permitted; `(?#`, lookaround, backreferences and POSIX
+  bracket classes are refused), `{,n}` is refused, `(?i)` folds ASCII letters only by expansion
+  so no engine folds U+017F or U+212A, an astral character inside a class is one scalar value in
+  TypeScript, a pattern is at most 2048 bytes, every rejection carries the same per-feature
+  message and E005, and a fixed-offset `timezone` is `[+-]HH` or `[+-]HH:MM` with two-digit
+  fields. Vectors under `fixtures/core/invalid/regex-*.yaml`, `when-timezone-*.yaml` and
+  `fixtures/core/evaluation/regex-dialect.test.yaml`.
+- Canonical form: a number written with integer syntax is bounded by 2^53-1 and one written
+  with float syntax is emitted at any magnitude, in every SDK (TypeScript narrows integers at
+  parse time; Go refuses an integer literal past 2^64 that its YAML parser would have rounded);
+  a written `null` for a declared property, an unknown key, a non-object `extensions` and an
+  unknown extension name are refused everywhere, and the reference canonicalizer refuses an
+  unresolved `extends` and a duplicate YAML key. Vector `fixtures/core/hash/numbers-large.yaml`.
+- Evidence chain: bundle verifiers reject a revoked or retired key (`key_revoked`,
+  `key_retired`; vectors `revoked-key`, `retired-key`); every receipt parser validates the 0.2
+  structure and refuses an explicit `null`; a leap second is refused (vector
+  `leap-second-signed-at`); log writers share one lock protocol (the `<path>.lock` sentinel,
+  with `flock` held underneath where the platform has it, and a bounded wait), always record
+  `previous_entry_hash`, rotate under one lock and refuse a corrupt tail; the Python refusal
+  receipt carries the refused document's real content hash; TypeScript and Python record
+  `missing_signature` when verification was attempted; a claimed `key_id` is recorded only when
+  well formed; `compile()` refuses a document that still declares `extends` in every SDK;
+  `Policy::resolve` merges options instead of replacing them; Go's `EvaluateAudited` returns an
+  error rather than a receipt with an empty content hash.
+- Conditions and adapters: `when.context` matching (scalar membership in both directions,
+  array intersection, exact numbers) is written into core spec 3.13 and pinned by
+  `conditions-context-match.test.yaml`; Python drops a counter that is not a whole number; Go
+  refuses an empty `capability` or `timezone`; `min_score` is bounded to 100 at parse time; the
+  TypeScript Claude adapter scans a `create` command's `file_text`, strips dated tool suffixes
+  and maps `web_fetch` to egress; MCP tools map through the shared well-known table; the Vercel
+  wrapper keeps a tool's prototype; the Go adapter entry points carry the same names as the
+  other SDKs; the TypeScript guard re-checks an adopted resolution under `requireSignature`; the
+  poller survives a throwing callback; the Python provider fingerprints a file before loading it.
+- Observers and sinks: a failing receipt sink never changes a decision and is reported as a
+  `sink.error` event in every SDK (Go's `Check` no longer returns it); `MultiSink` surfaces a
+  child's failure; Rust observers absorb a panicking hook; Python and Go OTLP records carry
+  `observedTimeUnixNano` and `severityNumber`; Go's metrics count only load failures as failed
+  loads.
+
+**CLI and tooling**
+
+- `h2h report` runs the receipt schema pass `h2h log verify` runs and takes `--keyring`,
+  `--key`, `--require-signatures` and `--max-skew`; an unresolvable `--policy` for
+  `h2h bundle verify` is a `policy_mismatch`; `h2h audit` and `h2h schema` report a
+  serialization failure instead of exiting 0 silently.
+- Workflows declare `permissions: contents: read`; the PyPI publish action is pinned to a
+  commit; the release job fails without both signing keys unless `allow-unsigned` is passed and
+  verifies the bundles it ships; the action caches the binary under the resolved release tag;
+  `cargo deny` refuses yanked and unmaintained crates; every generator requires `rustfmt` and
+  formats for edition 2024.
+- `h2h report` treats a file holding any log entry as a log and verifies its chain, so a plain
+  receipt prepended to a log cannot carry it past verification; mixed record types are reported.
+- Control coverage (lint L011, `h2h audit --controls`, `h2h report`) counts a mapping only when
+  its rule path resolves in the document.
+- The GitHub Action reads its inputs from the environment instead of interpolating them into
+  the shell script.
+- The `h2h` build script watches the branch ref and `packed-refs` as well as `.git/HEAD`,
+  including from a linked worktree, so `h2h version` reports the current commit.
 
 **Library**
 

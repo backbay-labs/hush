@@ -27,7 +27,7 @@ const signingVectorsVersion = "0.1.0"
 // signingVectorCaseCount is the number of cases the specification's table
 // enumerates. Pinning it means a vector added upstream cannot be silently
 // skipped by a runner that only iterates what it finds.
-const signingVectorCaseCount = 16
+const signingVectorCaseCount = 18
 
 // signingReasonCodes is the closed set from spec section 6.4. A vector that
 // expects a code outside it is a manifest this SDK does not understand, which
@@ -197,6 +197,64 @@ func TestSigningVectors(t *testing.T) {
 	}
 }
 
+// TestEnvelopeRejectsAnEmptyOptionalClaim covers a claim that is present and
+// empty. The schema gives `policy_name` and `signer` a minimum length of one,
+// so an envelope carrying one cannot be read past check 1 of spec section 6.2
+// -- on either path into the model, the `.sig` parser or the typed member a
+// log entry's signature arrives as.
+func TestEnvelopeRejectsAnEmptyOptionalClaim(t *testing.T) {
+	dir := signingFixtureDir(t)
+	data, err := os.ReadFile(filepath.Join(dir, "policies", "basic.sig"))
+	if err != nil {
+		t.Fatalf("cannot read the vector: %v", err)
+	}
+	keyringJSON, err := os.ReadFile(filepath.Join(dir, "keys", "keyring.json"))
+	if err != nil {
+		t.Fatalf("cannot read the keyring: %v", err)
+	}
+	keyring, err := LoadKeyring(keyringJSON)
+	if err != nil {
+		t.Fatalf("cannot load the keyring: %v", err)
+	}
+	now, err := time.Parse(time.RFC3339, "2026-09-15T12:00:00Z")
+	if err != nil {
+		t.Fatalf("cannot parse the verifier clock: %v", err)
+	}
+
+	for _, member := range []string{"policy_name", "signer"} {
+		t.Run(member, func(t *testing.T) {
+			var document map[string]any
+			if err := json.Unmarshal(data, &document); err != nil {
+				t.Fatalf("cannot read the envelope: %v", err)
+			}
+			document[member] = ""
+			edited, err := json.Marshal(document)
+			if err != nil {
+				t.Fatalf("cannot re-encode the envelope: %v", err)
+			}
+
+			if envelope, err := ParseEnvelope(edited); err == nil {
+				t.Fatalf("an empty %s must be refused, got %+v", member, envelope)
+			} else if reason, _ := ReasonFromError(err); reason != ReasonMalformedEnvelope {
+				t.Errorf("expected %s, got %q: %v", ReasonMalformedEnvelope, reason, err)
+			}
+
+			var typed Envelope
+			if err := json.Unmarshal(edited, &typed); err != nil {
+				t.Fatalf("cannot read the envelope: %v", err)
+			}
+			result := VerifyContentHash(&typed, typed.ContentHash, VerifyOptions{
+				Keyring: keyring,
+				Now:     now,
+			})
+			if result.Reason != ReasonMalformedEnvelope {
+				t.Errorf("expected %s, got %q: %s",
+					ReasonMalformedEnvelope, result.Reason, result.Detail)
+			}
+		})
+	}
+}
+
 // parseSigningVectorPolicy loads a vector's policy the way a verifier sees
 // it: as parsed but unresolved, leaving the resolution that the content hash
 // depends on to the verifier itself.
@@ -323,8 +381,8 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("envelope key_id %s does not match the key id of the signing key %s",
 			envelope.KeyID, keyID)
 	}
-	if envelope.PolicyName != "signed-basic" {
-		t.Fatalf("expected policy_name signed-basic, got %q", envelope.PolicyName)
+	if stringValue(envelope.PolicyName) != "signed-basic" {
+		t.Fatalf("expected policy_name signed-basic, got %q", stringValue(envelope.PolicyName))
 	}
 	if envelope.PolicyVersion == nil || *envelope.PolicyVersion != 4 {
 		t.Fatalf("expected policy_version 4 copied from the policy, got %v", envelope.PolicyVersion)
@@ -332,8 +390,8 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	if envelope.SignedAt != "2026-09-15T09:00:00.000Z" {
 		t.Fatalf("unexpected signed_at %q", envelope.SignedAt)
 	}
-	if envelope.ExpiresAt != "2026-09-16T09:00:00.000Z" {
-		t.Fatalf("unexpected expires_at %q", envelope.ExpiresAt)
+	if stringValue(envelope.ExpiresAt) != "2026-09-16T09:00:00.000Z" {
+		t.Fatalf("unexpected expires_at %q", stringValue(envelope.ExpiresAt))
 	}
 
 	options := VerifyOptions{Keyring: keyring, Now: now}
@@ -397,7 +455,8 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 
 	t.Run("edited claim", func(t *testing.T) {
 		edited := *envelope
-		edited.Signer = "attacker@example.com"
+		attacker := "attacker@example.com"
+		edited.Signer = &attacker
 		result := VerifyPolicy(spec, &edited, options)
 		if result.Reason != ReasonSignatureMismatch {
 			t.Fatalf("expected %s, got %q: %s", ReasonSignatureMismatch, result.Reason, result.Detail)
@@ -609,15 +668,12 @@ func (s jsonSchemaShape) assertValid(t *testing.T, document map[string]any) {
 	}
 }
 
-// loadSignatureSchema reads the 0.2 signature schema from whichever location
-// currently holds it: the staging directory it lands in first, or the
-// published directory once it is promoted.
+// loadSignatureSchema reads the published 0.2 signature schema.
 func loadSignatureSchema(t *testing.T) jsonSchemaShape {
 	t.Helper()
 	root := fixtureRepoRoot(t)
 	candidates := []string{
-		filepath.Join(root, "schemas", "staged", "0.2.0", "hushspec-signature.v0.schema.json"),
-		filepath.Join(root, "schemas", "hushspec-signature.v0.schema.json"),
+		filepath.Join(root, "schemas", "hushspec-signature.v1.schema.json"),
 	}
 
 	for _, path := range candidates {

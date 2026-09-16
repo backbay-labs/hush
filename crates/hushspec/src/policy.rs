@@ -206,9 +206,31 @@ impl Policy {
 
     /// Resolve with `options`. Without this call, resolution runs with
     /// [`ResolveOptions::default`]: builtins and files, no verification.
+    ///
+    /// The options are merged into whatever the builder already carries: each
+    /// member `options` sets wins, and `require_signature` is the union of the
+    /// two, so `verify(keyring).resolve(ResolveOptions::default())` keeps the
+    /// keyring and the requirement rather than silently dropping them. A
+    /// requirement, once declared, can only be dropped by building a fresh
+    /// [`Policy`].
     #[must_use]
     pub fn resolve(mut self, options: ResolveOptions) -> Self {
-        self.options = options;
+        let ResolveOptions {
+            require_signature,
+            #[cfg(feature = "signing")]
+            keyring,
+            #[cfg(feature = "signing")]
+            verify,
+            signature_locator,
+        } = options;
+        self.options.require_signature |= require_signature;
+        #[cfg(feature = "signing")]
+        {
+            self.options.keyring = keyring.or(self.options.keyring.take());
+            self.options.verify = verify.or(self.options.verify.take());
+        }
+        self.options.signature_locator =
+            signature_locator.or(self.options.signature_locator.take());
         self
     }
 
@@ -356,6 +378,30 @@ rules:
             .compile()
             .expect_err("an unknown builtin must not compile");
         assert!(matches!(error, PolicyError::Resolve(_)), "{error}");
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    fn resolve_keeps_a_requirement_an_earlier_call_declared() {
+        let keyring = crate::signing::Keyring::parse(
+            &std::fs::read_to_string("../../fixtures/signing/keys/keyring.json")
+                .expect("reads the test keyring"),
+        )
+        .expect("parses the test keyring");
+
+        let policy = Policy::from_str("hushspec: \"0.1.0\"\n")
+            .expect("parses")
+            .verify(keyring)
+            .resolve(ResolveOptions::default());
+
+        assert!(
+            policy.options.require_signature,
+            "resolve must not drop a requirement declared by verify"
+        );
+        assert!(
+            policy.options.keyring.is_some(),
+            "resolve must not drop the keyring declared by verify"
+        );
     }
 
     #[test]

@@ -100,6 +100,16 @@ class TestContextConditions:
         cond = Condition(context={"user.groups": "ml-team"})
         assert evaluate_condition(cond, ctx) is True
 
+    def test_numbers_compare_exactly(self):
+        cond = Condition(context={"custom.ratio": 0.3})
+        assert evaluate_condition(cond, RuntimeContext(custom={"ratio": 0.3})) is True
+        assert (
+            evaluate_condition(
+                cond, RuntimeContext(custom={"ratio": 0.30000000000000004})
+            )
+            is False
+        )
+
 
 
 # Array-vs-array intersection and number/bool array membership (core spec
@@ -737,6 +747,22 @@ class TestRatePredicate:
         assert context.counters == {"shell_commands": 7}
         assert evaluate_condition(self.GTE, context)
 
+    def test_a_counter_that_is_not_a_whole_number_is_dropped(self):
+        context = RuntimeContext.from_dict(
+            {
+                "counters": {
+                    "shell_commands": True,
+                    "egress_calls": "3",
+                    "tool_calls": 2.5,
+                    "file_writes": 4.0,
+                }
+            }
+        )
+        assert context.counters == {"file_writes": 4}
+        # A dropped counter is absent, so the predicate reading it is
+        # unevaluable and the block stays active.
+        assert evaluate_condition(self.GTE, context)
+
 
 class TestRateDecoding:
     """Rate shape violations are parse errors (core spec 3.13, code E001)."""
@@ -916,3 +942,9 @@ class TestTimezoneOffsetStrictness:
     def test_an_out_of_range_offset_is_unknown(self):
         assert not timezone_is_known("+24:00")
         assert not timezone_is_known("+09:60")
+
+    def test_the_offset_grammar_is_two_digit_fields(self):
+        for zone in ("+05:30", "-08:00", "+05", "-08", "+00:00"):
+            assert timezone_is_known(zone), zone
+        for zone in ("+5", "+0530", "+5:0", "++5", "+05:3", "+05:30 "):
+            assert not timezone_is_known(zone), zone

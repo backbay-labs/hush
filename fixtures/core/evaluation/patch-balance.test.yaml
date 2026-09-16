@@ -42,14 +42,27 @@ cases:
     expect:
       decision: deny
       matched_rule: rules.patch_integrity.max_imbalance_ratio
-  - description: "header lines are not counted"
+  - description: "the +++ header is not counted as an addition"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        +++ b/a.txt
+        +a
+        +b
+        +c
+        -d
+    expect:
+      decision: allow
+  - description: "the --- header is not counted as a deletion"
     action:
       type: patch_apply
       target: "/proj/a.txt"
       content: |
         --- a/a.txt
-        +++ b/a.txt
-        +a
+        -a
         -b
+        -c
+        +d
     expect:
       decision: allow

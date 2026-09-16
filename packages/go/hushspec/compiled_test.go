@@ -106,7 +106,7 @@ func TestCompiledPolicyMatchesFreeFunctions(t *testing.T) {
 func TestCompilePolicyRejectsPatternOutsideProfile(t *testing.T) {
 	spec := &HushSpec{
 		HushSpecVersion: "0.1.0",
-		Name:            "bad-pattern",
+		Name:            strPtr("bad-pattern"),
 		Rules: &Rules{
 			SecretPatterns: &SecretPatternsRule{
 				Enabled: true,
@@ -151,6 +151,19 @@ func TestCompilePolicyRejectsPatternOutsideProfile(t *testing.T) {
 func TestCompilePolicyRejectsNilSpec(t *testing.T) {
 	if _, err := CompilePolicy(nil); err == nil {
 		t.Fatal("expected an error compiling a nil document")
+	}
+}
+
+// Core spec 2.3: compiling an unresolved document would drop every rule block
+// its base contributes.
+func TestCompilePolicyRejectsADocumentThatStillExtends(t *testing.T) {
+	spec, err := Parse("hushspec: \"0.1.0\"\nextends: \"builtin:default\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	_, err = CompilePolicy(spec)
+	if err == nil || !strings.Contains(err.Error(), "builtin:default") {
+		t.Fatalf("expected a refusal naming the unresolved reference, got %v", err)
 	}
 }
 
@@ -240,7 +253,10 @@ func TestCompiledEvaluateAuditedMatchesSpecReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audited spec: %v", err)
 	}
-	got := policy.EvaluateAudited(nil, action, &config, ctx)
+	got, err := policy.EvaluateAudited(nil, action, &config, ctx)
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 
 	if got.Policy.ContentHash != want.Policy.ContentHash ||
 		got.Policy.Name != want.Policy.Name ||
@@ -253,5 +269,37 @@ func TestCompiledEvaluateAuditedMatchesSpecReceipt(t *testing.T) {
 	}
 	if len(got.RuleTrace) != len(want.RuleTrace) {
 		t.Errorf("rule trace length = %d, want %d", len(got.RuleTrace), len(want.RuleTrace))
+	}
+}
+
+// The free-function cache is bounded, and at the bound it empties rather than
+// freezing: a run that evaluates thousands of one-shot documents must neither
+// retain them all nor recompile every later one on every action.
+func TestCachedCompileEmptiesAtItsBound(t *testing.T) {
+	compiledCacheMu.Lock()
+	clear(compiledCache)
+	compiledCacheMu.Unlock()
+
+	specs := make([]*HushSpec, compiledCacheLimit+1)
+	for index := range specs {
+		spec, err := Parse("hushspec: \"0.1.0\"\n")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		specs[index] = spec
+		cachedCompile(spec)
+	}
+
+	compiledCacheMu.RLock()
+	size := len(compiledCache)
+	compiledCacheMu.RUnlock()
+	if size != 1 {
+		t.Fatalf("cache holds %d documents after %d, want 1", size, len(specs))
+	}
+
+	// The newest document is still memoized, so back-to-back calls on it do
+	// not recompile.
+	if cachedCompile(specs[len(specs)-1]) != cachedCompile(specs[len(specs)-1]) {
+		t.Error("the most recent document was not cached")
 	}
 }

@@ -141,23 +141,69 @@ func TestPunycodeMatchesRFCExamples(t *testing.T) {
 }
 
 // TestEveryPatchOfASupportedMinorIsAccepted covers core spec 2.2: an engine
-// declaring support for minor X.Y accepts every X.Y.Z document.
+// declaring support for minor X.Y accepts every X.Y.Z document. The engine
+// declares 0.1, 0.2 and 1.0 (core spec 10.2), and 1.7 is the unsupported
+// minor the invalid vector pins.
 func TestEveryPatchOfASupportedMinorIsAccepted(t *testing.T) {
-	for _, version := range []string{"0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"} {
+	for _, version := range []string{"0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7", "1.0.0", "1.0.3"} {
 		if !IsSupported(version) {
 			t.Errorf("expected %q to be supported", version)
 		}
 	}
-	for _, version := range []string{"0.3.0", "1.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", "", "0.1.-1"} {
+	for _, version := range []string{"0.3.0", "1.1.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", "", "0.1.-1"} {
 		if IsSupported(version) {
 			t.Errorf("expected %q to be rejected", version)
 		}
 	}
-	if Version != "0.2.0" {
-		t.Errorf("expected engine version 0.2.0, got %q", Version)
+	if Version != "1.0.0" {
+		t.Errorf("expected engine version 1.0.0, got %q", Version)
 	}
-	if SupportedMinor("0.1.7") != "0.1" || SupportedMinor("0.2.7") != "0.2" {
+	if SupportedMinor("0.1.7") != "0.1" || SupportedMinor("0.2.7") != "0.2" ||
+		SupportedMinor("1.0.7") != "1.0" {
 		t.Error("expected SupportedMinor to report the X.Y minor of a supported version")
+	}
+}
+
+// TestAOnePointZeroDocumentIsEvaluatedAsAZeroPointTwoDocument covers core spec
+// 10.2: 1.0 freezes the 0.2 semantics without changing them, so one document
+// declared under either version validates alike and reaches the same decision
+// by the same rule.
+func TestAOnePointZeroDocumentIsEvaluatedAsAZeroPointTwoDocument(t *testing.T) {
+	const document = `hushspec: "%s"
+name: version-equivalence
+rules:
+  egress:
+    allow:
+      - api.example.com
+    default: block
+`
+	action := &EvaluationAction{Type: "egress", Target: "blocked.example.com"}
+
+	var hashes []string
+	for _, version := range []string{"0.2.0", "1.0.0"} {
+		spec, err := Parse(fmt.Sprintf(document, version))
+		if err != nil {
+			t.Fatalf("parse the %s document: %v", version, err)
+		}
+		if result := Validate(spec); !result.IsValid() {
+			t.Fatalf("%s did not validate: %+v", version, result.Errors)
+		}
+		decision := Evaluate(spec, action)
+		if decision.Decision != DecisionDeny || decision.MatchedRule != "rules.egress.default" {
+			t.Errorf("%s: got %s from %s, want deny from rules.egress.default",
+				version, decision.Decision, decision.MatchedRule)
+		}
+		hash, err := ContentHash(spec)
+		if err != nil {
+			t.Fatalf("hash the %s document: %v", version, err)
+		}
+		hashes = append(hashes, hash)
+	}
+
+	// The `hushspec` field is part of the canonical form, so the two hashes
+	// differ; what must not differ is that each is stable and well formed.
+	if hashes[0] == hashes[1] {
+		t.Error("two documents declaring different versions hashed the same")
 	}
 }
 
@@ -168,6 +214,127 @@ func TestValidateAcceptsAnyPatchOfASupportedMinor(t *testing.T) {
 	}
 	if result := Validate(spec); !result.IsValid() {
 		t.Fatalf("expected 0.1.1 to validate, got %+v", result.Errors)
+	}
+}
+
+// TestEmptyNameOnlyRefusedInThe10Format covers core spec 2 and versioning spec
+// 10: a present `name` must be non-empty from the 1.0 document format on, while
+// the frozen 0.x format allows `name: ""`.
+func TestEmptyNameOnlyRefusedInThe10Format(t *testing.T) {
+	for _, version := range []string{"0.1.0", "0.2.0", "0.2.7"} {
+		if _, err := Parse("hushspec: \"" + version + "\"\nname: \"\"\n"); err != nil {
+			t.Errorf("expected %s to accept an empty name, got %v", version, err)
+		}
+	}
+	for _, version := range []string{"1.0.0", "1.0.3"} {
+		if _, err := Parse("hushspec: \"" + version + "\"\nname: \"\"\n"); err == nil {
+			t.Errorf("expected %s to refuse an empty name", version)
+		}
+	}
+}
+
+// TestEmptyNameUnderAnUnreadableVersion covers the fail-closed half: a version
+// that cannot be read as MAJOR.MINOR.PATCH is refused on its own account, and
+// must never be a way to relax a constraint as well.
+func TestEmptyNameUnderAnUnreadableVersion(t *testing.T) {
+	if _, err := Parse("hushspec: \"not-a-version\"\nname: \"\"\n"); err == nil ||
+		!strings.Contains(err.Error(), "name: must not be empty when present") {
+		t.Fatalf("expected the empty name to be refused, got %v", err)
+	}
+}
+
+// TestAWrittenNullIsRefusedWhereTheFormatTypesAValue covers canonical spec
+// 2.2: no HushSpec property is nullable, and yaml.v3 would otherwise decode a
+// written null into the zero value -- for an optional field, exactly what an
+// absent key decodes to; for a list element or a schema-map entry, a value the
+// author never wrote.
+func TestAWrittenNullIsRefusedWhereTheFormatTypesAValue(t *testing.T) {
+	cases := []struct{ name, source, want string }{
+		{
+			name:   "rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress: null\n",
+			want:   "rules.egress: invalid type: null, expected an object",
+		},
+		{
+			name:   "top-level string",
+			source: "hushspec: \"1.0.0\"\nname: null\n",
+			want:   "name: invalid type: null, expected a string",
+		},
+		{
+			name:   "governance string",
+			source: "hushspec: \"1.0.0\"\nmetadata:\n  author: null\n",
+			want:   "metadata.author: invalid type: null, expected a string",
+		},
+		{
+			name:   "list inside a rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    allow: null\n",
+			want:   "rules.egress.allow: invalid type: null, expected an array",
+		},
+		{
+			name: "condition nested under a rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    when:\n" +
+				"      all_of:\n        - capability: null\n",
+			want: "rules.egress.when.all_of[0].capability: invalid type: null, expected a string",
+		},
+		{
+			name: "extension module property",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard:\n        description: null\n",
+			want: "extensions.posture.states.standard.description: invalid type: null, expected a string",
+		},
+		{
+			name:   "string list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    allow: [null]\n",
+			want:   "rules.egress.allow[0]: invalid type: null, expected a string",
+		},
+		{
+			name: "object list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  secret_patterns:\n    patterns:\n" +
+				"      - null\n",
+			want: "rules.secret_patterns.patterns[0]: invalid type: null, expected an object",
+		},
+		{
+			name: "condition list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    when:\n" +
+				"      all_of:\n        - null\n",
+			want: "rules.egress.when.all_of[0]: invalid type: null, expected an object",
+		},
+		{
+			name: "schema map entry",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard: null\n",
+			want: "extensions.posture.states.standard: invalid type: null, expected an object",
+		},
+		{
+			name: "schema map entry with a scalar value",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard:\n        budgets:\n" +
+				"          file_writes: null\n",
+			want: "extensions.posture.states.standard.budgets.file_writes: " +
+				"invalid type: null, expected an integer",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := Parse(testCase.source)
+			if err == nil {
+				t.Fatalf("expected a refusal, the document was accepted")
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+// TestANullInsideAContextValueIsALeaf draws the line the walk stops at:
+// `when.context` holds values to compare against the runtime context, so a
+// null there is data, not a property of the document format.
+func TestANullInsideAContextValueIsALeaf(t *testing.T) {
+	source := "hushspec: \"1.0.0\"\nrules:\n  egress:\n    default: block\n" +
+		"    when:\n      context:\n        user.tenant: null\n"
+	if _, err := Parse(source); err != nil {
+		t.Fatalf("expected a null context value to be accepted, got %v", err)
 	}
 }
 

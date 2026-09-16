@@ -2,17 +2,19 @@ import { createHash } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
 import path from 'node:path';
 import { canonicalizeValue, type JsonValue } from './canonical.js';
 import type { DecisionReceipt, EnforcementMode, PolicySummary } from './receipt.js';
-import { RECEIPT_VERSION, formatTimestamp } from './receipt.js';
+import { RECEIPT_VERSION, formatTimestamp, parseReceipt } from './receipt.js';
 import type { Envelope, Keyring, KeyringDocument, VerificationOutcome } from './signing.js';
 import { signContentHash, verifyContentHash } from './signing.js';
 import type { ReceiptSink } from './sinks.js';
@@ -190,6 +192,29 @@ const SIGNATURE_KEYS: ReadonlySet<string> = new Set([
   'signature',
 ]);
 
+const POLICY_SUMMARY_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'version',
+  'spec_version',
+  'content_hash',
+  'extends_chain',
+  'signature',
+]);
+
+const CHAIN_LINK_KEYS: ReadonlySet<string> = new Set(['source', 'content_hash']);
+
+const SIGNATURE_STATUS_KEYS: ReadonlySet<string> = new Set([
+  'verified',
+  'key_id',
+  'verified_at',
+  'reason',
+]);
+
+const SDK_KEYS: ReadonlySet<string> = new Set(['name', 'version']);
+
+/** The payload members an entry may carry, each a JSON object when present. */
+const PAYLOAD_MEMBERS = ['receipt', 'policy_event', 'log_started', 'signature'] as const;
+
 /**
  * The first unknown member of `value` against `allowed`, or `undefined`.
  * Unknown fields are a break (log spec 8, step 1): a verifier that ignored
@@ -204,6 +229,38 @@ function unknownKey(value: unknown, allowed: ReadonlySet<string>): string | unde
 }
 
 /**
+ * The first unknown member anywhere inside a `policy_event`, or `undefined`.
+ *
+ * The log-entry schema closes every object it defines, not only the ones the
+ * entry names directly, so the check has to reach the policy identity and the
+ * SDK record too.
+ */
+function unknownPolicyEventKey(event: unknown): string | undefined {
+  const top = unknownKey(event, POLICY_EVENT_KEYS);
+  if (top !== undefined) return top;
+  if (typeof event !== 'object' || event === null) return undefined;
+  const { policy, sdk } = event as { policy?: unknown; sdk?: unknown };
+  const inPolicy = unknownKey(policy, POLICY_SUMMARY_KEYS) ?? unknownSummaryKey(policy);
+  return inPolicy ?? unknownKey(sdk, SDK_KEYS);
+}
+
+/** The first unknown member inside a policy summary's own objects. */
+function unknownSummaryKey(policy: unknown): string | undefined {
+  if (typeof policy !== 'object' || policy === null) return undefined;
+  const { extends_chain: chain, signature } = policy as {
+    extends_chain?: unknown;
+    signature?: unknown;
+  };
+  if (Array.isArray(chain)) {
+    for (const link of chain) {
+      const unknown = unknownKey(link, CHAIN_LINK_KEYS);
+      if (unknown !== undefined) return unknown;
+    }
+  }
+  return unknownKey(signature, SIGNATURE_STATUS_KEYS);
+}
+
+/**
  * Recompute the hash an entry should carry: `sha256:` over the RFC 8785
  * canonical form of the entry with `entry_hash` and `signature` removed.
  */
@@ -213,11 +270,17 @@ export function computeEntryHash(entry: Partial<LogEntry>): string {
   return `sha256:${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
 }
 
-/** Whether exactly the payload named by `entry_type` is present. */
+/**
+ * Whether exactly the payload named by `entry_type` is present.
+ *
+ * A member set to `null` counts as absent, as it does in every other SDK, so
+ * an entry that names a payload it did not carry is a payload mismatch rather
+ * than something a later step dereferences.
+ */
 export function payloadMatchesType(entry: LogEntry): boolean {
-  const receipt = entry.receipt !== undefined;
-  const event = entry.policy_event !== undefined;
-  const started = entry.log_started !== undefined;
+  const receipt = entry.receipt != null;
+  const event = entry.policy_event != null;
+  const started = entry.log_started != null;
   switch (entry.entry_type) {
     case 'receipt':
       return receipt && !event && !started;
@@ -265,9 +328,12 @@ function sleepSync(ms: number): void {
 
 /**
  * Run `body` while holding `<path>.lock`, created atomically with `O_EXCL`.
- * A stale lock (a writer that died) times out rather than being bypassed:
- * two writers appending to one file interleave chains and corrupt both
- * (log spec 9).
+ *
+ * This is the lock every SDK takes (log spec 4), so writers in different
+ * languages exclude each other. A stale lock -- one a writer that died left
+ * behind -- times out rather than being bypassed: breaking a lock this process
+ * cannot prove is stale would let two writers interleave chains and corrupt
+ * both (log spec 9).
  */
 function withFileLock<T>(target: string, body: () => T): T {
   const lockPath = `${target}.lock`;
@@ -303,10 +369,14 @@ function withFileLock<T>(target: string, body: () => T): T {
  * Appends hash-linked entries to a JSON Lines file, fsyncing each one.
  *
  * Opening an existing file continues its chain from the last entry. Appends
- * are serialized across processes by a best-effort `<path>.lock` file; a lock
- * held longer than {@link LOCK_TIMEOUT_MS} is reported as an error rather
- * than bypassed. {@link ChainedFileSink.rotate} carries the chain into a new
- * file through a `log_started` entry.
+ * are serialized across processes by the `<path>.lock` sentinel every SDK
+ * takes (log spec 4); a lock held longer than {@link LOCK_TIMEOUT_MS} is
+ * reported as an error rather than bypassed. Each entry's `seq` and
+ * `prev_hash` come from the file's current last entry, read while that lock is
+ * held, so a second sink or process writing the same log extends the chain
+ * instead of forking it.
+ * {@link ChainedFileSink.rotate} carries the chain into a new file through a
+ * `log_started` entry.
  */
 export class ChainedFileSink implements ReceiptSink {
   private logPath: string;
@@ -368,42 +438,56 @@ export class ChainedFileSink implements ReceiptSink {
   /**
    * Append one entry, fsynced before it is reported as written (log spec 3).
    *
-   * @throws {LogChainError} when the lock cannot be taken.
+   * The chain head is re-read from the file under the write lock, so an entry
+   * continues what the file holds rather than what this sink last wrote. A
+   * tail that cannot be parsed fails the append: continuing past it would
+   * leave a second, unlinked chain in the file.
+   *
+   * @throws {LogChainError} when the lock cannot be taken or the file's last
+   * line is not a log entry.
    */
   append(payload: Payload): LogEntry {
-    // Member order is fixed (log spec 4), so two writers appending the same
-    // chain produce byte-identical files. The hash itself is over the
-    // canonical form and does not depend on it.
-    const entry: LogEntry = {
-      log_version: LOG_VERSION,
-      seq: this.seq + 1,
-      prev_hash: this.prevHash,
-      entry_type: entryTypeOf(payload),
-      ...('receipt' in payload ? { receipt: payload.receipt } : {}),
-      ...('policyEvent' in payload ? { policy_event: payload.policyEvent } : {}),
-      ...('logStarted' in payload ? { log_started: payload.logStarted } : {}),
-      entry_hash: '',
-    };
-    entry.entry_hash = computeEntryHash(entry);
-    if (this.signerKey !== undefined) {
-      entry.signature = signContentHash(entry.entry_hash, this.signerKey, {
-        signedAt: this.now(),
-      });
-    }
-
-    const line = `${JSON.stringify(entry)}\n`;
     const target = this.logPath;
     // Before the lock: the lock file lives next to the log, so the directory
     // has to exist for the lock itself to be creatable.
     mkdirSync(path.dirname(target), { recursive: true });
-    withFileLock(target, () => {
+    const entry = withFileLock(target, () => {
+      // A missing or empty file means a fresh log, or a rotation whose
+      // `log_started` entry is about to seed the new file; both continue from
+      // the head this sink carries.
+      const head = lastEntry(target);
+      const seq = head === undefined ? this.seq : head.seq;
+      const prevHash = head === undefined ? this.prevHash : head.entry_hash;
+      // Member order is fixed (log spec 4), so two writers appending the same
+      // chain produce byte-identical files. The hash itself is over the
+      // canonical form and does not depend on it.
+      const written: LogEntry = {
+        log_version: LOG_VERSION,
+        seq: seq + 1,
+        prev_hash: prevHash,
+        entry_type: entryTypeOf(payload),
+        ...('receipt' in payload ? { receipt: payload.receipt } : {}),
+        ...('policyEvent' in payload ? { policy_event: payload.policyEvent } : {}),
+        ...('logStarted' in payload ? { log_started: payload.logStarted } : {}),
+        entry_hash: '',
+      };
+      written.entry_hash = computeEntryHash(written);
+      // Signing belongs under the lock too: the signature covers `entry_hash`,
+      // which depends on the `prev_hash` just read.
+      if (this.signerKey !== undefined) {
+        written.signature = signContentHash(written.entry_hash, this.signerKey, {
+          signedAt: this.now(),
+        });
+      }
+
       const fd = openSync(target, 'a');
       try {
-        writeSync(fd, line);
+        writeSync(fd, `${JSON.stringify(written)}\n`);
         fsyncSync(fd);
       } finally {
         closeSync(fd);
       }
+      return written;
     });
 
     this.seq = entry.seq;
@@ -444,31 +528,100 @@ export class ChainedFileSink implements ReceiptSink {
       logStarted: {
         timestamp: formatTimestamp(this.now()),
         previous_file: previousFile,
-        ...(previousEntryHash === GENESIS_HASH
-          ? {}
-          : { previous_entry_hash: previousEntryHash }),
+        // Always recorded, the genesis value included (log spec 5): a verifier
+        // given both files compares this against the previous file's last
+        // hash, and an omitted member is not that hash.
+        previous_entry_hash: previousEntryHash,
       },
     });
   }
 }
 
+/** How much of the tail to read at a time when looking for the last line. */
+const TAIL_CHUNK_BYTES = 8 * 1024;
+
 /** The last non-empty line of `filePath` as an entry, or `undefined`. */
 function lastEntry(filePath: string): LogEntry | undefined {
-  if (!existsSync(filePath)) return undefined;
-  const text = readFileSync(filePath, 'utf8');
-  let last: string | undefined;
-  for (const line of text.split('\n')) {
-    if (line.trim() !== '') last = line;
-  }
+  const last = lastLine(filePath);
   if (last === undefined) return undefined;
+  let parsed: unknown;
   try {
-    return JSON.parse(last) as LogEntry;
+    parsed = JSON.parse(last) as unknown;
   } catch (error) {
     throw new LogChainError(
       `last line of ${filePath} is not a log entry: ` +
         `${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  // Reading the head loosely would seed the chain from a malformed tail: a
+  // `seq` that is not an integer or an `entry_hash` that is not a string would
+  // become the next entry's link and break the chain for every later verifier.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new LogChainError(`last line of ${filePath} is not a log entry`);
+  }
+  const { seq, entry_hash: entryHash } = parsed as Record<string, unknown>;
+  if (typeof seq !== 'number' || !Number.isInteger(seq)) {
+    throw new LogChainError(
+      `last line of ${filePath} has a non-integer seq ${JSON.stringify(seq) ?? 'undefined'}`,
+    );
+  }
+  if (typeof entryHash !== 'string') {
+    throw new LogChainError(
+      `last line of ${filePath} has a non-string entry_hash ` +
+        `${JSON.stringify(entryHash) ?? 'undefined'}`,
+    );
+  }
+  return parsed as LogEntry;
+}
+
+/**
+ * The last non-empty line of `filePath`, read by seeking back from the end.
+ *
+ * Every append reads the head this way, so the cost has to be the size of one
+ * entry rather than the size of the log.
+ */
+function lastLine(filePath: string): string | undefined {
+  let fd: number;
+  try {
+    fd = openSync(filePath, 'r');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  try {
+    let end = fstatSync(fd).size;
+    let tail = Buffer.alloc(0);
+    while (end > 0) {
+      const start = Math.max(0, end - TAIL_CHUNK_BYTES);
+      const chunk = Buffer.alloc(end - start);
+      readSync(fd, chunk, 0, chunk.length, start);
+      tail = Buffer.concat([chunk, tail]);
+      end = start;
+      const line = lastLineOf(tail, end === 0);
+      if (line !== undefined) return line;
+    }
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The last non-empty line inside `buffer`, or `undefined` when it may still
+ * begin earlier in the file. `atStart` says `buffer` reaches the file's first
+ * byte, so a line with no newline before it is already complete.
+ */
+function lastLineOf(buffer: Buffer, atStart: boolean): string | undefined {
+  let end = buffer.length;
+  while (end > 0 && isAsciiWhitespace(buffer[end - 1]!)) end -= 1;
+  if (end === 0) return undefined;
+  const newline = buffer.lastIndexOf(0x0a, end - 1);
+  if (newline === -1 && !atStart) return undefined;
+  return buffer.toString('utf8', newline + 1, end);
+}
+
+function isAsciiWhitespace(byte: number): boolean {
+  return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
 }
 
 // --------------------------------------------------------------------------
@@ -582,6 +735,17 @@ export function verifyLogs(
       }
       const entry = parsed as LogEntry;
 
+      // An entry's hash covers whatever JSON the line held, so a
+      // hash-consistent line can still carry a member of the wrong shape.
+      // Check the shapes before reading into them: a malformed log is a
+      // verification failure, never an exception out of the verifier.
+      for (const member of PAYLOAD_MEMBERS) {
+        const value: unknown = entry[member];
+        if (value != null && (typeof value !== 'object' || Array.isArray(value))) {
+          return broke(`${member} is not a JSON object`);
+        }
+      }
+
       if (entry.log_version !== LOG_VERSION) {
         return broke(
           `unsupported log_version ${JSON.stringify(entry.log_version)}, ` +
@@ -595,7 +759,7 @@ export function verifyLogs(
         return broke(`payload does not match entry_type ${JSON.stringify(entry.entry_type)}`);
       }
       const nestedUnknown =
-        unknownKey(entry.policy_event, POLICY_EVENT_KEYS) ??
+        unknownPolicyEventKey(entry.policy_event) ??
         unknownKey(entry.log_started, LOG_STARTED_KEYS) ??
         unknownKey(entry.signature, SIGNATURE_KEYS);
       if (nestedUnknown !== undefined) {
@@ -640,21 +804,32 @@ export function verifyLogs(
         );
       }
 
-      if (entry.receipt !== undefined) {
+      if (entry.receipt != null) {
         if (entry.receipt.receipt_version !== RECEIPT_VERSION) {
           return broke(
             `receipt_version ${JSON.stringify(entry.receipt.receipt_version)} is not ` +
               `${JSON.stringify(RECEIPT_VERSION)}`,
           );
         }
+        // The entry hash covers whatever JSON the line held, so a
+        // hash-consistent line can still carry something that is not a
+        // receipt. Log spec 8, step 8 requires the payload to validate.
+        try {
+          parseReceipt(entry.receipt);
+        } catch (error) {
+          return broke(
+            'receipt does not validate against the 0.2 receipt schema: ' +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
         report.receipts += 1;
       }
-      if (entry.policy_event !== undefined) {
+      if (entry.policy_event != null) {
         report.policy_events += 1;
       }
 
       const signature = entry.signature;
-      if (signature === undefined) {
+      if (signature == null) {
         if (options.requireSignatures === true) {
           return broke(`${REASON_UNSIGNED}: signatures are required`);
         }

@@ -75,6 +75,12 @@ func Parse(yamlStr string) (*HushSpec, error) {
 			normalizeDecoderMessage(err.Error()))
 	}
 	applyParseDefaults(&spec, &presence)
+	// Go cannot give a field a default and writes a nil slice as JSON `null`,
+	// so a required collection that decoded to nil is given an empty value
+	// here -- the same place the Python model does it. Without this the other
+	// three SDKs would serialize an empty `states`, `transitions` or
+	// `rule_paths` and Go alone would drop it.
+	spec.initEmptyCollections()
 
 	// Raw-document checks catch structural issues the typed decode swallows
 	// (non-integer floats truncated into int fields, empty/invalid enum
@@ -135,6 +141,12 @@ func normalizeDecoderMessage(message string) string {
 	return message
 }
 
+// defaultMaxImbalanceRatio is the schema default for
+// `rules.patch_integrity.max_imbalance_ratio`. [applyParseDefaults]
+// materializes it, so a parsed document always carries a limit and evaluation
+// never has to invent one.
+const defaultMaxImbalanceRatio = 10.0
+
 func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 	if spec.Rules != nil && spec.Rules.ForbiddenPaths != nil {
 		if presence.Rules == nil || presence.Rules.ForbiddenPaths == nil || presence.Rules.ForbiddenPaths.Enabled == nil {
@@ -165,7 +177,7 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 			spec.Rules.PatchIntegrity.MaxDeletions = 500
 		}
 		if presence.Rules == nil || presence.Rules.PatchIntegrity == nil || presence.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
-			ratio := 10.0
+			ratio := defaultMaxImbalanceRatio
 			spec.Rules.PatchIntegrity.MaxImbalanceRatio = &ratio
 		}
 	}

@@ -1,6 +1,6 @@
 # HushSpec Core Specification
 
-The full normative specification is at [`spec/hushspec-core.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-core.md). This page summarizes the 0.2.0 draft.
+The full normative specification is at [`spec/hushspec-core.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-core.md). This page summarizes HushSpec 1.0.0.
 
 ## Document Structure
 
@@ -26,7 +26,7 @@ Documents use YAML 1.2 Core: only `true`/`false` are booleans (`yes`/`no`/`on`/`
 - The `hushspec` field **MUST** be present and be a string
 - Unknown fields **MUST** be rejected at every nesting level (fail-closed)
 - Path fields (`forbidden_paths`, `path_allowlist`, `skip_paths`) use the path-glob class; egress and browser domain fields use the host-pattern class; tool names are exact strings
-- All patterns in `secret_patterns`, `patch_integrity`, `shell_commands`, and `extra_credential_patterns` must conform to the HushSpec regex profile (RE2 subset, ASCII `\d \w \s \b`, no lookaround or backreferences)
+- All patterns in `secret_patterns`, `patch_integrity`, `shell_commands`, and `extra_credential_patterns` must conform to the HushSpec regex profile (RE2 subset, ASCII `\d \w \s \b` and ASCII-only `(?i)`, named groups but no backreferences or lookaround, no POSIX classes, at most 2048 bytes)
 - Secret pattern `name` fields **MUST** be unique within the array
 - Every `when` condition is validated at parse time
 
@@ -48,3 +48,9 @@ Documents use YAML 1.2 Core: only `true`/`false` are booleans (`yes`/`no`/`on`/`
 Every rule block accepts `enabled` and an optional `when` condition that gates the block on a time window or runtime context.
 
 See the [Rules Reference](rules-reference.md) for detailed field documentation.
+
+## Resolution, Enforcement, and Panic Mode
+
+- **Resolution** (Section 2.6): `extends` accepts `builtin:` names, filesystem paths, and `https:` URLs, each optionally pinned by digest. A chain is limited to 32 hops, cycles are rejected, and any loader failure refuses the resolution rather than evaluating the leaf alone.
+- **Enforcement** (Section 6.2): an enforcement point runs in `enforce` or `monitor` mode with per-rule-path overrides. Monitor mode is refused without a receipt sink or observer, and a panic denial or a refused-policy denial is always enforced.
+- **Panic mode** (Section 6.3): a latch, set programmatically or by a sentinel file, that denies every action with `__hushspec_panic__`. Checking the sentinel fails closed, and absence of the file never disarms the latch.

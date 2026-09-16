@@ -28,17 +28,17 @@ that same directory prefix:
 
 | Release | Git tag |
 | --- | --- |
+| `v1.0.0` of this module | `packages/go/v1.0.0` |
 | `v0.1.1` of this module | `packages/go/v0.1.1` |
 
-So a release is published by tagging `packages/go/v0.1.1`, and consumed as:
+The HushSpec 1.0.0 release is tagged `packages/go/v1.0.0`, and consumed as:
 
 ```bash
-go get github.com/backbay-labs/hush/packages/go@v0.1.1
+go get github.com/backbay-labs/hush/packages/go@v1.0.0
 ```
 
-A plain `v0.1.1` tag at the repository root does **not** version this module —
-`go get ...@v0.1.1` will not find it. Before the first prefixed tag exists,
-depend on a branch or commit instead:
+A plain `v1.0.0` tag at the repository root does **not** version this module —
+`go get ...@v1.0.0` will not find it. To track the branch instead of a release:
 
 ```bash
 go get github.com/backbay-labs/hush/packages/go@main
@@ -46,6 +46,47 @@ go get github.com/backbay-labs/hush/packages/go@main
 
 Note that `go get` always asks for the *module* path (`.../packages/go`), while
 your imports use the *package* path (`.../packages/go/hushspec`).
+
+The module path carries no `/vN` suffix: that is required only from major
+version 2 onward, and this module is at v1.
+
+### Specification versions
+
+`hushspec.Version` is the HushSpec version this engine writes, and
+`hushspec.SupportedMinors` is what it accepts. Specification versions are
+independent of the module version above (core spec 10.3).
+
+| Constant | Value |
+| --- | --- |
+| `hushspec.Version` | `1.0.0` |
+| `hushspec.SupportedMinors` | `0.1`, `0.2`, `1.0` |
+
+An engine that supports minor `X.Y` accepts every `X.Y.Z` document, because
+patch versions carry only clarifications and errata (core spec 2.2). A `1.0.Z`
+document is evaluated exactly as a `0.2.Z` one — 1.0 freezes the 0.2 semantics
+without changing them (core spec 10.2). The one validation difference is that a
+present `name` must be non-empty, rejected with `E004`. Any other minor is
+rejected with `E002`.
+
+### JSON Schemas
+
+Policies validate against the `.v1.` schema lineage, published under
+`https://hushspec.dev/schemas/`. Point an editor at it with a modeline:
+
+```yaml
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+```
+
+| Document | Schema URL |
+| --- | --- |
+| Policy | `https://hushspec.dev/schemas/hushspec-core.v1.schema.json` |
+| Receipt | `https://hushspec.dev/schemas/hushspec-receipt.v1.schema.json` |
+| Log entry | `https://hushspec.dev/schemas/hushspec-log-entry.v1.schema.json` |
+| Signature | `https://hushspec.dev/schemas/hushspec-signature.v1.schema.json` |
+| Bundle | `https://hushspec.dev/schemas/hushspec-bundle.v1.schema.json` |
+
+The `.v0.` files are frozen copies retained for documents that declare a 0.x
+version; they are not edited, and `schemas/frozen-v0.json` pins their digests.
 
 ## Quick start
 
@@ -88,7 +129,11 @@ func main() {
 		}
 		log.Fatal("policy is invalid")
 	}
-	fmt.Println("policy ok:", spec.Name)
+	// An optional string is a *string: nil is an absent property, and a
+	// pointer to "" is one the document wrote as the empty string.
+	if spec.Name != nil {
+		fmt.Println("policy ok:", *spec.Name)
+	}
 }
 ```
 
@@ -159,7 +204,7 @@ if err != nil {
 }
 
 result := policy.Evaluate(action)
-receipt := policy.EvaluateAudited(resolution, action, nil, nil)
+receipt, err := policy.EvaluateAudited(resolution, action, nil, nil)
 ```
 
 `CompiledPolicy` mirrors the free functions minus the document argument:
@@ -187,9 +232,13 @@ if err != nil {
 }
 
 config := hushspec.DefaultAuditConfig()
-receipt := hushspec.EvaluateAudited(resolution, action, &config, &hushspec.AuditContext{
+receipt, err := hushspec.EvaluateAudited(resolution, action, &config, &hushspec.AuditContext{
 	Actor: &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
 })
+if err != nil {
+	// The policy has no content hash, so there is no receipt that could name it.
+	log.Fatal(err)
+}
 
 fmt.Println(receipt.ReceiptID, receipt.Decision, receipt.Policy.ContentHash)
 
@@ -409,12 +458,12 @@ is the security-relevant part: a call evaluated as a bare `tool_call` meets
 `forbidden_paths` and `path_allowlist`.
 
 ```go
-action := hushspec.MapAnthropicToolUse("bash", input)          // shell_command
+action := hushspec.MapClaudeToolToAction("bash", input)          // shell_command
 action = hushspec.MapMCPToolCall("fetch", args)                // egress, host only
 action = hushspec.MapOpenAIToolCall("get_weather", arguments)  // tool_call + args size
 ```
 
-`MapAnthropicToolUse` recognizes `bash` and `terminal`, the text editor tools
+`MapClaudeToolToAction` recognizes `bash` and `terminal`, the text editor tools
 (dated revisions included -- a `view` reads, anything else writes and carries
 its payload as content), `computer`, and `web_fetch`; an
 `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
@@ -423,7 +472,7 @@ the file, command and fetch tools. Anything unrecognized is a `tool_call`
 against the tool's own name: guessing wrong would consult the wrong rule block,
 which is worse than not guessing.
 
-`GuardedToolHandler` (and the per-runtime `GuardedAnthropicToolHandler`,
+`GuardedToolHandler` (and the per-runtime `CreateSecureToolHandler`,
 `GuardedOpenAIToolHandler`, `GuardedMCPToolHandler`) wraps a handler so the
 check happens before the tool runs; a refused call returns a `*ToolDeniedError`
 and the handler is never invoked.

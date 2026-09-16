@@ -1,7 +1,7 @@
 # Evidence report vectors
 
 Vectors for `h2h report` and
-[`schemas/hushspec-report.v0.schema.json`](../../schemas/hushspec-report.v0.schema.json).
+[`schemas/hushspec-report.v1.schema.json`](../../schemas/hushspec-report.v1.schema.json).
 
 - `24h.jsonl` is a synthetic working day: a hash-linked log
   ([log spec](../../spec/hushspec-log.md)) of 20 entries -- a `policy_loaded`

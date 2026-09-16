@@ -16,7 +16,8 @@ npm install @hushspec/core
 import { parseOrThrow, validate, evaluate } from '@hushspec/core';
 
 const policy = parseOrThrow(`
-hushspec: "0.1.0"
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+hushspec: "1.0.0"
 name: my-policy
 rules:
   egress:
@@ -193,6 +194,50 @@ Rotation carries the chain forward: `sink.rotate('./audit-2.jsonl')` writes a
 detectable from a file alone (log spec section 9) -- publish `sink.head()`
 periodically as an external anchor.
 
+### Policy bundles
+
+A receipt says what one decision was; a bundle says which policy was in force
+when it was made. `createBundle` attests a *resolved* policy -- the document
+after `extends` has been followed -- as a DSSE envelope carrying an in-toto
+statement: the content hash, the chain it was resolved from, and the resolver
+that did it.
+
+```typescript
+import {
+  createBundle,
+  bundleToJson,
+  verifyBundle,
+  parseOrThrow,
+  resolveWithOptions,
+  createCompositeLoader,
+} from '@hushspec/core';
+
+// `createBundle` takes a Resolution -- the resolved document plus the chain
+// it came from -- not a bare policy.
+const resolution = resolveWithOptions(parseOrThrow(readFileSync('./policy.yaml', 'utf8')), {
+  source: './policy.yaml',
+  loader: createCompositeLoader(),
+});
+
+const bundle = createBundle(resolution, { privateKeyPem });
+
+writeFileSync('./policy.bundle.json', bundleToJson(bundle));
+
+const outcome = verifyBundle(bundle, { keyring, policy: resolution });
+// outcome.ok, or outcome.reason: 'content_hash_mismatch' when the bundle
+// attests a different policy than the one passed in
+```
+
+Creation is reproducible: two bundlers given the same resolution, the same
+`createdAt`, and the same resolver produce byte-identical bundles, Ed25519
+being deterministic. That is what pins this SDK against the reference CLI's
+published vectors. Omit `privateKeyPem` for an unsigned bundle -- useful for
+inspecting a statement, though `verifyBundle` refuses one.
+
+`resolver.tool` defaults to this SDK rather than to `BUNDLE_RESOLVER_TOOL`
+(`'h2h'`, the reference CLI), so a bundle always names what actually produced
+it; pass `tool` and `version` to override.
+
 ### OTLP export
 
 `OtlpReceiptSink` is a `ReceiptSink` that exports receipts and
@@ -224,8 +269,9 @@ One `logRecord` per entry, with the wire mapping every HushSpec SDK emits:
 
 | OTLP field | Value |
 |---|---|
-| `timeUnixNano` | The receipt's or event's own `timestamp` (`observedTimeUnixNano` is the export time) |
-| `severityText` | `INFO` for `allow`, `WARN` for `warn`, `ERROR` for `deny`; `INFO` for a policy event |
+| `timeUnixNano` | The receipt's or event's own `timestamp` |
+| `observedTimeUnixNano` | When the sink took the entry |
+| `severityText` / `severityNumber` | `INFO`/9 for `allow`, `WARN`/13 for `warn`, `ERROR`/17 for `deny`; a policy event is `INFO`/9 |
 | `body.stringValue` | The entry's RFC 8785 canonical JSON -- byte for byte the form its hash covers |
 | attributes | `hushspec.entry_type` (`receipt`, `policy_loaded`, `policy_swapped`), `hushspec.receipt_version`, `hushspec.decision`, `hushspec.action_type`, `hushspec.matched_rule`, `hushspec.policy.content_hash`, `hushspec.receipt_hash`, `hushspec.enforcement.mode`, `hushspec.enforcement.outcome` |
 | resource attributes | `service.name` (default `hushspec`), `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |

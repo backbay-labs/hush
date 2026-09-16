@@ -1,10 +1,8 @@
 //! Property-based round-trip tests for `crates/hushspec`.
 //!
-//! CLAUDE.md lists "property testing with proptest for serialization
-//! round-trip and schema validation code" as a repo-wide convention, but
-//! prior to this file the only proptest usage in the workspace lived in
-//! `crates/hushspec-testkit/src/gen.rs`. This file exercises the same idea
-//! directly against the core crate's own public API.
+//! Serialization round-trip and schema validation code is property-tested
+//! with proptest across the workspace. This file exercises that directly
+//! against the core crate's own public API.
 //!
 //! Deliberately does NOT depend on `hushspec-testkit`: that crate depends on
 //! `hushspec`, so depending on it back here would be a cycle. Strategies
@@ -625,12 +623,12 @@ fn action_strategy() -> impl Strategy<Value = EvaluationAction> {
 static RECEIPT_SCHEMA: std::sync::LazyLock<jsonschema::JSONSchema> =
     std::sync::LazyLock::new(compile_receipt_schema);
 
-/// Compiles `schemas/hushspec-receipt.v0.schema.json`. `tests/receipt.rs` has
+/// Compiles `schemas/hushspec-receipt.v1.schema.json`. `tests/receipt.rs` has
 /// its own copy: integration test files are separate compilation units.
 fn compile_receipt_schema() -> jsonschema::JSONSchema {
     let schema_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../schemas/hushspec-receipt.v0.schema.json"
+        "/../../schemas/hushspec-receipt.v1.schema.json"
     );
     let schema_text = std::fs::read_to_string(schema_path)
         .unwrap_or_else(|e| panic!("failed to read {schema_path}: {e}"));
@@ -756,13 +754,15 @@ macro_rules! assert_block_preserved_or_overridden {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 128, ..ProptestConfig::default() })]
 
-    /// `merge` with `replace` equals the child document, minus `extends`
-    /// (which `merge` always clears so the result is self-contained).
+    /// `merge` with `replace` equals the child document, minus the two
+    /// resolution instructions `merge` always consumes so the result is a
+    /// self-contained resolved document (core spec 2.3).
     #[test]
-    fn merge_replace_equals_child_minus_extends((base, child) in replace_pair_strategy()) {
+    fn merge_replace_equals_child_minus_resolution_fields((base, child) in replace_pair_strategy()) {
         let merged = merge(&base, &child);
         let mut expected = child.clone();
         expected.extends = None;
+        expected.merge_strategy = None;
         prop_assert_eq!(merged, expected);
     }
 
@@ -789,6 +789,9 @@ proptest! {
         assert_block_preserved_or_overridden!(base_rules, child_rules, merged_rules, browser_automation);
         assert_block_preserved_or_overridden!(base_rules, child_rules, merged_rules, code_execution);
 
+        // Core spec 2.3: the child names `deep_merge`, and the resolved
+        // document that comes back says nothing about how it was assembled.
         prop_assert!(merged.extends.is_none());
+        prop_assert!(merged.merge_strategy.is_none());
     }
 }

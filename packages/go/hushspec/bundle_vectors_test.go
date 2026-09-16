@@ -22,7 +22,7 @@ const bundleVectorsVersion = "0.1.0"
 // bundleVectorCaseCount is the number of cases the specification's table
 // enumerates. Pinning it means a vector added upstream cannot be silently
 // skipped by a runner that only iterates what it finds.
-const bundleVectorCaseCount = 8
+const bundleVectorCaseCount = 10
 
 type bundleVectorFile struct {
 	Version     string               `yaml:"hushspec_bundle_vectors"`
@@ -196,7 +196,7 @@ func TestBundleVectorsUseTheClosedReasonSet(t *testing.T) {
 }
 
 // TestBundlesValidateAgainstTheSchema checks every published bundle against
-// schemas/hushspec-bundle.v0.schema.json: the envelope against the root, and
+// schemas/hushspec-bundle.v1.schema.json: the envelope against the root, and
 // the decoded payload against $defs/Statement. This SDK carries no JSON Schema
 // engine, so the constraints the schema states for the members it reads are
 // asserted directly -- the three `const` members are read out of the schema
@@ -204,15 +204,7 @@ func TestBundleVectorsUseTheClosedReasonSet(t *testing.T) {
 // apart unnoticed.
 func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 	root, manifest := loadBundleVectors(t)
-	schemaPath := filepath.Join(fixtureRepoRoot(t), "schemas", "hushspec-bundle.v0.schema.json")
-	schemaJSON, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("the bundle schema is not published: %v", err)
-	}
-	var schema map[string]any
-	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
-		t.Fatalf("the bundle schema is not JSON: %v", err)
-	}
+	schema := bundleSchemaDocument(t)
 
 	// The constants this SDK compares against are the schema's own, so a
 	// divergence between the two is a failure here rather than a silent
@@ -269,6 +261,41 @@ func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bundleSchemaDocument reads schemas/hushspec-bundle.v1.schema.json, the
+// document a consumer of a bundle validates against.
+func bundleSchemaDocument(t *testing.T) map[string]any {
+	t.Helper()
+	path := filepath.Join(fixtureRepoRoot(t), "schemas", "hushspec-bundle.v1.schema.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the bundle schema is not published: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("the bundle schema is not JSON: %v", err)
+	}
+	return schema
+}
+
+// schemaMinLength reads the `minLength` of the schema member at path, failing
+// when the path does not lead to one.
+func schemaMinLength(t *testing.T, schema map[string]any, path ...string) int {
+	t.Helper()
+	node := schema
+	for _, segment := range path {
+		next, ok := node[segment].(map[string]any)
+		if !ok {
+			t.Fatalf("the bundle schema has no object at %s", strings.Join(path, "."))
+		}
+		node = next
+	}
+	value, ok := node["minLength"].(float64)
+	if !ok {
+		t.Fatalf("the bundle schema member at %s has no minLength", strings.Join(path, "."))
+	}
+	return int(value)
 }
 
 // schemaConst reads the `const` of the schema member at path, failing when the

@@ -52,7 +52,7 @@ import {
   TRANSITION_TRIGGERS_SET,
 } from './generated/contract.js';
 import { compileProfileRegex, isSafeRegex } from './regex.js';
-import { HUSHSPEC_SUPPORTED_MINORS, isSupported } from './version.js';
+import { HUSHSPEC_SUPPORTED_MINORS, isSupported, majorVersion } from './version.js';
 import type { Condition } from './conditions.js';
 import { MAX_NESTING_DEPTH, RATE_COMPARISONS, validateCondition } from './conditions.js';
 
@@ -191,6 +191,22 @@ function validateDocument(
   };
 }
 
+/**
+ * Whether a document declaring `version` must give a present `name` a
+ * non-empty value.
+ *
+ * This is the one constraint the 1.0 document format adds to 0.2
+ * (spec/versioning.md section 10): the frozen 0.x format allows `name: ''`.
+ * A version that is absent or unreadable as `MAJOR.MINOR.PATCH` is already
+ * refused above, and is held to the current format's constraints here so an
+ * unreadable version can never relax one.
+ */
+function requiresNonEmptyName(version: string | undefined): boolean {
+  if (version === undefined) return true;
+  const major = majorVersion(version);
+  return major === undefined || major >= 1;
+}
+
 function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   rejectUnknownKeys(obj, TOP_LEVEL_KEYS_SET, ctx);
 
@@ -221,6 +237,11 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   }
 
   validateOptionalString(obj, 'name', ctx, 'name');
+  // Core spec 2: `name` is optional, but an empty one names nothing -- a
+  // bundle subject and a receipt's policy summary both carry it.
+  if (obj.name === '' && requiresNonEmptyName(version)) {
+    addError(ctx, 'E004', 'name: must not be empty when present');
+  }
   validateOptionalString(obj, 'description', ctx, 'description');
   validateOptionalString(obj, 'extends', ctx, 'extends');
   validateOptionalEnum(obj, 'merge_strategy', ctx, 'merge_strategy', MERGE_STRATEGIES_SET);
@@ -1035,12 +1056,14 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
     validateOptionalRuleObject(section, 'heuristics', sectionCtx, (heuristics, heuristicsCtx, heuristicsPath) => {
       rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, heuristicsPath);
       validateOptionalBoolean(heuristics, 'enabled', heuristicsCtx, `${heuristicsPath}.enabled`);
-      // An unsigned floor: a negative value is a type error, and the upper
-      // bound is left to the detector (a floor above 100 simply silences it).
+      // A floor on the normalized 0-100 score, so a value outside that range
+      // names no score the detector can produce (detection spec 9).
       if (hasValue(heuristics, 'min_score')) {
         const minScore = heuristics.min_score;
         if (typeof minScore !== 'number' || !Number.isInteger(minScore) || minScore < 0) {
           addError(heuristicsCtx, 'E001', `${heuristicsPath}.min_score must be a non-negative integer`);
+        } else if (minScore > 100) {
+          addError(heuristicsCtx, 'E004', `${heuristicsPath}.min_score must be between 0 and 100`);
         }
       }
     }, sectionPath);
@@ -1377,21 +1400,12 @@ function validateBounds(
 }
 
 function validateRegex(pattern: string, ctx: ValidationContext, path: string): void {
-  // RE2/ReDoS safety first, so a lookaround or `(a+)+` keeps reporting the
-  // dedicated `non_re2_regex` code rather than being swallowed by the profile
-  // compile below (which also rejects them, to stay fail-closed at eval time).
-  if (!isSafeRegex(pattern)) {
-    addError(
-      ctx,
-      'E005',
-      `${path}: pattern uses features not in the RE2 subset (backreferences, lookaround, etc.) which may cause ReDoS`,
-    );
-    return;
-  }
-
-  // Profile check second: `compileProfileRegex` is the exact call the evaluator
-  // makes, so a pattern that validates here can never fail to compile at
-  // evaluation time -- and vice versa.
+  // `compileProfileRegex` is the exact call the evaluator makes, so a pattern
+  // that validates here can never fail to compile at evaluation time -- and
+  // vice versa. It runs the portability pre-check (possessive quantifiers,
+  // `\Z`/`\z` end-anchors, `{,n}`, empty character classes) and the ReDoS
+  // nested-quantifier heuristic before translating, and the wording of each
+  // rejection is shared with the other three SDKs.
   try {
     compileProfileRegex(pattern);
   } catch (error) {

@@ -13,15 +13,11 @@ from hushspec.error_codes import (
     ERROR_UNSUPPORTED_VERSION,
     ErrorMessage,
 )
-from hushspec.regex_profile import compile_profile_regex
+from hushspec.regex_profile import NESTED_QUANTIFIER_MESSAGE, compile_profile_regex
 # The regex-portability scanners are shared with hushspec.validate rather
 # than copied: a pattern parse() refuses and one validate() refuses can then
 # never drift apart.
-from hushspec.validate import (
-    _RE2_DISALLOWED,
-    _disallowed_regex_feature,
-    _has_nested_quantifier,
-)
+from hushspec.validate import _disallowed_regex_feature, _has_nested_quantifier
 from hushspec.generated_contract import (
     BROWSER_AUTOMATION_KEYS,
     CODE_EXECUTION_KEYS,
@@ -76,6 +72,42 @@ FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
 
 
+#: The declared members of a ``when`` condition, each with the type its value
+#: must have (core spec 3.13).
+_CONDITION_MEMBER_TYPES = {
+    "time_window": "an object",
+    "context": "an object",
+    "all_of": "an array",
+    "any_of": "an array",
+    "not": "an object",
+    "capability": "a string",
+    "rate": "an object",
+}
+
+
+def _reject_null_condition_members(
+    raw: Any, errors: list[str], path: str
+) -> None:
+    """Refuse a ``null`` written for a declared member of a condition.
+
+    No HushSpec property is nullable (canonical spec 2.2), but a written null
+    reads as an absent member to :meth:`Condition.from_dict`, which is the
+    decoder both validation and evaluation run a ``when`` through.
+    """
+    if not isinstance(raw, dict):
+        return
+    for key, expected in _CONDITION_MEMBER_TYPES.items():
+        if key in raw and raw[key] is None:
+            errors.append(f"{path}.{key}: invalid type, expected {expected}")
+    for key in ("all_of", "any_of"):
+        children = raw.get(key)
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                _reject_null_condition_members(child, errors, f"{path}.{key}[{index}]")
+    if isinstance(raw.get("not"), dict):
+        _reject_null_condition_members(raw["not"], errors, f"{path}.not")
+
+
 def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """Structural check of a rule block's ``when`` condition (core spec 3.13).
 
@@ -86,6 +118,7 @@ def _validate_when(obj: dict[str, Any], errors: list[str], path: str) -> None:
     """
     if "when" not in obj:
         return
+    _reject_null_condition_members(obj["when"], errors, f"{path}.when")
     try:
         Condition.from_dict(obj["when"])
     except (ValueError, TypeError, AttributeError) as exc:
@@ -118,6 +151,11 @@ def _validate_top_level(obj: dict[str, Any], errors: list[str]) -> None:
 
     if "hushspec" not in obj:
         errors.append("missing field `hushspec`")
+    elif obj["hushspec"] is None:
+        # The schema types `hushspec` as a string (canonical spec 2.2), so a
+        # written null is a value of the wrong type -- there is no version here
+        # to call unsupported.
+        errors.append("hushspec: invalid type, expected a string")
     elif not isinstance(obj["hushspec"], str):
         # Present but not a version string at all -- `hushspec: 0.1` is a YAML
         # float, not `"0.1.0"`. The reference reports that as an unsupported
@@ -830,14 +868,17 @@ def _validate_detection_heuristics(
 ) -> None:
     """``prompt_injection.heuristics`` (detection spec 3.5.1).
 
-    ``min_score`` is a non-negative integer. The schema's upper bound of 100
-    is not enforced here: a floor above the clamp is harmless (nothing ever
-    reaches it), and refusing a document other engines accept would itself be
-    a conformance divergence.
+    ``min_score`` is a floor on the normalized 0-100 score, so a value outside
+    that range names no score the detector can produce and is rejected
+    (detection spec 9).
     """
     _reject_unknown_keys(obj, PROMPT_INJECTION_HEURISTICS_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
-    _validate_optional_int(obj, "min_score", errors, f"{path}.min_score", min_value=0)
+    min_score = _validate_optional_int(
+        obj, "min_score", errors, f"{path}.min_score", min_value=0
+    )
+    if min_score is not None and min_score > 100:
+        errors.append(_constraint(f"{path}.min_score must be between 0 and 100"))
 
 
 def _validate_detection_jailbreak(obj: dict[str, Any], errors: list[str], path: str) -> None:
@@ -1108,35 +1149,35 @@ def _validate_number_value(
 
 
 def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
-    # Portability pre-check, RE2-feature check and nested-quantifier (ReDoS)
-    # heuristic first, all reported with the shared "not in the RE2 subset"
-    # message. These are hushspec.validate's own scanners, so what parse()
-    # refuses and what validate() refuses cannot drift apart.
-    if (
-        _disallowed_regex_feature(pattern) is not None
-        or _RE2_DISALLOWED.search(pattern)
-        or _has_nested_quantifier(pattern)
-    ):
-        errors.append(
-            f"{path}: pattern uses features not in the RE2 subset "
-            "(backreferences, lookaround, etc.) which may cause ReDoS"
-        )
-        return
-
-    # Everything else goes through compile_profile_regex, which repeats those
-    # checks and then applies the HushSpec regex profile (ASCII shorthands,
-    # leading-only inline flags, portable escapes) before compiling. It is the
-    # exact call the evaluator makes, so parse() rejects precisely the patterns
-    # evaluation would deny on.
-    try:
-        compile_profile_regex(pattern)
-    except ValueError as exc:
+    def reject(message: str) -> None:
         errors.append(
             ErrorMessage(
-                f"{path} must be a valid regular expression: {exc}",
+                f"{path} must be a valid regular expression: {message}",
                 ERROR_INVALID_REGEX,
             )
         )
+
+    # Portability pre-check and the nested-quantifier (ReDoS) heuristic first.
+    # These are hushspec.validate's own scanners, so what parse() refuses and
+    # what validate() refuses cannot drift apart.
+    feature = _disallowed_regex_feature(pattern)
+    if feature is not None:
+        reject(feature)
+        return
+    if _has_nested_quantifier(pattern):
+        reject(NESTED_QUANTIFIER_MESSAGE)
+        return
+
+    # Everything else goes through compile_profile_regex, which repeats those
+    # checks, refuses the rest of the non-RE2 syntax (lookaround,
+    # backreferences, atomic and recursive groups) and then applies the
+    # HushSpec regex profile (ASCII shorthands, leading-only inline flags,
+    # portable escapes) before compiling. It is the exact call the evaluator
+    # makes, so parse() rejects precisely the patterns evaluation would deny on.
+    try:
+        compile_profile_regex(pattern)
+    except ValueError as exc:
+        reject(str(exc))
 
 
 # Nested-quantifier (catastrophic backtracking / ReDoS) heuristic.

@@ -359,7 +359,7 @@ func TestSignPolicyRefusesWhatItCannotSign(t *testing.T) {
 	})
 
 	t.Run("invalid policy", func(t *testing.T) {
-		spec := &HushSpec{HushSpecVersion: "9.0.0", Name: "from the future"}
+		spec := &HushSpec{HushSpecVersion: "9.0.0", Name: strPtr("from the future")}
 		if _, err := SignPolicy(spec, privateKeyPEM, SignOptions{SignedAt: &signedAt}); err == nil {
 			t.Fatal("expected an unsupported policy version to be refused")
 		}

@@ -7,7 +7,13 @@ import { isPanicActive } from './evaluate.js';
 import { parse } from './parse.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import nodePath from 'node:path';
-import type { Loader, ResolveOptions, Resolution, SignatureStatus } from './resolve.js';
+import type {
+  LoadReasonCode,
+  Loader,
+  ResolveOptions,
+  Resolution,
+  SignatureStatus,
+} from './resolve.js';
 import {
   PolicyVerificationError,
   createBuiltinLoader,
@@ -39,6 +45,7 @@ import {
   unverifiedPolicyReceipt,
   uuidV7,
 } from './receipt.js';
+import { argsSize } from './adapters/tool-mapping.js';
 import type { PolicyEvent } from './log.js';
 import { policyLoadedEvent, policySwappedEvent } from './log.js';
 import type { ReceiptSink } from './sinks.js';
@@ -118,11 +125,21 @@ export interface HushGuardOptions {
  * the receipt spec's reserved `__hushspec_policy_unverified__`, used both in
  * the in-memory result and in the receipt.
  *
- * Distinct from `__hushspec_policy_provider__` (the policy could not be
+ * Distinct from {@link POLICY_PROVIDER_RULE} (the policy could not be
  * *obtained*) because this one means the policy was obtained and rejected --
  * the receipt has to be able to say which.
  */
 export const POLICY_SIGNATURE_RULE: string = POLICY_UNVERIFIED_RULE;
+
+/**
+ * `matched_rule` for every denial issued by a guard whose policy provider
+ * cannot serve a policy to evaluate against: it has not loaded one, it handed
+ * back an unresolved document, or it threw.
+ *
+ * The reserved value `__hushspec_policy_provider__` of the rule-path registry
+ * (`spec/registries/rule-paths.yaml`).
+ */
+export const POLICY_PROVIDER_RULE = '__hushspec_policy_provider__';
 
 /** The policy-loading half of {@link HushGuardOptions}. */
 export type PolicyResolveOptions = Pick<
@@ -441,8 +458,9 @@ export class HushGuard {
   private emitPolicyEvent(event: PolicyEvent): void {
     try {
       this.sink?.recordPolicyEvent?.(event);
-    } catch {
-      /* sinks must not break policy loading */
+    } catch (error) {
+      // Sinks must not break policy loading; the observers still hear about it.
+      this.reportSinkFailure(error);
     }
   }
 
@@ -536,7 +554,13 @@ export class HushGuard {
    * refuse against.
    */
   private loadResolution(policy: HushSpec, adopted?: Resolution): Resolution {
-    if (adopted !== undefined) return adopted;
+    if (adopted !== undefined) {
+      const unproven = this.unprovenHop(adopted);
+      if (unproven !== undefined) {
+        this.refusal = unproven;
+      }
+      return adopted;
+    }
     try {
       return resolvePolicyResolution(policy, this.resolveOptions);
     } catch (error) {
@@ -550,6 +574,40 @@ export class HushGuard {
       }
       throw error;
     }
+  }
+
+  /**
+   * The first hop of an adopted chain that has not proved itself under
+   * `requireSignature`, or `undefined` when the chain is acceptable.
+   *
+   * A provider resolves against the source it loaded from -- which the guard
+   * cannot reach a second time -- so its resolution is adopted rather than
+   * rebuilt. It was built under the provider's options, though, not the
+   * guard's, so the requirement the guard was given has to be re-applied here:
+   * without it, `requireSignature` would be dropped by handing the policy in
+   * pre-resolved, which is exactly the fail-open the requirement exists to
+   * prevent.
+   *
+   * `builtin:` hops are exempt, as they are during resolution: they are
+   * embedded in the SDK, not loaded from anywhere signable. Every other hop
+   * proves itself by a verified signature on its link. A hop proved by a
+   * digest pin cannot be re-checked from a resolution -- the chain records the
+   * hash each hop had, not the digest its child pinned it to -- so an adopted
+   * chain has to carry signatures.
+   */
+  private unprovenHop(
+    resolution: Resolution,
+  ): { source: string; status: SignatureStatus } | undefined {
+    if (this.resolveOptions.requireSignature !== true) return undefined;
+    for (const link of resolution.chain) {
+      if (link.source.startsWith('builtin:')) continue;
+      if (link.signature?.verified === true) continue;
+      return {
+        source: link.source,
+        status: link.signature ?? { verified: false, reason: 'missing_signature' },
+      };
+    }
+    return undefined;
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
@@ -597,9 +655,23 @@ export class HushGuard {
     if (receipt === undefined || this.sink === null) return;
     try {
       this.sink.send(receipt);
-    } catch {
-      /* sinks must not break evaluation */
+    } catch (error) {
+      // A sink must never break enforcement: a full disk is not a reason to
+      // let an action through, nor to stop one. The failure still reaches the
+      // observers, so the gap in the evidence is visible.
+      this.reportSinkFailure(error);
     }
+  }
+
+  /**
+   * Put a sink failure on the observer channel as a `sink.error` event, named
+   * by the sink that refused.
+   */
+  private reportSinkFailure(error: unknown): void {
+    this.observableEvaluator?.notifySinkError(
+      error instanceof Error ? error.message : String(error),
+      this.sink?.constructor?.name,
+    );
   }
 
   check(action: EvaluationAction): boolean {
@@ -780,13 +852,7 @@ export class HushGuard {
   ): void {
     if (receipt) {
       receipt.enforcement = enforcement;
-      if (this.sink) {
-        try {
-          this.sink.send(receipt);
-        } catch {
-          /* sinks must not break enforcement */
-        }
-      }
+      this.send(receipt);
     }
     this.observableEvaluator?.notifyEvaluationCompleted(
       this.observerAction(action),
@@ -815,7 +881,7 @@ export class HushGuard {
     return {
       type: 'tool_call',
       target: toolName,
-      args_size: args ? JSON.stringify(args).length : undefined,
+      args_size: args ? argsSize(args) : undefined,
     };
   }
 
@@ -846,6 +912,16 @@ export class HushGuard {
       resolution !== undefined && resolution.spec === newPolicy
         ? resolution
         : resolvePolicyResolution(newPolicy, this.resolveOptions);
+    const unproven = this.unprovenHop(next);
+    if (unproven !== undefined) {
+      throw new PolicyVerificationError(
+        unproven.source,
+        (unproven.status.reason as LoadReasonCode | undefined) ?? 'missing_signature',
+        'the reloaded policy carries no verified signature and this guard requires one',
+        next,
+        unproven.status,
+      );
+    }
     const resolved = next.spec;
     const previousHash = this.policyHash;
     this.policy = resolved;
@@ -905,7 +981,7 @@ export class HushGuard {
       if (current == null) {
         return {
           decision: 'deny',
-          matched_rule: '__hushspec_policy_provider__',
+          matched_rule: POLICY_PROVIDER_RULE,
           reason: 'policy provider has not loaded a policy yet',
         };
       }
@@ -916,7 +992,7 @@ export class HushGuard {
         // block its base declares -- deny instead.
         return {
           decision: 'deny',
-          matched_rule: '__hushspec_policy_provider__',
+          matched_rule: POLICY_PROVIDER_RULE,
           reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
         };
       }
@@ -935,7 +1011,7 @@ export class HushGuard {
       const message = error instanceof Error ? error.message : String(error);
       return {
         decision: 'deny',
-        matched_rule: '__hushspec_policy_provider__',
+        matched_rule: POLICY_PROVIDER_RULE,
         reason: `policy provider unavailable: ${message}`,
       };
     }

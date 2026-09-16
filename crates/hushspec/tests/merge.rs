@@ -28,7 +28,10 @@ rules:
     .unwrap();
     let merged = merge(&base, &child);
     assert_eq!(merged.name.as_deref(), Some("child"));
+    // Core spec 2.3: resolution consumes both instructions, `replace`
+    // included, so the document that comes out declares neither.
     assert!(merged.extends.is_none());
+    assert!(merged.merge_strategy.is_none());
     assert!(merged.rules.as_ref().unwrap().egress.is_none());
     assert!(merged.rules.as_ref().unwrap().tool_access.is_some());
 }

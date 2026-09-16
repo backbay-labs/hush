@@ -1,4 +1,5 @@
 use colored::Colorize;
+use hushspec::evaluate::REFERENCE_ACTION_TYPES;
 use hushspec::log::{ChainedFileSink, PolicyEvent};
 use hushspec::receipt::{DetectorEvaluation, RuleOutcome, RuleTraceEntry};
 use hushspec::{
@@ -6,20 +7,6 @@ use hushspec::{
     EnforcementSummary, EvaluationAction, HushSpec, Policy, PolicyError, PolicySummary, Resolution,
     ResolveError, ResolveOptions, policy_summary, unverified_policy_receipt,
 };
-
-const KNOWN_ACTION_TYPES: &[&str] = &[
-    "file_read",
-    "file_write",
-    "patch_apply",
-    "shell_command",
-    "tool_call",
-    "egress",
-    "computer_use",
-    "input_inject",
-    "browser_action",
-    "code_exec",
-    "custom",
-];
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum EvalOutputFormat {
@@ -173,7 +160,7 @@ pub fn run(args: EvalArgs) -> i32 {
         }
     }
 
-    if !KNOWN_ACTION_TYPES.contains(&action.action_type.as_str()) {
+    if !REFERENCE_ACTION_TYPES.contains(&action.action_type.as_str()) {
         eprintln!(
             "{} '{}' is not a reference action type; it is denied fail-closed",
             "note:".yellow(),
@@ -917,5 +904,49 @@ mod tests {
                 .contains("code_execution")
         );
         assert!(precedence_note("frobnicate").is_none());
+    }
+
+    /// The command-line surface carries two tables the evaluator also carries:
+    /// the reference action types a note is written for, and the rule blocks
+    /// those notes and `h2h lint` name. Both are checked against the published
+    /// core schema, which is what the evaluator's own tables are generated
+    /// from, so a block added to the specification cannot be missed here.
+    #[test]
+    fn the_command_tables_match_the_core_schema() {
+        let schema: serde_json::Value = serde_json::from_str(
+            crate::generated_schemas::schema_body("core").expect("core schema"),
+        )
+        .expect("the embedded core schema parses");
+        let mut rule_blocks: Vec<&str> = schema["$defs"]["Rules"]["properties"]
+            .as_object()
+            .expect("`Rules` declares its blocks")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        rule_blocks.sort_unstable();
+
+        // `h2h lint` reports one `enabled` state per rule block.
+        let listed = crate::cmd_lint::rule_block_enabled(&hushspec::Rules::default());
+        let mut linted: Vec<&str> = listed
+            .iter()
+            .map(|(name, _)| name.strip_prefix("rules.").expect("a `rules.` path"))
+            .collect();
+        linted.sort_unstable();
+        assert_eq!(linted, rule_blocks);
+
+        // Every reference action type has a precedence note, and between them
+        // the notes name every rule block.
+        let mut named: Vec<&str> = Vec::new();
+        for action_type in hushspec::evaluate::REFERENCE_ACTION_TYPES {
+            let note = precedence_note(action_type)
+                .unwrap_or_else(|| panic!("{action_type} has no precedence note"));
+            for block in &rule_blocks {
+                if note.contains(block) && !named.contains(block) {
+                    named.push(block);
+                }
+            }
+        }
+        named.sort_unstable();
+        assert_eq!(named, rule_blocks);
     }
 }

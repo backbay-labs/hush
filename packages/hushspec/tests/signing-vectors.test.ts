@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
@@ -28,23 +28,22 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const signingDir = path.join(repoRoot, 'fixtures', 'signing');
 
 /**
- * The 0.2 signature schema, from `schemas/` once it is promoted and from
- * `schemas/staged/0.2.0/` until then. Picking by content rather than by
- * existence means the test does not care which side of the promotion it runs
- * on -- only that the schema it checks against really is the 0.2 one.
+ * The published signature schema, checked to really be the 0.2 envelope
+ * rather than trusted by file name: the vectors below describe envelope
+ * version 0.2 (signing spec 4) and a schema for any other one would let them
+ * pass while testing nothing.
  */
 function schemaPath(name: string): string {
-  const promoted = path.join(repoRoot, 'schemas', name);
-  const staged = path.join(repoRoot, 'schemas', 'staged', '0.2.0', name);
-  if (existsSync(promoted)) {
-    const doc = JSON.parse(readFileSync(promoted, 'utf8')) as Record<string, unknown>;
-    if (JSON.stringify(doc).includes('"0.2"')) return promoted;
+  const published = path.join(repoRoot, 'schemas', name);
+  const doc = JSON.parse(readFileSync(published, 'utf8')) as Record<string, unknown>;
+  if (!JSON.stringify(doc).includes('"0.2"')) {
+    throw new Error(`${name} is not the 0.2 signature envelope schema`);
   }
-  return staged;
+  return published;
 }
 
 const signatureSchema = JSON.parse(
-  readFileSync(schemaPath('hushspec-signature.v0.schema.json'), 'utf8'),
+  readFileSync(schemaPath('hushspec-signature.v1.schema.json'), 'utf8'),
 ) as JsonSchema;
 
 // --------------------------------------------------------------------------
@@ -159,7 +158,7 @@ const trustedPrivateKeyPem = fixture('keys/test-signing.key.pem');
 
 describe('signing vectors (spec/hushspec-signing.md section 9)', () => {
   it('finds the full vector set', () => {
-    expect(vectors.cases.length).toBe(16);
+    expect(vectors.cases.length).toBe(18);
   });
 
   for (const testCase of vectors.cases) {
@@ -194,12 +193,12 @@ describe('signing vectors (spec/hushspec-signing.md section 9)', () => {
         .map((testCase) => (testCase.expect === 'valid' ? undefined : testCase.expect.invalid))
         .filter((reason): reason is ReasonCode => reason !== undefined),
     );
-    // `malformed_envelope` has no vector; the unit tests below cover it.
     expect([...covered].sort()).toEqual([
       'content_hash_mismatch',
       'expired',
       'key_retired',
       'key_revoked',
+      'malformed_envelope',
       'policy_version_rollback',
       'signature_mismatch',
       'signed_at_in_future',
@@ -357,6 +356,18 @@ describe('keys and keyrings (spec section 5)', () => {
     expect(() => loadKeyring('not json')).toThrow(SigningError);
   });
 
+  it('rejects a not_after that is not a calendar date', () => {
+    // A retirement instant is compared against `signed_at`; one that had to be
+    // normalized first would retire the key on a different day than it says.
+    const base = JSON.parse(fixture('keys/keyring-retired.json')) as {
+      keys: Record<string, unknown>[];
+    };
+    const entry = base.keys[0] as Record<string, unknown>;
+    expect(() =>
+      loadKeyring({ ...base, keys: [{ ...entry, not_after: '2026-02-30T00:00:00.000Z' }] }),
+    ).toThrow(/not_after/);
+  });
+
   it('selects by exact key_id with no fallback to another key on the ring', () => {
     const document = JSON.parse(fixture('keys/keyring.json')) as Record<string, unknown>;
     const untrusted = keyringFromPublicKey(fixture('keys/test-untrusted.pub.pem'));
@@ -398,6 +409,12 @@ describe('envelope parsing and the verifier contract', () => {
       { ...good, content_hash: '386fb3d6' },
       { ...good, signed_at: '2026-09-15T09:00:00Z' },
       { ...good, signed_at: '2026-99-99T09:00:00.000Z' },
+      // Shaped like an instant but not a calendar date. `Date.parse` would
+      // normalize it to March 2 and let it go on to the expiry and retirement
+      // comparisons; the other SDKs refuse it, so this one must too.
+      { ...good, signed_at: '2026-02-30T00:00:00.000Z' },
+      { ...good, signed_at: '2026-04-31T00:00:00.000Z' },
+      { ...good, expires_at: '2026-02-30T00:00:00.000Z' },
       { ...good, expires_at: 12 },
       { ...good, policy_version: 1.5 },
       { ...good, policy_version: -1 },

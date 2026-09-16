@@ -10,9 +10,10 @@ parse the body to filter on them.
 
 The mapping is fixed across the Rust, TypeScript, Python and Go SDKs: one
 ``logRecord`` per entry, ``timeUnixNano`` from the entry's own timestamp,
-``severityText`` ``INFO``/``WARN``/``ERROR`` for allow/warn/deny, and the
-``hushspec.*`` attributes below. A receipt exported by one SDK is indistinguishable
-from the same receipt exported by another.
+``observedTimeUnixNano`` from when the sink took it, ``severityText`` and
+``severityNumber`` of ``INFO``/9, ``WARN``/13 and ``ERROR``/17 for
+allow/warn/deny, and the ``hushspec.*`` attributes below. A receipt exported by
+one SDK is indistinguishable from the same receipt exported by another.
 
 Export is off the hot path: :meth:`OtlpReceiptSink.send` renders the record and
 hands it to a bounded queue, and a daemon thread batches, posts and retries. It
@@ -61,8 +62,20 @@ _DEFAULT_MAX_QUEUE = 2048
 _DEFAULT_MAX_RETRIES = 3
 _DEFAULT_RETRY_BACKOFF_S = 0.5
 
-_SEVERITY_BY_DECISION = {"allow": "INFO", "warn": "WARN", "deny": "ERROR"}
-_POLICY_EVENT_SEVERITY = "INFO"
+#: Severity text and number per decision, as the OpenTelemetry logs data model
+#: numbers them: an allow is routine, a warn is worth a look, a denial is an
+#: incident, so a collector's default severity filters surface denials without
+#: a rule of their own.
+_SEVERITY_BY_DECISION = {
+    "allow": ("INFO", 9),
+    "warn": ("WARN", 13),
+    "deny": ("ERROR", 17),
+}
+#: A decision this build does not know is not an "INFO".
+_SEVERITY_UNKNOWN = ("ERROR", 17)
+#: A policy event decided nothing, so it is informational whatever the policy
+#: says.
+_POLICY_EVENT_SEVERITY = ("INFO", 9)
 
 _ENTRY_TYPE_RECEIPT = "receipt"
 _ENTRY_TYPE_BY_POLICY_EVENT = {
@@ -120,12 +133,13 @@ def _attributes(pairs: list[tuple[str, Any]]) -> list[dict[str, Any]]:
     return [_attribute(key, value) for key, value in pairs if value not in (None, "")]
 
 
-def _time_unix_nano(timestamp: Optional[str]) -> str:
+def _time_unix_nano(timestamp: Optional[str], fallback: str) -> str:
     """Nanoseconds since the epoch, from a receipt's RFC 3339 UTC timestamp.
 
     OTLP/JSON carries 64-bit integers as strings. An unparseable timestamp falls
-    back to now: a record with no time at all would be dropped by collectors,
-    and the body still carries the entry's own timestamp verbatim.
+    back to *fallback*, the time the sink took the entry: a record with no time
+    at all would be dropped by collectors, and the body still carries the
+    entry's own timestamp verbatim.
     """
     if timestamp:
         text = timestamp.strip()
@@ -144,7 +158,7 @@ def _time_unix_nano(timestamp: Optional[str]) -> str:
                 + delta.microseconds * 1000
             )
             return str(nanos)
-    return str(time.time_ns())
+    return fallback
 
 
 def _receipt_record(receipt: DecisionReceipt) -> dict[str, Any]:
@@ -153,9 +167,15 @@ def _receipt_record(receipt: DecisionReceipt) -> dict[str, Any]:
     policy = receipt.policy
     action = receipt.action
     body = canonical_json(receipt)
+    observed = str(time.time_ns())
+    severity_text, severity_number = _SEVERITY_BY_DECISION.get(
+        decision, _SEVERITY_UNKNOWN
+    )
     return {
-        "timeUnixNano": _time_unix_nano(receipt.timestamp),
-        "severityText": _SEVERITY_BY_DECISION.get(decision, "ERROR"),
+        "timeUnixNano": _time_unix_nano(receipt.timestamp, observed),
+        "observedTimeUnixNano": observed,
+        "severityNumber": severity_number,
+        "severityText": severity_text,
         "body": {"stringValue": body},
         "attributes": _attributes(
             [
@@ -188,9 +208,13 @@ def _policy_event_record(event: "PolicyEvent") -> dict[str, Any]:
     kind = str(_value(event.event))
     policy = event.policy
     body = canonical_json_value(policy_event_to_dict(event))
+    observed = str(time.time_ns())
+    severity_text, severity_number = _POLICY_EVENT_SEVERITY
     return {
-        "timeUnixNano": _time_unix_nano(event.timestamp),
-        "severityText": _POLICY_EVENT_SEVERITY,
+        "timeUnixNano": _time_unix_nano(event.timestamp, observed),
+        "observedTimeUnixNano": observed,
+        "severityNumber": severity_number,
+        "severityText": severity_text,
         "body": {"stringValue": body},
         "attributes": _attributes(
             [

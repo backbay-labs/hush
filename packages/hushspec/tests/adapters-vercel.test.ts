@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalizeValue } from '../src/canonical.js';
 import { HushGuard, HushSpecDenied } from '../src/middleware.js';
+import { utf8ByteLength } from '../src/utf8.js';
 import { createVercelGuard, mapVercelToolCall } from '../src/adapters/vercel.js';
 
 const POLICY = `
@@ -35,7 +37,7 @@ describe('mapVercelToolCall', () => {
     const action = mapVercelToolCall({ toolName: 'readFile', args: { path: '/etc/hosts' } });
     expect(action.type).toBe('file_read');
     expect(action.target).toBe('/etc/hosts');
-    expect(action.args_size).toBe(JSON.stringify({ path: '/etc/hosts' }).length);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue({ path: '/etc/hosts' })));
   });
 
   it('normalizes tool-name spelling', () => {
@@ -80,7 +82,7 @@ describe('mapVercelToolCall', () => {
     const action = mapVercelToolCall({ toolName: 'search', args });
     expect(action.type).toBe('tool_call');
     expect(action.target).toBe('search');
-    expect(action.args_size).toBe(JSON.stringify(args).length);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue(args)));
   });
 
   it('accepts the AI SDK 5 `input` spelling', () => {
@@ -89,12 +91,15 @@ describe('mapVercelToolCall', () => {
     expect(action.target).toBe('whoami');
   });
 
-  it('parses JSON string arguments and sizes them as supplied', () => {
+  it('parses JSON string arguments and sizes them canonically', () => {
+    // Core spec 3.7: the padding is not part of the payload a
+    // `max_args_size` limit bounds, so it is not part of the count.
     const raw = '{"path":   "/tmp/a.txt"}';
     const action = mapVercelToolCall({ toolName: 'readFile', args: raw });
     expect(action.type).toBe('file_read');
     expect(action.target).toBe('/tmp/a.txt');
-    expect(action.args_size).toBe(raw.length);
+    expect(action.args_size).toBe(utf8ByteLength('{"path":"/tmp/a.txt"}'));
+    expect(action.args_size).toBeLessThan(utf8ByteLength(raw));
   });
 
   it('tolerates missing arguments', () => {
@@ -218,5 +223,31 @@ describe('createVercelGuard', () => {
     await expect(wrapped.execute?.({ command: 'rm -rf /tmp' })).rejects.toBeInstanceOf(
       HushSpecDenied,
     );
+  });
+
+  it("keeps the tool's identity, prototype members and other methods", async () => {
+    class FakeVercelTool {
+      readonly description = 'a class-based tool';
+      calls: unknown[] = [];
+      describeSelf(): string {
+        return this.description;
+      }
+      async execute(input: unknown): Promise<string> {
+        this.calls.push(input);
+        return 'ran';
+      }
+    }
+    const tool = new FakeVercelTool();
+    const wrapped = createVercelGuard(guard()).wrapTool('safe_tool', tool);
+
+    expect(wrapped).toBeInstanceOf(FakeVercelTool);
+    expect(wrapped.describeSelf()).toBe('a class-based tool');
+    expect(await wrapped.execute({ query: 'hi' })).toBe('ran');
+    expect(tool.calls).toEqual([{ query: 'hi' }]);
+  });
+
+  it('returns a stable gated execute', () => {
+    const wrapped = createVercelGuard(guard()).wrapTool('bash', fakeTool());
+    expect(wrapped.execute).toBe(wrapped.execute);
   });
 });

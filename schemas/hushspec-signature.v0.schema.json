@@ -1,10 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-signature.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Policy Signature Envelope v0.2",
   "description": "A detached Ed25519 signature over the canonical form of a resolved HushSpec policy. Stored as a .sig JSON file next to the policy. Normative prose: spec/hushspec-signing.md. The signature covers the RFC 8785 canonical serialization of this object with the `signature` member removed.",
   "type": "object",
-  "required": ["format_version", "algorithm", "key_id", "signed_at", "content_hash", "signature"],
+  "required": [
+    "format_version",
+    "algorithm",
+    "key_id",
+    "signed_at",
+    "content_hash",
+    "signature"
+  ],
   "additionalProperties": false,
   "properties": {
     "format_version": {

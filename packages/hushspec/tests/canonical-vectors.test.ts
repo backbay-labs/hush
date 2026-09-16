@@ -7,10 +7,12 @@ import {
   CANONICAL_SCHEMA_TABLE,
   CanonicalError,
   canonicalJson,
+  canonicalizeValue,
   contentHash,
   type PropertySchema,
   type SchemaNode,
 } from '../src/canonical.js';
+import { parse } from '../src/parse.js';
 import { createBuiltinLoader, resolve } from '../src/resolve.js';
 import { validate } from '../src/validate.js';
 import type { HushSpec } from '../src/schema.js';
@@ -19,7 +21,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const vectorsDir = path.join(repoRoot, 'fixtures', 'core', 'hash');
 const schemasDir = path.join(repoRoot, 'schemas');
 
-/** `schemas/hushspec-hash-vector.v0.schema.json`. */
+/** `schemas/hushspec-hash-vector.v1.schema.json`. */
 interface HashVector {
   hushspec_hash_vector: string;
   description: string;
@@ -77,7 +79,7 @@ function describeDifference(actual: string, expected: string): string {
 
 describe('canonical form vectors (spec/hushspec-canonical.md section 7)', () => {
   it('finds the full vector set', () => {
-    expect(vectorFiles.length).toBe(14);
+    expect(vectorFiles.length).toBe(16);
   });
 
   for (const file of vectorFiles) {
@@ -137,6 +139,101 @@ describe('canonicalJson', () => {
   it('hashes the canonical bytes with the sha256: wire prefix (section 5)', () => {
     expect(contentHash({ hushspec: '0.1.0' })).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
+
+  it('keeps every integer inside the safe range', () => {
+    expect(canonicalizeValue({ budget: 9007199254740991 })).toBe('{"budget":9007199254740991}');
+    expect(canonicalizeValue({ budget: -9007199254740991 })).toBe('{"budget":-9007199254740991}');
+    expect(canonicalizeValue({ ratio: 0.35 })).toBe('{"ratio":0.35}');
+  });
+
+  it('refuses a null written for a declared property (section 2.2)', () => {
+    expect(() => canonicalJson({ hushspec: '0.1.0', rules: { egress: null } } as HushSpec)).toThrow(
+      /\$\.rules\.egress is null/,
+    );
+    expect(() => canonicalJson({ hushspec: '0.1.0', name: null } as unknown as HushSpec)).toThrow(
+      CanonicalError,
+    );
+  });
+
+  it('keeps a null inside a free-form value (section 2.2)', () => {
+    const document = {
+      hushspec: '0.1.0',
+      rules: { egress: { when: { context: { a: null } } } },
+    } as unknown as HushSpec;
+    expect(canonicalJson(document)).toContain('"context":{"a":null}');
+  });
+
+  it('refuses a key the schema does not declare (section 2.3)', () => {
+    expect(() => canonicalJson({ hushspec: '0.1.0', nope: 1 } as unknown as HushSpec)).toThrow(
+      /unknown field \$\.nope/,
+    );
+    expect(() =>
+      canonicalJson({ hushspec: '0.1.0', rules: { egress: { nope: 1 } } } as unknown as HushSpec),
+    ).toThrow(/unknown field \$\.rules\.egress\.nope/);
+  });
+
+  it('refuses an extensions block the schemas do not describe (section 3.4)', () => {
+    expect(() =>
+      canonicalJson({ hushspec: '0.1.0', extensions: 'nope' } as unknown as HushSpec),
+    ).toThrow(/\$\.extensions must be an object/);
+    expect(() =>
+      canonicalJson({ hushspec: '0.1.0', extensions: { nope: {} } } as unknown as HushSpec),
+    ).toThrow(/unknown extension `nope`/);
+  });
+});
+
+// Section 4.3: the safe-integer bound belongs to integer syntax, which only
+// the parser sees. A literal past the range is refused there; float syntax
+// keeps its ECMAScript form at any magnitude.
+describe('the safe-integer bound (section 4.3)', () => {
+  const policy = (literal: string): string =>
+    [
+      'hushspec: "0.1.0"',
+      'rules:',
+      '  egress:',
+      '    when:',
+      '      context:',
+      `        budget: ${literal}`,
+      '',
+    ].join('\n');
+
+  for (const literal of ['9007199254740993', '18446744073709551617']) {
+    it(`refuses the integer literal ${literal}`, () => {
+      const result = parse(policy(literal));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toContain(`integer ${literal} exceeds the safe range (2^53-1)`);
+    });
+  }
+
+  it('keeps an integer literal inside the range', () => {
+    const result = parse(policy('9007199254740991'));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(canonicalJson(result.value)).toContain('"budget":9007199254740991');
+  });
+
+  it('leaves float syntax unbounded', () => {
+    const result = parse(
+      [
+        'hushspec: "0.1.0"',
+        'rules:',
+        '  egress:',
+        '    when:',
+        '      context:',
+        '        a: 1.0e+16',
+        '        b: 1.0e+21',
+        '        c: 1.5e+300',
+        '        d: -0.0',
+        '',
+      ].join('\n'),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(canonicalJson(result.value)).toContain(
+      '"context":{"a":10000000000000000,"b":1e+21,"c":1.5e+300,"d":0}',
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -178,12 +275,11 @@ function unwrapLazy(node: SchemaNode): SchemaNode {
 /**
  * Walk the hand-written table alongside the published schema.
  *
- * Tolerant in exactly one direction: a schema property the table does not know
- * about is fine *if it has no `default`*, because the projection passes
- * unknown keys through verbatim and a default-less property is emitted exactly
- * as written either way. A property that gains a `default`, changes one, or
- * changes `required` must be transcribed into the table, and fails here until
- * it is.
+ * Strict in both directions: the projection refuses a key the table does not
+ * declare (spec section 2.3), so a schema property missing from the table
+ * would make a valid document uncanonicalizable, and a table property missing
+ * from the schema would let an invalid one through. Defaults and `required`
+ * lists must match too.
  */
 function checkNode(
   table: SchemaNode,
@@ -226,9 +322,7 @@ function checkNode(
         ? propSchema['default']
         : undefined;
       if (entry == null) {
-        if (schemaDefault !== undefined) {
-          errors.push(`${label}.${propName}: schema declares a default, table is missing it`);
-        }
+        errors.push(`${label}.${propName}: in the schema but not in the table`);
         continue;
       }
       if (JSON.stringify(entry.default ?? null) !== JSON.stringify(schemaDefault ?? null)) {
@@ -279,10 +373,10 @@ function checkNode(
 
 describe('projection table matches schemas/', () => {
   const cases: Array<[keyof typeof CANONICAL_SCHEMA_TABLE, string]> = [
-    ['core', 'hushspec-core.v0.schema.json'],
-    ['posture', 'hushspec-posture.v0.schema.json'],
-    ['origins', 'hushspec-origins.v0.schema.json'],
-    ['detection', 'hushspec-detection.v0.schema.json'],
+    ['core', 'hushspec-core.v1.schema.json'],
+    ['posture', 'hushspec-posture.v1.schema.json'],
+    ['origins', 'hushspec-origins.v1.schema.json'],
+    ['detection', 'hushspec-detection.v1.schema.json'],
   ];
 
   for (const [tableKey, schemaFile] of cases) {

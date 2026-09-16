@@ -1,0 +1,10 @@
+hushspec: "0.1.0"
+name: resolved-output-base
+rules:
+  egress:
+    allow:
+      - "base.example.com"
+    default: block
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"

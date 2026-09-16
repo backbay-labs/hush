@@ -52,10 +52,16 @@ func (o *recordingObserver) counts() (int, int, int) {
 	return len(o.loads), len(o.results), len(o.errs)
 }
 
+func (o *recordingObserver) errors() []error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]error(nil), o.errs...)
+}
+
 func guardSpec() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.2.0",
-		Name:            "guard-policy",
+		Name:            strPtr("guard-policy"),
 		Rules: &Rules{
 			Egress: &EgressRule{
 				Enabled: true,
@@ -100,7 +106,7 @@ func TestRuleBlockOf(t *testing.T) {
 
 func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	metrics := NewMetricsCollector()
-	metrics.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:x"})
+	metrics.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:x"})
 	metrics.OnEvaluation(
 		&EvaluationAction{Type: "egress", Target: "evil.example.com"},
 		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
@@ -117,6 +123,7 @@ func TestMetricsCollectorCountsDecisions(t *testing.T) {
 		nil, 90*time.Millisecond,
 	)
 	metrics.OnError(errors.New("sink down"))
+	metrics.OnError(&PolicyLoadError{Source: "policy.yaml", Err: errors.New("unreadable")})
 
 	snapshot := metrics.Snapshot()
 	if got := snapshot.Evaluations[EvaluationMetricKey{Decision: DecisionDeny, ActionType: "egress"}]; got != 1 {
@@ -131,8 +138,8 @@ func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	if snapshot.PolicyLoads["success"] != 1 || snapshot.PolicyLoads["failure"] != 1 {
 		t.Fatalf("policy load counters are wrong: %+v", snapshot.PolicyLoads)
 	}
-	if snapshot.Errors != 1 {
-		t.Fatalf("expected one error, got %d", snapshot.Errors)
+	if snapshot.Errors != 2 {
+		t.Fatalf("expected two errors, got %d", snapshot.Errors)
 	}
 
 	// Cumulative buckets: 8us lands in every bucket, 40us in all but the first,
@@ -167,12 +174,31 @@ func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	}
 }
 
+func TestMetricsCollectorCountsOnlyLoadFailuresAsFailedLoads(t *testing.T) {
+	metrics := NewMetricsCollector()
+	metrics.OnError(&SinkError{Sink: "ChainedFileSink", Err: errors.New("disk full")})
+	metrics.OnError(errors.New("something else the guard absorbed"))
+
+	snapshot := metrics.Snapshot()
+	if snapshot.Errors != 2 {
+		t.Fatalf("expected two errors, got %d", snapshot.Errors)
+	}
+	if got := snapshot.PolicyLoads["failure"]; got != 0 {
+		t.Fatalf("a sink failure leaves the policy in force, got %d failed loads", got)
+	}
+
+	metrics.OnError(&PolicyLoadError{Source: "policy.yaml", Err: errors.New("unreadable")})
+	if got := metrics.Snapshot().PolicyLoads["failure"]; got != 1 {
+		t.Fatalf("expected one failed load, got %d", got)
+	}
+}
+
 func TestJSONLineObserverWritesEventsWithoutContent(t *testing.T) {
 	var buffer bytes.Buffer
 	observer := NewJSONLineObserver(&buffer)
-	observer.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:aa"})
+	observer.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:aa"})
 	observer.OnPolicyLoaded(PolicyLoadObservation{
-		Name: "p", ContentHash: "sha256:bb", PreviousContentHash: "sha256:aa",
+		Name: strPtr("p"), ContentHash: "sha256:bb", PreviousContentHash: "sha256:aa",
 	})
 	content := "super secret"
 	observer.OnEvaluation(
@@ -255,7 +281,7 @@ func TestObservableEvaluatorFansOutAndSurvivesPanics(t *testing.T) {
 		t.Fatalf("expected 3 observers, got %d", len(fanout.Observers()))
 	}
 
-	fanout.OnPolicyLoaded(PolicyLoadObservation{Name: "p"})
+	fanout.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p")})
 	fanout.OnEvaluation(&EvaluationAction{Type: "egress"}, EvaluationResult{Decision: DecisionAllow}, nil, 0)
 	fanout.OnError(errors.New("boom"))
 
@@ -395,7 +421,7 @@ func TestStderrObserverDenyOnly(t *testing.T) {
 		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
 		nil, 0,
 	)
-	observer.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:aa"})
+	observer.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:aa"})
 	if !strings.Contains(buffer.String(), "evil.example.com") ||
 		!strings.Contains(buffer.String(), "policy loaded") {
 		t.Fatalf("unexpected output: %q", buffer.String())

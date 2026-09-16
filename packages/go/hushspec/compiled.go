@@ -13,7 +13,7 @@
 // the decisions, traces and receipts the free functions produce, including the
 // fail-closed denies a pattern outside the regex profile causes. A pattern that
 // will not compile is kept as a recorded error carrying the rule path, so the
-// evaluator denies with the same matched_rule and reason it always did, and
+// evaluator denies with that rule's matched_rule and reason, and
 // [CompilePolicy] reports it to callers that want compilation itself to fail.
 //
 // A [CompiledPolicy] is immutable once built and safe for concurrent use. It
@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
-	"sync/atomic"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -77,23 +76,32 @@ var blockNames = [blockCount]string{
 // The applicable-block lists of core spec Section 5, allocated once instead of
 // per evaluation. They are read-only.
 var (
-	blocksFileRead       = []blockID{blockForbiddenPaths, blockPathAllowlist}
-	blocksFileWrite      = []blockID{blockForbiddenPaths, blockPathAllowlist, blockSecretPatterns}
-	blocksPatchApply     = []blockID{blockForbiddenPaths, blockPathAllowlist, blockPatchIntegrity, blockSecretPatterns}
-	blocksShellCommand   = []blockID{blockShellCommands}
-	blocksEgress         = []blockID{blockEgress, blockSecretPatterns}
-	blocksToolCall       = []blockID{blockToolAccess, blockSecretPatterns}
-	blocksComputerUse    = []blockID{blockComputerUse, blockRemoteDesktopChannels}
-	blocksInputInject    = []blockID{blockInputInjection}
-	blocksBrowserAction  = []blockID{blockBrowserAutomation}
-	blocksCodeExec       = []blockID{blockCodeExecution}
-	inactiveAbsentBlocks = newInactiveAbsentBlocks()
+	blocksFileRead             = []blockID{blockForbiddenPaths, blockPathAllowlist}
+	blocksFileWrite            = []blockID{blockForbiddenPaths, blockPathAllowlist, blockSecretPatterns}
+	blocksPatchApply           = []blockID{blockForbiddenPaths, blockPathAllowlist, blockPatchIntegrity, blockSecretPatterns}
+	blocksShellCommand         = []blockID{blockShellCommands}
+	blocksEgress               = []blockID{blockEgress, blockSecretPatterns}
+	blocksToolCall             = []blockID{blockToolAccess, blockSecretPatterns}
+	blocksComputerUse          = []blockID{blockComputerUse, blockRemoteDesktopChannels}
+	blocksInputInject          = []blockID{blockInputInjection}
+	blocksBrowserAction        = []blockID{blockBrowserAutomation}
+	blocksCodeExec             = []blockID{blockCodeExecution}
+	inactiveAbsentBlocks       = newInactiveBlocks("no %s rule configured")
+	inactiveContentNotSupplied = newInactiveBlocks(
+		"content not supplied; %s not consulted")
+	inactiveTargetNotAChannel = newInactiveBlocks(
+		"target is not a remote desktop channel; %s not consulted")
 )
 
-func newInactiveAbsentBlocks() [blockCount]*inactive {
+// newInactiveBlocks builds the per-block reason a trace records when a block
+// is skipped for one cause, with format naming the block. A skipped block says
+// which of the causes of receipt spec 4.3 applied -- "not configured" and
+// "configured but not consulted for this action" are different facts about the
+// policy, and an auditor reading the trace must be able to tell them apart.
+func newInactiveBlocks(format string) [blockCount]*inactive {
 	var out [blockCount]*inactive
 	for id := blockID(0); id < blockCount; id++ {
-		out[id] = &inactive{reason: fmt.Sprintf("no %s rule configured", blockNames[id])}
+		out[id] = &inactive{reason: fmt.Sprintf(format, blockNames[id])}
 	}
 	return out
 }
@@ -136,7 +144,7 @@ func applicableBlocks(actionType string) (blocks []blockID, ok bool) {
 
 // compiledGlobSet is a path-glob list compiled to anchored regexes. A pattern
 // that does not compile is a nil entry, which matches nothing -- the behaviour
-// [PathGlobMatches] has always had for an uncompilable glob.
+// [PathGlobMatches] has for an uncompilable glob.
 type compiledGlobSet []*regexp.Regexp
 
 func compileGlobSet(patterns []string) compiledGlobSet {
@@ -371,7 +379,7 @@ func (c *compiledOrigins) selectProfile(origin *OriginContext) *compiledOriginPr
 		if !ok {
 			continue
 		}
-		if profile.match.SpaceID != "" {
+		if profile.match.SpaceID != nil {
 			return profile
 		}
 		if matchedFields > bestCount {
@@ -447,9 +455,10 @@ func (e *CompileError) Unwrap() error { return e.Err }
 // CompilePolicy compiles a resolved HushSpec document once, so repeated
 // evaluations do no pattern compilation at all.
 //
-// It is fail-closed: any pattern outside the HushSpec regex profile is a
-// [CompileError] rather than a policy that denies later, since a pattern the
-// engine cannot evaluate is a policy the author cannot rely on. Path globs and
+// It is fail-closed: a document that still declares `extends` is refused, and
+// any pattern outside the HushSpec regex profile is a [CompileError] rather
+// than a policy that denies later, since a pattern the engine cannot evaluate
+// is a policy the author cannot rely on. Path globs and
 // host patterns are not regexes and are never an error -- an uncompilable one
 // matches nothing, exactly as it does during evaluation.
 //
@@ -458,6 +467,15 @@ func (e *CompileError) Unwrap() error { return e.Err }
 func CompilePolicy(spec *HushSpec) (*CompiledPolicy, error) {
 	if spec == nil {
 		return nil, errors.New("cannot compile a nil HushSpec document")
+	}
+	if spec.Extends != nil {
+		// Core spec 2.3: an engine MUST refuse to evaluate a document that
+		// still declares `extends`. Its rules are not the rules that would be
+		// in force -- every block its base contributes would silently be
+		// missing -- so there is nothing safe to compile.
+		return nil, fmt.Errorf(
+			"policy still declares 'extends: %s'; resolve the chain before compiling it",
+			*spec.Extends)
 	}
 	policy := compilePolicy(spec)
 	if policy.compileErr != nil {
@@ -492,8 +510,8 @@ func (p *CompiledPolicy) ContentHash() (string, error) {
 }
 
 // compilePolicy compiles without failing: a pattern outside the regex profile
-// is recorded on the entry that owns it (so the evaluator denies with the same
-// rule path and reason it always did) and remembered in compileErr for
+// is recorded on the entry that owns it (so the evaluator denies with that
+// entry's rule path and reason) and remembered in compileErr for
 // [CompilePolicy]. A nil spec compiles to an empty policy.
 func compilePolicy(spec *HushSpec) *CompiledPolicy {
 	policy := &CompiledPolicy{spec: spec}
@@ -787,11 +805,14 @@ func (p *CompiledPolicy) EvaluateWithContext(
 // ---------------------------------------------------------------------------
 
 // compiledCacheLimit bounds the number of documents the free-function cache
-// holds. Past it, evaluation still works -- it just compiles on the fly, as it
-// did before there was a cache.
+// holds. At the bound the whole cache is dropped rather than frozen: a run
+// that evaluates thousands of one-shot documents (the fixture suites, the
+// differential fuzzer) must neither retain them all nor recompile the
+// thousand-and-first on every action.
 const compiledCacheLimit = 64
 
 var (
+	compiledCacheMu sync.RWMutex
 	// compiledCache maps a *HushSpec to its compiled form, so back-to-back
 	// free-function calls on one document compile once. Keying on the pointer
 	// means the entry keeps the document alive, so an address is never reused
@@ -799,27 +820,33 @@ var (
 	// evaluated keeps its old compilation. Resolved documents are treated as
 	// immutable everywhere in this SDK; a caller that edits one should hold a
 	// [CompiledPolicy] of its own instead.
-	compiledCache      sync.Map
-	compiledCacheCount atomic.Int64
+	compiledCache = make(map[*HushSpec]*CompiledPolicy, compiledCacheLimit)
 )
 
-// cachedCompile is the compiled form of spec for the free functions: cached
-// when there is room, compiled on the fly otherwise. It never fails -- an
-// invalid pattern denies during evaluation exactly as it always has.
+// cachedCompile is the compiled form of spec for the free functions. It never
+// fails: an invalid pattern denies during evaluation instead.
 func cachedCompile(spec *HushSpec) *CompiledPolicy {
 	if spec == nil {
 		return compilePolicy(nil)
 	}
-	if cached, ok := compiledCache.Load(spec); ok {
-		return cached.(*CompiledPolicy)
+	compiledCacheMu.RLock()
+	cached, ok := compiledCache[spec]
+	compiledCacheMu.RUnlock()
+	if ok {
+		return cached
 	}
+
 	compiled := compilePolicy(spec)
-	if compiledCacheCount.Load() >= compiledCacheLimit {
-		return compiled
+	compiledCacheMu.Lock()
+	defer compiledCacheMu.Unlock()
+	if existing, ok := compiledCache[spec]; ok {
+		// Another goroutine compiled the same document first; one compiled
+		// policy per document keeps the cache a memo rather than a leak.
+		return existing
 	}
-	if actual, loaded := compiledCache.LoadOrStore(spec, compiled); loaded {
-		return actual.(*CompiledPolicy)
+	if len(compiledCache) >= compiledCacheLimit {
+		clear(compiledCache)
 	}
-	compiledCacheCount.Add(1)
+	compiledCache[spec] = compiled
 	return compiled
 }

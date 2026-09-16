@@ -94,6 +94,20 @@ describe('CompileError', () => {
     },
   };
 
+  it('is raised for a document that still declares extends', () => {
+    // Core spec 2.3: compiling an unresolved document would drop every rule
+    // block its base contributes.
+    const unresolved: HushSpec = { hushspec: '0.1.0', extends: 'builtin:default' };
+    for (const compile of [
+      () => compilePolicy(unresolved),
+      () => compileResolution({ spec: unresolved, content_hash: '', chain: [] }),
+      () => compilePolicy(unresolved, { strict: false }),
+    ]) {
+      expect(compile).toThrow(CompileError);
+      expect(compile).toThrow(/builtin:default/);
+    }
+  });
+
   it('is raised for a pattern outside the regex profile', () => {
     expect(() => compilePolicy(badSpec)).toThrow(CompileError);
     try {
@@ -102,7 +116,7 @@ describe('CompileError', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(CompileError);
       expect((error as CompileError).path).toBe('rules.shell_commands.forbidden_patterns[0]');
-      expect((error as CompileError).message).toContain('RE2 subset');
+      expect((error as CompileError).message).toContain('group form');
     }
   });
 
@@ -124,7 +138,7 @@ describe('CompileError', () => {
     const result = compiled.evaluate({ type: 'shell_command', target: 'sudo rm -rf /tmp/demo' });
     expect(result.decision).toBe('deny');
     expect(result.matched_rule).toBe('rules.shell_commands.forbidden_patterns[0]');
-    expect(result.reason).toContain('RE2 subset');
+    expect(result.reason).toContain('group form');
   });
 
   it('is never raised through the free functions', () => {

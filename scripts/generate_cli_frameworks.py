@@ -27,6 +27,15 @@ REGISTRY = ROOT / "spec" / "registries" / "frameworks.yaml"
 OUTPUT = ROOT / "crates" / "hushspec-cli" / "src" / "generated_frameworks.rs"
 
 FRAMEWORK_ID_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
+
+#: Regex constructs Python's `re` accepts but the Rust `regex` crate, which
+#: compiles `control_id_pattern` in the CLI, does not: lookaround,
+#: backreferences, atomic and conditional groups, and recursion. A pattern
+#: using one of them would validate here and fail to compile there, where
+#: every control id for the framework is then reported as a mismatch.
+NOT_IN_RUST_REGEX = re.compile(
+    r"\\[1-9]|\\k<|\\g<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?[0-9]+\)|\(\?P="
+)
 FIELDS = ("id", "name", "version", "url", "control_id_pattern")
 
 
@@ -68,6 +77,12 @@ def load() -> tuple[str, list[dict]]:
             re.compile(pattern)
         except re.error as exc:
             raise SystemExit(f"{REGISTRY}: {entry['id']}: control_id_pattern does not compile: {exc}")
+        if NOT_IN_RUST_REGEX.search(pattern) is not None:
+            raise SystemExit(
+                f"{REGISTRY}: {entry['id']}: control_id_pattern uses lookaround, a "
+                "backreference, an atomic or conditional group, or recursion, none "
+                "of which the Rust regex crate that compiles it supports"
+            )
         if entry["id"] in seen:
             raise SystemExit(f"{REGISTRY}: duplicate framework id {entry['id']!r}")
         seen.add(entry["id"])
@@ -136,10 +151,16 @@ def render() -> str:
     # `--check` reports the committed file as permanently stale.
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is not on PATH, and generated_frameworks.rs is committed as rustfmt "
+            "output. Generating without it would write a file that `cargo fmt` "
+            "immediately reformats, which this script's --check then reports "
+            "as out of date forever. Install it with `rustup component add "
+            "rustfmt`."
+        )
 
     result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        [rustfmt, "--emit", "stdout", "--edition", "2024"],
         input=content,
         text=True,
         capture_output=True,

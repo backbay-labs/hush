@@ -115,8 +115,11 @@ func runExpectedReceiptFixture(t *testing.T, fixturePath, expectedDir string) in
 		if action.Context == nil {
 			action.Context = testCase.Context
 		}
-		receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+		receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
 			expectedReceiptContext(index))
+		if err != nil {
+			t.Fatalf("case %d: audited: %v", index, err)
+		}
 
 		path := filepath.Join(expectedDir, fmt.Sprintf("%d.json", index))
 		expected, err := os.ReadFile(path)

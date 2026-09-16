@@ -89,6 +89,20 @@ func RegistryErrorCode(kind string) string {
 	return ErrorCodeConstraint
 }
 
+// requiresNonEmptyName reports whether a document declaring version must give
+// a present `name` a non-empty value. A bundle's subject and a receipt's policy
+// summary both name the policy, and an empty name names nothing.
+//
+// This is the one constraint the 1.0 document format adds to 0.2 (versioning
+// spec 10): the frozen 0.x format allows `name: ""`. A version that cannot be
+// read as MAJOR.MINOR.PATCH is already refused as unsupported, and is held to
+// the current format's constraints here so an unreadable version can never
+// relax one.
+func requiresNonEmptyName(version string) bool {
+	major, ok := MajorVersion(version)
+	return !ok || major >= 1
+}
+
 // ValidationResult is everything [Validate] found: refusals that make the
 // document invalid, and advisory warnings that do not.
 type ValidationResult struct {
@@ -176,6 +190,10 @@ func Validate(spec *HushSpec) *ValidationResult {
 				spec.HushSpecVersion, strings.Join(SupportedMinors, ", ")))
 	}
 
+	if spec.Name != nil && *spec.Name == "" && requiresNonEmptyName(spec.HushSpecVersion) {
+		result.addErrorAt("INVALID_VALUE", "name", "name: must not be empty when present")
+	}
+
 	if spec.MergeStrategy != "" && !containsTyped(spec.MergeStrategy, MergeStrategies) {
 		result.addError("INVALID_MERGE_STRATEGY",
 			fmt.Sprintf("invalid merge_strategy %q; must be one of: replace, merge, deep_merge", spec.MergeStrategy))
@@ -202,16 +220,16 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 
 	for _, field := range []struct {
 		path  string
-		value string
+		value *string
 	}{
 		{"metadata.approval_date", m.ApprovalDate},
 		{"metadata.effective_date", m.EffectiveDate},
 		{"metadata.expiry_date", m.ExpiryDate},
 		{"metadata.next_review_date", m.NextReviewDate},
 	} {
-		if field.value != "" && !isISODate(field.value) {
+		if field.value != nil && !isISODate(*field.value) {
 			result.addError("INVALID_DATE", fmt.Sprintf(
-				"%s: %q is not an ISO 8601 date (YYYY-MM-DD)", field.path, field.value))
+				"%s: %q is not an ISO 8601 date (YYYY-MM-DD)", field.path, *field.value))
 		}
 	}
 
@@ -224,48 +242,50 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 
 	// GOV_SELF_SUPERSEDES: a document that replaces its own version describes
 	// an impossible lineage, so it is an error rather than an advisory warning.
-	if m.Supersedes != "" && m.PolicyVersion != nil &&
-		strings.TrimSpace(m.Supersedes) == strconv.Itoa(*m.PolicyVersion) {
+	if m.Supersedes != nil && m.PolicyVersion != nil &&
+		strings.TrimSpace(*m.Supersedes) == strconv.Itoa(*m.PolicyVersion) {
 		result.addError("INVALID_VALUE", fmt.Sprintf(
-			"metadata.supersedes '%s' is the policy's own policy_version", m.Supersedes))
+			"metadata.supersedes '%s' is the policy's own policy_version", *m.Supersedes))
 	}
 
 	if m.LifecycleState == LifecycleStateDeprecated || m.LifecycleState == LifecycleStateArchived {
 		result.addWarning(fmt.Sprintf("policy lifecycle state is '%s'", m.LifecycleState))
 	}
 
-	if m.ExpiryDate != "" && isISODate(m.ExpiryDate) && m.ExpiryDate < today {
-		result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", m.ExpiryDate))
+	if m.ExpiryDate != nil && isISODate(*m.ExpiryDate) && *m.ExpiryDate < today {
+		result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", *m.ExpiryDate))
 	}
 
-	if m.ApprovedBy != "" && m.ApprovalDate == "" {
+	if m.ApprovedBy != nil && m.ApprovalDate == nil {
 		result.addWarning("approved_by is set but approval_date is missing")
 	}
 
-	if m.Classification == ClassificationRestricted && m.ApprovedBy == "" {
+	if m.Classification == ClassificationRestricted && m.ApprovedBy == nil {
 		result.addWarning("classification is 'restricted' but no approved_by is set")
 	}
 
 	// GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that
 	// a copy-paste with different capitalization defeats is no check at all.
-	if author := strings.TrimSpace(m.Author); author != "" &&
-		strings.EqualFold(author, strings.TrimSpace(m.ApprovedBy)) {
-		result.addWarning(fmt.Sprintf(
-			"author and approved_by are the same identity '%s': separation of duties requires a different approver",
-			author))
+	if m.Author != nil && m.ApprovedBy != nil {
+		if author := strings.TrimSpace(*m.Author); author != "" &&
+			strings.EqualFold(author, strings.TrimSpace(*m.ApprovedBy)) {
+			result.addWarning(fmt.Sprintf(
+				"author and approved_by are the same identity '%s': separation of duties requires a different approver",
+				author))
+		}
 	}
 
 	// GOV_UNAPPROVED_STATE.
 	if (m.LifecycleState == LifecycleStateApproved || m.LifecycleState == LifecycleStateDeployed) &&
-		m.ApprovedBy == "" {
+		m.ApprovedBy == nil {
 		result.addWarning(fmt.Sprintf(
 			"lifecycle_state is '%s' but no approved_by is set", m.LifecycleState))
 	}
 
 	// GOV_REVIEW_OVERDUE.
-	if m.NextReviewDate != "" && isISODate(m.NextReviewDate) && m.NextReviewDate < today {
+	if m.NextReviewDate != nil && isISODate(*m.NextReviewDate) && *m.NextReviewDate < today {
 		result.addWarning(fmt.Sprintf(
-			"policy next_review_date '%s' is in the past", m.NextReviewDate))
+			"policy next_review_date '%s' is in the past", *m.NextReviewDate))
 	}
 
 	// GOV_CHANGELOG_ORDER.
@@ -563,13 +583,31 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 		}
 
 		if profile.Match != nil {
-			if profile.Match.SpaceType != "" && !containsTyped(profile.Match.SpaceType, OriginSpaceTypes) {
+			if profile.Match.SpaceType != nil && !containsTyped(*profile.Match.SpaceType, OriginSpaceTypes) {
 				result.addError("INVALID_ORIGIN_SPACE_TYPE",
-					fmt.Sprintf("origins.profiles[%d].match.space_type %q is not valid", index, profile.Match.SpaceType))
+					fmt.Sprintf("origins.profiles[%d].match.space_type %q is not valid", index, *profile.Match.SpaceType))
 			}
-			if profile.Match.Visibility != "" && !containsTyped(profile.Match.Visibility, OriginVisibilities) {
+			if profile.Match.Visibility != nil && !containsTyped(*profile.Match.Visibility, OriginVisibilities) {
 				result.addError("INVALID_ORIGIN_VISIBILITY",
-					fmt.Sprintf("origins.profiles[%d].match.visibility %q is not valid", index, profile.Match.Visibility))
+					fmt.Sprintf("origins.profiles[%d].match.visibility %q is not valid", index, *profile.Match.Visibility))
+			}
+			// A present-but-empty free-text match field is an unsatisfiable
+			// constraint: no origin carries an empty provider or tenant. The
+			// enum fields above already refuse "" as an unknown variant.
+			for _, field := range []struct {
+				name  string
+				value *string
+			}{
+				{"provider", profile.Match.Provider},
+				{"tenant_id", profile.Match.TenantID},
+				{"space_id", profile.Match.SpaceID},
+				{"sensitivity", profile.Match.Sensitivity},
+				{"actor_role", profile.Match.ActorRole},
+			} {
+				if field.value != nil && *field.value == "" {
+					result.addError("INVALID_VALUE", fmt.Sprintf(
+						"origins.profiles[%d].match.%s must not be empty", index, field.name))
+				}
 			}
 		}
 
@@ -594,13 +632,13 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 
 		if profile.Bridge != nil {
 			for targetIndex, target := range profile.Bridge.AllowedTargets {
-				if target.SpaceType != "" && !containsTyped(target.SpaceType, OriginSpaceTypes) {
+				if target.SpaceType != nil && !containsTyped(*target.SpaceType, OriginSpaceTypes) {
 					result.addError("INVALID_BRIDGE_SPACE_TYPE",
-						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].space_type %q is not valid", index, targetIndex, target.SpaceType))
+						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].space_type %q is not valid", index, targetIndex, *target.SpaceType))
 				}
-				if target.Visibility != "" && !containsTyped(target.Visibility, OriginVisibilities) {
+				if target.Visibility != nil && !containsTyped(*target.Visibility, OriginVisibilities) {
 					result.addError("INVALID_BRIDGE_VISIBILITY",
-						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].visibility %q is not valid", index, targetIndex, target.Visibility))
+						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].visibility %q is not valid", index, targetIndex, *target.Visibility))
 				}
 			}
 		}
@@ -620,6 +658,10 @@ func validateDetection(detection *DetectionExtension, result *ValidationResult) 
 		}
 		if prompt.MaxScanBytes != nil && *prompt.MaxScanBytes < 1 {
 			result.addError("INVALID_MAX_SCAN_BYTES", "detection.prompt_injection.max_scan_bytes must be >= 1")
+		}
+		if h := prompt.Heuristics; h != nil && h.MinScore != nil && (*h.MinScore < 0 || *h.MinScore > 100) {
+			result.addError("INVALID_MIN_SCORE",
+				"detection.prompt_injection.heuristics.min_score must be between 0 and 100")
 		}
 
 		warnLevel := DetectionLevelSuspicious
@@ -718,6 +760,10 @@ func validateRegex(pattern, path string, result *ValidationResult) {
 // quantifiers.
 const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines"
 
+// openLowerBoundRegexMessage is the shared rejection message for the
+// open-lower-bound quantifier {,n}.
+const openLowerBoundRegexMessage = "the {,n} quantifier is not portable across the HushSpec SDK regex engines (Python reads it as {0,n}, the others as literal text); write {0,n}"
+
 // disallowedRegexFeature is a portability pre-check: it rejects regex
 // constructs that are unsupported by, or behave differently across, the four
 // SDK engines so a pattern validates identically everywhere. Scanning outside
@@ -727,7 +773,9 @@ const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+,
 //     RegExp and Go RE2 reject them at compile time),
 //   - \Z and \z end-anchors (Rust/Python/Go accept them with differing
 //     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
-//   - empty character classes [] and [^] (JS accepts them; the others reject).
+//   - empty character classes [] and [^] (JS accepts them; the others reject),
+//   - the {,n} quantifier (Python reads it as {0,n}; the others read the whole
+//     brace as literal text).
 //
 // The rules are part of the HushSpec regex profile, so every engine must apply
 // them identically.
@@ -784,6 +832,9 @@ func disallowedRegexFeature(pattern string) (string, bool) {
 			if j < n {
 				inner := string(chars[i+1 : j])
 				if braceKind(inner) != quantNone {
+					if strings.HasPrefix(inner, ",") {
+						return openLowerBoundRegexMessage, true
+					}
 					if j+1 < n && chars[j+1] == '+' {
 						return possessiveRegexMessage, true
 					}

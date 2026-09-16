@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
 # Hardened CI/CD pipeline policy.
 #
 # DISCLAIMER: Customize the egress allowlist and tool access for your

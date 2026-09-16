@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "1.0.0"
 edition = "2024"
 # MSRV. Edition 2024 alone only needs 1.85, but the sources use let-chains
 # (`if let ... && ...`), stable since 1.88, and the committed Cargo.lock

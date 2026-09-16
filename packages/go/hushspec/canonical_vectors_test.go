@@ -9,14 +9,14 @@ import (
 )
 
 // hashVectorVersion is the `hushspec_hash_vector` format version this runner
-// understands (schemas/hushspec-hash-vector.v0.schema.json).
+// understands (schemas/hushspec-hash-vector.v1.schema.json).
 const hashVectorVersion = "0.1.0"
 
 // expectedHashVectors is the size of the normative vector set; keep it in step
 // with the table in fixtures/core/hash/README.md.
-const expectedHashVectors = 14
+const expectedHashVectors = 16
 
-// hashVector mirrors schemas/hushspec-hash-vector.v0.schema.json. `source` is
+// hashVector mirrors schemas/hushspec-hash-vector.v1.schema.json. `source` is
 // informational -- it records the unresolved document `policy` came from -- so
 // it is not decoded here.
 type hashVector struct {
@@ -96,7 +96,7 @@ func parseVectorPolicy(t *testing.T, path string, policy map[string]any) *HushSp
 	if err != nil {
 		t.Fatalf("%s: failed to parse policy: %v", path, err)
 	}
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		resolved, err := Resolve(spec, "", nil)
 		if err != nil {
 			t.Fatalf("%s: failed to resolve policy: %v", path, err)

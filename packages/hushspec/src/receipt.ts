@@ -14,6 +14,7 @@ import { compiledFor, compiledForResolution } from './compiled.js';
 import type { ChainLink, Resolution, SignatureStatus } from './resolve.js';
 import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
+import { RULE_KEYS } from './generated/contract.js';
 import { utf8ByteLength } from './utf8.js';
 
 /**
@@ -209,12 +210,9 @@ const RECEIPT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Parse a receipt, rejecting unknown top-level fields and any version other
- * than the one this module implements (receipt spec 3.1).
- *
- * Structural validation beyond that is the schema's job; this is the
- * fail-closed gate a consumer needs before it treats a document as a 0.2
- * receipt.
+ * Parse a receipt, rejecting unknown fields, any version other than the one
+ * this module implements, and any document that is not shaped like a 0.2
+ * receipt (receipt spec 3.1).
  *
  * @throws {ReceiptError}
  */
@@ -231,22 +229,362 @@ export function parseReceipt(json: string | unknown): DecisionReceipt {
   } else {
     value = json;
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ReceiptError('receipt must be a JSON object');
-  }
-  for (const key of Object.keys(value)) {
-    if (!RECEIPT_KEYS.has(key)) {
-      throw new ReceiptError(`unknown receipt field ${JSON.stringify(key)}`);
-    }
-  }
-  const receipt = value as DecisionReceipt;
-  if (receipt.receipt_version !== RECEIPT_VERSION) {
+  const object = requireObject(value, 'receipt', RECEIPT_KEYS);
+  if (object.receipt_version !== RECEIPT_VERSION) {
     throw new ReceiptError(
-      `unsupported receipt_version ${JSON.stringify(receipt.receipt_version)}, ` +
+      `unsupported receipt_version ${JSON.stringify(object.receipt_version)}, ` +
         `expected ${JSON.stringify(RECEIPT_VERSION)}`,
     );
   }
-  return receipt;
+  validateReceiptShape(object);
+  return object as unknown as DecisionReceipt;
+}
+
+// --------------------------------------------------------------------------
+// Structural validation (receipt spec 2, item 4)
+// --------------------------------------------------------------------------
+
+/**
+ * A TypeScript interface says nothing at runtime, so the parser checks what
+ * the 0.2 schema states and a typed model would otherwise enforce: required
+ * members, member types, closed enums, and no unknown member at any level.
+ * Without them a consumer -- a log verifier above all -- would count an
+ * arbitrary JSON object as evidence.
+ */
+
+type JsonObject = Record<string, unknown>;
+
+const ACTOR_KEYS: ReadonlySet<string> = new Set([
+  'agent_id',
+  'session_id',
+  'principal',
+  'runtime',
+]);
+
+const POLICY_KEYS: ReadonlySet<string> = new Set([
+  'name',
+  'version',
+  'spec_version',
+  'content_hash',
+  'extends_chain',
+  'signature',
+]);
+
+const CHAIN_LINK_KEYS: ReadonlySet<string> = new Set(['source', 'content_hash']);
+
+const SIGNATURE_STATUS_KEYS: ReadonlySet<string> = new Set([
+  'verified',
+  'key_id',
+  'verified_at',
+  'reason',
+]);
+
+const ACTION_KEYS: ReadonlySet<string> = new Set([
+  'type',
+  'target',
+  'content_hash',
+  'content_size',
+  'args_size',
+  'origin',
+  'context',
+]);
+
+const RULE_TRACE_KEYS: ReadonlySet<string> = new Set([
+  'rule_block',
+  'rule_path',
+  'outcome',
+  'evaluated',
+  'reason',
+]);
+
+const DETECTION_TRACE_KEYS: ReadonlySet<string> = new Set([
+  'detector_id',
+  'category',
+  'score',
+  'level',
+  'matched',
+]);
+
+const ENFORCEMENT_KEYS: ReadonlySet<string> = new Set(['mode', 'outcome']);
+
+const POSTURE_KEYS: ReadonlySet<string> = new Set(['current', 'next']);
+
+const TIME_SOURCES: ReadonlySet<string> = new Set([
+  'system',
+  'monotonic_adjusted',
+  'trusted',
+  'unknown',
+]);
+
+const DECISIONS: ReadonlySet<string> = new Set(['allow', 'warn', 'deny']);
+
+const RULE_OUTCOMES: ReadonlySet<string> = new Set(['allow', 'warn', 'deny', 'skip']);
+
+const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
+
+const ENFORCEMENT_OUTCOMES: ReadonlySet<string> = new Set([
+  'allowed',
+  'confirmed',
+  'blocked',
+  'would_block',
+]);
+
+const DETECTION_CATEGORIES: ReadonlySet<string> = new Set([
+  'prompt_injection',
+  'jailbreak',
+  'data_exfiltration',
+  'threat_intel',
+]);
+
+const DETECTOR_LEVELS: ReadonlySet<string> = new Set([
+  'none',
+  'low',
+  'suspicious',
+  'high',
+  'critical',
+]);
+
+/**
+ * `$defs.RuleEvaluation.rule_block`: the rule-block ids, which are the keys of
+ * `rules` exactly, followed by the engine stages of receipt spec 4.3, item 5.
+ *
+ * The bare spellings are normative: format 0.1 mixed `egress` and
+ * `rules.egress`, and 0.2 closed the enum on the bare ids.
+ */
+const RULE_BLOCKS: ReadonlySet<string> = new Set([
+  ...RULE_KEYS,
+  'posture_capability',
+  ORIGIN_PROFILE_BLOCK,
+  'panic',
+  UNKNOWN_ACTION_TYPE_BLOCK,
+  'default',
+]);
+
+/** `$.receipt_id`: a UUID v7, lowercase, with the version nibble 7 and the
+ * RFC 4122 variant bits. */
+const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+/** A `sha256:` content hash (canonical spec 5). */
+const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
+
+/** The message a member that is not one reports. */
+const NOT_A_CONTENT_HASH = 'is not `sha256:` and 64 lowercase hex digits';
+
+/** `$defs.PolicySummary.spec_version`: the v1 schema widened it to the 1.x
+ * lineage, so a receipt for a 1.0.z policy validates (core spec 10.2). */
+const SPEC_VERSION = /^(0|1)\.[0-9]+\.[0-9]+$/;
+
+function requireObject(
+  value: unknown,
+  label: string,
+  allowed: ReadonlySet<string>,
+): JsonObject {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ReceiptError(`${label} must be a JSON object`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new ReceiptError(`unknown field ${JSON.stringify(key)} in ${label}`);
+    }
+  }
+  return value as JsonObject;
+}
+
+function requireArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new ReceiptError(`${label} must be an array`);
+  }
+  return value;
+}
+
+function requireMembers(object: JsonObject, label: string, keys: readonly string[]): void {
+  for (const key of keys) {
+    if (object[key] === undefined) {
+      throw new ReceiptError(`${label} is missing ${JSON.stringify(key)}`);
+    }
+  }
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== 'string') {
+    throw new ReceiptError(`${label} must be a string`);
+  }
+  return value;
+}
+
+function optionalString(value: unknown, label: string): void {
+  if (value !== undefined) requireString(value, label);
+}
+
+function requireNonEmpty(value: unknown, label: string): void {
+  if (requireString(value, label) === '') {
+    throw new ReceiptError(`${label} is empty`);
+  }
+}
+
+function requirePattern(
+  value: unknown,
+  label: string,
+  pattern: RegExp,
+  expected: string,
+): void {
+  const text = requireString(value, label);
+  if (!pattern.test(text)) {
+    throw new ReceiptError(`${label} ${JSON.stringify(text)} ${expected}`);
+  }
+}
+
+function requireBoolean(value: unknown, label: string): void {
+  if (typeof value !== 'boolean') {
+    throw new ReceiptError(`${label} must be a boolean`);
+  }
+}
+
+function optionalSize(value: unknown, label: string): void {
+  if (value === undefined) return;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new ReceiptError(`${label} must be a non-negative integer`);
+  }
+}
+
+function requireEnum(value: unknown, label: string, allowed: ReadonlySet<string>): void {
+  const text = requireString(value, label);
+  if (!allowed.has(text)) {
+    throw new ReceiptError(`${label} ${JSON.stringify(text)} is outside the closed enum`);
+  }
+}
+
+function requireTimestamp(value: unknown, label: string): void {
+  const text = requireString(value, label);
+  if (!isMillisecondTimestamp(text)) {
+    throw new ReceiptError(
+      `${label} ${JSON.stringify(text)} is not an RFC 3339 UTC instant with ` +
+        'millisecond precision',
+    );
+  }
+}
+
+function validateReceiptShape(receipt: JsonObject): void {
+  requireMembers(receipt, 'receipt', [
+    'receipt_id',
+    'timestamp',
+    'time_source',
+    'policy',
+    'action',
+    'decision',
+    'rule_trace',
+    'enforcement',
+  ]);
+  requirePattern(receipt.receipt_id, 'receipt_id', UUID_V7, 'is not a lowercase UUID v7');
+  requireTimestamp(receipt.timestamp, 'timestamp');
+  requireEnum(receipt.time_source, 'time_source', TIME_SOURCES);
+  requireEnum(receipt.decision, 'decision', DECISIONS);
+  optionalString(receipt.matched_rule, 'matched_rule');
+  optionalString(receipt.reason, 'reason');
+  optionalString(receipt.origin_profile, 'origin_profile');
+  optionalSize(receipt.duration_us, 'duration_us');
+
+  if (receipt.actor !== undefined) {
+    const actor = requireObject(receipt.actor, 'actor', ACTOR_KEYS);
+    for (const key of ACTOR_KEYS) optionalString(actor[key], `actor.${key}`);
+  }
+
+  validatePolicy(requireObject(receipt.policy, 'policy', POLICY_KEYS));
+  validateAction(requireObject(receipt.action, 'action', ACTION_KEYS));
+  validateRuleTrace(requireArray(receipt.rule_trace, 'rule_trace'));
+  if (receipt.detection_trace !== undefined) {
+    validateDetectionTrace(requireArray(receipt.detection_trace, 'detection_trace'));
+  }
+
+  const enforcement = requireObject(receipt.enforcement, 'enforcement', ENFORCEMENT_KEYS);
+  requireMembers(enforcement, 'enforcement', ['mode', 'outcome']);
+  requireEnum(enforcement.mode, 'enforcement.mode', ENFORCEMENT_MODES);
+  requireEnum(enforcement.outcome, 'enforcement.outcome', ENFORCEMENT_OUTCOMES);
+
+  if (receipt.posture !== undefined) {
+    const posture = requireObject(receipt.posture, 'posture', POSTURE_KEYS);
+    requireMembers(posture, 'posture', ['current', 'next']);
+    requireNonEmpty(posture.current, 'posture.current');
+    requireNonEmpty(posture.next, 'posture.next');
+  }
+}
+
+function validatePolicy(policy: JsonObject): void {
+  requireMembers(policy, 'policy', ['spec_version', 'content_hash']);
+  requirePattern(
+    policy.spec_version,
+    'policy.spec_version',
+    SPEC_VERSION,
+    'is outside the 0.x and 1.x lineages',
+  );
+  requirePattern(policy.content_hash, 'policy.content_hash', CONTENT_HASH, NOT_A_CONTENT_HASH);
+  optionalString(policy.name, 'policy.name');
+  optionalSize(policy.version, 'policy.version');
+
+  if (policy.extends_chain !== undefined) {
+    requireArray(policy.extends_chain, 'policy.extends_chain').forEach((raw, index) => {
+      const label = `policy.extends_chain[${index}]`;
+      const link = requireObject(raw, label, CHAIN_LINK_KEYS);
+      requireMembers(link, label, ['source', 'content_hash']);
+      requireNonEmpty(link.source, `${label}.source`);
+      requirePattern(link.content_hash, `${label}.content_hash`, CONTENT_HASH, NOT_A_CONTENT_HASH);
+    });
+  }
+
+  if (policy.signature !== undefined) {
+    const status = requireObject(policy.signature, 'policy.signature', SIGNATURE_STATUS_KEYS);
+    requireMembers(status, 'policy.signature', ['verified']);
+    requireBoolean(status.verified, 'policy.signature.verified');
+    if (status.key_id !== undefined) {
+      requirePattern(status.key_id, 'policy.signature.key_id', CONTENT_HASH, NOT_A_CONTENT_HASH);
+    }
+    optionalString(status.reason, 'policy.signature.reason');
+    if (status.verified_at !== undefined) {
+      requireTimestamp(status.verified_at, 'policy.signature.verified_at');
+    }
+  }
+}
+
+function validateAction(action: JsonObject): void {
+  requireMembers(action, 'action', ['type']);
+  requireNonEmpty(action.type, 'action.type');
+  optionalString(action.target, 'action.target');
+  if (action.content_hash !== undefined) {
+    requirePattern(action.content_hash, 'action.content_hash', CONTENT_HASH, NOT_A_CONTENT_HASH);
+  }
+  optionalSize(action.content_size, 'action.content_size');
+  optionalSize(action.args_size, 'action.args_size');
+  // `origin` and `context` are the descriptors the caller supplied, carried
+  // verbatim (receipt spec 4.4); any JSON value is in range.
+}
+
+function validateRuleTrace(entries: readonly unknown[]): void {
+  entries.forEach((raw, index) => {
+    const label = `rule_trace[${index}]`;
+    const entry = requireObject(raw, label, RULE_TRACE_KEYS);
+    requireMembers(entry, label, ['rule_block', 'outcome', 'evaluated']);
+    requireEnum(entry.rule_block, `${label}.rule_block`, RULE_BLOCKS);
+    optionalString(entry.rule_path, `${label}.rule_path`);
+    requireEnum(entry.outcome, `${label}.outcome`, RULE_OUTCOMES);
+    requireBoolean(entry.evaluated, `${label}.evaluated`);
+    optionalString(entry.reason, `${label}.reason`);
+  });
+}
+
+function validateDetectionTrace(entries: readonly unknown[]): void {
+  entries.forEach((raw, index) => {
+    const label = `detection_trace[${index}]`;
+    const entry = requireObject(raw, label, DETECTION_TRACE_KEYS);
+    requireMembers(entry, label, ['detector_id', 'category', 'score', 'level', 'matched']);
+    requireNonEmpty(entry.detector_id, `${label}.detector_id`);
+    requireEnum(entry.category, `${label}.category`, DETECTION_CATEGORIES);
+    const score = entry.score;
+    if (typeof score !== 'number' || !Number.isFinite(score) || score < 0 || score > 1) {
+      throw new ReceiptError(`${label}.score must be a number in [0, 1]`);
+    }
+    requireEnum(entry.level, `${label}.level`, DETECTOR_LEVELS);
+    requireBoolean(entry.matched, `${label}.matched`);
+  });
 }
 
 // --------------------------------------------------------------------------
@@ -257,6 +595,27 @@ export function parseReceipt(json: string | unknown): DecisionReceipt {
 export function formatTimestamp(instant: Date | number = new Date()): string {
   const date = typeof instant === 'number' ? new Date(instant) : instant;
   return date.toISOString();
+}
+
+/** `YYYY-MM-DDTHH:MM:SS.sssZ`, the one instant form these formats accept. */
+const MILLISECOND_TIMESTAMP =
+  /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/;
+
+/**
+ * Whether `value` is an RFC 3339 UTC instant with millisecond precision and a
+ * `Z` suffix -- the one form receipts, signature envelopes, keyrings and
+ * bundles spell an instant in.
+ *
+ * The shape check alone is not enough: `Date.parse` accepts and normalizes
+ * impossible calendar dates, so `2026-02-30T00:00:00.000Z` would pass as
+ * March 2 and go on to take part in expiry and retirement comparisons. Rust,
+ * Python and Go all reject it, so the round-trip through `toISOString` makes
+ * the calendar date part of the check here too.
+ */
+export function isMillisecondTimestamp(value: string): boolean {
+  if (!MILLISECOND_TIMESTAMP.test(value)) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
 }
 
 function uuidFromBytes(bytes: Uint8Array): string {

@@ -2,8 +2,11 @@
 
 `h2h` is the reference command-line tool for HushSpec documents. It validates,
 resolves, lints, formats, diffs, evaluates, signs and scaffolds policies, and
-every subcommand is scriptable: machine-readable output through `--format json`
-and exit codes that mean the same thing everywhere.
+every reporting subcommand is scriptable: machine-readable output through
+`--format json` and exit codes that mean the same thing everywhere. The
+exceptions are `init`, `keygen`, `sign`, `panic` and `completions`, which
+take no `--format`, and `hash`, whose `--format` selects `digest` or
+`canonical`.
 
 ```bash
 h2h --help            # subcommand list
@@ -244,6 +247,7 @@ rows.
 | `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
 | `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
 | `L021` | warning | ungranted-capability | A `when.capability` naming a capability no posture state grants can never be true while the policy has a posture extension, so the block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported. |
+| `L022` | warning | empty-list-entry | An empty string in `tool_access.allow`, `block`, or `require_confirmation`, or in an origins overlay list, can never match a tool or host (core spec 3.3, 3.7) and is usually an editing mistake. |
 | `L020` | info | inert-condition | The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. Listing all seven days is likewise the default. An `all_of`/`any_of` with no members is always true. (There is no "never true" window to report: core spec 3.13 keeps a block active when a window cannot be evaluated.) |
 
 ## `h2h fmt`
@@ -336,7 +340,7 @@ rule-by-rule trace forced on.
 ```bash
 h2h eval policy.yaml --type egress --target api.example.com
 h2h explain builtin:default --type file_read --target /etc/passwd
-h2h eval policy.yaml --action-json '{"action_type":"tool_call","target":"bash"}'
+h2h eval policy.yaml --action-json '{"type":"tool_call","target":"bash"}'
 h2h eval policy.yaml --action-file - --format receipt   # action from stdin
 ```
 
@@ -470,15 +474,16 @@ Print a published HushSpec JSON Schema. The schemas are embedded in the binary,
 so this works offline and from an installed release.
 
 ```bash
-h2h schema core > hushspec-core.v0.schema.json
-h2h schema hushspec-receipt.v0.schema.json     # full file name also accepted
+h2h schema core > hushspec-core.v1.schema.json
+h2h schema hushspec-receipt.v1.schema.json     # full file name also accepted
+h2h schema core.v0                              # the frozen 0.x lineage
 h2h schema --list
 h2h schema --list --format json
 ```
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | `core`, `detection`, `evaluator-test`, `keyring`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
+| `[NAME]` | A short name for the current `.v1.` lineage — `core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector` — the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -519,7 +524,7 @@ what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
 key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
 recomputes that id from the public key rather than trusting a keyring's claim.
 
-`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v0.schema.json)
+`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v1.schema.json)
 listing the trusted keys, each of which may carry `not_after` (retire a key
 without invalidating older signatures) or `revoked: true` (reject everything it
 signed). `--key` is the one-key shorthand.
@@ -666,9 +671,9 @@ h2h report audit.jsonl --format json > report.json         # validates against t
 h2h report audit.jsonl --format csv --out ./evidence/      # one CSV per table
 ```
 
-Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line, so a mixed file works. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
+Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line. A file holding any log entry is a log and is chain-verified as a whole, so a plain receipt among log entries is reported as a mixed file and breaks the chain rather than slipping past verification. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
 
-When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
+When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, the receipt schema pass and the entry signatures included, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
 
 | Flag | Meaning |
 |---|---|
@@ -679,7 +684,11 @@ When the input is a log, its chain is verified before anything is counted (the s
 | `--out <PATH>` | A directory for `--format csv` (one CSV per table), a file for every other format. |
 | `--lenient` | Skip unparsable lines instead of refusing. |
 | `--unverified` | Report on a log whose chain did not verify. |
-| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). |
+| `--keyring <PATH>` | Trusted keyring JSON for entry signatures. Without one, signed entries are counted but not verified. |
+| `--key <PATH>` | A single trusted public key (PEM), as a one-key keyring. Mutually exclusive with `--keyring`. |
+| `--require-signatures` | Every log entry must carry a signature that verifies; an unsigned entry (`entry_unsigned`) or a missing keyring (`no_keyring`) breaks the chain. |
+| `--max-skew <SECONDS>` | Allowed signer clock skew while verifying entry signatures (default 300). |
+| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). It is also the verifier's clock for entry signatures, so a report pinned to an instant verifies them as of the moment it describes. |
 | `--top-paths <N>` | How many `rule_path`s each rule-block row lists (default 5). |
 | `--experimental-oscal` | Required by `--format oscal`. |
 
@@ -697,7 +706,7 @@ A mapping that names a rule block (`rules.egress`) is evidenced by everything th
 
 ### Formats
 
-`--format json` emits one document validated by [`schemas/hushspec-report.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v0.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
+`--format json` emits one document validated by [`schemas/hushspec-report.v1.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v1.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
 
 `--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
 
@@ -751,7 +760,9 @@ Runs the four ordered checks of bundle spec 5.2 and stops at the first failure.
 |---|---|
 | `malformed_bundle` | 1: not a well-formed envelope, statement, or predicate; an unknown `predicateType` or `bundle_version` lands here. |
 | `unknown_key_id` | 2: no signature names a key in the keyring. |
-| `dsse_signature_mismatch` | 2: a trusted key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
+| `key_revoked` | 2: the only keys that signed are revoked in the keyring. |
+| `key_retired` | 2: the only keys that signed were retired before `predicate.created_at`. |
+| `dsse_signature_mismatch` | 2: a usable key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
 | `subject_digest_mismatch` | 3: `predicate.resolved` does not hash to the declared subject. |
 | `policy_mismatch` | 4: `--policy` resolves to something else, or does not resolve at all. |
 

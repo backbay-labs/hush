@@ -45,11 +45,11 @@ export type AsyncLoader = (reference: string, from?: string) => LoadedSpec | Pro
  * references are loaded, and (in `options`) what must be true of its
  * signatures before it may be used.
  *
- * `source` does double duty, exactly as it always has: it anchors relative
- * `extends` references *and* it is the identity the leaf carries into
- * {@link Resolution.chain} and into the signature locator. A caller that has a
- * real file path should pass it; a caller holding only a YAML string should
- * not invent one, and the leaf is then reported as {@link MEMORY_SOURCE}.
+ * `source` does double duty: it anchors relative `extends` references *and* it
+ * is the identity the leaf carries into {@link Resolution.chain} and into the
+ * signature locator. A caller that has a real file path should pass it; a
+ * caller holding only a YAML string should not invent one, and the leaf is then
+ * reported as {@link MEMORY_SOURCE}.
  */
 export interface ResolveInput {
   source?: string;
@@ -151,7 +151,10 @@ export interface ChainLink {
 
 /** A resolved policy together with the evidence gathered while loading it. */
 export interface Resolution {
-  /** The merged document; `extends` is always absent. */
+  /**
+   * The merged document: resolution consumes `extends` and `merge_strategy`,
+   * so neither is ever present (Core section 2.3).
+   */
   spec: HushSpec;
   /** Content hash of {@link Resolution.spec} (Canonical Form section 5). */
   content_hash: string;
@@ -182,7 +185,10 @@ export type LoadReasonCode = ReasonCode | 'digest_mismatch' | 'missing_signature
 export function resolutionFromResolved(spec: HushSpec, source?: string): Resolution {
   const hash = contentHash(spec);
   return {
-    spec,
+    // A resolution's document carries no resolution instructions, however it
+    // was obtained: `contentHash` above already refused a lingering `extends`,
+    // and `merge_strategy` is inert here (Core section 2.3).
+    spec: stripResolutionFields(spec),
     content_hash: hash,
     chain: [{ source: source ?? MEMORY_SOURCE, content_hash: hash }],
   };
@@ -620,9 +626,10 @@ function startWalk(spec: HushSpec, source: string | undefined) {
  */
 function foldChain(hops: Hop[]): HushSpec[] {
   // The root carries no `extends` (that is what ended the walk) and its
-  // `merge_strategy`, if any, is inert with nothing above it -- so it enters
-  // the fold untouched and a chain of one comes back byte-identical.
-  const partials: HushSpec[] = [hops[0]!.spec];
+  // `merge_strategy`, if any, is inert with nothing above it -- but a resolved
+  // document declares neither field (Core section 2.3), and a chain of one
+  // never reaches `merge`, so the root is stripped on the way in.
+  const partials: HushSpec[] = [stripResolutionFields(hops[0]!.spec)];
   for (let index = 1; index < hops.length; index += 1) {
     partials.push(merge(partials[index - 1]!, hops[index]!.spec));
   }
@@ -682,13 +689,14 @@ function buildResolution(
     }
 
     const envelope = envelopes[index] ?? null;
-    if (options.keyring !== undefined && envelope !== null) {
-      link.signature = verifyLink(
-        partials[index]!,
-        envelope,
-        options,
-        index === leafIndex,
-      );
+    if (options.keyring !== undefined && !isBuiltinSource(hop.source)) {
+      // Verification was attempted, so the outcome is always recorded
+      // (signing spec section 6.5): a hop with no envelope carries
+      // `missing_signature` rather than nothing at all, which a reader could
+      // only take for "no check was configured".
+      link.signature = envelope === null
+        ? { verified: false, reason: 'missing_signature' }
+        : verifyLink(partials[index]!, envelope, options, index === leafIndex);
     }
 
     if (options.requireSignature !== true || isBuiltinSource(hop.source) || pinned) {
@@ -767,15 +775,21 @@ function verifyLink(
   };
 }
 
+/** `sha256:` plus 64 lowercase hex: the only `key_id` the receipt schema admits. */
+const KEY_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
 /**
  * The `key_id` a failed envelope *claimed*, for the receipt. Claimed, not
  * trusted: verification already refused it, and recording which key was named
  * is what makes a rotation mistake distinguishable from an attack.
+ *
+ * An envelope that failed its own shape check may carry anything at all under
+ * `key_id`, so only a well-formed one is surfaced.
  */
 function describeEnvelopeKey(document: unknown): { key_id?: string } {
   if (typeof document !== 'object' || document === null) return {};
   const keyId = (document as { key_id?: unknown }).key_id;
-  return typeof keyId === 'string' ? { key_id: keyId } : {};
+  return typeof keyId === 'string' && KEY_ID_PATTERN.test(keyId) ? { key_id: keyId } : {};
 }
 
 // --------------------------------------------------------------------------

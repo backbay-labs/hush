@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -76,6 +78,9 @@ func enforceYAMLProfile(yamlStr string) error {
 	if err := checkProfileNode(root.Content[0], 1); err != nil {
 		return err
 	}
+	if err := checkIntegerLiterals(root.Content[0], 1); err != nil {
+		return err
+	}
 
 	depth, nodes := measureNode(root.Content[0], 1)
 	if depth > MaxDocumentNestingDepth {
@@ -114,6 +119,57 @@ func checkProfileNode(node *yaml.Node, depth int) error {
 		}
 	}
 	return nil
+}
+
+// integerLiteralPattern matches the integer syntax of the YAML 1.2 Core
+// schema: an optional sign and digits, decimal or with a base prefix, and no
+// fraction or exponent.
+var integerLiteralPattern = regexp.MustCompile(`^[-+]?(0[bBoOxX][0-9a-fA-F]+|[0-9]+)$`)
+
+// checkIntegerLiterals refuses a plain scalar written in integer syntax whose
+// magnitude an IEEE 754 double cannot hold exactly (canonical spec 4.3).
+//
+// The bound belongs to integer syntax, and this is the only place the document
+// still carries any: gopkg.in/yaml.v3 hands a literal past int64 and uint64
+// over as a float64, so by the time the canonical projection sees one it is
+// indistinguishable from a float-syntax value, which carries no bound.
+// Refusing here keeps a rounded integer out of a content hash.
+func checkIntegerLiterals(node *yaml.Node, depth int) error {
+	if node == nil || depth > MaxDocumentNestingDepth+1 {
+		// The depth check that follows reports an over-deep document; stop
+		// descending rather than recurse without bound.
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		// A quoted scalar is a string, whatever its digits spell.
+		if node.Style != 0 || !integerLiteralPattern.MatchString(node.Value) {
+			return nil
+		}
+		if value, err := strconv.ParseInt(node.Value, 0, 64); err == nil {
+			if value > maxSafeInteger || value < -maxSafeInteger {
+				return integerRangeError(node)
+			}
+			return nil
+		}
+		if value, err := strconv.ParseUint(node.Value, 0, 64); err == nil {
+			if value > uint64(maxSafeInteger) {
+				return integerRangeError(node)
+			}
+			return nil
+		}
+		// Too large for either 64-bit form, so past the safe range as well.
+		return integerRangeError(node)
+	}
+	for _, child := range node.Content {
+		if err := checkIntegerLiterals(child, depth+1); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func integerRangeError(node *yaml.Node) error {
+	return fmt.Errorf("line %d: integer %s exceeds the safe range (2^53-1)", node.Line, node.Value)
 }
 
 // measureNode returns the document's nesting depth and node count as core spec

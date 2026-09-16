@@ -293,7 +293,7 @@ func parsePolicy(policy map[string]any) (*hushspec.HushSpec, *verdict) {
 	if err != nil {
 		return nil, &verdict{Status: "rejected", Phase: "parse", Message: err.Error()}
 	}
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		resolved, err := hushspec.Resolve(spec, "", nil)
 		if err != nil {
 			return nil, &verdict{Status: "rejected", Phase: "resolve", Message: err.Error()}

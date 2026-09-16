@@ -16,8 +16,8 @@
   "action": {
     "type": "patch_apply",
     "target": "/proj/a.txt",
-    "content_hash": "sha256:42290c8e8d6c8591d8866f07b28938c899c220bff79ecb310e730d2ebf5e7736",
-    "content_size": 30
+    "content_hash": "sha256:b8d17160b75a7d5ea353f6df79b27964d8d36cd9f63de66d55b6cd7f105aade7",
+    "content_size": 24
   },
   "decision": "allow",
   "rule_trace": [

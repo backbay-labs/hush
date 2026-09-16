@@ -1,0 +1,90 @@
+hushspec_test: "0.1.0"
+description: "not over an unevaluable predicate is unevaluable, so the block stays active; only an evaluated false makes it inert (core spec 3.13)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    shell_commands:
+      when:
+        not:
+          rate:
+            counter: shell_calls
+            threshold: 5
+            comparison: gte
+      forbidden_patterns:
+        - "rm[ \\t]+-rf"
+    tool_access:
+      when:
+        not:
+          capability: shell
+      block: [deploy]
+      default: allow
+    egress:
+      when:
+        not:
+          time_window:
+            start: "09:00"
+            end: "17:00"
+            timezone: "UTC"
+      default: block
+cases:
+  - description: "absent counter: the rate predicate is unevaluable, not keeps it unevaluable, the shell block stays active"
+    context:
+      counters: {}
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "counter below the threshold: the rate predicate is false, not makes it true, the shell block is active"
+    context:
+      counters:
+        shell_calls: 2
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "counter at the threshold: the rate predicate is true, not makes it false, the shell block is inert"
+    context:
+      counters:
+        shell_calls: 5
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: allow
+  - description: "no posture extension: the capability predicate is unevaluable, not keeps it unevaluable, the tool block still denies"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "unparsable current_time: the time window is unevaluable, not keeps it unevaluable, the egress block stays active"
+    context:
+      current_time: "not-a-time"
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "inside the window: the time window is true, not makes it false, the egress block is inert"
+    context:
+      current_time: "2026-09-16T12:00:00Z"
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: allow
+  - description: "outside the window: the time window is false, not makes it true, the egress block is active"
+    context:
+      current_time: "2026-09-16T20:00:00Z"
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default

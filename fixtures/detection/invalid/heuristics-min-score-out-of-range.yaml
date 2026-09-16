@@ -1,0 +1,6 @@
+hushspec: "0.1.0"
+extensions:
+  detection:
+    prompt_injection:
+      heuristics:
+        min_score: 150
