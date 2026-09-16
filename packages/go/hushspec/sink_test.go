@@ -33,7 +33,7 @@ func makeTestReceipt(decision Decision) *DecisionReceipt {
 			},
 		},
 		Policy: PolicySummary{
-			Name:        "test-policy",
+			Name:        strPtr("test-policy"),
 			SpecVersion: "0.1.0",
 			ContentHash: DigestOf("test-policy"),
 		},

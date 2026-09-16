@@ -129,7 +129,11 @@ func main() {
 		}
 		log.Fatal("policy is invalid")
 	}
-	fmt.Println("policy ok:", spec.Name)
+	// An optional string is a *string: nil is an absent property, and a
+	// pointer to "" is one the document wrote as the empty string.
+	if spec.Name != nil {
+		fmt.Println("policy ok:", *spec.Name)
+	}
 }
 ```
 

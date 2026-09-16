@@ -211,7 +211,7 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 	}
 	// A fixture whose embedded policy extends is resolved before it runs: a
 	// bare leaf would drop every block its base declares.
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		resolved, err := Resolve(spec, fixturePath, createCompositeLoader())
 		if err != nil {
 			t.Fatalf("embedded policy failed to resolve: %v", err)

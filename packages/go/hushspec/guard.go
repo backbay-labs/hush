@@ -169,10 +169,10 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 	if resolution == nil || resolution.Spec == nil {
 		return nil, errors.New("guard: a resolved policy is required")
 	}
-	if resolution.Spec.Extends != "" {
+	if resolution.Spec.Extends != nil {
 		return nil, fmt.Errorf(
 			"guard: policy still declares 'extends: %s'; resolve it first",
-			resolution.Spec.Extends,
+			*resolution.Spec.Extends,
 		)
 	}
 
@@ -769,10 +769,10 @@ func (g *Guard) SwapPolicy(resolution *Resolution) error {
 	if resolution == nil || resolution.Spec == nil {
 		return errors.New("guard: a resolved policy is required")
 	}
-	if resolution.Spec.Extends != "" {
+	if resolution.Spec.Extends != nil {
 		return fmt.Errorf(
 			"guard: policy still declares 'extends: %s'; resolve it first",
-			resolution.Spec.Extends,
+			*resolution.Spec.Extends,
 		)
 	}
 	compiled, err := CompilePolicy(resolution.Spec)

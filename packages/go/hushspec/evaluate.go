@@ -1206,11 +1206,11 @@ func postureCapabilities(extension *PostureExtension, posture *PostureResult) gr
 // and there is no per-field weighting (origins spec 3).
 func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 	count := 0
-	checkString := func(expected, actual string) bool {
-		if expected == "" {
+	checkString := func(expected *string, actual string) bool {
+		if expected == nil {
 			return true
 		}
-		if actual != expected {
+		if actual != *expected {
 			return false
 		}
 		count++
@@ -1248,10 +1248,7 @@ func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
 	}
 	// A match rule with all fields absent legitimately matches every origin
 	// with count 0 (the explicit `match: {}` default profile), so count 0 must
-	// NOT be read as "no match". A present-but-empty match field such as
-	// `provider: ""` is a real, unsatisfiable constraint, which the generated
-	// Go model cannot tell from an absent field; validateRawDocument rejects it
-	// at parse instead.
+	// NOT be read as "no match".
 	return count, true
 }
 

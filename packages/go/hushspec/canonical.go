@@ -58,10 +58,10 @@ func CanonicalJSON(spec *HushSpec) (string, error) {
 	if spec == nil {
 		return "", fmt.Errorf("cannot canonicalize a nil HushSpec document")
 	}
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		return "", fmt.Errorf(
 			"cannot canonicalize an unresolved HushSpec document: resolve extends %q first",
-			spec.Extends,
+			*spec.Extends,
 		)
 	}
 	projected, err := canonicalProjectStruct(reflect.ValueOf(*spec))
@@ -344,12 +344,14 @@ func canonicalProjectStruct(v reflect.Value) (map[string]any, error) {
 // is present in the document, and returns the value to project.
 //
 //   - Pointers, slices and maps model presence directly: nil is absent, and a
-//     non-nil empty slice or map is a present-but-empty container, which
-//     section 3.3 (and its exception table) then judges.
-//   - Strings use the SDK-wide omitempty convention: "" is absent. The Go
-//     model cannot express a present-but-empty optional string, and every
-//     such property is either an enum (where "" is invalid and rejected by
-//     validateRawDocument) or free text that is inert when empty.
+//     non-nil empty slice, map or string is a present-but-empty value, which
+//     section 3.3 (and its exception table) then judges. Every optional
+//     free-text property is a *string for exactly this reason, so one written
+//     as the empty string reaches the canonical form as it does in the other
+//     SDKs.
+//   - A bare string is either a required property or an enum, and "" is not a
+//     value of either: the empty enum sentinel is absence, and
+//     validateRawDocument refuses a document that writes one.
 //   - Booleans, numbers and nested structs cannot express absence at all, so
 //     they are always present; Parse materializes the schema defaults whose
 //     value is not the Go zero value (see applyParseDefaults).

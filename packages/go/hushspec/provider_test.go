@@ -76,7 +76,7 @@ func TestFileProviderLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if resolution.Spec.Name != "file-policy" || resolution.ContentHash == "" {
+	if stringValue(resolution.Spec.Name) != "file-policy" || resolution.ContentHash == "" {
 		t.Fatalf("unexpected resolution: %+v", resolution.Spec)
 	}
 

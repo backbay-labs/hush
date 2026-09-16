@@ -17,15 +17,18 @@ import (
 //   - Non-integer floats in integer-typed fields. gopkg.in/yaml.v3 truncates a
 //     scalar like `max_additions: 1.5` into a Go int (-> 1) without error,
 //     where the schema rejects any non-integer value.
-//   - Empty or invalid enum sentinels. The generated Go model represents
-//     optional enum-ish strings (match.visibility, metadata.classification, ...)
-//     as plain strings, so a present-but-empty "" is indistinguishable from an
-//     absent field in the typed struct; the schema treats "" (and any other
-//     out-of-set value) as a real, invalid value. The top-level `name` is the
-//     same shape: it is optional, but present it MUST be non-empty (core spec
-//     2; `minLength: 1` in the v1 core schema).
+//   - Empty or invalid enum sentinels. The generated Go model represents an
+//     optional enum (match.visibility, metadata.classification, ...) as a plain
+//     string, whose zero value stands for an absent field; the schema treats ""
+//     (and any other out-of-set value) as a real, invalid value.
 //   - A posture extension missing its required `transitions` key, which the
 //     schema requires and supplies no default for.
+//
+// It also refuses, at parse time, the present-but-empty strings the schema
+// gives a minimum length: the top-level `name` and the free-text origin match
+// fields. [Validate] refuses those too, for a document a caller built in
+// memory; refusing them here as well keeps a document this engine parses one
+// the schema accepts.
 //
 // It returns one issue per problem found, each carrying the registered error
 // code of spec/registries/error-codes.yaml that the condition maps onto, or an
@@ -69,15 +72,10 @@ func (r *rawIssues) addConstraint(path, message string) {
 	})
 }
 
-// validateRawName refuses a present but empty top-level `name` (core spec 2).
-// A bundle's subject and a receipt's policy summary both name the policy, and
-// an empty name names nothing. Only the raw document separates `name: ""` from
-// an absent `name`, which the typed model spells the same way; `name: null` is
-// an absent name, as it is to every other SDK.
-//
-// The constraint belongs to the 1.0 document format: it is the one thing 1.0
-// adds to 0.2 (spec/versioning.md section 10), and the frozen 0.x format
-// allows `name: ""`.
+// validateRawName refuses a present but empty top-level `name` (core spec 2),
+// which the 1.0 document format requires to be non-empty; `name: null` is an
+// absent name, as it is to every other SDK. See [requiresNonEmptyName] for the
+// constraint and the version it belongs to.
 func validateRawName(root map[string]any, errs *rawIssues) {
 	value, present := root["name"]
 	if !present {
@@ -91,18 +89,16 @@ func validateRawName(root map[string]any, errs *rawIssues) {
 	}
 }
 
-// rawRequiresNonEmptyName reports whether the document's declared version puts
-// it in the 1.0 format or later. A version that is absent, not a string, or
-// unreadable as MAJOR.MINOR.PATCH is refused elsewhere as unsupported, and is
-// held to the current format's constraints here so an unreadable version can
-// never relax one.
+// rawRequiresNonEmptyName applies [requiresNonEmptyName] to the raw document's
+// declared version. A version that is absent or not a string is refused
+// elsewhere as unsupported, and is held to the current format's constraints
+// here so an unreadable version can never relax one.
 func rawRequiresNonEmptyName(root map[string]any) bool {
 	declared, isString := root["hushspec"].(string)
 	if !isString {
 		return true
 	}
-	major, ok := MajorVersion(declared)
-	return !ok || major >= 1
+	return requiresNonEmptyName(declared)
 }
 
 // rawConditionBlocks are the rule blocks whose `when` the raw validator walks.
@@ -326,12 +322,11 @@ func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 					fmt.Sprintf("origins.profiles[%d].match.space_type", i), OriginSpaceTypes, errs)
 				checkRawEnum(match, "visibility",
 					fmt.Sprintf("origins.profiles[%d].match.visibility", i), OriginVisibilities, errs)
-				// A present-but-empty free-string match field (e.g.
-				// `provider: ""`) is a real, unsatisfiable constraint, but the
-				// generated Go model collapses "" and an absent field, so the
-				// empty sentinel is rejected here. An absent field is left
-				// untouched -- an all-absent match still matches every origin
-				// with score 0.
+				// A present-but-empty free-text match field (e.g.
+				// `provider: ""`) is a real, unsatisfiable constraint: no
+				// origin carries an empty provider or tenant. An absent field
+				// is left untouched -- an all-absent match still matches every
+				// origin with score 0.
 				for _, field := range []string{"provider", "tenant_id", "space_id", "sensitivity", "actor_role"} {
 					checkRawNonEmptyString(match, field,
 						fmt.Sprintf("origins.profiles[%d].match.%s", i, field), errs)
@@ -682,8 +677,8 @@ func quotedVariants[T ~string](allowed map[T]struct{}) []string {
 }
 
 // checkRawNonEmptyString records an error when key is present in obj with an
-// empty string value. An absent key is ignored, so only an explicit "" (which
-// the typed model cannot distinguish from absent) is rejected.
+// empty string value. An absent key is ignored, so only an explicit "" is
+// rejected.
 func checkRawNonEmptyString(obj map[string]any, key, path string, errs *rawIssues) {
 	v, ok := obj[key]
 	if !ok {

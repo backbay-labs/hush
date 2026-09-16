@@ -95,8 +95,10 @@ type ReceiptChainLink struct {
 // PolicySummary is the identity of the resolved policy a decision was
 // evaluated against (receipt spec 4.2).
 type PolicySummary struct {
-	// Name is the policy's `name`, when present.
-	Name string `json:"name,omitempty"`
+	// Name is the policy's `name`, copied as written: a policy that declares
+	// an empty name is summarized with one, and only a policy that declares no
+	// name leaves this absent.
+	Name *string `json:"name,omitempty"`
 	// Version is the policy's `metadata.policy_version`, when present. An
 	// integer, never a string -- a pointer so an explicit 0 survives.
 	Version *int64 `json:"version,omitempty"`

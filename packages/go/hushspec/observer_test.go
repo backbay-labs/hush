@@ -55,7 +55,7 @@ func (o *recordingObserver) counts() (int, int, int) {
 func guardSpec() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.2.0",
-		Name:            "guard-policy",
+		Name:            strPtr("guard-policy"),
 		Rules: &Rules{
 			Egress: &EgressRule{
 				Enabled: true,
@@ -100,7 +100,7 @@ func TestRuleBlockOf(t *testing.T) {
 
 func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	metrics := NewMetricsCollector()
-	metrics.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:x"})
+	metrics.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:x"})
 	metrics.OnEvaluation(
 		&EvaluationAction{Type: "egress", Target: "evil.example.com"},
 		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
@@ -170,9 +170,9 @@ func TestMetricsCollectorCountsDecisions(t *testing.T) {
 func TestJSONLineObserverWritesEventsWithoutContent(t *testing.T) {
 	var buffer bytes.Buffer
 	observer := NewJSONLineObserver(&buffer)
-	observer.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:aa"})
+	observer.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:aa"})
 	observer.OnPolicyLoaded(PolicyLoadObservation{
-		Name: "p", ContentHash: "sha256:bb", PreviousContentHash: "sha256:aa",
+		Name: strPtr("p"), ContentHash: "sha256:bb", PreviousContentHash: "sha256:aa",
 	})
 	content := "super secret"
 	observer.OnEvaluation(
@@ -255,7 +255,7 @@ func TestObservableEvaluatorFansOutAndSurvivesPanics(t *testing.T) {
 		t.Fatalf("expected 3 observers, got %d", len(fanout.Observers()))
 	}
 
-	fanout.OnPolicyLoaded(PolicyLoadObservation{Name: "p"})
+	fanout.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p")})
 	fanout.OnEvaluation(&EvaluationAction{Type: "egress"}, EvaluationResult{Decision: DecisionAllow}, nil, 0)
 	fanout.OnError(errors.New("boom"))
 
@@ -395,7 +395,7 @@ func TestStderrObserverDenyOnly(t *testing.T) {
 		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
 		nil, 0,
 	)
-	observer.OnPolicyLoaded(PolicyLoadObservation{Name: "p", ContentHash: "sha256:aa"})
+	observer.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:aa"})
 	if !strings.Contains(buffer.String(), "evil.example.com") ||
 		!strings.Contains(buffer.String(), "policy loaded") {
 		t.Fatalf("unexpected output: %q", buffer.String())

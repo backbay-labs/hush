@@ -63,6 +63,7 @@ code" is the answer a relying party needs:
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Parse YAML to a document | `HushSpec::parse` | `parse`, `parseOrThrow` | `parse`, `parse_or_raise` | `Parse` | Fail-closed: unknown members at any depth, YAML aliases, merge keys, duplicate keys, multi-document streams and `yes`/`no` booleans are all parse errors (core spec 2.4) | Rust uses serde `deny_unknown_fields`; the ports check the closed key sets of their generated contract |
+| Optional string in the document | `Option<String>` | `string \| undefined` | `str \| None` | `*string` | An absent property and one written as `""` are distinct: the canonical form keeps the empty string, so the two hash differently | An optional *enum* is a plain string in Go; `""` is not one of its values |
 | Serialize back to YAML | `HushSpec::to_yaml` | -- | -- | `Marshal` | Round-trips a parsed document | TS and Python callers use their own YAML library |
 | YAML profile check alone | `schema::yaml_profile_violation` | `yamlProfileViolation` | -- | -- | Reports the profile violation without a full parse | Python and Go fold the check into `parse` / `Parse` |
 | Validate a document | `validate` | `validate` | `validate` | `Validate` | Types, enums, uniqueness, numeric bounds, the regex profile and `when` conditions. Never throws; collects every error | |
@@ -370,7 +371,7 @@ each is enforced by a check that fails CI.
 | Invariant | Enforced by |
 |---|---|
 | **Identical decisions.** For any document and action, all four return the same `decision`, `matched_rule`, `reason`, `origin_profile` and `posture`. | The shared corpus (`fixtures/{core,posture,origins,detection}/evaluation`) run natively by each SDK, plus `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the Rust oracle. |
-| **Identical canonical form and content hash.** The same resolved document canonicalizes to the same bytes and hashes to the same `sha256:` in all four. | `fixtures/core/hash/` (14 vectors) run by all four; `scripts/check_cross_sdk_roundtrip.py`; `content_hash` compared per group by `hushspec-difftest`. |
+| **Identical canonical form and content hash.** The same resolved document canonicalizes to the same bytes and hashes to the same `sha256:` in all four. | `fixtures/core/hash/` (15 vectors) run by all four; `scripts/check_cross_sdk_roundtrip.py`; `content_hash` compared per group by `hushspec-difftest`. |
 | **Byte-identical receipts after JCS under fixed inputs.** With the actor, clock, receipt id and audit config that `fixtures/receipts/expected/README.md` pins, every evaluation case produces the committed receipt byte for byte after RFC 8785. | `fixtures/receipts/expected/<module>/<fixture>/<case>.json` run by all four; `receipt_hash` compared per group by `hushspec-difftest`. |
 | **Identical recorded rule traces.** The same entries, in the same order, under the same closed `rule_block` ids. | The `expect.rule_trace` assertions of evaluator-test format 0.2, plus the expected receipts. |
 | **Identical reason codes.** The 11 signing reasons, the 5 bundle reasons and the resolve reasons are the same strings everywhere. | `fixtures/signing/vectors.yaml` (16 cases) and `fixtures/bundle/vectors.yaml` (8 cases), each asserting the exact code, run by all four. |

@@ -16,8 +16,8 @@ name: test
 	if spec.HushSpecVersion != "0.1.0" {
 		t.Fatalf("expected hushspec version 0.1.0, got %q", spec.HushSpecVersion)
 	}
-	if spec.Name != "test" {
-		t.Fatalf("expected name test, got %q", spec.Name)
+	if stringValue(spec.Name) != "test" {
+		t.Fatalf("expected name test, got %q", stringValue(spec.Name))
 	}
 	if !Validate(spec).IsValid() {
 		t.Fatal("expected minimal document to validate")
@@ -363,8 +363,8 @@ rules:
 `)
 
 	merged := Merge(base, child)
-	if merged.Extends != "" {
-		t.Fatalf("expected replace merge to clear extends, got %q", merged.Extends)
+	if merged.Extends != nil {
+		t.Fatalf("expected replace merge to clear extends, got %q", *merged.Extends)
 	}
 	if merged.MergeStrategy != "" {
 		t.Fatalf("expected replace merge to clear merge_strategy, got %q", merged.MergeStrategy)
@@ -437,8 +437,8 @@ extensions:
 `)
 
 	merged := Merge(base, child)
-	if merged.Extends != "" {
-		t.Fatalf("expected merged spec to clear extends, got %q", merged.Extends)
+	if merged.Extends != nil {
+		t.Fatalf("expected merged spec to clear extends, got %q", *merged.Extends)
 	}
 	if merged.Rules == nil || merged.Rules.ForbiddenPaths == nil || merged.Rules.Egress == nil {
 		t.Fatal("expected deep merge to preserve base rules and add child rules")
@@ -519,7 +519,7 @@ metadata:
 `)
 
 	merged := Merge(base, child)
-	if merged.Metadata == nil || merged.Metadata.Author != "b" {
+	if merged.Metadata == nil || stringValue(merged.Metadata.Author) != "b" {
 		t.Fatalf("expected child metadata.author to win, got %+v", merged.Metadata)
 	}
 
@@ -529,7 +529,7 @@ name: child
 extends: base
 `)
 	fallback := Merge(base, childNoMetadata)
-	if fallback.Metadata == nil || fallback.Metadata.Author != "a" {
+	if fallback.Metadata == nil || stringValue(fallback.Metadata.Author) != "a" {
 		t.Fatalf("expected base metadata to be preserved when child has none, got %+v", fallback.Metadata)
 	}
 }

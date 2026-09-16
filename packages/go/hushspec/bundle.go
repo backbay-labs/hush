@@ -147,10 +147,13 @@ type BundleResolver struct {
 // receipt's `policy` block carries (receipt spec 4.2), so a receipt and a
 // bundle join on content_hash.
 type BundlePolicyIdentity struct {
-	ContentHash   string `json:"content_hash"`
-	SpecVersion   string `json:"spec_version"`
-	Name          string `json:"name,omitempty"`
-	PolicyVersion *int64 `json:"policy_version,omitempty"`
+	ContentHash string `json:"content_hash"`
+	SpecVersion string `json:"spec_version"`
+	// Name is the policy's own `name`, copied as written: a policy that
+	// declares an empty name claims an empty name, and only a policy that
+	// declares none leaves this absent.
+	Name          *string `json:"name,omitempty"`
+	PolicyVersion *int64  `json:"policy_version,omitempty"`
 }
 
 // PolicyBundlePredicate is the policy-bundle predicate (bundle spec 4.2).
@@ -421,16 +424,7 @@ func BuildBundleStatement(resolution *Resolution, opts CreateBundleOptions) (*Bu
 	}
 
 	spec := resolution.Spec
-	name := opts.SubjectName
-	if name == "" {
-		name = spec.Name
-	}
-	if name == "" {
-		name = bundleLeafFileName(chain)
-	}
-	if name == "" {
-		name = "policy"
-	}
+	name := bundleSubjectName(opts.SubjectName, spec, chain)
 
 	tool := opts.Tool
 	if tool == "" {
@@ -563,10 +557,10 @@ func MarshalBundle(envelope *DSSEEnvelope) ([]byte, error) {
 // bundleResolvedValue is the canonical projection of a resolved document as
 // the plain JSON object `predicate.resolved` holds (canonical spec 3).
 func bundleResolvedValue(spec *HushSpec) (map[string]any, error) {
-	if spec.Extends != "" {
+	if spec.Extends != nil {
 		return nil, fmt.Errorf(
 			"cannot canonicalize an unresolved HushSpec document: resolve extends %q first",
-			spec.Extends,
+			*spec.Extends,
 		)
 	}
 	projected, err := canonicalProjectStruct(reflect.ValueOf(*spec))
@@ -603,6 +597,23 @@ func bundleRelativeSource(source, base string) string {
 	}
 	// A bundle is JSON read on every platform, so the separator is `/`.
 	return filepath.ToSlash(relative)
+}
+
+// bundleSubjectName is the subject's informational label: the first of an
+// explicit override, the policy's own name, the leaf source's file name, and a
+// constant. A policy that declares `name: ""` has a name, so the fallbacks
+// below it never run for one.
+func bundleSubjectName(override string, spec *HushSpec, chain []ChainLink) string {
+	if override != "" {
+		return override
+	}
+	if spec.Name != nil {
+		return *spec.Name
+	}
+	if leaf := bundleLeafFileName(chain); leaf != "" {
+		return leaf
+	}
+	return "policy"
 }
 
 // bundleLeafFileName is the leaf's file name, for a policy with no `name`.
@@ -665,8 +676,9 @@ type VerifyBundleResult struct {
 	SubjectName string
 	// ContentHash is the resolved policy's content hash, "sha256:"-prefixed.
 	ContentHash string
-	// PolicyName and PolicyVersion echo the predicate's claims.
-	PolicyName    string
+	// PolicyName and PolicyVersion echo the predicate's claims. PolicyName is
+	// nil when the bundle records no policy name.
+	PolicyName    *string
 	PolicyVersion *int64
 	// CreatedAt is the predicate's own timestamp.
 	CreatedAt string
