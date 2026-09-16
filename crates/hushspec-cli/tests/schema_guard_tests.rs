@@ -94,7 +94,43 @@ fn every_schema_meta_validates_and_id_matches_filename() {
     // `cmd_schema.rs`, which compares the embedded module with the directory.
     assert!(
         checked >= 15,
-        "expected at least the 15 published schemas, found {checked}"
+        "the schemas directory has shrunk below its floor of 15: found {checked}"
+    );
+}
+
+/// The reference page tabulates the published schemas, and says it is the
+/// whole of `schemas/`. A schema added without a row is one a reader has no
+/// way to discover from the docs, and the claim on the page turns into a
+/// quiet falsehood -- so the table is compared with the directory rather
+/// than maintained by hand.
+#[test]
+fn the_json_schema_reference_lists_every_published_schema() {
+    let root = repo_root();
+    let page = fs::read_to_string(format!("{root}/docs/src/reference/json-schema.md"))
+        .expect("the JSON Schema reference is readable");
+
+    let mut documented: Vec<String> = page
+        .lines()
+        .filter_map(|line| {
+            let name = line.strip_prefix("| `")?.split('`').next()?;
+            name.ends_with(".schema.json").then(|| name.to_string())
+        })
+        .collect();
+
+    let mut published: Vec<String> = fs::read_dir(format!("{root}/schemas"))
+        .expect("schemas/ is readable")
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+            name.ends_with(".json").then_some(name)
+        })
+        .collect();
+
+    documented.sort();
+    published.sort();
+    assert_eq!(
+        documented, published,
+        "docs/src/reference/json-schema.md and schemas/ have diverged; \
+         add a row for each new schema"
     );
 }
 
@@ -394,6 +430,124 @@ fn an_unknown_key_inside_an_extension_block_is_refused() {
     }
 }
 
+/// A key the companion schema *does* declare, carrying the wrong type, is
+/// refused too. Without this the previous test passes for a schema that only
+/// forbids unknown keys, which is what `extensions` already did before the
+/// composition: `type: object` and nothing else.
+#[test]
+fn a_declared_extension_key_with_the_wrong_type_is_refused() {
+    let schema = compile(&core_schema());
+
+    for (key, body) in [
+        (
+            "posture",
+            serde_json::json!({"initial": 5, "states": {"n": {}}, "transitions": []}),
+        ),
+        ("origins", serde_json::json!({"default_behavior": "allow"})),
+        ("detection", serde_json::json!({"prompt_injection": "yes"})),
+    ] {
+        let document = serde_json::json!({
+            "hushspec": "0.1.0",
+            "extensions": { key: body },
+        });
+        assert!(
+            !schema.is_valid(&document),
+            "extensions.{key} must be validated by its companion schema, \
+             not merely checked for unknown keys"
+        );
+    }
+}
+
+/// `unevaluatedProperties: false` is the sibling that keeps `extensions`
+/// closed, and the core schema's `$comment` says so. Today the companion
+/// roots also set `additionalProperties: false`, so the two agree and no
+/// vector can tell them apart -- which is exactly why a companion that
+/// dropped its own gate would go unnoticed.
+///
+/// Validating against a copy of the core schema with the companions' own
+/// `additionalProperties` removed leaves `unevaluatedProperties` as the only
+/// thing standing, and pins two facts about it: it still refuses an unknown
+/// key, and it does *not* refuse a valid document -- which it would if the
+/// `$ref`'d properties were not seen as evaluated (draft 2020-12 §11.3).
+#[test]
+fn unevaluated_properties_closes_an_extension_on_its_own() {
+    let mut core = core_schema();
+    for (_, def_name, _) in EMBEDDED_EXTENSIONS {
+        core["$defs"][def_name]
+            .as_object_mut()
+            .unwrap_or_else(|| panic!("$defs/{def_name} is an object"))
+            .remove("additionalProperties")
+            .unwrap_or_else(|| {
+                panic!("$defs/{def_name} no longer sets additionalProperties; update this test")
+            });
+    }
+    let schema = compile(&core);
+
+    for (key, ..) in EMBEDDED_EXTENSIONS {
+        let document = serde_json::json!({
+            "hushspec": "0.1.0",
+            "extensions": { key: { "bogus": 1 } },
+        });
+        assert!(
+            !schema.is_valid(&document),
+            "unevaluatedProperties alone must still refuse extensions.{key}.bogus"
+        );
+    }
+
+    let document = serde_json::json!({
+        "hushspec": "0.1.0",
+        "extensions": { "posture": {
+            "initial": "normal",
+            "states": { "normal": { "capabilities": ["egress"] } },
+            "transitions": [{ "from": "normal", "to": "locked", "on": "user_denial" }],
+        }},
+    });
+    if let Err(errors) = schema.validate(&document) {
+        let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+        panic!("a valid posture block must survive unevaluatedProperties: {messages:?}");
+    }
+}
+
+/// Each companion is embedded as its own schema resource -- it carries an
+/// `$id`, so a `#/$defs/...` reference written inside it resolves against
+/// *its* root, not the core document's. The two roots therefore have
+/// independent `$defs` namespaces, and nothing here depends on which one a
+/// name is looked up in.
+///
+/// That independence is invisible while the namespaces happen to be
+/// disjoint. Adding a core `$defs` name that a companion also uses would
+/// make the two readings differ, and a consumer that resolves embedded
+/// resources loosely would silently validate against the wrong subschema.
+/// The collision is the thing to catch, so it is asserted rather than left
+/// to whichever validator notices first.
+#[test]
+fn the_embedded_resources_do_not_share_a_defs_name_with_the_core_document() {
+    let core = core_schema();
+    let outer = core["$defs"].as_object().expect("core declares $defs");
+    let embedded: Vec<&str> = EMBEDDED_EXTENSIONS
+        .iter()
+        .map(|(_, def_name, _)| *def_name)
+        .collect();
+
+    for def_name in &embedded {
+        let inner = core["$defs"][def_name]["$defs"]
+            .as_object()
+            .unwrap_or_else(|| panic!("$defs/{def_name} declares its own $defs"));
+        for name in inner.keys() {
+            assert!(
+                !outer.contains_key(name),
+                "$defs/{def_name}/$defs/{name} collides with the core document's \
+                 $defs/{name}; rename one so the two namespaces stay disjoint"
+            );
+        }
+        assert!(
+            core["$defs"][def_name]["$id"].is_string(),
+            "$defs/{def_name} must keep its $id, or its internal references \
+             would resolve against the core document"
+        );
+    }
+}
+
 fn repo_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/../..")
 }
@@ -504,6 +658,95 @@ fn the_schemastore_entries_match_the_catalog_entry_shape() {
         names.contains(&"HushSpec"),
         "the core policy schema must be listed"
     );
+}
+
+/// A catalog `fileMatch` pattern is applied in every editor that consults
+/// SchemaStore, against every project its user opens -- not only against
+/// this repository. `rulesets/*.yaml` reads naturally from inside the repo
+/// and is a reasonable layout here, but as a catalog pattern it claims every
+/// YAML file in every `rulesets/` directory in the world, and the editor
+/// then reports a wall of validation errors against someone else's unrelated
+/// file.
+///
+/// The property that keeps a pattern honest is that it *names* something:
+/// after the final extension is stripped, a distinguishing token has to be
+/// left. `*.hushspec.yaml` leaves `*.hushspec` and `*.receipt.json` leaves
+/// `*.receipt`; `rulesets/*.yaml` and `receipts/*.json` leave `*`, which is
+/// the whole of the claim -- a directory name plus an extension shared with
+/// most of the ecosystem.
+#[test]
+fn the_schemastore_file_match_patterns_name_something_specific() {
+    let root = repo_root();
+    let raw = fs::read_to_string(format!("{root}/docs/schemastore-entry.json"))
+        .expect("the prepared entry is readable");
+    let document: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
+
+    for entry in document["schemas"]
+        .as_array()
+        .expect("entries are an array")
+    {
+        let name = entry["name"].as_str().expect("name is a string");
+        for pattern in entry["fileMatch"]
+            .as_array()
+            .expect("fileMatch is an array")
+        {
+            let pattern = pattern.as_str().expect("a pattern is a string");
+            let base = pattern.rsplit('/').next().expect("a pattern is non-empty");
+            let stem = base.rsplit_once('.').map_or(base, |(stem, _)| stem);
+            assert!(
+                stem != "*" && !stem.is_empty(),
+                "{name}: `{pattern}` matches every `{base}` in every project a user \
+                 opens; give it a distinguishing token such as `*.hushspec.yaml`"
+            );
+        }
+    }
+}
+
+/// `editor-setup.md` tabulates the same patterns for a reader deciding what
+/// to name a file. A table that drifts from the entry tells them to name a
+/// file something the catalog will not match -- a silent wrong answer, since
+/// the only symptom is autocompletion quietly not appearing.
+#[test]
+fn the_editor_setup_table_lists_the_prepared_file_match_patterns() {
+    let root = repo_root();
+    let entry_raw = fs::read_to_string(format!("{root}/docs/schemastore-entry.json"))
+        .expect("the prepared entry is readable");
+    let document: serde_json::Value = serde_json::from_str(&entry_raw).expect("it is JSON");
+    let guide = fs::read_to_string(format!("{root}/docs/src/guides/editor-setup.md"))
+        .expect("the editor setup guide is readable");
+
+    for entry in document["schemas"]
+        .as_array()
+        .expect("entries are an array")
+    {
+        let name = entry["name"].as_str().expect("name is a string");
+
+        let row = guide
+            .lines()
+            .find(|line| line.starts_with(&format!("| {name} |")))
+            .unwrap_or_else(|| panic!("editor-setup.md has no table row for {name}"));
+        let matches = row
+            .split('|')
+            .nth(3)
+            .unwrap_or_else(|| panic!("the {name} row has no Matches column"));
+
+        // Each pattern is written as inline code, separated by `/` or `,`.
+        let mut listed: Vec<&str> = matches.split('`').skip(1).step_by(2).collect();
+        let mut declared: Vec<&str> = entry["fileMatch"]
+            .as_array()
+            .expect("fileMatch is an array")
+            .iter()
+            .map(|pattern| pattern.as_str().expect("a pattern is a string"))
+            .collect();
+        listed.sort_unstable();
+        declared.sort_unstable();
+
+        assert_eq!(
+            listed, declared,
+            "the editor-setup.md row for {name} has drifted from \
+             docs/schemastore-entry.json"
+        );
+    }
 }
 
 /// An origins profile overlay narrows the base rule it composes with; it must

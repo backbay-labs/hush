@@ -25,6 +25,7 @@ rules:
     const merged = merge(base, child);
     expect(merged.name).toBe('child');
     expect(merged.extends).toBeUndefined();
+    expect(merged.merge_strategy).toBeUndefined();
     expect(merged.rules?.egress).toBeUndefined();
     expect(merged.rules?.tool_access?.block).toEqual(['shell_exec']);
   });
@@ -50,6 +51,7 @@ rules:
 `);
     const merged = merge(base, child);
     expect(merged.extends).toBeUndefined();
+    expect(merged.merge_strategy).toBeUndefined();
     expect(merged.rules?.egress?.allow).toEqual(['b.com']);
     expect(merged.rules?.forbidden_paths?.patterns).toEqual(['**/.ssh/**']);
   });
@@ -74,6 +76,7 @@ rules:
 `);
     const merged = merge(base, child);
     expect(merged.extends).toBeUndefined();
+    expect(merged.merge_strategy).toBeUndefined();
     expect(merged.rules?.egress?.allow).toEqual(['b.com']);
     expect(merged.rules?.forbidden_paths?.patterns).toEqual(['**/.ssh/**']);
   });
@@ -107,4 +110,24 @@ rules:
     const merged = merge(base, child);
     expect(merged.metadata?.author).toBe('a');
   });
+
+  // `extends` and `merge_strategy` describe how a document was assembled, not
+  // what it permits. A merge result is already assembled, so carrying either
+  // forward would make it look like a document still waiting to be resolved --
+  // and `merge_strategy` would then be read a second time by whatever resolved
+  // the result.
+  it.each(['replace', 'merge', 'deep_merge'])(
+    'drops the resolution fields under %s',
+    (strategy) => {
+      const base = parseOrThrow('hushspec: "0.1.0"\nname: base\n');
+      const child = parseOrThrow(
+        `hushspec: "0.1.0"\nname: child\nextends: base\nmerge_strategy: ${strategy}\n`,
+      );
+      const merged = merge(base, child);
+
+      expect(child.merge_strategy).toBe(strategy);
+      expect(merged.extends).toBeUndefined();
+      expect(merged.merge_strategy).toBeUndefined();
+    },
+  );
 });

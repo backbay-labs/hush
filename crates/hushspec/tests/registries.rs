@@ -70,19 +70,53 @@ fn keys(schema: &Value, def: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// The registries published with a `hushspec-registry-<name>.v0.schema.json`
+/// of their own. Kept exhaustive by
+/// `every_published_registry_schema_is_covered`.
+const REGISTRIES: [&str; 7] = [
+    "action-types",
+    "rule-blocks",
+    "rule-paths",
+    "capabilities",
+    "detectors",
+    "condition-types",
+    "media-types",
+];
+
 #[test]
 fn every_registry_validates_against_its_schema() {
-    for name in [
-        "action-types",
-        "rule-blocks",
-        "rule-paths",
-        "capabilities",
-        "detectors",
-        "condition-types",
-        "media-types",
-    ] {
+    for name in REGISTRIES {
         assert_valid(name);
     }
+}
+
+/// A registry schema added to `schemas/` but not to `REGISTRIES` would be
+/// published without anything ever validating the YAML it describes, and the
+/// omission would look exactly like a passing suite. The list is therefore
+/// compared against the directory rather than trusted.
+#[test]
+fn every_published_registry_schema_is_covered() {
+    const PREFIX: &str = "hushspec-registry-";
+    const SUFFIX: &str = ".v0.schema.json";
+
+    let mut published: Vec<String> = fs::read_dir(root().join("schemas"))
+        .expect("schemas/ is readable")
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+            let stem = name.strip_prefix(PREFIX)?.strip_suffix(SUFFIX)?;
+            Some(stem.to_string())
+        })
+        .collect();
+    published.sort();
+
+    let mut covered: Vec<String> = REGISTRIES.iter().map(|n| (*n).to_string()).collect();
+    covered.sort();
+
+    assert_eq!(
+        published, covered,
+        "the registry schemas in schemas/ and the REGISTRIES list have diverged; \
+         add the new registry to the list so its YAML is validated too"
+    );
 }
 
 #[test]

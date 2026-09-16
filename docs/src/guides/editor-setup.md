@@ -24,18 +24,31 @@ cover five document kinds:
 
 | Entry | Schema | Matches |
 |-------|--------|---------|
-| HushSpec | core policy | `hushspec.yaml` / `hushspec.yml`, `.hushspec.yaml` / `.hushspec.yml`, `*.hushspec.yaml` / `*.hushspec.yml`, `rulesets/*.yaml`, `library/**/*.yaml` |
-| HushSpec Evaluator Test | evaluator test | `*.hushspec.test.yaml` / `*.hushspec.test.yml`, `fixtures/**/*.test.yaml`, `tests/*.test.yaml` |
-| HushSpec Decision Receipt | receipt | `*.receipt.json`, `receipts/*.json` |
+| HushSpec | core policy | `hushspec.yaml` / `hushspec.yml`, `.hushspec.yaml` / `.hushspec.yml`, `*.hushspec.yaml` / `*.hushspec.yml` |
+| HushSpec Evaluator Test | evaluator test | `*.hushspec.test.yaml` / `*.hushspec.test.yml`, `**/fixtures/**/*.test.yaml` |
+| HushSpec Decision Receipt | receipt | `*.receipt.json` |
 | HushSpec Log Entry | log entry | `*.log-entry.json` |
 | HushSpec Policy Bundle | bundle | `*.bundle.json` |
 
-The policy patterns are the filename convention used elsewhere in
-HushSpec-aware tooling -- the Claude Code hook's policy discovery walks up the
-directory tree looking for a `.hushspec.yaml`, and `h2h init` scaffolds
-`policy.yaml` beside `tests/policy.test.yaml`. Name your files to match and,
-once the SchemaStore submission below has merged, you get validation and
-autocomplete with no configuration at all.
+Every pattern names something, and that is deliberate. A catalog entry is
+consulted in every project its reader ever opens, not just this one: a
+pattern like `rulesets/*.yaml` reads naturally from inside this repository
+but claims every YAML file in every `rulesets/` directory anywhere, and the
+reward for that is a wall of validation errors on somebody else's unrelated
+file. A directory name plus an extension the whole ecosystem uses is not a
+claim a global catalog gets to make. `**/fixtures/**/*.test.yaml` is the one
+pattern here that doesn't carry `hushspec`; `.test.yaml` under `fixtures/` is
+specific enough to be worth the reach, since that is where evaluator tests
+actually live.
+
+So name a policy `hushspec.yaml`, `.hushspec.yaml`, or `<something>.hushspec.yaml`
+and, once the SchemaStore submission below has merged, you get validation and
+autocomplete with no configuration at all. The convention already shows up
+elsewhere in HushSpec-aware tooling: the Claude Code hook's policy discovery
+walks up the directory tree looking for a `.hushspec.yaml`. Files `h2h init`
+scaffolds -- `policy.yaml` beside `tests/policy.test.yaml` -- are outside these
+patterns by name, and are covered instead by the modeline `h2h init` writes
+into them.
 
 A hash-linked log is a `.jsonl` stream with one entry per line, which no
 editor can validate against a schema that describes a single entry; use
@@ -100,8 +113,10 @@ tracks `main` directly:
 https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
 ```
 
-Both URLs serve the same bytes -- the same file, from the same commit on
-`main`. Once `hushspec.dev` is live, prefer the canonical URL: it's the one the
+Both URLs serve the same file, and can differ only for as long as it takes a
+docs deploy to run -- raw GitHub tracks `main` directly, while the canonical
+host serves the last successful deploy of it. Once `hushspec.dev` is live,
+prefer the canonical URL: it's the one the
 schemas' own `$id` fields declare, and the one the SchemaStore entries above
 point to. `https://hushspec.dev/schemas/index.json` lists everything the host
 serves, and is the quickest way to check whether it is live.

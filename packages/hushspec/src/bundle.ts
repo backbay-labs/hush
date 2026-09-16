@@ -989,7 +989,16 @@ function timestamp(value: Date | string): string {
   if (Number.isNaN(date.getTime())) {
     throw new BundleError(`${JSON.stringify(String(value))} is not a timestamp`);
   }
-  return `${date.toISOString().slice(0, 23)}Z`;
+  // `toISOString` widens the year field outside 0000-9999 (`+275760-09-13`),
+  // so the fixed slice would silently produce a malformed `created_at`. Refuse
+  // it here, where the caller still has the input, rather than at read time.
+  const formatted = `${date.toISOString().slice(0, 23)}Z`;
+  if (!MILLISECOND_TIMESTAMP.test(formatted)) {
+    throw new BundleError(
+      `${JSON.stringify(String(value))} is outside the range created_at can express`,
+    );
+  }
+  return formatted;
 }
 
 function resolveKeyring(options: VerifyBundleOptions): Keyring {

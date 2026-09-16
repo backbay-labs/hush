@@ -35,6 +35,8 @@ describe('package entry point', () => {
     'verifyLog',
     'verifyBundle',
     'parseBundle',
+    // Rust `create_bundle`, Go `CreateBundle`, Python `create_bundle`.
+    'createBundle',
     // Signing
     'signPolicy',
     'verifyPolicy',
