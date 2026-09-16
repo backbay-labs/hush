@@ -994,16 +994,37 @@ rules:
             }
         }
 
-        // Nothing is listening: the worker's requests time out, so the queue
-        // fills and stays full.
+        // The collector accepts every connection and never answers, so the
+        // worker is held on its first request for the whole of the send loop
+        // and the one-entry queue stays full however the threads are scheduled.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("binds");
+        let port = listener.local_addr().expect("addr").port();
+        listener.set_nonblocking(true).expect("nonblocking");
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stalled = {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let mut held = Vec::new();
+                while !stop.load(Ordering::SeqCst) {
+                    match listener.accept() {
+                        Ok((stream, _)) => held.push(stream),
+                        Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => return,
+                    }
+                }
+            })
+        };
+
         let observer = Arc::new(Errors::default());
         let sink = OtlpSink::with_config(OtlpConfig {
             queue_capacity: 1,
             batch_size: 1024,
             flush_interval: Duration::from_secs(60),
-            timeout: Duration::from_millis(50),
+            timeout: Duration::from_millis(500),
             max_retries: 0,
-            ..OtlpConfig::new("http://127.0.0.1:1")
+            ..OtlpConfig::new(format!("http://127.0.0.1:{port}"))
         })
         .expect("builds")
         .with_observer(observer.clone());
@@ -1017,9 +1038,15 @@ rules:
         }
         assert!(refused > 0, "a full queue must refuse rather than block");
         assert_eq!(sink.dropped(), refused);
-        let errors = observer.0.lock().expect("lock");
-        assert_eq!(errors.len() as u64, sink.dropped());
-        assert!(errors[0].contains("queue full"), "{}", errors[0]);
+        {
+            let errors = observer.0.lock().expect("lock");
+            assert_eq!(errors.len() as u64, sink.dropped());
+            assert!(errors[0].contains("queue full"), "{}", errors[0]);
+        }
+
+        drop(sink);
+        stop.store(true, Ordering::SeqCst);
+        stalled.join().expect("collector thread");
     }
 
     #[test]
