@@ -14,7 +14,10 @@
 //!
 //! 1. **Syntax is RE2-class.** Lookaround, backreferences, possessive
 //!    quantifiers, atomic/conditional/recursive groups, and nested unbounded
-//!    quantifiers are rejected (see [`crate::validate`]).
+//!    quantifiers are rejected (see [`crate::validate`]). The group forms are
+//!    `(...)`, `(?:...)`, and the named pair `(?<name>...)` / `(?P<name>...)`,
+//!    whose names are ASCII letters, digits and underscores not starting with
+//!    a digit; any other `(?...)` opener is rejected.
 //! 2. **Inline flags only as a leading group.** `(?i)`, `(?s)`, `(?m)`, `(?is)`
 //!    at the very start of the pattern (one or more consecutive groups). An
 //!    inline flag group anywhere else -- including the scoped form `(?i:...)`
@@ -27,14 +30,24 @@
 //!    The negated shorthands `\D \W \S` and the boundaries `\b \B` cannot be
 //!    expressed as character-class members, so they are rejected *inside* a
 //!    class.
-//! 4. **`.` matches any character except `\n`.** With a leading `(?s)` it
+//! 4. **`.` matches any scalar value except `\n`.** With a leading `(?s)` it
 //!    matches everything.
 //! 5. **`$` matches only at end of text** unless a leading `(?m)` is present.
 //!    `^` is unchanged.
-//! 6. **Unanchored search semantics** -- a pattern matches if it matches
+//! 6. **`(?i)` folds ASCII letters only.** Each ASCII letter is expanded into
+//!    a two-member class (`s` -> `[sS]`) and no case-insensitive flag reaches
+//!    the host engine, so the Unicode simple case-folding table never pulls
+//!    U+017F or U+212A into a match for `s` or `k`.
+//! 7. **Unanchored search semantics** -- a pattern matches if it matches
 //!    anywhere in the subject.
-//! 7. **Compile failure at evaluation time denies**, carrying the rule path of
+//! 8. **Compile failure at evaluation time denies**, carrying the rule path of
 //!    the offending pattern.
+//!
+//! A character class is a set of scalar values: an unescaped `[` inside one is
+//! rejected (so POSIX bracket expressions are not mistaken for a class of
+//! their own), and a range endpoint outside the Basic Multilingual Plane is
+//! rejected because the SDKs cannot express such a range alike. A pattern is
+//! limited to 2048 UTF-8 bytes (core spec 3.14.3).
 //!
 //! Escapes are restricted to the intersection the four engines agree on:
 //! `\n \r \t \f \v`, `\xHH`, `\d \D \w \W \s \S \b \B`, and any escaped ASCII
@@ -42,17 +55,6 @@
 //! `\0`, `\a`, `\e`, `\cX` and every other alphanumeric escape are rejected:
 //! each of them is either unsupported by at least one engine or, worse,
 //! silently reinterpreted as a literal by JavaScript.
-//!
-//! # Known, deliberate residual divergence
-//!
-//! Under a leading `(?i)`, Rust `regex` and Go RE2 case-fold using the full
-//! Unicode simple case-folding table, while JavaScript `RegExp` (no `u` flag)
-//! and Python `re` compiled with `re.ASCII` fold only ASCII. A pattern such as
-//! `(?i)stra(ss|ß)e` can therefore match differently across SDKs. Use explicit
-//! alternations instead of `(?i)` when a pattern must fold non-ASCII letters.
-//! `.` also matches a single UTF-16 code unit in JavaScript versus a single
-//! code point in the other three, so a pattern using `.` against astral-plane
-//! text (emoji) can differ.
 
 use regex::{Regex, RegexBuilder};
 use std::fmt;
@@ -99,6 +101,36 @@ impl fmt::Display for RegexProfileError {
 
 impl std::error::Error for RegexProfileError {}
 
+/// Maximum size of a policy-authored pattern, in UTF-8 bytes (core spec
+/// 3.14.3).
+const MAX_PATTERN_BYTES: usize = 2048;
+
+/// Shared rejection message for an over-long pattern.
+const PATTERN_TOO_LONG_MESSAGE: &str =
+    "pattern exceeds the HushSpec regex profile limit of 2048 bytes";
+
+/// Shared rejection message for group openers outside the profile.
+const GROUP_FORM_MESSAGE: &str = "this group form is not portable across the HushSpec SDK regex engines; the profile \
+     allows (?:...), the named forms (?<name>...) and (?P<name>...), and a leading \
+     inline flag group such as (?i)";
+
+/// Shared rejection message for a malformed or non-portable group name.
+const GROUP_NAME_MESSAGE: &str = "a named group's name must be ASCII letters, digits and underscores, must not start \
+     with a digit, and must be closed by >";
+
+/// Shared rejection message for an unescaped `[` inside a character class.
+const NESTED_CLASS_MESSAGE: &str = "an unescaped [ inside a character class is not portable across the HushSpec SDK \
+     regex engines (Rust and Go read [[:alpha:]] as a POSIX class, JavaScript and \
+     Python as a literal [); escape it as \\[";
+
+/// Shared rejection message for a class range reaching outside the BMP.
+const ASTRAL_RANGE_MESSAGE: &str = "a character-class range with an endpoint outside the Basic Multilingual Plane is \
+     not portable across the HushSpec SDK regex engines";
+
+/// Shared rejection message for an empty character class.
+const EMPTY_CLASS_MESSAGE: &str = "empty character classes [] and [^] are not portable across the HushSpec SDK \
+     regex engines";
+
 /// Flags carried by a leading inline flag group.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct ProfileFlags {
@@ -113,11 +145,14 @@ struct ProfileFlags {
 /// both [`crate::validate`] and [`crate::evaluate`] route through it so
 /// validation and evaluation can never disagree.
 pub fn compile_profile_regex(pattern: &str) -> Result<Regex, RegexProfileError> {
-    // Portability pre-check (possessive quantifiers, `\Z`/`\z`, empty classes)
-    // and the ReDoS nested-quantifier heuristic run here rather than only in
-    // `validate`, so the evaluator denies on exactly the patterns the validator
-    // rejects even when a caller hands `evaluate` a hand-built, never-validated
-    // `HushSpec`.
+    if pattern.len() > MAX_PATTERN_BYTES {
+        return Err(RegexProfileError::new(PATTERN_TOO_LONG_MESSAGE));
+    }
+    // Portability pre-check (possessive quantifiers, `\Z`/`\z`, `{,n}`, empty
+    // classes) and the ReDoS nested-quantifier heuristic run here rather than
+    // only in `validate`, so the evaluator denies on exactly the patterns the
+    // validator rejects even when a caller hands `evaluate` a hand-built,
+    // never-validated `HushSpec`.
     if let Some(message) = crate::validate::disallowed_regex_feature(pattern) {
         return Err(RegexProfileError::new(message));
     }
@@ -127,10 +162,12 @@ pub fn compile_profile_regex(pattern: &str) -> Result<Regex, RegexProfileError> 
 
     let chars: Vec<char> = pattern.chars().collect();
     let (flags, body_start) = split_leading_flags(&chars);
-    let translated = translate(&chars[body_start..])?;
+    let translated = translate(&chars[body_start..], flags)?;
 
+    // `case_insensitive` is deliberately not set: the profile folds ASCII
+    // letters only, which `translate` has already done by expanding each one
+    // into a two-member class.
     RegexBuilder::new(&translated)
-        .case_insensitive(flags.case_insensitive)
         .dot_matches_new_line(flags.dot_all)
         .multi_line(flags.multi_line)
         .build()
@@ -142,8 +179,8 @@ pub fn compile_profile_regex(pattern: &str) -> Result<Regex, RegexProfileError> 
 #[cfg(test)]
 fn translate_for_test(pattern: &str) -> Result<String, RegexProfileError> {
     let chars: Vec<char> = pattern.chars().collect();
-    let (_, body_start) = split_leading_flags(&chars);
-    translate(&chars[body_start..])
+    let (flags, body_start) = split_leading_flags(&chars);
+    translate(&chars[body_start..], flags)
 }
 
 /// Consume the leading run of `(?flags)` groups, returning the accumulated
@@ -181,16 +218,56 @@ fn is_inline_flag_char(c: char) -> bool {
     matches!(c, 'i' | 'm' | 's' | 'x' | 'u' | 'U' | 'a' | 'L' | 'n' | '-')
 }
 
+/// The other ASCII case of `c`, or `None` when `c` is not an ASCII letter.
+fn ascii_case_counterpart(c: char) -> Option<char> {
+    if c.is_ascii_lowercase() {
+        Some(c.to_ascii_uppercase())
+    } else if c.is_ascii_uppercase() {
+        Some(c.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
+/// The class-body ranges that fold `lo..=hi` to its other ASCII case.
+///
+/// A range is emitted for the part of `lo..=hi` inside `a-z` and for the part
+/// inside `A-Z`, so `[a-f]` under `(?i)` becomes `[a-fA-F]` and a range over
+/// digits is left alone.
+fn folded_class_range(lo: char, hi: char) -> String {
+    let mut out = String::new();
+    let lower_start = lo.max('a');
+    let lower_end = hi.min('z');
+    if lower_start <= lower_end {
+        out.push(lower_start.to_ascii_uppercase());
+        out.push('-');
+        out.push(lower_end.to_ascii_uppercase());
+    }
+    let upper_start = lo.max('A');
+    let upper_end = hi.min('Z');
+    if upper_start <= upper_end {
+        out.push(upper_start.to_ascii_lowercase());
+        out.push('-');
+        out.push(upper_end.to_ascii_lowercase());
+    }
+    out
+}
+
 /// Walk the pattern body, translating profile constructs into Rust `regex`
 /// source and rejecting anything that is not portable across the four SDKs.
 ///
-/// Unlike the TypeScript and Python translators this one needs no flag
-/// argument: Rust's `.` and `$` already have profile semantics, and `(?s)` /
-/// `(?m)` are applied through `RegexBuilder` instead of by rewriting.
-fn translate(chars: &[char]) -> Result<String, RegexProfileError> {
+/// Rust's `.` and `$` already have profile semantics -- `.` excludes only `\n`
+/// (the TypeScript SDK has to rewrite it, because JavaScript's `.` also
+/// excludes `\r`, U+2028 and U+2029) and `$` is an end-of-text anchor (the
+/// Python SDK rewrites it to `\Z`, because Python's `$` also matches just
+/// before a trailing newline) -- so both pass through unchanged, and `(?s)` /
+/// `(?m)` are applied through `RegexBuilder`. `flags.case_insensitive` is the
+/// exception: it is compiled here, by expanding every ASCII letter into a
+/// two-member class, because the host engine would otherwise fold with the
+/// full Unicode table.
+fn translate(chars: &[char], flags: ProfileFlags) -> Result<String, RegexProfileError> {
     let n = chars.len();
     let mut out = String::with_capacity(n + 16);
-    let mut in_class = false;
     let mut index = 0;
 
     while index < n {
@@ -202,63 +279,38 @@ fn translate(chars: &[char]) -> Result<String, RegexProfileError> {
                     "pattern ends with a trailing backslash",
                 ));
             }
-            translate_escape(chars[index + 1], in_class, chars, index, &mut out)?;
+            translate_escape(
+                chars[index + 1],
+                false,
+                flags.case_insensitive,
+                chars,
+                index,
+                &mut out,
+            )?;
             index += escape_len(chars, index);
-            continue;
-        }
-
-        if in_class {
-            if c == ']' {
-                in_class = false;
-            }
-            out.push(c);
-            index += 1;
             continue;
         }
 
         match c {
             '[' => {
-                // `[]` / `[^]` are read as an empty class by Rust/Python/Go
-                // (a compile error) but as "match nothing"/"match anything" by
-                // JavaScript, so they are never portable.
-                let mut cursor = index + 1;
-                if cursor < n && chars[cursor] == '^' {
-                    cursor += 1;
-                }
-                if cursor >= n || chars[cursor] == ']' {
-                    return Err(RegexProfileError::new(
-                        "empty character classes [] and [^] are not portable across the \
-                         HushSpec SDK regex engines",
-                    ));
-                }
-                in_class = true;
-                out.push('[');
-                index += 1;
+                let (source, next) =
+                    translate_character_class(chars, index, flags.case_insensitive)?;
+                out.push_str(&source);
+                index = next;
             }
             '(' => {
-                if let Some(error) = inline_flag_group_error(chars, index) {
-                    return Err(error);
-                }
-                out.push('(');
-                index += 1;
-            }
-            '.' => {
-                // Rust `.` already excludes `\n`, and `dot_matches_new_line`
-                // carries a leading `(?s)`, so no rewrite is needed here. The
-                // TypeScript SDK rewrites `.` to `[^\n]` because JavaScript's
-                // `.` also excludes `\r`, U+2028 and U+2029.
-                out.push('.');
-                index += 1;
-            }
-            '$' => {
-                // Rust `$` is already an end-of-text anchor without `(?m)`.
-                // The Python SDK rewrites it to `\Z`, because Python's `$` also
-                // matches just before a trailing newline.
-                out.push('$');
-                index += 1;
+                index = translate_group(chars, index, &mut out)?;
             }
             _ => {
-                out.push(c);
+                match ascii_case_counterpart(c).filter(|_| flags.case_insensitive) {
+                    Some(other) => {
+                        out.push('[');
+                        out.push(c);
+                        out.push(other);
+                        out.push(']');
+                    }
+                    None => out.push(c),
+                }
                 index += 1;
             }
         }
@@ -275,6 +327,197 @@ fn escape_len(chars: &[char], index: usize) -> usize {
     } else {
         2
     }
+}
+
+/// Translate the group opener starting at `chars[start]`, returning the index
+/// just past it.
+///
+/// `(`, `(?:` and the two named spellings are the profile's only group forms;
+/// `(?=`, `(?!`, `(?>`, `(?#`, `(?(`, `(?R)` and `(?P=name)` are rejected here
+/// rather than left to a host engine that may accept them.
+fn translate_group(
+    chars: &[char],
+    start: usize,
+    out: &mut String,
+) -> Result<usize, RegexProfileError> {
+    if chars.get(start + 1) != Some(&'?') {
+        out.push('(');
+        return Ok(start + 1);
+    }
+    if let Some(error) = inline_flag_group_error(chars, start) {
+        return Err(error);
+    }
+    match chars.get(start + 2) {
+        Some(':') => {
+            out.push_str("(?:");
+            Ok(start + 3)
+        }
+        // Rust `regex` accepts both named spellings; normalizing to `(?P<`
+        // keeps the translated source the same shape as the Python and Go
+        // SDKs', which accept only that one.
+        Some('<') if !matches!(chars.get(start + 3), Some('=') | Some('!')) => {
+            translate_group_name(chars, start + 3, out)
+        }
+        Some('P') if chars.get(start + 3) == Some(&'<') => {
+            translate_group_name(chars, start + 4, out)
+        }
+        _ => Err(RegexProfileError::new(GROUP_FORM_MESSAGE)),
+    }
+}
+
+/// Copy the group name that starts at `start` and ends at `>`, returning the
+/// index just past the `>`. The name is never case-folded: it is an identifier,
+/// not subject text.
+fn translate_group_name(
+    chars: &[char],
+    start: usize,
+    out: &mut String,
+) -> Result<usize, RegexProfileError> {
+    let mut cursor = start;
+    while cursor < chars.len() && chars[cursor] != '>' {
+        cursor += 1;
+    }
+    if cursor >= chars.len() {
+        return Err(RegexProfileError::new(GROUP_NAME_MESSAGE));
+    }
+    let name: String = chars[start..cursor].iter().collect();
+    if !is_group_name(&name) {
+        return Err(RegexProfileError::new(GROUP_NAME_MESSAGE));
+    }
+    out.push_str("(?P<");
+    out.push_str(&name);
+    out.push('>');
+    Ok(cursor + 1)
+}
+
+/// `[A-Za-z_][0-9A-Za-z_]*`: the group names every SDK engine accepts alike.
+fn is_group_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// One member of a character class: its translated source, the scalar value it
+/// stands for (absent for a multi-member shorthand such as `\d`), and the
+/// number of chars it spans.
+struct ClassAtom {
+    source: String,
+    value: Option<char>,
+    len: usize,
+}
+
+/// Read the class member starting at `chars[index]`.
+fn read_class_atom(chars: &[char], index: usize) -> Result<ClassAtom, RegexProfileError> {
+    let c = chars[index];
+    if c == '\\' {
+        if index + 1 >= chars.len() {
+            return Err(RegexProfileError::new(
+                "pattern ends with a trailing backslash",
+            ));
+        }
+        let mut source = String::new();
+        translate_escape(chars[index + 1], true, false, chars, index, &mut source)?;
+        Ok(ClassAtom {
+            source,
+            value: escape_literal_value(chars, index),
+            len: escape_len(chars, index),
+        })
+    } else if c == '[' {
+        Err(RegexProfileError::new(NESTED_CLASS_MESSAGE))
+    } else {
+        Ok(ClassAtom {
+            source: c.to_string(),
+            value: Some(c),
+            len: 1,
+        })
+    }
+}
+
+/// The scalar value an escape sequence stands for, or `None` when it stands for
+/// a set of them. Only reached for escapes [`translate_escape`] accepted.
+fn escape_literal_value(chars: &[char], index: usize) -> Option<char> {
+    match chars[index + 1] {
+        'n' => Some('\n'),
+        'r' => Some('\r'),
+        't' => Some('\t'),
+        'f' => Some('\u{c}'),
+        'v' => Some('\u{b}'),
+        'd' | 'w' | 's' => None,
+        'x' => {
+            let hex: String = chars[index + 2..index + 4].iter().collect();
+            u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32)
+        }
+        escaped => Some(escaped),
+    }
+}
+
+/// Translate the character class starting at `chars[start]`, returning its Rust
+/// `regex` source and the index just past its closing `]`.
+///
+/// Members are read one at a time so that an unescaped `[` can be refused, a
+/// range can be checked for a non-BMP endpoint, and -- under `(?i)` -- both the
+/// members and the ranges can be folded to their other ASCII case.
+fn translate_character_class(
+    chars: &[char],
+    start: usize,
+    case_insensitive: bool,
+) -> Result<(String, usize), RegexProfileError> {
+    let n = chars.len();
+    let mut index = start + 1;
+    let negated = chars.get(index) == Some(&'^');
+    if negated {
+        index += 1;
+    }
+    // `[]` / `[^]` are read as an empty class by Rust/Python/Go (a compile
+    // error) but as "match nothing"/"match anything" by JavaScript, so they are
+    // never portable.
+    if index >= n || chars[index] == ']' {
+        return Err(RegexProfileError::new(EMPTY_CLASS_MESSAGE));
+    }
+
+    let mut body = String::new();
+    while index < n && chars[index] != ']' {
+        let atom = read_class_atom(chars, index)?;
+        let after = index + atom.len;
+        // A `-` is a range only between two single members and never just
+        // before the closing `]`, where it is a literal hyphen.
+        if let Some(lo) = atom.value
+            && chars.get(after) == Some(&'-')
+            && after + 1 < n
+            && chars[after + 1] != ']'
+        {
+            let high = read_class_atom(chars, after + 1)?;
+            if let Some(hi) = high.value {
+                if lo > '\u{ffff}' || hi > '\u{ffff}' {
+                    return Err(RegexProfileError::new(ASTRAL_RANGE_MESSAGE));
+                }
+                body.push_str(&atom.source);
+                body.push('-');
+                body.push_str(&high.source);
+                if case_insensitive {
+                    body.push_str(&folded_class_range(lo, hi));
+                }
+                index = after + 1 + high.len;
+                continue;
+            }
+        }
+        body.push_str(&atom.source);
+        if case_insensitive && let Some(other) = atom.value.and_then(ascii_case_counterpart) {
+            body.push(other);
+        }
+        index = after;
+    }
+
+    let prefix = if negated { "^" } else { "" };
+    if index >= n {
+        // Unterminated: hand it to `regex`, whose own diagnostic names the
+        // class.
+        return Ok((format!("[{prefix}{body}"), index));
+    }
+    Ok((format!("[{prefix}{body}]"), index + 1))
 }
 
 /// Reject `(?flags)` and `(?flags:...)` groups outside the leading position.
@@ -302,9 +545,12 @@ fn inline_flag_group_error(chars: &[char], index: usize) -> Option<RegexProfileE
 
 /// Translate one escape sequence. `escaped` is the character after the
 /// backslash; `chars`/`index` are supplied so `\xHH` can read its digits.
+/// `fold` asks for the profile's ASCII case folding, which applies only outside
+/// a character class -- [`translate_character_class`] folds its own members.
 fn translate_escape(
     escaped: char,
     in_class: bool,
+    fold: bool,
     chars: &[char],
     index: usize,
     out: &mut String,
@@ -375,9 +621,23 @@ fn translate_escape(
             let lo = chars.get(index + 3).copied();
             match (hi, lo) {
                 (Some(hi), Some(lo)) if hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit() => {
-                    out.push_str("\\x");
-                    out.push(hi);
-                    out.push(lo);
+                    let counterpart = u32::from_str_radix(&format!("{hi}{lo}"), 16)
+                        .ok()
+                        .and_then(char::from_u32)
+                        .and_then(ascii_case_counterpart)
+                        .filter(|_| fold);
+                    if let Some(other) = counterpart {
+                        out.push('[');
+                        out.push_str("\\x");
+                        out.push(hi);
+                        out.push(lo);
+                        out.push(other);
+                        out.push(']');
+                    } else {
+                        out.push_str("\\x");
+                        out.push(hi);
+                        out.push(lo);
+                    }
                     Ok(())
                 }
                 _ => Err(RegexProfileError::new(
@@ -566,6 +826,104 @@ mod tests {
         // use either spelling in any SDK.
         assert!(matches("(?P<year>[0-9]{4})", "in 2026"));
         assert!(matches("(?<year>[0-9]{4})", "in 2026"));
+        assert_eq!(
+            translate_for_test("(?<year>x)").unwrap(),
+            translate_for_test("(?P<year>x)").unwrap()
+        );
+    }
+
+    #[test]
+    fn group_names_are_ascii_identifiers() {
+        assert!(rejects("(?<1st>x)").contains("named group's name"));
+        assert!(rejects("(?<ann\u{e9}e>x)").contains("named group's name"));
+        assert!(rejects("(?<year x)").contains("named group's name"));
+    }
+
+    #[test]
+    fn non_profile_group_openers_are_rejected() {
+        for pattern in [
+            "a(?#comment)b",
+            "a(?=b)",
+            "a(?!b)",
+            "(?<=a)b",
+            "(?<!a)b",
+            "(?>a)",
+            "(?(1)a|b)",
+            "(?R)",
+            "(?1)",
+            "(?P<a>x)(?P=a)",
+        ] {
+            assert!(
+                rejects(pattern).contains("group form"),
+                "{pattern} should be refused as a group form"
+            );
+        }
+        assert!(compile_profile_regex("(?:ab)+").is_ok());
+    }
+
+    #[test]
+    fn posix_bracket_expressions_are_rejected() {
+        assert!(rejects("[[:alpha:]]").contains("unescaped ["));
+        assert!(rejects("[a[b]").contains("unescaped ["));
+        // An escaped `[` is an ordinary class member.
+        assert!(matches(r"[a\[]", "["));
+    }
+
+    #[test]
+    fn open_lower_bound_quantifier_is_rejected() {
+        assert!(rejects("a{,3}").contains("{,n} quantifier"));
+        assert!(compile_profile_regex("a{0,3}").is_ok());
+    }
+
+    #[test]
+    fn over_long_patterns_are_rejected() {
+        let pattern = "a".repeat(2049);
+        assert!(rejects(&pattern).contains("2048 bytes"));
+        assert!(compile_profile_regex(&"a".repeat(2048)).is_ok());
+    }
+
+    #[test]
+    fn class_ranges_stay_inside_the_bmp() {
+        assert!(
+            rejects("[\u{1F600}-\u{1F64F}]").contains("Basic Multilingual Plane"),
+            "an astral range is not expressible in every SDK"
+        );
+        // An astral character is still an ordinary class member.
+        assert!(matches("^[\u{1F600}a]$", "\u{1F600}"));
+        assert!(matches("^[\u{1F600}a]$", "a"));
+        assert!(!matches("^[^\u{1F600}]$", "\u{1F600}"));
+        assert!(matches("^[^\u{1F600}]$", "a"));
+    }
+
+    // ---- ASCII-only case folding ----
+
+    #[test]
+    fn case_insensitive_folds_ascii_letters_only() {
+        assert!(matches("(?i)stra", "STRA"));
+        assert!(matches("(?i)stra", "Stra"));
+        // U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII
+        // under the full Unicode table; the profile folds ASCII only.
+        assert!(!matches("(?i)s", "\u{17f}"));
+        assert!(!matches("(?i)k", "\u{212a}"));
+    }
+
+    #[test]
+    fn case_insensitive_folds_class_members_and_ranges() {
+        assert!(matches("(?i)^[a-f]$", "C"));
+        assert!(!matches("(?i)^[a-f]$", "G"));
+        assert!(matches("(?i)^[sq]$", "S"));
+        assert!(!matches("(?i)^[sq]$", "\u{17f}"));
+        assert!(!matches("(?i)^[^s]$", "S"));
+        assert!(matches("(?i)^[^s]$", "\u{17f}"));
+        // Digit ranges are untouched.
+        assert_eq!(translate_for_test("(?i)[0-9]").unwrap(), "[0-9]");
+    }
+
+    #[test]
+    fn case_insensitive_folds_hex_escapes_and_spares_group_names() {
+        assert!(matches(r"(?i)\x41", "a"));
+        assert!(matches(r"(?i)\x61", "A"));
+        assert_eq!(translate_for_test("(?i)(?P<ab>c)").unwrap(), "(?P<ab>[cC])");
     }
 
     #[test]

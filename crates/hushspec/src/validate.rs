@@ -643,50 +643,51 @@ fn is_framework_id(value: &str) -> bool {
 }
 
 fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) {
+    let mut reject = |message: String| {
+        errors.push(ValidationError::InvalidRegex {
+            field: path.to_string(),
+            pattern: pattern.to_string(),
+            message,
+        });
+    };
+
     // Portability pre-check first: reject constructs that are unsupported by, or
     // behave differently across, the four SDK regex engines (possessive
-    // quantifiers, `\Z`/`\z` end-anchors, empty character classes) so a pattern
-    // validates identically everywhere, regardless of what any single engine
-    // does with them. The HushSpec regex profile check follows it.
+    // quantifiers, `\Z`/`\z` end-anchors, `{,n}`, empty character classes) so a
+    // pattern validates identically everywhere, regardless of what any single
+    // engine does with them.
     if let Some(message) = disallowed_regex_feature(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: message.to_string(),
-        });
+        reject(message.to_string());
         return;
     }
 
-    // Profile check second: `compile_profile_regex` applies the HushSpec regex
-    // profile (ASCII `\d`/`\w`/`\s`/`\b`, leading-only inline flags, portable
-    // escapes) and then compiles, so the `regex` crate's own rejection of
-    // non-RE2 features (backreferences, lookaround, ...) comes for free. This
-    // is the *same* call the evaluator makes, so a pattern that validates here
-    // can never fail to compile at evaluation time -- and vice versa.
-    if let Err(error) = compile_profile_regex(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: error.message().to_string(),
-        });
-        return;
-    }
-
-    // Nested-quantifier check third: RE2 tolerates shapes like `(a+)+` that
+    // Nested-quantifier check second: RE2 tolerates shapes like `(a+)+` that
     // catastrophically backtrack on the backtracking SDK engines, so reject them
     // here to keep the safety contract identical across all four SDKs.
     if has_nested_quantifier(pattern) {
-        errors.push(ValidationError::InvalidRegex {
-            field: path.to_string(),
-            pattern: pattern.to_string(),
-            message: crate::regex_profile::NESTED_QUANTIFIER_MESSAGE.to_string(),
-        });
+        reject(crate::regex_profile::NESTED_QUANTIFIER_MESSAGE.to_string());
+        return;
+    }
+
+    // Profile check last: `compile_profile_regex` repeats the two checks above,
+    // applies the HushSpec regex profile (ASCII `\d`/`\w`/`\s`/`\b`,
+    // leading-only inline flags, portable escapes) and then compiles, so the
+    // `regex` crate's own rejection of non-RE2 features (backreferences,
+    // lookaround, ...) comes for free. This is the *same* call the evaluator
+    // makes, so a pattern that validates here can never fail to compile at
+    // evaluation time -- and vice versa.
+    if let Err(error) = compile_profile_regex(pattern) {
+        reject(error.message().to_string());
     }
 }
 
 /// Shared rejection message for possessive quantifiers.
 const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable \
      across the HushSpec SDK regex engines";
+
+/// Shared rejection message for the open-lower-bound quantifier `{,n}`.
+const OPEN_LOWER_BOUND_MESSAGE: &str = "the {,n} quantifier is not portable across the HushSpec SDK regex engines \
+     (Python reads it as {0,n}, the others as literal text); write {0,n}";
 
 /// Portability pre-check: reject regex constructs that are unsupported by, or
 /// behave differently across, the four SDK engines so a pattern validates
@@ -699,7 +700,9 @@ const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}
 ///     semantics; JavaScript reads `\Z`/`\z` as a literal letter -- users
 ///     anchor with `$`),
 ///   * empty character classes `[]` and `[^]` (JavaScript accepts them; the
-///     others reject them).
+///     others reject them),
+///   * the `{,n}` quantifier (Python reads it as `{0,n}`; the others read the
+///     whole brace as literal text).
 ///
 /// Must stay byte-identical to the TypeScript, Python, and Go implementations.
 pub(crate) fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
@@ -763,6 +766,9 @@ pub(crate) fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
                 if j < n {
                     let inner: String = chars[i + 1..j].iter().collect();
                     if brace_kind(&inner) != QuantKind::None {
+                        if inner.starts_with(',') {
+                            return Some(OPEN_LOWER_BOUND_MESSAGE);
+                        }
                         if j + 1 < n && chars[j + 1] == '+' {
                             return Some(POSSESSIVE_MESSAGE);
                         }

@@ -540,8 +540,18 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 |------------|-----------------|----------|-----------|---------------------------------------------------------------|
 | `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
 | `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
-| `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset `+HH:MM`/`-HH:MM`. |
+| `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset (grammar below).  |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
+
+**Fixed-offset grammar.** A `timezone` that is not an IANA identifier MUST be a fixed offset in exactly one of two shapes, with ASCII digits only:
+
+```abnf
+offset = ("+" / "-") hour [ ":" minute ]
+hour   = ("0" / "1") DIGIT / "2" %x30-33   ; 00-23, always two digits
+minute = %x30-35 DIGIT                     ; 00-59, always two digits
+```
+
+`+05:30` and `-08` conform; `+5`, `+0530`, `+5:0`, and `++5` do not. A `timezone` outside both this grammar and the engine's time-zone database is a parse error.
 
 **Rate condition object.**
 
@@ -650,9 +660,11 @@ Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtur
 
 Regular expressions in HushSpec documents MUST conform to the **HushSpec regex profile**, a portable subset of RE2 syntax with fixed semantics. Version 0.1.0 said engines SHOULD support "PCRE2-compatible syntax"; that text is withdrawn.
 
-**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )` and non-capturing `(?: )` groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
+**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )`, non-capturing `(?: )`, and named groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
 
-A pattern MUST NOT use: lookahead or lookbehind; backreferences; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; named groups or named references; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
+A named group is written `(?<name>...)` or `(?P<name>...)`; the two spellings are equivalent, and `name` is one or more ASCII letters, digits, and underscores that does not start with a digit. Group names carry no matching semantics in HushSpec: a decision depends only on whether the pattern matched.
+
+A pattern MUST NOT use: lookahead or lookbehind; backreferences, named ones included; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; comment groups `(?#...)`; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); an unescaped `[` inside a bracket class, which excludes POSIX bracket expressions such as `[[:alpha:]]`; a bracket-class range with an endpoint outside the Basic Multilingual Plane; the `{,n}` quantifier, which some engines read as `{0,n}` and others as literal text; or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
 
 **Semantics.** Every engine MUST match with these semantics regardless of its host regex library:
 - The subject is a sequence of Unicode scalar values; `.` and negated classes consume exactly one scalar value.
