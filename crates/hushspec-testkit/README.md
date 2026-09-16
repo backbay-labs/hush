@@ -42,7 +42,7 @@ all pass; a level with any unattempted vector is never a pass.
 ## The conformance bundle
 
 ```bash
-hushspec-testkit bundle --root . --out hushspec-conformance-0.2.0.tar.gz
+hushspec-testkit bundle --root . --out hushspec-conformance-1.0.0.tar.gz
 ```
 
 The archive holds `spec/`, `schemas/`, and `fixtures/` (minus `staged/`, which
@@ -90,7 +90,7 @@ Exit codes: `0` no divergence, `1` divergence found, `2` infrastructure error
 {
   "hushspec_diff": "0.1.0",
   "seed": 42,
-  "generated_by": "hushspec-gen 0.1.1",
+  "generated_by": "hushspec-gen 1.0.0",
   "groups": [
     {
       "id": "g0001",

@@ -132,7 +132,7 @@ groups, comparing every port against the Rust oracle on decision, rule trace,
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
+> Homebrew, npm, and prebuilt binaries become available once the release pipeline has run for the `v1.0.0` tag and published the artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
 
 All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 
@@ -158,7 +158,7 @@ the `Dockerfile`/`ghcr.io/backbay-labs/h2h` container image.
 
 ```toml
 [dependencies]
-hushspec = "0.1"
+hushspec = "1.0"
 ```
 
 ### TypeScript
@@ -176,8 +176,12 @@ pip install hushspec
 ### Go
 
 ```bash
-go get github.com/backbay-labs/hush/packages/go@main
+go get github.com/backbay-labs/hush/packages/go@v1.0.0
 ```
+
+The SDK is a nested module, so Go resolves that version from the
+`packages/go/v1.0.0` tag rather than from a plain `v1.0.0` at the repository
+root ([packaging notes](./packages/go/README.md#versioning-and-tags)).
 
 ## Getting Started
 

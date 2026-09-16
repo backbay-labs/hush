@@ -43,7 +43,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
   `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
   hash for chaining), with 12 valid and 14 invalid vectors under `fixtures/receipts/`.
-  `schemas/hushspec-receipt.v0.schema.json` is the 0.2 schema.
+  `schemas/hushspec-receipt.v1.schema.json` is the 0.2 schema.
 - `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
   (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
   expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
@@ -90,16 +90,16 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `h2h schema core` prints the v1 file; `h2h schema core.v0` prints the frozen one.
 - **Expected error codes on every `invalid/` vector.** `spec/registries/error-codes.yaml`
   registers the codes the validator emits (`E000`-`E005`, `E010`, `E011`), validated by
-  `schemas/hushspec-error-codes.v0.schema.json`, whose `$defs/ExpectedError` is the shape of the
+  `schemas/hushspec-error-codes.v1.schema.json`, whose `$defs/ExpectedError` is the shape of the
   new `fixtures/<module>/invalid/<name>.expect.yaml` sidecars. All four SDK fixture runners
   assert the registered code and any `message_contains` substring.
-- **`schemas/hushspec-merge-vector.v0.schema.json`** writes down the merge vector directory
+- **`schemas/hushspec-merge-vector.v1.schema.json`** writes down the merge vector directory
   convention (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, the digest-pin path through the
   resolver, and the two refusal markings all four runners honour), validated against every merge
   directory in the corpus by a testkit test.
-- **`schemas/hushspec-conformance-report.v0.schema.json`**: the shape of a conformance report.
-- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v0.schema.json`,
-  same file name): a case may declare `controls: [{framework, control_id}]` -- the controls it
+- **`schemas/hushspec-conformance-report.v1.schema.json`**: the shape of a conformance report.
+- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v1.schema.json`):
+  a case may declare `controls: [{framework, control_id}]` -- the controls it
   is evidence for -- and free-form `tags`, and its `expect` may assert `rule_trace` (the
   recorded trace of receipt spec 4.3, compared in order and in full, with `rule_path` compared
   only where it is spelled) and `receipt` (a partial format 0.2 receipt whose members must equal
@@ -160,10 +160,10 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - Verify-on-load and digest pinning: `resolve_with_options` / `resolve_path_with_options`
   return a `Resolution` with per-hop chain links and verification outcomes;
   `extends: "<ref>#sha256:<hex>"` pins a base document.
-- Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v0.schema.json`):
+- Hash-linked receipt log (`spec/hushspec-log.md`, `schemas/hushspec-log-entry.v1.schema.json`):
   `ChainedFileSink`, `PolicyEvent` records, `verify_logs`, and `h2h log verify`.
 - Receipt signing (`sign_receipt` / `verify_receipt`) and `h2h receipts verify`.
-- Policy bundle attestation (`spec/hushspec-bundle.md`, `schemas/hushspec-bundle.v0.schema.json`):
+- Policy bundle attestation (`spec/hushspec-bundle.md`, `schemas/hushspec-bundle.v1.schema.json`):
   `h2h bundle create` resolves a policy and wraps it in a DSSE envelope over an in-toto Statement
   v1 whose subject is the canonical form of the resolved document and whose predicate carries that
   document, every `extends` hop with its hash and signature status, and the resolver. `h2h bundle
@@ -317,7 +317,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   detections by detector and level. With `--policy`, joins `metadata.controls` into a per-control
   evidence table (evaluated / fired / denied / last seen, plus the rule blocks that fired with no
   control behind them). `--format json` is validated by the new
-  `schemas/hushspec-report.v0.schema.json` (`h2h schema report`), `--format csv` writes one table
+  `schemas/hushspec-report.v1.schema.json` (`h2h schema report`), `--format csv` writes one table
   per file into `--out` (or the `--by` table to stdout), and `--format oscal` behind
   `--experimental-oscal` emits a minimal OSCAL 1.1.2 assessment-results skeleton. The aggregation
   itself is the new `hushspec::report` module. Vectors: `fixtures/report/` -- a synthetic 24-hour
@@ -385,7 +385,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   conformance claim cites the corpus by this file's digest.
 - `hushspec-testkit --fixtures fixtures --report report.json`, which runs the evidence-chain
   vectors as well as the document corpus, computes the highest fully passing level, validates
-  the report against `schemas/hushspec-conformance-report.v0.schema.json`, and writes it.
+  the report against `schemas/hushspec-conformance-report.v1.schema.json`, and writes it.
 - **`hushspec-testkit bundle`** packages `spec/`, `schemas/` and `fixtures/` with
   a README on running them. Reproducible byte for byte; `release.yml` builds it, checks
   reproducibility with a second build, and adds it to the release assets and the attestation
@@ -477,15 +477,26 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   the bundle vectors, which were the last Level 5 gap, and all four fixture runners assert the
   `.expect.yaml` sidecar's registered error code and `message_contains` substring, closing the
   Level 1 error-code gap.
-
-**Rust**
-
-- A skipped rule block records why it was not consulted instead of reporting itself inactive:
+- A skipped rule block records why it was not consulted instead of reporting itself inactive.
   `secret_patterns` evaluated without content records
   `content not supplied; secret_patterns not consulted`, and `remote_desktop_channels` with a
   target that is not a channel records
-  `target is not a remote desktop channel; remote_desktop_channels not consulted`. The expected
-  receipts under `fixtures/receipts/expected/` are regenerated.
+  `target is not a remote desktop channel; remote_desktop_channels not consulted`. Both strings
+  are byte-identical in all four evaluators, since a receipt records them; the expected receipts
+  under `fixtures/receipts/expected/` and the log and report vectors are regenerated.
+- **`args_size` is measured in UTF-8 bytes of the canonical JSON** (core spec 3.7) by every
+  adapter and guard mapping in TypeScript, Python and Go. The previous measurements were the
+  ones the spec names as wrong: `JSON.stringify(args).length` counts UTF-16 code units, so
+  TypeScript undercounted every non-ASCII payload -- a 12-byte argument of emoji measured as 10
+  slipped under a `max_args_size` of 11; `len(json.dumps(args))` counts the spaces Python's
+  encoder writes; and measuring a string payload as received counts whatever whitespace and
+  `\uXXXX` escaping the transport chose. One limit now bounds the same payload behind every
+  adapter and in every SDK. Rust has no adapters and was already correct. Affects any
+  `max_args_size` decision on a non-ASCII or non-compact payload, and the `action.args_size` a
+  receipt records for it.
+
+**Rust**
+
 - The HTTPS `extends` loader (`hushspec::resolve::http`, the `http` feature) enforces the full
   rule set of core spec 2.6.4. The blocked-network list grows from the loopback, RFC 1918,
   link-local and unique-local ranges to every network the spec tabulates, IPv4-mapped and

@@ -19,9 +19,10 @@ records where the code stands so the phases below can be read against it.
 
 **Shipped in Waves 0-5:**
 
-- **Spec 0.2.0 (draft).** Twelve rule blocks, three extension modules, and six
-  normative conformance levels (core spec section 8) -- Levels 4 (Auditor) and 5
-  (Attested) are now written down rather than forward-referenced. Companion
+- **The specification Wave 6 declared as 1.0.0.** Twelve rule blocks, three
+  extension modules, and six normative conformance levels (core spec section 8)
+  -- Levels 4 (Auditor) and 5 (Attested) are now written down rather than
+  forward-referenced. Companion
   specifications for canonical form, decision receipts, policy signing, the
   hash-linked log and policy bundles. Ratified decisions D14-D20, including
   `when.capability`, `when.rate`, and the normative `heuristic_injection@1`
