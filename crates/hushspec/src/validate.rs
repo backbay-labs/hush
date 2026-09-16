@@ -482,6 +482,15 @@ fn validate_detection(
                 ));
             }
 
+            if let Some(heuristics) = &prompt_injection.heuristics
+                && matches!(heuristics.min_score, Some(value) if value > 100)
+            {
+                errors.push(ValidationError::Custom(
+                    "detection.prompt_injection.heuristics.min_score must be between 0 and 100"
+                        .to_string(),
+                ));
+            }
+
             let warn_level = prompt_injection
                 .warn_at_or_above
                 .unwrap_or(crate::extensions::DetectionLevel::Suspicious);

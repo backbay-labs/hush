@@ -659,6 +659,10 @@ func validateDetection(detection *DetectionExtension, result *ValidationResult) 
 		if prompt.MaxScanBytes != nil && *prompt.MaxScanBytes < 1 {
 			result.addError("INVALID_MAX_SCAN_BYTES", "detection.prompt_injection.max_scan_bytes must be >= 1")
 		}
+		if h := prompt.Heuristics; h != nil && h.MinScore != nil && (*h.MinScore < 0 || *h.MinScore > 100) {
+			result.addError("INVALID_MIN_SCORE",
+				"detection.prompt_injection.heuristics.min_score must be between 0 and 100")
+		}
 
 		warnLevel := DetectionLevelSuspicious
 		if prompt.WarnAtOrAbove != nil {

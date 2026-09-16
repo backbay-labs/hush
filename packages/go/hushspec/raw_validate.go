@@ -371,7 +371,7 @@ func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 			checkRawVariant(pi, "block_at_or_above",
 				"detection.prompt_injection.block_at_or_above", DetectionLevels, errs)
 			if heuristics := rawObject(pi, "heuristics"); heuristics != nil {
-				checkRawNonNegativeInteger(heuristics, "min_score",
+				checkRawScoreInteger(heuristics, "min_score",
 					"detection.prompt_injection.heuristics.min_score", errs)
 			}
 		}
@@ -576,6 +576,52 @@ func isRawNegativeInteger(v any) bool {
 		return n < 0
 	case int64:
 		return n < 0
+	default:
+		return false
+	}
+}
+
+// checkRawScoreInteger records an error when key is present with a non-null
+// value that is not an integer in the closed range 0 to 100. It stands for a
+// floor on the normalized 0-100 score: a value outside that range names no
+// score a detector can produce (detection spec 9).
+func checkRawScoreInteger(obj map[string]any, key, path string, errs *rawIssues) {
+	v, ok := obj[key]
+	if !ok || v == nil {
+		return
+	}
+	if !isRawInteger(v) {
+		errs.add(fmt.Sprintf("%s must be an integer", path))
+		return
+	}
+	if isRawNegativeInteger(v) || rawIntegerAbove(v, 100) {
+		errs.addConstraint(path, fmt.Sprintf("%s must be between 0 and 100", path))
+	}
+}
+
+// rawIntegerAbove reports whether the integer scalar v exceeds limit.
+func rawIntegerAbove(v any, limit int64) bool {
+	switch n := v.(type) {
+	case int:
+		return int64(n) > limit
+	case int8:
+		return int64(n) > limit
+	case int16:
+		return int64(n) > limit
+	case int32:
+		return int64(n) > limit
+	case int64:
+		return n > limit
+	case uint:
+		return uint64(n) > uint64(limit)
+	case uint8:
+		return uint64(n) > uint64(limit)
+	case uint16:
+		return uint64(n) > uint64(limit)
+	case uint32:
+		return uint64(n) > uint64(limit)
+	case uint64:
+		return n > uint64(limit)
 	default:
 		return false
 	}

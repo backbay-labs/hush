@@ -428,6 +428,20 @@ def _validate_detection(
                 )
             )
 
+        heuristics = pi.heuristics
+        if (
+            heuristics is not None
+            and heuristics.min_score is not None
+            and heuristics.min_score > 100
+        ):
+            errors.append(
+                ValidationError(
+                    "invalid_min_score",
+                    "detection.prompt_injection.heuristics.min_score must be "
+                    "between 0 and 100",
+                )
+            )
+
         warn_level = pi.warn_at_or_above or DetectionLevel.SUSPICIOUS
         block_level = pi.block_at_or_above or DetectionLevel.HIGH
         if _DETECTION_LEVEL_ORDER[block_level] < _DETECTION_LEVEL_ORDER[warn_level]:

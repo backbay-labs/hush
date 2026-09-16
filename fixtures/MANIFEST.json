@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T18:32:49Z",
+  "generated_at": "2026-09-16T18:46:17Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1364,6 +1364,20 @@
     {
       "path": "fixtures/detection/invalid/bad-similarity.yaml",
       "sha256": "1acb30adc1345351c54a11049d69fcf160d17441ed403682cba4fd2348b9d27c",
+      "category": "invalid",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/invalid/heuristics-min-score-out-of-range.expect.yaml",
+      "sha256": "c2747b9f47969fbc64308affe8c75d7315a10082ae29464903ec4073f0cca14a",
+      "category": "expect",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/invalid/heuristics-min-score-out-of-range.yaml",
+      "sha256": "7c4bef78ca02ad532fd6138da8dd51c445106847129a753b39d94c43f229aff7",
       "category": "invalid",
       "module": "detection",
       "level": 1
