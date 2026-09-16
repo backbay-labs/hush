@@ -174,7 +174,14 @@ export type BundleReason =
   | 'malformed_bundle'
   /** Check 2: no signature names a key the keyring holds. */
   | 'unknown_key_id'
-  /** Check 2: a key was found but no signature verifies over the PAE. */
+  /** Check 2: the only keys that signed are revoked (signing spec 5.3). */
+  | 'key_revoked'
+  /**
+   * Check 2: the only keys that signed were retired before the bundle was
+   * created (signing spec 5.3).
+   */
+  | 'key_retired'
+  /** Check 2: a usable key was found but no signature verifies over the PAE. */
   | 'dsse_signature_mismatch'
   /** Check 3: `predicate.resolved` does not hash to the declared subject. */
   | 'subject_digest_mismatch'
@@ -185,6 +192,8 @@ export type BundleReason =
 export const BUNDLE_REASONS: readonly BundleReason[] = [
   'malformed_bundle',
   'unknown_key_id',
+  'key_revoked',
+  'key_retired',
   'dsse_signature_mismatch',
   'subject_digest_mismatch',
   'policy_mismatch',
@@ -565,35 +574,55 @@ export function verifyBundle(
   const statement = read.statement;
   const predicate = statement.predicate;
 
-  // 2. Signature. A bundle may carry several; one that verifies under a
-  //    trusted key is enough, and the reason code distinguishes "we trust
-  //    nobody who signed this" from "the signature is wrong".
+  // 2. Signature. A bundle may carry several; one that verifies under a key
+  //    the keyring still trusts is enough, and the reason code distinguishes
+  //    "we trust nobody who signed this" from "the key is withdrawn" from
+  //    "the signature is wrong".
   const paeBytes = pae(envelope.payloadType, payload.bytes);
   const keyIds: string[] = [];
-  let namedATrustedKey = false;
-  let mismatchDetail = '';
+  let refusal: BundleVerificationFailure | undefined;
+  const record = (candidate: BundleVerificationFailure): void => {
+    if (refusal === undefined || reasonPrecedence(candidate.reason) < reasonPrecedence(refusal.reason)) {
+      refusal = candidate;
+    }
+  };
   for (const signature of envelope.signatures) {
     const entry = keyring.get(signature.keyid);
     if (entry === undefined) continue;
     // The declared id is never enough (signing spec 5.2): `loadKeyring`
     // recomputes every entry's id from its own public key, so a keyring hit
     // is already a hit on the recomputed id.
-    namedATrustedKey = true;
+    //
+    // The keyring holds the key; whether it still vouches for it is the next
+    // question (signing spec 5.3).
+    if (entry.revoked) {
+      record(failure('key_revoked', `key ${signature.keyid} is revoked`));
+      continue;
+    }
+    if (entry.notAfter !== undefined && retiredAt(entry.notAfter, predicate.created_at)) {
+      record(failure(
+        'key_retired',
+        `key ${signature.keyid} was retired at ${entry.notAfter}; the bundle is dated `
+        + `${predicate.created_at}`,
+      ));
+      continue;
+    }
     const bytes = decodeBase64(signature.sig);
     if (bytes === undefined || bytes.length !== ED25519_SIGNATURE_BYTES) {
-      mismatchDetail = `signature by ${signature.keyid} is not 64 bytes`;
+      record(failure('dsse_signature_mismatch', `signature by ${signature.keyid} is not 64 bytes`));
       continue;
     }
     if (ed25519Verify(paeBytes, bytes, entry.publicKey)) {
       keyIds.push(signature.keyid);
     } else {
-      mismatchDetail = `Ed25519 verification failed for ${signature.keyid}`;
+      record(failure(
+        'dsse_signature_mismatch',
+        `Ed25519 verification failed for ${signature.keyid}`,
+      ));
     }
   }
   if (keyIds.length === 0) {
-    if (namedATrustedKey) {
-      return failure('dsse_signature_mismatch', mismatchDetail);
-    }
+    if (refusal !== undefined) return refusal;
     if (envelope.signatures.length === 0) {
       return failure(
         'dsse_signature_mismatch',
@@ -953,6 +982,33 @@ function checkStatement(value: unknown): StatementRead {
 
 function failure(reason: BundleReason, detail: string): BundleVerificationFailure {
   return { ok: false, reason, detail };
+}
+
+/**
+ * Rank of the reason a failed signature contributes, lowest first: bundle spec
+ * 5.2 check 2 reports a withdrawn key ahead of a wrong signature, the way the
+ * signing specification's own checks 5 and 6 precede its check 8.
+ */
+function reasonPrecedence(reason: BundleReason): number {
+  if (reason === 'key_revoked') return 0;
+  if (reason === 'key_retired') return 1;
+  return 2;
+}
+
+/**
+ * Whether a key whose retirement instant is `notAfter` had already been retired
+ * when a bundle dated `createdAt` was produced (bundle spec 5.2 check 2).
+ *
+ * Both are `YYYY-MM-DDTHH:MM:SS.sssZ` -- the keyring schema and the statement
+ * shape check admit no other form -- so an unparseable one is a keyring this
+ * verifier will not read a retirement out of, and the key is treated as
+ * current.
+ */
+function retiredAt(notAfter: string, createdAt: string): boolean {
+  const retired = Date.parse(notAfter);
+  const created = Date.parse(createdAt);
+  if (Number.isNaN(retired) || Number.isNaN(created)) return false;
+  return created >= retired;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

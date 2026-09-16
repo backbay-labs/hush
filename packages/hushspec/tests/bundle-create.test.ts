@@ -190,6 +190,39 @@ describe('createBundle', () => {
     }
   });
 
+  it('honours retirement against created_at, and revocation always', () => {
+    const bundle = createBundle(resolveVectorPolicy(), {
+      privateKeyPem: readKey('test-signing.key.pem'),
+      createdAt: vectorCreatedAt,
+    });
+    const document = JSON.parse(
+      readFileSync(path.join(keysRoot, 'keyring.json'), 'utf8'),
+    ) as { keys: Record<string, unknown>[] };
+    const withEntry = (fields: Record<string, unknown>): string =>
+      JSON.stringify({ ...document, keys: [{ ...document.keys[0], ...fields }] });
+
+    // A bundle produced while the key was current keeps verifying after it is
+    // retired; one produced at or after `not_after` does not.
+    expect(verifyBundle(bundle, {
+      keyring: withEntry({ not_after: '2026-09-16T00:00:00.000Z' }),
+      now: vectorCreatedAt,
+    }).ok).toBe(true);
+
+    const retired = verifyBundle(bundle, {
+      keyring: withEntry({ not_after: vectorCreatedAt }),
+      now: vectorCreatedAt,
+    });
+    expect(retired.ok).toBe(false);
+    if (!retired.ok) expect(retired.reason).toBe('key_retired');
+
+    const revoked = verifyBundle(bundle, {
+      keyring: withEntry({ revoked: true }),
+      now: vectorCreatedAt,
+    });
+    expect(revoked.ok).toBe(false);
+    if (!revoked.ok) expect(revoked.reason).toBe('key_revoked');
+  });
+
   it('refuses an unsigned bundle at verification, as bundle spec 3 requires', () => {
     const bundle = createBundle(resolveVectorPolicy(), { createdAt: vectorCreatedAt });
     const outcome = verifyBundle(bundle, { keyring: vectorKeyring(), now: vectorCreatedAt });
