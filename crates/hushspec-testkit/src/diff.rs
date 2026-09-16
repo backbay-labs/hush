@@ -1796,6 +1796,15 @@ mod tests {
         let mut oracle = InProcessEvaluator;
         let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
 
+        // The blocks and stages the 0.2 corpus exists to exercise.
+        const REQUIRED_BLOCKS: [&str; 5] = [
+            "browser_automation",
+            "code_execution",
+            "origins",
+            "posture_capability",
+            "default",
+        ];
+
         let mut evaluated_blocks: std::collections::BTreeSet<&str> =
             std::collections::BTreeSet::new();
         let mut detection_escalations = 0usize;
@@ -1808,24 +1817,11 @@ mod tests {
             }
             for entry in &result.rule_trace {
                 if entry.evaluated {
-                    evaluated_blocks.insert(match entry.rule_block.as_str() {
-                        "browser_automation" => "browser_automation",
-                        "code_execution" => "code_execution",
-                        "origins" => "origins",
-                        "posture_capability" => "posture_capability",
-                        "default" => "default",
-                        _ => continue,
-                    });
+                    evaluated_blocks.insert(entry.rule_block.as_str());
                 }
             }
         }
-        for expected in [
-            "browser_automation",
-            "code_execution",
-            "origins",
-            "posture_capability",
-            "default",
-        ] {
+        for expected in REQUIRED_BLOCKS {
             assert!(
                 evaluated_blocks.contains(expected),
                 "no generated case ever evaluated `{expected}` (saw {evaluated_blocks:?})"
