@@ -1,11 +1,11 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T15:59:23Z",
+  "generated_at": "2026-09-16T18:12:30Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
-      "sha256": "35c43349d0976a548aff60251c07d67f924660ee5d9ad5c974bfc46206b0c7ef",
+      "sha256": "1061ad9f3dba955e6bb2f833beebf798a10c54063f15f7fb290e4ab28e5415c8",
       "category": "doc",
       "module": "bundle",
       "level": 0
@@ -69,13 +69,6 @@
     {
       "path": "fixtures/core/evaluation/code-execution.test.yaml",
       "sha256": "7e69a129be57cab59a796293c4722df021d082095781e7b0b1fca4a2a8af9ed1",
-      "category": "evaluation",
-      "module": "core",
-      "level": 3
-    },
-    {
-      "path": "fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml",
-      "sha256": "ca0c22c1559f093f8a1d8af98bd7a93deb61e389362e5848a118728cb49e1772",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1889,20 +1882,6 @@
     {
       "path": "fixtures/receipts/expected/core/code-execution/5.json",
       "sha256": "aa559388a277f9e65e1a20918462e35b224c5fe01e96db09e05c37911dac060b",
-      "category": "receipt-expected",
-      "module": "receipts",
-      "level": 4
-    },
-    {
-      "path": "fixtures/receipts/expected/core/computer-use-guardrail-deny/0.json",
-      "sha256": "fbe24203f99d4c68e2bcb04236683fc05af8d7e0d45f6960ef767b6de97a9a38",
-      "category": "receipt-expected",
-      "module": "receipts",
-      "level": 4
-    },
-    {
-      "path": "fixtures/receipts/expected/core/computer-use-guardrail-deny/1.json",
-      "sha256": "71a40253985cb8b715f4ba6618185dcb30d8684084a5a2864dabe104af272496",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

@@ -171,7 +171,7 @@ fill in later. Paths are relative to
 | `patch_integrity` | 3.5 | `core/evaluation/patch-integrity`, `patch-integrity-defaults`, `patch-balance`, `patch-balance-zero` | 3 |
 | `shell_commands` | 3.9 | `core/evaluation/shell-commands`, `regex-dialect` | 3 |
 | `tool_access` | 3.7 | `core/evaluation/tool-access`, `tool-exact-match`, `tool-allowlist-deny`, `tool-glob-literal`, `tool-max-args-size` | 3 |
-| `computer_use` | 3.8 | `core/evaluation/computer-use`, `computer-use-guardrail-deny` | 3 |
+| `computer_use` | 3.8 | `core/evaluation/computer-use` | 3 |
 | `remote_desktop_channels` | 3.10 | `core/valid/remote-desktop-channels-rule`, `core/evaluation/rule-blocks-disabled` | 3 |
 | `input_injection` | 3.10 | `core/evaluation/input-injection` | 3 |
 | `browser_automation` | 3.11 | `core/evaluation/browser-automation` | 3 |

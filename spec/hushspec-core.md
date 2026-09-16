@@ -435,7 +435,7 @@ Version 0.1.0 described `guardrail` as permitting engine heuristics on borderlin
 
 Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`) compared as exact strings. This specification does not mandate a fixed set of action identifiers.
 
-Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`, `fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml`.
+Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`.
 
 ### 3.9 `rules.remote_desktop_channels`
 
