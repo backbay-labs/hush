@@ -582,7 +582,8 @@ export function verifyBundle(
   const keyIds: string[] = [];
   let refusal: BundleVerificationFailure | undefined;
   const record = (candidate: BundleVerificationFailure): void => {
-    if (refusal === undefined || reasonPrecedence(candidate.reason) < reasonPrecedence(refusal.reason)) {
+    const held = refusal;
+    if (held === undefined || reasonPrecedence(candidate.reason) < reasonPrecedence(held.reason)) {
       refusal = candidate;
     }
   };
