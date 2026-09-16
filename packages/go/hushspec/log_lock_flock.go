@@ -9,15 +9,13 @@ import (
 	"time"
 )
 
-// lockLogFile takes an exclusive advisory lock on the log file itself, which
-// the kernel releases even if the writer dies -- so a crashed enforcement
-// point never leaves a lock that a later one has to break (log spec 9).
+// flockLogFile takes an exclusive advisory lock on the log file itself, under
+// the sentinel. The kernel releases it even if the writer dies, so a crashed
+// enforcement point never leaves this half of the lock behind.
 //
-// The lock is taken non-blocking and retried, so a writer that cannot get it
-// within [LogLockTimeout] reports an error rather than blocking forever or
-// bypassing the lock.
-func lockLogFile(file *os.File, path string) (func(), error) {
-	deadline := time.Now().Add(LogLockTimeout)
+// It is taken non-blocking and retried, so a writer that cannot get it before
+// the deadline reports an error rather than blocking forever or bypassing it.
+func flockLogFile(file *os.File, path string, deadline time.Time) (func(), error) {
 	for {
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
@@ -31,6 +29,6 @@ func lockLogFile(file *os.File, path string) (func(), error) {
 				"log: timed out after %s waiting for another writer to release %s",
 				LogLockTimeout, path)
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(logLockPollInterval)
 	}
 }

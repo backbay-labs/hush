@@ -250,10 +250,10 @@ struct ChainState {
 
 /// Appends hash-linked entries to a JSON Lines file, fsyncing each one.
 ///
-/// Opening an existing file continues its chain from the last entry.
-/// Appends are serialized in-process by a mutex and across processes by a
-/// best-effort `<path>.lock` file; a lock held longer than
-/// [`ChainedFileSink::LOCK_TIMEOUT`] is reported as an error rather than
+/// Opening an existing file continues its chain from the last entry. Appends
+/// are serialized in-process by a mutex and across processes by the
+/// `<path>.lock` sentinel every SDK takes (log spec 4); a lock held longer
+/// than [`ChainedFileSink::LOCK_TIMEOUT`] is reported as an error rather than
 /// bypassed. Each entry's `seq` and `prev_hash` come from the file's current
 /// last entry, read while that lock is held, so a second sink or process
 /// writing the same log extends the chain instead of forking it. Rotation
@@ -368,6 +368,18 @@ impl ChainedFileSink {
     /// [`SinkError::Chain`].
     pub fn append(&self, payload: Payload) -> Result<LogEntry, SinkError> {
         let mut state = self.state_mut()?;
+        self.append_locked(&mut state, payload)
+    }
+
+    /// [`ChainedFileSink::append`] with the chain head already taken, so a
+    /// caller with more to do under the same lock -- [`ChainedFileSink::rotate`],
+    /// which must make its `log_started` record the first entry of the new
+    /// file -- can append without releasing it.
+    fn append_locked(
+        &self,
+        state: &mut ChainState,
+        payload: Payload,
+    ) -> Result<LogEntry, SinkError> {
         let path = state.path.clone();
         let cached = (state.seq, state.prev_hash.clone());
         let entry = with_file_lock(&path, || {
@@ -454,26 +466,31 @@ impl ChainedFileSink {
                 new_path.display()
             )));
         }
-        let (previous_file, previous_entry_hash) = {
-            let mut state = self.state_mut()?;
-            // Only the file name: logs are moved between hosts, and a path
-            // would leak the writer's layout for no verification benefit.
-            let previous = state
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| state.path.display().to_string());
-            let hash = state.prev_hash.clone();
-            state.path = new_path;
-            state.seq = 0;
-            (previous, hash)
-        };
-        self.append(Payload::LogStarted(LogStarted {
-            timestamp: format_timestamp(self.now()),
-            previous_file: Some(previous_file),
-            previous_entry_hash: (previous_entry_hash != GENESIS_HASH)
-                .then_some(previous_entry_hash),
-        }))
+        // The switch and the `log_started` entry happen under one lock: a
+        // concurrent send must not slip a receipt into the new file ahead of
+        // the record that links it to the old one (log spec 5).
+        let mut state = self.state_mut()?;
+        // Only the file name: logs are moved between hosts, and a path
+        // would leak the writer's layout for no verification benefit.
+        let previous_file = state
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| state.path.display().to_string());
+        let previous_entry_hash = state.prev_hash.clone();
+        state.path = new_path;
+        state.seq = 0;
+        self.append_locked(
+            &mut state,
+            Payload::LogStarted(LogStarted {
+                timestamp: format_timestamp(self.now()),
+                previous_file: Some(previous_file),
+                // Always recorded, the genesis value included (log spec 5): a
+                // verifier given both files compares it against the previous
+                // file's last hash, and an omitted member is not that hash.
+                previous_entry_hash: Some(previous_entry_hash),
+            }),
+        )
     }
 }
 
@@ -586,8 +603,13 @@ fn last_line_of(buffer: &[u8], at_start: bool) -> Option<&[u8]> {
     }
 }
 
-/// Run `f` while holding `<path>.lock`, created atomically. A stale lock
-/// (a writer that died) times out rather than being bypassed.
+/// Run `f` while holding `<path>.lock`, created atomically with `O_EXCL`.
+///
+/// This is the lock every SDK takes (log spec 4), so writers in different
+/// languages exclude each other. A stale lock -- one a writer that died left
+/// behind -- times out rather than being bypassed: breaking a lock this
+/// process cannot prove is stale would let two writers interleave chains and
+/// corrupt both (log spec 9).
 fn with_file_lock<T>(
     path: &Path,
     f: impl FnOnce() -> Result<T, SinkError>,
@@ -745,12 +767,7 @@ pub fn verify_logs(
                         "a continued file must start with a log_started entry".into(),
                     ));
                 };
-                // An empty predecessor carries the genesis hash, which
-                // `rotate` records as an absent `previous_entry_hash`; treat
-                // the two spellings as the same link.
-                let started_hash = started.previous_entry_hash.as_deref();
-                let carried = carried_hash.as_deref();
-                if started_hash.unwrap_or(GENESIS_HASH) != carried.unwrap_or(GENESIS_HASH) {
+                if started.previous_entry_hash.as_deref() != carried_hash.as_deref() {
                     return Err(fail(
                         "log_started.previous_entry_hash does not match the previous file's last hash"
                             .into(),

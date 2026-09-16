@@ -309,6 +309,40 @@ fn rotation_carries_the_chain_into_the_next_file() {
 }
 
 #[test]
+fn a_chain_rotated_at_genesis_verifies() {
+    let dir = temp_dir("rotate-genesis");
+    let first = dir.join("log-1.jsonl");
+    let second = dir.join("log-2.jsonl");
+    // A writer that rotates before it has written anything carries the genesis
+    // hash into the new file. The link is recorded all the same, so a verifier
+    // given both files sees one chain.
+    fs::write(&first, "").unwrap();
+    let sink = ChainedFileSink::open(&first).unwrap().with_clock(clock());
+    let started = sink.rotate(&second).unwrap();
+    assert_eq!(started.prev_hash, GENESIS_HASH);
+    assert_eq!(
+        started
+            .log_started
+            .as_ref()
+            .unwrap()
+            .previous_entry_hash
+            .as_deref(),
+        Some(GENESIS_HASH)
+    );
+    sink.send(&evaluate_audited(
+        &resolution(),
+        &actions()[0],
+        &config(),
+        &ctx(0),
+    ))
+    .unwrap();
+
+    let report = verify_log_files(&[&first, &second], &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.files, 2);
+    assert_eq!(report.entries, 2);
+}
+
+#[test]
 fn tampering_is_detected_at_the_first_broken_line() {
     let dir = temp_dir("tamper");
     let path = dir.join("log.jsonl");

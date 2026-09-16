@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -78,6 +79,12 @@ REASON_UNSIGNED = "entry_unsigned"
 
 #: The ``sdk.name`` this SDK writes into a policy event.
 SDK_NAME = "hushspec-python"
+
+#: How long an append waits for another writer's lock before failing.
+LOCK_TIMEOUT_SECONDS = 5.0
+
+#: How long to wait between attempts while another writer holds the lock.
+_LOCK_POLL_SECONDS = 0.005
 
 
 def _sdk_version() -> str:
@@ -339,6 +346,83 @@ _ENTRY_KEYS = frozenset(
     )
 )
 
+_POLICY_EVENT_KEYS = frozenset(
+    (
+        "event",
+        "timestamp",
+        "policy",
+        "enforcement_mode",
+        "sdk",
+        "spec_version",
+        "previous_content_hash",
+    )
+)
+
+_POLICY_SUMMARY_KEYS = frozenset(
+    ("name", "version", "spec_version", "content_hash", "extends_chain", "signature")
+)
+
+_CHAIN_LINK_KEYS = frozenset(("source", "content_hash"))
+
+_SIGNATURE_STATUS_KEYS = frozenset(("verified", "key_id", "verified_at", "reason"))
+
+_SDK_KEYS = frozenset(("name", "version"))
+
+_LOG_STARTED_KEYS = frozenset(("timestamp", "previous_file", "previous_entry_hash"))
+
+_ENTRY_SIGNATURE_KEYS = frozenset(
+    (
+        "format_version",
+        "algorithm",
+        "key_id",
+        "signed_at",
+        "expires_at",
+        "policy_version",
+        "policy_name",
+        "content_hash",
+        "signer",
+        "signature",
+    )
+)
+
+
+def _unknown_key(value: Any, allowed: frozenset[str]) -> Optional[str]:
+    """The first unknown member of *value*, or ``None``.
+
+    Unknown fields are a break (log spec section 8, step 1): a verifier that
+    ignored them would not be hashing what it read.
+    """
+    if not isinstance(value, dict):
+        return None
+    unknown = sorted(set(value) - allowed)
+    return unknown[0] if unknown else None
+
+
+def _unknown_policy_event_key(event: Any) -> Optional[str]:
+    """The first unknown member anywhere inside a ``policy_event``.
+
+    The log-entry schema closes every object it defines, not only the ones the
+    entry names directly, so the check reaches the policy identity and the SDK
+    record too.
+    """
+    top = _unknown_key(event, _POLICY_EVENT_KEYS)
+    if top is not None or not isinstance(event, dict):
+        return top
+    policy = event.get("policy")
+    unknown = _unknown_key(policy, _POLICY_SUMMARY_KEYS)
+    if unknown is None and isinstance(policy, dict):
+        chain = policy.get("extends_chain")
+        if isinstance(chain, list):
+            for link in chain:
+                unknown = _unknown_key(link, _CHAIN_LINK_KEYS)
+                if unknown is not None:
+                    break
+        if unknown is None:
+            unknown = _unknown_key(policy.get("signature"), _SIGNATURE_STATUS_KEYS)
+    if unknown is not None:
+        return unknown
+    return _unknown_key(event.get("sdk"), _SDK_KEYS)
+
 
 # --------------------------------------------------------------------------- #
 # The chained sink
@@ -353,13 +437,14 @@ class ChainedFileSink:
     """Appends hash-linked entries to a JSON Lines file, fsyncing each one.
 
     Opening an existing file continues its chain from the last entry. Appends
-    are serialized in-process by a lock, each line is written under an
-    exclusive ``flock`` where the platform has one, and every line is flushed
-    and ``os.fsync``'d before the entry is reported as written (log spec
-    section 3). The chain head -- ``seq`` and ``prev_hash`` -- is re-read from
-    the file while that lock is held, so a second sink or process writing the
-    same log extends the chain instead of forking it. Rotation
-    (:meth:`rotate`) carries the chain into the new file through a
+    are serialized in-process by a lock and across processes by the
+    ``<path>.lock`` sentinel every SDK takes, under which an exclusive
+    ``flock`` is held too where the platform has one (log spec section 4).
+    Every line is flushed and ``os.fsync``'d before the entry is reported as
+    written (log spec section 3). The chain head -- ``seq`` and ``prev_hash``
+    -- is re-read from the file while that lock is held, so a second sink or
+    process writing the same log extends the chain instead of forking it.
+    Rotation (:meth:`rotate`) carries the chain into the new file through a
     ``log_started`` entry.
 
     It satisfies :class:`~hushspec.sinks.ReceiptSink`, so a guard can write its
@@ -428,6 +513,17 @@ class ChainedFileSink:
         wrote. A tail that cannot be parsed raises :class:`SinkError`:
         continuing past it would leave a second, unlinked chain in the file.
         """
+        with self._lock:
+            return self._append_locked(payload)
+
+    def _append_locked(
+        self,
+        payload: Union[DecisionReceipt, PolicyEvent, LogStarted],
+    ) -> LogEntry:
+        """:meth:`append` with the chain head already taken, so a caller with
+        more to do under the same lock -- :meth:`rotate`, which must make its
+        ``log_started`` record the first entry of the new file -- can append
+        without releasing it."""
         if isinstance(payload, DecisionReceipt):
             entry_type = EntryType.RECEIPT.value
         elif isinstance(payload, PolicyEvent):
@@ -441,7 +537,7 @@ class ChainedFileSink:
         else:
             raise SinkError(f"cannot append {type(payload).__name__} to a log")
 
-        with self._lock, _locked_for_append(self._path) as handle:
+        with _locked_for_append(self._path) as handle:
             # A missing or empty file means a fresh log, or a rotation whose
             # ``log_started`` entry is about to seed the new file; both
             # continue from the head this sink carries.
@@ -497,6 +593,9 @@ class ChainedFileSink:
         new_path = Path(new_path)
         if new_path.exists():
             raise SinkError(f"cannot rotate into existing file {new_path}")
+        # The switch and the ``log_started`` entry happen under one lock: a
+        # concurrent send must not slip a receipt into the new file ahead of
+        # the record that links it to the old one (log spec section 5).
         with self._lock:
             # Only the file name: logs are moved between hosts, and a path
             # would leak the writer's layout for no verification benefit.
@@ -504,46 +603,100 @@ class ChainedFileSink:
             previous_hash = self._prev_hash
             self._path = new_path
             self._seq = 0
-        return self.append(
-            LogStarted(
-                timestamp=format_timestamp(self._now()),
-                previous_file=previous_file,
-                previous_entry_hash=(
-                    previous_hash if previous_hash != GENESIS_HASH else None
-                ),
+            return self._append_locked(
+                LogStarted(
+                    timestamp=format_timestamp(self._now()),
+                    previous_file=previous_file,
+                    # Always recorded, the genesis value included (log spec
+                    # section 5): a verifier given both files compares it
+                    # against the previous file's last hash, and an omitted
+                    # member is not that hash.
+                    previous_entry_hash=previous_hash,
+                )
             )
-        )
 
 
 @contextmanager
 def _locked_for_append(path: Path) -> Iterator[BinaryIO]:
     """Open *path* for reading and appending under an exclusive lock.
 
-    The file is opened for append (so the write is atomic against other
-    appenders on POSIX) and locked exclusively where the platform supports it.
-    The lock is waited for; one the OS refuses outright fails the append rather
-    than being bypassed (log spec section 9). It covers reading the chain head
-    as well as writing, so two writers cannot build entries from the same
-    predecessor.
+    The lock covers reading the chain head as well as writing, so two writers
+    cannot build entries from the same predecessor (log spec section 4). The
+    file is opened for append, so the write is atomic against other appenders
+    on POSIX.
     """
     if path.parent and not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        handle = open(path, "a+b")
-    except OSError as exc:
-        raise SinkError(f"cannot append to {path}: {exc}") from exc
-    try:
-        if fcntl is not None:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    with _sentinel_lock(path):
         try:
-            yield handle
+            handle = open(path, "a+b")
+        except OSError as exc:
+            raise SinkError(f"cannot append to {path}: {exc}") from exc
+        try:
+            with _advisory_lock(handle, path):
+                yield handle
         finally:
-            if fcntl is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError as exc:
-        raise SinkError(f"cannot append to {path}: {exc}") from exc
+            handle.close()
+
+
+@contextmanager
+def _sentinel_lock(path: Path) -> Iterator[None]:
+    """Hold ``<path>.lock``, created atomically with ``O_EXCL``.
+
+    This is the lock every SDK takes, so writers in different languages
+    exclude each other (log spec section 4). A lock this SDK cannot acquire
+    within :data:`LOCK_TIMEOUT_SECONDS` is an error, never something to
+    bypass: two writers appending to one file interleave chains and corrupt
+    both.
+    """
+    lock_path = path.with_name(path.name + ".lock")
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            break
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                raise SinkError(f"timed out waiting for {lock_path}") from None
+            time.sleep(_LOCK_POLL_SECONDS)
+        except OSError as exc:
+            raise SinkError(f"cannot lock {path}: {exc}") from exc
+    try:
+        yield
     finally:
-        handle.close()
+        os.close(descriptor)
+        try:
+            os.unlink(lock_path)
+        except OSError:  # pragma: no cover - another writer already reclaimed it
+            pass
+
+
+@contextmanager
+def _advisory_lock(handle: BinaryIO, path: Path) -> Iterator[None]:
+    """Hold an exclusive ``flock`` on the log file itself, under the sentinel.
+
+    The kernel releases it even if the writer dies, so it also excludes a
+    writer that takes only the advisory lock. Platforms without ``fcntl`` rely
+    on the sentinel alone rather than appending with no exclusion at all.
+    """
+    if fcntl is None:  # pragma: no cover - platform dependent
+        yield
+        return
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+    while True:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                raise SinkError(f"timed out waiting for a lock on {path}") from None
+            time.sleep(_LOCK_POLL_SECONDS)
+        except OSError as exc:
+            raise SinkError(f"cannot lock {path}: {exc}") from exc
+    try:
+        yield
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _write_line(handle: BinaryIO, path: Path, line: str) -> None:
@@ -715,9 +868,9 @@ def verify_logs(
                 raise fail(f"not a log entry: {exc}") from exc
             if not isinstance(entry, dict):
                 raise fail("not a log entry: expected a JSON object")
-            unknown = sorted(set(entry) - _ENTRY_KEYS)
-            if unknown:
-                raise fail(f"unknown field {unknown[0]!r} in log entry")
+            unknown = _unknown_key(entry, _ENTRY_KEYS)
+            if unknown is not None:
+                raise fail(f"unknown field {unknown!r} in log entry")
             if entry.get("log_version") != LOG_VERSION:
                 raise fail(
                     f"unsupported log_version {entry.get('log_version')!r}, "
@@ -731,6 +884,13 @@ def verify_logs(
                 value = entry.get(member)
                 if value is not None and not isinstance(value, dict):
                     raise fail(f"{member} is not a JSON object")
+            nested = (
+                _unknown_policy_event_key(entry.get("policy_event"))
+                or _unknown_key(entry.get("log_started"), _LOG_STARTED_KEYS)
+                or _unknown_key(entry.get("signature"), _ENTRY_SIGNATURE_KEYS)
+            )
+            if nested is not None:
+                raise fail(f"unknown field {nested!r} in log entry")
             seq = entry.get("seq")
             if not isinstance(seq, int) or isinstance(seq, bool):
                 raise fail(f"seq {seq!r} is not an integer")

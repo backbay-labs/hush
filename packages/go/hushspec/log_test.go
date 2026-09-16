@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -375,6 +376,88 @@ func TestRotationCarriesTheChain(t *testing.T) {
 
 	if _, err := VerifyLogFiles([]string{first, second}, nil); err != nil {
 		t.Fatalf("the rotation this SDK wrote must verify: %v", err)
+	}
+}
+
+// TestRotateAtGenesisVerifies covers a writer that rotates before it has
+// written anything: the link it records is the genesis hash, and a verifier
+// given both files has to see one chain.
+func TestRotateAtGenesisVerifies(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "log-1.jsonl")
+	second := filepath.Join(dir, "log-2.jsonl")
+	if err := os.WriteFile(first, nil, 0o644); err != nil {
+		t.Fatalf("cannot create the file: %v", err)
+	}
+
+	sink, err := OpenChainedFileSink(first)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	clock := logVectorClock(t)
+	sink.WithClock(func() time.Time { return clock })
+
+	started, err := sink.Rotate(second)
+	if err != nil {
+		t.Fatalf("Rotate failed: %v", err)
+	}
+	if started.PrevHash != GenesisHash {
+		t.Errorf("expected the genesis hash, got %s", started.PrevHash)
+	}
+	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash != GenesisHash {
+		t.Fatalf("log_started must record the link even at genesis, got %+v", started.LogStarted)
+	}
+
+	resolution := vectorResolution(t)
+	receipt := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
+		expectedReceiptContext(0))
+	if err := sink.Send(&receipt); err != nil {
+		t.Fatalf("cannot append the receipt: %v", err)
+	}
+
+	report, err := VerifyLogFiles([]string{first, second}, nil)
+	if err != nil {
+		t.Fatalf("a chain rotated at genesis must verify: %v", err)
+	}
+	if report.Files != 2 || report.Entries != 2 {
+		t.Errorf("expected 2 files and 2 entries, got %d and %d", report.Files, report.Entries)
+	}
+}
+
+// TestOpenRefusesATailWithNoChainHead covers a tail that parses but carries
+// nothing to continue from. Reading it loosely would seed the next entry from
+// seq 0 and an empty hash, leaving a second, unlinked chain in the file.
+func TestOpenRefusesATailWithNoChainHead(t *testing.T) {
+	for name, tail := range map[string]string{
+		"no seq":        `{"log_version":"0.1","prev_hash":"x","entry_type":"receipt","entry_hash":"sha256:00"}`,
+		"no entry_hash": `{"log_version":"0.1","seq":5,"prev_hash":"x","entry_type":"receipt"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "log.jsonl")
+			if err := os.WriteFile(path, []byte(tail+"\n"), 0o644); err != nil {
+				t.Fatalf("cannot create the file: %v", err)
+			}
+			if sink, err := OpenChainedFileSink(path); err == nil {
+				t.Fatalf("a tail with no chain head must be refused, got %+v", sink)
+			}
+		})
+	}
+}
+
+// TestLastLineIsCappedBeforeItIsAssembled covers a file with no newline in it:
+// the cap has to stop the read before the whole file is in memory.
+func TestLastLineIsCappedBeforeItIsAssembled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	if err := os.WriteFile(path, bytes.Repeat([]byte("a"), maxLogLineBytes+1), 0o644); err != nil {
+		t.Fatalf("cannot create the file: %v", err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("cannot open the file: %v", err)
+	}
+	defer file.Close()
+	if _, err := lastLogLine(file, path); err == nil {
+		t.Fatal("a line longer than the cap must be refused")
 	}
 }
 
