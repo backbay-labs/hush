@@ -5,6 +5,7 @@ import pytest
 from hushspec import (
     DefaultAction,
     DetectionExtension,
+    EvaluationAction,
     Extensions,
     GovernanceMetadata,
     HushSpec,
@@ -15,6 +16,8 @@ from hushspec import (
     Rules,
     ThreatIntelDetection,
     TransitionTrigger,
+    content_hash,
+    evaluate,
     is_supported,
     merge,
     parse,
@@ -955,6 +958,60 @@ class TestVersionAcceptance:
     def test_rejects_unsupported_or_malformed_versions(self):
         for version in ("0.3.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
             assert is_supported(version) is False, version
+
+    def test_a_one_point_zero_document_is_evaluated_as_a_zero_point_two_one(self):
+        # Core spec 10.2: 1.0 freezes the 0.2 semantics without changing them,
+        # so one document declared under either version validates alike and
+        # reaches the same decision by the same rule.
+        def document(version: str) -> str:
+            return f"""
+hushspec: "{version}"
+name: version-equivalence
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+  egress:
+    allow:
+      - api.example.com
+    default: block
+  tool_access:
+    block:
+      - shell_exec
+    default: allow
+"""
+
+        zero = parse_or_raise(document("0.2.0"))
+        one = parse_or_raise(document("1.0.0"))
+        assert validate(zero).is_valid
+        assert validate(one).is_valid
+
+        actions = [
+            ("file_read", "/home/agent/.ssh/id_ed25519"),
+            ("egress", "api.example.com"),
+            ("egress", "blocked.example.net"),
+            ("tool_call", "shell_exec"),
+        ]
+        for action_type, target in actions:
+            action = EvaluationAction(type=action_type, target=target)
+            under_zero = evaluate(zero, action)
+            under_one = evaluate(one, action)
+            assert under_one.decision == under_zero.decision, (action_type, target)
+            assert under_one.matched_rule == under_zero.matched_rule, (
+                action_type,
+                target,
+            )
+            assert under_one.reason == under_zero.reason, (action_type, target)
+
+        denied = evaluate(
+            one, EvaluationAction(type="file_read", target="/home/agent/.ssh/id_rsa")
+        )
+        assert denied.decision == "deny"
+        assert denied.matched_rule == "rules.forbidden_paths.patterns"
+
+        # The `hushspec` field is part of the canonical form, so the two
+        # hashes differ; what must not differ is the decisions they hash.
+        assert content_hash(zero) != content_hash(one)
 
     def test_unsupported_version_names_the_supported_minors(self):
         spec = parse_or_raise('hushspec: "0.9.0"\nname: v\n')
