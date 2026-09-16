@@ -667,9 +667,15 @@ def audited_from_compiled(
     config = config or AuditConfig()
     ctx = context or AuditContext()
 
-    start_ns = time.perf_counter_ns() if (config.enabled and config.record_duration) else None
-    detected = compiled.evaluate_with_detection_traced(
-        action, ctx.context, ctx.conditions
+    keep_trace = config.enabled and config.include_rule_trace
+    timed = config.enabled and config.record_duration
+    # A trace nobody keeps is not recorded. A timed evaluation records one
+    # regardless, so ``duration_us`` always covers the same work.
+    record_trace = keep_trace or timed
+
+    start_ns = time.perf_counter_ns() if timed else None
+    detected = compiled.run_with_detection(
+        action, ctx.context, ctx.conditions, record_trace=record_trace
     )
     duration_us = (
         (time.perf_counter_ns() - start_ns) // 1000 if start_ns is not None else None
@@ -677,9 +683,7 @@ def audited_from_compiled(
     result = detected.evaluation
 
     rule_trace = (
-        _build_trace(detected.traced.trace, result.origin_profile)
-        if config.enabled and config.include_rule_trace
-        else []
+        _build_trace(detected.traced.trace, result.origin_profile) if keep_trace else []
     )
 
     now = ctx.clock or datetime.now(timezone.utc)
