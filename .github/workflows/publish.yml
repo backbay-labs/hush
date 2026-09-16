@@ -178,7 +178,9 @@ jobs:
 
       - name: Publish to PyPI
         if: github.event.inputs.dry_run != 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        # Pinned to a commit: this step runs with id-token: write, so a
+        # mutable ref would let a change upstream mint an upload token.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: packages/python/dist
 
