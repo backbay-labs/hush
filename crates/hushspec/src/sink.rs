@@ -36,8 +36,8 @@ pub trait ReceiptSink: Send + Sync {
 
     /// How a `sink.error` observer event names this sink in its `source`.
     ///
-    /// Defaults to the implementing type's own name; override it with
-    /// something an operator can place, such as a path or an endpoint.
+    /// Defaults to the implementing type's own name, which is what the other
+    /// SDKs report; a sink with a more telling constant name overrides it.
     fn name(&self) -> &'static str {
         short_type_name(std::any::type_name::<Self>())
     }
