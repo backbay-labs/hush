@@ -264,7 +264,8 @@ class HttpLoaderConfig:
     #: host, and every other blocked address, is still refused. It is never
     #: appropriate in a deployment -- a policy fetched in the clear is a policy
     #: anyone on the path can rewrite -- and the loader refuses a plain-``http``
-    #: or loopback URL unless it is set.
+    #: or loopback URL unless it is set. Even then plain ``http`` reaches only
+    #: loopback addresses; any other target must be HTTPS.
     allow_insecure_loopback: bool = False
     #: TLS context. ``None`` uses the default verifying context. A test that
     #: serves HTTPS from a self-signed certificate passes its own.
@@ -340,15 +341,21 @@ def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target
         raise HttpLoadError(f"host '{host}' did not resolve to any addresses")
 
     for address in addresses:
-        if not is_blocked_address(address):
-            continue
-        # The loopback exemption is deliberately the narrowest one that lets a
-        # test server be reached: loopback and nothing else.
-        if loopback_exemption and _is_loopback(address):
-            continue
-        raise HttpLoadError(
-            f"SSRF protection: host '{host}' resolves to private IP {address}"
-        )
+        if is_blocked_address(address):
+            # The loopback exemption is deliberately the narrowest one that
+            # lets a test server be reached: loopback and nothing else.
+            if not (loopback_exemption and _is_loopback(address)):
+                raise HttpLoadError(
+                    f"SSRF protection: host '{host}' resolves to private IP {address}"
+                )
+        # Plain HTTP is permitted only where the exemption points: a loopback
+        # test server. A public address in the clear is a policy anyone on the
+        # path can rewrite, whatever the option says about loopback.
+        if parsed.scheme == "http" and not _is_loopback(address):
+            raise HttpLoadError(
+                f"plain HTTP is allowed only to loopback addresses; host '{host}' "
+                f"resolves to {address}"
+            )
 
     return _Target(
         url=url,

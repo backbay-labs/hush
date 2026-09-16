@@ -177,6 +177,19 @@ func TestLoopbackNeedsTheTestOnlyOption(t *testing.T) {
 	}
 }
 
+func TestTheLoopbackEscapeHatchDoesNotOpenPlainHTTPToPublicAddresses(t *testing.T) {
+	config := HTTPLoaderConfig{AllowInsecureLoopback: true}
+	if _, err := ValidateURL("http://8.8.8.8/policy.yaml", config); err == nil ||
+		!strings.Contains(err.Error(), "plain HTTP is allowed only to loopback") {
+		t.Errorf("plain HTTP to a public address was accepted: %v", err)
+	}
+	// HTTPS to a public address is still permitted under the option.
+	target, err := ValidateURL("https://8.8.8.8/policy.yaml", config)
+	if err != nil || target.Address != "8.8.8.8" {
+		t.Errorf("HTTPS to a public address was refused: %v", err)
+	}
+}
+
 func TestTheLoopbackEscapeHatchOpensNothingElse(t *testing.T) {
 	config := HTTPLoaderConfig{AllowInsecureLoopback: true}
 	for _, raw := range []string{

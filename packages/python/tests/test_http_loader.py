@@ -216,6 +216,15 @@ def test_the_loopback_escape_hatch_does_not_open_other_private_addresses() -> No
         validate_url("http://169.254.169.254/latest/meta-data/", config)
 
 
+def test_the_loopback_escape_hatch_does_not_open_plain_http_to_public_addresses() -> None:
+    config = HttpLoaderConfig(allow_insecure_loopback=True)
+    with pytest.raises(HttpLoadError, match="plain HTTP is allowed only to loopback"):
+        validate_url("http://8.8.8.8/policy.yaml", config)
+    # HTTPS to a public address is still permitted under the option.
+    target = validate_url("https://8.8.8.8/policy.yaml", config)
+    assert target.address == "8.8.8.8"
+
+
 def test_the_validated_target_pins_the_address_the_request_will_dial() -> None:
     target = validate_url(
         "http://127.0.0.1:8443/policy.yaml", HttpLoaderConfig(allow_insecure_loopback=True)

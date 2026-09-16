@@ -311,8 +311,8 @@ type HTTPLoaderConfig struct {
 	// A test server listens on 127.0.0.1, so without this the loader's own
 	// fetch, ETag and size-cap paths could not be exercised against
 	// httptest.NewTLSServer. Setting it turns off the HTTPS requirement and the
-	// address check *for loopback only*: every other host, and every other
-	// blocked address, is still refused. It is never appropriate in a
+	// address check *for loopback only*: plain HTTP to any other address, every
+	// other host, and every other blocked address are still refused. It is never appropriate in a
 	// deployment -- a policy fetched in the clear is a policy anyone on the
 	// path can rewrite.
 	AllowInsecureLoopback bool
@@ -417,16 +417,22 @@ func ValidateURL(rawURL string, config HTTPLoaderConfig) (*HTTPTarget, error) {
 	}
 
 	for _, address := range addresses {
-		if !IsBlockedAddress(address) {
-			continue
+		if IsBlockedAddress(address) {
+			// The loopback exemption is deliberately the narrowest one that
+			// lets a test server be reached: loopback and nothing else.
+			if !(loopbackExemption && isLoopbackAddress(address)) {
+				return nil, httpErr(
+					"SSRF protection: host '%s' resolves to private IP %s", host, address)
+			}
 		}
-		// The loopback exemption is deliberately the narrowest one that lets a
-		// test server be reached: loopback and nothing else.
-		if loopbackExemption && isLoopbackAddress(address) {
-			continue
+		// Plain HTTP is permitted only where the exemption points: a loopback
+		// test server. A public address in the clear is a policy anyone on the
+		// path can rewrite, whatever the option says about loopback.
+		if parsed.Scheme == "http" && !isLoopbackAddress(address) {
+			return nil, httpErr(
+				"plain HTTP is allowed only to loopback addresses; host '%s' resolves to %s",
+				host, address)
 		}
-		return nil, httpErr(
-			"SSRF protection: host '%s' resolves to private IP %s", host, address)
 	}
 
 	return &HTTPTarget{
