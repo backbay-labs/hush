@@ -256,9 +256,8 @@ type ToolHandler[T any] func(ctx context.Context, name string, arguments T) (any
 // the action may proceed. A refused call returns a [ToolDeniedError] and the
 // handler is never invoked.
 //
-// It is stricter than [Guard.Check] in one way: a decision the guard could not
-// record (a sink that failed) also stops the call. A tool whose decision left
-// no evidence is not a tool that was allowed.
+// An error from [Guard.Check] -- a cancelled context, an action the guard
+// could not take -- stops the call too, the same way a denial does.
 func GuardedToolHandler[T any](
 	guard *Guard,
 	mapper ToolActionMapper[T],

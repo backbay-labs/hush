@@ -397,5 +397,6 @@ export {
   type PolicyLoadedEvent,
   type PolicyLoadFailedEvent,
   type PolicyReloadedEvent,
+  type SinkErrorEvent,
   type ObserverEvent,
 } from './observer.js';

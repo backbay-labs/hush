@@ -354,19 +354,29 @@ func TestGuardedToolHandlers(t *testing.T) {
 	})
 }
 
-func TestGuardedToolHandlerRefusesUnrecordedDecision(t *testing.T) {
-	sink := &recordingSink{failWith: errors.New("disk full")}
-	guard := newTestGuard(t, GuardOptions{Sink: sink})
+// A sink is evidence, not enforcement: a receipt the sink refused leaves the
+// decision exactly as the policy made it, so an allowed call still runs. The
+// gap in the audit trail is reported on the observer channel instead.
+func TestGuardedToolHandlerRunsWhenTheSinkRefusesTheReceipt(t *testing.T) {
+	sink := &recordingSink{failWith: errors.New("no space left on device")}
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, Observer: observer})
 	handler := GuardedMCPToolHandler(guard, func(
 		ctx context.Context, name string, arguments map[string]any,
 	) (any, error) {
-		t.Fatal("a decision that was not recorded must not run the tool")
-		return nil, nil
+		return "ran", nil
 	})
-	if _, err := handler(context.Background(), "fetch", map[string]any{
+	result, err := handler(context.Background(), "fetch", map[string]any{
 		"url": "https://api.github.com/x",
-	}); err == nil {
-		t.Fatal("expected the sink failure to stop the call")
+	})
+	if err != nil {
+		t.Fatalf("a sink failure must not stop an allowed call: %v", err)
+	}
+	if result != "ran" {
+		t.Fatalf("unexpected result %v", result)
+	}
+	if errs := observer.errors(); len(errs) != 1 {
+		t.Fatalf("expected the observer to hear about the sink failure, got %d", len(errs))
 	}
 }
 
