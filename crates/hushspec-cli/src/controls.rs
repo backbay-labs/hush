@@ -67,12 +67,17 @@ pub fn rule_block_paths(doc: &Value) -> Vec<String> {
 /// that block, as does any mapping *inside* it (`rules.secret_patterns` covers
 /// its patterns, and `rules.secret_patterns.patterns[ssn]` still counts the
 /// `secret_patterns` block as mapped).
+///
+/// A mapping that does not resolve against `doc` covers nothing: a path that
+/// points at no part of the policy is a broken claim about what the policy
+/// implements (lint L012), and counting it as coverage would overstate how
+/// much of the policy the controls account for.
 #[must_use]
-pub fn path_covers_block(rule_path: &str, block_path: &str) -> bool {
+pub fn path_covers_block(doc: &Value, rule_path: &str, block_path: &str) -> bool {
     let Some(parsed) = parse_path(rule_path) else {
         return false;
     };
-    if parsed.segments[0] != "rules" {
+    if parsed.segments[0] != "rules" || !path_resolves(doc, rule_path) {
         return false;
     }
     match parsed.segments.get(1) {
@@ -199,15 +204,49 @@ mod tests {
 
     #[test]
     fn coverage_flows_down_from_rules_and_from_a_block() {
-        assert!(path_covers_block("rules", "rules.egress"));
-        assert!(path_covers_block("rules.egress", "rules.egress"));
-        assert!(path_covers_block("rules.egress.allow", "rules.egress"));
+        let doc = doc();
+        assert!(path_covers_block(&doc, "rules", "rules.egress"));
+        assert!(path_covers_block(&doc, "rules.egress", "rules.egress"));
         assert!(path_covers_block(
+            &doc,
+            "rules.egress.allow",
+            "rules.egress"
+        ));
+        assert!(path_covers_block(
+            &doc,
             "rules.secret_patterns.patterns[ssn]",
             "rules.secret_patterns"
         ));
-        assert!(!path_covers_block("rules.egress", "rules.tool_access"));
-        assert!(!path_covers_block("extensions.posture", "rules.egress"));
+        assert!(!path_covers_block(
+            &doc,
+            "rules.egress",
+            "rules.tool_access"
+        ));
+        assert!(!path_covers_block(
+            &doc,
+            "extensions.posture",
+            "rules.egress"
+        ));
+    }
+
+    #[test]
+    fn a_path_that_does_not_resolve_covers_nothing() {
+        let doc = doc();
+        for rule_path in [
+            "rules.egress.nope",
+            "rules.secret_patterns.patterns[nope]",
+            "rules..egress",
+        ] {
+            assert!(!path_resolves(&doc, rule_path), "{rule_path} resolves");
+            assert!(
+                !path_covers_block(&doc, rule_path, "rules.egress"),
+                "{rule_path} covers rules.egress"
+            );
+            assert!(
+                !path_covers_block(&doc, rule_path, "rules.secret_patterns"),
+                "{rule_path} covers rules.secret_patterns"
+            );
+        }
     }
 
     #[test]

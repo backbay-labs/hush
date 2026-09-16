@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::conditions::{Condition, RuntimeContext};
-use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, TracedEvaluation};
+use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, Recording, TracedEvaluation};
 use crate::extensions::DetectionLevel;
 use crate::regex_profile::compile_profile_regex;
 use crate::schema::HushSpec;
@@ -747,7 +747,7 @@ pub fn evaluate_with_detection(
     spec: &HushSpec,
     action: &EvaluationAction,
 ) -> EvaluationWithDetection {
-    let traced = evaluate_with_detection_traced(spec, action, None, &HashMap::new());
+    let traced = run_with_detection(spec, action, None, &HashMap::new(), Recording::Off);
     EvaluationWithDetection {
         evaluation: traced.evaluation,
         detections: traced.detections,
@@ -769,6 +769,19 @@ pub fn evaluate_with_detection_traced(
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
 ) -> TracedEvaluationWithDetection {
+    run_with_detection(spec, action, context, conditions, Recording::On)
+}
+
+/// [`evaluate_with_detection_traced`] with the rule trace made optional: the
+/// detector trace is recorded either way, because a receipt must say whether
+/// the detection pipeline ran (receipt spec 4.6) however little else it keeps.
+pub(crate) fn run_with_detection(
+    spec: &HushSpec,
+    action: &EvaluationAction,
+    context: Option<&RuntimeContext>,
+    conditions: &HashMap<String, Condition>,
+    recording: Recording,
+) -> TracedEvaluationWithDetection {
     let matchers = crate::compiled::CompiledMatchers::lazy(spec);
     let traced = crate::evaluate::run_evaluation(
         spec,
@@ -777,6 +790,7 @@ pub fn evaluate_with_detection_traced(
         action,
         context,
         conditions,
+        recording,
     );
     fold_detection(spec, traced, action, None)
 }
@@ -791,8 +805,9 @@ pub(crate) fn run_detection(
     action: &EvaluationAction,
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
+    recording: Recording,
 ) -> TracedEvaluationWithDetection {
-    let traced = policy.evaluate_traced(action, context, conditions);
+    let traced = policy.run_evaluation(action, context, conditions, recording);
     fold_detection(policy.spec(), traced, action, policy.detectors())
 }
 

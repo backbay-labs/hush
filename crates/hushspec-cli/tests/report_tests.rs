@@ -642,6 +642,49 @@ fn a_broken_chain_refuses_to_report_without_unverified() {
 }
 
 #[test]
+fn a_receipt_prepended_to_a_log_is_still_chain_verified() {
+    let dir = TempDir::new().unwrap();
+    let log = dir.path().join("prepended.jsonl");
+    let chained =
+        std::fs::read_to_string(repo_root().join("fixtures/log/valid/basic.jsonl")).unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            repo_root().join("fixtures/receipts/expected/core/browser-automation/0.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &log,
+        format!("{}\n{chained}", serde_json::to_string(&receipt).unwrap()),
+    )
+    .unwrap();
+
+    // The receipt is a valid record, so nothing is malformed -- but the file
+    // holds log entries, so it is verified as a log and the receipt breaks it.
+    h2h()
+        .arg("report")
+        .arg(&log)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("mixes record types"))
+        .stderr(predicate::str::contains("BROKEN"))
+        .stderr(predicate::str::contains("--unverified"));
+
+    let output = h2h()
+        .arg("report")
+        .arg(&log)
+        .args(["--unverified", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["chain_verified"], false);
+}
+
+#[test]
 fn a_plain_receipt_jsonl_reports_without_a_chain() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("receipts.jsonl");

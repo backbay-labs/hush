@@ -245,6 +245,41 @@ rules:
 }
 
 #[test]
+fn an_unresolvable_mapping_leaves_its_block_unmapped() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(
+        tmp.path(),
+        "unresolvable-only.yaml",
+        r#"hushspec: "0.2.0"
+name: unresolvable-only
+metadata:
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths:
+        - rules.egress.nope
+rules:
+  egress:
+    allow: ["api.github.com"]
+    default: block
+"#,
+    );
+
+    // The mapping points at nothing, so it is both a broken claim (L012) and
+    // no coverage for the block it names (L011).
+    h2h()
+        .arg("lint")
+        .arg(&policy)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("error[L012]"))
+        .stdout(predicate::str::contains("rules.egress.nope"))
+        .stdout(predicate::str::contains(
+            "warning[L011]: rule block `rules.egress` has no control mapping",
+        ));
+}
+
+#[test]
 fn l012_rejects_a_path_outside_the_grammar() {
     let tmp = TempDir::new().unwrap();
     let policy = write_policy(

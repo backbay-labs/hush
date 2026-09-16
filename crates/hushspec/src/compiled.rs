@@ -39,7 +39,7 @@ use regex::Regex;
 
 use crate::conditions::{Condition, RuntimeContext};
 use crate::detection::{DetectorRegistry, EvaluationWithDetection, TracedEvaluationWithDetection};
-use crate::evaluate::{EvaluationAction, EvaluationResult, TracedEvaluation};
+use crate::evaluate::{EvaluationAction, EvaluationResult, Recording, TracedEvaluation};
 use crate::extensions::{OriginEgressOverlay, OriginProfile};
 use crate::panic::PanicState;
 use crate::receipt::{AuditConfig, AuditContext, DecisionReceipt};
@@ -587,6 +587,17 @@ impl CompiledPolicy {
         context: Option<&RuntimeContext>,
         conditions: &HashMap<String, Condition>,
     ) -> TracedEvaluation {
+        self.run_evaluation(action, context, conditions, Recording::On)
+    }
+
+    /// [`CompiledPolicy::evaluate_traced`] with the rule trace made optional.
+    pub(crate) fn run_evaluation(
+        &self,
+        action: &EvaluationAction,
+        context: Option<&RuntimeContext>,
+        conditions: &HashMap<String, Condition>,
+        recording: Recording,
+    ) -> TracedEvaluation {
         crate::evaluate::run_evaluation(
             &self.spec,
             &self.matchers,
@@ -594,6 +605,7 @@ impl CompiledPolicy {
             action,
             context,
             conditions,
+            recording,
         )
     }
 
@@ -601,7 +613,7 @@ impl CompiledPolicy {
     /// policy's detector registry.
     #[must_use]
     pub fn evaluate_with_detection(&self, action: &EvaluationAction) -> EvaluationWithDetection {
-        let traced = self.evaluate_with_detection_traced(action, None, &HashMap::new());
+        let traced = self.run_with_detection(action, None, &HashMap::new(), Recording::Off);
         EvaluationWithDetection {
             evaluation: traced.evaluation,
             detections: traced.detections,
@@ -618,7 +630,19 @@ impl CompiledPolicy {
         context: Option<&RuntimeContext>,
         conditions: &HashMap<String, Condition>,
     ) -> TracedEvaluationWithDetection {
-        crate::detection::run_detection(self, action, context, conditions)
+        self.run_with_detection(action, context, conditions, Recording::On)
+    }
+
+    /// [`CompiledPolicy::evaluate_with_detection_traced`] with the rule trace
+    /// made optional; the detector trace is recorded either way.
+    pub(crate) fn run_with_detection(
+        &self,
+        action: &EvaluationAction,
+        context: Option<&RuntimeContext>,
+        conditions: &HashMap<String, Condition>,
+        recording: Recording,
+    ) -> TracedEvaluationWithDetection {
+        crate::detection::run_detection(self, action, context, conditions, recording)
     }
 
     /// Evaluate `action` and record the receipt, using the resolution this

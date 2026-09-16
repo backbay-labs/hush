@@ -668,7 +668,7 @@ h2h report audit.jsonl --format json > report.json         # validates against t
 h2h report audit.jsonl --format csv --out ./evidence/      # one CSV per table
 ```
 
-Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line, so a mixed file works. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
+Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line. A file holding any log entry is a log and is chain-verified as a whole, so a plain receipt among log entries is reported as a mixed file and breaks the chain rather than slipping past verification. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
 
 When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
 

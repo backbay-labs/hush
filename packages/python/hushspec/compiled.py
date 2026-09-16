@@ -1685,12 +1685,32 @@ class CompiledPolicy:
         conditions: Optional[dict[str, Condition]] = None,
     ) -> TracedEvaluation:
         """Full evaluation with the recorded rule trace (used by receipts)."""
+        return self._traced(action, context, conditions, record_trace=True)
+
+    def _traced(
+        self,
+        action: EvaluationAction,
+        context: Optional[RuntimeContext],
+        conditions: Optional[dict[str, Condition]],
+        *,
+        record_trace: bool,
+    ) -> TracedEvaluation:
+        """:meth:`evaluate_traced` with the rule trace made optional.
+
+        ``record_trace=False`` returns an empty trace and skips recording one;
+        nothing else about the evaluation changes.
+        """
         if context is None:
             context = action.context
             if context is None:
                 context = _EMPTY_CONTEXT
         trace: list[RuleEvaluation] = []
-        result = self._run(action, context, conditions or _NO_CONDITIONS, trace)
+        result = self._run(
+            action,
+            context,
+            conditions or _NO_CONDITIONS,
+            trace if record_trace else None,
+        )
         return TracedEvaluation(result=result, trace=trace)
 
     def evaluate_with_context(
@@ -1939,7 +1959,7 @@ class CompiledPolicy:
         self, action: EvaluationAction
     ) -> EvaluationWithDetection:
         """Evaluate, then fold in the configured content detectors."""
-        traced = self.evaluate_with_detection_traced(action)
+        traced = self.run_with_detection(action, record_trace=False)
         return EvaluationWithDetection(
             evaluation=traced.evaluation,
             detections=traced.detections,
@@ -1953,15 +1973,33 @@ class CompiledPolicy:
         conditions: Optional[dict[str, Condition]] = None,
     ) -> TracedEvaluationWithDetection:
         """:meth:`evaluate_with_detection` with the rule and detector traces."""
+        return self.run_with_detection(action, context, conditions, record_trace=True)
+
+    def run_with_detection(
+        self,
+        action: EvaluationAction,
+        context: Optional[RuntimeContext] = None,
+        conditions: Optional[dict[str, Condition]] = None,
+        *,
+        record_trace: bool = True,
+    ) -> TracedEvaluationWithDetection:
+        """:meth:`evaluate_with_detection_traced` with the rule trace optional.
+
+        The detector trace is recorded either way: a receipt has to say whether
+        the detection pipeline ran (receipt spec 4.6) however little else it
+        keeps.
+        """
         detection = self._detection
         if detection is None:
             # Exact no-op for a policy with no `detection:` extension: no
             # detector trace at all (receipt spec 4.6).
-            traced = self.evaluate_traced(action, context, conditions)
+            traced = self._traced(
+                action, context, conditions, record_trace=record_trace
+            )
             return TracedEvaluationWithDetection(
                 traced=traced, evaluation=traced.result
             )
-        traced = self.evaluate_traced(action, context, conditions)
+        traced = self._traced(action, context, conditions, record_trace=record_trace)
         base = traced.result
         content = action.content or ""
         if not content:

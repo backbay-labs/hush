@@ -388,7 +388,7 @@ fn build_controls_report(spec: &HushSpec) -> ControlsReport {
                 mapping
                     .rule_paths
                     .iter()
-                    .any(|path| crate::controls::path_covers_block(path, block))
+                    .any(|path| crate::controls::path_covers_block(&doc, path, block))
             })
         })
         .cloned()

@@ -184,6 +184,17 @@ pub struct TracedEvaluation {
     pub trace: Vec<RuleEvaluation>,
 }
 
+/// Whether an evaluation records its rule trace.
+///
+/// Recording allocates an entry for every applicable rule block, evaluated or
+/// skipped. Callers that discard the trace ask for [`Recording::Off`] and get
+/// an empty one; nothing else about the evaluation changes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Recording {
+    On,
+    Off,
+}
+
 /// Evaluate `action` against a resolved document.
 ///
 /// `when` conditions are evaluated against `action.context` (an empty context
@@ -232,6 +243,7 @@ pub fn evaluate_traced(
         action,
         context,
         conditions,
+        Recording::On,
     )
 }
 
@@ -245,6 +257,7 @@ pub(crate) fn run_evaluation(
     action: &EvaluationAction,
     context: Option<&RuntimeContext>,
     conditions: &HashMap<String, Condition>,
+    recording: Recording,
 ) -> TracedEvaluation {
     let default_context = RuntimeContext::default();
     let context = context
@@ -257,6 +270,7 @@ pub(crate) fn run_evaluation(
         action,
         context,
         conditions,
+        recording,
         active: Vec::new(),
         trace: Vec::new(),
     }
@@ -359,6 +373,7 @@ struct Evaluator<'a> {
     /// Empty when no applicable block carries a condition at all, which is
     /// the common case and costs nothing.
     active: Vec<BlockActivity>,
+    recording: Recording,
     trace: Vec<RuleEvaluation>,
 }
 
@@ -547,6 +562,9 @@ impl Evaluator<'_> {
         reason: Option<&str>,
         evaluated: bool,
     ) {
+        if self.recording == Recording::Off {
+            return;
+        }
         self.trace.push(RuleEvaluation {
             rule_block: block.to_string(),
             outcome,
