@@ -7,7 +7,13 @@ import { isPanicActive } from './evaluate.js';
 import { parse } from './parse.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import nodePath from 'node:path';
-import type { Loader, ResolveOptions, Resolution, SignatureStatus } from './resolve.js';
+import type {
+  LoadReasonCode,
+  Loader,
+  ResolveOptions,
+  Resolution,
+  SignatureStatus,
+} from './resolve.js';
 import {
   PolicyVerificationError,
   createBuiltinLoader,
@@ -538,7 +544,13 @@ export class HushGuard {
    * refuse against.
    */
   private loadResolution(policy: HushSpec, adopted?: Resolution): Resolution {
-    if (adopted !== undefined) return adopted;
+    if (adopted !== undefined) {
+      const unproven = this.unprovenHop(adopted);
+      if (unproven !== undefined) {
+        this.refusal = unproven;
+      }
+      return adopted;
+    }
     try {
       return resolvePolicyResolution(policy, this.resolveOptions);
     } catch (error) {
@@ -552,6 +564,40 @@ export class HushGuard {
       }
       throw error;
     }
+  }
+
+  /**
+   * The first hop of an adopted chain that has not proved itself under
+   * `requireSignature`, or `undefined` when the chain is acceptable.
+   *
+   * A provider resolves against the source it loaded from -- which the guard
+   * cannot reach a second time -- so its resolution is adopted rather than
+   * rebuilt. It was built under the provider's options, though, not the
+   * guard's, so the requirement the guard was given has to be re-applied here:
+   * without it, `requireSignature` would be dropped by handing the policy in
+   * pre-resolved, which is exactly the fail-open the requirement exists to
+   * prevent.
+   *
+   * `builtin:` hops are exempt, as they are during resolution: they are
+   * embedded in the SDK, not loaded from anywhere signable. Every other hop
+   * proves itself by a verified signature on its link. A hop proved by a
+   * digest pin cannot be re-checked from a resolution -- the chain records the
+   * hash each hop had, not the digest its child pinned it to -- so an adopted
+   * chain has to carry signatures.
+   */
+  private unprovenHop(
+    resolution: Resolution,
+  ): { source: string; status: SignatureStatus } | undefined {
+    if (this.resolveOptions.requireSignature !== true) return undefined;
+    for (const link of resolution.chain) {
+      if (link.source.startsWith('builtin:')) continue;
+      if (link.signature?.verified === true) continue;
+      return {
+        source: link.source,
+        status: link.signature ?? { verified: false, reason: 'missing_signature' },
+      };
+    }
+    return undefined;
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
@@ -856,6 +902,16 @@ export class HushGuard {
       resolution !== undefined && resolution.spec === newPolicy
         ? resolution
         : resolvePolicyResolution(newPolicy, this.resolveOptions);
+    const unproven = this.unprovenHop(next);
+    if (unproven !== undefined) {
+      throw new PolicyVerificationError(
+        unproven.source,
+        (unproven.status.reason as LoadReasonCode | undefined) ?? 'missing_signature',
+        'the reloaded policy carries no verified signature and this guard requires one',
+        next,
+        unproven.status,
+      );
+    }
     const resolved = next.spec;
     const previousHash = this.policyHash;
     this.policy = resolved;

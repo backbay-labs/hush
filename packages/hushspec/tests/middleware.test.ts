@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { HushGuard, HushSpecDenied, matchesRulePathPrefix } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
+import { resolutionFromResolved } from '../src/resolve.js';
+import type { Resolution } from '../src/resolve.js';
+import { Keyring } from '../src/signing.js';
+import type { HushSpec } from '../src/schema.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
 import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
@@ -13,6 +17,34 @@ import type { EvaluationResult } from '../src/evaluate.js';
 // ---------------------------------------------------------------------------
 // Shared policies
 // ---------------------------------------------------------------------------
+
+/** A provider that hands the guard its own resolution for exactly this spec. */
+function signedProvider(spec: HushSpec, resolution: Resolution): PolicyProvider {
+  return {
+    async load() {
+      return spec;
+    },
+    watch() {},
+    stop() {},
+    current() {
+      return spec;
+    },
+    resolution() {
+      return resolution;
+    },
+  };
+}
+
+/** The same resolution with every hop reporting a verified signature. */
+function verifiedResolution(spec: HushSpec, source: string): Resolution {
+  const base = resolutionFromResolved(spec, source);
+  const signature = { verified: true, key_id: 'test-key' };
+  return {
+    ...base,
+    chain: base.chain.map((link) => ({ ...link, signature })),
+    signature,
+  };
+}
 
 const ALLOW_ALL_POLICY = `
 hushspec: "0.1.0"
@@ -204,6 +236,68 @@ describe('HushGuard', () => {
       expect(result.decision).toBe('deny');
       expect(result.matched_rule).toBe('__hushspec_policy_provider__');
       expect(result.reason).toContain('Policy is stale');
+    });
+
+    // A provider resolves under its own options. Adopting its resolution
+    // unchecked would let `requireSignature` be dropped by handing the policy
+    // in pre-resolved, which is the fail-open the requirement exists to stop.
+    it('refuses an adopted resolution that carries no verified signature', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = resolutionFromResolved(spec, 'file:///policies/app.yaml');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      const result = guard.evaluate({ type: 'tool_call', target: 'any_tool' });
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toContain('file:///policies/app.yaml');
+      expect(guard.resolution).toBe(resolution);
+    });
+
+    it('adopts a resolution whose every hop verified', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = verifiedResolution(spec, 'file:///policies/app.yaml');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      expect(guard.evaluate({ type: 'tool_call', target: 'any_tool' }).decision).toBe('allow');
+    });
+
+    it('exempts a builtin hop, which is embedded rather than loaded', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = resolutionFromResolved(spec, 'builtin:default');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      expect(guard.evaluate({ type: 'tool_call', target: 'any_tool' }).decision).toBe('allow');
+    });
+
+    it('keeps the policy in force when a reload adopts an unverified resolution', async () => {
+      const spec = parseOrThrow(DENY_SHELL_POLICY);
+      const guard = await HushGuard.fromProvider(
+        signedProvider(spec, verifiedResolution(spec, 'file:///policies/app.yaml')),
+        { requireSignature: true, keyring: new Keyring([]) },
+      );
+
+      const reloaded = parseOrThrow(ALLOW_ALL_POLICY);
+      expect(() =>
+        guard.swapPolicy(reloaded, resolutionFromResolved(reloaded, 'file:///policies/app.yaml')),
+      ).toThrow(/verification failed/);
+
+      // The refusal left the verified policy in force rather than swapping in
+      // one that never proved itself.
+      expect(guard.check({ type: 'shell_command', target: 'rm -rf /' })).toBe(false);
     });
   });
 
