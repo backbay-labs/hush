@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T12:19:31Z",
+  "generated_at": "2026-09-16T14:10:23Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -104,6 +104,20 @@
     {
       "path": "fixtures/core/evaluation/conditions-rate.test.yaml",
       "sha256": "dad99fa8ed46a8a87a8c00e80df75f2b1e11b0942d5d7e82e773c1c83f040e45",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml",
+      "sha256": "36690c0f9382d784ed47ffe0d6d06fb4d01201d8fcf1997dce531a98026d0f3d",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-unevaluable-not.test.yaml",
+      "sha256": "697d86086fe80d980c667af78e1e557ce08dc7ec3fb8f90b1355f2d59cbdd86c",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1959,6 +1973,118 @@
     {
       "path": "fixtures/receipts/expected/core/conditions-rate/5.json",
       "sha256": "df4e472b1d6acf0d7ad2a8e8393ec3ca516d531db4682555b96e4c20f27ae64a",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/0.json",
+      "sha256": "f07f357589801c22d30518dda6a9b5741459853abcf34b4a16e80173cc15f174",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/1.json",
+      "sha256": "cbdb7c9ad0d7445c318aa659903d7d1ebc41b507dc998367b6521dbdab5d86c5",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/2.json",
+      "sha256": "253d1c6b193a2c800a3e0627bc23b3f81e0fa656b233292ff110ccac43f4d85b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/3.json",
+      "sha256": "f52c78bbeb0a4bd3ae3efe2f984f401d37e32ecdfe1f15f12c62fde8ca1da514",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/4.json",
+      "sha256": "76054ee00f23eb7360fd4538d4cbfef176490a2a9c4b3cfb2165aa05b11cca58",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/5.json",
+      "sha256": "672465b7343f2f2c2770168e4474b4293667a7f71d195fa58db768e06fbfc4cd",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/6.json",
+      "sha256": "f82da3c14bf71bd15d227b76120762be1d287ce4dd8b9da7f1c58c635b3d2500",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/7.json",
+      "sha256": "d2bb7eb71e7cec25bb3228e0e1b1fa09a2c00e9b4283fed37294cb0ad7a8fcca",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-combinators/8.json",
+      "sha256": "4a1c0364bd9cbc17e54d811a14cf444ba57b32b7a08f9f99791c737ccc803023",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/0.json",
+      "sha256": "702bac1c0b9713a87f65f3620c69fdbd917ba28630a2dcc12fbca0fcbbb7c000",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/1.json",
+      "sha256": "59fc133cf1bb2617957a158706280fa1a8e26416bc5524a5639bae429a61a5d3",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/2.json",
+      "sha256": "de550f8ad9496c9c908a8f009e96ab81326c6b1935921216378e1a8f21276738",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/3.json",
+      "sha256": "83ec18351bd70bdebb6b4ccc40d49fbd93e4fddcf58c9e8efa2def5e766fb24c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/4.json",
+      "sha256": "c36b4c64b46f8d566ecf6ba4c1bdb6177d1d5d51cc6ec36b2b9be7a3880f921e",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/5.json",
+      "sha256": "7e7147c10d518de08399bc518face777fbc15e057f2e0a15d620090b6719b66c",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-unevaluable-not/6.json",
+      "sha256": "b71a33c148ceb372ed5d94613a02ea30a2cf8e9fcd14eeb15d07b355968537ca",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

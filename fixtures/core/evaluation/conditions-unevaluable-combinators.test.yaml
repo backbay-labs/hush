@@ -1,0 +1,122 @@
+hushspec_test: "0.1.0"
+description: "all_of and any_of propagate an unevaluable member instead of collapsing it to a boolean: all_of is false only when a member is false, any_of is true only when a member is true, and either is unevaluable otherwise when a member is (core spec 3.13)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    forbidden_paths:
+      when:
+        all_of:
+          - rate:
+              counter: writes
+              threshold: 1
+              comparison: gte
+          - context:
+              environment: production
+      patterns:
+        - "**/.env"
+    egress:
+      when:
+        any_of:
+          - rate:
+              counter: egress_calls
+              threshold: 100
+              comparison: gte
+          - context:
+              environment: production
+      default: block
+    tool_access:
+      when:
+        not:
+          any_of:
+            - rate:
+                counter: deploys
+                threshold: 1
+                comparison: gte
+            - context:
+                environment: production
+      block: [deploy]
+      default: allow
+cases:
+  - description: "all_of with an unevaluable rate and a true context is unevaluable: the paths block stays active"
+    context:
+      environment: production
+    action:
+      type: file_write
+      target: /app/.env
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "all_of with an unevaluable rate and a false context is false: the paths block is inert"
+    context:
+      environment: staging
+    action:
+      type: file_write
+      target: /app/.env
+    expect:
+      decision: allow
+  - description: "all_of with a false rate and a true context is false: the paths block is inert"
+    context:
+      environment: production
+      counters:
+        writes: 0
+    action:
+      type: file_write
+      target: /app/.env
+    expect:
+      decision: allow
+  - description: "any_of with an unevaluable rate and a false context is unevaluable: the egress block stays active"
+    context:
+      environment: staging
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "any_of with an unevaluable rate and a true context is true: the egress block is active"
+    context:
+      environment: production
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "any_of with a false rate and a false context is false: the egress block is inert"
+    context:
+      environment: staging
+      counters:
+        egress_calls: 1
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: allow
+  - description: "not over an unevaluable any_of is unevaluable: the tool block stays active"
+    context:
+      environment: staging
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "not over a false any_of is true: the tool block is active"
+    context:
+      environment: staging
+      counters:
+        deploys: 0
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "not over a true any_of is false: the tool block is inert"
+    context:
+      environment: production
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
