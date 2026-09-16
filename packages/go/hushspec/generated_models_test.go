@@ -87,6 +87,30 @@ extensions:
 	}
 }
 
+// TestANullRequiredCollectionIsRefused draws the line the fill stops at. A
+// present-but-null `transitions:` decodes to a nil slice without failing the
+// typed decode, so filling it would have Go accept -- and hash, as
+// `"transitions":[]` -- a document Rust, TypeScript and Python all refuse at
+// parse. Filling an absent-in-the-Go-model collection is a serialization
+// detail; inventing a value the author did not write is not.
+func TestANullRequiredCollectionIsRefused(t *testing.T) {
+	_, err := Parse(`hushspec: "0.2.0"
+name: null-transitions
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard: {}
+    transitions:
+`)
+	if err == nil {
+		t.Fatal("a null `transitions` was accepted; the other SDKs refuse it")
+	}
+	if !strings.Contains(err.Error(), "transitions must be an array") {
+		t.Errorf("error = %v, want it to name `transitions`", err)
+	}
+}
+
 // TestControlMappingAlwaysEmitsRulePaths pins the same tag rule on the other
 // always-emitted collection. A control mapping with no rule paths is refused
 // by validation, so the shape is asserted on the struct directly.

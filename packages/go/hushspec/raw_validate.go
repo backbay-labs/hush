@@ -244,8 +244,14 @@ func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 	if posture := rawObject(ext, "posture"); posture != nil {
 		// transitions is a required field in the reference models: an absent
 		// key is rejected (an empty list is fine).
-		if _, ok := posture["transitions"]; !ok {
+		if raw, ok := posture["transitions"]; !ok {
 			errs.add("extensions.posture: missing field `transitions`")
+		} else if _, isArray := raw.([]any); !isArray {
+			// A present-but-null `transitions:` decodes to a nil slice rather
+			// than failing the typed decode, and Parse then materializes an
+			// empty one -- so without this check Go alone would accept, and
+			// hash, a document the other three SDKs refuse.
+			errs.add("extensions.posture.transitions must be an array")
 		}
 		for index, raw := range rawArray(posture, "transitions") {
 			transition, ok := raw.(map[string]any)

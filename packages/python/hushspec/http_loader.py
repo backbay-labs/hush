@@ -71,6 +71,7 @@ __all__ = [
     "fetch_signature",
     "install_https_loader",
     "is_blocked_address",
+    "signature_locator",
     "validate_url",
 ]
 
@@ -87,7 +88,7 @@ DEFAULT_MAX_SIZE = 1_048_576
 
 #: The two well-known cloud instance-metadata endpoints, named so the intent is
 #: readable even though :data:`BLOCKED_NETWORKS` already covers both
-#: (``169.254.0.0/16`` and ``fd00::/8``). Reaching one from a URL an agent
+#: (``169.254.0.0/16`` and ``fc00::/7``). Reaching one from a URL an agent
 #: supplied is the classic SSRF credential theft.
 CLOUD_METADATA_ADDRESSES = ("169.254.169.254", "fd00:ec2::254")
 
@@ -193,10 +194,22 @@ class EtagCache:
     request instead of a full body.
 
     Entries live in memory for the life of the loader: nothing is written to
-    disk, so a policy body never outlives the process that fetched it.
+    disk, so a policy body never outlives the process that fetched it. The
+    cache is **bounded**, and has to be: a URL comes out of a document, a body
+    may be as large as :data:`DEFAULT_MAX_SIZE`, and an unbounded map keyed on
+    something an attacker names is a memory-exhaustion primitive. Past
+    :attr:`max_entries` the oldest entry is dropped, which costs a full body on
+    the next fetch of that URL and nothing else.
     """
 
-    def __init__(self) -> None:
+    #: Entries kept before the oldest is evicted. A chain is capped at 32
+    #: documents (core spec 2.6.2), so this holds two whole chains.
+    DEFAULT_MAX_ENTRIES = 64
+
+    def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be at least 1")
+        self.max_entries = max_entries
         self._lock = threading.Lock()
         self._entries: dict[str, tuple[str, str]] = {}
 
@@ -207,7 +220,12 @@ class EtagCache:
 
     def put(self, url: str, etag: str, body: str) -> None:
         with self._lock:
+            # A `dict` keeps insertion order, so the first key is the oldest.
+            # Rewriting a URL already held replaces it in place rather than
+            # counting against the bound again.
             self._entries[url] = (etag, body)
+            while len(self._entries) > self.max_entries:
+                del self._entries[next(iter(self._entries))]
 
     def clear(self) -> None:
         with self._lock:
@@ -283,16 +301,19 @@ def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target
     except ValueError as exc:
         raise HttpLoadError(f"invalid URL '{url}': {exc}") from exc
 
-    loopback_exemption = False
     if parsed.scheme == "https":
         default_port = 443
     elif parsed.scheme == "http" and config.allow_insecure_loopback:
         default_port = 80
-        loopback_exemption = True
     else:
         raise HttpLoadError(
             f"only HTTPS URLs are allowed, got '{parsed.scheme}'"
         )
+    # The exemption is about where the request may go, not which scheme
+    # carried it: a loopback *HTTPS* test server needs it too, and that is the
+    # arrangement under which the pinned connection's certificate check can be
+    # exercised at all.
+    loopback_exemption = config.allow_insecure_loopback
 
     host = parsed.hostname
     if not host:
@@ -419,20 +440,32 @@ class _PinnedHTTPHandler(urllib.request.HTTPHandler):
         return self.do_open(self._factory, req)
 
 
+@dataclass(frozen=True)
+class _Fetched:
+    """What one GET produced.
+
+    ``revalidated`` marks a ``304``, which comes back with an empty body
+    because the caller holds the cached one. ``missing`` is set only when the
+    caller asked for ``missing_is_none`` and the server answered 404 or 410,
+    which is how :func:`fetch_signature` reads "there is no signature here"
+    without treating every other failure as one.
+    """
+
+    status: int
+    body: str
+    etag: Optional[str]
+    revalidated: bool = False
+    missing: bool = False
+
+
 def _fetch(
     target: _Target,
     config: HttpLoaderConfig,
     *,
     etag: Optional[str],
     missing_is_none: bool,
-) -> Optional[tuple[int, str, Optional[str]]]:
-    """``(status, body, etag)`` for a GET of *target*.
-
-    ``304`` comes back with an empty body: the caller holds the cached one.
-    ``None`` is returned only when ``missing_is_none`` and the server answered
-    404 or 410, which is how :func:`fetch_signature` reads "there is no
-    signature here" without treating every other failure as one.
-    """
+) -> _Fetched:
+    """Perform one GET of *target* under *config*."""
     headers = {"Accept": "application/yaml, text/yaml, */*"}
     if config.auth_header:
         headers["Authorization"] = config.auth_header
@@ -449,17 +482,17 @@ def _fetch(
 
     try:
         with opener.open(request, timeout=config.read_timeout_s) as response:
-            return (
-                response.status,
-                _read_capped(response, target.url, config.max_size),
-                response.headers.get("ETag"),
+            return _Fetched(
+                status=response.status,
+                body=_read_capped(response, target.url, config.max_size),
+                etag=response.headers.get("ETag"),
             )
     except urllib.error.HTTPError as exc:
         with exc:
             if exc.code == 304:
-                return (304, "", etag)
+                return _Fetched(status=304, body="", etag=etag, revalidated=True)
             if missing_is_none and exc.code in (404, 410):
-                return None
+                return _Fetched(status=exc.code, body="", etag=None, missing=True)
             raise HttpLoadError(
                 f"HTTP request to '{target.url}' returned status {exc.code}"
             ) from exc
@@ -512,18 +545,17 @@ def create_http_loader(config: Optional[HttpLoaderConfig] = None) -> Resolver:
             etag=cached[0] if cached else None,
             missing_is_none=False,
         )
-        assert result is not None  # missing_is_none=False never returns None
-        status, body, etag = result
 
-        if status == 304:
+        body = result.body
+        if result.revalidated:
             if cached is None:
                 raise HttpLoadError(
                     f"HTTP request to '{reference}' returned status 304 "
                     "without a cached response to revalidate"
                 )
             body = cached[1]
-        elif etag:
-            settings.cache.put(reference, etag, body)
+        elif result.etag:
+            settings.cache.put(reference, result.etag, body)
 
         ok, parsed = parse(body)
         if not ok:
@@ -574,10 +606,9 @@ def fetch_signature(
     settings = config or HttpLoaderConfig()
     target = validate_url(url, settings)
     result = _fetch(target, settings, etag=None, missing_is_none=True)
-    if result is None:
+    if result.missing:
         return None
-    _status, body, _etag = result
-    return body.encode("utf-8")
+    return result.body.encode("utf-8")
 
 
 def signature_locator(
