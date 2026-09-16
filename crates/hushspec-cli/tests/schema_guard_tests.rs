@@ -505,3 +505,47 @@ fn the_schemastore_entries_match_the_catalog_entry_shape() {
         "the core policy schema must be listed"
     );
 }
+
+/// An origins profile overlay narrows the base rule it composes with; it must
+/// not be able to switch one off, or to introduce a control the base rule
+/// does not have.
+///
+/// `enabled` and `when` gate a rule *block* and belong to the base policy. An
+/// overlay that declared `enabled` would let an origin profile disable a
+/// control the base policy applies -- the opposite of what an overlay is for,
+/// since allowlists intersect and blocklists union (origins spec 4). Every
+/// overlay key must also name a property of the base block, so the overlay
+/// can only ever tighten something that already exists.
+#[test]
+fn the_origins_overlays_narrow_a_base_rule_and_cannot_disable_it() {
+    let origins = read_schema("hushspec-origins.v0.schema.json");
+    let core = core_schema();
+
+    for (overlay_def, base_def) in [("ToolAccessRule", "ToolAccess"), ("EgressRule", "Egress")] {
+        let overlay = origins["$defs"][overlay_def]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("origins $defs/{overlay_def} declares properties"));
+        let base = core["$defs"][base_def]["properties"]
+            .as_object()
+            .unwrap_or_else(|| panic!("core $defs/{base_def} declares properties"));
+
+        for gate in ["enabled", "when"] {
+            assert!(
+                !overlay.contains_key(gate),
+                "origins $defs/{overlay_def} must not declare `{gate}`: \
+                 an overlay narrows a base rule, it does not gate one"
+            );
+        }
+        for key in overlay.keys() {
+            assert!(
+                base.contains_key(key),
+                "origins $defs/{overlay_def}.{key} has no counterpart in \
+                 core $defs/{base_def}"
+            );
+        }
+        assert!(
+            !overlay.is_empty(),
+            "origins $defs/{overlay_def} overlays nothing"
+        );
+    }
+}
