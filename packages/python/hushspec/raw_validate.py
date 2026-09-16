@@ -151,6 +151,11 @@ def _validate_top_level(obj: dict[str, Any], errors: list[str]) -> None:
 
     if "hushspec" not in obj:
         errors.append("missing field `hushspec`")
+    elif obj["hushspec"] is None:
+        # The schema types `hushspec` as a string (canonical spec 2.2), so a
+        # written null is a value of the wrong type -- there is no version here
+        # to call unsupported.
+        errors.append("hushspec: invalid type, expected a string")
     elif not isinstance(obj["hushspec"], str):
         # Present but not a version string at all -- `hushspec: 0.1` is a YAML
         # float, not `"0.1.0"`. The reference reports that as an unsupported
