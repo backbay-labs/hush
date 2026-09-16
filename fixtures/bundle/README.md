@@ -18,8 +18,9 @@ bundle format 0.1. Every bundle attests
 | `bundles/malformed-predicate-type.bundle.json` | Correctly signed over a `.../policy-bundle/v0.2` predicate. | `malformed_bundle` |
 | `vectors.yaml` | The case manifest: bundle, keyring, policy to cross-check, expected outcome. | |
 
-`policy-mismatch` reuses `valid.bundle.json` and checks it against a different library policy, so
-there is no seventh bundle file.
+Three cases reuse `valid.bundle.json` rather than adding a bundle file of their own: `policy-mismatch`
+checks it against a different library policy, and `revoked-key` and `retired-key` check it against
+`keyring-revoked.json` and `keyring-retired.json`, which hold the signing key and have withdrawn it.
 
 `crates/hushspec/tests/bundle_vectors.rs` walks the manifest and also validates every bundle
 against [`schemas/hushspec-bundle.v1.schema.json`](../../schemas/hushspec-bundle.v1.schema.json).
@@ -47,9 +48,11 @@ H2H=target/debug/h2h
   --out fixtures/bundle/bundles/unsigned.bundle.json
 ```
 
-The remaining three cannot come from the CLI: they are bundles *correctly signed* over a statement
-that is wrong, which `h2h bundle create` will not produce. They are derived from `valid.bundle.json`
-by a script that signs with `openssl pkeyutl -sign -rawin`, independently of the Rust signer:
+The remaining three cannot come from the CLI. Two are bundles *correctly signed* over a statement
+that is wrong, which `h2h bundle create` will not produce; the third, `tampered-payload`, is the
+valid bundle's signature left in place over an edited payload. All three are derived from
+`valid.bundle.json` by a script that signs with `openssl pkeyutl -sign -rawin`, independently of the
+Rust signer:
 
 ```bash
 python3 scripts/generate_bundle_vectors.py          # rewrite
