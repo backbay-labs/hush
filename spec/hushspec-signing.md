@@ -261,6 +261,7 @@ Signatures were produced with the reference canonicalizer for the signing input 
 | `retired-key` | `key_retired` |
 | `revoked-key` | `key_revoked` |
 | `impossible-signed-at-date` | `malformed_envelope` |
+| `leap-second-signed-at` | `malformed_envelope` |
 
 Every SDK runs these vectors; a divergence between engines is a conformance failure.
 

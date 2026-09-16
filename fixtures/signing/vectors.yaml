@@ -98,3 +98,10 @@ cases:
   note: February 30 is not a calendar date, so the shape check of section 6.2 fails before any
     signature check; an engine that normalized it would compare expiry and retirement against
     March 2
+- name: leap-second-signed-at
+  policy: policies/basic.yaml
+  signature: policies/leap-second.sig
+  expect:
+    invalid: malformed_envelope
+  note: second 60 is a leap second, not an instant the `[0-5][0-9]` pattern of the schema admits, so
+    the shape check of section 6.2 fails before any signature check

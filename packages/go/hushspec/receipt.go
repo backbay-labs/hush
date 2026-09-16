@@ -279,8 +279,13 @@ func ParseReceipt(data []byte) (*DecisionReceipt, error) {
 		return nil, fmt.Errorf(
 			"unsupported receipt_version %q, expected %q", receipt.ReceiptVersion, ReceiptVersion)
 	}
-	if err := receipt.Validate(); err != nil {
-		return nil, err
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("receipt is not a well-formed 0.2 document: %w", err)
+	}
+	if problems := documentProblems(document, &receipt); len(problems) > 0 {
+		return nil, fmt.Errorf(
+			"receipt does not satisfy the 0.2 schema: %s", strings.Join(problems, "; "))
 	}
 	return &receipt, nil
 }

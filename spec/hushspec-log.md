@@ -39,9 +39,11 @@ Because `prev_hash` is inside the hashed content, every entry's hash commits to 
 
 A writer MUST derive `seq` and `prev_hash` from the file's current last entry while it holds the write lock, not from a head cached when it opened the file, so that two writers of the same log never build entries from the same predecessor and fork the chain.
 
+The write lock is a **sentinel file** named by appending `.lock` to the log's path, created with `O_EXCL` so that creating it is acquiring it and removing it is releasing it. Every implementation MUST use this lock, because it is the one mechanism available in every language and on every platform, and a lock one writer cannot see is not a lock. A writer whose platform also offers an advisory lock on an open file (`flock`) SHOULD hold one on the log file as well, taken after the sentinel: the kernel releases it even if the writer dies, and it excludes a writer that takes only the advisory lock. A writer that cannot acquire the lock within a bounded wait MUST fail the append; it MUST NOT break a sentinel it cannot prove is stale, because two writers appending to one file interleave chains and corrupt both.
+
 ## 5. Rotation
 
-A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.
+A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). `previous_entry_hash` is recorded even when the previous file was empty and the value is therefore the genesis hash: a verifier compares it against the previous file's last hash, and an omitted member is not that hash. A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.
 
 ## 6. Policy-in-effect records
 
@@ -73,4 +75,4 @@ The security considerations for the whole specification family, including the sh
 
 - **Truncation.** Deleting entries from the end of a log leaves a valid chain. Detecting truncation needs an external anchor: the `entry_hash` a signer published, a receipt's presence in another system, or a `policy_swapped` entry expected on a schedule. Writers SHOULD publish the head hash periodically.
 - **Key custody.** An entry signature proves the writer held the key; it does not prove the clock. Auditors weigh `timestamp` by the receipt's `time_source`.
-- **Locking.** Two writers appending to one file interleave chains and corrupt both. The reference implementation uses a lock file and fails rather than bypasses a lock it cannot acquire.
+- **Locking.** Two writers appending to one file interleave chains and corrupt both. Section 4 defines the lock: a `<path>.lock` sentinel every implementation takes, plus an advisory lock on the log file where the platform has one. A writer that cannot acquire it fails rather than bypasses it, so a sentinel left behind by a writer that died is a condition for an operator to clear, not one a second writer may assume.

@@ -673,7 +673,7 @@ h2h report audit.jsonl --format csv --out ./evidence/      # one CSV per table
 
 Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line. A file holding any log entry is a log and is chain-verified as a whole, so a plain receipt among log entries is reported as a mixed file and breaks the chain rather than slipping past verification. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
 
-When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
+When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, the receipt schema pass and the entry signatures included, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
 
 | Flag | Meaning |
 |---|---|
@@ -684,7 +684,11 @@ When the input is a log, its chain is verified before anything is counted (the s
 | `--out <PATH>` | A directory for `--format csv` (one CSV per table), a file for every other format. |
 | `--lenient` | Skip unparsable lines instead of refusing. |
 | `--unverified` | Report on a log whose chain did not verify. |
-| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). |
+| `--keyring <PATH>` | Trusted keyring JSON for entry signatures. Without one, signed entries are counted but not verified. |
+| `--key <PATH>` | A single trusted public key (PEM), as a one-key keyring. Mutually exclusive with `--keyring`. |
+| `--require-signatures` | Every log entry must carry a signature that verifies; an unsigned entry (`entry_unsigned`) or a missing keyring (`no_keyring`) breaks the chain. |
+| `--max-skew <SECONDS>` | Allowed signer clock skew while verifying entry signatures (default 300). |
+| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). It is also the verifier's clock for entry signatures, so a report pinned to an instant verifies them as of the moment it describes. |
 | `--top-paths <N>` | How many `rule_path`s each rule-block row lists (default 5). |
 | `--experimental-oscal` | Required by `--format oscal`. |
 

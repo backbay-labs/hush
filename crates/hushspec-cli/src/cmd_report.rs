@@ -16,13 +16,14 @@
 
 use clap::ValueEnum;
 use colored::Colorize;
-use hushspec::log::{LogEntry, LogVerifyOptions, PolicyEvent, verify_log};
+use hushspec::log::{LogEntry, LogError, LogVerifyOptions, PolicyEvent, verify_log};
 use hushspec::report::{
     ChainSummary, ControlEvidenceRow, ControlsEvidence, FrameworkEvidence, Report, ReportOptions,
     build_report, in_window,
 };
 use hushspec::signing::SignedReceipt;
 use hushspec::{DecisionReceipt, HushSpec, ResolveOptions, RuleTraceEntry};
+use jsonschema::JSONSchema;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -67,6 +68,22 @@ pub struct ReportArgs {
     /// Report even though an input log's hash chain did not verify
     #[arg(long)]
     unverified: bool,
+
+    /// Trusted keyring JSON for entry signatures
+    #[arg(long, value_name = "PATH", conflicts_with = "key")]
+    keyring: Option<PathBuf>,
+
+    /// A single trusted public key (PEM) for entry signatures
+    #[arg(long, value_name = "PATH")]
+    key: Option<PathBuf>,
+
+    /// Every log entry must carry a signature that verifies
+    #[arg(long)]
+    require_signatures: bool,
+
+    /// Allowed signer clock skew in seconds
+    #[arg(long, default_value_t = 300, value_name = "SECONDS")]
+    max_skew: i64,
 
     /// Stamp the report with this RFC 3339 time instead of the wall clock
     #[arg(long, value_name = "TIMESTAMP")]
@@ -151,9 +168,38 @@ pub fn run(args: ReportArgs) -> i32 {
         },
     };
 
+    // A report's chain check is `h2h log verify`'s, so it reads the same
+    // flags and runs the same receipt schema pass. The report's own instant is
+    // the verifier's clock, so a report pinned with `--now` verifies the
+    // signatures as of the moment it claims to describe.
+    let verify_args = crate::verify_opts::VerifyOnLoadArgs {
+        require_signature: false,
+        keyring: args.keyring.clone(),
+        key: args.key.clone(),
+        now: args.now.clone(),
+        max_skew: args.max_skew,
+        last_seen_version: None,
+    };
+    let resolve_options = match verify_args.to_options() {
+        Ok(options) => options,
+        Err(code) => return code,
+    };
+    let log_options = LogVerifyOptions {
+        require_signatures: args.require_signatures,
+        keyring: resolve_options.keyring,
+        verify: resolve_options.verify,
+    };
+    let receipt_schema = match crate::cmd_log::receipt_schema() {
+        Ok(schema) => schema,
+        Err(message) => {
+            eprintln!("{} {message}", "error:".red());
+            return 2;
+        }
+    };
+
     let mut loaded = Loaded::default();
     for path in &args.files {
-        if let Err(code) = read_file(path, &mut loaded) {
+        if let Err(code) = read_file(path, &log_options, &receipt_schema, &mut loaded) {
             return code;
         }
     }
@@ -303,7 +349,44 @@ fn line_list(lines: &[usize]) -> String {
     text
 }
 
-fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
+/// Validate every receipt entry of `text` against the receipt schema.
+///
+/// The chain verifier reads receipts through the typed model, which is not the
+/// schema: a line whose receipt is hash-consistent can still carry a document
+/// no auditor would accept as evidence.
+fn receipts_match_schema(name: &str, text: &str, schema: &JSONSchema) -> Result<(), LogError> {
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<LogEntry>(line) else {
+            continue; // already reported by the chain verifier
+        };
+        let Some(receipt) = &entry.receipt else {
+            continue;
+        };
+        let value = serde_json::to_value(receipt).unwrap_or_default();
+        if let Err(errors) = schema.validate(&value) {
+            let messages: Vec<String> = errors.map(|error| error.to_string()).collect();
+            return Err(LogError {
+                file: name.to_string(),
+                line: index + 1,
+                message: format!(
+                    "receipt does not validate against the receipt schema: {}",
+                    messages.join("; ")
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn read_file(
+    path: &Path,
+    options: &LogVerifyOptions,
+    receipt_schema: &JSONSchema,
+    loaded: &mut Loaded,
+) -> Result<(), i32> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) => {
@@ -356,7 +439,14 @@ fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
     // carries the previous file's hash); checking the link *between* two
     // rotated files is `h2h log verify`'s job, and it takes them in order.
     if is_log {
-        let summary = match verify_log(&name, &text, &LogVerifyOptions::default()) {
+        let verified = verify_log(&name, &text, options)
+            // The chain verifier checks `receipt_version`; the schema pass
+            // covers every other member of every receipt entry (log spec 8,
+            // step 8), exactly as `h2h log verify` runs it.
+            .and_then(|report| {
+                receipts_match_schema(&name, &text, receipt_schema).map(|()| report)
+            });
+        let summary = match verified {
             Ok(report) => ChainSummary {
                 verified: true,
                 files: 1,

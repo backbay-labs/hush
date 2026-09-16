@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,6 +116,34 @@ func TestInvalidReceiptVectorsAreRejected(t *testing.T) {
 	t.Logf("rejected %d invalid receipt vectors", len(files))
 }
 
+// TestExplicitNullIsNotAnAbsentMember covers the one distinction the typed
+// model cannot make: `"reason": null` and no `reason` at all unmarshal to the
+// same receipt, but they are different documents and a log entry's hash covers
+// the difference.
+func TestExplicitNullIsNotAnAbsentMember(t *testing.T) {
+	path := filepath.Join(fixtureRepoRoot(t), "fixtures", "receipts", "valid", "allow-egress.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read %s: %v", path, err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("cannot read the vector: %v", err)
+	}
+	document["reason"] = nil
+	edited, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("cannot re-encode the vector: %v", err)
+	}
+	receipt, err := ParseReceipt(edited)
+	if err == nil {
+		t.Fatalf("an explicit null must be rejected, got %+v", receipt)
+	}
+	if !strings.Contains(err.Error(), "reason must not be null") {
+		t.Errorf("expected the rejection to name the null member, got: %v", err)
+	}
+}
+
 func mustCanonical(t *testing.T, receipt *DecisionReceipt) string {
 	t.Helper()
 	canonical, err := receipt.CanonicalJSON()
@@ -222,7 +251,7 @@ func TestSignReceiptRoundTrip(t *testing.T) {
 	}
 	// A receipt already names its policy, so the envelope leaves the policy
 	// claims unset unless the caller asks for them.
-	if signed.Signature.PolicyName != "" || signed.Signature.PolicyVersion != nil {
+	if signed.Signature.PolicyName != nil || signed.Signature.PolicyVersion != nil {
 		t.Errorf("expected no policy claims on a receipt envelope, got %+v", signed.Signature)
 	}
 

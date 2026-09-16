@@ -250,10 +250,10 @@ struct ChainState {
 
 /// Appends hash-linked entries to a JSON Lines file, fsyncing each one.
 ///
-/// Opening an existing file continues its chain from the last entry.
-/// Appends are serialized in-process by a mutex and across processes by a
-/// best-effort `<path>.lock` file; a lock held longer than
-/// [`ChainedFileSink::LOCK_TIMEOUT`] is reported as an error rather than
+/// Opening an existing file continues its chain from the last entry. Appends
+/// are serialized in-process by a mutex and across processes by the
+/// `<path>.lock` sentinel every SDK takes (log spec 4); a lock held longer
+/// than [`ChainedFileSink::LOCK_TIMEOUT`] is reported as an error rather than
 /// bypassed. Each entry's `seq` and `prev_hash` come from the file's current
 /// last entry, read while that lock is held, so a second sink or process
 /// writing the same log extends the chain instead of forking it. Rotation
@@ -368,6 +368,18 @@ impl ChainedFileSink {
     /// [`SinkError::Chain`].
     pub fn append(&self, payload: Payload) -> Result<LogEntry, SinkError> {
         let mut state = self.state_mut()?;
+        self.append_locked(&mut state, payload)
+    }
+
+    /// [`ChainedFileSink::append`] with the chain head already taken, so a
+    /// caller with more to do under the same lock -- [`ChainedFileSink::rotate`],
+    /// which must make its `log_started` record the first entry of the new
+    /// file -- can append without releasing it.
+    fn append_locked(
+        &self,
+        state: &mut ChainState,
+        payload: Payload,
+    ) -> Result<LogEntry, SinkError> {
         let path = state.path.clone();
         let cached = (state.seq, state.prev_hash.clone());
         let entry = with_file_lock(&path, || {
@@ -454,26 +466,31 @@ impl ChainedFileSink {
                 new_path.display()
             )));
         }
-        let (previous_file, previous_entry_hash) = {
-            let mut state = self.state_mut()?;
-            // Only the file name: logs are moved between hosts, and a path
-            // would leak the writer's layout for no verification benefit.
-            let previous = state
-                .path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| state.path.display().to_string());
-            let hash = state.prev_hash.clone();
-            state.path = new_path;
-            state.seq = 0;
-            (previous, hash)
-        };
-        self.append(Payload::LogStarted(LogStarted {
-            timestamp: format_timestamp(self.now()),
-            previous_file: Some(previous_file),
-            previous_entry_hash: (previous_entry_hash != GENESIS_HASH)
-                .then_some(previous_entry_hash),
-        }))
+        // The switch and the `log_started` entry happen under one lock: a
+        // concurrent send must not slip a receipt into the new file ahead of
+        // the record that links it to the old one (log spec 5).
+        let mut state = self.state_mut()?;
+        // Only the file name: logs are moved between hosts, and a path
+        // would leak the writer's layout for no verification benefit.
+        let previous_file = state
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| state.path.display().to_string());
+        let previous_entry_hash = state.prev_hash.clone();
+        state.path = new_path;
+        state.seq = 0;
+        self.append_locked(
+            &mut state,
+            Payload::LogStarted(LogStarted {
+                timestamp: format_timestamp(self.now()),
+                previous_file: Some(previous_file),
+                // Always recorded, the genesis value included (log spec 5): a
+                // verifier given both files compares it against the previous
+                // file's last hash, and an omitted member is not that hash.
+                previous_entry_hash: Some(previous_entry_hash),
+            }),
+        )
     }
 }
 
@@ -586,8 +603,13 @@ fn last_line_of(buffer: &[u8], at_start: bool) -> Option<&[u8]> {
     }
 }
 
-/// Run `f` while holding `<path>.lock`, created atomically. A stale lock
-/// (a writer that died) times out rather than being bypassed.
+/// Run `f` while holding `<path>.lock`, created atomically with `O_EXCL`.
+///
+/// This is the lock every SDK takes (log spec 4), so writers in different
+/// languages exclude each other. A stale lock -- one a writer that died left
+/// behind -- times out rather than being bypassed: breaking a lock this
+/// process cannot prove is stale would let two writers interleave chains and
+/// corrupt both (log spec 9).
 fn with_file_lock<T>(
     path: &Path,
     f: impl FnOnce() -> Result<T, SinkError>,
@@ -713,8 +735,14 @@ pub fn verify_logs(
                 line: line_no,
                 message,
             };
-            let entry: LogEntry =
-                serde_json::from_str(line).map_err(|e| fail(entry_parse_message(line, &e)))?;
+            // The entry is read from the line's own JSON object, which is also
+            // what step 7 hashes: hashing a re-serialization of the typed entry
+            // would cover the members this SDK materializes rather than the
+            // ones the file holds.
+            let document: serde_json::Value =
+                serde_json::from_str(line).map_err(|e| fail(format!("not a log entry: {e}")))?;
+            let entry = LogEntry::deserialize(&document)
+                .map_err(|e| fail(entry_parse_message(&document, &e)))?;
             if entry.log_version != LOG_VERSION {
                 return Err(fail(format!(
                     "unsupported log_version {:?}, expected {LOG_VERSION:?}",
@@ -739,12 +767,7 @@ pub fn verify_logs(
                         "a continued file must start with a log_started entry".into(),
                     ));
                 };
-                // An empty predecessor carries the genesis hash, which
-                // `rotate` records as an absent `previous_entry_hash`; treat
-                // the two spellings as the same link.
-                let started_hash = started.previous_entry_hash.as_deref();
-                let carried = carried_hash.as_deref();
-                if started_hash.unwrap_or(GENESIS_HASH) != carried.unwrap_or(GENESIS_HASH) {
+                if started.previous_entry_hash.as_deref() != carried_hash.as_deref() {
                     return Err(fail(
                         "log_started.previous_entry_hash does not match the previous file's last hash"
                             .into(),
@@ -767,8 +790,7 @@ pub fn verify_logs(
                     entry.prev_hash, prev_hash
                 )));
             }
-            let recomputed = entry
-                .compute_entry_hash()
+            let recomputed = entry_hash_of_document(&document)
                 .map_err(|e| fail(format!("cannot canonicalize entry: {e}")))?;
             if recomputed != entry.entry_hash {
                 return Err(fail(format!(
@@ -781,6 +803,20 @@ pub fn verify_logs(
                     return Err(fail(format!(
                         "receipt_version {:?} is not {RECEIPT_VERSION:?}",
                         receipt.receipt_version
+                    )));
+                }
+                // The entry hash covers whatever JSON the line held, so a
+                // hash-consistent line can still carry something that is not a
+                // receipt; the payload has to validate, not merely name the
+                // version (log spec 8, step 8).
+                let problems = crate::receipt::document_problems(
+                    document.get("receipt").unwrap_or(&serde_json::Value::Null),
+                    receipt,
+                );
+                if !problems.is_empty() {
+                    return Err(fail(format!(
+                        "receipt does not validate against the 0.2 receipt schema: {}",
+                        problems.join("; ")
                     )));
                 }
                 report.receipts += 1;
@@ -851,15 +887,26 @@ pub fn verify_logs(
     Ok(report)
 }
 
+/// The `entry_hash` one line should carry: `sha256:` over the RFC 8785
+/// canonical form of the object with `entry_hash` and `signature` removed
+/// (log spec 4).
+fn entry_hash_of_document(document: &serde_json::Value) -> Result<String, CanonicalError> {
+    let mut document = document.clone();
+    if let Some(object) = document.as_object_mut() {
+        object.remove("entry_hash");
+        object.remove("signature");
+    }
+    Ok(canonical::digest(&canonical::serialize_jcs(&document)?))
+}
+
 /// Why a line is not a log entry.
 ///
 /// A `receipt` member of the wrong shape is named as such (log spec 8, step 8)
 /// rather than reported as an opaque parse failure, so every SDK reports the
 /// same break for the same line.
-fn entry_parse_message(line: &str, error: &serde_json::Error) -> String {
-    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
-        && let Some(receipt) = value.get("receipt")
-        && let Err(receipt_error) = serde_json::from_value::<DecisionReceipt>(receipt.clone())
+fn entry_parse_message(document: &serde_json::Value, error: &serde_json::Error) -> String {
+    if let Some(receipt) = document.get("receipt")
+        && let Err(receipt_error) = DecisionReceipt::from_document(receipt)
     {
         return format!(
             "receipt does not validate against the 0.2 receipt schema: {receipt_error}"

@@ -40,6 +40,7 @@ from hushspec.evaluate import (
 # Re-exported: the rule trace is produced by the evaluator itself, so its
 # types live there.
 from hushspec.evaluate import RuleEvaluation, RuleOutcome  # noqa: F401
+from hushspec.generated_contract import RULE_KEYS
 from hushspec.resolve import ChainLink, Resolution, SignatureStatus
 from hushspec.schema import HushSpec
 
@@ -453,6 +454,36 @@ _TIMESTAMP_PATTERN = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$"
 )
 
+#: ``$.receipt_id``: a UUID v7, lowercase, with the version nibble 7 and the
+#: RFC 4122 variant bits.
+_UUID_V7_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+#: A ``sha256:`` content hash (canonical spec section 5).
+_CONTENT_HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+#: What a member that is not one reports.
+_NOT_A_CONTENT_HASH = "is not `sha256:` and 64 lowercase hex digits"
+
+#: ``$defs.PolicySummary.spec_version``: the v1 schema widened it to the 1.x
+#: lineage, so a receipt for a 1.0.z policy validates (core spec section 10.2).
+_SPEC_VERSION_PATTERN = re.compile(r"^(0|1)\.[0-9]+\.[0-9]+$")
+
+#: ``$defs.RuleEvaluation.rule_block``: the rule-block ids, which are the keys
+#: of ``rules`` exactly, followed by the engine stages of receipt spec section
+#: 4.3, item 5.
+#:
+#: The bare spellings are normative: format 0.1 mixed ``egress`` and
+#: ``rules.egress``, and 0.2 closed the enum on the bare ids.
+_RULE_BLOCKS = tuple(sorted(RULE_KEYS)) + (
+    "posture_capability",
+    "origin_profile",
+    "panic",
+    "unknown_action_type",
+    "default",
+)
+
 _ACTOR_KEYS = ("agent_id", "session_id", "principal", "runtime")
 _POLICY_KEYS = (
     "name",
@@ -519,9 +550,27 @@ def _require_str(value: Any, label: str) -> str:
     return value
 
 
-def _optional_str(value: Any, label: str) -> None:
-    if value is not None:
-        _require_str(value, label)
+def _optional_str(obj: dict[str, Any], key: str, label: str) -> None:
+    """Check an optional string member of *obj*.
+
+    An absent member is fine; one set to ``null`` is not. The schema types
+    every member it defines and none of them admits ``null``, and a receipt
+    inside a log entry is hashed as the document it is, so the two spellings
+    are not interchangeable.
+    """
+    if key in obj:
+        _require_str(obj[key], label)
+
+
+def _require_non_empty(value: Any, label: str) -> None:
+    if not _require_str(value, label):
+        raise ReceiptError(f"{label} is empty")
+
+
+def _require_pattern(value: Any, label: str, pattern: "re.Pattern[str]", expected: str) -> None:
+    text = _require_str(value, label)
+    if not pattern.match(text):
+        raise ReceiptError(f"{label} {text!r} {expected}")
 
 
 def _require_bool(value: Any, label: str) -> None:
@@ -529,9 +578,12 @@ def _require_bool(value: Any, label: str) -> None:
         raise ReceiptError(f"{label} must be a boolean")
 
 
-def _optional_size(value: Any, label: str) -> None:
-    if value is None:
+def _optional_size(obj: dict[str, Any], key: str, label: str) -> None:
+    """Check an optional non-negative integer member, as :func:`_optional_str`
+    checks a string one."""
+    if key not in obj:
         return
+    value = obj[key]
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ReceiptError(f"{label} must be a non-negative integer")
 
@@ -570,24 +622,26 @@ def _validate_receipt_shape(receipt: dict[str, Any]) -> None:
             "enforcement",
         ),
     )
-    _require_str(receipt["receipt_id"], "receipt_id")
+    _require_pattern(
+        receipt["receipt_id"], "receipt_id", _UUID_V7_PATTERN, "is not a lowercase UUID v7"
+    )
     _require_timestamp(receipt["timestamp"], "timestamp")
     _require_enum(receipt["time_source"], "time_source", _TIME_SOURCES)
     _require_enum(receipt["decision"], "decision", _DECISIONS)
-    _optional_str(receipt.get("matched_rule"), "matched_rule")
-    _optional_str(receipt.get("reason"), "reason")
-    _optional_str(receipt.get("origin_profile"), "origin_profile")
-    _optional_size(receipt.get("duration_us"), "duration_us")
+    _optional_str(receipt, "matched_rule", "matched_rule")
+    _optional_str(receipt, "reason", "reason")
+    _optional_str(receipt, "origin_profile", "origin_profile")
+    _optional_size(receipt, "duration_us", "duration_us")
 
-    if receipt.get("actor") is not None:
+    if "actor" in receipt:
         actor = _require_object(receipt["actor"], "actor", _ACTOR_KEYS)
         for key in _ACTOR_KEYS:
-            _optional_str(actor.get(key), f"actor.{key}")
+            _optional_str(actor, key, f"actor.{key}")
 
     _validate_policy(_require_object(receipt["policy"], "policy", _POLICY_KEYS))
     _validate_action(_require_object(receipt["action"], "action", _ACTION_KEYS))
     _validate_rule_trace(_require_list(receipt["rule_trace"], "rule_trace"))
-    if receipt.get("detection_trace") is not None:
+    if "detection_trace" in receipt:
         _validate_detection_trace(
             _require_list(receipt["detection_trace"], "detection_trace")
         )
@@ -601,49 +655,76 @@ def _validate_receipt_shape(receipt: dict[str, Any]) -> None:
         enforcement["outcome"], "enforcement.outcome", _ENFORCEMENT_OUTCOMES
     )
 
-    if receipt.get("posture") is not None:
+    if "posture" in receipt:
         posture = _require_object(receipt["posture"], "posture", _POSTURE_KEYS)
         _require_members(posture, "posture", _POSTURE_KEYS)
-        _require_str(posture["current"], "posture.current")
-        _require_str(posture["next"], "posture.next")
+        _require_non_empty(posture["current"], "posture.current")
+        _require_non_empty(posture["next"], "posture.next")
 
 
 def _validate_policy(policy: dict[str, Any]) -> None:
     _require_members(policy, "policy", ("spec_version", "content_hash"))
-    _require_str(policy["spec_version"], "policy.spec_version")
-    _require_str(policy["content_hash"], "policy.content_hash")
-    _optional_str(policy.get("name"), "policy.name")
-    _optional_size(policy.get("version"), "policy.version")
+    _require_pattern(
+        policy["spec_version"],
+        "policy.spec_version",
+        _SPEC_VERSION_PATTERN,
+        "is outside the 0.x and 1.x lineages",
+    )
+    _require_pattern(
+        policy["content_hash"],
+        "policy.content_hash",
+        _CONTENT_HASH_PATTERN,
+        _NOT_A_CONTENT_HASH,
+    )
+    _optional_str(policy, "name", "policy.name")
+    _optional_size(policy, "version", "policy.version")
 
-    if policy.get("extends_chain") is not None:
+    if "extends_chain" in policy:
         chain = _require_list(policy["extends_chain"], "policy.extends_chain")
         for index, raw in enumerate(chain):
             label = f"policy.extends_chain[{index}]"
             link = _require_object(raw, label, _CHAIN_LINK_KEYS)
             _require_members(link, label, _CHAIN_LINK_KEYS)
-            _require_str(link["source"], f"{label}.source")
-            _require_str(link["content_hash"], f"{label}.content_hash")
+            _require_non_empty(link["source"], f"{label}.source")
+            _require_pattern(
+                link["content_hash"],
+                f"{label}.content_hash",
+                _CONTENT_HASH_PATTERN,
+                _NOT_A_CONTENT_HASH,
+            )
 
-    if policy.get("signature") is not None:
+    if "signature" in policy:
         status = _require_object(
             policy["signature"], "policy.signature", _SIGNATURE_STATUS_KEYS
         )
         if "verified" not in status:
             raise ReceiptError("policy.signature is missing 'verified'")
         _require_bool(status["verified"], "policy.signature.verified")
-        _optional_str(status.get("key_id"), "policy.signature.key_id")
-        _optional_str(status.get("reason"), "policy.signature.reason")
-        if status.get("verified_at") is not None:
+        if "key_id" in status:
+            _require_pattern(
+                status["key_id"],
+                "policy.signature.key_id",
+                _CONTENT_HASH_PATTERN,
+                _NOT_A_CONTENT_HASH,
+            )
+        _optional_str(status, "reason", "policy.signature.reason")
+        if "verified_at" in status:
             _require_timestamp(status["verified_at"], "policy.signature.verified_at")
 
 
 def _validate_action(action: dict[str, Any]) -> None:
     _require_members(action, "action", ("type",))
-    _require_str(action["type"], "action.type")
-    _optional_str(action.get("target"), "action.target")
-    _optional_str(action.get("content_hash"), "action.content_hash")
-    _optional_size(action.get("content_size"), "action.content_size")
-    _optional_size(action.get("args_size"), "action.args_size")
+    _require_non_empty(action["type"], "action.type")
+    _optional_str(action, "target", "action.target")
+    if "content_hash" in action:
+        _require_pattern(
+            action["content_hash"],
+            "action.content_hash",
+            _CONTENT_HASH_PATTERN,
+            _NOT_A_CONTENT_HASH,
+        )
+    _optional_size(action, "content_size", "action.content_size")
+    _optional_size(action, "args_size", "action.args_size")
     # `origin` and `context` are the descriptors the caller supplied, carried
     # verbatim (receipt spec section 4.4); any JSON value is in range.
 
@@ -655,11 +736,11 @@ def _validate_rule_trace(entries: list[Any]) -> None:
         if "evaluated" not in entry:
             raise ReceiptError(f"{label} is missing 'evaluated'")
         _require_members(entry, label, ("rule_block", "outcome"))
-        _require_str(entry["rule_block"], f"{label}.rule_block")
-        _optional_str(entry.get("rule_path"), f"{label}.rule_path")
+        _require_enum(entry["rule_block"], f"{label}.rule_block", _RULE_BLOCKS)
+        _optional_str(entry, "rule_path", f"{label}.rule_path")
         _require_enum(entry["outcome"], f"{label}.outcome", _RULE_OUTCOMES)
         _require_bool(entry["evaluated"], f"{label}.evaluated")
-        _optional_str(entry.get("reason"), f"{label}.reason")
+        _optional_str(entry, "reason", f"{label}.reason")
 
 
 def _validate_detection_trace(entries: list[Any]) -> None:
@@ -669,7 +750,7 @@ def _validate_detection_trace(entries: list[Any]) -> None:
         if "matched" not in entry:
             raise ReceiptError(f"{label} is missing 'matched'")
         _require_members(entry, label, ("detector_id", "category", "score", "level"))
-        _require_str(entry["detector_id"], f"{label}.detector_id")
+        _require_non_empty(entry["detector_id"], f"{label}.detector_id")
         _require_enum(entry["category"], f"{label}.category", _DETECTION_CATEGORIES)
         score = entry["score"]
         if isinstance(score, bool) or not isinstance(score, (int, float)):

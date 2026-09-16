@@ -225,7 +225,7 @@ fill in later. Paths are relative to
 | Canonical form and `content_hash` | canonical 7 | `core/hash/` (16 vectors) | 4 |
 | Receipt format 0.2 | receipt 2 | `receipts/valid/`, `receipts/invalid/` | 4 |
 | Recorded `rule_trace`, per-case receipts | receipt 4.3 | `receipts/expected/<module>/<fixture>/<case>.json` | 4 |
-| Policy signing and verification | signing 2 | `signing/vectors.yaml` (17 cases) | 5 |
+| Policy signing and verification | signing 2 | `signing/vectors.yaml` (18 cases) | 5 |
 | Receipt signing | signing 8 | `receipts/signed/valid/`, `receipts/signed/invalid/` | 5 |
 | Hash-linked log | log | `log/valid/`, `log/invalid/` | 5 |
 | Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (8 cases) | 5 |

@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T19:29:57Z",
+  "generated_at": "2026-09-16T19:49:29Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -4477,6 +4477,13 @@
       "level": 5
     },
     {
+      "path": "fixtures/signing/policies/leap-second.sig",
+      "sha256": "0f97ce97a8014d288cdadff2b0274c555311b340b7ab18dead4fb45c8b871eb4",
+      "category": "signing",
+      "module": "signing",
+      "level": 5
+    },
+    {
       "path": "fixtures/signing/policies/raw-bytes-hash.sig",
       "sha256": "359785ef02e787c01938f433a5e88d0145585a28576322ebb0b87bed50e54e1f",
       "category": "signing",
@@ -4534,7 +4541,7 @@
     },
     {
       "path": "fixtures/signing/vectors.yaml",
-      "sha256": "ba49f23364bf426c236e1fc769ceebaadff7c521edb191986c30c6af1daf3a15",
+      "sha256": "fe3a0ec521effab0ab08638e093a20cdcf2635ce0c14edfaa0bd8da7711a6916",
       "category": "signing",
       "module": "signing",
       "level": 5

@@ -100,6 +100,54 @@ var (
 	}
 )
 
+// documentProblems is every way a receipt document departs from the 0.2
+// schema.
+//
+// Both forms are needed: receipt carries the typed members to check, and
+// document is the JSON it was read from, which is the only place an explicit
+// null still shows.
+func documentProblems(document any, receipt *DecisionReceipt) []string {
+	return append(nullMembers(document, ""), receipt.structuralProblems()...)
+}
+
+// nullMembers reports every member of document that is explicitly null.
+//
+// No member the schema defines admits null, so `"reason": null` is not the
+// document a receipt without a `reason` is -- unmarshalling collapses the two,
+// while a log's `entry_hash` covers the difference. `action.origin` and
+// `action.context` are skipped: they carry the descriptor the caller supplied
+// verbatim, whose own members are not this schema's to constrain.
+func nullMembers(document any, path string) []string {
+	var problems []string
+	switch value := document.(type) {
+	case nil:
+		return []string{path + " must not be null"}
+	case map[string]any:
+		// Sorted, so a receipt that breaks several rules reports them in the
+		// same order every time.
+		keys := make([]string, 0, len(value))
+		for key := range value {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			if path == "action" && (key == "origin" || key == "context") {
+				continue
+			}
+			child := key
+			if path != "" {
+				child = path + "." + key
+			}
+			problems = append(problems, nullMembers(value[key], child)...)
+		}
+	case []any:
+		for index, item := range value {
+			problems = append(problems, nullMembers(item, fmt.Sprintf("%s[%d]", path, index))...)
+		}
+	}
+	return problems
+}
+
 // Validate checks a receipt against the structural rules of the 0.2 schema
 // that a typed model cannot express: closed enums, string patterns, required
 // members, and non-negative sizes.

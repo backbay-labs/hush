@@ -279,23 +279,60 @@ pub enum ReceiptError {
     Json(#[from] serde_json::Error),
     #[error("unsupported receipt_version {0:?}, expected {RECEIPT_VERSION:?}")]
     UnsupportedVersion(String),
+    #[error("receipt does not satisfy the 0.2 schema: {0}")]
+    Structure(String),
     #[error("receipt has no canonical form: {0}")]
     Canonical(#[from] CanonicalError),
 }
 
 impl DecisionReceipt {
-    /// Parse a receipt, rejecting unknown fields and any version other than
-    /// the one this module implements (receipt spec 3.1).
+    /// Parse a receipt, rejecting unknown fields, any version other than the
+    /// one this module implements, and any document that is not shaped like a
+    /// 0.2 receipt (receipt spec 3.1).
     ///
     /// # Errors
     ///
-    /// [`ReceiptError::Json`] or [`ReceiptError::UnsupportedVersion`].
+    /// [`ReceiptError::Json`], [`ReceiptError::UnsupportedVersion`] or
+    /// [`ReceiptError::Structure`].
     pub fn parse(json: &str) -> Result<Self, ReceiptError> {
-        let receipt: Self = serde_json::from_str(json)?;
+        let document: serde_json::Value = serde_json::from_str(json)?;
+        Self::from_document(&document)
+    }
+
+    /// [`DecisionReceipt::parse`] for a document that is already parsed, so a
+    /// log verifier reads the receipt its line holds rather than a
+    /// re-serialization of it.
+    ///
+    /// # Errors
+    ///
+    /// As [`DecisionReceipt::parse`].
+    pub(crate) fn from_document(document: &serde_json::Value) -> Result<Self, ReceiptError> {
+        let receipt = Self::deserialize(document)?;
         if receipt.receipt_version != RECEIPT_VERSION {
             return Err(ReceiptError::UnsupportedVersion(receipt.receipt_version));
         }
+        let problems = document_problems(document, &receipt);
+        if !problems.is_empty() {
+            return Err(ReceiptError::Structure(problems.join("; ")));
+        }
         Ok(receipt)
+    }
+
+    /// Check this receipt against the structural rules of the 0.2 schema that
+    /// a typed model cannot express: string patterns, members that must not be
+    /// empty, and numeric bounds.
+    ///
+    /// # Errors
+    ///
+    /// [`ReceiptError::Structure`], listing every rule the receipt breaks
+    /// rather than the first: a receipt that breaks several is usually one
+    /// bug, and an auditor reading the report wants the whole picture.
+    pub fn validate(&self) -> Result<(), ReceiptError> {
+        let problems = self.structural_problems();
+        if problems.is_empty() {
+            return Ok(());
+        }
+        Err(ReceiptError::Structure(problems.join("; ")))
     }
 
     /// The receipt's canonical form: RFC 8785 over the receipt object, with
@@ -319,6 +356,245 @@ impl DecisionReceipt {
     /// As [`DecisionReceipt::canonical_json`].
     pub fn receipt_hash(&self) -> Result<String, CanonicalError> {
         Ok(canonical::digest(&self.canonical_json()?))
+    }
+
+    fn structural_problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+
+        if self.receipt_version != RECEIPT_VERSION {
+            problems.push(format!(
+                "receipt_version {:?} is not {RECEIPT_VERSION:?}",
+                self.receipt_version
+            ));
+        }
+        if !is_uuid_v7(&self.receipt_id) {
+            problems.push(format!(
+                "receipt_id {:?} is not a lowercase UUID v7",
+                self.receipt_id
+            ));
+        }
+        push_timestamp_problem(&mut problems, "timestamp", &self.timestamp);
+
+        // policy (receipt spec 4.2).
+        if !is_spec_version(&self.policy.spec_version) {
+            problems.push(format!(
+                "policy.spec_version {:?} is outside the 0.x and 1.x lineages",
+                self.policy.spec_version
+            ));
+        }
+        push_hash_problem(
+            &mut problems,
+            "policy.content_hash",
+            &self.policy.content_hash,
+        );
+        for (index, link) in self.policy.extends_chain.iter().flatten().enumerate() {
+            push_empty_problem(
+                &mut problems,
+                &format!("policy.extends_chain[{index}].source"),
+                &link.source,
+            );
+            push_hash_problem(
+                &mut problems,
+                &format!("policy.extends_chain[{index}].content_hash"),
+                &link.content_hash,
+            );
+        }
+        if let Some(status) = &self.policy.signature {
+            if let Some(key_id) = &status.key_id {
+                push_hash_problem(&mut problems, "policy.signature.key_id", key_id);
+            }
+            if let Some(verified_at) = &status.verified_at {
+                push_timestamp_problem(&mut problems, "policy.signature.verified_at", verified_at);
+            }
+        }
+
+        // action (receipt spec 4.4).
+        push_empty_problem(&mut problems, "action.type", &self.action.action_type);
+        if let Some(content_hash) = &self.action.content_hash {
+            push_hash_problem(&mut problems, "action.content_hash", content_hash);
+        }
+
+        // rule_trace (receipt spec 4.3).
+        for (index, entry) in self.rule_trace.iter().enumerate() {
+            if !is_rule_block(&entry.rule_block) {
+                problems.push(format!(
+                    "rule_trace[{index}].rule_block {:?} is outside the closed enum",
+                    entry.rule_block
+                ));
+            }
+        }
+
+        // detection_trace (receipt spec 4.6).
+        for (index, entry) in self.detection_trace.iter().flatten().enumerate() {
+            push_empty_problem(
+                &mut problems,
+                &format!("detection_trace[{index}].detector_id"),
+                &entry.detector_id,
+            );
+            if !(0.0..=1.0).contains(&entry.score) {
+                problems.push(format!(
+                    "detection_trace[{index}].score {} is outside [0, 1]",
+                    entry.score
+                ));
+            }
+        }
+
+        // posture (receipt spec 4.8).
+        if let Some(posture) = &self.posture {
+            push_empty_problem(&mut problems, "posture.current", &posture.current);
+            push_empty_problem(&mut problems, "posture.next", &posture.next);
+        }
+
+        problems
+    }
+}
+
+// --------------------------------------------------------------------------
+// Structural validation (receipt spec 2, item 4)
+// --------------------------------------------------------------------------
+//
+// Deserializing already enforces the schema's types, its closed enums and
+// `additionalProperties: false` (an unknown member is a parse error). What a
+// typed model cannot state is the rest: which strings match a pattern, which
+// must not be empty, which numbers are in range, and that an explicit `null`
+// is not the same document as an absent member. The checks below close that
+// gap, so [`DecisionReceipt::parse`] and the log verifier accept exactly the
+// documents `schemas/hushspec-receipt.v1.schema.json` accepts.
+//
+// They are a focused checker rather than a JSON Schema engine: the schema is
+// normative and stable, and the library carries no validator dependency. Every
+// rule names the member it comes from.
+
+/// Every way a receipt document departs from the 0.2 schema.
+///
+/// Both forms are needed: `receipt` carries the typed members to check, and
+/// `document` is the JSON the receipt was read from, which is the only place
+/// an explicit `null` still shows.
+pub(crate) fn document_problems(
+    document: &serde_json::Value,
+    receipt: &DecisionReceipt,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    push_null_problems(document, "", &mut problems);
+    problems.extend(receipt.structural_problems());
+    problems
+}
+
+/// `sha256:` followed by 64 lowercase hex digits (canonical spec 5).
+#[must_use]
+pub(crate) fn is_content_hash(value: &str) -> bool {
+    let Some(hex) = value.strip_prefix(canonical::CONTENT_HASH_PREFIX) else {
+        return false;
+    };
+    hex.len() == 64
+        && hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// `$.receipt_id`: a UUID v7, lowercase, with the version nibble 7 and the
+/// RFC 4122 variant bits.
+fn is_uuid_v7(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shape = b"########-####-####-####-############";
+    if bytes.len() != shape.len() {
+        return false;
+    }
+    for (byte, expected) in bytes.iter().zip(shape) {
+        let ok = match expected {
+            b'#' => byte.is_ascii_digit() || (b'a'..=b'f').contains(byte),
+            other => byte == other,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    bytes[14] == b'7' && matches!(bytes[19], b'8' | b'9' | b'a' | b'b')
+}
+
+/// `$defs.PolicySummary.spec_version`: the v1 schema widened it to the 1.x
+/// lineage, so a receipt for a 1.0.z policy validates (core spec 10.2).
+fn is_spec_version(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let (Some(major), Some(minor), Some(patch), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    matches!(major, "0" | "1") && digits(minor) && digits(patch)
+}
+
+/// The engine stages a `rule_trace` entry may name besides a rule block
+/// (receipt spec 4.3, item 5).
+const ENGINE_STAGE_BLOCKS: &[&str] = &[
+    "posture_capability",
+    ORIGIN_PROFILE_BLOCK,
+    "panic",
+    UNKNOWN_ACTION_TYPE_BLOCK,
+    "default",
+];
+
+/// `$defs.RuleEvaluation.rule_block`: the rule-block ids, which are the keys of
+/// `rules` exactly, plus the engine stages.
+///
+/// The bare spellings are normative: format 0.1 mixed `egress` and
+/// `rules.egress`, and 0.2 closed the enum on the bare ids.
+fn is_rule_block(value: &str) -> bool {
+    crate::generated_contract::RULE_KEYS.contains(&value) || ENGINE_STAGE_BLOCKS.contains(&value)
+}
+
+fn push_hash_problem(problems: &mut Vec<String>, field: &str, value: &str) {
+    if !is_content_hash(value) {
+        problems.push(format!(
+            "{field} {value:?} is not `sha256:` and 64 lowercase hex digits"
+        ));
+    }
+}
+
+fn push_timestamp_problem(problems: &mut Vec<String>, field: &str, value: &str) {
+    if !is_millisecond_timestamp(value) {
+        problems.push(format!(
+            "{field} {value:?} is not an RFC 3339 UTC instant with millisecond precision"
+        ));
+    }
+}
+
+fn push_empty_problem(problems: &mut Vec<String>, field: &str, value: &str) {
+    if value.is_empty() {
+        problems.push(format!("{field} is empty"));
+    }
+}
+
+/// Report every member of `document` that is explicitly `null`.
+///
+/// No member the schema defines admits `null`, so `"reason": null` is not the
+/// document a receipt without a `reason` is -- and deserializing collapses the
+/// two, while a log's `entry_hash` covers the difference. `action.origin` and
+/// `action.context` are skipped: they carry the descriptor the caller supplied
+/// verbatim, whose own members are not this schema's to constrain.
+fn push_null_problems(document: &serde_json::Value, path: &str, problems: &mut Vec<String>) {
+    match document {
+        serde_json::Value::Null => problems.push(format!("{path} must not be null")),
+        serde_json::Value::Object(members) => {
+            for (key, value) in members {
+                if path == "action" && (key == "origin" || key == "context") {
+                    continue;
+                }
+                let child = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                push_null_problems(value, &child, problems);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                push_null_problems(item, &format!("{path}[{index}]"), problems);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -384,10 +660,6 @@ pub fn format_timestamp(instant: DateTime<Utc>) -> String {
 /// The shape is checked before parsing because `parse_from_rfc3339` also
 /// accepts offsets and other sub-second precisions, which receipts and
 /// envelopes do not.
-///
-/// Only the signing and bundle envelopes validate timestamps they were
-/// handed, so this is gated with them.
-#[cfg(feature = "signing")]
 pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
     let bytes = value.as_bytes();
     let shape = b"####-##-##T##:##:##.###Z";
@@ -402,6 +674,13 @@ pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
         if !ok {
             return false;
         }
+    }
+    // `parse_from_rfc3339` reads second 60 as a leap second. The schemas pin
+    // the field to `[0-5][0-9]`, so a leap second is not an instant these
+    // formats can carry, and accepting one would compare an expiry against a
+    // time the other engines reject outright.
+    if &bytes[17..19] == b"60" {
+        return false;
     }
     DateTime::parse_from_rfc3339(value).is_ok()
 }
@@ -712,6 +991,16 @@ mod tests {
             EnforcementSummary::implied(Decision::Deny, Monitor).outcome,
             WouldBlock
         );
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    fn a_millisecond_timestamp_is_a_real_instant() {
+        assert!(is_millisecond_timestamp("2026-09-15T12:00:00.000Z"));
+        assert!(!is_millisecond_timestamp("2026-06-30T23:59:60.000Z"));
+        assert!(!is_millisecond_timestamp("2026-02-30T00:00:00.000Z"));
+        assert!(!is_millisecond_timestamp("2026-09-15T12:00:00Z"));
+        assert!(!is_millisecond_timestamp("2026-09-15T12:00:00.000+01:00"));
     }
 
     #[test]

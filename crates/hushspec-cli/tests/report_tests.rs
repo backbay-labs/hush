@@ -641,6 +641,86 @@ fn a_broken_chain_refuses_to_report_without_unverified() {
     );
 }
 
+/// The `entry_hash` a log line should carry, so a test can edit a receipt and
+/// leave the chain otherwise intact.
+fn entry_hash_of(entry: &serde_json::Value) -> String {
+    let mut hashed = entry.clone();
+    let object = hashed.as_object_mut().unwrap();
+    object.remove("entry_hash");
+    object.remove("signature");
+    hushspec::canonical::digest(&hushspec::canonical::serialize_jcs(&hashed).unwrap())
+}
+
+#[test]
+fn a_receipt_the_schema_rejects_breaks_the_chain() {
+    // `h2h report` runs the same checks as `h2h log verify`, the receipt
+    // schema pass included: a line can be hash-consistent and still carry a
+    // receipt no auditor would accept as evidence.
+    let dir = TempDir::new().unwrap();
+    let log = dir.path().join("schema.jsonl");
+    let good = std::fs::read_to_string(repo_root().join("fixtures/log/valid/basic.jsonl")).unwrap();
+    let lines: Vec<&str> = good.lines().collect();
+    let mut entry: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+    entry["receipt"]["matched_rule"] = serde_json::json!("");
+    entry["entry_hash"] = serde_json::json!(entry_hash_of(&entry));
+    std::fs::write(
+        &log,
+        format!("{}\n{}\n", lines[0], serde_json::to_string(&entry).unwrap()),
+    )
+    .unwrap();
+
+    for command in ["report", "log"] {
+        let mut h2h = h2h();
+        h2h.arg(command);
+        if command == "log" {
+            h2h.arg("verify");
+        }
+        h2h.arg(&log)
+            .assert()
+            .code(1)
+            .stderr(predicate::str::contains("receipt schema"));
+    }
+}
+
+#[test]
+fn entry_signatures_are_verified_when_a_keyring_is_supplied() {
+    let signed = repo_root().join("fixtures/log/valid/signed.jsonl");
+    let keyring = repo_root().join("fixtures/signing/keys/keyring.json");
+
+    let output = h2h()
+        .arg("report")
+        .arg(&signed)
+        .args(["--keyring", keyring.to_str().unwrap()])
+        .args(["--require-signatures", "--now", "2026-09-15T12:00:00Z"])
+        .args(["--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["chain_verified"], true);
+    assert_eq!(report["chain"]["signed_entries"], 4);
+
+    // Requiring signatures with no keyring cannot be satisfied, and an
+    // unsigned log fails the requirement outright.
+    h2h()
+        .arg("report")
+        .arg(&signed)
+        .arg("--require-signatures")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("no_keyring"));
+    h2h()
+        .arg("report")
+        .arg(repo_root().join("fixtures/log/valid/basic.jsonl"))
+        .args(["--keyring", keyring.to_str().unwrap()])
+        .arg("--require-signatures")
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("entry_unsigned"));
+}
+
 #[test]
 fn a_receipt_prepended_to_a_log_is_still_chain_verified() {
     let dir = TempDir::new().unwrap();

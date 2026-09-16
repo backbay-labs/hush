@@ -261,12 +261,13 @@ func (p LogPayload) entryType() (EntryType, error) {
 // each one to durable storage before reporting it written (log spec 3).
 //
 // Opening an existing file continues its chain from the last entry. Appends
-// are serialized in-process by a mutex and across processes by an exclusive
-// lock on the file itself (flock where the platform has it, a `<path>.lock`
-// file elsewhere); a lock held longer than [LogLockTimeout] is reported as an
-// error rather than bypassed. Each entry's `seq` and `prev_hash` come from the
-// file's current last entry, read while that lock is held, so a second sink or
-// process writing the same log extends the chain instead of forking it.
+// are serialized in-process by a mutex and across processes by the
+// `<path>.lock` sentinel every SDK takes, under which the log file itself is
+// flocked too where the platform has it (log spec 4); a lock held longer than
+// [LogLockTimeout] is reported as an error rather than bypassed. Each entry's
+// `seq` and `prev_hash` come from the file's current last entry, read while
+// that lock is held, so a second sink or process writing the same log extends
+// the chain instead of forking it.
 // [ChainedFileSink.Rotate] carries the chain into a new file through a
 // `log_started` entry.
 type ChainedFileSink struct {
@@ -458,12 +459,13 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	previousFile := filepath.Base(s.path)
 	previousHash := s.prevHash
 	s.path, s.seq = newPath, 0
+	// The link is always recorded, the genesis value included (log spec 5): a
+	// verifier given both files compares it against the previous file's last
+	// hash, and an omitted member is not that hash.
 	started := &LogStarted{
-		Timestamp:    FormatTimestamp(s.now()),
-		PreviousFile: previousFile,
-	}
-	if previousHash != GenesisHash {
-		started.PreviousEntryHash = previousHash
+		Timestamp:         FormatTimestamp(s.now()),
+		PreviousFile:      previousFile,
+		PreviousEntryHash: previousHash,
 	}
 
 	return s.appendLocked(LogPayload{LogStarted: started})
@@ -494,6 +496,16 @@ func lastLogEntryIn(file *os.File, path string) (*LogEntry, error) {
 	if err := strictUnmarshalJSON(last, &entry); err != nil {
 		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %w", path, err)
 	}
+	// Reading the head loosely would seed the chain from a malformed tail. A
+	// sequence number starts at 1 and an entry hash is never empty, so the zero
+	// values mean the member was absent -- and continuing from them would make
+	// the next entry start a second, unlinked chain inside the file.
+	if entry.Seq == 0 {
+		return nil, fmt.Errorf("log: the last line of %s has no seq", path)
+	}
+	if entry.EntryHash == "" {
+		return nil, fmt.Errorf("log: the last line of %s has no entry_hash", path)
+	}
 	return &entry, nil
 }
 
@@ -516,6 +528,13 @@ func lastLogLine(file *os.File, path string) ([]byte, error) {
 	end := info.Size()
 	var tail []byte
 	for end > 0 {
+		// Checked before the next chunk is read, so a file with no newline in
+		// it is never pulled into memory whole. The line itself is checked
+		// again below: the last chunk can carry it past the cap.
+		if len(tail) > maxLogLineBytes {
+			return nil, fmt.Errorf(
+				"log: the last line of %s is longer than %d bytes", path, maxLogLineBytes)
+		}
 		start := end - tailChunkBytes
 		if start < 0 {
 			start = 0
@@ -714,7 +733,12 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			// this SDK materializes rather than the ones the file holds, and
 			// would report a payload it cannot model exactly as a hash
 			// mismatch instead of letting the check that names it run.
-			recomputed, err := entryHashOfLine(line)
+			object, err := entryObjectOfLine(line)
+			if err != nil {
+				return nil, fail("cannot canonicalize entry: %s", err)
+			}
+			receiptDocument := object["receipt"]
+			recomputed, err := entryHashOfObject(object)
 			if err != nil {
 				return nil, fail("cannot canonicalize entry: %s", err)
 			}
@@ -732,7 +756,8 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 					return nil, fail("receipt_version %q is not %q",
 						entry.Receipt.ReceiptVersion, ReceiptVersion)
 				}
-				if problems := entry.Receipt.structuralProblems(); len(problems) > 0 {
+				problems := documentProblems(receiptDocument, entry.Receipt)
+				if len(problems) > 0 {
 					return nil, fail(
 						"receipt does not validate against the 0.2 receipt schema: %s",
 						strings.Join(problems, "; "))
@@ -763,17 +788,29 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 	return report, nil
 }
 
-// entryHashOfLine is the `entry_hash` one JSON Lines record should carry:
-// "sha256:" over the RFC 8785 canonical form of the object with `entry_hash`
-// and `signature` removed (log spec 4).
-func entryHashOfLine(line string) (string, error) {
+// entryObjectOfLine reads one JSON Lines record as the object the line holds,
+// which is what both the entry hash and the receipt payload check read: the
+// typed entry cannot answer for members it does not model.
+func entryObjectOfLine(line string) (map[string]any, error) {
 	var object map[string]any
 	if err := json.Unmarshal([]byte(line), &object); err != nil {
-		return "", fmt.Errorf("cannot re-read the log entry: %w", err)
+		return nil, fmt.Errorf("cannot re-read the log entry: %w", err)
 	}
-	delete(object, "entry_hash")
-	delete(object, "signature")
-	canonical, err := canonicalJSONValue(object)
+	return object, nil
+}
+
+// entryHashOfObject is the `entry_hash` one record should carry: "sha256:"
+// over the RFC 8785 canonical form of the object with `entry_hash` and
+// `signature` removed (log spec 4).
+func entryHashOfObject(object map[string]any) (string, error) {
+	hashed := make(map[string]any, len(object))
+	for key, value := range object {
+		if key == "entry_hash" || key == "signature" {
+			continue
+		}
+		hashed[key] = value
+	}
+	canonical, err := canonicalJSONValue(hashed)
 	if err != nil {
 		return "", fmt.Errorf("the log entry has no canonical form: %w", err)
 	}
