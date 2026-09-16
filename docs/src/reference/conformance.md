@@ -228,4 +228,4 @@ fill in later. Paths are relative to
 | Policy signing and verification | signing 2 | `signing/vectors.yaml` (18 cases) | 5 |
 | Receipt signing | signing 8 | `receipts/signed/valid/`, `receipts/signed/invalid/` | 5 |
 | Hash-linked log | log | `log/valid/`, `log/invalid/` | 5 |
-| Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (8 cases) | 5 |
+| Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (10 cases) | 5 |

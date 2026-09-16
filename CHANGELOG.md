@@ -48,7 +48,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `schemas/hushspec-receipt.v1.schema.json` is the 0.2 schema.
 - `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
   (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
-  expiry, rollback protection, and 17 verification vectors under `fixtures/signing/` signed
+  expiry, rollback protection, and 18 verification vectors under `fixtures/signing/` signed
   with a published test-only key.
 - `spec/hushspec-log.md` and `spec/hushspec-bundle.md`: the hash-linked receipt log and the
   policy bundle attestation format, with their schemas and vectors.
@@ -182,7 +182,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   reports the closed reason-code set of signing spec 6.4 (`malformed_envelope`,
   `unsupported_format_version`, `unsupported_algorithm`, `unknown_key_id`, `key_revoked`,
   `key_retired`, `signed_at_in_future`, `expired`, `signature_mismatch`,
-  `content_hash_mismatch`, `policy_version_rollback`). All 17 vectors under `fixtures/signing/`
+  `content_hash_mismatch`, `policy_version_rollback`). All 18 vectors under `fixtures/signing/`
   pass.
 - `when.capability` and `when.rate` support: `RateCondition`, `RateComparison`,
   `evaluate_condition_with_capabilities` and `is_capability_identifier` are exported.
@@ -661,8 +661,57 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `fixtures/core/hash/empty-strings.yaml`. The Python bundle subject and the Rust signer's
   policy-name claim follow the same presence rule.
 
+- The regex profile reads every pattern the same way in all four SDKs: one group grammar
+  (named groups in either spelling are permitted; `(?#`, lookaround, backreferences and POSIX
+  bracket classes are refused), `{,n}` is refused, `(?i)` folds ASCII letters only by expansion
+  so no engine folds U+017F or U+212A, an astral character inside a class is one scalar value in
+  TypeScript, a pattern is at most 2048 bytes, every rejection carries the same per-feature
+  message and E005, and a fixed-offset `timezone` is `[+-]HH` or `[+-]HH:MM` with two-digit
+  fields. Vectors under `fixtures/core/invalid/regex-*.yaml`, `when-timezone-*.yaml` and
+  `fixtures/core/evaluation/regex-dialect.test.yaml`.
+- Canonical form: a number written with integer syntax is bounded by 2^53-1 and one written
+  with float syntax is emitted at any magnitude, in every SDK (TypeScript narrows integers at
+  parse time; Go refuses an integer literal past 2^64 that its YAML parser would have rounded);
+  a written `null` for a declared property, an unknown key, a non-object `extensions` and an
+  unknown extension name are refused everywhere, and the reference canonicalizer refuses an
+  unresolved `extends` and a duplicate YAML key. Vector `fixtures/core/hash/numbers-large.yaml`.
+- Evidence chain: bundle verifiers reject a revoked or retired key (`key_revoked`,
+  `key_retired`; vectors `revoked-key`, `retired-key`); every receipt parser validates the 0.2
+  structure and refuses an explicit `null`; a leap second is refused (vector
+  `leap-second-signed-at`); log writers share one lock protocol (the `<path>.lock` sentinel,
+  with `flock` held underneath where the platform has it, and a bounded wait), always record
+  `previous_entry_hash`, rotate under one lock and refuse a corrupt tail; the Python refusal
+  receipt carries the refused document's real content hash; TypeScript and Python record
+  `missing_signature` when verification was attempted; a claimed `key_id` is recorded only when
+  well formed; `compile()` refuses a document that still declares `extends` in every SDK;
+  `Policy::resolve` merges options instead of replacing them; Go's `EvaluateAudited` returns an
+  error rather than a receipt with an empty content hash.
+- Conditions and adapters: `when.context` matching (scalar membership in both directions,
+  array intersection, exact numbers) is written into core spec 3.13 and pinned by
+  `conditions-context-match.test.yaml`; Python drops a counter that is not a whole number; Go
+  refuses an empty `capability` or `timezone`; `min_score` is bounded to 100 at parse time; the
+  TypeScript Claude adapter scans a `create` command's `file_text`, strips dated tool suffixes
+  and maps `web_fetch` to egress; MCP tools map through the shared well-known table; the Vercel
+  wrapper keeps a tool's prototype; the Go adapter entry points carry the same names as the
+  other SDKs; the TypeScript guard re-checks an adopted resolution under `requireSignature`; the
+  poller survives a throwing callback; the Python provider fingerprints a file before loading it.
+- Observers and sinks: a failing receipt sink never changes a decision and is reported as a
+  `sink.error` event in every SDK (Go's `Check` no longer returns it); `MultiSink` surfaces a
+  child's failure; Rust observers absorb a panicking hook; Python and Go OTLP records carry
+  `observedTimeUnixNano` and `severityNumber`; Go's metrics count only load failures as failed
+  loads.
+
 **CLI and tooling**
 
+- `h2h report` runs the receipt schema pass `h2h log verify` runs and takes `--keyring`,
+  `--key`, `--require-signatures` and `--max-skew`; an unresolvable `--policy` for
+  `h2h bundle verify` is a `policy_mismatch`; `h2h audit` and `h2h schema` report a
+  serialization failure instead of exiting 0 silently.
+- Workflows declare `permissions: contents: read`; the PyPI publish action is pinned to a
+  commit; the release job fails without both signing keys unless `allow-unsigned` is passed and
+  verifies the bundles it ships; the action caches the binary under the resolved release tag;
+  `cargo deny` refuses yanked and unmaintained crates; every generator requires `rustfmt` and
+  formats for edition 2024.
 - `h2h report` treats a file holding any log entry as a log and verifies its chain, so a plain
   receipt prepended to a log cannot carry it past verification; mixed record types are reported.
 - Control coverage (lint L011, `h2h audit --controls`, `h2h report`) counts a mapping only when
