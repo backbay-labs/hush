@@ -78,7 +78,11 @@ export class PolicyPoller {
 
     const intervalMs = this.options.intervalMs ?? 60_000;
     this.timer = setInterval(() => {
-      void this.doLoad(false);
+      // A poll runs with nobody awaiting it, so a rejection here would be an
+      // unhandled rejection rather than something a caller can catch. The
+      // callbacks report their own failures, so anything reaching this point
+      // is already past reporting.
+      void this.doLoad(false).catch(() => {});
     }, intervalMs);
 
     if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
@@ -121,6 +125,36 @@ export class PolicyPoller {
     return this.currentResolution;
   }
 
+  /**
+   * Hand the new policy to `onChange` without letting a throw from it escape.
+   *
+   * The callback belongs to the caller and runs on the poll timer, where an
+   * escaping error is an unhandled rejection rather than something anyone can
+   * catch -- and it would take the poll loop with it. A callback that throws
+   * is reported through `onError`, which is where the caller already looks for
+   * a failed poll.
+   */
+  private notifyChange(spec: HushSpec, resolution?: Resolution): void {
+    try {
+      this.options.onChange(spec, resolution);
+    } catch (err) {
+      this.notifyError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * Report a failed poll, tolerating a handler that throws. There is nowhere
+   * left to report an `onError` that fails, so it is dropped rather than
+   * allowed to stop the poll loop.
+   */
+  private notifyError(error: Error): void {
+    try {
+      this.options.onError?.(error);
+    } catch {
+      // Reporting the reporter has no destination.
+    }
+  }
+
   private async doLoad(throwOnError: boolean): Promise<HushSpec> {
     const loadId = ++this.nextLoadId;
     let loaded: string | PolicySnapshot;
@@ -134,7 +168,7 @@ export class PolicyPoller {
       if (loadId < this.latestAppliedLoadId) {
         return this.currentSpec!;
       }
-      this.options.onError?.(error);
+      this.notifyError(error);
       return this.currentSpec!;
     }
 
@@ -153,7 +187,7 @@ export class PolicyPoller {
         if (loadId < this.latestAppliedLoadId) {
           return this.currentSpec!;
         }
-        this.options.onError?.(error);
+        this.notifyError(error);
         return this.currentSpec!;
       }
       resolution = result.value;
@@ -180,7 +214,7 @@ export class PolicyPoller {
     this.currentResolution = resolution ?? null;
     this.contentHash = hash;
     this.lastSuccessfulLoad = Date.now();
-    this.options.onChange(spec, resolution);
+    this.notifyChange(spec, resolution);
 
     return spec;
   }
