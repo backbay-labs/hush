@@ -132,6 +132,10 @@ export {
 } from './resolve.js';
 export {
   verifyBundle,
+  createBundle,
+  buildBundleStatement,
+  bundleStatementBytes,
+  bundleToJson,
   parseBundle,
   bundleStatement,
   pae,
@@ -141,6 +145,8 @@ export {
   BUNDLE_PAYLOAD_TYPE,
   BUNDLE_STATEMENT_TYPE,
   BUNDLE_PREDICATE_TYPE,
+  BUNDLE_RESOLVER_TOOL,
+  type CreateBundleOptions,
   type DsseEnvelope,
   type DsseSignature,
   type BundleStatement,
