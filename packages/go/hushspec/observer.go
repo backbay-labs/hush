@@ -25,6 +25,7 @@ const (
 	ObserverEventPolicyLoaded   = "policy.loaded"
 	ObserverEventPolicyReloaded = "policy.reloaded"
 	ObserverEventPolicyFailed   = "policy.load_failed"
+	ObserverEventSinkError      = "sink.error"
 	ObserverEventError          = "error"
 )
 
@@ -280,6 +281,12 @@ func errorObserverEvent(err error) ObserverEvent {
 	if errors.As(err, &loadErr) {
 		event.Type = ObserverEventPolicyFailed
 		event.Source = loadErr.Source
+		return event
+	}
+	var sinkErr *SinkError
+	if errors.As(err, &sinkErr) {
+		event.Type = ObserverEventSinkError
+		event.Source = sinkErr.Sink
 	}
 	return event
 }
@@ -297,6 +304,23 @@ func (e *PolicyLoadError) Error() string {
 }
 
 func (e *PolicyLoadError) Unwrap() error { return e.Err }
+
+// SinkError is a receipt sink that refused what it was handed: a receipt, or
+// the policy-in-effect record for a load. The decision it belonged to stands
+// and the policy still takes effect -- a full disk is not a reason to let an
+// action through, nor to stop one -- so it is reported to the observers as a
+// `sink.error` event and never returned to the caller.
+type SinkError struct {
+	// Sink names the sink that refused, by its type.
+	Sink string
+	Err  error
+}
+
+func (e *SinkError) Error() string {
+	return fmt.Sprintf("sink %s: %v", e.Sink, e.Err)
+}
+
+func (e *SinkError) Unwrap() error { return e.Err }
 
 // ---------------------------------------------------------------------------
 // JSONLineObserver

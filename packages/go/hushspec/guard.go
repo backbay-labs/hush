@@ -451,10 +451,11 @@ func (g *Guard) EnforcementMode() EnforcementMode {
 // ([GuardDecision.Allowed]).
 //
 // The returned decision is always usable: a guard that cannot evaluate denies.
-// A non-nil error reports either a caller-side failure that prevented the
-// evaluation (a cancelled context, in which case the decision denies) or a
-// sink that would not take the receipt, in which case the decision stands and
-// only the audit trail is incomplete.
+// A non-nil error reports a caller-side failure that prevented the evaluation
+// -- a missing action, a cancelled context -- and the decision then denies. A
+// sink that would not take the receipt is not one of them: it reaches the
+// observers as a `sink.error` event and never the caller, because a full disk
+// is no reason to let an action through, nor to stop one.
 func (g *Guard) Check(ctx context.Context, action *EvaluationAction) (GuardDecision, error) {
 	return g.decide(ctx, action, true)
 }
@@ -535,8 +536,8 @@ func (g *Guard) decide(
 		Enforced:    enforcement.Outcome != EnforcementOutcomeWouldBlock,
 		Enforcement: enforcement,
 	}
-	err := g.record(state, action, decision, duration)
-	return decision, err
+	g.record(state, action, decision, duration)
+	return decision, nil
 }
 
 // runEvaluation evaluates the action, building a receipt when a sink is
@@ -601,7 +602,7 @@ func (g *Guard) refuse(state guardState, action *EvaluationAction) GuardDecision
 	}
 	// The record is the point of refusing rather than failing to construct:
 	// an agent that tried to act under an unverified policy leaves evidence.
-	_ = g.record(state, action, decision, 0)
+	g.record(state, action, decision, 0)
 	return decision
 }
 
@@ -689,18 +690,18 @@ func effectiveMode(
 }
 
 // record sends the receipt to the sink and notifies the observer. Neither can
-// change the decision: a sink failure is reported to the caller and to the
-// observer, and an observer failure is swallowed.
+// change the decision: a sink failure goes to the observers as a [SinkError]
+// and no further, and an observer failure is swallowed.
 func (g *Guard) record(
 	state guardState,
 	action *EvaluationAction,
 	decision GuardDecision,
 	duration time.Duration,
-) error {
+) {
 	var sinkErr error
 	if state.sink != nil && decision.Receipt != nil {
 		if err := state.sink.Send(decision.Receipt); err != nil {
-			sinkErr = fmt.Errorf("guard: receipt sink: %w", err)
+			sinkErr = &SinkError{Sink: sinkName(state.sink), Err: err}
 		}
 	}
 	if state.observer != nil {
@@ -713,7 +714,6 @@ func (g *Guard) record(
 			})
 		}
 	}
-	return sinkErr
 }
 
 // notifyObserver calls an observer without letting it break enforcement.
@@ -810,8 +810,9 @@ func (g *Guard) emitPolicyEvent(event *PolicyEvent) {
 		return
 	}
 	if _, err := RecordPolicyEvent(sink, event); err != nil && observer != nil {
+		sinkErr := &SinkError{Sink: sinkName(sink), Err: err}
 		notifyObserver(observer, func(o EvaluationObserver) {
-			o.OnError(fmt.Errorf("guard: policy event sink: %w", err))
+			o.OnError(sinkErr)
 		})
 	}
 }

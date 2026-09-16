@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 )
 
 // ReceiptSink persists or forwards decision receipts.
@@ -34,6 +35,22 @@ func RecordPolicyEvent(sink ReceiptSink, event *PolicyEvent) (bool, error) {
 		return false, nil
 	}
 	return true, target.RecordPolicyEvent(event)
+}
+
+// sinkName is how a `sink.error` observer event names a sink in its source:
+// the sink's own type name, without its package or pointer decoration.
+func sinkName(sink ReceiptSink) string {
+	if sink == nil {
+		return ""
+	}
+	t := reflect.TypeOf(sink)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if name := t.Name(); name != "" {
+		return name
+	}
+	return t.String()
 }
 
 // FileReceiptSink appends receipts as JSON Lines to a file.

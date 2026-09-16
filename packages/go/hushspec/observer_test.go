@@ -52,6 +52,12 @@ func (o *recordingObserver) counts() (int, int, int) {
 	return len(o.loads), len(o.results), len(o.errs)
 }
 
+func (o *recordingObserver) errors() []error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]error(nil), o.errs...)
+}
+
 func guardSpec() *HushSpec {
 	return &HushSpec{
 		HushSpecVersion: "0.2.0",

@@ -14,10 +14,11 @@ import (
 // recordingSink captures everything a guard records, so a test can assert on
 // the audit trail as well as the decision.
 type recordingSink struct {
-	mu       sync.Mutex
-	receipts []*DecisionReceipt
-	events   []*PolicyEvent
-	failWith error
+	mu            sync.Mutex
+	receipts      []*DecisionReceipt
+	events        []*PolicyEvent
+	failWith      error
+	failEventWith error
 }
 
 func (s *recordingSink) Send(receipt *DecisionReceipt) error {
@@ -31,7 +32,7 @@ func (s *recordingSink) RecordPolicyEvent(event *PolicyEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.events = append(s.events, event)
-	return nil
+	return s.failEventWith
 }
 
 func (s *recordingSink) snapshot() ([]*DecisionReceipt, []*PolicyEvent) {
@@ -447,22 +448,69 @@ func TestGuardRejectsUnresolvedPolicy(t *testing.T) {
 }
 
 func TestGuardSinkFailureIsReportedButDecisionStands(t *testing.T) {
-	sink := &recordingSink{failWith: errors.New("disk full")}
+	sink := &recordingSink{failWith: errors.New("no space left on device")}
 	observer := &recordingObserver{}
 	guard := newTestGuard(t, GuardOptions{Sink: sink, Observer: observer})
 
 	decision, err := guard.Check(context.Background(), &EvaluationAction{
 		Type: "egress", Target: "api.github.com",
 	})
-	if err == nil || !strings.Contains(err.Error(), "disk full") {
-		t.Fatalf("expected the sink failure to be reported, got %v", err)
+	if err != nil {
+		t.Fatalf("a sink failure must not reach the caller, got %v", err)
 	}
 	if !decision.Allowed() {
 		t.Fatal("the decision stands even when recording it failed")
 	}
-	_, _, errs := observer.counts()
-	if errs != 1 {
-		t.Fatalf("expected the observer to hear about the sink failure, got %d errors", errs)
+	denied, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "evil.example.com",
+	})
+	if err != nil {
+		t.Fatalf("a sink failure must not reach the caller, got %v", err)
+	}
+	if denied.Allowed() {
+		t.Fatal("a sink failure must not let a denied action through")
+	}
+
+	errs := observer.errors()
+	if len(errs) != 2 {
+		t.Fatalf("expected one report per refused receipt, got %d", len(errs))
+	}
+	event := errorObserverEvent(errs[0])
+	if event.Type != ObserverEventSinkError {
+		t.Fatalf("expected a %s event, got %s", ObserverEventSinkError, event.Type)
+	}
+	if event.Source != "recordingSink" {
+		t.Fatalf("the event must name the sink that refused, got %q", event.Source)
+	}
+	if !strings.Contains(event.Error, "no space left on device") {
+		t.Fatalf("the event must carry the sink's own error, got %q", event.Error)
+	}
+}
+
+func TestGuardPolicyEventSinkFailureIsReported(t *testing.T) {
+	sink := &recordingSink{failEventWith: errors.New("no space left on device")}
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, Observer: observer})
+
+	if _, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "api.github.com",
+	}); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+
+	errs := observer.errors()
+	if len(errs) != 1 {
+		t.Fatalf("expected the policy load to report one sink failure, got %d", len(errs))
+	}
+	event := errorObserverEvent(errs[0])
+	if event.Type != ObserverEventSinkError {
+		t.Fatalf("expected a %s event, got %s", ObserverEventSinkError, event.Type)
+	}
+	if event.Source != "recordingSink" {
+		t.Fatalf("the event must name the sink that refused, got %q", event.Source)
+	}
+	if !strings.Contains(event.Error, "no space left on device") {
+		t.Fatalf("the event must carry the sink's own error, got %q", event.Error)
 	}
 }
 
