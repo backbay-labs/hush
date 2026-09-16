@@ -39,6 +39,7 @@ import {
   unverifiedPolicyReceipt,
   uuidV7,
 } from './receipt.js';
+import { argsSize } from './adapters/tool-mapping.js';
 import type { PolicyEvent } from './log.js';
 import { policyLoadedEvent, policySwappedEvent } from './log.js';
 import type { ReceiptSink } from './sinks.js';
@@ -815,7 +816,7 @@ export class HushGuard {
     return {
       type: 'tool_call',
       target: toolName,
-      args_size: args ? JSON.stringify(args).length : undefined,
+      args_size: args ? argsSize(args) : undefined,
     };
   }
 

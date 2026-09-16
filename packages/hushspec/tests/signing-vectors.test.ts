@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
@@ -28,23 +28,22 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const signingDir = path.join(repoRoot, 'fixtures', 'signing');
 
 /**
- * The 0.2 signature schema, from `schemas/` once it is promoted and from
- * `schemas/staged/0.2.0/` until then. Picking by content rather than by
- * existence means the test does not care which side of the promotion it runs
- * on -- only that the schema it checks against really is the 0.2 one.
+ * The published signature schema, checked to really be the 0.2 envelope
+ * rather than trusted by file name: the vectors below describe envelope
+ * version 0.2 (signing spec 4) and a schema for any other one would let them
+ * pass while testing nothing.
  */
 function schemaPath(name: string): string {
-  const promoted = path.join(repoRoot, 'schemas', name);
-  const staged = path.join(repoRoot, 'schemas', 'staged', '0.2.0', name);
-  if (existsSync(promoted)) {
-    const doc = JSON.parse(readFileSync(promoted, 'utf8')) as Record<string, unknown>;
-    if (JSON.stringify(doc).includes('"0.2"')) return promoted;
+  const published = path.join(repoRoot, 'schemas', name);
+  const doc = JSON.parse(readFileSync(published, 'utf8')) as Record<string, unknown>;
+  if (!JSON.stringify(doc).includes('"0.2"')) {
+    throw new Error(`${name} is not the 0.2 signature envelope schema`);
   }
-  return staged;
+  return published;
 }
 
 const signatureSchema = JSON.parse(
-  readFileSync(schemaPath('hushspec-signature.v0.schema.json'), 'utf8'),
+  readFileSync(schemaPath('hushspec-signature.v1.schema.json'), 'utf8'),
 ) as JsonSchema;
 
 // --------------------------------------------------------------------------

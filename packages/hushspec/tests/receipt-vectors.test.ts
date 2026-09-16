@@ -138,7 +138,7 @@ describe('expected receipts', () => {
 // ---------------------------------------------------------------------------
 
 const receiptSchema = JSON.parse(
-  readFileSync(path.join(repoRoot, 'schemas/hushspec-receipt.v0.schema.json'), 'utf8'),
+  readFileSync(path.join(repoRoot, 'schemas/hushspec-receipt.v1.schema.json'), 'utf8'),
 ) as SchemaDocument;
 
 function jsonFiles(dir: string): string[] {

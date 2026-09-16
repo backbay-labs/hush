@@ -10,6 +10,7 @@ import {
   isSupported,
   supportedMinor,
 } from '../src/version.js';
+import { evaluate } from '../src/evaluate.js';
 import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
 
@@ -17,21 +18,22 @@ import { validate } from '../src/validate.js';
 // X.Y.Z document.
 
 describe('version acceptance', () => {
-  it('writes 0.2.0 and supports the 0.1 and 0.2 minors', () => {
-    expect(HUSHSPEC_VERSION).toBe('0.2.0');
-    expect([...HUSHSPEC_SUPPORTED_MINORS]).toEqual(['0.1', '0.2']);
+  it('writes 1.0.0 and supports the 0.1, 0.2 and 1.0 minors', () => {
+    expect(HUSHSPEC_VERSION).toBe('1.0.0');
+    expect([...HUSHSPEC_SUPPORTED_MINORS]).toEqual(['0.1', '0.2', '1.0']);
   });
 
   it('accepts every patch level of a supported minor', () => {
-    for (const version of ['0.1.0', '0.1.1', '0.1.99', '0.2.0', '0.2.7']) {
+    for (const version of ['0.1.0', '0.1.1', '0.1.99', '0.2.0', '0.2.7', '1.0.0', '1.0.3']) {
       expect(isSupported(version), version).toBe(true);
     }
     expect(supportedMinor('0.1.99')).toBe('0.1');
     expect(supportedMinor('0.2.7')).toBe('0.2');
+    expect(supportedMinor('1.0.3')).toBe('1.0');
   });
 
   it('rejects unsupported or malformed versions', () => {
-    for (const version of ['0.3.0', '1.0.0', '0.1', '0.1.0.0', '0.1.x', '+0.1.0', '', ' 0.1.0']) {
+    for (const version of ['0.3.0', '1.7.0', '2.0.0', '0.1', '0.1.0.0', '0.1.x', '+0.1.0', '', ' 0.1.0']) {
       expect(isSupported(version), version).toBe(false);
       expect(supportedMinor(version), version).toBeUndefined();
     }
@@ -44,12 +46,26 @@ describe('version acceptance', () => {
     expect(validate(result.value).valid).toBe(true);
   });
 
+  // Core spec 10.2: 1.0 froze the 0.2 semantics without changing them, so a
+  // 1.0.Z document is the same document a 0.2.Z declaration would describe.
+  it('evaluates a 1.0 document exactly as the 0.2 one it mirrors', () => {
+    const body = 'name: one-point-zero\nrules:\n  egress:\n    allow: ["api.example.com"]\n    default: block\n';
+    const one = parse(`hushspec: "1.0.0"\n${body}`);
+    const zero = parse(`hushspec: "0.2.0"\n${body}`);
+    expect(one.ok && zero.ok).toBe(true);
+    if (!one.ok || !zero.ok) return;
+    expect(validate(one.value).valid).toBe(true);
+
+    const action = { type: 'egress', target: 'evil.example.net' } as const;
+    expect(evaluate(one.value, action)).toEqual(evaluate(zero.value, action));
+  });
+
   it('reports the supported minors when rejecting a version', () => {
     const result = validate({ hushspec: '0.9.0' });
     expect(result.valid).toBe(false);
     expect(result.errors[0].code).toBe('E002');
     expect(result.errors[0].message).toBe(
-      'unsupported hushspec version: 0.9.0 (this engine accepts minor versions 0.1, 0.2)',
+      'unsupported hushspec version: 0.9.0 (this engine accepts minor versions 0.1, 0.2, 1.0)',
     );
   });
 });
@@ -70,7 +86,14 @@ describe('SDK identity', () => {
     expect(SDK_VERSION).toBe(packageJson.version);
   });
 
-  it('is distinct from the specification version', () => {
-    expect(SDK_VERSION).not.toBe(HUSHSPEC_VERSION);
+  // Core spec 10.3: the two are versioned independently, so a log records
+  // both. They coincide in this release and nothing may come to depend on
+  // either that -- or on their ever differing again.
+  it('is a separate constant from the specification version', () => {
+    expect(HUSHSPEC_VERSION).toBe('1.0.0');
+    expect(isSupported(HUSHSPEC_VERSION)).toBe(true);
+    // The SDK version is whatever `package.json` says; it is not required to
+    // be a HushSpec version at all.
+    expect(SDK_VERSION).toMatch(/^\d+\.\d+\.\d+/);
   });
 });

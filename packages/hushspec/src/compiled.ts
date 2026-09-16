@@ -500,8 +500,21 @@ function blockDeny(matchedRule: string, reason: string): BlockDecision {
   return { decision: 'deny', matched_rule: matchedRule, reason };
 }
 
-/** Why an applicable block was not evaluated. */
-type InactiveReason = 'absent' | 'disabled' | 'condition_false' | 'out_of_band_condition_false';
+/**
+ * Why an applicable block was not evaluated.
+ *
+ * A configured block that the action gave nothing to work on is distinguished
+ * from one the document never declared: reading `no secret_patterns rule
+ * configured` off a trace whose policy does configure the block would misread
+ * the receipt as evidence that the scan was never asked for.
+ */
+type InactiveReason =
+  | 'absent'
+  | 'disabled'
+  | 'condition_false'
+  | 'out_of_band_condition_false'
+  | 'content_not_supplied'
+  | 'target_not_a_channel';
 
 function inactiveReasonText(reason: InactiveReason, block: string): string {
   switch (reason) {
@@ -509,6 +522,9 @@ function inactiveReasonText(reason: InactiveReason, block: string): string {
     case 'disabled': return 'rule disabled';
     case 'condition_false': return 'when condition is false';
     case 'out_of_band_condition_false': return 'out-of-band condition is false';
+    case 'content_not_supplied': return `content not supplied; ${block} not consulted`;
+    case 'target_not_a_channel':
+      return `target is not a remote desktop channel; ${block} not consulted`;
   }
 }
 
@@ -520,6 +536,8 @@ const ABSENT: Inactive = { inactive: 'absent' };
 const DISABLED: Inactive = { inactive: 'disabled' };
 const CONDITION_FALSE: Inactive = { inactive: 'condition_false' };
 const OUT_OF_BAND_FALSE: Inactive = { inactive: 'out_of_band_condition_false' };
+const CONTENT_NOT_SUPPLIED: Inactive = { inactive: 'content_not_supplied' };
+const TARGET_NOT_A_CHANNEL: Inactive = { inactive: 'target_not_a_channel' };
 
 function isInactive(value: BlockDecision | Inactive): value is Inactive {
   return (value as Inactive).inactive !== undefined;
@@ -1282,7 +1300,7 @@ class Evaluation {
         if (rule == null) return ABSENT;
         const pathBearing = action.type === 'file_write' || action.type === 'patch_apply';
         // egress and tool_call are scanned only when they carry content.
-        if (!pathBearing && content == null) return ABSENT;
+        if (!pathBearing && content == null) return CONTENT_NOT_SUPPLIED;
         const inactive = this.activity(block, rule);
         if (inactive) return inactive;
         const skipPath = pathBearing ? normalizedPath : undefined;
@@ -1335,7 +1353,7 @@ class Evaluation {
         if (rule == null) return ABSENT;
         const inactive = this.activity(block, rule);
         if (inactive) return inactive;
-        return evaluateRemoteDesktopChannels(rule, action.target ?? '') ?? ABSENT;
+        return evaluateRemoteDesktopChannels(rule, action.target ?? '') ?? TARGET_NOT_A_CHANNEL;
       }
       case 'input_injection': {
         const rule = rules.input_injection;

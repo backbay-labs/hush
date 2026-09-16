@@ -560,7 +560,7 @@ export function punycodeEncode(input: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 let panicActive = false;
-const PANIC_POLICY_YAML = `hushspec: "0.2.0"
+const PANIC_POLICY_YAML = `hushspec: "1.0.0"
 name: "__hushspec_panic__"
 description: "Emergency deny-all policy. Activated by panic mode."
 

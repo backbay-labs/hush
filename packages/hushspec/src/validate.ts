@@ -221,6 +221,11 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   }
 
   validateOptionalString(obj, 'name', ctx, 'name');
+  // Core spec 2: `name` is optional, but an empty one names nothing -- a
+  // bundle subject and a receipt's policy summary both carry it.
+  if (obj.name === '') {
+    addError(ctx, 'E004', 'name: must not be empty when present');
+  }
   validateOptionalString(obj, 'description', ctx, 'description');
   validateOptionalString(obj, 'extends', ctx, 'extends');
   validateOptionalEnum(obj, 'merge_strategy', ctx, 'merge_strategy', MERGE_STRATEGIES_SET);

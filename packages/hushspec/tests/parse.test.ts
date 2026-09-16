@@ -248,6 +248,44 @@ describe('validate', () => {
     expect(result.errors[0].code).toBe('E002');
   });
 
+  // Core spec 2: `name` is optional, but a present one must not be empty --
+  // a bundle's subject and a receipt's policy summary both carry it, and an
+  // empty name names nothing. The v1 core schema says the same with
+  // `minLength: 1`; the shared vector is `fixtures/core/invalid/empty-name.yaml`.
+  describe('name', () => {
+    it('rejects an empty name with E004', () => {
+      const result = validate({ hushspec: '1.0.0', name: '' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].code).toBe('E004');
+      expect(result.errors[0].message).toBe('name: must not be empty when present');
+    });
+
+    it('refuses the document at parse time, before it can be evaluated', () => {
+      const result = parse('hushspec: "1.0.0"\nname: ""\n');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe('E004');
+      expect(result.error).toContain('name: must not be empty');
+    });
+
+    it('rejects an empty name under every supported minor', () => {
+      // 1.0 froze the 0.2 semantics, and this is the one validation rule the
+      // declaration added (core spec 10.2) -- it is not gated on the version
+      // the document declares.
+      for (const version of ['0.1.0', '0.2.0', '1.0.0']) {
+        expect(validate({ hushspec: version, name: '' }).valid, version).toBe(false);
+      }
+    });
+
+    it('accepts an absent name and a non-empty one', () => {
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\n')).valid).toBe(true);
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: a\n')).valid).toBe(true);
+      // Whitespace is a name; only the empty string is refused, exactly as
+      // the schema's `minLength: 1` reads.
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: " "\n')).valid).toBe(true);
+    });
+  });
+
   it('rejects duplicate secret pattern names', () => {
     const result = parse(`
 hushspec: "0.1.0"

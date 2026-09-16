@@ -412,7 +412,7 @@ describe('verifyLog', () => {
 // ----------------------------------------------------------------- vectors --
 
 const logEntrySchema = JSON.parse(
-  readFileSync(path.join(repoRoot, 'schemas/hushspec-log-entry.v0.schema.json'), 'utf8'),
+  readFileSync(path.join(repoRoot, 'schemas/hushspec-log-entry.v1.schema.json'), 'utf8'),
 ) as SchemaDocument;
 
 /** `invalid/<what>-line-<n>.jsonl` names the line the break must be found on. */
