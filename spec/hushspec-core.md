@@ -530,7 +530,7 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `context`     | object (string -> any)  | Every key is a dot-delimited path into the runtime context; every value must equal the context value at that path. |
 | `all_of`      | array of Condition      | Every sub-condition must be true.                                                           |
 | `any_of`      | array of Condition      | At least one sub-condition must be true. An empty array is treated as absent.               |
-| `not`         | Condition               | The sub-condition must be false.                                                            |
+| `not`         | Condition               | The sub-condition must be false. Unevaluable when the sub-condition is unevaluable.         |
 | `capability`  | string                  | The effective posture state MUST grant this capability. Unevaluable when the policy has no posture extension. |
 | `rate`        | object                  | An engine-supplied counter compared with a threshold. See below.                          |
 
@@ -575,15 +575,16 @@ The window is half-open: it contains the current local time `t` when `start <= t
 - has a `rate` object missing `counter`, `threshold`, or `comparison`, a negative `threshold`, or a `comparison` other than `gte` / `lt`;
 - nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep. `capability` and `rate` are leaf predicates and do not add nesting.
 
-**Evaluation (fail-closed toward enforcement).**
+**Evaluation (fail-closed toward enforcement).** A condition evaluates to one of three values: `true`, `false`, or **unevaluable**. A block is inert only when its condition evaluates to `false`; `true` and unevaluable both leave the block active. An unevaluable condition MUST NOT switch a security control off.
 - A `context` key that is absent from the runtime context makes the condition `false`.
-- An engine that cannot resolve the `timezone` at evaluation time (for example because its time-zone database lacks the identifier) MUST treat the block as **active**, not inert: an unresolvable condition MUST NOT switch a security control off.
-- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are **unevaluable** and MUST be treated as held: the block stays active. An unevaluable condition MUST NOT switch a security control off.
+- A `time_window` the engine cannot evaluate -- because its time-zone database lacks the `timezone` identifier, or the runtime context's `current_time` does not parse -- is unevaluable: the block stays active, not inert.
+- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are unevaluable: the block stays active.
+- Unevaluable propagates through the combinators instead of collapsing to a boolean. `not` of an unevaluable condition is unevaluable. `all_of` is `false` when any member is `false`, otherwise unevaluable when any member is unevaluable, otherwise `true`; the fields of one condition object combine the same way. `any_of` is `true` when any member is `true`, otherwise unevaluable when any member is unevaluable, otherwise `false`. A `not` over a missing counter or an absent posture extension therefore leaves the block active rather than switching it off.
 - Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation. Because `capability` depends on the effective posture state, engines resolve posture (and the origins profile it may come from) before evaluating conditions.
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
 
 ### 3.14 Pattern Matching
 
