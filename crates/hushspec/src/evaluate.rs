@@ -277,6 +277,22 @@ pub(crate) fn run_evaluation(
     .run()
 }
 
+/// The action types core spec Section 5 fixes rule blocks for. An action type
+/// outside this list is unknown to the specification and denied fail-closed.
+pub const REFERENCE_ACTION_TYPES: &[&str] = &[
+    "file_read",
+    "file_write",
+    "patch_apply",
+    "shell_command",
+    "tool_call",
+    "egress",
+    "computer_use",
+    "input_inject",
+    "browser_action",
+    "code_exec",
+    "custom",
+];
+
 /// Rule blocks applicable to each reference action type, in evaluation order
 /// (core spec Section 5). `None` means the type is unknown to the specification.
 fn applicable_blocks(action_type: &str) -> Option<&'static [&'static str]> {
@@ -2111,6 +2127,37 @@ struct PatchStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every block the applicability table names is a key of `rules`, and
+    /// between them the reference action types reach every key: a name that
+    /// drifts from the generated contract would silently skip a rule block.
+    #[test]
+    fn applicable_blocks_name_exactly_the_rule_keys() {
+        use std::collections::BTreeSet;
+
+        let mut reached = BTreeSet::new();
+        for action_type in REFERENCE_ACTION_TYPES {
+            let blocks =
+                applicable_blocks(action_type).expect("a reference action type has a block list");
+            for block in blocks {
+                assert!(
+                    crate::generated_contract::RULE_KEYS.contains(block),
+                    "{action_type} names {block}, which is not a key of `rules`"
+                );
+                reached.insert(*block);
+            }
+        }
+        let expected: BTreeSet<&str> = crate::generated_contract::RULE_KEYS
+            .iter()
+            .copied()
+            .collect();
+        assert_eq!(reached, expected);
+    }
+
+    #[test]
+    fn applicable_blocks_rejects_an_unknown_action_type() {
+        assert!(applicable_blocks("teleport").is_none());
+    }
 
     #[test]
     fn normalizes_paths_lexically() {
