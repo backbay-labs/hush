@@ -72,7 +72,7 @@ code" is the answer a relying party needs:
 | Condition validation | `conditions::validate_condition` | `validateCondition`, `validateConditions` | `validate_condition`, `validate_conditions` | `ValidateCondition`, `ValidateConditions` | A malformed `when` is a document error, not a runtime deny | |
 | Regex profile | `compile_profile_regex` | `isSafeRegex` | `is_safe_regex` | `CompileProfileRegex` | The ReDoS-safe profile of core spec 3.14; a pattern outside it is `E005` | Rust and Go return the compiled regex, TS and Python a boolean |
 | Document limits | `schema::MAX_DOCUMENT_BYTES`, `MAX_NESTING_DEPTH`, `MAX_NODE_COUNT` | `MAX_DOCUMENT_BYTES`, `MAX_DOCUMENT_DEPTH`, `MAX_NODE_COUNT` | `parse.MAX_DOCUMENT_BYTES`, `parse.MAX_NESTING_DEPTH`, `parse.MAX_NODE_COUNT` | `MaxDocumentBytes`, `MaxDocumentNestingDepth`, `MaxDocumentNodeCount` | 1 MiB, depth 32, 100 000 nodes -- identical in all four | TS spells the depth limit `MAX_DOCUMENT_DEPTH`; Python's three are module-level, not in `__all__` |
-| Governance findings | `validate_governance`, `GovernanceWarning` | -- | -- | -- | Separation of duties, overdue review, changelog order (core spec 2.5) | Rust and `h2h audit` only. The `metadata` date format (`E011`) is checked inside `validate` in all four |
+| Governance findings | `validate_governance`, `GovernanceFinding`, `GovernanceSeverity` | -- | -- | -- | Separation of duties, overdue review, changelog order (core spec 2.5) | Rust and `h2h audit` only. The `metadata` date format (`E011`) is checked inside `validate` in all four |
 
 ## Merge, resolve, verify-on-load, digest pins
 
