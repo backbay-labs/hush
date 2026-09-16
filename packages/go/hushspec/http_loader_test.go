@@ -649,6 +649,28 @@ func TestAMismatchedDigestPinIsFatalOverHTTPS(t *testing.T) {
 	}
 }
 
+// TestAStrayServerNameDoesNotMoveTheCertificateCheck pins which name the
+// certificate is checked against. The transport dials the vetted address, so
+// the only thing naming the certificate is ServerName -- and it has to come
+// from the URL, never from the caller's TLS config, or a policy server could
+// be reached with a certificate issued for something else entirely. The
+// config here carries a name the test server's certificate does not cover: the
+// load must still succeed, which it can only do if the name was dropped.
+func TestAStrayServerNameDoesNotMoveTheCertificateCheck(t *testing.T) {
+	server := newHTTPTestServer(t)
+	config := server.config()
+	config.TLSClientConfig = config.TLSClientConfig.Clone()
+	config.TLSClientConfig.ServerName = "elsewhere.invalid"
+
+	if _, err := NewHTTPLoader(config)(server.URL+"/base.yaml", ""); err != nil {
+		t.Fatalf("a stray ServerName reached the handshake: %v", err)
+	}
+	// And the caller's own config is left as it was.
+	if config.TLSClientConfig.ServerName != "elsewhere.invalid" {
+		t.Error("the loader mutated the caller's TLS config")
+	}
+}
+
 // --------------------------------------------------------------------------
 // The ETag cache
 // --------------------------------------------------------------------------

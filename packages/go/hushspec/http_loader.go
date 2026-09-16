@@ -3,7 +3,6 @@ package hushspec
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -319,10 +318,10 @@ type HTTPLoaderConfig struct {
 	AllowInsecureLoopback bool
 	// TLSClientConfig overrides the default TLS settings. A test that serves
 	// HTTPS from a generated certificate passes the one
-	// httptest.Server.Client() carries. ServerName is left for the transport to
-	// fill in from the request URL, so the certificate is always checked
-	// against the hostname the policy named and never against the pinned
-	// address.
+	// httptest.Server.Client() carries. Any ServerName on it is dropped and
+	// the transport fills one in from the request URL, so the certificate is
+	// always checked against the hostname the policy named and never against
+	// the pinned address or a name supplied out of band.
 	TLSClientConfig *tls.Config
 }
 
@@ -457,9 +456,6 @@ func isLoopbackAddress(ip string) bool {
 // The transport
 // --------------------------------------------------------------------------
 
-// errHTTPRedirect marks a response the loader refused to follow.
-var errHTTPRedirect = errors.New("redirect")
-
 // newPinnedClient is an HTTP client that dials only target.Address.
 //
 // The request still carries the original host, so the Host header, the SNI name
@@ -472,9 +468,14 @@ func newPinnedClient(target *HTTPTarget, config HTTPLoaderConfig) *http.Client {
 
 	var tlsConfig *tls.Config
 	if config.TLSClientConfig != nil {
-		// Clone so the caller's config is never mutated, and leave ServerName
-		// empty for the transport to fill in from the URL.
+		// Clone so the caller's config is never mutated, and clear ServerName
+		// so the transport fills it in from the URL. A ServerName set here
+		// would name what the certificate is checked against, which is the
+		// hostname the policy named and nothing else: leaving a caller's
+		// stray value in place would check the certificate against a name the
+		// document never asked for.
 		tlsConfig = config.TLSClientConfig.Clone()
+		tlsConfig.ServerName = ""
 	}
 
 	transport := &http.Transport{
