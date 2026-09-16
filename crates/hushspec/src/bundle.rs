@@ -562,10 +562,13 @@ pub fn build_statement(
         })
         .collect();
 
+    // The subject needs at least one character (bundle spec 4.1), so a policy
+    // that declares an empty name falls through to the file name.
     let name = options
         .subject_name
         .clone()
-        .or_else(|| resolution.spec.name.clone())
+        .filter(|name| !name.is_empty())
+        .or_else(|| non_empty_name(&resolution.spec))
         .or_else(|| leaf_file_name(&chain))
         .unwrap_or_else(|| "policy".to_string());
 
@@ -596,11 +599,17 @@ pub fn build_statement(
     })
 }
 
+/// The policy's `name` when it has one character or more: the bundle schema
+/// admits no empty subject name or policy name claim.
+fn non_empty_name(spec: &HushSpec) -> Option<String> {
+    spec.name.clone().filter(|name| !name.is_empty())
+}
+
 fn policy_identity(spec: &HushSpec, content_hash: &str) -> PolicyIdentity {
     PolicyIdentity {
         content_hash: content_hash.to_string(),
         spec_version: spec.hushspec.clone(),
-        name: spec.name.clone(),
+        name: non_empty_name(spec),
         policy_version: spec
             .metadata
             .as_ref()

@@ -618,7 +618,7 @@ def build_statement(
             policy=PolicyIdentity(
                 content_hash=hash_value,
                 spec_version=getattr(spec, "hushspec", ""),
-                name=name,
+                name=name or None,
                 policy_version=getattr(metadata, "policy_version", None),
             ),
             chain=chain,
@@ -784,12 +784,12 @@ def _subject_name(
     override: str | None, name: str | None, chain: Sequence[BundleChainLink]
 ) -> str:
     """The subject's informational label: the first of an explicit override,
-    the policy's own name, the leaf source's file name, and a constant. A
-    policy that declares ``name: ""`` has a name, so the fallbacks below it
-    never run for one."""
-    if override is not None:
+    the policy's own name, the leaf source's file name, and a constant. The
+    subject needs at least one character (bundle spec 4.1), so a policy that
+    declares an empty name falls through to the file name."""
+    if override:
         return override
-    if name is not None:
+    if name:
         return name
     leaf = _leaf_file_name(chain)
     return leaf if leaf is not None else "policy"

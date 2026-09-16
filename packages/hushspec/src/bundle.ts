@@ -368,7 +368,9 @@ export function buildBundleStatement(
     _type: BUNDLE_STATEMENT_TYPE,
     subject: [
       {
-        name: options.subjectName ?? spec.name ?? leafFileName(chain) ?? 'policy',
+        // The subject needs at least one character (bundle spec 4.1), so a
+        // policy that declares an empty name falls through to the file name.
+        name: nonEmpty(options.subjectName) ?? nonEmpty(spec.name) ?? leafFileName(chain) ?? 'policy',
         // The `sha256:` prefix is stripped here and only here, because that is
         // the form in-toto requires of a subject digest (bundle spec 4.1).
         digest: { sha256: hash.replace(/^sha256:/, '') },
@@ -380,7 +382,7 @@ export function buildBundleStatement(
       policy: {
         content_hash: hash,
         spec_version: spec.hushspec,
-        ...(spec.name === undefined ? {} : { name: spec.name }),
+        ...(nonEmpty(spec.name) === undefined ? {} : { name: spec.name }),
         ...(policyVersion === undefined ? {} : { policy_version: policyVersion }),
       },
       chain,
@@ -492,6 +494,11 @@ function relativeSource(source: string, base?: string): string {
   }
   // A bundle is JSON read on every platform, so the separator is `/`.
   return relative.split(path.sep).join('/');
+}
+
+/** `value` when it has one character or more: the bundle schema admits no empty name. */
+function nonEmpty(value: string | undefined): string | undefined {
+  return value === undefined || value === '' ? undefined : value;
 }
 
 /** The leaf's file name, for a policy that declares no `name`. */

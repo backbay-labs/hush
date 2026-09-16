@@ -456,7 +456,7 @@ func BuildBundleStatement(resolution *Resolution, opts CreateBundleOptions) (*Bu
 			Policy: BundlePolicyIdentity{
 				ContentHash:   contentHash,
 				SpecVersion:   spec.HushSpecVersion,
-				Name:          spec.Name,
+				Name:          bundlePolicyName(spec),
 				PolicyVersion: policyVersion,
 			},
 			Chain:     chain,
@@ -601,14 +601,23 @@ func bundleRelativeSource(source, base string) string {
 
 // bundleSubjectName is the subject's informational label: the first of an
 // explicit override, the policy's own name, the leaf source's file name, and a
-// constant. A policy that declares `name: ""` has a name, so the fallbacks
-// below it never run for one.
+// constant. The subject needs at least one character (bundle spec 4.1), so a
+// policy that declares an empty name falls through to the file name.
+// bundlePolicyName is the policy's `name` when it has one character or more:
+// the bundle schema admits no empty subject name or policy name claim.
+func bundlePolicyName(spec *HushSpec) *string {
+	if spec.Name == nil || *spec.Name == "" {
+		return nil
+	}
+	return spec.Name
+}
+
 func bundleSubjectName(override string, spec *HushSpec, chain []ChainLink) string {
 	if override != "" {
 		return override
 	}
-	if spec.Name != nil {
-		return *spec.Name
+	if name := bundlePolicyName(spec); name != nil {
+		return *name
 	}
 	if leaf := bundleLeafFileName(chain); leaf != "" {
 		return leaf
