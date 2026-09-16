@@ -381,9 +381,11 @@ h2h completions zsh > "${fpath[1]}/_h2h"
 h2h version --format json
 ```
 
-Every subcommand supports `--format json`, and exit codes are uniform: `0`
-success, `1` policy failure, `2` input or usage failure (`4` for a `warn`
-decision from `eval`/`explain`). Full flag and exit-code tables live in the
+Every reporting subcommand supports `--format json` -- `init`, `keygen`,
+`sign`, `panic` and `completions` take no `--format`, and `hash` takes
+`digest|canonical` -- and exit codes are uniform: `0` success, `1` policy
+failure, `2` input or usage failure (`4` for a `warn` decision from
+`eval`/`explain`). Full flag and exit-code tables live in the
 [CLI reference](docs/src/reference/cli.md).
 
 See [Installation](#installation) above for install options — Homebrew, npm, Cargo, or prebuilt binaries.
