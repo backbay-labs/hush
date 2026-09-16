@@ -5,6 +5,7 @@
 //! git metadata, and the binary must still build and run there, so a missing
 //! SHA is reported as "unknown" at runtime rather than failing the build.
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn main() {
@@ -31,11 +32,7 @@ fn git_sha() -> Option<String> {
         }
     }
 
-    // Rebuild when HEAD moves, but only if this really is a git checkout.
-    // `.git` is a directory in a normal clone and a file in a worktree.
-    if let Some(head) = git_head_path() {
-        println!("cargo:rerun-if-changed={}", head.display());
-    }
+    watch_head();
 
     let output = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
@@ -51,21 +48,89 @@ fn git_sha() -> Option<String> {
     if sha.is_empty() { None } else { Some(sha) }
 }
 
-fn git_head_path() -> Option<std::path::PathBuf> {
-    let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+/// Ask Cargo to rerun this script whenever the commit under HEAD changes.
+///
+/// `HEAD` on its own is not enough. A checkout that stays on one branch keeps
+/// the same `ref: refs/heads/<branch>` line as commits land, so watching only
+/// `HEAD` freezes the reported SHA at whatever it was when the script last
+/// ran. What moves is the branch's own ref file, or `packed-refs` when the
+/// branch tip is packed. A detached HEAD holds the commit id itself, so there
+/// `HEAD` is the whole story.
+///
+/// Every step is best-effort and silent: a checkout with no git metadata must
+/// still build.
+fn watch_head() {
+    let Some(git_dir) = git_dir() else {
+        return;
+    };
+    let head = git_dir.join("HEAD");
+    let Ok(contents) = std::fs::read_to_string(&head) else {
+        return;
+    };
+    watch(&head);
+
+    let Some(reference) = contents.trim().strip_prefix("ref:") else {
+        return;
+    };
+    let reference = reference.trim();
+    if reference.is_empty() {
+        return;
+    }
+
+    // A per-worktree ref lives in that worktree's git directory; a branch lives
+    // in the shared one, loose or packed.
+    let common_dir = common_dir(&git_dir);
+    watch(&git_dir.join(reference));
+    watch(&common_dir.join(reference));
+    watch(&common_dir.join("packed-refs"));
+}
+
+/// Watch a path that may not exist: a path Cargo cannot stat counts as
+/// changed, which would rerun this script on every build.
+fn watch(path: &Path) {
+    if path.exists() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+}
+
+/// The git directory for this checkout: `.git` itself in a normal clone, and
+/// the directory named by the `gitdir:` line when `.git` is the file a linked
+/// worktree carries.
+fn git_dir() -> Option<PathBuf> {
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
         let git = dir.join(".git");
         if git.is_dir() {
-            let head = git.join("HEAD");
-            return head.exists().then_some(head);
+            return Some(git);
         }
         if git.is_file() {
-            // Worktree: `.git` points at the real git dir. Not worth parsing;
-            // the file itself changes rarely, so skip the rerun hint.
-            return None;
+            let contents = std::fs::read_to_string(&git).ok()?;
+            let target = PathBuf::from(contents.trim().strip_prefix("gitdir:")?.trim());
+            return Some(absolute(&dir, target));
         }
         if !dir.pop() {
             return None;
         }
     }
+}
+
+/// The directory holding `refs/` and `packed-refs`. A linked worktree's git
+/// directory names the shared one in its `commondir` file; everywhere else the
+/// git directory is its own common directory.
+fn common_dir(git_dir: &Path) -> PathBuf {
+    match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(contents) => absolute(git_dir, PathBuf::from(contents.trim())),
+        Err(_) => git_dir.to_path_buf(),
+    }
+}
+
+/// Resolve `path` against `base` when it is relative, tidying the result when
+/// the filesystem allows it.
+fn absolute(base: &Path, path: PathBuf) -> PathBuf {
+    let joined = if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    };
+    std::fs::canonicalize(&joined).unwrap_or(joined)
 }
