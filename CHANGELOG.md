@@ -421,6 +421,23 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ### Changed
 
+**Spec**
+
+- **One HTTPS `extends` loader rule set.** Core spec 2.6.4 is rewritten as ten MUSTs that say
+  exactly what every SDK enforces: `https:` only with `http://` refused outright, an optional
+  exact and case-insensitive host allowlist checked before DNS, a tabulated blocked-network list
+  (`0.0.0.0/8`, `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`,
+  `192.168/16`, `198.18/15`, `224/4`, `240/4`, `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`,
+  `ff00::/8`) that *every* resolved address must clear, IPv4-mapped and IPv4-compatible IPv6
+  forms unwrapped and judged on the address inside, an unparseable address treated as blocked,
+  the checked address pinned for the connection while the host name still carries SNI,
+  certificate validation and the `Host` header, no redirects, separate connect and read budgets,
+  a capped body, `ETag` revalidation that serves a cached body only on a `304`, and `<url>.sig`
+  fetched under the identical rules. The previous text named a looser list, said nothing about
+  allowlists, pinning or the sidecar, and left the size and time bounds as one budget.
+  `spec/hushspec-security.md` section 4 is aligned with it and its residual-risk paragraph now
+  describes what the list and the pin actually leave open.
+
 **SDKs**
 
 - **All four SDKs are Level 5 (Attested)**, not Rust alone: TypeScript, Python and Go now run
@@ -428,8 +445,34 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   `.expect.yaml` sidecar's registered error code and `message_contains` substring, closing the
   Level 1 error-code gap.
 
+**Rust**
+
+- The HTTPS `extends` loader (`hushspec::resolve::http`, the `http` feature) enforces the full
+  rule set of core spec 2.6.4. The blocked-network list grows from the loopback, RFC 1918,
+  link-local and unique-local ranges to every network the spec tabulates, IPv4-mapped and
+  IPv4-compatible IPv6 forms are unwrapped and judged on the address inside, and an address that
+  cannot be parsed is blocked. The connection is then **pinned** to the address that was checked
+  -- `reqwest`'s `ClientBuilder::resolve` maps the host to the vetted socket address, so the
+  socket goes there while TLS still validates the hostname the document wrote -- which closes the
+  DNS-rebinding window between the check and the connect. A 3xx is refused with a message naming
+  the refusal rather than reported as a generic non-2xx, `HttpLoaderConfig` gains
+  `allowed_hosts` (exact, case-insensitive, checked before DNS) and splits `timeout_ms` into
+  `connect_timeout_ms` and `read_timeout_ms`, and `fetch_signature` / `signature_locator` fetch
+  `<url>.sig` under the identical rules. `is_blocked_address`, `validate_url` and `HttpTarget`
+  are public, as they are in the Python and Go SDKs.
+
 **TypeScript**
 
+- The HTTPS `extends` loader (`http-loader.ts`) enforces the same rule set, over `node:https`
+  rather than `fetch`, because a pinned connection is not something `fetch` can express. A
+  `lookup` that returns only the checked address pins the socket while `servername` keeps SNI,
+  certificate validation and the `Host` header on the hostname the document wrote; a 3xx is
+  refused explicitly. The blocked-network list is the spec's, addresses are parsed rather than
+  string-matched (so `100.64/10`, `192.0.0/24`, `198.18/15`, `224/4`, `240/4` and `ff00::/8` are
+  covered and an unparseable address is blocked), and `HttpLoaderConfig` gains `allowedHosts`,
+  `connectTimeoutMs` and `readTimeoutMs`. `isPrivateIp` is renamed `isBlockedAddress`, and it,
+  `resolveTarget`, `CLOUD_METADATA_ADDRESSES` and the default bounds are exported.
+  `HttpProvider`'s options are now the loader's, so a provider cannot quietly relax a rule.
 - Evaluation no longer compiles patterns per call: the free `evaluate()` functions compile the
   document on first use and cache the compilation against the document object (a `WeakMap`), so
   decisions, receipts, hashes and traces are unchanged while a mixed action set against

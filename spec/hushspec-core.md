@@ -204,16 +204,40 @@ The reference implementation's default loader tries, in order: the built-in load
 
 #### 2.6.4 HTTPS Loader
 
-An engine that loads documents over the network MUST apply the following rules; they are what the reference implementation enforces.
+A URL in `extends` is a request an attacker partly controls: the URL comes out of a document. An engine that loads documents over the network MUST apply all of the following rules, and every SDK of the reference implementation enforces exactly these.
 
-1. **TLS only.** The scheme MUST be `https`. Certificate verification MUST be on by default; an option to disable it exists for test harnesses only and MUST be documented as unsafe.
-2. **Address filtering after resolution.** The host MUST be resolved before connecting, and every resolved address MUST be checked. Loopback, private (RFC 1918), link-local (`169.254.0.0/16`, `fe80::/10`), unspecified, and unique-local (`fc00::/7`) addresses MUST be refused, including IPv4-mapped IPv6 forms of them. This closes the cloud-metadata endpoint and the usual server-side request forgery targets.
-3. **No redirects.** A redirect response MUST be treated as a failure; a loader MUST NOT follow it.
-4. **Bounded body.** The response body MUST be capped at the document size limit of Section 2.4; a longer body is a failure.
-5. **Bounded time.** The request MUST have a timeout (the reference default is 10 seconds).
-6. **Revalidation, not staleness.** A loader MAY cache by URL keyed on the `ETag` and revalidate with `If-None-Match`; it MUST NOT serve a cached document after a failed revalidation.
+1. **TLS only.** The scheme MUST be `https`. An `http://` reference MUST be refused outright, never upgraded. Certificate verification MUST be on by default; an option to disable it exists for test harnesses only and MUST be documented as unsafe.
+2. **Host allowlist, checked before DNS.** A loader MAY be configured with the set of hosts it may fetch from. When one is configured, a reference whose host is outside it MUST be refused before the host is resolved. Matching MUST be exact and case-insensitive, never a suffix rule: `evil-example.com` ends in nothing a suffix test would be safe about.
+3. **Address filtering after resolution.** The host MUST be resolved before a connection is opened, and *every* address it resolves to MUST be checked -- one blocked address among several refuses the reference, because a name with one public and one private address is a name that reaches the private one. An address the loader cannot parse MUST be treated as blocked. These networks MUST be refused:
 
-Digest pins and detached signatures (`<url>.sig`) apply to remote documents as to local ones. The Security Considerations (`hushspec-security.md`, Section 4) discuss DNS rebinding, which rule 2 mitigates but does not eliminate.
+| Network | What it is |
+|---------|------------|
+| `0.0.0.0/8` | "this network", including `0.0.0.0` itself |
+| `10.0.0.0/8` | private (RFC 1918) |
+| `100.64.0.0/10` | carrier-grade NAT (RFC 6598) |
+| `127.0.0.0/8` | loopback |
+| `169.254.0.0/16` | link-local, including the cloud metadata endpoint |
+| `172.16.0.0/12` | private (RFC 1918) |
+| `192.0.0.0/24` | IETF protocol assignments |
+| `192.168.0.0/16` | private (RFC 1918) |
+| `198.18.0.0/15` | benchmarking |
+| `224.0.0.0/4` | multicast |
+| `240.0.0.0/4` | reserved, including the `255.255.255.255` broadcast address |
+| `::/128` | unspecified |
+| `::1/128` | loopback |
+| `fc00::/7` | unique local, including the IPv6 metadata endpoint |
+| `fe80::/10` | link-local |
+| `ff00::/8` | multicast |
+
+4. **IPv4-in-IPv6 unwrapping.** An IPv6 address carrying an IPv4 address in its low 32 bits MUST be unwrapped and judged on the address inside, in both the IPv4-mapped form (`::ffff:127.0.0.1`) and the deprecated IPv4-compatible form (`::7f00:1`, which is `127.0.0.1`). `::` and `::1` are covered by the table and are not unwrapped.
+5. **Address pinning.** The connection MUST go to an address that passed rule 3, not to a name resolved a second time at connect time. The host name MUST still be used for SNI, for certificate validation and in the `Host` header, so a pinned connection is still authenticated against the name the document wrote. This is what closes DNS rebinding between the check and the connection.
+6. **No redirects.** A 3xx response MUST be treated as a failure; a loader MUST NOT follow it, not even to the same host. A redirect moves the request to a location the scheme check, the allowlist and the address check never saw.
+7. **Bounded body.** The response body MUST be capped at the document size limit of Section 2.4; a longer body is a failure. A body of exactly the limit is accepted.
+8. **Bounded time.** Establishing the connection and reading the response MUST have separate budgets, so a server that accepts a connection and then stalls does not inherit the connect timeout's patience. The reference default is 10 seconds for each.
+9. **Revalidation, not staleness.** A loader MAY cache a document by URL against the `ETag` the server returned, and MUST then revalidate it with `If-None-Match`. The server is asked every time: a cached body MAY be used only on a `304 Not Modified`, a `304` answered with no cached body to revalidate MUST be a failure rather than an empty document, and a cached document MUST NOT be served after a failed revalidation.
+10. **The signature sidecar follows the same rules.** A detached envelope at `<url>.sig` (Signing specification, Section 7.1) MUST be fetched under every rule above -- the same allowlist, the same address check and pinning, no redirects, the same caps. A `404` or `410` means the policy is unsigned and is not itself a failure; every other failure is one. A `.sig` URL MUST NOT be able to reach anything the policy URL could not.
+
+Integrity is not the loader's job. A URL is a location, never an identity: digest pins and detached signatures apply to remote documents as to local ones, and they are what makes a remote base trustworthy. The Security Considerations (`hushspec-security.md`, Section 4) discuss the residual risk rules 3 and 5 leave.
 
 Test vectors: `fixtures/core/resolve/`, `fixtures/core/merge/`.
 
