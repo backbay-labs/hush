@@ -58,11 +58,37 @@ describe('compileProfileRegex', () => {
     expect(profileMatches('a.b', 'a\nb')).toBe(false);
     expect(profileMatches('(?s)a.b', 'a\nb')).toBe(true);
     expect(compileProfileRegex('a.b').source).toBe(
-      'a(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])b',
+      'a(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF\\n]' +
+        '|[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF])b',
     );
-    // One astral code point, like Rust/Python/Go `.` (a bare `[^\n]` would
-    // match only half the surrogate pair).
+  });
+
+  // Rust, Python and Go all match over code points, so a `.` takes an astral
+  // character whole and never half of one. JavaScript strings are UTF-16, so
+  // the translation has to say so explicitly; a fallback that admitted
+  // surrogate code units would let `^..$` backtrack through the two halves of
+  // one emoji and match where the other three SDKs do not.
+  it('counts an astral character as one code point', () => {
     expect(profileMatches('^a.b$', 'a\u{1F600}b')).toBe(true);
+    expect(profileMatches('^.$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^..$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('^..$', '\u{1F600}\u{1F600}')).toBe(true);
+    expect(profileMatches('^..$', 'ab')).toBe(true);
+    expect(profileMatches('(?s)^..$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('(?s)^.$', '\u{1F600}')).toBe(true);
+    // A negated class and a negated shorthand are "one code point outside this
+    // set", so they take an astral character whole as well.
+    expect(profileMatches('^[^a]$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^[^a]{2}$', '\u{1F600}')).toBe(false);
+    expect(profileMatches('^\\D$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^\\W$', '\u{1F600}')).toBe(true);
+    expect(profileMatches('^\\S$', '\u{1F600}')).toBe(true);
+    // A quantifier after an astral literal applies to the whole character.
+    expect(profileMatches('^\u{1F600}+$', '\u{1F600}\u{1F600}')).toBe(true);
+    expect(profileMatches('^\u{1F600}+$', '\u{1F600}\u{1F600}b')).toBe(false);
+    // A trailing `-` in a negated class must stay a literal member.
+    expect(profileMatches('^[^a-]$', '-')).toBe(false);
+    expect(profileMatches('^[^a-]$', 'b')).toBe(true);
   });
 
   it('makes \\s ASCII whitespace including the vertical tab', () => {

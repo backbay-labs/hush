@@ -402,10 +402,17 @@ function hasEmptyCharacterClass(pattern: string): boolean {
  * unsupported by at least one engine, or -- worse -- silently reinterpreted by
  * JavaScript as the bare letter.
  *
- * Known residual divergence: under a leading `(?i)`, an engine that applies
- * the full Unicode simple case-folding table matches U+017F (long s) and
- * U+212A (Kelvin sign) against `(?i)s` / `(?i)k`. JavaScript without the `u`
- * flag folds only ASCII, so they do not match here.
+ * Known residual divergences:
+ *
+ * - Under a leading `(?i)`, an engine that applies the full Unicode simple
+ *   case-folding table matches U+017F (long s) and U+212A (Kelvin sign)
+ *   against `(?i)s` / `(?i)k`. JavaScript without the `u` flag folds only
+ *   ASCII, so they do not match here.
+ * - A literal astral character written *inside* a character class (`[\u{1F600}a]`)
+ *   stays a pair of UTF-16 code units there, so the class matches either half
+ *   on its own rather than the code point. Every other position -- `.`, a
+ *   negated class, a negated shorthand, a literal outside a class -- takes an
+ *   astral character as one code point, as the other engines do.
  */
 
 /** Character-class body for ASCII `\d`. */
@@ -415,18 +422,48 @@ const WORD_BODY = '0-9A-Za-z_';
 /** Character-class body for ASCII `\s` -- includes `\v`, excludes NBSP. */
 const SPACE_BODY = '\\t\\n\\v\\f\\r ';
 
+/** A UTF-16 surrogate pair: the two code units of one astral code point. */
+const SURROGATE_PAIR_SOURCE = '[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]';
+
+/** Character-class body covering every surrogate code unit. */
+const SURROGATE_BODY = '\\uD800-\\uDFFF';
+
+/**
+ * A surrogate code unit with no partner.
+ *
+ * Valid UTF-8 input cannot contain one, but a JavaScript string can, and
+ * leaving it unmatchable would make a negated construct silently skip a
+ * character the other engines would have matched.
+ */
+const LONE_SURROGATE_SOURCE =
+  '[\\uD800-\\uDBFF](?![\\uDC00-\\uDFFF])|(?<![\\uD800-\\uDBFF])[\\uDC00-\\uDFFF]';
+
+/**
+ * One code point that is not a member of the character-class body `body`.
+ *
+ * The four alternatives are mutually exclusive and between them cover every
+ * code point, so exactly one matches at any position: a surrogate pair is
+ * always consumed whole, and the fallback excludes surrogate code units rather
+ * than letting the engine backtrack into half of a pair. That is what makes
+ * `^..$` refuse a single astral character here as it does in the other SDKs.
+ *
+ * The surrogate range leads the negated class so that a body ending in a
+ * trailing `-` (`[^a-]`) cannot form a range with what follows it.
+ */
+function codePointOutside(body: string): string {
+  return `(?:${SURROGATE_PAIR_SOURCE}|[^${SURROGATE_BODY}${body}]|${LONE_SURROGATE_SOURCE})`;
+}
+
 /**
  * One code point that is not `\n` -- the profile's `.`.
  *
- * The surrogate-pair alternation comes first so an astral code point is
- * consumed whole, as one character; a bare `[^\n]` would consume half of it.
- * `[^\n]` (unlike JavaScript's own `.`) deliberately keeps `\r`, U+2028 and
- * U+2029 as ordinary characters.
+ * Unlike JavaScript's own `.` this deliberately keeps `\r`, U+2028 and U+2029
+ * as ordinary characters.
  */
-const DOT_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])';
+const DOT_SOURCE = codePointOutside('\\n');
 
 /** One code point, `\n` included -- the profile's `.` under a leading `(?s)`. */
-const DOT_ALL_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\s\\S])';
+const DOT_ALL_SOURCE = codePointOutside('');
 
 /**
  * `^` and `$` under a leading `(?m)`. The profile breaks lines only at `\n`,
@@ -546,7 +583,7 @@ function translateEscape(
       );
     }
     const body = escaped === 'D' ? DIGIT_BODY : escaped === 'W' ? WORD_BODY : SPACE_BODY;
-    return `[^${body}]`;
+    return codePointOutside(body);
   }
   if (escaped === 'b' || escaped === 'B') {
     if (inClass) {
@@ -614,7 +651,6 @@ function translateEscape(
 function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boolean): string {
   const n = chars.length;
   let out = '';
-  let inClass = false;
   let index = 0;
 
   while (index < n) {
@@ -624,35 +660,15 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
       if (index + 1 >= n) {
         throw new Error('pattern ends with a trailing backslash');
       }
-      out += translateEscape(chars[index + 1], inClass, chars, index);
+      out += translateEscape(chars[index + 1], false, chars, index);
       index += escapeLength(chars, index);
       continue;
     }
 
-    if (inClass) {
-      if (c === ']') {
-        inClass = false;
-      }
-      out += c;
-      index += 1;
-      continue;
-    }
-
     if (c === '[') {
-      // `[]` / `[^]` are a compile error in most engines but read as "match
-      // nothing" / "match anything" in JavaScript.
-      let cursor = index + 1;
-      if (chars[cursor] === '^') {
-        cursor += 1;
-      }
-      if (cursor >= n || chars[cursor] === ']') {
-        throw new Error(
-          'empty character classes [] and [^] are not portable across the HushSpec SDK regex engines',
-        );
-      }
-      inClass = true;
-      out += '[';
-      index += 1;
+      const [source, next] = translateCharacterClass(chars, index);
+      out += source;
+      index = next;
       continue;
     }
 
@@ -686,11 +702,67 @@ function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boole
       continue;
     }
 
-    out += c;
+    // `Array.from` splits by code point, so an astral literal is one element
+    // of two UTF-16 code units. Grouping it keeps a following quantifier on
+    // the whole character instead of on its trailing code unit.
+    out += c.length > 1 ? `(?:${c})` : c;
     index += 1;
   }
 
   return out;
+}
+
+/**
+ * Translate the character class starting at `chars[start]`, returning its
+ * JavaScript source and the index just past its closing `]`.
+ *
+ * A negated class means "one code point outside this set" to every other
+ * HushSpec engine, so it is rewritten the same way `.` is rather than left as
+ * a class over UTF-16 code units, which would match half of a surrogate pair.
+ */
+function translateCharacterClass(chars: string[], start: number): [string, number] {
+  const n = chars.length;
+  let index = start + 1;
+  const negated = chars[index] === '^';
+  if (negated) {
+    index += 1;
+  }
+  // `[]` / `[^]` are a compile error in most engines but read as "match
+  // nothing" / "match anything" in JavaScript.
+  if (index >= n || chars[index] === ']') {
+    throw new Error(
+      'empty character classes [] and [^] are not portable across the HushSpec SDK regex engines',
+    );
+  }
+
+  let body = '';
+  let hasAstralMember = false;
+  while (index < n && chars[index] !== ']') {
+    const c = chars[index];
+    if (c === '\\') {
+      if (index + 1 >= n) {
+        throw new Error('pattern ends with a trailing backslash');
+      }
+      body += translateEscape(chars[index + 1], true, chars, index);
+      index += escapeLength(chars, index);
+      continue;
+    }
+    if (c.length > 1) {
+      hasAstralMember = true;
+    }
+    body += c;
+    index += 1;
+  }
+
+  const prefix = negated ? '^' : '';
+  if (index >= n) {
+    // Unterminated: hand it to `RegExp`, whose own diagnostic names the class.
+    return [`[${prefix}${body}`, index];
+  }
+  if (!negated || hasAstralMember) {
+    return [`[${prefix}${body}]`, index + 1];
+  }
+  return [codePointOutside(body), index + 1];
 }
 
 /**
