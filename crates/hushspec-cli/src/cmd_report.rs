@@ -1,11 +1,12 @@
 //! `h2h report`: turn a window of receipts into an evidence report.
 //!
 //! The input is either a hash-linked log (`spec/hushspec-log.md`) or a plain
-//! receipt JSONL; each line is classified on its own. A log's chain is
-//! verified before anything is counted, because a report over a chain that
-//! does not verify is not evidence -- it is a summary of whatever the last
-//! writer left behind. Reporting on a broken chain therefore takes an
-//! explicit `--unverified`, and stamps the document `chain_verified: false`.
+//! receipt JSONL; each line is classified on its own, and a file holding any
+//! log entry is treated as a log. A log's chain is verified before anything is
+//! counted, because a report over a chain that does not verify is not evidence
+//! -- it is a summary of whatever the last writer left behind. Reporting on a
+//! broken chain therefore takes an explicit `--unverified`, and stamps the
+//! document `chain_verified: false`.
 //!
 //! The aggregation itself is [`hushspec::report`]. What lives here is the
 //! reading (auto-detection, the window, fail-closed line handling), the
@@ -287,6 +288,21 @@ fn check_timestamp(timestamp: &str) -> Result<(), String> {
         .map_err(|error| format!("timestamp {timestamp:?} is not RFC 3339: {error}"))
 }
 
+/// Line numbers for a diagnostic, listing the first few and counting the rest.
+fn line_list(lines: &[usize]) -> String {
+    const SHOWN: usize = 5;
+    let mut text = lines
+        .iter()
+        .take(SHOWN)
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    if lines.len() > SHOWN {
+        let _ = write!(text, " (and {} more)", lines.len() - SHOWN);
+    }
+    text
+}
+
 fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -298,22 +314,40 @@ fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
     let name = path.display().to_string();
 
     let mut classified: Vec<(usize, Line)> = Vec::new();
-    let mut is_log = false;
+    let mut entry_lines = 0usize;
+    let mut receipt_lines: Vec<usize> = Vec::new();
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
+        let line_no = index + 1;
         match classify(line) {
             Ok(parsed) => {
-                if classified.is_empty() {
-                    is_log = matches!(parsed, Line::Entry(_));
+                match &parsed {
+                    Line::Entry(_) => entry_lines += 1,
+                    Line::Receipt(_) => receipt_lines.push(line_no),
                 }
-                classified.push((index + 1, parsed));
+                classified.push((line_no, parsed));
             }
             Err(message) => loaded
                 .malformed
-                .push(format!("{name}:{}: {message}", index + 1)),
+                .push(format!("{name}:{line_no}: {message}")),
         }
+    }
+
+    // Any log entry makes the whole file a log. Verifying only the files that
+    // *open* with one would let a plain receipt prepended to a hash-linked log
+    // carry the rest of that log past chain verification entirely.
+    let is_log = entry_lines > 0;
+    if is_log && !receipt_lines.is_empty() {
+        eprintln!(
+            "{} {name} mixes record types: {entry_lines} log entry line(s) and {} plain \
+             receipt line(s) at {}; the file is verified as a log, so its plain receipt \
+             lines break the chain",
+            "warning:".yellow(),
+            receipt_lines.len(),
+            line_list(&receipt_lines),
+        );
     }
 
     // A log's chain is verified before its receipts are counted (log spec 8).
