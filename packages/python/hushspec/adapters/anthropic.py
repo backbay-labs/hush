@@ -15,12 +15,11 @@ dependency of the application rather than of the policy engine.
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 from urllib.parse import urlparse
 
-from hushspec.evaluate import EvaluationAction
+from hushspec.evaluate import EvaluationAction, args_size_of
 from hushspec.middleware import HushGuard
 
 __all__ = [
@@ -54,13 +53,6 @@ def _member(block: Any, name: str) -> Any:
 
 def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
-
-
-def _args_size(tool_input: Any) -> Optional[int]:
-    try:
-        return len(json.dumps(tool_input, default=str))
-    except (TypeError, ValueError):  # pragma: no cover - json.dumps default=str
-        return None
 
 
 def _host(url: str) -> str:
@@ -149,13 +141,13 @@ def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
         return EvaluationAction(
             type="tool_call",
             target=inner,
-            args_size=_args_size(tool_input),
+            args_size=args_size_of(tool_input),
         )
 
     return EvaluationAction(
         type="tool_call",
         target=name,
-        args_size=_args_size(tool_input),
+        args_size=args_size_of(tool_input),
     )
 
 
