@@ -305,7 +305,7 @@ Network egress control by host.
 2. If the host matches any entry in `allow`, the decision is **allow** (`rules.egress.allow`).
 3. Otherwise, the `default` value applies (`rules.egress.default`).
 
-Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
+Test vectors: `fixtures/core/evaluation/egress.test.yaml`, `fixtures/core/evaluation/egress-default-fail-closed.test.yaml`, `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`, `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
 
 ### 3.4 `rules.secret_patterns`
 
@@ -624,7 +624,7 @@ Test vectors: `fixtures/core/evaluation/path-normalization.test.yaml`, `fixtures
 #### 3.14.2 Host Patterns
 
 **Target normalization.** The egress target MAY be a bare host, a `host:port`, or a URL. It MUST be reduced to a host, in order:
-1. If the target contains `://`, parse it as a URL and take the authority; otherwise the whole target is the authority.
+1. If the target contains `://`, the authority is everything after it up to the first `/`, `\`, `?` or `#`; otherwise the whole target, cut at the same characters, is the authority. A backslash ends the authority exactly as a slash does, which is how browsers parse URLs with a special scheme: `http://blocked.example\@allowed.example` names the host `blocked.example`, never `allowed.example`.
 2. Remove any userinfo (`user:pass@`).
 3. If the authority begins with `[`, the host is the bracketed IPv6 literal including the brackets, and anything after the closing `]` (a `:port`) is removed. Otherwise remove a trailing `:` followed by one or more digits.
 4. Remove any path, query, or fragment.
@@ -644,7 +644,7 @@ Patterns undergo steps 5-7 only.
 
 The apex host is never implied by a wildcard; a document that intends to allow `example.com` MUST list it. If the normalized host is an IPv4 literal or a bracketed IPv6 literal, it matches a pattern only when the pattern is character-for-character equal to it; wildcards MUST NOT match IP literals. A target that cannot be reduced to a syntactically valid host MUST be treated as matching nothing (so `default` applies).
 
-Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
+Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtures/core/evaluation/egress-host-normalization.test.yaml`, `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
 
 #### 3.14.3 Regex Profile
 

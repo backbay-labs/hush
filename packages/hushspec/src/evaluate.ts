@@ -304,7 +304,9 @@ export function normalizeHost(target: string): string | undefined {
   const trimmed = target.trim();
   const schemeIndex = trimmed.indexOf('://');
   let authority = schemeIndex >= 0 ? trimmed.slice(schemeIndex + 3) : trimmed;
-  const end = firstIndexOfAny(authority, ['/', '?', '#']);
+  // A backslash ends the authority exactly as a slash does (core spec
+  // 3.14.2), the way a browser reads a special-scheme URL.
+  const end = firstIndexOfAny(authority, ['/', '\\', '?', '#']);
   authority = end >= 0 ? authority.slice(0, end) : authority;
   const at = authority.lastIndexOf('@');
   if (at >= 0) {

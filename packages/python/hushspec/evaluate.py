@@ -580,8 +580,10 @@ def normalize_host(target: str) -> Optional[str]:
     target = target.strip()
     scheme = target.find("://")
     authority = target[scheme + 3 :] if scheme >= 0 else target
+    # A backslash ends the authority exactly as a slash does (core spec
+    # 3.14.2), the way a browser reads a special-scheme URL.
     end = len(authority)
-    for ch in ("/", "?", "#"):
+    for ch in ("/", "\\", "?", "#"):
         found = authority.find(ch)
         if found >= 0:
             end = min(end, found)

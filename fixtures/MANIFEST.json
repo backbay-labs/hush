@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T14:10:23Z",
+  "generated_at": "2026-09-16T14:15:03Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -202,6 +202,13 @@
     {
       "path": "fixtures/core/evaluation/forbidden-paths.test.yaml",
       "sha256": "c3ad5ec8444f5eb16eb054775651111569e28bfbcc7803601f15ecb62d6f9362",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/host-normalization-backslash.test.yaml",
+      "sha256": "c5cc101ffb657ab20687e01c384795a3e1f6aafcd2bed4e32419aa6415270fa0",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1678,7 +1685,7 @@
     },
     {
       "path": "fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml",
-      "sha256": "081525dd1ec7e638ebc0c90d38de2a15fe0f240b599ab382f746b12d844fc524",
+      "sha256": "59827f700df40062b115ee0a6537619ea440bce8e0f8a380c19a01fa4c43c431",
       "category": "evaluation",
       "module": "posture",
       "level": 3
@@ -2512,6 +2519,48 @@
     {
       "path": "fixtures/receipts/expected/core/forbidden-paths/4.json",
       "sha256": "76492f7cdbfcd6285857e73a255f9a7e06533ae82ba8f4c2cb7659f43a346418",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/0.json",
+      "sha256": "c7ba53a632fd23ee179aebbfb3a4b290c682bf0b0e060e16ade2cb9753895fc0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/1.json",
+      "sha256": "2688d52ca38e1e0bbc63c1f57925653daa73665345aac0ee0e80f53f34413218",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/2.json",
+      "sha256": "20f4c3d6ed9e030da07abbb973188a24dd2580cf391fa9e71c89c6df7589f2dd",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/3.json",
+      "sha256": "b05e85fae03eea46810adbe11cf504467801999cccfdc16d1b0a60591cc9acb4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/4.json",
+      "sha256": "a2b66692c853119f91134c79455031566fb8935625dac61cb48cb177535baee9",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/host-normalization-backslash/5.json",
+      "sha256": "f4ce1535b39bdc7eec5a2a8c72ded3e51a16d213c34d8595405393e4c44b8993",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
@@ -3757,14 +3806,28 @@
     },
     {
       "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/0.json",
-      "sha256": "092d9f2e346acd71a227c57fc79698e4ccab842c96ff33007584a72f42c038d9",
+      "sha256": "3f622942e539f55d8a0c38bf8e9837a450e39378fbc55bbbc8f8f328bb99861d",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4
     },
     {
       "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/1.json",
-      "sha256": "3ceb5a50b5d5f495df4fbebccecc9b3a2efd8499807469b9a75b20526fbbe239",
+      "sha256": "3c7ac7724703848a7da4ddad90ef51edfc4fc99214b68b1ed728fd8b6f6a7632",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/2.json",
+      "sha256": "f1c7fd9ec31f12307278096e753d5b91ad45ef07a5e253604493bb6ac3dd613b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/posture/unknown-state-fail-closed/3.json",
+      "sha256": "e63c43331e5a3000cd8dd20217ea5816fdb88b34c26e92635c02ca5cb0715edd",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

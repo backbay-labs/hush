@@ -1389,7 +1389,9 @@ func NormalizeHost(target string) *string {
 	if index := strings.Index(authority, "://"); index >= 0 {
 		authority = authority[index+3:]
 	}
-	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+	// A backslash ends the authority exactly as a slash does (core spec
+	// 3.14.2), the way a browser reads a special-scheme URL.
+	if end := strings.IndexAny(authority, `/\?#`); end >= 0 {
 		authority = authority[:end]
 	}
 	if at := strings.LastIndex(authority, "@"); at >= 0 {

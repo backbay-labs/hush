@@ -1824,7 +1824,11 @@ pub fn normalize_host(target: &str) -> Option<String> {
         Some(index) => &target[index + 3..],
         None => target,
     };
-    let end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
+    // A backslash ends the authority exactly as a slash does (core spec
+    // 3.14.2), the way a browser reads a special-scheme URL.
+    let end = authority
+        .find(['/', '\\', '?', '#'])
+        .unwrap_or(authority.len());
     authority = &authority[..end];
     if let Some(at) = authority.rfind('@') {
         authority = &authority[at + 1..];
@@ -2133,6 +2137,14 @@ mod tests {
             Some("api.example.com")
         );
         assert_eq!(normalize_host("[::1]:8080").as_deref(), Some("[::1]"));
+        assert_eq!(
+            normalize_host("http://blocked.com\\@allowed.com/x").as_deref(),
+            Some("blocked.com"),
+        );
+        assert_eq!(
+            normalize_host("blocked.com\\@allowed.com").as_deref(),
+            Some("blocked.com"),
+        );
         assert_eq!(
             normalize_host("B\u{dc}CHER.example").as_deref(),
             Some("xn--bcher-kva.example")
