@@ -4,7 +4,12 @@ import type { HushSpec } from './schema.js';
 import { evaluate } from './evaluate.js';
 
 export interface EvaluationEvent {
-  type: 'evaluation.completed' | 'policy.loaded' | 'policy.load_failed' | 'policy.reloaded';
+  type:
+    | 'evaluation.completed'
+    | 'policy.loaded'
+    | 'policy.load_failed'
+    | 'policy.reloaded'
+    | 'sink.error';
   timestamp: string;
 }
 
@@ -42,11 +47,23 @@ export interface PolicyReloadedEvent extends EvaluationEvent {
   previous_hash?: string;
 }
 
+/**
+ * A receipt sink refused what it was handed. The decision it belonged to
+ * stands: a sink is evidence, never enforcement.
+ */
+export interface SinkErrorEvent extends EvaluationEvent {
+  type: 'sink.error';
+  error: string;
+  /** The sink that refused, by name. */
+  source?: string;
+}
+
 export type ObserverEvent =
   | EvaluationCompletedEvent
   | PolicyLoadedEvent
   | PolicyLoadFailedEvent
-  | PolicyReloadedEvent;
+  | PolicyReloadedEvent
+  | SinkErrorEvent;
 
 export interface EvaluationObserver {
   onEvent(event: ObserverEvent): void;
@@ -185,6 +202,15 @@ export class ObservableEvaluator {
   notifyPolicyLoadFailed(error: string, source?: string): void {
     this.emit({
       type: 'policy.load_failed',
+      timestamp: new Date().toISOString(),
+      error,
+      source,
+    });
+  }
+
+  notifySinkError(error: string, source?: string): void {
+    this.emit({
+      type: 'sink.error',
       timestamp: new Date().toISOString(),
       error,
       source,

@@ -442,8 +442,9 @@ export class HushGuard {
   private emitPolicyEvent(event: PolicyEvent): void {
     try {
       this.sink?.recordPolicyEvent?.(event);
-    } catch {
-      /* sinks must not break policy loading */
+    } catch (error) {
+      // Sinks must not break policy loading; the observers still hear about it.
+      this.reportSinkFailure(error);
     }
   }
 
@@ -598,9 +599,23 @@ export class HushGuard {
     if (receipt === undefined || this.sink === null) return;
     try {
       this.sink.send(receipt);
-    } catch {
-      /* sinks must not break evaluation */
+    } catch (error) {
+      // A sink must never break enforcement: a full disk is not a reason to
+      // let an action through, nor to stop one. The failure still reaches the
+      // observers, so the gap in the evidence is visible.
+      this.reportSinkFailure(error);
     }
+  }
+
+  /**
+   * Put a sink failure on the observer channel as a `sink.error` event, named
+   * by the sink that refused.
+   */
+  private reportSinkFailure(error: unknown): void {
+    this.observableEvaluator?.notifySinkError(
+      error instanceof Error ? error.message : String(error),
+      this.sink?.constructor?.name,
+    );
   }
 
   check(action: EvaluationAction): boolean {
@@ -781,13 +796,7 @@ export class HushGuard {
   ): void {
     if (receipt) {
       receipt.enforcement = enforcement;
-      if (this.sink) {
-        try {
-          this.sink.send(receipt);
-        } catch {
-          /* sinks must not break enforcement */
-        }
-      }
+      this.send(receipt);
     }
     this.observableEvaluator?.notifyEvaluationCompleted(
       this.observerAction(action),
