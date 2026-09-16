@@ -26,7 +26,7 @@ Documents use YAML 1.2 Core: only `true`/`false` are booleans (`yes`/`no`/`on`/`
 - The `hushspec` field **MUST** be present and be a string
 - Unknown fields **MUST** be rejected at every nesting level (fail-closed)
 - Path fields (`forbidden_paths`, `path_allowlist`, `skip_paths`) use the path-glob class; egress and browser domain fields use the host-pattern class; tool names are exact strings
-- All patterns in `secret_patterns`, `patch_integrity`, `shell_commands`, and `extra_credential_patterns` must conform to the HushSpec regex profile (RE2 subset, ASCII `\d \w \s \b`, no lookaround or backreferences)
+- All patterns in `secret_patterns`, `patch_integrity`, `shell_commands`, and `extra_credential_patterns` must conform to the HushSpec regex profile (RE2 subset, ASCII `\d \w \s \b` and ASCII-only `(?i)`, named groups but no backreferences or lookaround, no POSIX classes, at most 2048 bytes)
 - Secret pattern `name` fields **MUST** be unique within the array
 - Every `when` condition is validated at parse time
 
