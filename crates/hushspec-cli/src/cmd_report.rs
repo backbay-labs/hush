@@ -445,10 +445,11 @@ fn merge_chain(previous: ChainSummary, next: ChainSummary) -> ChainSummary {
 /// mapping (`rules.egress.block`) is only evidenced by an entry whose recorded
 /// `rule_path` is at or under it -- otherwise a report would credit
 /// `rules.egress.block` for an evaluation that matched the allowlist.
-fn mapping_covers(rule_path: &str, entry: &RuleTraceEntry) -> bool {
+fn mapping_covers(doc: &serde_json::Value, rule_path: &str, entry: &RuleTraceEntry) -> bool {
     let depth = rule_path.split('.').count();
     if rule_path.starts_with("rules") && depth <= 2 && !rule_path.contains('[') {
         return crate::controls::path_covers_block(
+            doc,
             rule_path,
             &format!("rules.{}", entry.rule_block),
         );
@@ -535,6 +536,7 @@ fn control_evidence(
         return Ok(None);
     };
 
+    let doc = crate::controls::document_json(&spec);
     let mappings = spec
         .metadata
         .as_ref()
@@ -579,7 +581,7 @@ fn control_evidence(
                 if !mapping
                     .rule_paths
                     .iter()
-                    .any(|path| mapping_covers(path, entry))
+                    .any(|path| mapping_covers(&doc, path, entry))
                 {
                     continue;
                 }
@@ -1464,31 +1466,48 @@ mod tests {
         }
     }
 
+    fn policy() -> serde_json::Value {
+        serde_json::json!({
+            "rules": {
+                "egress": { "allow": ["api.example.com"], "block": [], "default": "block" },
+                "tool_access": { "allow": ["read_file"], "default": "block" },
+                "forbidden_paths": { "patterns": ["/etc/**"] }
+            }
+        })
+    }
+
     #[test]
     fn a_block_mapping_covers_every_entry_of_that_block() {
+        let doc = policy();
         let egress = entry("egress", Some("rules.egress.allow"));
-        assert!(mapping_covers("rules", &egress));
-        assert!(mapping_covers("rules.egress", &egress));
-        assert!(!mapping_covers("rules.tool_access", &egress));
+        assert!(mapping_covers(&doc, "rules", &egress));
+        assert!(mapping_covers(&doc, "rules.egress", &egress));
+        assert!(!mapping_covers(&doc, "rules.tool_access", &egress));
+        // A block mapping that names no block of this policy evidences nothing.
+        assert!(!mapping_covers(&doc, "rules.nope", &egress));
     }
 
     #[test]
     fn a_deep_mapping_needs_the_recorded_path_under_it() {
+        let doc = policy();
         let blocked = entry("egress", Some("rules.egress.block"));
         let allowed = entry("egress", Some("rules.egress.allow"));
-        assert!(mapping_covers("rules.egress.block", &blocked));
-        assert!(!mapping_covers("rules.egress.block", &allowed));
+        assert!(mapping_covers(&doc, "rules.egress.block", &blocked));
+        assert!(!mapping_covers(&doc, "rules.egress.block", &allowed));
         // A block that recorded no path evidences nothing deeper than itself.
         assert!(!mapping_covers(
+            &doc,
             "rules.egress.block",
             &entry("egress", None)
         ));
         // Segment boundaries: `rules.egress.blocklist` is not under `.block`.
         assert!(!mapping_covers(
+            &doc,
             "rules.egress.block",
             &entry("egress", Some("rules.egress.blocklist"))
         ));
         assert!(mapping_covers(
+            &doc,
             "rules.forbidden_paths.patterns",
             &entry("forbidden_paths", Some("rules.forbidden_paths.patterns"))
         ));

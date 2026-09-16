@@ -687,7 +687,7 @@ fn check_control_mappings(spec: &HushSpec, file: &str, findings: &mut Vec<LintFi
             control
                 .rule_paths
                 .iter()
-                .any(|rule_path| crate::controls::path_covers_block(rule_path, &block_path))
+                .any(|rule_path| crate::controls::path_covers_block(&doc, rule_path, &block_path))
         });
         if !covered {
             findings.push(LintFinding::keyed(
