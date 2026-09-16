@@ -267,8 +267,9 @@ sink = MultiSink(
 
 `FilteredSink(inner, ["deny", "warn"])` passes on the decisions you name;
 `deny_only` is the common case. A sink that raises never breaks enforcement:
-`MultiSink` counts the loss in `sink.dropped` and reports it through
-`on_error`.
+`MultiSink` delivers to every sink whatever the ones before it did, counts each
+loss in `sink.dropped`, reports it through `on_error`, and then raises the
+first failure so a guard records it as a `sink.error` observer event.
 
 ### OTLP export
 

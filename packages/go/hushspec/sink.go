@@ -141,8 +141,12 @@ func (s *FilteredSink) RecordPolicyEvent(event *PolicyEvent) error {
 	return err
 }
 
-// MultiSink fans out to all sinks. Returns the first error but always
-// attempts every sink.
+// MultiSink fans out to several sinks.
+//
+// Every sink is attempted whatever the ones before it did -- one destination
+// refusing a receipt must not cost the others theirs -- and the first failure
+// is returned as a [SinkError] naming the sink that refused, so a guard raises
+// a `sink.error` observer event for it.
 type MultiSink struct {
 	sinks []ReceiptSink
 }
@@ -152,28 +156,27 @@ func NewMultiSink(sinks []ReceiptSink) *MultiSink {
 	return &MultiSink{sinks: sinks}
 }
 
-// Send forwards the receipt to every sink, returning the first error.
+// Send forwards the receipt to every sink, returning the first failure.
 func (s *MultiSink) Send(receipt *DecisionReceipt) error {
-	var firstErr error
-	for _, sink := range s.sinks {
-		if err := sink.Send(receipt); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-	return firstErr
+	return s.fanOut(func(sink ReceiptSink) error {
+		return sink.Send(receipt)
+	})
 }
 
 // RecordPolicyEvent fans the event out to every sink that can carry one,
-// returning the first error but always attempting each sink.
+// returning the first failure.
 func (s *MultiSink) RecordPolicyEvent(event *PolicyEvent) error {
+	return s.fanOut(func(sink ReceiptSink) error {
+		_, err := RecordPolicyEvent(sink, event)
+		return err
+	})
+}
+
+func (s *MultiSink) fanOut(deliver func(ReceiptSink) error) error {
 	var firstErr error
 	for _, sink := range s.sinks {
-		if _, err := RecordPolicyEvent(sink, event); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		if err := deliver(sink); err != nil && firstErr == nil {
+			firstErr = &SinkError{Sink: sinkName(sink), Err: err}
 		}
 	}
 	return firstErr

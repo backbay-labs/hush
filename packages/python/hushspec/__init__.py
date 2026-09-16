@@ -177,6 +177,7 @@ from hushspec.sinks import (
     MultiSink,
     NullSink,
     ReceiptSink,
+    SinkFanoutError,
     StderrReceiptSink,
 )
 from hushspec.otlp import (
@@ -500,6 +501,7 @@ __all__ = [
     "StderrReceiptSink",
     "FilteredSink",
     "MultiSink",
+    "SinkFanoutError",
     "CallbackSink",
     "NullSink",
     "OtlpReceiptSink",

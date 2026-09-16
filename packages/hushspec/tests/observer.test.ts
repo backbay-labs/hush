@@ -15,6 +15,7 @@ import {
   ConsoleObserver,
 } from '../src/observer.js';
 import type { ReceiptSink } from '../src/sinks.js';
+import { MultiSink } from '../src/sinks.js';
 import { HushGuard } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 
@@ -434,5 +435,29 @@ rules:
     expect(errors).toHaveLength(1);
     expect(errors[0].error).toBe('no space left on device');
     expect(errors[0].source).toBe('FailingSink');
+  });
+
+  it('reports a sink that refuses behind a MultiSink, naming the child', () => {
+    const observer = new TestObserver();
+    let recorded = 0;
+    const counting: ReceiptSink = {
+      send() {
+        recorded++;
+      },
+      recordPolicyEvent() {},
+    };
+    const guard = HushGuard.fromYaml(DENY_POLICY, {
+      observer,
+      sink: new MultiSink([new FailingSink(), counting]),
+    });
+    observer.events.length = 0;
+
+    expect(guard.check({ type: 'tool_call', target: 'dangerous_tool' })).toBe(false);
+    expect(recorded).toBe(1);
+
+    const errors = observer.events.filter(e => e.type === 'sink.error') as SinkErrorEvent[];
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toBe('sink FailingSink: no space left on device');
+    expect(errors[0].source).toBe('MultiSink');
   });
 });

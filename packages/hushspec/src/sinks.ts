@@ -62,28 +62,43 @@ export class FilteredSink implements ReceiptSink {
   }
 }
 
+/**
+ * Fans out to several sinks.
+ *
+ * Every sink is attempted whatever the ones before it did -- one destination
+ * refusing a receipt must not cost the others theirs -- and the first failure
+ * is then thrown, naming the sink that refused, so a guard raises a
+ * `sink.error` observer event for it rather than losing the evidence quietly.
+ */
 export class MultiSink implements ReceiptSink {
   constructor(private sinks: ReceiptSink[]) {}
 
   send(receipt: DecisionReceipt): void {
-    for (const sink of this.sinks) {
-      try {
-        sink.send(receipt);
-      } catch {
-        // Sinks must not crash the application.
-      }
-    }
+    this.fanOut(sink => sink.send(receipt));
   }
 
   recordPolicyEvent(event: PolicyEvent): void {
+    this.fanOut(sink => sink.recordPolicyEvent?.(event));
+  }
+
+  private fanOut(deliver: (sink: ReceiptSink) => void): void {
+    let firstFailure: Error | undefined;
     for (const sink of this.sinks) {
       try {
-        sink.recordPolicyEvent?.(event);
-      } catch {
-        // Sinks must not crash the application.
+        deliver(sink);
+      } catch (error) {
+        firstFailure ??= sinkFailure(sink, error);
       }
     }
+    if (firstFailure !== undefined) throw firstFailure;
   }
+}
+
+/** A child sink's failure, named by the sink that refused. */
+function sinkFailure(sink: ReceiptSink, error: unknown): Error {
+  const name = sink.constructor?.name ?? 'sink';
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(`sink ${name}: ${message}`, { cause: error });
 }
 
 export class CallbackSink implements ReceiptSink {
