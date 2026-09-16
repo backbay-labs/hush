@@ -109,7 +109,7 @@ func TestConditionIntFloatDistinction(t *testing.T) {
 func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
 	ctx := &RuntimeContext{CurrentTime: "2026-01-14T10:30:00Z"}
 
-	plus := &Condition{TimeWindow: &TimeWindowCondition{Start: "+9:00", End: "17:00", Timezone: "UTC"}}
+	plus := &Condition{TimeWindow: &TimeWindowCondition{Start: "+9:00", End: "17:00", Timezone: strPtr("UTC")}}
 	if !EvaluateCondition(plus, ctx) {
 		t.Error(`expected an unparsable HH:MM start ("+9:00") to leave the rule block active`)
 	}
@@ -118,7 +118,7 @@ func TestTimeWindowRejectsLeadingPlusInHHMM(t *testing.T) {
 	}
 
 	// Control: the equivalent zero-padded digits are active at 10:30.
-	valid := &Condition{TimeWindow: &TimeWindowCondition{Start: "09:00", End: "17:00", Timezone: "UTC"}}
+	valid := &Condition{TimeWindow: &TimeWindowCondition{Start: "09:00", End: "17:00", Timezone: strPtr("UTC")}}
 	if !EvaluateCondition(valid, ctx) {
 		t.Error("expected a valid 09:00-17:00 window to be active at 10:30 UTC")
 	}

@@ -62,6 +62,11 @@ jobs:
         run: python3 scripts/generate_testkit_schemas.py --check
       - name: Check the fixture manifest
         run: python3 scripts/generate_fixture_manifest.py --check
+      # The reference canonicalizer generated the normative vectors, so it has
+      # to keep reproducing them: a drift between it and the SDKs is a
+      # conformance failure either way round.
+      - name: Check the canonical form vectors
+        run: python3 scripts/canonical_json.py --check fixtures/core/hash
       # Re-derives the three hand-built bundle vectors from the committed
       # valid one, signing with OpenSSL: a standing cross-check of the Rust
       # signer as well as a staleness guard.

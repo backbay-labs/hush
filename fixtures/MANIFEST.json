@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T18:35:38Z",
+  "generated_at": "2026-09-16T18:52:37Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -390,7 +390,7 @@
     },
     {
       "path": "fixtures/core/hash/README.md",
-      "sha256": "ed41b85348796a514311bff65562971ac1ee6d7b7c926499dd39371861298e8b",
+      "sha256": "bd6d49cc7eebc43fb7fac997e63ec7e45e84c3fb7096b8ce41956c8a1a97e4c8",
       "category": "doc",
       "module": "core",
       "level": 0
@@ -468,6 +468,13 @@
     {
       "path": "fixtures/core/hash/minimal.yaml",
       "sha256": "e697644dc111ee3b9fab7645f59aaff12cd3684d524e1d0fcb25a755c75ef2ab",
+      "category": "canonical",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/hash/numbers-large.yaml",
+      "sha256": "a3d2f6b9e2468024cb113879de816292f7cbe794d3ca68f94afdcdfd80db833e",
       "category": "canonical",
       "module": "core",
       "level": 4

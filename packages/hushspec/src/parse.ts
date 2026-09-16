@@ -24,6 +24,9 @@ export const MAX_DOCUMENT_DEPTH = 32;
 /** Maximum accepted node count (core spec 2.4, RECOMMENDED default). */
 export const MAX_NODE_COUNT = 100_000;
 
+/** Largest integer an IEEE 754 double holds exactly (canonical spec 4.3). */
+const MAX_SAFE_INTEGER = BigInt(Number.MAX_SAFE_INTEGER);
+
 /**
  * Parse a HushSpec document under the YAML profile of core spec 2.4.
  *
@@ -32,6 +35,11 @@ export const MAX_NODE_COUNT = 100_000;
  * indentation, and rejects multi-document streams. The profile additionally
  * forbids anchors, aliases and merge keys, and bounds the input size, nesting
  * depth and node count; those checks live here.
+ *
+ * `intAsBigInt` keeps integer syntax apart from float syntax through the
+ * decode, which is what canonical spec 4.3's safe-integer bound is written
+ * against. `narrowIntegers` applies the bound and hands every integer on as a
+ * `number`, so no BigInt leaves this module.
  */
 export function parse(yaml: string): ParseResult {
   if (utf8ByteLength(yaml) > MAX_DOCUMENT_BYTES) {
@@ -51,6 +59,7 @@ export function parse(yaml: string): ParseResult {
     doc = YAML.parse(yaml, {
       version: '1.2',
       schema: 'core',
+      intAsBigInt: true,
       uniqueKeys: (a, b) => {
         const equal = a === b || (isScalar(a) && isScalar(b) && a.value === b.value);
         if (equal && duplicateKey === undefined) {
@@ -65,6 +74,15 @@ export function parse(yaml: string): ParseResult {
     });
   } catch (error) {
     return parseError(describeYamlError(error, duplicateKey));
+  }
+
+  try {
+    doc = narrowIntegers(doc, '$');
+  } catch (error) {
+    if (error instanceof UnsafeIntegerError) {
+      return parseError(error.message);
+    }
+    throw error;
   }
 
   const measured = measure(doc, 1);
@@ -113,6 +131,46 @@ function describeYamlError(error: unknown, duplicateKey: string | undefined): st
   const position = /at line (\d+), column (\d+)/.exec(message);
   const where = position == null ? '' : ` at line ${position[1]} column ${position[2]}`;
   return `duplicate entry with key ${JSON.stringify(duplicateKey)}${where}`;
+}
+
+/** An integer literal the IEEE 754 safe range cannot hold (canonical spec 4.3). */
+class UnsafeIntegerError extends Error {}
+
+/**
+ * Replace every BigInt the decode produced with a `number`, refusing one
+ * outside the IEEE 754 safe range (canonical spec 4.3).
+ *
+ * The bound belongs to integer syntax: `10000000000000000` names an exact
+ * integer that a double cannot hold, while `1.0e+16` names the double itself
+ * and is emitted whatever its magnitude. JavaScript has one numeric type, so
+ * the parser is the only place that distinction survives -- `intAsBigInt`
+ * hands integer-syntax scalars over as BigInt and float-syntax scalars as
+ * `number`. Applying the bound here means a rounded integer can never reach a
+ * content hash, and the rest of the SDK works with plain numbers.
+ */
+function narrowIntegers(value: unknown, path: string): unknown {
+  if (typeof value === 'bigint') {
+    if (value > MAX_SAFE_INTEGER || value < -MAX_SAFE_INTEGER) {
+      throw new UnsafeIntegerError(
+        `${path}: integer ${value} exceeds the safe range (2^53-1)`,
+      );
+    }
+    return Number(value);
+  }
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      value[index] = narrowIntegers(value[index], `${path}[${index}]`);
+    }
+    return value;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      record[key] = narrowIntegers(record[key], `${path}.${key}`);
+    }
+    return value;
+  }
+  return value;
 }
 
 interface Measured {

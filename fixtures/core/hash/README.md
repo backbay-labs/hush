@@ -31,7 +31,7 @@ every generated policy; `--ignore-content-hash` opts out of that comparison.
 Canonicalization presupposes validity ([canonical spec section
 2.3](../../../spec/hushspec-canonical.md)): a policy no conformant engine accepts could pin
 an identity no engine can ever produce. Every runner here validates before it canonicalizes,
-and `h2h hash` reproduces all fifteen.
+and `h2h hash` reproduces all sixteen.
 
 Project the `policy` as a generic tree of maps, arrays and scalars, the way [canonical spec
 section 6](../../../spec/hushspec-canonical.md) recommends -- but a typed model reaches the
@@ -49,6 +49,7 @@ other no-default empty container. `origins-overlay-empties.yaml` pins that.
 | `all-rule-blocks-defaults.yaml` | 3.2 | Every rule block present and empty: full default materialization. |
 | `defaults-partial.yaml` | 3.2 | Defaults fill only absent fields; absent blocks are not invented. |
 | `numbers.yaml` | 4.3 | Whole floats print as integers, fractions keep the shortest form. |
+| `numbers-large.yaml` | 4.3 | Float syntax past the safe-integer bound; negative zero. |
 | `strings-escapes.yaml` | 4.2 | Every escape class; non-ASCII, U+2028, astral, DEL, NBSP are literal. |
 | `key-order-utf16.yaml` | 4.1 | UTF-16 code-unit key order, including a surrogate-pair key. |
 | `empty-containers.yaml` | 3.3 | Empty no-default containers are omitted. |

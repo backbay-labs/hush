@@ -345,12 +345,14 @@ func canonicalProjectStruct(v reflect.Value) (map[string]any, error) {
 //
 //   - Pointers, slices and maps model presence directly: nil is absent, and a
 //     non-nil empty slice, map or string is a present-but-empty value, which
-//     section 3.3 (and its exception table) then judges. Every optional
-//     free-text property is a *string for exactly this reason, so one written
-//     as the empty string reaches the canonical form as it does in the other
-//     SDKs.
-//   - A bare string is either a required property or an enum, and "" is not a
-//     value of either: the empty enum sentinel is absence, and
+//     section 3.3 (and its exception table) then judges. Every string property
+//     whose presence the canonical form can observe -- an optional free-text
+//     one, and `time_window.timezone`, whose absence takes a schema default --
+//     is a *string for exactly this reason, so one written as the empty string
+//     reaches the canonical form as it does in the other SDKs. See
+//     is_optional_go_string in scripts/generate_sdk_models.py.
+//   - The remaining bare strings are required properties and enums, for which
+//     "" is not a value: the empty enum sentinel is absence, and
 //     validateRawDocument refuses a document that writes one.
 //   - Booleans, numbers and nested structs cannot express absence at all, so
 //     they are always present; Parse materializes the schema defaults whose

@@ -71,8 +71,8 @@ def _diff(expected: str, actual: str) -> str:
 
 
 def test_vector_directory_is_populated() -> None:
-    assert len(VECTOR_FILES) == 15, (
-        f"expected the 15 normative vectors in {VECTOR_DIR}, found {len(VECTOR_FILES)}"
+    assert len(VECTOR_FILES) == 16, (
+        f"expected the 16 normative vectors in {VECTOR_DIR}, found {len(VECTOR_FILES)}"
     )
 
 
