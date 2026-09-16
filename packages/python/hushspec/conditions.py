@@ -803,18 +803,21 @@ def _resolve_timezone(tz: str) -> Optional[tzinfo]:
 
 
 def _parse_offset_value(s: str) -> Optional[int]:
-    """Minutes for a ``+HH``/``+HH:MM`` offset body, or ``None``.
+    """Minutes for a fixed offset body, the part of a ``timezone`` after its
+    sign: ``HH`` or ``HH:MM``, two ASCII digits per field (core spec 3.13).
 
-    The digits are parsed strictly. A zone that cannot be resolved leaves
-    the rule block active (core spec 3.13), so tolerating whitespace,
-    underscores or non-ASCII digits here would resolve a zone another
-    engine refuses and could switch a control off.
+    Anything else is not an offset. A zone that cannot be resolved leaves the
+    rule block active, so tolerating a one-digit field, a missing colon,
+    whitespace or non-ASCII digits here would resolve a zone another engine
+    refuses and could switch a control off.
     """
     if ":" in s:
         hours_str, minutes_str = s.split(":", 1)
     else:
         hours_str = s
-        minutes_str = "0"
+        minutes_str = "00"
+    if len(hours_str) != 2 or len(minutes_str) != 2:
+        return None
     hours = _parse_strict_uint(hours_str)
     minutes = _parse_strict_uint(minutes_str)
     if hours is None or minutes is None:

@@ -101,9 +101,9 @@ class TestRegexProfile:
     def test_non_portable_escapes_are_rejected(self):
         assert "\\Q" in rejects(r"\Qa.b\E")
         assert "anchor with" in rejects(r"\Afoo")
-        # \Z / \z are caught by the shared RE2 portability pre-check.
-        assert "RE2 subset" in rejects(r"foo\Z")
-        assert "RE2 subset" in rejects(r"foo\z")
+        # \Z / \z are caught by the shared portability pre-check.
+        assert "end-anchors" in rejects(r"foo\Z")
+        assert "end-anchors" in rejects(r"foo\z")
         assert "Unicode property" in rejects(r"\p{L}")
         assert "Unicode property" in rejects(r"\P{L}")
         assert "profile escape" in rejects("\\u00a0")
@@ -122,8 +122,8 @@ class TestRegexProfile:
         assert matches(r"a\-b", "a-b")
 
     def test_empty_character_classes_are_rejected(self):
-        assert "RE2 subset" in rejects("[]")
-        assert "RE2 subset" in rejects("[^]")
+        assert "empty character class" in rejects("[]")
+        assert "empty character class" in rejects("[^]")
 
     def test_javascript_named_group_spelling_is_rewritten(self):
         assert compile_profile_regex("(?<year>[0-9]{4})").pattern == "(?P<year>[0-9]{4})"
@@ -140,6 +140,67 @@ class TestRegexProfile:
 
     def test_re2_unsafe_patterns_are_rejected(self):
         assert "nested unbounded quantifier" in rejects("(a+)+")
-        assert "RE2 subset" in rejects("(?=foo)bar")
-        assert "RE2 subset" in rejects(r"(foo)\1")
-        assert "RE2 subset" in rejects("a*+")
+        assert "group form" in rejects("(?=foo)bar")
+        assert "profile escape" in rejects(r"(foo)\1")
+        assert "possessive" in rejects("a*+")
+
+    def test_group_names_are_ascii_identifiers(self):
+        assert "named group's name" in rejects("(?<1st>x)")
+        assert "named group's name" in rejects("(?<année>x)")
+        assert "named group's name" in rejects("(?<year x)")
+
+    def test_non_profile_group_openers_are_rejected(self):
+        for pattern in (
+            "a(?#comment)b",
+            "a(?=b)",
+            "a(?!b)",
+            "(?<=a)b",
+            "(?<!a)b",
+            "(?>a)",
+            "(?(1)a|b)",
+            "(?R)",
+            "(?1)",
+            "(?P<a>x)(?P=a)",
+        ):
+            assert "group form" in rejects(pattern), pattern
+        assert matches("(?:ab)+", "abab")
+
+    def test_posix_bracket_expressions_are_rejected(self):
+        assert "unescaped [" in rejects("[[:alpha:]]")
+        assert "unescaped [" in rejects("[a[b]")
+        assert matches(r"[a\[]", "[")
+
+    def test_open_lower_bound_quantifier_is_rejected(self):
+        assert "{,n} quantifier" in rejects("a{,3}")
+        assert matches("a{0,3}b", "aab")
+
+    def test_over_long_patterns_are_rejected(self):
+        assert "2048 bytes" in rejects("a" * 2049)
+        assert matches("a" * 2048, "a" * 2048)
+
+    def test_class_ranges_stay_inside_the_bmp(self):
+        assert "Basic Multilingual Plane" in rejects("[\U0001f600-\U0001f64f]")
+        assert matches("^[\U0001f600a]$", "\U0001f600")
+        assert matches("^[\U0001f600a]$", "a")
+        assert not matches("^[^\U0001f600]$", "\U0001f600")
+        assert matches("^[^\U0001f600]$", "a")
+
+    def test_case_insensitive_folds_ascii_letters_only(self):
+        assert matches("(?i)stra", "STRA")
+        assert matches("(?i)stra", "Stra")
+        # U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII
+        # under the full Unicode table; the profile folds ASCII only.
+        assert not matches("(?i)s", "ſ")
+        assert not matches("(?i)k", "K")
+
+    def test_case_insensitive_folds_class_members_and_ranges(self):
+        assert matches("(?i)^[a-f]$", "C")
+        assert not matches("(?i)^[a-f]$", "G")
+        assert matches("(?i)^[sq]$", "S")
+        assert not matches("(?i)^[sq]$", "ſ")
+        assert not matches("(?i)^[^s]$", "S")
+        assert matches("(?i)^[^s]$", "ſ")
+        assert matches(r"(?i)\x41", "a")
+        assert matches(r"(?i)\x61", "A")
+        assert compile_profile_regex("(?i)[0-9]").pattern == "[0-9]"
+        assert compile_profile_regex("(?i)(?P<ab>c)").pattern == "(?P<ab>[cC])"

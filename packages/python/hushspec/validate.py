@@ -15,7 +15,7 @@ from hushspec.error_codes import (
     ERROR_UNSUPPORTED_VERSION,
 )
 from hushspec.extensions import DetectionLevel, Extensions, TransitionTrigger
-from hushspec.regex_profile import compile_profile_regex
+from hushspec.regex_profile import NESTED_QUANTIFIER_MESSAGE, compile_profile_regex
 from hushspec.rules import Rules
 from hushspec.schema import Classification, HushSpec, LifecycleState
 from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported, major_version
@@ -40,12 +40,14 @@ _DETECTION_LEVEL_ORDER = {
 
 #: Which registry code each validation check reports. Every check not listed
 #: here is a core Section 7 / extension-module constraint violation, which is
-#: what E004 covers, so only the four the registry names separately need an
-#: entry.
+#: what E004 covers, so only the ones the registry names separately need an
+#: entry. A pattern outside the RE2 subset is a bad pattern like any other, so
+#: it reports E005 alongside ``invalid_regex``.
 _REGISTRY_CODES: dict[str, str] = {
     "unsupported_version": ERROR_UNSUPPORTED_VERSION,
     "duplicate_pattern_name": ERROR_DUPLICATE_PATTERN_NAME,
     "invalid_regex": ERROR_INVALID_REGEX,
+    "non_re2_regex": ERROR_INVALID_REGEX,
     "invalid_date": ERROR_INVALID_DATE,
 }
 
@@ -535,6 +537,12 @@ _POSSESSIVE_MESSAGE = (
     "across the HushSpec SDK regex engines"
 )
 
+# Shared rejection message for the open-lower-bound quantifier {,n}.
+_OPEN_LOWER_BOUND_MESSAGE = (
+    "the {,n} quantifier is not portable across the HushSpec SDK regex engines "
+    "(Python reads it as {0,n}, the others as literal text); write {0,n}"
+)
+
 
 def _disallowed_regex_feature(pattern: str) -> str | None:
     """Portability pre-check: reject regex constructs that are unsupported by,
@@ -549,7 +557,9 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
         differing semantics; JavaScript reads ``\\Z``/``\\z`` as a literal
         letter -- users anchor with ``$``),
       * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
-        the others reject them).
+        the others reject them),
+      * the ``{,n}`` quantifier (Python's `re` reads it as ``{0,n}``; the
+        others read the whole brace as literal text).
 
     The accepted set is normative: every SDK must reject exactly these
     constructs. ``hushspec.raw_validate`` runs this same function, so a
@@ -607,6 +617,8 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
             if j < n:
                 inner = "".join(chars[i + 1 : j])
                 if _brace_kind(inner) != "none":
+                    if inner.startswith(","):
+                        return _OPEN_LOWER_BOUND_MESSAGE
                     if j + 1 < n and chars[j + 1] == "+":
                         return _POSSESSIVE_MESSAGE
                     i = j + 1
@@ -756,32 +768,36 @@ def _brace_kind(inner: str) -> str:
 
 
 def _validate_regex(pattern: str, path: str, errors: list[ValidationError]) -> None:
-    # RE2/ReDoS safety first, so a lookaround or ``(a+)+`` keeps reporting the
-    # dedicated ``non_re2_regex`` code rather than being swallowed by the
-    # profile compile below (which also rejects them, to stay fail-closed at
-    # evaluation time).
-    if not is_safe_regex(pattern):
+    def reject(kind: str, message: str) -> None:
         errors.append(
-            ValidationError(
-                "non_re2_regex",
-                f"{path}: pattern uses features not in the RE2 subset "
-                "(backreferences, lookaround, etc.) which may cause ReDoS",
-            )
+            ValidationError(kind, f"{path} must be a valid regular expression: {message}")
         )
+
+    # Portability pre-check first: reject constructs that are unsupported by, or
+    # behave differently across, the four SDK regex engines (possessive
+    # quantifiers, ``\Z``/``\z`` end-anchors, ``{,n}``, empty character classes)
+    # so a pattern validates identically everywhere. The wording of each
+    # rejection is shared with the other three SDKs.
+    feature = _disallowed_regex_feature(pattern)
+    if feature is not None:
+        reject("non_re2_regex", feature)
         return
 
-    # Profile check second: ``compile_profile_regex`` is the exact call the
-    # evaluator makes, so a pattern that validates here can never fail to
-    # compile at evaluation time -- and vice versa.
+    # Nested-quantifier check second: RE2 tolerates shapes like ``(a+)+`` that
+    # catastrophically backtrack on Python's ``re``.
+    if _has_nested_quantifier(pattern):
+        reject("non_re2_regex", NESTED_QUANTIFIER_MESSAGE)
+        return
+
+    # Profile check last: ``compile_profile_regex`` repeats the two checks
+    # above, refuses the rest of the non-RE2 syntax (lookaround,
+    # backreferences, atomic and recursive groups) and then compiles. It is the
+    # exact call the evaluator makes, so a pattern that validates here can never
+    # fail to compile at evaluation time -- and vice versa.
     try:
         compile_profile_regex(pattern)
     except ValueError as e:
-        errors.append(
-            ValidationError(
-                "invalid_regex",
-                f"{path} must be a valid regular expression: {e}",
-            )
-        )
+        reject("invalid_regex", str(e))
 
 
 def _is_valid_duration(value: str) -> bool:

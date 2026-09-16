@@ -363,6 +363,9 @@ function resolveCurrentTime(
     const adjusted = new Date(date.getTime() + utcOffset * 60_000);
     return utcDateParts(adjusted);
   }
+  if (isFixedOffsetShaped(tz)) {
+    return undefined;
+  }
 
   const intlParts = resolveViaIntl(date, tz);
   if (intlParts != null) {
@@ -437,20 +440,28 @@ const FIXED_OFFSET_ALIASES: Record<string, number> = {
 
 const UTC_ALIASES = new Set(['UTC', 'utc', 'Etc/UTC', 'Etc/GMT', 'GMT']);
 
+/**
+ * Minutes for `UTC` and its aliases, or for a fixed offset: `[+-]HH` or
+ * `[+-]HH:MM`, two ASCII digits per field (core spec 3.13).
+ *
+ * Anything else is not an offset. A zone that cannot be resolved leaves the
+ * rule block active, so tolerating a one-digit field, a missing colon or
+ * surrounding whitespace here would resolve a zone another engine refuses and
+ * could switch a control off.
+ */
 function parseUtcOrNumericOffsetMinutes(tz: string): number | undefined {
-  const normalized = tz.trim();
-  if (UTC_ALIASES.has(normalized)) {
+  if (UTC_ALIASES.has(tz)) {
     return 0;
   }
 
-  const match = normalized.match(/^([+-])(\d{1,2})(?::?(\d{2}))?$/);
+  const match = tz.match(/^([+-])([0-9]{2})(?::([0-9]{2}))?$/);
   if (!match) {
     return undefined;
   }
 
   const hours = parseInt(match[2], 10);
   const minutes = parseInt(match[3] ?? '0', 10);
-  if (Number.isNaN(hours) || Number.isNaN(minutes) || hours > 23 || minutes > 59) {
+  if (hours > 23 || minutes > 59) {
     return undefined;
   }
 
@@ -459,11 +470,23 @@ function parseUtcOrNumericOffsetMinutes(tz: string): number | undefined {
 }
 
 /**
+ * Whether `tz` is written as a fixed offset, well-formed or not.
+ *
+ * A signed token is an offset or nothing: `Intl` resolves spellings the
+ * grammar above refuses (`+0530`), which no other SDK accepts, so a signed
+ * token must never reach it.
+ */
+function isFixedOffsetShaped(tz: string): boolean {
+  return tz.startsWith('+') || tz.startsWith('-');
+}
+
+/**
  * Whether `tz` is an identifier this engine can resolve: an IANA zone, a
  * known fixed-offset alias, or a numeric `+HH:MM` / `-HH:MM` offset.
  */
 export function timezoneIsKnown(tz: string): boolean {
   if (parseUtcOrNumericOffsetMinutes(tz) != null) return true;
+  if (isFixedOffsetShaped(tz)) return false;
   if (Object.prototype.hasOwnProperty.call(FIXED_OFFSET_ALIASES, tz)) return true;
   try {
     // `Intl` throws RangeError on an unknown time zone.
