@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# A document declaring the 1.0 series is accepted by an engine that supports
+# minor version 1.0 (core spec 2.2, 10); its semantics are those of 0.2.
+hushspec: "1.0.0"
+name: one-point-zero
+description: Declares the stable 1.0 document format
+
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+  egress:
+    allow:
+      - "api.example.com"
+    default: block
+  tool_access:
+    block:
+      - shell_exec
+    default: allow

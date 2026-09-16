@@ -2,20 +2,21 @@
 //!
 //! Version acceptance follows core spec 2.2: an engine that supports a
 //! minor version `X.Y` accepts every `X.Y.Z` document, because patch versions
-//! carry only clarifications and errata. This engine implements the 0.2.0
-//! semantics and also accepts 0.1.x documents (evaluated under 0.2 semantics).
+//! carry only clarifications and errata. This engine implements the 1.0.0
+//! semantics, which are identical to 0.2.0, and also accepts 0.1.x and 0.2.x
+//! documents (core spec 10).
 
 /// The HushSpec version this engine writes by default.
-pub const HUSHSPEC_VERSION: &str = "0.2.0";
+pub const HUSHSPEC_VERSION: &str = "1.0.0";
 
 /// Minor versions this engine accepts, as `X.Y` strings.
-pub const HUSHSPEC_SUPPORTED_MINORS: &[&str] = &["0.1", "0.2"];
+pub const HUSHSPEC_SUPPORTED_MINORS: &[&str] = &["0.1", "0.2", "1.0"];
 
 /// Representative full versions for each supported minor (display only; use
 /// [`is_supported`] for acceptance, which accepts every patch level).
-pub const HUSHSPEC_SUPPORTED_VERSIONS: &[&str] = &["0.1.0", "0.2.0"];
+pub const HUSHSPEC_SUPPORTED_VERSIONS: &[&str] = &["0.1.0", "0.2.0", "1.0.0"];
 
-/// Whether `version` is a well-formed `0.Y.Z` string whose minor version this
+/// Whether `version` is a well-formed `X.Y.Z` string whose minor version this
 /// engine supports. Any patch level of a supported minor is accepted.
 #[must_use]
 pub fn is_supported(version: &str) -> bool {
@@ -53,12 +54,15 @@ mod tests {
         assert!(is_supported("0.1.99"));
         assert!(is_supported("0.2.0"));
         assert!(is_supported("0.2.7"));
+        assert!(is_supported("1.0.0"));
+        assert!(is_supported("1.0.3"));
     }
 
     #[test]
     fn rejects_unsupported_or_malformed_versions() {
         assert!(!is_supported("0.3.0"));
-        assert!(!is_supported("1.0.0"));
+        assert!(!is_supported("1.7.0"));
+        assert!(!is_supported("2.0.0"));
         assert!(!is_supported("0.1"));
         assert!(!is_supported("0.1.0.0"));
         assert!(!is_supported("0.1.x"));

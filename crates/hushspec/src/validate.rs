@@ -55,6 +55,12 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
         errors.push(ValidationError::UnsupportedVersion(spec.hushspec.clone()));
     }
 
+    if spec.name.as_deref() == Some("") {
+        errors.push(ValidationError::Custom(
+            "name: must not be empty when present".to_string(),
+        ));
+    }
+
     if let Some(rules) = &spec.rules {
         validate_rules(rules, &mut errors);
 

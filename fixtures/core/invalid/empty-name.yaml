@@ -1,0 +1,8 @@
+# A present but empty name is a constraint violation in the 1.0 document
+# format (core spec 2): a bundle's subject and a receipt's policy summary
+# both name the policy, and an empty name names nothing.
+hushspec: "1.0.0"
+name: ""
+rules:
+  egress:
+    default: block
