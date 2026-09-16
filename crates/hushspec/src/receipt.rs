@@ -403,6 +403,13 @@ pub(crate) fn is_millisecond_timestamp(value: &str) -> bool {
             return false;
         }
     }
+    // `parse_from_rfc3339` reads second 60 as a leap second. The schemas pin
+    // the field to `[0-5][0-9]`, so a leap second is not an instant these
+    // formats can carry, and accepting one would compare an expiry against a
+    // time the other engines reject outright.
+    if &bytes[17..19] == b"60" {
+        return false;
+    }
     DateTime::parse_from_rfc3339(value).is_ok()
 }
 
@@ -712,6 +719,16 @@ mod tests {
             EnforcementSummary::implied(Decision::Deny, Monitor).outcome,
             WouldBlock
         );
+    }
+
+    #[cfg(feature = "signing")]
+    #[test]
+    fn a_millisecond_timestamp_is_a_real_instant() {
+        assert!(is_millisecond_timestamp("2026-09-15T12:00:00.000Z"));
+        assert!(!is_millisecond_timestamp("2026-06-30T23:59:60.000Z"));
+        assert!(!is_millisecond_timestamp("2026-02-30T00:00:00.000Z"));
+        assert!(!is_millisecond_timestamp("2026-09-15T12:00:00Z"));
+        assert!(!is_millisecond_timestamp("2026-09-15T12:00:00.000+01:00"));
     }
 
     #[test]

@@ -158,7 +158,7 @@ const trustedPrivateKeyPem = fixture('keys/test-signing.key.pem');
 
 describe('signing vectors (spec/hushspec-signing.md section 9)', () => {
   it('finds the full vector set', () => {
-    expect(vectors.cases.length).toBe(17);
+    expect(vectors.cases.length).toBe(18);
   });
 
   for (const testCase of vectors.cases) {

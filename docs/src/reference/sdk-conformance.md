@@ -59,7 +59,7 @@ Every runner walks the same sixteen directories -- `{core,posture,origins,detect
 | `fixtures/core/resolve/` | 4 | `crates/hushspec/tests/resolve_vectors.rs` | `tests/resolve-vectors.test.ts` | `tests/test_resolve_vectors.py` | `resolve_vectors_test.go` |
 | `fixtures/receipts/{valid,invalid}/` | 4 | `crates/hushspec/tests/receipt.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_vectors_test.go` |
 | `fixtures/receipts/expected/` | 4 | `crates/hushspec/tests/receipt_expected.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_expected_test.go` |
-| `fixtures/signing/vectors.yaml` (16) | 5 | `crates/hushspec/tests/signing_vectors.rs` | `tests/signing-vectors.test.ts` | `tests/test_signing_vectors.py` | `signing_vectors_test.go` |
+| `fixtures/signing/vectors.yaml` (18) | 5 | `crates/hushspec/tests/signing_vectors.rs` | `tests/signing-vectors.test.ts` | `tests/test_signing_vectors.py` | `signing_vectors_test.go` |
 | Verify-on-load, `receipt.policy.signature` | 5 | `crates/hushspec/src/{resolve,guard}.rs` tests | `tests/verify-load.test.ts`, `tests/guard-evidence.test.ts` | `tests/test_verify_on_load.py`, `tests/test_guard_evidence.py` | `resolve_verify_test.go`, `guard_test.go` |
 | `fixtures/log/{valid,invalid}/`, break identified by line | 5 | `crates/hushspec/tests/log_chain.rs` | `tests/log.test.ts` | `tests/test_log.py` | `log_test.go` |
 | `fixtures/receipts/signed/{valid,invalid}/` | 5 | `crates/hushspec/tests/receipt_signing.rs` | `tests/receipt-signing.test.ts` | `tests/test_receipt_signing.py` | `receipt_vectors_test.go` |

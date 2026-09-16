@@ -509,7 +509,7 @@ with retirement and revocation.
 Verification runs **on load**: every hop of an `extends` chain is checked against the keyring
 or its digest pin, the load fails closed when a signature is required and absent or invalid,
 and the outcome is recorded in every receipt's `policy.signature`. All four SDKs return the
-exact reason code for each of the 17 vectors in `fixtures/signing/vectors.yaml`. Rust needs the
+exact reason code for each of the 18 vectors in `fixtures/signing/vectors.yaml`. Rust needs the
 `signing` Cargo feature; Python needs the `signing` extra
 (`pip install "hushspec[signing]"`), without which the signature entry points raise
 `SigningUnavailable` rather than reporting an unverified signature as good. The format is

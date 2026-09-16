@@ -126,7 +126,7 @@ def _expected(case: dict[str, Any]) -> tuple[bool, str | None]:
 
 
 def test_vector_manifest_is_populated() -> None:
-    assert len(CASES) == 17, f"expected the 17 normative signing vectors, found {len(CASES)}"
+    assert len(CASES) == 18, f"expected the 18 normative signing vectors, found {len(CASES)}"
     names = [case["name"] for case in CASES]
     assert len(set(names)) == len(names), "vector names must be unique"
 
@@ -175,11 +175,13 @@ def test_signing_vector(case: dict[str, Any]) -> None:
 #: mapped to the reason parsing it must carry. ``bad-algorithm`` and
 #: ``bad-format-version`` pin values the schema closes with ``const``, which is
 #: exactly why spec section 6.2 gives each its own check rather than folding it
-#: into check 1; ``impossible-signed-at-date`` fails check 1 itself.
+#: into check 1; ``impossible-signed-at-date`` and ``leap-second-signed-at``
+#: fail check 1 itself.
 _UNPARSEABLE_VECTORS = {
     "bad-algorithm": "unsupported_algorithm",
     "bad-format-version": "unsupported_format_version",
     "impossible-signed-at-date": "malformed_envelope",
+    "leap-second-signed-at": "malformed_envelope",
 }
 
 
