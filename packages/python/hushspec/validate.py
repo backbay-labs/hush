@@ -635,13 +635,14 @@ def is_safe_regex(pattern: str) -> bool:
     Returns ``True`` only if the pattern is safe on every HushSpec engine.
     Returns ``False`` if the pattern contains backreferences, lookaround,
     atomic groups, possessive quantifiers (including possessive braces like
-    ``{2,}+``), ``\\Z``/``\\z`` anchors, empty character classes (``[]``,
-    ``[^]``), or other non-RE2 features, OR a nested unbounded quantifier
-    (e.g. ``(a+)+``) that catastrophically backtracks on the backtracking
-    engines (JavaScript ``RegExp``, Python ``re``).
+    ``{2,}+``), the ``{,n}`` quantifier, ``\\Z``/``\\z`` anchors, empty
+    character classes (``[]``, ``[^]``), or other non-RE2 features, OR a
+    nested unbounded quantifier (e.g. ``(a+)+``) that catastrophically
+    backtracks on the backtracking engines (JavaScript ``RegExp``, Python
+    ``re``).
     """
-    # Portability pre-check first: possessive quantifiers, \Z/\z anchors, and
-    # empty character classes, via the escape/class-aware scanner.
+    # Portability pre-check first: possessive quantifiers, \Z/\z anchors,
+    # {,n} and empty character classes, via the escape/class-aware scanner.
     if _disallowed_regex_feature(pattern) is not None:
         return False
     # RE2-feature check second: backreferences, lookaround, atomic groups,
