@@ -57,7 +57,7 @@ A HushSpec document is authored in YAML (Core Section 2.4). Before projection it
 - YAML strings become JSON strings, byte-for-byte after YAML escape processing. No Unicode normalization is applied to values. (Path and host normalization in Core Sections 3.1 and 3.3 happen at evaluation time, on action inputs, never on the document.)
 - YAML integers become JSON numbers. YAML floats become JSON numbers. The distinction between `10` and `10.0` does not survive canonicalization (Section 4.3).
 - YAML booleans `true`/`false` become JSON booleans. Under the YAML 1.2 Core schema required by Core Section 2.4, `yes`, `no`, `on`, and `off` are strings.
-- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a `null` written for a property the schema declares is a validation error and the document MUST NOT be canonicalized. Inside the free-form values the schema does not describe (`when.context` and everything below it) `null` is an ordinary JSON value and is canonicalized as one.
+- YAML `null` becomes JSON `null`. HushSpec schemas define no nullable fields; a `null` written anywhere the schema types a value (a declared property, an array element, or a schema-map entry) is a validation error and the document MUST NOT be canonicalized. Inside the free-form values the schema does not describe (`when.context` and everything below it) `null` is an ordinary JSON value and is canonicalized as one.
 
 A document supplied as JSON is already in the data model.
 
