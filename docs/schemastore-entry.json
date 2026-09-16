@@ -12,7 +12,7 @@
         "*.hushspec.yaml",
         "*.hushspec.yml"
       ],
-      "url": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json"
+      "url": "https://hushspec.dev/schemas/hushspec-core.v1.schema.json"
     },
     {
       "name": "HushSpec Decision Receipt",
@@ -20,7 +20,7 @@
       "fileMatch": [
         "*.receipt.json"
       ],
-      "url": "https://hushspec.dev/schemas/hushspec-receipt.v0.schema.json"
+      "url": "https://hushspec.dev/schemas/hushspec-receipt.v1.schema.json"
     },
     {
       "name": "HushSpec Evaluator Test",
@@ -30,7 +30,7 @@
         "*.hushspec.test.yml",
         "**/fixtures/**/*.test.yaml"
       ],
-      "url": "https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json"
+      "url": "https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json"
     },
     {
       "name": "HushSpec Log Entry",
@@ -38,7 +38,7 @@
       "fileMatch": [
         "*.log-entry.json"
       ],
-      "url": "https://hushspec.dev/schemas/hushspec-log-entry.v0.schema.json"
+      "url": "https://hushspec.dev/schemas/hushspec-log-entry.v1.schema.json"
     },
     {
       "name": "HushSpec Policy Bundle",
@@ -46,7 +46,7 @@
       "fileMatch": [
         "*.bundle.json"
       ],
-      "url": "https://hushspec.dev/schemas/hushspec-bundle.v0.schema.json"
+      "url": "https://hushspec.dev/schemas/hushspec-bundle.v1.schema.json"
     }
   ]
 }

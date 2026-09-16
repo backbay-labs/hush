@@ -1,7 +1,7 @@
 # HushSpec Detection Extension Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 **Companion to:** HushSpec Core v0.1.0
 

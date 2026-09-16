@@ -48,7 +48,7 @@ review; it requires only that the numbers are true.
    report yourself.
 
 5. **Emit a report** conforming to
-   `schemas/hushspec-conformance-report.v0.schema.json`. Validate it with any
+   `schemas/hushspec-conformance-report.v1.schema.json`. Validate it with any
    JSON Schema 2020-12 validator before publishing. Publish it alongside the
    statement; the statement without the report is an assertion, not evidence.
 

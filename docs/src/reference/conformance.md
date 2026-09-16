@@ -18,7 +18,7 @@ SHA-256, its category, and the level at which it becomes required, and a claim
 names the corpus by the SHA-256 of that manifest.
 
 The machine-readable form of a claim is a
-[conformance report](json-schema.md): `hushspec-conformance-report.v0.schema.json`.
+[conformance report](json-schema.md): `hushspec-conformance-report.v1.schema.json`.
 The reference runner writes one, and validates it against its own schema before
 writing:
 
@@ -102,7 +102,7 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document
 - Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision, under the semantics of core spec sections 3, 5 and 6 -- including the normalization and matching algorithms of section 3.14
 - Implements aggregation and precedence per core spec 6.1 (`deny` > `warn` > `allow`) and denies unknown action types per section 5
-- Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v0.schema.json`
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v1.schema.json`
 
 This is the full engine level. All four HushSpec SDKs pass it, and go on to
 Levels 4 and 5; Clawdstrike is a Level 3 implementation.

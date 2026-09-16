@@ -2,7 +2,7 @@
 
 HushSpec documents are backed by JSON Schemas, published at stable URLs under
 their own `$id` (for example,
-`https://hushspec.dev/schemas/hushspec-core.v0.schema.json`). Any YAML-aware
+`https://hushspec.dev/schemas/hushspec-core.v1.schema.json`). Any YAML-aware
 editor that speaks [`yaml-language-server`](https://github.com/redhat-developer/yaml-language-server)
 conventions -- VS Code (with the YAML extension), Neovim, JetBrains IDEs, and
 others -- can use these schemas for autocompletion, hover documentation, and
@@ -63,7 +63,7 @@ below for what's still pending.
 Add a `yaml-language-server` modeline as the **first line** of the file:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
 hushspec: "0.1.0"
 name: "my-policy"
 ```
@@ -78,7 +78,7 @@ Evaluator test files (the `*.test.yaml` fixtures `h2h init` scaffolds
 alongside a policy) use the evaluator-test schema instead:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
 ```
 
 See the [JSON Schema reference](../reference/json-schema.md) for the full
@@ -93,7 +93,7 @@ your workspace settings:
 ```yaml
 # .vscode/settings.json
 "yaml.schemas": {
-  "https://hushspec.dev/schemas/hushspec-core.v0.schema.json": ["policies/*.yaml"]
+  "https://hushspec.dev/schemas/hushspec-core.v1.schema.json": ["policies/*.yaml"]
 }
 ```
 
@@ -110,7 +110,7 @@ live, substitute the raw GitHub URL anywhere above; it always resolves and
 tracks `main` directly:
 
 ```
-https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
+https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v1.schema.json
 ```
 
 Both URLs serve the same file, and can differ only for as long as it takes a

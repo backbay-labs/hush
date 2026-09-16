@@ -1,7 +1,7 @@
 # HushSpec Canonical Form Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 **Companion to:** HushSpec Core 0.2.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
 
@@ -25,7 +25,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHOULD", "SHOULD NOT", "
 
 **Resolved document.** The output of resolving a document's `extends` chain (Core Section 2.3). It contains neither `extends` nor `merge_strategy`.
 
-**Schema.** The JSON Schema documents under `schemas/`: `hushspec-core.v0.schema.json` and the three extension schemas (`posture`, `origins`, `detection`).
+**Schema.** The JSON Schema documents under `schemas/`: `hushspec-core.v1.schema.json` and the three extension schemas (`posture`, `origins`, `detection`).
 
 **Canonical projection.** The JSON value produced by Section 3.
 
@@ -120,7 +120,7 @@ No other field in the current schemas is presence-significant. A future schema r
 
 ### 3.4 Extensions
 
-The core schema declares `extensions.posture`, `extensions.origins`, and `extensions.detection` as opaque objects. For projection, each present extension block is projected against the **root** of its own schema document (`hushspec-posture.v0.schema.json`, `hushspec-origins.v0.schema.json`, `hushspec-detection.v0.schema.json`) using the same rules as Section 3.2, then subjected to Section 3.3. If every extension block projects to an omitted value, `extensions` itself is omitted.
+The core schema declares `extensions.posture`, `extensions.origins`, and `extensions.detection` as opaque objects. For projection, each present extension block is projected against the **root** of its own schema document (`hushspec-posture.v1.schema.json`, `hushspec-origins.v1.schema.json`, `hushspec-detection.v1.schema.json`) using the same rules as Section 3.2, then subjected to Section 3.3. If every extension block projects to an omitted value, `extensions` itself is omitted.
 
 ### 3.5 Worked example
 
@@ -250,7 +250,7 @@ The **reference implementation** is `scripts/canonical_json.py`, a standard-libr
 
 ## 7. Test Vectors
 
-Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushspec-hash-vector.v0.schema.json`:
+Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushspec-hash-vector.v1.schema.json`:
 
 | Field | Meaning |
 |---|---|

@@ -162,7 +162,7 @@ code" is the answer a relying party needs:
 | Format version | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `ReceiptVersion` | `"0.2"` | |
 | Evaluate and record | `evaluate_audited` | `evaluateAudited` | `evaluate_audited` | `EvaluateAudited` | Takes a **`Resolution`**, an action, an `AuditConfig` and an `AuditContext`; returns a format 0.2 receipt | Content is never carried -- only `action.content_hash` and `content_size` |
 | From a bare document | `evaluate_audited_spec` | `evaluateAuditedSpec` | `evaluate_audited_spec` | `EvaluateAuditedSpec` | Resolves the leaf as `memory` first | |
-| Receipt value | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `receipt_version`, UUID v7 `receipt_id`, millisecond `timestamp` with `time_source`, `actor`, `policy`, `action`, decision, recorded `rule_trace`, `detection_trace`, required `enforcement` | Validates against `hushspec-receipt.v0.schema.json` |
+| Receipt value | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `receipt_version`, UUID v7 `receipt_id`, millisecond `timestamp` with `time_source`, `actor`, `policy`, `action`, decision, recorded `rule_trace`, `detection_trace`, required `enforcement` | Validates against `hushspec-receipt.v1.schema.json` |
 | Parse a receipt | `DecisionReceipt::parse` | `parseReceipt` | `parse_receipt` | `ParseReceipt` | Accepts exactly what the 0.2 schema accepts; every `receipts/invalid/` vector is rejected | |
 | Receipt hash | `DecisionReceipt::receipt_hash` | `receiptHash` | `receipt_hash` | `(*DecisionReceipt).ReceiptHash` | `sha256:` over the JCS form of the receipt -- what the log chains and the signer signs | |
 | Receipt canonical JSON | `DecisionReceipt::canonical_json` | `receiptCanonicalJson` | `receipt_to_dict` + `canonical_json_value` | `(*DecisionReceipt).CanonicalJSON` | | TS re-exports `canonicalJson as receiptCanonicalJson` so the policy one stays unambiguous |
@@ -201,9 +201,9 @@ good.
 | Sign a policy | `signing::sign_policy` | `signPolicy` | `sign_policy` | `SignPolicy` | Signs the **content hash of the resolved policy**, not the file's bytes: reformatting keeps a signature valid, changing a base reached through `extends` invalidates it | |
 | Verify a policy | `signing::verify_policy` | `verifyPolicy` | `verify_policy` | `VerifyPolicy` | Returns valid, or invalid with one of the eleven closed reason codes of signing spec 6.4 | All four pass all 16 `fixtures/signing/vectors.yaml` cases |
 | Sign / verify a bare hash | `signing::sign_content_hash`, `verify_content_hash` | `signContentHash`, `verifyContentHash` | `sign_content_hash`, `verify_content_hash` | `SignContentHash`, `VerifyContentHash` | The primitive the policy, receipt and log signers share | |
-| Envelope | `signing::Envelope` | `Envelope`, `parseEnvelope`, `envelopeSigningInput` | `Envelope`, `parse_envelope`, `signing_input` | `Envelope`, `ParseEnvelope`, `MarshalEnvelope` | `hushspec-signature.v0.schema.json` | |
+| Envelope | `signing::Envelope` | `Envelope`, `parseEnvelope`, `envelopeSigningInput` | `Envelope`, `parse_envelope`, `signing_input` | `Envelope`, `ParseEnvelope`, `MarshalEnvelope` | `hushspec-signature.v1.schema.json` | |
 | Reason codes | `signing::ReasonCode` (`ALL`, `as_str`, `from_code`) | `ReasonCode` | `REASON_CODES` | `ReasonMalformedEnvelope` ... `ReasonPolicyVersionRollback` | The closed set of signing spec 6.4 -- identical strings in all four | Rust's is an enum with a `&'static str` wire form; TS's is a type-level union only |
-| Keyring | `signing::Keyring` | `Keyring`, `loadKeyring`, `keyringFromPublicKey` | `Keyring`, `load_keyring` | `Keyring`, `LoadKeyring`, `KeyringFromPublicKey` | `hushspec-keyring.v0.schema.json`, with retirement and revocation | |
+| Keyring | `signing::Keyring` | `Keyring`, `loadKeyring`, `keyringFromPublicKey` | `Keyring`, `load_keyring` | `Keyring`, `LoadKeyring`, `KeyringFromPublicKey` | `hushspec-keyring.v1.schema.json`, with retirement and revocation | |
 | Key id | `signing::key_id` | `keyIdFromPublicKey` | `key_id_from_public_key` | `KeyIDFromPublicKey` | SHA-256 of the SPKI DER -- never chosen by the signer | |
 | Keypair | `signing::generate_keypair` | `generateKeypair` | `cryptography` | `ParsePrivateKeyPEM`, `MarshalPrivateKeyPEM` | PKCS#8 and SubjectPublicKeyInfo PEM | |
 | Sign a receipt | `signing::sign_receipt` | `signReceipt` | `sign_receipt` | `SignReceipt` | Signs the receipt hash | `SignedReceipt` in all four |
@@ -311,9 +311,9 @@ through a guard, a chained sink and an OTLP sink.
 
 | Constant | Rust | TypeScript | Python | Go | Value |
 |---|---|---|---|---|---|
-| Spec version written | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `Version` | `"0.2.0"` |
-| Minors accepted | `version::HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS`, `SUPPORTED_MINORS` | `SupportedMinors` | `["0.1", "0.2"]` |
-| Representative versions | `version::HUSHSPEC_SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `SupportedVersions` | `["0.1.0", "0.2.0"]` |
+| Spec version written | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `HUSHSPEC_VERSION` | `Version` | `"1.0.0"` |
+| Minors accepted | `version::HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS` | `HUSHSPEC_SUPPORTED_MINORS`, `SUPPORTED_MINORS` | `SupportedMinors` | `["0.1", "0.2", "1.0"]` |
+| Representative versions | `version::HUSHSPEC_SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `HUSHSPEC_SUPPORTED_VERSIONS`, `SUPPORTED_VERSIONS` | `SupportedVersions` | `["0.1.0", "0.2.0", "1.0.0"]` |
 | Acceptance test | `version::is_supported` | `isSupported` | `is_supported` | `IsSupported` | Accepts every `X.Y.Z` of a supported minor (core spec 2.2) |
 | Minor of a version | `version::supported_minor` | `supportedMinor` | `supported_minor` | `SupportedMinor` | |
 | Package identity | Cargo metadata | `SDK_NAME`, `SDK_VERSION` | `__version__` | `SDKName` | The SDK's own release, distinct from the spec version |

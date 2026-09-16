@@ -1,7 +1,7 @@
 # HushSpec Core Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 **Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of changes.
 
@@ -35,7 +35,7 @@ A HushSpec document is a YAML file (see Section 2.4 for the YAML profile) with t
 | Field            | Type   | Required | Default        | Description                                      |
 |------------------|--------|----------|----------------|--------------------------------------------------|
 | `hushspec`       | string | REQUIRED | --             | Spec version. See Section 2.2.                   |
-| `name`           | string | OPTIONAL | --             | Human-readable policy name.                      |
+| `name`           | string | OPTIONAL | --             | Human-readable policy name. MUST NOT be empty when present (`fixtures/core/invalid/empty-name.yaml`). |
 | `description`    | string | OPTIONAL | --             | Policy description.                              |
 | `extends`        | string | OPTIONAL | --             | Reference to a base policy.                      |
 | `merge_strategy` | string | OPTIONAL | `"deep_merge"` | One of `replace`, `merge`, `deep_merge`.         |
@@ -55,7 +55,7 @@ The `hushspec` field is the only REQUIRED field. Its value MUST be a string of t
 
 **Version acceptance.** An engine that declares support for minor version `X.Y` MUST accept every document whose `hushspec` value is `X.Y.Z` for any non-negative integer `Z`. Patch versions contain only clarifications and errata (see Section 10.1) and never change document validity or evaluation semantics, so rejecting them is a conformance failure. Engines MUST reject documents whose `X.Y` they do not support.
 
-Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/version-patch-accept.yaml`.
+Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/version-patch-accept.yaml`, `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
 
 ### 2.3 Extends Field
 
@@ -823,7 +823,7 @@ Test vectors: `fixtures/core/invalid/`.
 
 Implementations of HushSpec declare conformance at one of six levels. Each level subsumes all requirements of the levels below it: an implementation claiming Level N MUST satisfy every requirement of Levels 0 through N.
 
-A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v0.schema.json`; a level reported as `not_attempted` is not a pass.
+A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v1.schema.json`; a level reported as `not_attempted` is not a pass.
 
 
 ### Level 0: Parser
@@ -839,7 +839,7 @@ A Level 1 implementation additionally:
 - Validates all field types and constraints as specified in Section 7.
 - Rejects documents with unknown fields at any nesting level.
 - Validates enum values, uniqueness constraints, numeric constraints, the regex profile, and conditions.
-- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v0.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
+- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v1.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
 
 ### Level 2: Merger
 
@@ -854,14 +854,14 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document.
 - Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Sections 3, 5, and 6, including the normalization and matching algorithms of Section 3.14.
 - Implements aggregation and precedence as defined in Section 6.1 and denies unknown action types per Section 5.
-- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v0.schema.json`.
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v1.schema.json`.
 
 ### Level 4: Auditor
 
 Level 3 says an engine reaches the right decision. Level 4 says it can prove which document it reached it under, and why, to someone who was not there.
 
 A Level 4 implementation additionally:
-- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v0.schema.json`, per the Receipt specification Section 2.
+- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v1.schema.json`, per the Receipt specification Section 2.
 - Computes `policy.content_hash` as the canonical content hash of the **resolved** document, per the Canonical Form specification. Passes every vector under `fixtures/core/hash/`: for each, the canonical text byte for byte and the resulting digest.
 - **Records** `rule_trace` during evaluation rather than reconstructing it afterwards, satisfying Receipt specification Section 4.3. Every applicable rule block MUST appear in evaluation order, with the closed `rule_block` identifiers of the receipt schema.
 - Produces, for every case of every evaluation vector, a receipt byte-identical after RFC 8785 canonicalization to the committed vector under `fixtures/receipts/expected/<module>/<fixture stem>/<case index>.json`, under the fixed inputs that directory's README states.
@@ -927,7 +927,7 @@ The v0.x series was the development series. Breaking changes (field removals, se
 
 ### 10.2 v1.0 and Later
 
-This document is a release candidate for 1.0.0. The 1.0.0 release is declared by a versioning decision recorded in `versioning.md` and `CHANGELOG.md`. Until it is declared, an engine is not required to accept `1.0.Z` documents, and the reference implementation accepts `0.1.Z` and `0.2.Z` only. From the declaration on, an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them.
+HushSpec 1.0.0 was declared on 2026-09-15 (`versioning.md`, Section 10; `CHANGELOG.md`). Its evaluation semantics are identical to 0.2.0: an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them, and the reference implementation accepts `0.1.Z`, `0.2.Z`, and `1.0.Z`. The one validation difference is that a present `name` MUST be non-empty (Section 2). The stability guarantee of `versioning.md` Section 5 applies from this release. Test vectors: `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
 
 From 1.0.0, within a major version:
 - Minor versions MAY add new optional fields, rule blocks, and open-registry entries. Existing valid documents remain valid, keep their semantics, and keep their canonical content hash (Canonical Form specification, Section 3.2).

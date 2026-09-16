@@ -21,7 +21,7 @@ inputs:
     default: ""
   version:
     description: >-
-      h2h release to install: a release tag (e.g. "v0.2.0"), "latest" for
+      h2h release to install: a release tag (e.g. "v1.0.0"), "latest" for
       the newest GitHub release, or "source" to build
       crates/hushspec-cli from this action's own checkout (no release
       binaries required; needs a Rust toolchain, installed automatically).
@@ -48,7 +48,7 @@ inputs:
     default: ""
   keyring:
     description: >-
-      Path to a hushspec-keyring.v0.schema.json document, forwarded as
+      Path to a hushspec-keyring.v1.schema.json document, forwarded as
       --keyring to "h2h bundle verify".
     required: false
     default: ""

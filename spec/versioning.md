@@ -1,8 +1,8 @@
 # HushSpec Versioning Policy
 
 **Applies to:** HushSpec Core and every companion specification (posture, origins, detection, canonical form, receipt, signing, log, bundle, grammars, security)
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 
 ---
@@ -15,7 +15,7 @@ The `hushspec` field of a document declares which version of the specification t
 
 ## 2. Version Numbers
 
-Versions follow Semantic Versioning 2.0.0 restricted to `MAJOR.MINOR.PATCH` (Grammars Section 8). A document's `hushspec` field never carries a pre-release or build suffix; a specification document's own header may (`1.0.0-rc.1`) while it is a candidate.
+Versions follow Semantic Versioning 2.0.0 restricted to `MAJOR.MINOR.PATCH` (Grammars Section 8). A document's `hushspec` field never carries a pre-release or build suffix; a specification document's own header may carry one (`-rc.1`) while a release is a candidate, and never once it is declared.
 
 ## 3. Acceptance Rule
 
@@ -62,11 +62,11 @@ Extension modules are versioned with the core specification. A document's `hushs
 
 ## 9. Schema Files
 
-JSON Schema files are named `hushspec-<name>.v<major>.schema.json` and carry an `$id` under `https://hushspec.dev/schemas/`. The `v0` files describe the 0.x line and stay published unchanged for documents that declare a 0.x version. The 1.0.0 release publishes `v1` files with new `$id`s; within the 1.x series those files are edited only as Section 6 allows, so a `v1` `$id` is stable for the life of the major version. Consumers SHOULD resolve schemas by `$id`; editor integrations SHOULD reference the `v1` files once 1.0.0 is released.
+JSON Schema files are named `hushspec-<name>.v<major>.schema.json` and carry an `$id` under `https://hushspec.dev/schemas/`. The `v0` files describe the 0.x line and stay published unchanged for documents that declare a 0.x version. The 1.0.0 release publishes `v1` files with new `$id`s; within the 1.x series those files are edited only as Section 6 allows, so a `v1` `$id` is stable for the life of the major version. Consumers SHOULD resolve schemas by `$id`; editor integrations SHOULD reference the `v1` files. The `v0` files are frozen: `schemas/frozen-v0.json` records their digests and the reference implementation refuses a change to any of them. The registry schemas (`hushspec-registry-*`) describe the files under `spec/registries/` rather than documents and keep their `v0` name.
 
 ## 10. Declaring 1.0.0
 
-The 1.0.0 release is declared when every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle for `1.0.0` is published, and every reference SDK accepts `1.0.z` documents. Until then, the family is a release candidate: engines are not required to accept `1.0.z` documents, and the reference implementation accepts `0.1.z` and `0.2.z` only. From the declaration on, an engine that supports 1.0 treats a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 semantics without changing them.
+HushSpec 1.0.0 was declared on 2026-09-15: every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle `hushspec-conformance-1.0.0.tar.gz` is built from this corpus, and the reference SDKs accept `1.0.z` documents. An engine that supports 1.0 treats a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 evaluation semantics without changing them; the reference implementation accepts `0.1.z`, `0.2.z`, and `1.0.z`. The one validation difference between the 0.2 and 1.0 document formats is that `name`, when present, is non-empty (Core Section 2). Section 5 applies from this release.
 
 ## 11. Conformance Across Versions
 

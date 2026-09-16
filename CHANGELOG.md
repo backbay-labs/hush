@@ -3,15 +3,29 @@
 All notable changes to HushSpec are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioning.md);
-until 1.0.0 the specification and SDKs are an unstable `0.x` series.
+HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioning.md).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-09-15
+
+HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
+1.0.0 with status Stable, and the document format, evaluation semantics, canonical form, wire
+formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series
+(`spec/versioning.md` section 5). A `1.0.z` document is evaluated exactly as a `0.2.z` document,
+and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was developed in the
+0.x series and ships for the first time in this release.
 
 ### Added
 
 **Spec**
 
+- **HushSpec 1.0.0 is declared** (core spec 10.2; versioning spec 10). A `1.0.Z` document is
+  treated exactly as a `0.2.Z` document; the reference implementation accepts `0.1`, `0.2`, and
+  `1.0` and rejects any other minor with E002. The one validation change from 0.2 is that `name`,
+  when present, MUST be non-empty (core spec 2), rejected with E004. Vectors:
+  `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`,
+  `fixtures/core/invalid/version-unsupported-minor.yaml`, `fixtures/core/invalid/empty-name.yaml`.
 - **Conformance levels 4 and 5** are normative in `spec/hushspec-core.md` section 8, closing the
   forward references the receipt and signing specifications already made. **Level 4 (Auditor)**:
   receipt format 0.2, a canonical `policy.content_hash` over the resolved document, a `rule_trace`
@@ -64,6 +78,16 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **Schemas**
 
+- **The `.v1.` schema lineage.** The sixteen document-format schemas are published as
+  `hushspec-<name>.v1.schema.json` under `https://hushspec.dev/schemas/`, and every SDK, the CLI,
+  the testkit, the fixture modelines, and the docs reference them. `hushspec-core.v1.schema.json`
+  differs from its `.v0.` predecessor in exactly two keywords: `hushspec` matches
+  `^(0|1)\.\d+\.\d+$` and `name` carries `minLength: 1`. The receipt, log-entry, and report
+  schemas widen their `spec_version` patterns the same way, so a receipt for a `1.0.z` policy
+  validates; every other `.v1.` file is its `.v0.` predecessor under a new `$id`. The `.v0.` files are frozen for documents that declare a 0.x
+  version: each carries a `$comment` saying so, `schemas/frozen-v0.json` records their digests,
+  and a test fails when one changes. The seven registry schemas keep the `.v0.` name.
+  `h2h schema core` prints the v1 file; `h2h schema core.v0` prints the frozen one.
 - **Expected error codes on every `invalid/` vector.** `spec/registries/error-codes.yaml`
   registers the codes the validator emits (`E000`-`E005`, `E010`, `E011`), validated by
   `schemas/hushspec-error-codes.v0.schema.json`, whose `$defs/ExpectedError` is the shape of the
@@ -85,6 +109,10 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **Rust**
 
+- `version::HUSHSPEC_VERSION` is `1.0.0` and `HUSHSPEC_SUPPORTED_MINORS` lists `0.1`, `0.2`,
+  and `1.0`.
+- `HttpLoaderConfig::cache_max_entries` (default `DEFAULT_CACHE_MAX_ENTRIES`, 64) bounds the
+  on-disk ETag cache; a write that would exceed it removes the oldest entries first.
 - `hushspec::guard` -- `HushGuard`, the Rust enforcement point, at parity with the
   TypeScript SDK's. Built from a `Policy`, a `Resolution` or a `CompiledPolicy`; carries the
   enforcement mode (with per-rule-path overrides, longest prefix wins), an `on_warn`
@@ -276,6 +304,9 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **CLI**
 
+- Lint **L022** `empty-list-entry` (warning): an empty string in `rules.tool_access.allow`,
+  `block`, or `require_confirmation`, or in an origins profile overlay list, can never match and
+  is reported at its index.
 - `h2h report <log.jsonl|receipts.jsonl>...`: compliance evidence over a window of receipts.
   Reads a hash-linked log or a plain receipt JSONL (classified line by line, signed receipts
   included), verifies the chain before counting anything and refuses to report on a broken one
@@ -440,6 +471,8 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **SDKs**
 
+- Package versions are 1.0.0: `hushspec`, `hushspec-cli`, and `hushspec-testkit` on crates.io,
+  `@hushspec/core` on npm, and `hushspec` on PyPI.
 - **All four SDKs are Level 5 (Attested)**, not Rust alone: TypeScript, Python and Go now run
   the bundle vectors, which were the last Level 5 gap, and all four fixture runners assert the
   `.expect.yaml` sidecar's registered error code and `message_contains` substring, closing the
@@ -447,6 +480,12 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 **Rust**
 
+- A skipped rule block records why it was not consulted instead of reporting itself inactive:
+  `secret_patterns` evaluated without content records
+  `content not supplied; secret_patterns not consulted`, and `remote_desktop_channels` with a
+  target that is not a channel records
+  `target is not a remote desktop channel; remote_desktop_channels not consulted`. The expected
+  receipts under `fixtures/receipts/expected/` are regenerated.
 - The HTTPS `extends` loader (`hushspec::resolve::http`, the `http` feature) enforces the full
   rule set of core spec 2.6.4. The blocked-network list grows from the loopback, RFC 1918,
   link-local and unique-local ranges to every network the spec tabulates, IPv4-mapped and

@@ -1,6 +1,6 @@
 # HushSpec Core Specification
 
-The full normative specification is at [`spec/hushspec-core.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-core.md). This page summarizes the 1.0.0 release candidate.
+The full normative specification is at [`spec/hushspec-core.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-core.md). This page summarizes HushSpec 1.0.0.
 
 ## Document Structure
 

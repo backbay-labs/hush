@@ -1,9 +1,9 @@
 # HushSpec Policy Signing Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
-**Supersedes:** Signature format 0.1.0 (schemas/hushspec-signature.v0.schema.json as shipped with HushSpec 0.1.x)
+**Supersedes:** Signature format 0.1.0 (schemas/hushspec-signature.v1.schema.json as shipped with HushSpec 0.1.x)
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2
 
 ---
@@ -59,7 +59,7 @@ Signers MUST resolve and validate the policy before signing, using the same reso
 
 ## 4. The envelope
 
-An envelope is a JSON object validating against `schemas/hushspec-signature.v0.schema.json` (0.2). Every member except `signature` is a signed claim.
+An envelope is a JSON object validating against `schemas/hushspec-signature.v1.schema.json` (0.2). Every member except `signature` is a signed claim.
 
 | Member | Required | Value |
 |---|---|---|
@@ -116,7 +116,7 @@ The DER SubjectPublicKeyInfo for an Ed25519 key is the 44-byte structure `30 2a 
 
 ### 5.3 Keyring
 
-A verifier's trust is a **keyring**: a JSON document validating against `schemas/hushspec-keyring.v0.schema.json`.
+A verifier's trust is a **keyring**: a JSON document validating against `schemas/hushspec-keyring.v1.schema.json`.
 
 ```json
 {

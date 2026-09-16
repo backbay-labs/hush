@@ -1,7 +1,7 @@
 # HushSpec Policy Bundle Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2, Policy Signing 0.2
 
@@ -35,7 +35,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 ## 2. Conformance
 
-An implementation conforms as a **bundler** if every bundle it produces validates against `schemas/hushspec-bundle.v0.schema.json` and verifies under Section 5 with the corresponding public key.
+An implementation conforms as a **bundler** if every bundle it produces validates against `schemas/hushspec-bundle.v1.schema.json` and verifies under Section 5 with the corresponding public key.
 
 An implementation conforms as a **bundle verifier** if, for every case in `fixtures/bundle/vectors.yaml`, it returns the expected outcome: `valid`, or invalid with the expected reason code (Section 5.4).
 

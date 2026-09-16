@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/backbay-labs/hush/actions"><img src="https://github.com/backbay-labs/hush/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/backbay-labs/hush/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/spec-v0.2.0--draft-orange.svg" alt="Spec Version">
+  <img src="https://img.shields.io/badge/spec-v1.0.0-brightgreen.svg" alt="Spec Version">
   <a href="https://crates.io/crates/hushspec"><img src="https://img.shields.io/crates/v/hushspec.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/@hushspec/core"><img src="https://img.shields.io/npm/v/@hushspec/core.svg" alt="npm"></a>
   <a href="https://pypi.org/project/hushspec/"><img src="https://img.shields.io/pypi/v/hushspec.svg" alt="PyPI"></a>
@@ -26,12 +26,12 @@
 
 HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under — filesystem access, network egress, tool usage, secret detection, and more. It defines **what** an agent may do at runtime without prescribing **how** those controls must be enforced, and it pairs each policy with structured decision receipts so enforcement can become evidence. That separation, plus fail-closed defaults, makes policies portable across runtimes, frameworks, and languages — and auditable wherever they run.
 
-**Spec 0.2.0 (draft).** The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published and functional. Parse, validate, merge, resolve, evaluate, detect, sign, audit and attest your way through 12 rule blocks and 3 extension modules, across 22 CLI subcommands. All four SDKs reach [Level 5 (Attested)](./docs/src/reference/sdk-conformance.md) against the published vector corpus. The API surface is stabilizing but not yet frozen — expect refinements before the 1.0 freeze.
+**Spec 1.0.0 (stable).** The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published at 1.0.0. Parse, validate, merge, resolve, evaluate, detect, sign, audit and attest your way through 12 rule blocks and 3 extension modules, across 22 CLI subcommands. All four SDKs reach [Level 5 (Attested)](./docs/src/reference/sdk-conformance.md) against the published vector corpus. The document format, evaluation semantics, canonical form, and wire formats are frozen for the 1.x series ([versioning policy](./spec/versioning.md)).
 
 ## Quick Example
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: production-agent
 
 rules:
@@ -139,7 +139,7 @@ All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
 ### GitHub Action
 
 ```yaml
-- uses: backbay-labs/hush@v0.2.0
+- uses: backbay-labs/hush@v1.0.0
   with:
     command: validate       # validate | lint | test | audit | bundle-verify
     paths: policies/**/*.yaml
@@ -187,7 +187,7 @@ go get github.com/backbay-labs/hush/packages/go@main
 ```rust
 use hushspec::HushSpec;
 
-let yaml_str = "hushspec: \"0.1.0\"\nname: example\n";
+let yaml_str = "hushspec: \"1.0.0\"\nname: example\n";
 let spec = HushSpec::parse(yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
@@ -199,7 +199,7 @@ assert!(result.is_valid());
 ```typescript
 import { parseOrThrow, validate } from '@hushspec/core';
 
-const yamlString = 'hushspec: "0.1.0"\nname: example\n';
+const yamlString = 'hushspec: "1.0.0"\nname: example\n';
 const spec = parseOrThrow(yamlString);
 const result = validate(spec);
 console.log(result.valid); // true
@@ -211,7 +211,7 @@ console.log(result.valid); // true
 ```python
 from hushspec import parse_or_raise, validate
 
-yaml_string = 'hushspec: "0.1.0"\nname: example\n'
+yaml_string = 'hushspec: "1.0.0"\nname: example\n'
 spec = parse_or_raise(yaml_string)
 result = validate(spec)
 assert result.is_valid
@@ -227,7 +227,7 @@ import (
     "github.com/backbay-labs/hush/packages/go/hushspec"
 )
 
-yamlString := "hushspec: \"0.1.0\"\nname: example\n"
+yamlString := "hushspec: \"1.0.0\"\nname: example\n"
 spec, err := hushspec.Parse(yamlString)
 if err != nil {
     panic(err)
@@ -391,7 +391,7 @@ See [Installation](#installation) above for install options — Homebrew, npm, C
 resolved policy's canonical content hash, its `extends` chain with each hop's signature
 outcome, the actor, the **recorded** rule and detection traces, and the enforcement
 disposition. Content is never carried -- only its `sha256:` hash and byte size -- so a receipt
-log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v0.schema.json` and
+log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v1.schema.json` and
 are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
 
 Receipts chain: `ChainedFileSink` writes a hash-linked JSONL log that `h2h log verify` checks,
@@ -510,7 +510,7 @@ exact reason code for each of the 16 vectors in `fixtures/signing/vectors.yaml`.
 (`pip install "hushspec[signing]"`), without which the signature entry points raise
 `SigningUnavailable` rather than reporting an unverified signature as good. The format is
 specified in [`spec/hushspec-signing.md`](./spec/hushspec-signing.md) and
-`hushspec-signature.v0.schema.json`.
+`hushspec-signature.v1.schema.json`.
 
 ```bash
 # Generate a keypair (writes h2h.key.pem and h2h.pub.pem, prints the key id)

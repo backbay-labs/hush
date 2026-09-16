@@ -1,7 +1,7 @@
 # HushSpec Errata Process
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 
 ---
@@ -35,4 +35,4 @@ When implementers disagree about what the prose meant, the conformance vectors d
 
 ## 5. Register
 
-Errata are listed in each specification's change appendix. There are none against `1.0.0-rc.1`.
+Errata are listed in each specification's change appendix. There are none against `1.0.0`.

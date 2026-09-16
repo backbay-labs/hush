@@ -42,4 +42,4 @@ HushSpec defines the **portable rule language**. Engines like [Clawdstrike](http
 
 ## Current Status
 
-HushSpec v0.1.0 — unstable. Breaking changes may occur between minor versions. The spec will stabilize at v1.0.0.
+HushSpec 1.0.0 is stable. The document format, evaluation semantics, canonical form, wire formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series; a minor version only adds ([versioning](reference/versioning.md)).

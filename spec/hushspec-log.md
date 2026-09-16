@@ -1,7 +1,7 @@
 # HushSpec Receipt Log Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
 **Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 0.2.0
 
@@ -15,7 +15,7 @@ The key words "MUST", "MUST NOT", "SHOULD", and "MAY" are to be interpreted as d
 
 ## 2. Conformance
 
-A writer conforms if every entry it emits validates against `schemas/hushspec-log-entry.v0.schema.json`, links to the previous entry as Section 4 requires, and carries a correct `entry_hash`. A verifier conforms if it accepts every file under `fixtures/log/valid/` and rejects every file under `fixtures/log/invalid/` with the first breaking line identified.
+A writer conforms if every entry it emits validates against `schemas/hushspec-log-entry.v1.schema.json`, links to the previous entry as Section 4 requires, and carries a correct `entry_hash`. A verifier conforms if it accepts every file under `fixtures/log/valid/` and rejects every file under `fixtures/log/invalid/` with the first breaking line identified.
 
 ## 3. File layout
 

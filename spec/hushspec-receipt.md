@@ -1,9 +1,9 @@
 # HushSpec Decision Receipt Specification
 
-**Version:** 1.0.0-rc.1
-**Status:** Release Candidate
+**Version:** 1.0.0
+**Status:** Stable
 **Date:** 2026-09-15
-**Supersedes:** Receipt format 0.1 (schemas/hushspec-receipt.v0.schema.json as shipped with HushSpec 0.1.x)
+**Supersedes:** Receipt format 0.1 (schemas/hushspec-receipt.v1.schema.json as shipped with HushSpec 0.1.x)
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Policy Signing 0.2
 
 ---
@@ -38,7 +38,7 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 An engine conforms to this specification (Core conformance **Level 4, Auditor**, Core Section 8) if:
 
-1. Every receipt it emits validates against `schemas/hushspec-receipt.v0.schema.json` at format version 0.2.
+1. Every receipt it emits validates against `schemas/hushspec-receipt.v1.schema.json` at format version 0.2.
 2. `policy.content_hash` equals the content hash of the resolved policy as defined by the Canonical Form specification.
 3. `rule_trace` is recorded during evaluation and satisfies Section 4.3.
 4. For every valid vector under `fixtures/receipts/valid/`, the engine's receipt parser accepts it, and for every vector under `fixtures/receipts/invalid/` it rejects it.
@@ -212,7 +212,7 @@ Because the hash covers every field, engines MUST NOT mutate a receipt after com
 | `evaluation_duration_us` required | `duration_us` optional |
 | nullable fields (`type: [..., "null"]`) | no nulls anywhere; absent means absent |
 
-`schemas/hushspec-receipt.v0.schema.json` is the normative 0.2 schema. The expected receipts under `fixtures/receipts/expected/` are the vectors every engine reproduces.
+`schemas/hushspec-receipt.v1.schema.json` is the normative 0.2 schema. The expected receipts under `fixtures/receipts/expected/` are the vectors every engine reproduces.
 
 ---
 

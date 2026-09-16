@@ -22,7 +22,7 @@ bundle format 0.1. Every bundle attests
 there is no seventh bundle file.
 
 `crates/hushspec/tests/bundle_vectors.rs` walks the manifest and also validates every bundle
-against [`schemas/hushspec-bundle.v0.schema.json`](../../schemas/hushspec-bundle.v0.schema.json).
+against [`schemas/hushspec-bundle.v1.schema.json`](../../schemas/hushspec-bundle.v1.schema.json).
 
 ## Regenerating
 
