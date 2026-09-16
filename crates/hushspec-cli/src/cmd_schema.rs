@@ -34,8 +34,7 @@ struct SchemaEntry {
 
 pub fn run(args: SchemaArgs) -> i32 {
     if args.list {
-        print_list(args.format);
-        return 0;
+        return print_list(args.format);
     }
 
     // clap's `required_unless_present` guarantees a name here.
@@ -62,7 +61,8 @@ pub fn run(args: SchemaArgs) -> i32 {
     }
 }
 
-fn print_list(format: SchemaOutputFormat) {
+/// Print the schema table, returning the process exit code.
+fn print_list(format: SchemaOutputFormat) -> i32 {
     let entries: Vec<SchemaEntry> = SCHEMA_FILE_NAMES
         .iter()
         .map(|(name, file)| SchemaEntry {
@@ -73,11 +73,16 @@ fn print_list(format: SchemaOutputFormat) {
         .collect();
 
     match format {
-        SchemaOutputFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(&entries) {
-                println!("{json}");
+        SchemaOutputFormat::Json => match serde_json::to_string_pretty(&entries) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!(
+                    "{} cannot serialize the schema list: {error}",
+                    "error".red()
+                );
+                return 2;
             }
-        }
+        },
         SchemaOutputFormat::Text => {
             // The column is as wide as the longest name, so no name runs into
             // the file name beside it. Padding is applied to the plain name --
@@ -93,6 +98,7 @@ fn print_list(format: SchemaOutputFormat) {
             }
         }
     }
+    0
 }
 
 fn ensure_trailing_newline(body: &str) -> String {

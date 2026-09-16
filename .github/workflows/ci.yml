@@ -8,6 +8,10 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# Read-only by default; the jobs that need more widen it themselves.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 

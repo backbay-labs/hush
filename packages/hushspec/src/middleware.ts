@@ -119,11 +119,21 @@ export interface HushGuardOptions {
  * the receipt spec's reserved `__hushspec_policy_unverified__`, used both in
  * the in-memory result and in the receipt.
  *
- * Distinct from `__hushspec_policy_provider__` (the policy could not be
+ * Distinct from {@link POLICY_PROVIDER_RULE} (the policy could not be
  * *obtained*) because this one means the policy was obtained and rejected --
  * the receipt has to be able to say which.
  */
 export const POLICY_SIGNATURE_RULE: string = POLICY_UNVERIFIED_RULE;
+
+/**
+ * `matched_rule` for every denial issued by a guard whose policy provider
+ * cannot serve a policy to evaluate against: it has not loaded one, it handed
+ * back an unresolved document, or it threw.
+ *
+ * The reserved value `__hushspec_policy_provider__` of the rule-path registry
+ * (`spec/registries/rule-paths.yaml`).
+ */
+export const POLICY_PROVIDER_RULE = '__hushspec_policy_provider__';
 
 /** The policy-loading half of {@link HushGuardOptions}. */
 export type PolicyResolveOptions = Pick<
@@ -915,7 +925,7 @@ export class HushGuard {
       if (current == null) {
         return {
           decision: 'deny',
-          matched_rule: '__hushspec_policy_provider__',
+          matched_rule: POLICY_PROVIDER_RULE,
           reason: 'policy provider has not loaded a policy yet',
         };
       }
@@ -926,7 +936,7 @@ export class HushGuard {
         // block its base declares -- deny instead.
         return {
           decision: 'deny',
-          matched_rule: '__hushspec_policy_provider__',
+          matched_rule: POLICY_PROVIDER_RULE,
           reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
         };
       }
@@ -945,7 +955,7 @@ export class HushGuard {
       const message = error instanceof Error ? error.message : String(error);
       return {
         decision: 'deny',
-        matched_rule: '__hushspec_policy_provider__',
+        matched_rule: POLICY_PROVIDER_RULE,
         reason: `policy provider unavailable: ${message}`,
       };
     }

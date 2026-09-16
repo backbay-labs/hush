@@ -128,23 +128,16 @@ runs:
           --locked --root "${RUNNER_TEMP}/hushspec-action" --force
         echo "$H2H_BINDIR" >> "$GITHUB_PATH"
 
-    - name: Cache h2h binary
+    # Resolved before the cache so the key names a concrete tag. Keying on
+    # the raw input would give every `latest` run the same key, and the first
+    # run's binary would then be reused for every release that follows.
+    - name: Resolve release tag
+      id: release
       if: inputs.version != 'source'
-      id: cache
-      uses: actions/cache@v4
-      with:
-        path: ${{ steps.platform.outputs.bindir }}
-        key: hushspec-h2h-${{ inputs.version }}-${{ steps.platform.outputs.target }}-v1
-
-    - name: Download h2h release
-      if: inputs.version != 'source' && steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         INPUT_VERSION: ${{ inputs.version }}
-        H2H_TARGET: ${{ steps.platform.outputs.target }}
-        H2H_BIN: ${{ steps.platform.outputs.bin }}
-        H2H_BINDIR: ${{ steps.platform.outputs.bindir }}
       run: |
         set -euo pipefail
         repo=backbay-labs/hush
@@ -155,7 +148,29 @@ runs:
             exit 1
           }
         fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+    - name: Cache h2h binary
+      if: inputs.version != 'source'
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.platform.outputs.bindir }}
+        key: hushspec-h2h-${{ steps.release.outputs.tag }}-${{ steps.platform.outputs.target }}-v1
+
+    - name: Download h2h release
+      if: inputs.version != 'source' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        H2H_TAG: ${{ steps.release.outputs.tag }}
+        H2H_TARGET: ${{ steps.platform.outputs.target }}
+        H2H_BIN: ${{ steps.platform.outputs.bin }}
+        H2H_BINDIR: ${{ steps.platform.outputs.bindir }}
+      run: |
+        set -euo pipefail
+        repo=backbay-labs/hush
+        tag="$H2H_TAG"
         target="$H2H_TARGET"
         bin="$H2H_BIN"
         bindir="$H2H_BINDIR"

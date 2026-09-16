@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T18:12:30Z",
+  "generated_at": "2026-09-16T18:35:38Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -229,7 +229,7 @@
     },
     {
       "path": "fixtures/core/evaluation/patch-balance.test.yaml",
-      "sha256": "f3bb71a55424f062c3ac572945fa9b2eed9595e00e51994d2d57a6665b04249f",
+      "sha256": "4d80caa9116eee19b9c85bb191cbb0000b57151a65239855ed586b0eaa04b9a9",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -2665,7 +2665,14 @@
     },
     {
       "path": "fixtures/receipts/expected/core/patch-balance/3.json",
-      "sha256": "34b398ea0825ab9a631abc2e3dafb6e0840b086d71333377e837a2b0de267c63",
+      "sha256": "b0ed070a8c962bb625d792b758fab87a221241bee2570aa57cb26d720c29bec3",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/patch-balance/4.json",
+      "sha256": "9a80ede4fa5bbf0e4f421b0e3452224a040e5ad90fabe8cdc70e0c723e64a8f7",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

@@ -8,6 +8,14 @@ on:
       tag:
         description: "Existing tag to (re)build artifacts for"
         required: true
+      allow-unsigned:
+        description: "Build policy bundles without a HushSpec signature when POLICY_SIGNING_KEY is not configured"
+        type: boolean
+        default: false
+
+# Read-only by default; the jobs that publish widen it themselves.
+permissions:
+  contents: read
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -85,13 +93,17 @@ jobs:
       - name: Bundle every library and ruleset policy
         shell: bash
         env:
-          # Optional. When absent the bundles carry no HushSpec signature and
-          # the Sigstore build provenance below is the only attestation.
           POLICY_SIGNING_KEY: ${{ secrets.POLICY_SIGNING_KEY }}
+          # The public half of POLICY_SIGNING_KEY, which `h2h keygen` writes
+          # alongside it. It is not secret, and the gate below verifies the
+          # signatures this step produces against it.
+          POLICY_SIGNING_PUBLIC_KEY: ${{ vars.POLICY_SIGNING_PUBLIC_KEY }}
+          ALLOW_UNSIGNED: ${{ github.event.inputs.allow-unsigned }}
         run: |
           set -euo pipefail
           mkdir -p dist/bundles
           key_file="${RUNNER_TEMP}/policy-signing.key.pem"
+          pub_file="${RUNNER_TEMP}/policy-signing.pub.pem"
           trap 'rm -f "$key_file"' EXIT
           key_args=()
           if [ -n "${POLICY_SIGNING_KEY}" ]; then
@@ -101,8 +113,16 @@ jobs:
             printf '%s\n' "${POLICY_SIGNING_KEY%$'\n'}" > "$key_file"
             chmod 600 "$key_file"
             key_args=(--key "$key_file")
+            if [ -z "${POLICY_SIGNING_PUBLIC_KEY}" ]; then
+              echo "::error::POLICY_SIGNING_KEY is set but the repository variable POLICY_SIGNING_PUBLIC_KEY is not, so nothing can verify what this step signs. Set it to the .pub.pem that h2h keygen wrote next to the signing key."
+              exit 1
+            fi
+            printf '%s\n' "${POLICY_SIGNING_PUBLIC_KEY%$'\n'}" > "$pub_file"
+          elif [ "${ALLOW_UNSIGNED}" = "true" ]; then
+            echo "::warning::POLICY_SIGNING_KEY is unset and allow-unsigned was requested; the bundles carry no HushSpec signature and rely on the build provenance attestation alone"
           else
-            echo "::notice::POLICY_SIGNING_KEY is unset; bundles are unsigned and rely on the build provenance attestation"
+            echo "::error::POLICY_SIGNING_KEY is not configured. An unsigned bundle is not evidence: set the secret, or re-run this workflow with allow-unsigned to publish bundles that carry no HushSpec signature."
+            exit 1
           fi
           # Pin created_at to the tagged commit so re-running this workflow for
           # the same tag reproduces every bundle byte for byte.
@@ -122,13 +142,21 @@ jobs:
             exit 1
           fi
           echo "bundled $count policies"
-      - name: Check every bundle reads back
+      - name: Check every bundle verifies
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
+          pub_file="${RUNNER_TEMP}/policy-signing.pub.pem"
           for bundle in dist/bundles/*.bundle.json; do
-            ./target/release/h2h bundle inspect "$bundle" >/dev/null
+            if [ -f "$pub_file" ]; then
+              # Shape, signature and subject digest: what a consumer checks.
+              ./target/release/h2h bundle verify "$bundle" --key "$pub_file" >/dev/null
+            else
+              # An unsigned bundle has no signature to check, so all the gate
+              # can confirm is that the statement parses and reads back.
+              ./target/release/h2h bundle inspect "$bundle" >/dev/null
+            fi
           done
       - uses: actions/upload-artifact@v4
         with:

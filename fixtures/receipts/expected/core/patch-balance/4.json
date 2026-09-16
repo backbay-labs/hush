@@ -1,6 +1,6 @@
 {
   "receipt_version": "0.2",
-  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
+  "receipt_id": "01a0a4f0-3200-7004-8000-000000000000",
   "timestamp": "2026-09-15T12:00:00.000Z",
   "time_source": "trusted",
   "actor": {
@@ -16,7 +16,7 @@
   "action": {
     "type": "patch_apply",
     "target": "/proj/a.txt",
-    "content_hash": "sha256:b8d17160b75a7d5ea353f6df79b27964d8d36cd9f63de66d55b6cd7f105aade7",
+    "content_hash": "sha256:d0e0426bcda3057ce8db4e43a9279a5e90c05e05b913523bdb9250096293f6e9",
     "content_size": 24
   },
   "decision": "allow",

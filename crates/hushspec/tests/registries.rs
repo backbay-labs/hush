@@ -296,7 +296,9 @@ fn rule_paths_match_the_receipt_schema() {
         .collect();
     // Read off the constants the engine emits, so renaming one in the code
     // fails here rather than quietly leaving the registry describing a value
-    // no receipt carries any more.
+    // no receipt carries any more. `__hushspec_policy_provider__` has no
+    // constant here: it is the denial a guard issues when its policy provider
+    // cannot serve a policy, which this crate's evaluator never reaches.
     assert_no_drift(
         "rule-paths",
         &reserved,
@@ -305,6 +307,7 @@ fn rule_paths_match_the_receipt_schema() {
             PANIC_RULE,
             UNKNOWN_ACTION_TYPE_RULE,
             POLICY_UNVERIFIED_RULE,
+            "__hushspec_policy_provider__",
             "detection",
         ]),
     );

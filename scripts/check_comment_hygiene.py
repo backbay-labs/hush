@@ -48,6 +48,7 @@ SCAN_ROOTS = (
     "rulesets",
     "spec",
     "docs/src",
+    ".github",
     "README.md",
     "CHANGELOG.md",
     "action.yml",
