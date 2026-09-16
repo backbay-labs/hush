@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Structural validation of a decision receipt against
@@ -127,12 +128,23 @@ func (r *DecisionReceipt) structuralProblems() []string {
 	requireContentHash := func(field, value string) {
 		requirePattern(field, value, signingDigestPattern)
 	}
+	// The pattern fixes the spelling; parsing rejects an impossible calendar
+	// date such as February 30, as the other SDKs do.
+	requireTimestamp := func(field, value string) {
+		if !receiptTimestampPattern.MatchString(value) {
+			report("%s %q does not match %s", field, value, receiptTimestampPattern)
+			return
+		}
+		if _, err := time.Parse("2006-01-02T15:04:05.000Z", value); err != nil {
+			report("%s %q is not a calendar instant", field, value)
+		}
+	}
 
 	if r.ReceiptVersion != ReceiptVersion {
 		report("receipt_version %q is not %q", r.ReceiptVersion, ReceiptVersion)
 	}
 	requirePattern("receipt_id", r.ReceiptID, receiptIDPattern)
-	requirePattern("timestamp", r.Timestamp, receiptTimestampPattern)
+	requireTimestamp("timestamp", r.Timestamp)
 	if !slices.Contains(receiptTimeSources, r.TimeSource) {
 		report("time_source %q is outside the closed enum", r.TimeSource)
 	}
@@ -154,7 +166,7 @@ func (r *DecisionReceipt) structuralProblems() []string {
 			requireContentHash("policy.signature.key_id", status.KeyID)
 		}
 		if status.VerifiedAt != "" {
-			requirePattern("policy.signature.verified_at", status.VerifiedAt, receiptTimestampPattern)
+			requireTimestamp("policy.signature.verified_at", status.VerifiedAt)
 		}
 	}
 

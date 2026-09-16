@@ -544,11 +544,15 @@ def _require_enum(value: Any, label: str, allowed: tuple[str, ...]) -> None:
 
 def _require_timestamp(value: Any, label: str) -> None:
     text = _require_str(value, label)
-    if not _TIMESTAMP_PATTERN.match(text):
-        raise ReceiptError(
-            f"{label} {text!r} is not an RFC 3339 UTC instant with millisecond "
-            "precision"
-        )
+    if _TIMESTAMP_PATTERN.match(text):
+        try:
+            datetime.strptime(text, "%Y-%m-%dT%H:%M:%S.%fZ")
+            return
+        except ValueError:
+            pass
+    raise ReceiptError(
+        f"{label} {text!r} is not an RFC 3339 UTC instant with millisecond precision"
+    )
 
 
 def _validate_receipt_shape(receipt: dict[str, Any]) -> None:

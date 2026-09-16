@@ -343,9 +343,6 @@ const DETECTOR_LEVELS: ReadonlySet<string> = new Set([
   'critical',
 ]);
 
-/** `$.timestamp`: RFC 3339 UTC with exactly three fractional digits. */
-const TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/;
-
 function requireObject(
   value: unknown,
   label: string,
@@ -410,7 +407,7 @@ function requireEnum(value: unknown, label: string, allowed: ReadonlySet<string>
 
 function requireTimestamp(value: unknown, label: string): void {
   const text = requireString(value, label);
-  if (!TIMESTAMP_PATTERN.test(text)) {
+  if (!isMillisecondTimestamp(text)) {
     throw new ReceiptError(
       `${label} ${JSON.stringify(text)} is not an RFC 3339 UTC instant with ` +
         'millisecond precision',
