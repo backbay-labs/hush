@@ -3,27 +3,30 @@
  *
  * Version acceptance follows core spec 2.2: an engine that supports a
  * minor version `X.Y` accepts every `X.Y.Z` document, because patch versions
- * carry only clarifications and errata. This engine implements the 0.2.0
- * semantics and also accepts 0.1.x documents (evaluated under 0.2 semantics).
+ * carry only clarifications and errata. This engine implements the 1.0.0
+ * semantics, which are identical to 0.2.0, and also accepts 0.1.x and 0.2.x
+ * documents (core spec 10).
  */
 
 /** The HushSpec version this engine writes by default. */
-export const HUSHSPEC_VERSION = '0.2.0';
+export const HUSHSPEC_VERSION = '1.0.0';
 
 /**
  * This package's own identity, as a receipt log's `sdk` member records it
- * (spec/hushspec-log.md section 6). Distinct from {@link HUSHSPEC_VERSION},
- * which is the *specification* version the engine implements.
+ * (spec/hushspec-log.md section 6). Independent of {@link HUSHSPEC_VERSION},
+ * which is the *specification* version the engine implements: the two are
+ * versioned separately (core spec 10.3) and this release is the one where
+ * they happen to coincide.
  *
  * `tests/version.test.ts` pins {@link SDK_VERSION} to `package.json`.
  */
 export const SDK_NAME = '@hushspec/core';
 
 /** @see {@link SDK_NAME} */
-export const SDK_VERSION = '0.1.1';
+export const SDK_VERSION = '1.0.0';
 
 /** Minor versions this engine accepts, as `X.Y` strings. */
-export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2'] as const;
+export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2', '1.0'] as const;
 
 /**
  * Representative full versions for each supported minor (display only; use
@@ -31,7 +34,7 @@ export const HUSHSPEC_SUPPORTED_MINORS = ['0.1', '0.2'] as const;
  *
  * Spelled identically in every HushSpec SDK, so they all name one constant.
  */
-export const HUSHSPEC_SUPPORTED_VERSIONS = ['0.1.0', '0.2.0'] as const;
+export const HUSHSPEC_SUPPORTED_VERSIONS = ['0.1.0', '0.2.0', '1.0.0'] as const;
 
 /**
  * This package's original name for {@link HUSHSPEC_SUPPORTED_VERSIONS}, kept

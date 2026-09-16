@@ -9,7 +9,7 @@
  * where getting that wrong is invisible from the fixtures alone.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -46,12 +46,22 @@ describe('the test JSON Schema validator', () => {
       // the documents this package validates against, so every schema the
       // repository publishes is walked here -- including the branches no
       // fixture reaches, which is the whole point.
+      //
+      // `frozen-v0.json` is skipped: it is the digest manifest that pins the
+      // frozen 0.x lineage (versioning spec 9), not a JSON Schema, and walking
+      // it as one reports its own members as unsupported keywords. The `.v0.`
+      // schemas it pins are still walked -- they are what a 0.x document is
+      // validated against and must stay readable -- but this package asserts
+      // against the `.v1.` lineage.
       const schemasRoot = path.resolve(
         path.dirname(fileURLToPath(import.meta.url)),
         '../../../schemas',
       );
-      const names = readdirSync(schemasRoot).filter((name) => name.endsWith('.json'));
+      const names = readdirSync(schemasRoot).filter(
+        (name) => name.endsWith('.schema.json'),
+      );
       expect(names.length).toBeGreaterThanOrEqual(15);
+      expect(names.filter((name) => name.includes('.v1.')).length).toBeGreaterThanOrEqual(15);
 
       for (const name of names) {
         const document = JSON.parse(
@@ -59,6 +69,49 @@ describe('the test JSON Schema validator', () => {
         ) as SchemaDocument;
         expect(() => assertSupported(document), name).not.toThrow();
       }
+    });
+  });
+
+  describe('the published schema lineages', () => {
+    const schemasRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../schemas',
+    );
+
+    function read(name: string): Record<string, unknown> {
+      return JSON.parse(readFileSync(path.join(schemasRoot, name), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+    }
+
+    // Versioning spec 9: the `.v0.` document-format schemas are frozen at
+    // HushSpec 1.0.0 and `frozen-v0.json` records the digest of each. Rust
+    // owns that digest check; here the only claim is that this package reads
+    // the *current* lineage, so a `.v0.` file it still loaded would be
+    // validating against a schema nobody maintains.
+    it('reads the v1 lineage, and never the frozen v0 copies', () => {
+      const manifest = read('frozen-v0.json');
+      expect(manifest['frozen_lineage']).toBe('0.x');
+      const frozen = Object.keys(manifest['files'] as Record<string, string>);
+      expect(frozen.length).toBeGreaterThanOrEqual(15);
+
+      for (const name of frozen) {
+        // Still published and still readable -- a 0.x document is validated
+        // against them -- but each has a `.v1.` successor, which is the one
+        // this package's assertions name.
+        expect(() => read(name)).not.toThrow();
+        expect(name.endsWith('.v0.schema.json'), name).toBe(true);
+        expect(existsSync(path.join(schemasRoot, name.replace('.v0.', '.v1.'))), name).toBe(true);
+      }
+    });
+
+    it('is not itself a JSON Schema, which is why the walk skips it', () => {
+      // The reason `accepts every published schema` filters on
+      // `.schema.json`: the manifest's own members are not keywords.
+      expect(() => assertSupported(read('frozen-v0.json') as SchemaDocument)).toThrow(
+        /unsupported schema keyword frozen_lineage/,
+      );
     });
   });
 

@@ -67,7 +67,7 @@ function recorder(): Recorder {
 }
 
 const receiptSchema = JSON.parse(
-  readFileSync(path.join(repoRoot, 'schemas/hushspec-receipt.v0.schema.json'), 'utf8'),
+  readFileSync(path.join(repoRoot, 'schemas/hushspec-receipt.v1.schema.json'), 'utf8'),
 ) as SchemaDocument;
 
 function wire(receipt: DecisionReceipt): unknown {
@@ -143,7 +143,7 @@ describe('HushGuard policy events', () => {
     expect(event.policy.version).toBe(3);
     expect(event.enforcement_mode).toBe('enforce');
     expect(event.sdk).toEqual({ name: SDK_NAME, version: SDK_VERSION });
-    expect(event.spec_version).toBe('0.2.0');
+    expect(event.spec_version).toBe('1.0.0');
     expect(event.previous_content_hash).toBeUndefined();
     // Before any receipt evaluated under it (log spec 6).
     expect(sink.receipts).toHaveLength(0);

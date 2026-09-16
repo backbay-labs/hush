@@ -299,7 +299,7 @@ describe('shared fixture corpus', () => {
   }
 });
 
-/** A `<name>.expect.yaml` sidecar (`schemas/hushspec-error-codes.v0.schema.json`). */
+/** A `<name>.expect.yaml` sidecar (`schemas/hushspec-error-codes.v1.schema.json`). */
 interface ExpectedError {
   reject: boolean;
   /** The registered code (`spec/registries/error-codes.yaml`). */

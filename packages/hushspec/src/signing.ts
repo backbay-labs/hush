@@ -155,7 +155,7 @@ export interface TrustedKey {
   readonly publicKey: KeyObject;
 }
 
-/** A keyring document as it appears on disk (`hushspec-keyring.v0.schema.json`). */
+/** A keyring document as it appears on disk (`hushspec-keyring.v1.schema.json`). */
 export interface KeyringDocument {
   keyring_version: string;
   keys: TrustedKeyDocument[];

@@ -19,7 +19,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const vectorsDir = path.join(repoRoot, 'fixtures', 'core', 'hash');
 const schemasDir = path.join(repoRoot, 'schemas');
 
-/** `schemas/hushspec-hash-vector.v0.schema.json`. */
+/** `schemas/hushspec-hash-vector.v1.schema.json`. */
 interface HashVector {
   hushspec_hash_vector: string;
   description: string;
@@ -279,10 +279,10 @@ function checkNode(
 
 describe('projection table matches schemas/', () => {
   const cases: Array<[keyof typeof CANONICAL_SCHEMA_TABLE, string]> = [
-    ['core', 'hushspec-core.v0.schema.json'],
-    ['posture', 'hushspec-posture.v0.schema.json'],
-    ['origins', 'hushspec-origins.v0.schema.json'],
-    ['detection', 'hushspec-detection.v0.schema.json'],
+    ['core', 'hushspec-core.v1.schema.json'],
+    ['posture', 'hushspec-posture.v1.schema.json'],
+    ['origins', 'hushspec-origins.v1.schema.json'],
+    ['detection', 'hushspec-detection.v1.schema.json'],
   ];
 
   for (const [tableKey, schemaFile] of cases) {

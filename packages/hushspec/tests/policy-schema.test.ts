@@ -24,9 +24,9 @@ const FAMILIES = ['core', 'posture', 'origins', 'detection'] as const;
 
 /** `[extensions key, embedded $defs name, published file name]`. */
 const EMBEDDED_EXTENSIONS = [
-  ['posture', 'PostureExtension', 'hushspec-posture.v0.schema.json'],
-  ['origins', 'OriginsExtension', 'hushspec-origins.v0.schema.json'],
-  ['detection', 'DetectionExtension', 'hushspec-detection.v0.schema.json'],
+  ['posture', 'PostureExtension', 'hushspec-posture.v1.schema.json'],
+  ['origins', 'OriginsExtension', 'hushspec-origins.v1.schema.json'],
+  ['detection', 'DetectionExtension', 'hushspec-detection.v1.schema.json'],
 ] as const;
 
 /**
@@ -45,8 +45,10 @@ const PROFILE_ONLY_VECTORS = new Set([
 /**
  * Vectors whose refusal no JSON Schema can express: referential integrity
  * between two members of a document, uniqueness by a field of a list entry, a
- * lookup in the IANA time zone database, the HushSpec regex profile, and a
- * recursion depth bound. The SDKs check them after parsing. They are asserted
+ * lookup in the IANA time zone database, the HushSpec regex profile, a
+ * recursion depth bound, and the set of minor versions an engine supports
+ * (the schema admits every `1.y.z`; core spec 2.2 makes acceptance the
+ * engine's decision). The SDKs check them after parsing. They are asserted
  * to *pass* below, so a schema change that does become able to express one
  * fails this file until the name is removed.
  */
@@ -55,6 +57,7 @@ const BEYOND_SCHEMA_VECTORS = new Set([
   'duplicate-ids.yaml',
   'duplicate-pattern-names.yaml',
   'regex-mid-pattern-flag.yaml',
+  'version-unsupported-minor.yaml',
   'when-bad-timezone.yaml',
   'when-too-deep.yaml',
 ]);
@@ -63,7 +66,7 @@ function loadSchema(fileName: string): SchemaDocument {
   return JSON.parse(readFileSync(path.join(schemasRoot, fileName), 'utf8')) as SchemaDocument;
 }
 
-const coreSchema = loadSchema('hushspec-core.v0.schema.json');
+const coreSchema = loadSchema('hushspec-core.v1.schema.json');
 
 function policyVectors(kind: 'valid' | 'invalid'): { name: string; file: string }[] {
   return FAMILIES.flatMap((family) => {

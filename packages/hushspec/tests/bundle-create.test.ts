@@ -50,11 +50,13 @@ const vectorPolicy = path.join(repoRoot, 'library', 'healthcare', 'hipaa-base.ya
 const vectorCreatedAt = '2026-09-15T12:00:00.000Z';
 
 /**
- * The reference CLI's version at the time the vectors were generated, read
- * back from the vector rather than hardcoded twice.
+ * The resolver the named vector records, read back from the vector rather
+ * than hardcoded twice. Per vector, not once for the set: the vectors were
+ * regenerated at different releases of the reference CLI, so reproducing a
+ * vector's bytes means naming the resolver *that* vector carries.
  */
-function vectorResolver(): { tool: string; version: string } {
-  const statement = statementOf(readVector('valid.bundle.json'));
+function vectorResolver(vector: string): { tool: string; version: string } {
+  const statement = statementOf(readVector(vector));
   return statement.predicate.resolver;
 }
 
@@ -96,7 +98,7 @@ describe('createBundle', () => {
       privateKeyPem: readKey('test-signing.key.pem'),
       createdAt: vectorCreatedAt,
       baseDir: repoRoot,
-      ...vectorResolver(),
+      ...vectorResolver('valid.bundle.json'),
     });
 
     // The payload is the canonical statement, so equal payloads mean the two
@@ -115,7 +117,7 @@ describe('createBundle', () => {
     const built = createBundle(resolveVectorPolicy(), {
       createdAt: vectorCreatedAt,
       baseDir: repoRoot,
-      ...vectorResolver(),
+      ...vectorResolver('unsigned.bundle.json'),
     });
 
     // Assert the vector is the unsigned one before comparing against it, so
@@ -132,7 +134,7 @@ describe('createBundle', () => {
       privateKeyPem: readKey('test-untrusted.key.pem'),
       createdAt: vectorCreatedAt,
       baseDir: repoRoot,
-      ...vectorResolver(),
+      ...vectorResolver('wrong-key.bundle.json'),
     });
 
     expect(built).toEqual(expected);
@@ -339,7 +341,7 @@ describe('createBundle key handling', () => {
  */
 describe('createBundle output against the published schema', () => {
   const bundleSchema = JSON.parse(
-    readFileSync(path.join(repoRoot, 'schemas', 'hushspec-bundle.v0.schema.json'), 'utf8'),
+    readFileSync(path.join(repoRoot, 'schemas', 'hushspec-bundle.v1.schema.json'), 'utf8'),
   ) as SchemaDocument;
 
   it.each([
