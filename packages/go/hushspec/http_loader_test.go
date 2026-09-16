@@ -648,3 +648,46 @@ func TestAMismatchedDigestPinIsFatalOverHTTPS(t *testing.T) {
 		t.Errorf("a mismatched pin resolved: err=%v reason=%q", err, reason)
 	}
 }
+
+// --------------------------------------------------------------------------
+// The ETag cache
+// --------------------------------------------------------------------------
+
+// TestHTTPEtagCacheIsBounded pins the eviction rule. A URL comes out of a
+// document and a body may be [DefaultHTTPMaxSize], so an unbounded map keyed on
+// one is a memory-exhaustion primitive; past the bound the oldest entry goes,
+// which costs a full body on the next fetch of that URL and nothing else.
+func TestHTTPEtagCacheIsBounded(t *testing.T) {
+	cache := &HTTPEtagCache{MaxEntries: 3}
+	for index := 0; index < 5; index++ {
+		cache.Put(fmt.Sprintf("https://policies.example/%d.yaml", index),
+			fmt.Sprintf("%q", fmt.Sprintf("v%d", index)), httpTestPolicy)
+	}
+	for _, evicted := range []string{"0", "1"} {
+		if _, _, ok := cache.Get("https://policies.example/" + evicted + ".yaml"); ok {
+			t.Errorf("entry %s should have been evicted", evicted)
+		}
+	}
+	etag, body, ok := cache.Get("https://policies.example/4.yaml")
+	if !ok || etag != `"v4"` || body != httpTestPolicy {
+		t.Errorf("newest entry = (%q, %q, %v), want the policy under v4", etag, body, ok)
+	}
+}
+
+// TestHTTPEtagCacheRewriteDoesNotCountTwice covers the other half of the bound:
+// revalidating a URL already held replaces it in place rather than pushing an
+// older, still-live entry out.
+func TestHTTPEtagCacheRewriteDoesNotCountTwice(t *testing.T) {
+	cache := &HTTPEtagCache{MaxEntries: 2}
+	cache.Put("https://policies.example/a.yaml", `"v1"`, httpTestPolicy)
+	for revision := 0; revision < 5; revision++ {
+		cache.Put("https://policies.example/b.yaml",
+			fmt.Sprintf("%q", fmt.Sprintf("v%d", revision)), httpTestPolicy)
+	}
+	if _, _, ok := cache.Get("https://policies.example/a.yaml"); !ok {
+		t.Error("the older entry should still be held")
+	}
+	if etag, _, _ := cache.Get("https://policies.example/b.yaml"); etag != `"v4"` {
+		t.Errorf("etag = %q, want the latest", etag)
+	}
+}

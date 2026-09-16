@@ -66,7 +66,7 @@ const (
 
 // CloudMetadataAddresses names the two well-known cloud instance-metadata
 // endpoints, so the intent is readable even though blockedNetworks already
-// covers both (169.254.0.0/16 and fd00::/8). Reaching one from a URL an agent
+// covers both (169.254.0.0/16 and fc00::/7). Reaching one from a URL an agent
 // supplied is the classic SSRF credential theft.
 var CloudMetadataAddresses = []string{"169.254.169.254", "fd00:ec2::254"}
 
@@ -198,17 +198,36 @@ func embeddedIPv4(address net.IP) net.IP {
 // Entries live in memory for the life of the cache: nothing is written to disk,
 // so a policy body never outlives the process that fetched it. It is safe for
 // concurrent use.
+//
+// The cache is bounded, and has to be: a URL comes out of a document, a body
+// may be as large as [DefaultHTTPMaxSize], and an unbounded map keyed on
+// something an attacker names is a memory-exhaustion primitive. Past MaxEntries
+// the oldest entry is dropped, which costs a full body on the next fetch of
+// that URL and nothing else.
 type HTTPEtagCache struct {
+	// MaxEntries is how many entries are kept before the oldest is evicted.
+	// Zero means [DefaultHTTPEtagCacheEntries], so the zero value of the
+	// struct is a usable bounded cache.
+	MaxEntries int
+
 	mu      sync.RWMutex
 	entries map[string]httpCacheEntry
+	// order holds the keys in insertion order, because a Go map has none.
+	order []string
 }
+
+// DefaultHTTPEtagCacheEntries is how many revalidation entries a cache keeps by
+// default. A chain is capped at 32 documents (core spec 2.6.2), so this holds
+// two whole chains.
+const DefaultHTTPEtagCacheEntries = 64
 
 type httpCacheEntry struct {
 	etag string
 	body string
 }
 
-// NewHTTPEtagCache is an empty cache, ready to use.
+// NewHTTPEtagCache is an empty cache holding [DefaultHTTPEtagCacheEntries]
+// entries, ready to use.
 func NewHTTPEtagCache() *HTTPEtagCache {
 	return &HTTPEtagCache{entries: map[string]httpCacheEntry{}}
 }
@@ -224,7 +243,8 @@ func (c *HTTPEtagCache) Get(url string) (string, string, bool) {
 	return entry.etag, entry.body, ok
 }
 
-// Put records a body against the etag the server returned for it.
+// Put records a body against the etag the server returned for it, evicting the
+// oldest entry once the cache is full.
 func (c *HTTPEtagCache) Put(url, etag, body string) {
 	if c == nil {
 		return
@@ -234,7 +254,21 @@ func (c *HTTPEtagCache) Put(url, etag, body string) {
 	if c.entries == nil {
 		c.entries = map[string]httpCacheEntry{}
 	}
+	// Rewriting a URL already held replaces it in place rather than counting
+	// against the bound again.
+	if _, held := c.entries[url]; !held {
+		c.order = append(c.order, url)
+	}
 	c.entries[url] = httpCacheEntry{etag: etag, body: body}
+
+	limit := c.MaxEntries
+	if limit <= 0 {
+		limit = DefaultHTTPEtagCacheEntries
+	}
+	for len(c.order) > limit {
+		delete(c.entries, c.order[0])
+		c.order = c.order[1:]
+	}
 }
 
 // Clear forgets every entry.
@@ -245,6 +279,7 @@ func (c *HTTPEtagCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = map[string]httpCacheEntry{}
+	c.order = nil
 }
 
 // HTTPLoaderConfig says how the HTTPS loader behaves. The zero value is usable
@@ -500,10 +535,10 @@ func fetchHTTP(target *HTTPTarget, config HTTPLoaderConfig, etag string, missing
 	if err != nil {
 		return nil, httpErr("HTTP request to '%s' failed: %v", target.URL, err)
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, config.maxSize()))
-		_ = response.Body.Close()
-	}()
+	// Closed, not drained: draining buys connection reuse, and this transport
+	// sets DisableKeepAlives, so the only thing a drain would buy on the
+	// oversized path is reading another megabyte from a hostile server.
+	defer func() { _ = response.Body.Close() }()
 
 	switch {
 	case response.StatusCode == http.StatusNotModified:
