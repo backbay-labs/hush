@@ -8,6 +8,23 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
+### Added
+
+- `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
+  materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
+  standard-library reference canonicalizer (`scripts/canonical_json.py`), the
+  `hushspec-hash-vector` schema, and 13 normative vectors under `fixtures/core/hash/`.
+- `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
+  millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
+  `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
+  hash for chaining). Schema staged at `schemas/staged/0.2.0/`; 12 valid and 14 invalid
+  vectors under `fixtures/receipts/`. SDKs still emit format 0.1 until RFC 09 P2-04.
+- `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
+  (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
+  expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
+  with a published test-only key. Schemas staged at `schemas/staged/0.2.0/`; the Rust
+  implementation is brought to it in RFC 09 P2-07.
+
 ### Changed
 
 - Repositioned the project around "agentic compliance as code": updated the tagline and
@@ -23,6 +40,13 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 ### Added
 
 - `CHANGELOG.md`, `SECURITY.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` at the repository root.
+- Machine-readable control mappings (RFC 09 P2-09): `metadata.controls[]`
+  (`framework`, `control_id`, `rule_paths`, `notes`) in the core schema, spec 2.5, and all
+  four SDKs; a framework registry at `spec/registries/frameworks.yaml` with its own schema;
+  lint `L011` (unmapped rule block), `L012` (rule path resolves to nothing) and `L013`
+  (unregistered framework or non-conforming control id); `h2h audit --controls` (text and
+  JSON) with a rule-block coverage line and a `--strict` exit code; and all eight
+  `library/` policies migrated from comment-only mappings to structured ones.
 
 ### Planned
 

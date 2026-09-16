@@ -44,6 +44,14 @@ var GovernanceMetadataKeys = map[string]struct{}{
 	"policy_version":  {},
 	"effective_date":  {},
 	"expiry_date":     {},
+	"controls":        {},
+}
+
+var ControlMappingKeys = map[string]struct{}{
+	"framework":  {},
+	"control_id": {},
+	"rule_paths": {},
+	"notes":      {},
 }
 
 var ForbiddenPathKeys = map[string]struct{}{

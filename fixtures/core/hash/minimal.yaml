@@ -1,0 +1,7 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.1/4: the minimal document; no defaults exist at the top level, so the canonical\
+  \ form is the version field alone"
+"policy":
+  "hushspec": "0.1.0"
+canonical: "{\"hushspec\":\"0.1.0\"}"
+content_hash: "sha256:9aa550f8eed15366ce9db38b22818179d79c382fa6423f159ef0b228aca25108"

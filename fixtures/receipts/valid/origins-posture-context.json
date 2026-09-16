@@ -1,0 +1,69 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01994b7e-2c23-7333-b333-0123456789ab",
+  "timestamp": "2026-09-15T08:30:00.123Z",
+  "time_source": "unknown",
+  "actor": {
+    "agent_id": "deploy-bot-3",
+    "session_id": "run-20260915-0042",
+    "principal": "alice@example.com",
+    "runtime": "hushspec-rs/0.2.0"
+  },
+  "policy": {
+    "name": "default",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "read_file",
+    "origin": {
+      "provider": "slack",
+      "space_id": "C0123",
+      "tags": [
+        "incident"
+      ]
+    },
+    "context": {
+      "environment": "production",
+      "user": {
+        "role": "responder"
+      }
+    }
+  },
+  "decision": "allow",
+  "matched_rule": "rules.tool_access.allow",
+  "reason": "tool is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "origin_profile",
+      "rule_path": "extensions.origins.profiles.incident-room",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "profile matched on space_id"
+    },
+    {
+      "rule_block": "posture_capability",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "capability tool_call granted in state elevated"
+    },
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool is explicitly allowed"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "duration_us": 41,
+  "origin_profile": "incident-room",
+  "posture": {
+    "current": "elevated",
+    "next": "elevated"
+  }
+}

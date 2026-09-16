@@ -692,6 +692,42 @@
         "expiry_date": {
           "type": "string",
           "description": "ISO 8601 date when the policy expires."
+        },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ControlMapping" },
+          "description": "Compliance control mappings for this policy. Declarative only: mappings never influence evaluation."
+        }
+      }
+    },
+    "ControlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["framework", "control_id", "rule_paths"],
+      "description": "Maps one compliance control onto the parts of this document that implement it. Advisory metadata: it has no effect on evaluation.",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$",
+          "description": "Framework identifier, e.g. 'hipaa-2013' or 'soc2-tsc-2017'. Registered ids and their control-id patterns are listed in spec/registries/frameworks.yaml; unregistered ids are valid but are flagged by linters."
+        },
+        "control_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Control identifier within the framework, e.g. '164.312(e)(1)' or 'CC6.1'. Each registered framework declares a control_id_pattern."
+        },
+        "rule_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Dot paths into the resolved document that implement the control. Grammar: path = root *( \".\" segment ) [ selector ]; root = \"rules\" / \"extensions\"; segment = 1*( ALPHA / DIGIT / \"_\" ); selector = \"[\" 1*( %x20-5A / %x5C-7C / %x7E ) \"]\" (any character except '[' and ']'). A selector names a list entry by its 'name' or 'id' field. Examples: 'rules' (the whole rules object), 'rules.egress' (one rule block), 'rules.egress.allow' (one field), 'rules.secret_patterns.patterns[ssn]' (one named secret pattern), 'extensions.posture'."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-text rationale explaining how the mapped paths satisfy the control."
         }
       }
     }

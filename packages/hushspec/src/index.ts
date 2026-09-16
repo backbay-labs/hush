@@ -1,4 +1,4 @@
-export type { HushSpec, MergeStrategy, GovernanceMetadata, Classification, LifecycleState } from './schema.js';
+export type { HushSpec, MergeStrategy, GovernanceMetadata, ControlMapping, Classification, LifecycleState } from './schema.js';
 export type {
   Rules,
   ForbiddenPathsRule,

@@ -8,6 +8,8 @@ pub const SCHEMA_NAMES: &[&str] = &[
     "core",
     "detection",
     "evaluator-test",
+    "framework-registry",
+    "hash-vector",
     "origins",
     "posture",
     "receipt",
@@ -19,6 +21,11 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("core", "hushspec-core.v0.schema.json"),
     ("detection", "hushspec-detection.v0.schema.json"),
     ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
+    (
+        "framework-registry",
+        "hushspec-framework-registry.v0.schema.json",
+    ),
+    ("hash-vector", "hushspec-hash-vector.v0.schema.json"),
     ("origins", "hushspec-origins.v0.schema.json"),
     ("posture", "hushspec-posture.v0.schema.json"),
     ("receipt", "hushspec-receipt.v0.schema.json"),
@@ -723,6 +730,42 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "expiry_date": {
           "type": "string",
           "description": "ISO 8601 date when the policy expires."
+        },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ControlMapping" },
+          "description": "Compliance control mappings for this policy. Declarative only: mappings never influence evaluation."
+        }
+      }
+    },
+    "ControlMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["framework", "control_id", "rule_paths"],
+      "description": "Maps one compliance control onto the parts of this document that implement it. Advisory metadata: it has no effect on evaluation.",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$",
+          "description": "Framework identifier, e.g. 'hipaa-2013' or 'soc2-tsc-2017'. Registered ids and their control-id patterns are listed in spec/registries/frameworks.yaml; unregistered ids are valid but are flagged by linters."
+        },
+        "control_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Control identifier within the framework, e.g. '164.312(e)(1)' or 'CC6.1'. Each registered framework declares a control_id_pattern."
+        },
+        "rule_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Dot paths into the resolved document that implement the control. Grammar: path = root *( \".\" segment ) [ selector ]; root = \"rules\" / \"extensions\"; segment = 1*( ALPHA / DIGIT / \"_\" ); selector = \"[\" 1*( %x20-5A / %x5C-7C / %x7E ) \"]\" (any character except '[' and ']'). A selector names a list entry by its 'name' or 'id' field. Examples: 'rules' (the whole rules object), 'rules.egress' (one rule block), 'rules.egress.allow' (one field), 'rules.secret_patterns.patterns[ssn]' (one named secret pattern), 'extensions.posture'."
+        },
+        "notes": {
+          "type": "string",
+          "description": "Free-text rationale explaining how the mapped paths satisfy the control."
         }
       }
     }
@@ -1024,6 +1067,112 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
   }
 }
 "##,
+    ),
+    (
+        "framework-registry",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-framework-registry.v0.schema.json",
+  "title": "HushSpec Framework Registry v0",
+  "description": "Schema for spec/registries/frameworks.yaml, the registry of compliance frameworks that metadata.controls[].framework may name.",
+  "type": "object",
+  "required": ["registry_version", "frameworks"],
+  "additionalProperties": false,
+  "properties": {
+    "registry_version": {
+      "type": "string",
+      "pattern": "^0\\.\\d+\\.\\d+$",
+      "description": "Registry format version."
+    },
+    "frameworks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/Framework" },
+      "description": "Registered frameworks, ordered by id."
+    }
+  },
+  "$defs": {
+    "Framework": {
+      "type": "object",
+      "required": ["id", "name", "version", "url", "control_id_pattern"],
+      "additionalProperties": false,
+      "description": "One registered compliance framework.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$",
+          "description": "Framework identifier used by metadata.controls[].framework."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable framework name."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Edition, revision, or publication year the ids in this registry entry refer to."
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "description": "Canonical location of the framework text."
+        },
+        "control_id_pattern": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Anchored regular expression (HushSpec regex profile) that every control_id for this framework must match."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "hash-vector",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-hash-vector.v0.schema.json",
+  "title": "HushSpec Canonical Form Test Vector v0",
+  "description": "A test vector for spec/hushspec-canonical.md. Each vector pairs a resolved HushSpec document with the exact canonical JSON serialization and content hash a conformant implementation MUST produce for it. Vectors live under fixtures/core/hash/ and are generated by scripts/canonical_json.py.",
+  "type": "object",
+  "required": ["hushspec_hash_vector", "description", "policy", "canonical", "content_hash"],
+  "additionalProperties": false,
+  "properties": {
+    "hushspec_hash_vector": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Vector format version."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What this vector exercises, citing the spec section."
+    },
+    "source": {
+      "type": "object",
+      "description": "Informational: the unresolved document the `policy` below was produced from (for vectors that exercise a resolved extends chain). Never canonicalized directly."
+    },
+    "policy": {
+      "type": "object",
+      "required": ["hushspec"],
+      "description": "The resolved HushSpec document to canonicalize. MUST NOT contain `extends` or `merge_strategy`."
+    },
+    "canonical": {
+      "type": "string",
+      "minLength": 2,
+      "description": "The exact RFC 8785 canonical JSON text (UTF-8) of the canonical projection of `policy`."
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "SHA-256 of the UTF-8 bytes of `canonical`, in the `sha256:<lowercase hex>` wire form."
+    }
+  }
+}
+"#,
     ),
     (
         "origins",

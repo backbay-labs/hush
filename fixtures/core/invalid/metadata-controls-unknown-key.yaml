@@ -1,0 +1,14 @@
+# Core 2.1/2.5: unknown keys inside a control mapping MUST be rejected.
+hushspec: "0.2.0"
+name: controls-unknown-key
+metadata:
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths:
+        - rules.egress
+      rationale: "not a ControlMapping field"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

@@ -6,7 +6,7 @@ import YAML from 'yaml';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const distEntry = path.join(root, 'packages', 'hushspec', 'dist', 'index.js');
-const { parse, validate, evaluate } = await import(distEntry);
+const { parse, validate, resolve, evaluateTraced, evaluateWithDetection } = await import(distEntry);
 
 if (process.argv.length !== 3) {
   console.error('usage: diffeval_ts.mjs <bundle.json>');
@@ -27,15 +27,29 @@ for (const group of bundle.groups) {
   if (!parsed.ok) {
     rejection = { status: 'rejected', phase: 'parse', message: parsed.error };
   } else {
-    const validation = validate(parsed.value);
-    if (!validation.valid) {
-      rejection = {
-        status: 'rejected',
-        phase: 'validate',
-        message: validation.errors[0]?.message ?? 'invalid HushSpec document',
-      };
-    } else {
-      spec = parsed.value;
+    // parse -> resolve -> validate -> evaluate, the same order the Rust oracle
+    // uses. The generator only emits `builtin:` references, which the default
+    // composite loader serves from the SDK's own embedded rulesets.
+    let candidate = parsed.value;
+    if (candidate.extends != null) {
+      const resolved = resolve(candidate);
+      if (!resolved.ok) {
+        rejection = { status: 'rejected', phase: 'resolve', message: resolved.error };
+      } else {
+        candidate = resolved.value;
+      }
+    }
+    if (rejection == null) {
+      const validation = validate(candidate);
+      if (!validation.valid) {
+        rejection = {
+          status: 'rejected',
+          phase: 'validate',
+          message: validation.errors[0]?.message ?? 'invalid HushSpec document',
+        };
+      } else {
+        spec = candidate;
+      }
     }
   }
 
@@ -46,13 +60,29 @@ for (const group of bundle.groups) {
       continue;
     }
     try {
-      const result = evaluate(spec, caseAction.action);
+      // Detection-aware result plus the base evaluator's trace. Detection
+      // never re-runs the rule blocks, so the trace of the plain traced
+      // evaluation is the trace behind the detection-aware verdict.
+      const traced = evaluateTraced(spec, caseAction.action);
+      const result = evaluateWithDetection(spec, caseAction.action).evaluation;
       const normalized = { decision: result.decision };
       if (result.matched_rule != null) normalized.matched_rule = result.matched_rule;
       if (result.reason != null) normalized.reason = result.reason;
       if (result.origin_profile != null) normalized.origin_profile = result.origin_profile;
       if (result.posture != null) {
         normalized.posture = { current: result.posture.current, next: result.posture.next };
+      }
+      if (traced.trace.length > 0) {
+        normalized.rule_trace = traced.trace.map(entry => {
+          const normalizedEntry = {
+            rule_block: entry.rule_block,
+            outcome: entry.outcome,
+            evaluated: entry.evaluated,
+          };
+          if (entry.matched_rule != null) normalizedEntry.matched_rule = entry.matched_rule;
+          if (entry.reason != null) normalizedEntry.reason = entry.reason;
+          return normalizedEntry;
+        });
       }
       results[key] = { status: 'ok', result: normalized };
     } catch (error) {

@@ -333,14 +333,22 @@ type ThreatIntelDetection struct {
 	TopK                *int     `yaml:"top_k,omitempty" json:"top_k,omitempty"`
 }
 
+type ControlMapping struct {
+	Framework string   `yaml:"framework" json:"framework"`
+	ControlID string   `yaml:"control_id" json:"control_id"`
+	RulePaths []string `yaml:"rule_paths,omitempty" json:"rule_paths,omitempty"`
+	Notes     string   `yaml:"notes,omitempty" json:"notes,omitempty"`
+}
+
 type GovernanceMetadata struct {
-	Author         string         `yaml:"author,omitempty" json:"author,omitempty"`
-	ApprovedBy     string         `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
-	ApprovalDate   string         `yaml:"approval_date,omitempty" json:"approval_date,omitempty"`
-	Classification Classification `yaml:"classification,omitempty" json:"classification,omitempty"`
-	ChangeTicket   string         `yaml:"change_ticket,omitempty" json:"change_ticket,omitempty"`
-	LifecycleState LifecycleState `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
-	PolicyVersion  *int           `yaml:"policy_version,omitempty" json:"policy_version,omitempty"`
-	EffectiveDate  string         `yaml:"effective_date,omitempty" json:"effective_date,omitempty"`
-	ExpiryDate     string         `yaml:"expiry_date,omitempty" json:"expiry_date,omitempty"`
+	Author         string           `yaml:"author,omitempty" json:"author,omitempty"`
+	ApprovedBy     string           `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
+	ApprovalDate   string           `yaml:"approval_date,omitempty" json:"approval_date,omitempty"`
+	Classification Classification   `yaml:"classification,omitempty" json:"classification,omitempty"`
+	ChangeTicket   string           `yaml:"change_ticket,omitempty" json:"change_ticket,omitempty"`
+	LifecycleState LifecycleState   `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
+	PolicyVersion  *int             `yaml:"policy_version,omitempty" json:"policy_version,omitempty"`
+	EffectiveDate  string           `yaml:"effective_date,omitempty" json:"effective_date,omitempty"`
+	ExpiryDate     string           `yaml:"expiry_date,omitempty" json:"expiry_date,omitempty"`
+	Controls       []ControlMapping `yaml:"controls,omitempty" json:"controls,omitempty"`
 }

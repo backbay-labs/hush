@@ -1,0 +1,12 @@
+hushspec: 0.2.0
+name: signed-basic
+metadata:
+  policy_version: 4
+  author: security@example.com
+rules:
+  egress:
+    allow:
+    - api.example.com
+  shell_commands:
+    forbidden_patterns:
+    - mkfs

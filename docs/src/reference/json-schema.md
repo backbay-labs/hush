@@ -12,6 +12,7 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-posture.v0.schema.json` | Posture extension schema (v0.x) |
 | `hushspec-origins.v0.schema.json` | Origins extension schema (v0.x) |
 | `hushspec-detection.v0.schema.json` | Detection extension schema (v0.x) |
+| `hushspec-framework-registry.v0.schema.json` | Schema for [`spec/registries/frameworks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/frameworks.yaml), the compliance frameworks `metadata.controls[].framework` may name |
 
 ## Usage
 

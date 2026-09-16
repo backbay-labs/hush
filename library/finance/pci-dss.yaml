@@ -189,3 +189,40 @@ rules:
       - git_push
     default: block
     max_args_size: 524288
+
+# Structured control mappings (core spec 2.5). Declarative metadata only: they
+# never influence evaluation. `h2h lint` enforces full rule-block coverage
+# (L011), path resolution (L012), and registry conformance (L013).
+metadata:
+  controls:
+    - framework: pci-dss-4.0
+      control_id: "3.2"
+      rule_paths:
+        - rules.secret_patterns.patterns
+      notes: "Sensitive authentication data is not retained: CVV/CVC and magnetic-stripe track patterns are critical detections."
+    - framework: pci-dss-4.0
+      control_id: "3.4"
+      rule_paths:
+        - rules.secret_patterns
+      notes: "Render PAN unreadable. Visa, Mastercard, Amex, and Discover PAN patterns are critical detections."
+    - framework: pci-dss-4.0
+      control_id: "4.1"
+      rule_paths:
+        - rules.egress
+      notes: "Protect cardholder data in transit. Egress defaults to block; only approved processors and registries are allowed."
+    - framework: pci-dss-4.0
+      control_id: "6.3"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Secure development. Patch limits and forbidden patterns block silent removal of payment-path validation."
+    - framework: pci-dss-4.0
+      control_id: "7.1"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.tool_access
+      notes: "Restrict access to system components and cardholder data by business need to know."
+    - framework: pci-dss-4.0
+      control_id: "10.2"
+      rule_paths:
+        - rules.shell_commands
+      notes: "Audit trail integrity. Log-truncating and exfiltration commands are blocked."

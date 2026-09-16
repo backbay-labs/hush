@@ -37,11 +37,12 @@ type verdict struct {
 }
 
 type normalizedResult struct {
-	Decision      string                  `json:"decision"`
-	MatchedRule   string                  `json:"matched_rule,omitempty"`
-	Reason        string                  `json:"reason,omitempty"`
-	OriginProfile string                  `json:"origin_profile,omitempty"`
-	Posture       *hushspec.PostureResult `json:"posture,omitempty"`
+	Decision      string                    `json:"decision"`
+	MatchedRule   string                    `json:"matched_rule,omitempty"`
+	Reason        string                    `json:"reason,omitempty"`
+	OriginProfile string                    `json:"origin_profile,omitempty"`
+	Posture       *hushspec.PostureResult   `json:"posture,omitempty"`
+	RuleTrace     []hushspec.RuleEvaluation `json:"rule_trace,omitempty"`
 }
 
 type report struct {
@@ -92,6 +93,10 @@ func main() {
 	fmt.Println(string(out))
 }
 
+// parsePolicy runs the same pipeline as the Rust oracle: parse, flatten the
+// `extends` chain (the generator emits only `builtin:` references, which the
+// default composite loader serves from the SDK's embedded rulesets), then
+// validate.
 func parsePolicy(policy map[string]any) (*hushspec.HushSpec, *verdict) {
 	policyBytes, err := yaml.Marshal(policy)
 	if err != nil {
@@ -100,6 +105,13 @@ func parsePolicy(policy map[string]any) (*hushspec.HushSpec, *verdict) {
 	spec, err := hushspec.Parse(string(policyBytes))
 	if err != nil {
 		return nil, &verdict{Status: "rejected", Phase: "parse", Message: err.Error()}
+	}
+	if spec.Extends != "" {
+		resolved, err := hushspec.Resolve(spec, "", nil)
+		if err != nil {
+			return nil, &verdict{Status: "rejected", Phase: "resolve", Message: err.Error()}
+		}
+		spec = resolved
 	}
 	if result := hushspec.Validate(spec); !result.IsValid() {
 		return nil, &verdict{Status: "rejected", Phase: "validate", Message: fmt.Sprintf("%v", result.Errors[0])}
@@ -112,7 +124,11 @@ func evaluateCase(spec *hushspec.HushSpec, raw json.RawMessage) verdict {
 	if err := json.Unmarshal(raw, &action); err != nil {
 		return verdict{Status: "error", Message: fmt.Sprintf("invalid action: %v", err)}
 	}
-	result := hushspec.Evaluate(spec, &action)
+	// Detection-aware result plus the base evaluator's trace: detection never
+	// re-runs the rule blocks, so the traced evaluation's trace is the trace
+	// behind the final verdict.
+	traced := hushspec.EvaluateTraced(spec, &action, nil, nil)
+	result := hushspec.EvaluateWithDetection(spec, &action).Evaluation
 	return verdict{
 		Status: "ok",
 		Result: &normalizedResult{
@@ -121,6 +137,7 @@ func evaluateCase(spec *hushspec.HushSpec, raw json.RawMessage) verdict {
 			Reason:        result.Reason,
 			OriginProfile: result.OriginProfile,
 			Posture:       result.Posture,
+			RuleTrace:     traced.Trace,
 		},
 	}
 }

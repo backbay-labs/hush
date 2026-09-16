@@ -159,7 +159,7 @@ func TestContentRedactedWhenContentPresent(t *testing.T) {
 	action := &EvaluationAction{
 		Type:    "shell_command",
 		Target:  "echo hello",
-		Content: "some content here",
+		Content: strPtr("some content here"),
 	}
 	receipt := EvaluateAudited(spec, action, enabledConfig())
 

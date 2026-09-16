@@ -14,6 +14,8 @@ mod cmd_test;
 mod cmd_validate;
 mod cmd_verify;
 mod cmd_version;
+mod controls;
+mod generated_frameworks;
 mod generated_schemas;
 mod input;
 

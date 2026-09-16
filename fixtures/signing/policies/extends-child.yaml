@@ -1,0 +1,8 @@
+hushspec: 0.2.0
+name: signed-child
+extends: builtin:default
+rules:
+  egress:
+    allow:
+    - api.example.com
+    default: block

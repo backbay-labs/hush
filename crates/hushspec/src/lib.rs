@@ -30,7 +30,7 @@ pub use evaluate::{
     evaluate, evaluate_with_context,
 };
 pub use extensions::Extensions;
-pub use governance::{GovernanceWarning, validate_governance};
+pub use governance::{ControlMapping, GovernanceMetadata, GovernanceWarning, validate_governance};
 pub use merge::merge;
 pub use panic::{
     activate_panic, check_panic_sentinel, deactivate_panic, is_panic_active, panic_policy,

@@ -1,0 +1,15 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 4.2: JCS string escaping; only quote, backslash and control characters are escaped\
+  \ (short escapes for BS/TAB/LF/FF/CR, \\u00XX lowercase otherwise); non-ASCII, U+2028 and astral characters\
+  \ are emitted literally"
+"policy":
+  "hushspec": "0.1.0"
+  "name": "quote\" backslash\\ tab\tnl\ncr\r"
+  "description": "ctl\x01\b\f\x1F unicode é€\L\U0001F600 del\x7F nbsp "
+  "rules":
+    "shell_commands":
+      "forbidden_patterns":
+      - "rm\\s+-rf"
+      - "curl.*\\|.*sh"
+canonical: "{\"description\":\"ctl\\u0001\\b\\f\\u001f unicode é€ 😀 del\u007f nbsp \",\"hushspec\":\"0.1.0\",\"name\":\"quote\\\" backslash\\\\ tab\\tnl\\ncr\\r\",\"rules\":{\"shell_commands\":{\"enabled\":true,\"forbidden_patterns\":[\"rm\\\\s+-rf\",\"curl.*\\\\|.*sh\"]}}}"
+content_hash: "sha256:f335682d4cde4650e0a15f0fc9d5f816a62acbaa183a655779e26f02c67c7ace"
