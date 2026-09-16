@@ -354,6 +354,69 @@ describe('rule trace for different action types', () => {
     expect(toolTrace!.rule_path).toBeUndefined();
   });
 
+  // A skipped block says why it was skipped, and "why" distinguishes a block
+  // the document never declared from one the action gave nothing to work on.
+  // An auditor reading `no secret_patterns rule configured` off a policy that
+  // does configure secret_patterns would conclude the scan was never asked
+  // for, which is the opposite of what happened.
+  describe('why a configured block was not consulted', () => {
+    const scanningPolicy: HushSpec = {
+      hushspec: '1.0.0',
+      rules: {
+        egress: { allow: ['api.example.com'], default: 'block' },
+        secret_patterns: {
+          patterns: [{ name: 'aws', pattern: 'AKIA[0-9A-Z]{16}', severity: 'critical' }],
+        },
+      },
+    };
+
+    function skipReason(spec: HushSpec, action: EvaluationAction, block: string): string {
+      const receipt = evaluateAuditedSpec(spec, action, enabledConfig());
+      const entry = receipt.rule_trace.find((t) => t.rule_block === block);
+      expect(entry, `${block} is traced`).toBeDefined();
+      expect(entry!.outcome).toBe('skip');
+      expect(entry!.evaluated).toBe(false);
+      return entry!.reason ?? '';
+    }
+
+    it('names the missing content when secret_patterns is configured', () => {
+      expect(
+        skipReason(scanningPolicy, { type: 'egress', target: 'api.example.com' }, 'secret_patterns'),
+      ).toBe('content not supplied; secret_patterns not consulted');
+    });
+
+    it('still reports an absent block as absent', () => {
+      const withoutScanning: HushSpec = {
+        hushspec: '1.0.0',
+        rules: { egress: { allow: ['api.example.com'], default: 'block' } },
+      };
+      expect(
+        skipReason(withoutScanning, { type: 'egress', target: 'api.example.com' }, 'secret_patterns'),
+      ).toBe('no secret_patterns rule configured');
+    });
+
+    it('names a target that is not a channel for remote_desktop_channels', () => {
+      const spec: HushSpec = {
+        hushspec: '1.0.0',
+        rules: { remote_desktop_channels: { enabled: true, clipboard: false } },
+      };
+      expect(
+        skipReason(spec, { type: 'computer_use', target: 'screenshot' }, 'remote_desktop_channels'),
+      ).toBe('target is not a remote desktop channel; remote_desktop_channels not consulted');
+    });
+
+    it('scans, rather than skipping, once content is supplied', () => {
+      const receipt = evaluateAuditedSpec(
+        scanningPolicy,
+        { type: 'egress', target: 'api.example.com', content: 'AKIAIOSFODNN7EXAMPLE' },
+        enabledConfig(),
+      );
+      const entry = receipt.rule_trace.find((t) => t.rule_block === 'secret_patterns');
+      expect(entry!.evaluated).toBe(true);
+      expect(entry!.outcome).toBe('deny');
+    });
+  });
+
   it('records an unknown action type under the unknown_action_type stage', () => {
     const spec: HushSpec = { hushspec: '0.1.0' };
     const action: EvaluationAction = { type: 'unknown_action', target: 'test' };
