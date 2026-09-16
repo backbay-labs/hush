@@ -319,6 +319,8 @@ enum Inactive {
     Disabled,
     ConditionFalse,
     OutOfBandConditionFalse,
+    ContentNotSupplied,
+    TargetNotAChannel,
 }
 
 impl Inactive {
@@ -328,6 +330,12 @@ impl Inactive {
             Inactive::Disabled => "rule disabled".to_string(),
             Inactive::ConditionFalse => "when condition is false".to_string(),
             Inactive::OutOfBandConditionFalse => "out-of-band condition is false".to_string(),
+            Inactive::ContentNotSupplied => {
+                format!("content not supplied; {block} not consulted")
+            }
+            Inactive::TargetNotAChannel => {
+                format!("target is not a remote desktop channel; {block} not consulted")
+            }
         }
     }
 }
@@ -665,7 +673,7 @@ impl Evaluator<'_> {
                     matches!(action.action_type.as_str(), "file_write" | "patch_apply");
                 // egress and tool_call are scanned only when they carry content.
                 if !path_bearing && content.is_none() {
-                    return Err(Inactive::Absent);
+                    return Err(Inactive::ContentNotSupplied);
                 }
                 self.activity(index, rule.enabled)?;
                 let compiled = compiled.secret_patterns(rule);
@@ -760,7 +768,7 @@ impl Evaluator<'_> {
                     .ok_or(Inactive::Absent)?;
                 self.activity(index, rule.enabled)?;
                 evaluate_remote_desktop_channels(rule, action.target.as_deref().unwrap_or_default())
-                    .ok_or(Inactive::Absent)
+                    .ok_or(Inactive::TargetNotAChannel)
             }
             "input_injection" => {
                 let rule = rules
