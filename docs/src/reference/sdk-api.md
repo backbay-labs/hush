@@ -271,7 +271,7 @@ good.
 
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Sink interface | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `send(receipt)`, plus an optional `record_policy_event` | A sink that fails must not break an evaluation |
+| Sink interface | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `ReceiptSink` | `send(receipt)`, plus an optional `record_policy_event` | A sink that fails must not break an evaluation; the guard reports it as `sink.error` naming the sink. Rust adds a defaulted `name()` so a sink can name itself something an operator can place; the other three read the sink's type name |
 | File | `FileReceiptSink` | `FileReceiptSink` | `FileReceiptSink` | `NewFileReceiptSink` | JSONL | |
 | Stderr | `StderrReceiptSink` | `StderrReceiptSink` (alias of `ConsoleReceiptSink`) | `StderrReceiptSink` | `StderrReceiptSink` | | `StderrReceiptSink` is the isomorphic name; TS keeps `ConsoleReceiptSink` as the original and pins the alias by identity |
 | Filtered | `FilteredSink` | `FilteredSink` | `FilteredSink` | `NewFilteredSink`, `NewDenyOnlySink` | Route only the decisions you keep | |
