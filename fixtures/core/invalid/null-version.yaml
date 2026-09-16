@@ -1,0 +1,8 @@
+# The core schema types `hushspec` as a string, so a written `null` is a value
+# of the wrong type rather than a version an engine cannot read: there is no
+# version here to call unsupported (canonical spec 2.2).
+hushspec: null
+name: null-version
+rules:
+  egress:
+    default: block
