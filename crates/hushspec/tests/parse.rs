@@ -1,4 +1,4 @@
-use hushspec::{HushSpec, validate};
+use hushspec::{BUILTIN_NAMES, HushSpec, load_builtin, validate};
 
 #[test]
 fn parse_minimal_valid() {
@@ -353,21 +353,21 @@ rules:
 #[test]
 fn validate_builtin_rulesets_pass() {
     // All built-in rulesets must have valid, RE2-compatible regex patterns.
-    let rulesets = [
-        include_str!("../../../rulesets/default.yaml"),
-        include_str!("../../../rulesets/strict.yaml"),
-        include_str!("../../../rulesets/permissive.yaml"),
-        include_str!("../../../rulesets/ai-agent.yaml"),
-        include_str!("../../../rulesets/cicd.yaml"),
-        include_str!("../../../rulesets/remote-desktop.yaml"),
-    ];
-    for (i, yaml) in rulesets.iter().enumerate() {
+    // The YAML comes from the embedded table (generated from rulesets/*.yaml by
+    // scripts/generate_rust_builtins.py) rather than `include_str!`, so this
+    // exercises exactly the bytes the published crate ships.
+    assert!(
+        !BUILTIN_NAMES.is_empty(),
+        "built-in table must not be empty"
+    );
+    for name in BUILTIN_NAMES {
+        let yaml = load_builtin(name).unwrap_or_else(|| panic!("ruleset {name} is not embedded"));
         let spec =
-            HushSpec::parse(yaml).unwrap_or_else(|e| panic!("ruleset {i} failed to parse: {e}"));
+            HushSpec::parse(yaml).unwrap_or_else(|e| panic!("ruleset {name} failed to parse: {e}"));
         let result = validate(&spec);
         assert!(
             result.is_valid(),
-            "ruleset {i} failed validation: {:?}",
+            "ruleset {name} failed validation: {:?}",
             result.errors
         );
     }

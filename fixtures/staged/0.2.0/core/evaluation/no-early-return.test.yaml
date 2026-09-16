@@ -1,0 +1,73 @@
+hushspec_test: "0.1.0"
+description: "D2 (core 6.1): every applicable block is evaluated; an allowlist or exception match never skips secret_patterns or patch_integrity"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    forbidden_paths:
+      patterns:
+        - "**/.env"
+      exceptions:
+        - "/proj/allowed/**"
+    path_allowlist:
+      enabled: true
+      write:
+        - "/proj/**"
+      patch:
+        - "/proj/**"
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+    patch_integrity:
+      forbidden_patterns:
+        - "chmod 777"
+cases:
+  - description: "an allowlisted write containing a secret is denied"
+    action:
+      type: file_write
+      target: "/proj/a.txt"
+      content: "key=AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.aws
+  - description: "an allowlisted write without a secret is allowed"
+    action:
+      type: file_write
+      target: "/proj/a.txt"
+      content: "clean"
+    expect:
+      decision: allow
+      matched_rule: rules.path_allowlist
+  - description: "a forbidden-path exception containing a secret is denied"
+    action:
+      type: file_write
+      target: "/proj/allowed/.env"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.aws
+  - description: "an allowlisted patch containing a forbidden pattern is denied"
+    action:
+      type: patch_apply
+      target: "/proj/deploy.sh"
+      content: "+chmod 777 /srv\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.forbidden_patterns[0]"
+  - description: "an allowlisted patch containing a secret is denied"
+    action:
+      type: patch_apply
+      target: "/proj/config.py"
+      content: "+KEY = 'AKIAABCDEFGHIJKLMNOP'\n"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.aws
+  - description: "a clean write outside the allowlist is denied by the allowlist"
+    action:
+      type: file_write
+      target: "/other/a.txt"
+      content: "clean"
+    expect:
+      decision: deny
+      matched_rule: rules.path_allowlist

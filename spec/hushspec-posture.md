@@ -1,9 +1,10 @@
 # HushSpec Posture Extension Specification
 
-**Version:** 0.1.0
+**Version:** 0.2.0 (Draft)
 **Status:** Draft
-**Date:** 2026-03-15
-**Companion to:** HushSpec Core v0.1.0
+**Date:** 2026-09-14
+**Companion to:** HushSpec Core v0.2.0
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix C for the list of ratified changes.
 
 ---
 
@@ -71,7 +72,13 @@ The `transitions` field is REQUIRED and MUST be an array of transition objects. 
 
 ## 3. Capabilities
 
-Capabilities declare what categories of action an agent may perform in a given state. When the posture extension is active and the current state's `capabilities` array is non-empty, only actions corresponding to a listed capability are permitted. If `capabilities` is absent or empty, no capability restriction is applied by the posture extension for that state.
+Capabilities declare what categories of action an agent may perform in a given state. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
+
+An action whose `posture.current` names a state absent from `states` MUST be denied with `matched_rule` `extensions.posture.states.<state>` (fail-closed).
+
+The posture guard runs before core rule blocks (core Section 6.1); a deny from it is final.
+
+Test vectors: `fixtures/posture/evaluation/posture-transitions.test.yaml`, `fixtures/posture/evaluation/empty-capabilities.test.yaml`, `fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml`.
 
 ### 3.1 Standard Capabilities
 
@@ -90,6 +97,23 @@ The following capability identifiers are defined by this specification:
 ### 3.2 Forward Compatibility
 
 Engines MAY support additional capability identifiers beyond the standard set. Conformant validators SHOULD produce warnings (not errors) for unrecognized capabilities. This ensures that documents authored for engines with extended capability sets remain valid under stricter validators.
+
+### 3.3 Required Capability by Action Type
+
+The posture guard maps each core action type (core Section 5) to the capability it requires:
+
+| Action type      | Required capability |
+|------------------|---------------------|
+| `file_read`      | `file_access`       |
+| `file_write`     | `file_write`        |
+| `patch_apply`    | `patch`             |
+| `shell_command`  | `shell`             |
+| `tool_call`      | `tool_call`         |
+| `egress`         | `egress`            |
+| `custom`         | `custom`            |
+| `computer_use`, `input_inject`, `browser_action`, `code_exec` | none (not gated by posture) |
+
+Action types not in this table are unknown and are denied by the core evaluator before the posture guard runs (core Section 5).
 
 ---
 
@@ -250,3 +274,13 @@ extensions:
         to: "restricted"
         on: budget_exhausted
 ```
+
+## Appendix C. Changes from 0.1.0
+
+| ID  | Section | Change                                                                                                     |
+|-----|---------|------------------------------------------------------------------------------------------------------------|
+| D11 | 3       | An absent or empty `capabilities` list denies every capability-requiring action. Version 0.1.0 said "no capability restriction is applied", which contradicted Appendix B's `locked` state and the reference implementation; the fail-closed reading is ratified. |
+| D1  | 3.3     | Required-capability table added; `custom` actions require the `custom` capability.                         |
+| --  | 3       | Unknown posture state and guard ordering made explicit.                                                    |
+
+Open item: Section 5.3 says a named `from` takes priority over `"*"`; the reference implementation selects the first matching transition in document order. This is tracked as a pending decision (see `fixtures/staged/README.md`, D18) and Section 5.3 is unchanged in this version.

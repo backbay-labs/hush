@@ -1,0 +1,5 @@
+# Core 2.2 / 2.4 (D17): the version field must be a string; a YAML float is rejected.
+hushspec: 0.1
+rules:
+  egress:
+    default: block

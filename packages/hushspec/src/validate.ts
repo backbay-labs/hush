@@ -41,7 +41,7 @@ import {
   TOP_LEVEL_KEYS_SET,
   TRANSITION_TRIGGERS_SET,
 } from './generated/contract.js';
-import { compilePolicyRegex, isSafeRegex } from './regex.js';
+import { compileProfileRegex, isSafeRegex } from './regex.js';
 import { isSupported } from './version.js';
 
 export { isSafeRegex };
@@ -905,22 +905,28 @@ function validateBounds(
 }
 
 function validateRegex(pattern: string, ctx: ValidationContext, path: string): void {
-  try {
-    compilePolicyRegex(pattern);
-  } catch (error) {
-    addError(
-      ctx,
-      'invalid_regex',
-      `${path} must be a valid regular expression: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return;
-  }
-
+  // RE2/ReDoS safety first, so a lookaround or `(a+)+` keeps reporting the
+  // dedicated `non_re2_regex` code rather than being swallowed by the profile
+  // compile below (which also rejects them, to stay fail-closed at eval time).
   if (!isSafeRegex(pattern)) {
     addError(
       ctx,
       'non_re2_regex',
       `${path}: pattern uses features not in the RE2 subset (backreferences, lookaround, etc.) which may cause ReDoS`,
+    );
+    return;
+  }
+
+  // Profile check second: `compileProfileRegex` is the exact call the evaluator
+  // makes, so a pattern that validates here can never fail to compile at
+  // evaluation time -- and vice versa.
+  try {
+    compileProfileRegex(pattern);
+  } catch (error) {
+    addError(
+      ctx,
+      'invalid_regex',
+      `${path} must be a valid regular expression: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

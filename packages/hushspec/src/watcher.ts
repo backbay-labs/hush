@@ -1,6 +1,6 @@
-import { watch, readFileSync } from 'node:fs';
+import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
-import { parse } from './parse.js';
+import { resolveFromFile } from './resolve.js';
 import type { HushSpec } from './schema.js';
 
 export interface WatcherOptions {
@@ -59,10 +59,11 @@ export class PolicyWatcher {
   }
 
   private loadFromDisk(): HushSpec {
-    const content = readFileSync(this.path, 'utf8');
-    const result = parse(content);
+    // Reload resolves the `extends` chain the same way the initial load does:
+    // a hot-swapped policy must never reach the guard as a bare leaf.
+    const result = resolveFromFile(this.path);
     if (!result.ok) {
-      throw new Error(`Failed to parse HushSpec at ${this.path}: ${result.error}`);
+      throw new Error(result.error);
     }
     return result.value;
   }

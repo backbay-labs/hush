@@ -1,0 +1,61 @@
+hushspec_test: "0.1.0"
+description: "D5 (core 3.3, 3.14.2): host pattern semantics that already hold -- multi-label wildcard, no implied apex, exact IP literals"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - "**.example.com"
+        - "10.0.0.1"
+        - "[::1]"
+      default: block
+cases:
+  - description: "double wildcard matches a single leading label"
+    action:
+      type: egress
+      target: "a.example.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "double wildcard matches several leading labels"
+    action:
+      type: egress
+      target: "a.b.example.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a wildcard never implies the apex host"
+    action:
+      type: egress
+      target: "example.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "an IPv4 literal matches an identical entry"
+    action:
+      type: egress
+      target: "10.0.0.1"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "an IPv4 literal does not match a longer address that shares a prefix"
+    action:
+      type: egress
+      target: "10.0.0.10"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a bracketed IPv6 literal matches an identical entry"
+    action:
+      type: egress
+      target: "[::1]"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a different IPv6 literal does not match"
+    action:
+      type: egress
+      target: "[::2]"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default

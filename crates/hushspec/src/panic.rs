@@ -32,11 +32,12 @@ pub fn is_panic_active() -> bool {
 
 /// Get the built-in panic (deny-all) policy.
 ///
-/// The panic policy is embedded at compile time from `rulesets/panic.yaml`.
-/// Panics at runtime only if the embedded YAML is somehow invalid (which would
-/// indicate a build-time defect).
+/// The panic policy is embedded at compile time from `rulesets/panic.yaml`,
+/// via the generated `generated_builtins` module (see
+/// `scripts/generate_rust_builtins.py`). Panics at runtime only if the
+/// embedded YAML is somehow invalid (which would indicate a build-time defect).
 pub fn panic_policy() -> crate::HushSpec {
-    let yaml = include_str!("../../../rulesets/panic.yaml");
+    let yaml = crate::generated_builtins::PANIC_YAML;
     crate::HushSpec::parse(yaml).expect("panic policy must be valid")
 }
 

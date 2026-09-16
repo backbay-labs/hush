@@ -11,6 +11,7 @@ from hushspec.extensions import (
     PostureExtension,
     TransitionTrigger,
 )
+from hushspec.regex_profile import compile_profile_regex
 from hushspec.rules import (
     ComputerUseMode,
     ComputerUseRule,
@@ -620,16 +621,26 @@ def evaluate_secret_patterns(
         )
 
     for pattern in rule.patterns:
+        # Fail closed: a pattern that will not compile under the HushSpec regex
+        # profile denies the action rather than being skipped, and the deny
+        # carries the offending rule path. Validation uses the same compile, so
+        # this is unreachable for a document that passed ``validate``.
         try:
-            if re.search(pattern.pattern, content):
-                return _deny_result(
-                    f"rules.secret_patterns.patterns.{pattern.name}",
-                    f"content matched secret pattern '{pattern.name}'",
-                    origin_profile_id,
-                    posture,
-                )
-        except re.error:
-            pass
+            compiled = compile_profile_regex(pattern.pattern)
+        except ValueError as exc:
+            return _deny_result(
+                f"rules.secret_patterns.patterns.{pattern.name}.pattern",
+                f"secret pattern '{pattern.name}' is invalid: {exc}",
+                origin_profile_id,
+                posture,
+            )
+        if compiled.search(content):
+            return _deny_result(
+                f"rules.secret_patterns.patterns.{pattern.name}",
+                f"content matched secret pattern '{pattern.name}'",
+                origin_profile_id,
+                posture,
+            )
 
     return _allow_result(None, None, origin_profile_id, posture)
 
@@ -644,16 +655,23 @@ def evaluate_patch_integrity(
         return _allow_result(None, None, origin_profile_id, posture)
 
     for index, pattern in enumerate(rule.forbidden_patterns):
+        # Fail closed on an uncompilable pattern (see evaluate_secret_patterns).
         try:
-            if re.search(pattern, content):
-                return _deny_result(
-                    f"rules.patch_integrity.forbidden_patterns[{index}]",
-                    "patch content matched a forbidden pattern",
-                    origin_profile_id,
-                    posture,
-                )
-        except re.error:
-            pass
+            compiled = compile_profile_regex(pattern)
+        except ValueError as exc:
+            return _deny_result(
+                f"rules.patch_integrity.forbidden_patterns[{index}]",
+                f"patch forbidden pattern is invalid: {exc}",
+                origin_profile_id,
+                posture,
+            )
+        if compiled.search(content):
+            return _deny_result(
+                f"rules.patch_integrity.forbidden_patterns[{index}]",
+                "patch content matched a forbidden pattern",
+                origin_profile_id,
+                posture,
+            )
 
     stats = patch_stats(content)
 
@@ -696,16 +714,23 @@ def evaluate_shell_rule(
         return _allow_result(None, None, origin_profile_id, posture)
 
     for index, pattern in enumerate(rule.forbidden_patterns):
+        # Fail closed on an uncompilable pattern (see evaluate_secret_patterns).
         try:
-            if re.search(pattern, target):
-                return _deny_result(
-                    f"rules.shell_commands.forbidden_patterns[{index}]",
-                    "shell command matched a forbidden pattern",
-                    origin_profile_id,
-                    posture,
-                )
-        except re.error:
-            pass
+            compiled = compile_profile_regex(pattern)
+        except ValueError as exc:
+            return _deny_result(
+                f"rules.shell_commands.forbidden_patterns[{index}]",
+                f"shell forbidden pattern is invalid: {exc}",
+                origin_profile_id,
+                posture,
+            )
+        if compiled.search(target):
+            return _deny_result(
+                f"rules.shell_commands.forbidden_patterns[{index}]",
+                "shell command matched a forbidden pattern",
+                origin_profile_id,
+                posture,
+            )
 
     return _allow_result(None, None, origin_profile_id, posture)
 

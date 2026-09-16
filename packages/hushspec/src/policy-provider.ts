@@ -3,6 +3,7 @@ import type { HushSpec } from './schema.js';
 import { PolicyWatcher, type WatcherOptions } from './watcher.js';
 import { PolicyPoller, type PollerOptions } from './poller.js';
 import { parse } from './parse.js';
+import { createBuiltinLoader, resolve as resolveSpec, resolveFromFile } from './resolve.js';
 import { computePolicyHash } from './receipt.js';
 import { createHttpLoader } from './http-loader.js';
 
@@ -25,10 +26,11 @@ export class FileProvider implements PolicyProvider {
   }
 
   async load(): Promise<HushSpec> {
-    const content = readFileSync(this.path, 'utf8');
-    const result = parse(content);
+    // Resolve here, not in the guard: a file policy's relative `extends`
+    // references are only meaningful against this file's own directory.
+    const result = resolveFromFile(this.path);
     if (!result.ok) {
-      throw new Error(`Failed to parse HushSpec at ${this.path}: ${result.error}`);
+      throw new Error(result.error);
     }
     this.currentSpec = result.value;
     return result.value;
@@ -139,6 +141,21 @@ export class HttpProvider implements PolicyProvider {
 
   private async loadRemoteSpec(): Promise<HushSpec> {
     const loaded = await this.httpLoader(this.url);
-    return loaded.spec;
+    if (loaded.spec.extends == null) {
+      return loaded.spec;
+    }
+    // `resolve()` is synchronous, so a remote policy can only extend a
+    // builtin. A remote base (`extends: https://...`) fails closed here with
+    // a clear message rather than being evaluated without its base.
+    const resolved = resolveSpec(loaded.spec, {
+      source: loaded.source,
+      load: createBuiltinLoader(),
+    });
+    if (!resolved.ok) {
+      throw new Error(
+        `Failed to resolve policy 'extends: ${loaded.spec.extends}' from ${this.url}: ${resolved.error}`,
+      );
+    }
+    return resolved.value;
   }
 }

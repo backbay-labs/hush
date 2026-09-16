@@ -1,0 +1,48 @@
+hushspec_test: "0.1.0"
+description: "D12 (origins 2.1): default_behavior deny is enforced for unmatched origins and for requests without origin context"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+      transitions: []
+    origins:
+      default_behavior: deny
+      profiles:
+        - id: slack
+          match:
+            provider: slack
+          tool_access:
+            default: allow
+cases:
+  - description: "a matched origin proceeds under its profile"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: slack
+    expect:
+      decision: allow
+      origin_profile: slack
+  - description: "an unmatched origin is denied by default_behavior"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: github
+    expect:
+      decision: deny
+      matched_rule: extensions.origins.default_behavior
+  - description: "a request with no origin context is unmatched and denied"
+    action:
+      type: tool_call
+      target: ticket_search
+    expect:
+      decision: deny
+      matched_rule: extensions.origins.default_behavior

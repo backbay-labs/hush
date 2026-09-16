@@ -240,6 +240,31 @@ class TestTimeWindowConditions:
         assert evaluate_condition(cond, ctx_with_time("2026-01-14T13:45:00Z")) is True
         assert evaluate_condition(cond, ctx_with_time("2026-07-14T12:45:00Z")) is True
 
+    def test_loads_iana_zones_from_the_tz_database(self):
+        # Neither zone is in the hardcoded fixed-offset fallback table, so these
+        # assertions only pass if zoneinfo can reach a tz database. That is what
+        # the `tzdata` runtime dependency guarantees on Windows and on slim
+        # images that ship no /usr/share/zoneinfo -- without it the lookup
+        # raises ZoneInfoNotFoundError and the condition fails closed.
+        new_york = Condition(
+            time_window=TimeWindowCondition(
+                start="09:00", end="10:00", timezone="America/New_York"
+            )
+        )
+        # 09:30 in New York, winter (UTC-5) and summer (UTC-4).
+        assert evaluate_condition(new_york, ctx_with_time("2026-01-14T14:30:00Z")) is True
+        assert evaluate_condition(new_york, ctx_with_time("2026-07-14T13:30:00Z")) is True
+        assert evaluate_condition(new_york, ctx_with_time("2026-01-14T09:30:00Z")) is False
+
+        kolkata = Condition(
+            time_window=TimeWindowCondition(
+                start="09:00", end="10:00", timezone="Asia/Kolkata"
+            )
+        )
+        # 09:30 in Kolkata (UTC+5:30 year-round).
+        assert evaluate_condition(kolkata, ctx_with_time("2026-01-14T04:00:00Z")) is True
+        assert evaluate_condition(kolkata, ctx_with_time("2026-01-14T09:30:00Z")) is False
+
     def test_wraps_midnight_with_day_filter(self):
         cond = Condition(
             time_window=TimeWindowCondition(

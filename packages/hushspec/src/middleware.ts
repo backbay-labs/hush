@@ -4,7 +4,10 @@ import type { EvaluationAction, EvaluationResult } from './evaluate.js';
 import { isPanicActive } from './evaluate.js';
 import { evaluateWithDetection } from './detection.js';
 import { parse } from './parse.js';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import nodePath from 'node:path';
+import type { LoadedSpec } from './resolve.js';
+import { createBuiltinLoader, createCompositeLoader, resolve as resolveSpec } from './resolve.js';
 import type { PolicyProvider } from './policy-provider.js';
 import type { EvaluationObserver } from './observer.js';
 import { ObservableEvaluator } from './observer.js';
@@ -36,6 +39,59 @@ export interface HushGuardOptions {
   enforcement?: EnforcementConfig;
   sink?: ReceiptSink;
   audit?: AuditConfig;
+  /**
+   * Loader for `extends` references. Defaults to builtin-only (or the
+   * builtin+filesystem composite loader when `baseDir` is set).
+   */
+  loader?: (reference: string, from?: string) => LoadedSpec;
+  /**
+   * Directory that relative `extends` references resolve against.
+   * `HushGuard.fromFile()` defaults it to the policy file's directory.
+   */
+  baseDir?: string;
+}
+
+/** The `extends`-resolution half of {@link HushGuardOptions}. */
+export type PolicyResolveOptions = Pick<HushGuardOptions, 'loader' | 'baseDir'>;
+
+/**
+ * Resolve a policy's `extends` chain, or throw.
+ *
+ * Every entry point into `HushGuard` funnels through this: the guard must
+ * never hold a spec whose `extends` is still set. An unresolved leaf policy
+ * silently drops every rule block its base declares -- `library/general/
+ * recommended.yaml` extends `builtin:default` and declares no
+ * `forbidden_paths`, so evaluating it unresolved would allow reads of
+ * `~/.ssh/id_rsa` -- and hashes the wrong document into every receipt.
+ * Fail closed: if the base cannot be loaded, no evaluation happens at all.
+ */
+export function resolvePolicyOrThrow(
+  policy: HushSpec,
+  options?: PolicyResolveOptions,
+): HushSpec {
+  if (policy.extends == null) {
+    return policy;
+  }
+
+  const load =
+    options?.loader ?? (options?.baseDir != null ? createCompositeLoader() : createBuiltinLoader());
+  // `resolve()` treats `source` as the *file* a relative reference is resolved
+  // from, so point it at a placeholder inside baseDir.
+  const source =
+    options?.baseDir != null
+      ? nodePath.join(nodePath.resolve(options.baseDir), '<policy>')
+      : undefined;
+
+  const result = resolveSpec(policy, { source, load });
+  if (!result.ok) {
+    throw new Error(`Failed to resolve policy 'extends: ${policy.extends}': ${result.error}`);
+  }
+  if (result.value.extends != null) {
+    throw new Error(
+      `Failed to resolve policy 'extends: ${policy.extends}': resolver returned an unresolved policy`,
+    );
+  }
+  return result.value;
 }
 
 const ENFORCEMENT_MODES: ReadonlySet<string> = new Set(['enforce', 'monitor']);
@@ -188,6 +244,7 @@ export class HushGuard {
   private enforcementOverrides: Record<string, EnforcementMode> = {};
   private sink: ReceiptSink | null = null;
   private audit: AuditConfig = DEFAULT_AUDIT_CONFIG;
+  private resolveOptions: PolicyResolveOptions;
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
@@ -199,26 +256,49 @@ export class HushGuard {
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.sink = options?.sink ?? null;
     this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
-    this.policy = policy;
+    this.resolveOptions = { loader: options?.loader, baseDir: options?.baseDir };
+    // Resolve before anything else touches the spec: a guard never holds an
+    // unresolved document, and the receipt hash covers the resolved policy.
+    this.policy = resolvePolicyOrThrow(policy, this.resolveOptions);
     this.onWarn = options?.onWarn ?? (() => false);
     this.provider = options?.provider ?? null;
     if (options?.observer) {
       this.observableEvaluator = new ObservableEvaluator();
       this.observableEvaluator.addObserver(options.observer);
-      this.policyHash = computePolicyHash(policy);
-      this.observableEvaluator.notifyPolicyLoaded(policy.name, this.policyHash);
+      this.policyHash = computePolicyHash(this.policy);
+      this.observableEvaluator.notifyPolicyLoaded(this.policy.name, this.policyHash);
     }
   }
 
+  /**
+   * Load a policy file and resolve its `extends` chain. Relative references
+   * resolve against the policy file's own directory (overridable with
+   * `options.baseDir`/`options.loader`); `builtin:` references come from the
+   * embedded rulesets. Throws if the chain cannot be resolved.
+   */
   static fromFile(path: string, options?: HushGuardOptions): HushGuard {
     const content = readFileSync(path, 'utf8');
     const result = parse(content);
     if (!result.ok) {
       throw new Error(`Failed to parse policy: ${result.error}`);
     }
-    return new HushGuard(result.value, options);
+    let baseDir = options?.baseDir;
+    if (baseDir == null) {
+      try {
+        baseDir = nodePath.dirname(realpathSync(path));
+      } catch {
+        baseDir = nodePath.dirname(nodePath.resolve(path));
+      }
+    }
+    return new HushGuard(result.value, { ...options, baseDir });
   }
 
+  /**
+   * Parse a policy document and resolve its `extends` chain. `builtin:`
+   * references resolve out of the box; file references need an explicit
+   * `options.baseDir` (or `options.loader`) since a YAML string has no
+   * directory of its own. Throws if the chain cannot be resolved.
+   */
   static fromYaml(yaml: string, options?: HushGuardOptions): HushGuard {
     const result = parse(yaml);
     if (!result.ok) {
@@ -490,12 +570,16 @@ export class HushGuard {
   }
 
   swapPolicy(newPolicy: HushSpec): void {
+    // Hot-reload is a policy load like any other: an unresolved document is
+    // rejected here rather than swapped in. The throw propagates to the
+    // provider's `onError`, leaving the previously resolved policy in force.
+    const resolved = resolvePolicyOrThrow(newPolicy, this.resolveOptions);
     const previousHash = this.policyHash;
-    this.policy = newPolicy;
+    this.policy = resolved;
     if (this.observableEvaluator) {
-      this.policyHash = computePolicyHash(newPolicy);
+      this.policyHash = computePolicyHash(resolved);
       this.observableEvaluator.notifyPolicyReloaded(
-        newPolicy.name,
+        resolved.name,
         this.policyHash,
         previousHash ?? undefined,
       );
@@ -514,6 +598,17 @@ export class HushGuard {
           decision: 'deny',
           matched_rule: '__hushspec_policy_provider__',
           reason: 'policy provider has not loaded a policy yet',
+        };
+      }
+      if (current.extends != null) {
+        // Defense in depth: the built-in providers resolve on load and on
+        // reload, so this only fires for a third-party provider that hands
+        // back a leaf document. Evaluating it would silently drop every rule
+        // block its base declares -- deny instead.
+        return {
+          decision: 'deny',
+          matched_rule: '__hushspec_policy_provider__',
+          reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
         };
       }
       this.policy = current;

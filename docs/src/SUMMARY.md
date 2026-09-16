@@ -24,6 +24,7 @@
 
 # Reference
 
+- [CLI Reference](reference/cli.md)
 - [Conformance Levels](reference/conformance.md)
 - [SDK Conformance Matrix](reference/sdk-conformance.md)
 - [Versioning](reference/versioning.md)

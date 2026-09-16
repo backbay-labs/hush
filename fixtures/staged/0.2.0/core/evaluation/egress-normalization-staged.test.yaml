@@ -1,0 +1,91 @@
+hushspec_test: "0.1.0"
+description: "D5 (core 3.3, 3.14.2): host normalization (port, case, trailing dot, URL, userinfo, IDNA), single-label wildcard scope, wildcards never match IP literals"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - "api.example.com"
+        - "*.example.org"
+        - "bücher.example"
+        - "10.0.*.*"
+        - "[::1]"
+      default: block
+cases:
+  - description: "a port suffix is stripped before matching"
+    action:
+      type: egress
+      target: "api.example.com:443"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "host matching is case-insensitive after lowercasing"
+    action:
+      type: egress
+      target: "API.EXAMPLE.COM"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a trailing dot is stripped"
+    action:
+      type: egress
+      target: "api.example.com."
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a URL is reduced to its host"
+    action:
+      type: egress
+      target: "https://api.example.com/v1/items?x=1#frag"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "userinfo and port are removed from a URL authority"
+    action:
+      type: egress
+      target: "https://user:pw@api.example.com:8443/"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a single-label wildcard matches exactly one label"
+    action:
+      type: egress
+      target: "a.example.org"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a single-label wildcard does not cross labels"
+    action:
+      type: egress
+      target: "a.b.example.org"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a single-label wildcard does not match the apex"
+    action:
+      type: egress
+      target: "example.org"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a non-ASCII host is compared in IDNA A-label form"
+    action:
+      type: egress
+      target: "BÜCHER.example"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a wildcard pattern never matches an IPv4 literal"
+    action:
+      type: egress
+      target: "10.0.0.1"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a bracketed IPv6 literal with a port matches the exact entry"
+    action:
+      type: egress
+      target: "[::1]:8080"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow

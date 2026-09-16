@@ -1,4 +1,5 @@
 mod cmd_audit;
+mod cmd_completions;
 mod cmd_diff;
 mod cmd_eval;
 mod cmd_fmt;
@@ -6,10 +7,15 @@ mod cmd_init;
 mod cmd_keygen;
 mod cmd_lint;
 mod cmd_panic;
+mod cmd_resolve;
+mod cmd_schema;
 mod cmd_sign;
 mod cmd_test;
 mod cmd_validate;
 mod cmd_verify;
+mod cmd_version;
+mod generated_schemas;
+mod input;
 
 use clap::{Parser, Subcommand};
 
@@ -21,7 +27,7 @@ use clap::{Parser, Subcommand};
     propagate_version = true,
     after_help = "psst... keep it down out there"
 )]
-struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
@@ -32,6 +38,8 @@ enum Commands {
     Audit(cmd_audit::AuditArgs),
     /// Validate policy files against the HushSpec schema
     Validate(cmd_validate::ValidateArgs),
+    /// Print a policy with its extends chain fully resolved and merged
+    Resolve(cmd_resolve::ResolveArgs),
     /// Run evaluation test suites against policies
     Test(cmd_test::TestArgs),
     /// Evaluate a single action against a policy
@@ -54,6 +62,12 @@ enum Commands {
     Verify(cmd_verify::VerifyArgs),
     /// Generate a new Ed25519 keypair for policy signing
     Keygen(cmd_keygen::KeygenArgs),
+    /// Print a published HushSpec JSON Schema
+    Schema(cmd_schema::SchemaArgs),
+    /// Generate a shell completion script
+    Completions(cmd_completions::CompletionsArgs),
+    /// Print CLI, build, and spec version information
+    Version(cmd_version::VersionArgs),
 }
 
 fn main() {
@@ -62,6 +76,7 @@ fn main() {
     let exit_code = match cli.command {
         Commands::Audit(args) => cmd_audit::run(args),
         Commands::Validate(args) => cmd_validate::run(args),
+        Commands::Resolve(args) => cmd_resolve::run(args),
         Commands::Test(args) => cmd_test::run(args),
         Commands::Eval(args) => cmd_eval::run(args),
         Commands::Explain(args) => cmd_eval::run_explain(args),
@@ -73,6 +88,9 @@ fn main() {
         Commands::Sign(args) => cmd_sign::run(args),
         Commands::Verify(args) => cmd_verify::run(args),
         Commands::Keygen(args) => cmd_keygen::run(args),
+        Commands::Schema(args) => cmd_schema::run(args),
+        Commands::Completions(args) => cmd_completions::run(args),
+        Commands::Version(args) => cmd_version::run(args),
     };
 
     std::process::exit(exit_code);

@@ -1,0 +1,9 @@
+# D15 (core 3.13): a time_window with an hour above 23 is a parse error.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      time_window:
+        start: "25:00"
+        end: "06:00"
+    forbidden_patterns: ["mkfs"]

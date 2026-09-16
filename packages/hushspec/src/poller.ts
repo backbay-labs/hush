@@ -1,6 +1,34 @@
 import { createHash } from 'node:crypto';
 import { parse } from './parse.js';
+import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
 import type { HushSpec } from './schema.js';
+
+/**
+ * Parse polled YAML and resolve its `extends` chain.
+ *
+ * A polled document has no directory of its own, so only `builtin:` bases can
+ * be resolved; anything else fails closed here instead of reaching the guard
+ * as a leaf policy that silently drops every block its base declares.
+ */
+function parseAndResolve(yaml: string): { ok: true; value: HushSpec } | { ok: false; error: Error } {
+  const parsed = parse(yaml);
+  if (!parsed.ok) {
+    return { ok: false, error: new Error(`Failed to parse policy: ${parsed.error}`) };
+  }
+  if (parsed.value.extends == null) {
+    return { ok: true, value: parsed.value };
+  }
+  const resolved = resolveSpec(parsed.value, { load: createBuiltinLoader() });
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      error: new Error(
+        `Failed to resolve policy 'extends: ${parsed.value.extends}': ${resolved.error}`,
+      ),
+    };
+  }
+  return { ok: true, value: resolved.value };
+}
 
 export interface PolicySnapshot {
   spec: HushSpec;
@@ -94,9 +122,9 @@ export class PolicyPoller {
 
     if (typeof loaded === 'string') {
       fingerprintSource = loaded;
-      const result = parse(loaded);
+      const result = parseAndResolve(loaded);
       if (!result.ok) {
-        const error = new Error(`Failed to parse policy: ${result.error}`);
+        const error = result.error;
         if (throwOnError && this.currentSpec == null) {
           throw error;
         }

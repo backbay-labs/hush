@@ -2,8 +2,9 @@
 name = "hushspec"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description = "Portable specification types for AI agent security rules"
+description = "Agentic compliance as code: portable policy spec for AI agent security controls"
 repository = "https://github.com/backbay-labs/hush"
 readme = "README.md"
 keywords = ["ai", "security", "policy", "agent", "hushspec"]
@@ -29,6 +30,7 @@ rand = { version = "0.8", optional = true }
 pretty_assertions = "1"
 criterion = "0.5"
 jsonschema = { version = "0.18", features = ["draft202012"] }
+proptest = "1"
 
 [[bench]]
 name = "evaluation"

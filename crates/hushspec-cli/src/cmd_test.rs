@@ -4,8 +4,19 @@ use hushspec::{
     Decision, EvaluationAction, EvaluationResult, HushSpec, PostureResult, evaluate_with_detection,
     validate,
 };
+use jsonschema::JSONSchema;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The evaluator-fixture schema, vendored into this crate.
+///
+/// `cargo package` only ships files inside the crate directory, so this cannot
+/// `include_str!` the canonical `schemas/` copy at the workspace root the way
+/// the testkit (never published) does. `evaluator_schema_matches_workspace_copy`
+/// in `tests/resolve_tests.rs` fails if the two ever drift.
+const EVALUATOR_TEST_SCHEMA: &str =
+    include_str!("../schemas/hushspec-evaluator-test.v0.schema.json");
 
 #[derive(clap::Args)]
 pub struct TestArgs {
@@ -39,6 +50,7 @@ enum TestOutputFormat {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EvaluationFixture {
     hushspec_test: String,
     #[allow(dead_code)]
@@ -48,6 +60,7 @@ struct EvaluationFixture {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EvaluationCase {
     description: String,
     action: EvaluationAction,
@@ -55,6 +68,7 @@ struct EvaluationCase {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ExpectedEvaluation {
     decision: Decision,
     #[serde(default)]
@@ -106,18 +120,33 @@ pub fn run(args: TestArgs) -> i32 {
         return 2;
     }
 
-    let external_policy = args.policy.as_ref().map(|path| {
-        let content = std::fs::read_to_string(path).unwrap_or_else(|e| {
+    // Fail closed before a single case runs: a fixture with a typo in `expect`
+    // (`matched_rul:`) or an unknown top-level key used to be silently ignored
+    // and reported green. A malformed suite is a config error, not a failure.
+    let mut malformed = false;
+    for file in &test_files {
+        if let Err(errors) = validate_fixture_schema(file) {
+            malformed = true;
             eprintln!(
-                "{} Failed to read policy {}: {e}",
+                "{} {} does not match the hushspec-evaluator-test schema:",
                 "ERROR".red(),
-                path.display()
+                file.display()
             );
-            std::process::exit(2);
-        });
-        HushSpec::parse(&content).unwrap_or_else(|e| {
+            for error in errors {
+                eprintln!("  {error}");
+            }
+        }
+    }
+    if malformed {
+        return 2;
+    }
+
+    let external_policy = args.policy.as_ref().map(|path| {
+        // Resolve `extends` here: `--policy` names the document the suite runs
+        // against, and an unresolved leaf drops every block its base declares.
+        hushspec::resolve_from_path_with_builtins(path).unwrap_or_else(|e| {
             eprintln!(
-                "{} Failed to parse policy {}: {e}",
+                "{} Failed to load policy {}: {e}",
                 "ERROR".red(),
                 path.display()
             );
@@ -148,6 +177,49 @@ pub fn run(args: TestArgs) -> i32 {
     }
 
     if total_failed > 0 { 1 } else { 0 }
+}
+
+/// Compiled `hushspec-evaluator-test.v0` schema (compiled once per process).
+fn evaluator_schema() -> &'static JSONSchema {
+    static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        let schema_json: serde_json::Value = serde_json::from_str(EVALUATOR_TEST_SCHEMA)
+            .expect("evaluator schema should be valid JSON");
+        // Formats are asserted deliberately rather than left at draft 2020-12's
+        // annotation-only default, matching the testkit's compile options.
+        JSONSchema::options()
+            .should_validate_formats(true)
+            .compile(&schema_json)
+            .expect("evaluator schema should compile")
+    })
+}
+
+/// Validate one fixture file against the evaluator-test schema, reporting each
+/// violation with its JSON-pointer path.
+///
+/// This mirrors what the conformance testkit already does
+/// (`hushspec-testkit`'s `validate_evaluator_schema`); without it, `h2h test`
+/// accepted anything its structs happened to deserialize and skipped the rest.
+fn validate_fixture_schema(path: &Path) -> Result<(), Vec<String>> {
+    let content =
+        std::fs::read_to_string(path).map_err(|e| vec![format!("failed to read file: {e}")])?;
+    let value: serde_json::Value =
+        serde_yaml::from_str(&content).map_err(|e| vec![format!("invalid YAML: {e}")])?;
+
+    match evaluator_schema().validate(&value) {
+        Ok(()) => Ok(()),
+        Err(errors) => Err(errors
+            .map(|error| {
+                let pointer = error.instance_path.to_string();
+                let pointer = if pointer.is_empty() {
+                    "/".to_string()
+                } else {
+                    pointer
+                };
+                format!("{pointer}: {error}")
+            })
+            .collect()),
+    }
 }
 
 fn collect_test_files(args: &TestArgs) -> Vec<PathBuf> {
@@ -268,7 +340,7 @@ fn run_fixture_file(path: &Path, external_policy: Option<&HushSpec>) -> FixtureR
             }
         };
 
-        match HushSpec::parse(&policy_yaml) {
+        let parsed = match HushSpec::parse(&policy_yaml) {
             Ok(s) => s,
             Err(e) => {
                 return FixtureResult {
@@ -279,6 +351,29 @@ fn run_fixture_file(path: &Path, external_policy: Option<&HushSpec>) -> FixtureR
                         message: Some(format!("embedded policy failed to parse: {e}")),
                     }],
                 };
+            }
+        };
+
+        // An embedded policy has no file of its own, so its `extends` chain is
+        // resolved as if it lived beside the fixture: builtins by name, and
+        // relative paths against the fixture's directory. A chain that will not
+        // resolve fails the fixture instead of running against the bare leaf.
+        if parsed.extends.is_none() {
+            parsed
+        } else {
+            let loader = hushspec::create_composite_loader();
+            match hushspec::resolve_with_loader(&parsed, Some(&file_display), &loader) {
+                Ok(resolved) => resolved,
+                Err(e) => {
+                    return FixtureResult {
+                        file: file_display,
+                        cases: vec![CaseResult {
+                            description: "(policy resolve)".into(),
+                            passed: false,
+                            message: Some(format!("embedded policy failed to resolve: {e}")),
+                        }],
+                    };
+                }
             }
         }
     };

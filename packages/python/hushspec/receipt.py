@@ -187,6 +187,25 @@ def receipt_to_dict(receipt: DecisionReceipt) -> dict:
 
 
 def compute_policy_hash(spec: HushSpec) -> str:
+    """Hash of the *resolved* policy -- the document evaluation runs against.
+
+    Hashing an unresolved leaf would make the receipt's ``content_hash``
+    identify a document that is not what was enforced (every block inherited
+    from the base is missing from it), so an ``extends`` still present here is
+    resolved against the embedded builtins first and, if that is impossible,
+    rejected rather than hashed. Guards resolve on load, so this is a backstop
+    for direct callers.
+    """
+    if spec.extends is not None:
+        from hushspec.resolve import create_builtin_loader, resolve
+
+        ok, resolved = resolve(spec, loader=create_builtin_loader())
+        if not ok:
+            raise ValueError(
+                f"cannot hash an unresolved policy (extends: {spec.extends}): {resolved}"
+            )
+        assert isinstance(resolved, HushSpec)
+        spec = resolved
     spec_dict = spec.to_dict()
     json_str = json.dumps(spec_dict, separators=(",", ":"), sort_keys=False)
     return hashlib.sha256(json_str.encode("utf-8")).hexdigest()

@@ -1,0 +1,76 @@
+# cargo-deny configuration for the HushSpec Rust workspace.
+#
+# Run locally with:
+#   cargo install cargo-deny
+#   cargo deny check
+#
+# CI runs the same command (see .github/workflows/ci.yml, job "Dependency Audit").
+
+[graph]
+# Check every target we ship a release binary for, so a platform-only
+# dependency cannot smuggle in a bad license or advisory.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[output]
+feature-depth = 1
+
+# ── Security advisories ─────────────────────────────────────────────
+[advisories]
+# Deny anything with a known advisory, and anything unmaintained or
+# yanked. `ignore` stays empty on purpose: an accepted risk should be a
+# reviewed, commented entry, never a silent default.
+ignore = []
+
+# ── Licenses ────────────────────────────────────────────────────────
+# HushSpec itself is Apache-2.0. Everything we link must be a permissive
+# licence compatible with that, or a weak-copyleft file-level licence
+# (MPL-2.0) that does not reach our own source.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    # colored 2.x is MPL-2.0. MPL is file-level copyleft: using it as an
+    # unmodified dependency imposes no obligation on our sources.
+    "MPL-2.0",
+    # webpki-roots ships Mozilla's CA root store as *data*, licensed under the
+    # Community Data License Agreement - Permissive 2.0. It carries no
+    # copyleft and covers certificate data, not code.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+# Keep an allowance listed even when no current dependency uses it -- the
+# graph shifts under us and an unused entry is not a problem worth failing on.
+unused-allowed-license = "allow"
+
+# ── Bans ────────────────────────────────────────────────────────────
+[bans]
+# Duplicate major versions are a size/audit-surface problem, not a
+# correctness one, and are usually outside our control (a transitive dep
+# lagging a bump). Surface them without failing the build.
+multiple-versions = "warn"
+# A wildcard version requirement means we have no idea what we ship.
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = []
+skip = []
+skip-tree = []
+
+# ── Sources ─────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

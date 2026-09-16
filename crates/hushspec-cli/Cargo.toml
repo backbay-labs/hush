@@ -2,8 +2,9 @@
 name = "hushspec-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description = "CLI tool for validating, testing, and scaffolding HushSpec policies"
+description = "Agentic compliance as code: CLI for validating, testing, and scaffolding HushSpec policies"
 repository = "https://github.com/backbay-labs/hush"
 readme = "README.md"
 keywords = ["ai", "security", "policy", "cli", "hushspec"]
@@ -25,6 +26,7 @@ regex = "1"
 thiserror = "2"
 anyhow = "1"
 similar = "2"
+clap_complete = "4"
 
 [dev-dependencies]
 assert_cmd = "2"

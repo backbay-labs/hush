@@ -1,0 +1,22 @@
+hushspec_test: "0.1.0"
+description: "D1 (core 5): unknown and custom action types deny with __unknown_action_type__ (staged: evaluator-test schema must add custom to the action enum)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+cases:
+  - description: "a custom action with no posture capability is denied"
+    action:
+      type: custom
+      target: "anything"
+    expect:
+      decision: deny
+      matched_rule: __unknown_action_type__
+  - description: "an action type unknown to the specification is denied"
+    action:
+      type: teleport
+      target: "anywhere"
+    expect:
+      decision: deny
+      matched_rule: __unknown_action_type__

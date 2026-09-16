@@ -32,30 +32,24 @@ pub enum ResolveError {
 }
 
 /// Embedded built-in ruleset YAML strings.
+///
+/// Accepts either the bare name (`"default"`) or the prefixed form
+/// (`"builtin:default"`). The prefix is stripped exactly once, so
+/// `"builtin:builtin:default"` is not a built-in.
+///
+/// The YAML itself lives in the generated `generated_builtins` module (see
+/// `scripts/generate_rust_builtins.py`) rather than behind `include_str!`,
+/// because `rulesets/` sits outside the crate directory and therefore is not
+/// part of the published crate.
 pub fn load_builtin(name: &str) -> Option<&'static str> {
-    match name {
-        "default" | "builtin:default" => Some(include_str!("../../../rulesets/default.yaml")),
-        "strict" | "builtin:strict" => Some(include_str!("../../../rulesets/strict.yaml")),
-        "permissive" | "builtin:permissive" => {
-            Some(include_str!("../../../rulesets/permissive.yaml"))
-        }
-        "ai-agent" | "builtin:ai-agent" => Some(include_str!("../../../rulesets/ai-agent.yaml")),
-        "cicd" | "builtin:cicd" => Some(include_str!("../../../rulesets/cicd.yaml")),
-        "remote-desktop" | "builtin:remote-desktop" => {
-            Some(include_str!("../../../rulesets/remote-desktop.yaml"))
-        }
-        _ => None,
-    }
+    let resolved = name.strip_prefix("builtin:").unwrap_or(name);
+    crate::generated_builtins::BUILTIN_RULESETS
+        .iter()
+        .find(|(builtin, _)| *builtin == resolved)
+        .map(|(_, yaml)| *yaml)
 }
 
-pub const BUILTIN_NAMES: &[&str] = &[
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-];
+pub const BUILTIN_NAMES: &[&str] = crate::generated_builtins::BUILTIN_NAMES;
 
 fn try_load_builtin(reference: &str) -> Option<Result<LoadedSpec, ResolveError>> {
     let yaml = load_builtin(reference)?;

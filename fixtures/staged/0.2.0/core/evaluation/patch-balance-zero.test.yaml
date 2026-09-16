@@ -1,0 +1,32 @@
+hushspec_test: "0.1.0"
+description: "D10 (core 3.5 item 4): with require_balance, a patch where exactly one count is zero is denied regardless of the ratio limit"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    patch_integrity:
+      require_balance: true
+      max_imbalance_ratio: 10.0
+cases:
+  - description: "deletions only is denied"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: "-a\n-b\n"
+    expect:
+      decision: deny
+      matched_rule: rules.patch_integrity.max_imbalance_ratio
+  - description: "additions only is denied"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: "+a\n"
+    expect:
+      decision: deny
+      matched_rule: rules.patch_integrity.max_imbalance_ratio
+  - description: "an empty patch is balanced"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: ""
+    expect:
+      decision: allow

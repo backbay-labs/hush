@@ -1,6 +1,6 @@
+use crate::regex_profile::compile_profile_regex;
 use crate::schema::HushSpec;
 use crate::version;
-use regex::Regex;
 use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
@@ -428,7 +428,7 @@ fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) 
     // behave differently across, the four SDK regex engines (possessive
     // quantifiers, `\Z`/`\z` end-anchors, empty character classes) so a pattern
     // validates identically everywhere, regardless of what any single engine
-    // does with them.
+    // does with them. The HushSpec regex profile check follows it.
     if let Some(message) = disallowed_regex_feature(pattern) {
         errors.push(ValidationError::InvalidRegex {
             field: path.to_string(),
@@ -438,13 +438,17 @@ fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) 
         return;
     }
 
-    // RE2-feature check second: the `regex` crate rejects non-RE2 features
-    // (backreferences, lookaround, ...) at compile time.
-    if let Err(error) = Regex::new(pattern) {
+    // Profile check second: `compile_profile_regex` applies the HushSpec regex
+    // profile (ASCII `\d`/`\w`/`\s`/`\b`, leading-only inline flags, portable
+    // escapes) and then compiles, so the `regex` crate's own rejection of
+    // non-RE2 features (backreferences, lookaround, ...) comes for free. This
+    // is the *same* call the evaluator makes, so a pattern that validates here
+    // can never fail to compile at evaluation time -- and vice versa.
+    if let Err(error) = compile_profile_regex(pattern) {
         errors.push(ValidationError::InvalidRegex {
             field: path.to_string(),
             pattern: pattern.to_string(),
-            message: error.to_string(),
+            message: error.message().to_string(),
         });
         return;
     }
@@ -456,9 +460,7 @@ fn validate_regex(pattern: &str, path: &str, errors: &mut Vec<ValidationError>) 
         errors.push(ValidationError::InvalidRegex {
             field: path.to_string(),
             pattern: pattern.to_string(),
-            message: "pattern contains a nested unbounded quantifier (e.g. (a+)+) \
-                      that can cause catastrophic backtracking (ReDoS)"
-                .to_string(),
+            message: crate::regex_profile::NESTED_QUANTIFIER_MESSAGE.to_string(),
         });
     }
 }
@@ -481,7 +483,7 @@ const POSSESSIVE_MESSAGE: &str = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}
 ///     others reject them).
 ///
 /// Must stay byte-identical to the TypeScript, Python, and Go implementations.
-fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
+pub(crate) fn disallowed_regex_feature(pattern: &str) -> Option<&'static str> {
     let chars: Vec<char> = pattern.chars().collect();
     let n = chars.len();
     let mut in_class = false;
@@ -571,7 +573,7 @@ enum QuantKind {
 /// itself immediately followed by an unbounded quantifier. Bounded quantifiers
 /// (`(a{1,3}){1,3}`, `(abc)+`) are accepted. Must stay identical to the
 /// TypeScript, Python, and Go implementations.
-fn has_nested_quantifier(pattern: &str) -> bool {
+pub(crate) fn has_nested_quantifier(pattern: &str) -> bool {
     let chars: Vec<char> = pattern.chars().collect();
     let n = chars.len();
     // Per open group: whether its body has seen an unbounded quantifier.

@@ -494,9 +494,17 @@ func evaluateSecretPatterns(
 	}
 
 	for _, pattern := range rule.Patterns {
-		re, err := regexp.Compile(pattern.Pattern)
+		// Fail closed: a pattern that will not compile under the HushSpec regex
+		// profile denies the action rather than being skipped, and the deny
+		// carries the offending rule path. Validation uses the same compile, so
+		// this is unreachable for a document that passed Validate.
+		re, err := CompileProfileRegex(pattern.Pattern)
 		if err != nil {
-			continue
+			return denyResult(
+				fmt.Sprintf("rules.secret_patterns.patterns.%s.pattern", pattern.Name),
+				fmt.Sprintf("secret pattern '%s' is invalid: %v", pattern.Name, err),
+				originProfileID, posture,
+			)
 		}
 		if re.MatchString(content) {
 			return denyResult(
@@ -521,9 +529,14 @@ func evaluatePatchIntegrity(
 	}
 
 	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := regexp.Compile(pattern)
+		// Fail closed on an uncompilable pattern (see evaluateSecretPatterns).
+		re, err := CompileProfileRegex(pattern)
 		if err != nil {
-			continue
+			return denyResult(
+				fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index),
+				fmt.Sprintf("patch forbidden pattern is invalid: %v", err),
+				originProfileID, posture,
+			)
 		}
 		if re.MatchString(content) {
 			return denyResult(
@@ -574,9 +587,14 @@ func evaluateShellRule(
 	}
 
 	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := regexp.Compile(pattern)
+		// Fail closed on an uncompilable pattern (see evaluateSecretPatterns).
+		re, err := CompileProfileRegex(pattern)
 		if err != nil {
-			continue
+			return denyResult(
+				fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index),
+				fmt.Sprintf("shell forbidden pattern is invalid: %v", err),
+				originProfileID, posture,
+			)
 		}
 		if re.MatchString(target) {
 			return denyResult(

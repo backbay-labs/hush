@@ -31,8 +31,6 @@
  *   not)
  */
 const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g</;
-const LEADING_INLINE_FLAGS = /^\(\?([ims]+)\)/;
-const PYTHON_NAMED_GROUP = /\(\?P<([A-Za-z_][A-Za-z0-9_]*)>/g;
 
 export interface CompiledPolicyRegex {
   source: string;
@@ -377,40 +375,391 @@ function hasEmptyCharacterClass(pattern: string): boolean {
   return false;
 }
 
-export function compilePolicyRegex(pattern: string): CompiledPolicyRegex {
-  const normalized = normalizePolicyRegex(pattern);
-  return {
-    ...normalized,
-    regex: new RegExp(normalized.source, normalized.flags),
-  };
+/* ---------------------------------------------------------------------------
+ * The HushSpec regex profile
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The HushSpec regex profile: the one regex dialect every HushSpec engine must
+ * implement, so a user-authored pattern in `secret_patterns`,
+ * `patch_integrity.forbidden_patterns`, or `shell_commands.forbidden_patterns`
+ * produces the *same* decision in Rust, TypeScript, Python, and Go.
+ *
+ * The four SDK engines agree on syntax but disagree on semantics, so the
+ * profile is reached by *translating* the author's pattern into an equivalent
+ * pattern in each host dialect before compiling it. The same translation runs
+ * in `validate` and in `evaluate`, so the two can never disagree.
+ *
+ * Profile (normative summary; keep in sync with
+ * `crates/hushspec/src/regex_profile.rs`,
+ * `packages/python/hushspec/regex_profile.py`, and
+ * `packages/go/hushspec/regex_profile.go`):
+ *
+ * 1. Syntax is RE2-class -- lookaround, backreferences, possessive
+ *    quantifiers, atomic/conditional/recursive groups and nested unbounded
+ *    quantifiers are rejected (`isSafeRegex`).
+ * 2. Inline flags only as a leading group: `(?i)`, `(?s)`, `(?m)`, `(?is)` at
+ *    the very start (one or more consecutive groups). A flag group anywhere
+ *    else -- including the scoped form `(?i:...)` and negations like `(?-i)` --
+ *    is an error.
+ * 3. `\d \w \s \b` and their negations are ASCII-only: `\d` = `[0-9]`,
+ *    `\w` = `[0-9A-Za-z_]`, `\s` = `[\t\n\v\f\r ]` (includes the vertical tab,
+ *    excludes NBSP and the Unicode space separators -- JavaScript's own `\s`
+ *    includes both), and `\b`/`\B` are boundaries under that ASCII `\w`
+ *    (JavaScript's already are). They are translated, not rejected, including
+ *    inside character classes (`[\d_]` -> `[0-9_]`). The negated shorthands
+ *    `\D \W \S` and the boundaries `\b \B` are rejected *inside* a class,
+ *    where they cannot be expressed as members.
+ * 4. `.` matches any character except `\n` -- one *code point*, and with a
+ *    leading `(?s)` any code point at all. JavaScript's `.` also excludes `\r`,
+ *    U+2028 and U+2029, and consumes a single UTF-16 code unit, so it is
+ *    rewritten to an explicit alternation that takes a surrogate pair as one
+ *    character (see `DOT_SOURCE`/`DOT_ALL_SOURCE`). The `u` flag would give the
+ *    same code-point semantics but would also reject patterns the other three
+ *    engines accept (identity escapes like `\-`, a literal `{`), so it is not
+ *    used.
+ * 5. `$` matches only at end of text, and `^` only at start, unless a leading
+ *    `(?m)` makes them line anchors around `\n`. JavaScript's `m` flag also
+ *    treats `\r`, U+2028 and U+2029 as line terminators, so `(?m)` is compiled
+ *    by rewriting `^`/`$` to `\n`-only lookarounds rather than by setting `m`.
+ *    (The Python SDK rewrites `$` to `\Z` for the non-`(?m)` case.)
+ * 6. Unanchored search semantics.
+ * 7. Compile failure at evaluation time denies, carrying the offending rule
+ *    path (see `evaluate.ts`).
+ *
+ * Escapes are restricted to the intersection the four engines agree on:
+ * `\n \r \t \f \v`, `\xHH`, `\d \D \w \W \s \S \b \B`, and any escaped ASCII
+ * punctuation. `\A`, `\Z`, `\z`, `\Q`, `\E`, `\p{...}`, `\P{...}`, `\uXXXX`,
+ * `\0`, `\a`, `\cX` and every other alphanumeric escape are rejected: each is
+ * unsupported by at least one engine, or -- worse -- silently reinterpreted by
+ * JavaScript as the bare letter.
+ *
+ * Known residual divergence: under a leading `(?i)`, Rust and Go case-fold with
+ * the full Unicode simple case-folding table while JavaScript (no `u` flag) and
+ * Python (`re.ASCII`) fold only ASCII, so U+017F (long s) and U+212A (Kelvin
+ * sign) match `(?i)s` / `(?i)k` in Rust and Go but not here.
+ */
+
+/** Character-class body for ASCII `\d`. */
+const DIGIT_BODY = '0-9';
+/** Character-class body for ASCII `\w`. */
+const WORD_BODY = '0-9A-Za-z_';
+/** Character-class body for ASCII `\s` -- includes `\v`, excludes NBSP. */
+const SPACE_BODY = '\\t\\n\\v\\f\\r ';
+
+/**
+ * One code point that is not `\n` -- the profile's `.`.
+ *
+ * The surrogate-pair alternation comes first so an astral code point is
+ * consumed whole, the way Rust/Python/Go `.` consumes one code point; a bare
+ * `[^\n]` would consume half of it. `[^\n]` (unlike JavaScript's own `.`)
+ * deliberately keeps `\r`, U+2028 and U+2029 as ordinary characters.
+ */
+const DOT_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\n])';
+
+/** One code point, `\n` included -- the profile's `.` under a leading `(?s)`. */
+const DOT_ALL_SOURCE = '(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[\\s\\S])';
+
+/**
+ * `^` and `$` under a leading `(?m)`. JavaScript's `m` flag would also break
+ * lines at `\r`, U+2028 and U+2029; Rust, Python and Go break only at `\n`, so
+ * the anchors are spelled out with `\n`-only lookarounds instead.
+ */
+const MULTILINE_START_SOURCE = '(?:^|(?<=\\n))';
+const MULTILINE_END_SOURCE = '(?:$|(?=\\n))';
+
+/** Shared rejection message for nested unbounded quantifiers. */
+const NESTED_QUANTIFIER_MESSAGE =
+  'pattern contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)';
+
+interface ProfileFlags {
+  caseInsensitive: boolean;
+  dotAll: boolean;
+  multiLine: boolean;
 }
 
-export function compileSafePolicyRegex(pattern: string): CompiledPolicyRegex {
-  if (!isSafeRegex(pattern)) {
-    throw new Error('pattern uses features not in the RE2 subset');
-  }
-  return compilePolicyRegex(pattern);
+/** Characters that may appear in an inline flag group; used only to detect one. */
+function isInlineFlagChar(c: string): boolean {
+  return (
+    c === 'i' ||
+    c === 'm' ||
+    c === 's' ||
+    c === 'x' ||
+    c === 'u' ||
+    c === 'U' ||
+    c === 'a' ||
+    c === 'L' ||
+    c === 'n' ||
+    c === '-'
+  );
 }
 
-function normalizePolicyRegex(pattern: string): { source: string; flags: string } {
-  let source = pattern;
-  let flags = '';
-
-  while (true) {
-    const match = source.match(LEADING_INLINE_FLAGS);
-    if (match == null) {
+/**
+ * Consume the leading run of `(?flags)` groups, returning the accumulated flags
+ * and the index at which the pattern body starts. Only `i`, `s` and `m` are
+ * recognized; anything else leaves the group in place, where the body walk
+ * rejects it as a non-leading inline flag group.
+ */
+function splitLeadingFlags(chars: string[]): [ProfileFlags, number] {
+  const flags: ProfileFlags = { caseInsensitive: false, dotAll: false, multiLine: false };
+  let index = 0;
+  while (index + 2 < chars.length && chars[index] === '(' && chars[index + 1] === '?') {
+    let cursor = index + 2;
+    const start = cursor;
+    while (
+      cursor < chars.length &&
+      (chars[cursor] === 'i' || chars[cursor] === 's' || chars[cursor] === 'm')
+    ) {
+      cursor += 1;
+    }
+    if (cursor === start || cursor >= chars.length || chars[cursor] !== ')') {
       break;
     }
+    for (let k = start; k < cursor; k++) {
+      if (chars[k] === 'i') flags.caseInsensitive = true;
+      if (chars[k] === 's') flags.dotAll = true;
+      if (chars[k] === 'm') flags.multiLine = true;
+    }
+    index = cursor + 1;
+  }
+  return [flags, index];
+}
 
-    for (const flag of match[1]) {
-      if (!flags.includes(flag)) {
-        flags += flag;
+/** Reject `(?flags)` / `(?flags:...)` groups outside the leading position. */
+function inlineFlagGroupError(chars: string[], index: number): string | undefined {
+  if (chars[index + 1] !== '?') {
+    return undefined;
+  }
+  let cursor = index + 2;
+  const start = cursor;
+  while (cursor < chars.length && isInlineFlagChar(chars[cursor])) {
+    cursor += 1;
+  }
+  if (cursor === start) {
+    return undefined;
+  }
+  if (chars[cursor] === ')' || chars[cursor] === ':') {
+    return (
+      'inline flags are only allowed as a leading group such as (?i), (?s), (?m) or (?is); ' +
+      'a flag group elsewhere in the pattern is not portable across the HushSpec SDK regex engines'
+    );
+  }
+  return undefined;
+}
+
+/** Number of chars consumed by the escape sequence starting at `index`. */
+function escapeLength(chars: string[], index: number): number {
+  return chars[index + 1] === 'x' ? 4 : 2;
+}
+
+function isAsciiHexDigit(c: string | undefined): boolean {
+  return c != null && /^[0-9A-Fa-f]$/.test(c);
+}
+
+function isAsciiAlphanumeric(c: string): boolean {
+  return /^[0-9A-Za-z]$/.test(c);
+}
+
+/** Translate one escape sequence into JavaScript `RegExp` source. */
+function translateEscape(
+  escaped: string,
+  inClass: boolean,
+  chars: string[],
+  index: number,
+): string {
+  if (escaped === 'd' || escaped === 'w' || escaped === 's') {
+    const body = escaped === 'd' ? DIGIT_BODY : escaped === 'w' ? WORD_BODY : SPACE_BODY;
+    return inClass ? body : `[${body}]`;
+  }
+  if (escaped === 'D' || escaped === 'W' || escaped === 'S') {
+    if (inClass) {
+      throw new Error(
+        `\\${escaped} is not portable inside a character class; a negated shorthand cannot be expressed as a class member`,
+      );
+    }
+    const body = escaped === 'D' ? DIGIT_BODY : escaped === 'W' ? WORD_BODY : SPACE_BODY;
+    return `[^${body}]`;
+  }
+  if (escaped === 'b' || escaped === 'B') {
+    if (inClass) {
+      throw new Error(
+        `\\${escaped} is not portable inside a character class (JavaScript and Python read it as a backspace; Rust and Go reject it)`,
+      );
+    }
+    // JavaScript word boundaries are ASCII without the `u` flag, which is
+    // exactly the profile definition; Rust needs `(?-u:\b)` to get here.
+    return `\\${escaped}`;
+  }
+  if (escaped === 'A' || escaped === 'Z' || escaped === 'z') {
+    throw new Error(
+      `\\${escaped} is not portable across the HushSpec SDK regex engines (JavaScript reads it as a literal letter); anchor with ^ and $`,
+    );
+  }
+  if (escaped === 'Q' || escaped === 'E') {
+    throw new Error(
+      '\\Q ... \\E literal spans are not portable across the HushSpec SDK regex engines; escape the literal characters individually',
+    );
+  }
+  if (escaped === 'p' || escaped === 'P') {
+    throw new Error(
+      `Unicode property escapes (\\${escaped}) are not portable across the HushSpec SDK regex engines; spell the character class out`,
+    );
+  }
+  if (escaped === 'x') {
+    const hi = chars[index + 2];
+    const lo = chars[index + 3];
+    if (!isAsciiHexDigit(hi) || !isAsciiHexDigit(lo)) {
+      throw new Error(
+        '\\x must be followed by exactly two hex digits (\\x41); the braced form \\x{...} is not portable across the HushSpec SDK regex engines',
+      );
+    }
+    return `\\x${hi}${lo}`;
+  }
+  if (
+    escaped === 'n' ||
+    escaped === 'r' ||
+    escaped === 't' ||
+    escaped === 'f' ||
+    escaped === 'v'
+  ) {
+    return `\\${escaped}`;
+  }
+  if (isAsciiAlphanumeric(escaped) || escaped === '_') {
+    throw new Error(`\\${escaped} is not a HushSpec regex profile escape`);
+  }
+  if ((escaped.codePointAt(0) ?? 0) <= 0x7f) {
+    return `\\${escaped}`;
+  }
+  throw new Error(
+    `escaping the non-ASCII character '${escaped}' is not portable across the HushSpec SDK regex engines`,
+  );
+}
+
+/**
+ * Walk the pattern body, translating profile constructs into JavaScript
+ * `RegExp` source and rejecting anything that is not portable across the four
+ * SDKs. `dotAll` and `multiLine` carry a leading `(?s)` / `(?m)`: both are
+ * compiled by rewriting the affected constructs rather than by setting the `s`
+ * and `m` flags, whose JavaScript definitions of "any character" and "line
+ * terminator" both differ from the profile's.
+ */
+function translateProfileBody(chars: string[], dotAll: boolean, multiLine: boolean): string {
+  const n = chars.length;
+  let out = '';
+  let inClass = false;
+  let index = 0;
+
+  while (index < n) {
+    const c = chars[index];
+
+    if (c === '\\') {
+      if (index + 1 >= n) {
+        throw new Error('pattern ends with a trailing backslash');
       }
+      out += translateEscape(chars[index + 1], inClass, chars, index);
+      index += escapeLength(chars, index);
+      continue;
     }
 
-    source = source.slice(match[0].length);
+    if (inClass) {
+      if (c === ']') {
+        inClass = false;
+      }
+      out += c;
+      index += 1;
+      continue;
+    }
+
+    if (c === '[') {
+      // `[]` / `[^]` read as an empty class (a compile error) in Rust, Python
+      // and Go but as "match nothing"/"match anything" in JavaScript.
+      let cursor = index + 1;
+      if (chars[cursor] === '^') {
+        cursor += 1;
+      }
+      if (cursor >= n || chars[cursor] === ']') {
+        throw new Error(
+          'empty character classes [] and [^] are not portable across the HushSpec SDK regex engines',
+        );
+      }
+      inClass = true;
+      out += '[';
+      index += 1;
+      continue;
+    }
+
+    if (c === '(') {
+      const error = inlineFlagGroupError(chars, index);
+      if (error != null) {
+        throw new Error(error);
+      }
+      // Python's named-group spelling `(?P<name>...)` is accepted by Rust, Go
+      // and Python but is a syntax error in JavaScript; `(?<name>...)` is
+      // accepted by every engine the profile targets.
+      if (chars[index + 1] === '?' && chars[index + 2] === 'P' && chars[index + 3] === '<') {
+        out += '(?<';
+        index += 4;
+        continue;
+      }
+      out += '(';
+      index += 1;
+      continue;
+    }
+
+    if (c === '.') {
+      out += dotAll ? DOT_ALL_SOURCE : DOT_SOURCE;
+      index += 1;
+      continue;
+    }
+
+    if (multiLine && (c === '^' || c === '$')) {
+      out += c === '^' ? MULTILINE_START_SOURCE : MULTILINE_END_SOURCE;
+      index += 1;
+      continue;
+    }
+
+    out += c;
+    index += 1;
   }
 
-  source = source.replace(PYTHON_NAMED_GROUP, '(?<$1>');
-  return { source, flags };
+  return out;
+}
+
+/**
+ * Compile a policy-authored pattern under the HushSpec regex profile.
+ *
+ * This is the only way policy regexes are compiled in this SDK: both
+ * `validate` and `evaluate` route through it, so validation and evaluation can
+ * never disagree about what a pattern means. Throws on any pattern outside the
+ * profile -- the evaluator turns that throw into a deny.
+ */
+export function compileProfileRegex(pattern: string): CompiledPolicyRegex {
+  // Portability pre-check and the ReDoS heuristic run here, not only in
+  // `validate`, so the evaluator denies on exactly the patterns the validator
+  // rejects even for a hand-built, never-validated policy object.
+  if (
+    RE2_DISALLOWED.test(pattern) ||
+    hasPossessiveQuantifier(pattern) ||
+    hasEndAnchorEscape(pattern) ||
+    hasEmptyCharacterClass(pattern)
+  ) {
+    throw new Error('pattern uses features not in the RE2 subset');
+  }
+  if (hasNestedQuantifier(pattern)) {
+    throw new Error(NESTED_QUANTIFIER_MESSAGE);
+  }
+
+  const chars = Array.from(pattern);
+  const [profileFlags, bodyStart] = splitLeadingFlags(chars);
+  const source = translateProfileBody(
+    chars.slice(bodyStart),
+    profileFlags.dotAll,
+    profileFlags.multiLine,
+  );
+  // Only `i` reaches the RegExp: `(?s)` and `(?m)` are compiled into the source
+  // above, because JavaScript's `s` and `m` flags do not mean what the profile
+  // means (see DOT_ALL_SOURCE / MULTILINE_END_SOURCE).
+  const flags = profileFlags.caseInsensitive ? 'i' : '';
+
+  return { source, flags, regex: new RegExp(source, flags) };
 }

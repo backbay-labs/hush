@@ -43,6 +43,10 @@ jobs:
 
       - name: Check generated Go builtins
         run: python3 scripts/generate_go_builtins.py --check
+      - name: Check generated Rust builtins
+        run: python3 scripts/generate_rust_builtins.py --check
+      - name: Check generated CLI schemas
+        run: python3 scripts/generate_cli_schemas.py --check
 
   rust:
     name: Rust
@@ -317,3 +321,243 @@ jobs:
         run: |
           mkdir -p docs/book/schemas
           cp schemas/*.json docs/book/schemas/
+
+  # ── Shipped policies must lint clean ───────────────────────────────
+  policy-lint:
+    name: Policy Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build h2h
+        run: cargo build -p hushspec-cli
+
+      - name: Validate every shipped policy
+        run: |
+          mapfile -t all < <(
+            ls rulesets/*.yaml
+            find library -type f \( -name '*.yaml' -o -name '*.yml' \) | sort
+          )
+          ./target/debug/h2h validate "${all[@]}"
+
+      - name: Lint (warnings are failures)
+        run: |
+          # rulesets/permissive.yaml is handled in the next step; see there.
+          mapfile -t strict < <(
+            for f in rulesets/*.yaml; do
+              [ "$f" = 'rulesets/permissive.yaml' ] || printf '%s\n' "$f"
+            done
+            find library -type f \( -name '*.yaml' -o -name '*.yml' \) | sort
+          )
+          ./target/debug/h2h lint --fail-on-warnings "${strict[@]}"
+
+      - name: Lint rulesets/permissive.yaml (errors only)
+        run: |
+          # The permissive preset exists to allow everything during local
+          # development, so L004 ("allow: [\"*\"] makes the rule ineffective")
+          # and L005 ("default: allow with an empty block list") restate its
+          # purpose rather than reporting a defect. It is still gated on lint
+          # *errors*; only those two by-design warnings are tolerated, and no
+          # warning is suppressed -- both still print in the job log.
+          ./target/debug/h2h lint rulesets/permissive.yaml
+
+  # ── Dependency audits ──────────────────────────────────────────────
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Check licenses, advisories, bans and sources
+        run: cargo deny check
+
+  cargo-audit:
+    name: cargo-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit Cargo.lock against the RustSec database
+        run: cargo audit --deny warnings
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit the npm dependency tree
+        run: npm audit --audit-level=high
+
+  pip-audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pip-audit
+        # pipx keeps pip-audit's own dependencies out of the environment it
+        # audits, so its transitive tree cannot produce a false positive.
+        run: pipx install pip-audit
+
+      - name: Audit Python package dependencies
+        run: pip-audit --progress-spinner=off ./packages/python
+
+  # ── Minimum supported Rust version ─────────────────────────────────
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    env:
+      # Keep in lockstep with `rust-version` in the root Cargo.toml; the
+      # last step fails the job if the two ever drift.
+      MSRV: '1.88'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1.88 is the floor both for the sources (let-chains) and for the
+      # versions pinned in Cargo.lock (`time` 0.3.53). Edition 2024 alone
+      # would only require 1.85.
+      - uses: dtolnay/rust-toolchain@1.88
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the declared rust-version matches this job's toolchain
+        run: |
+          declared=$(sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' Cargo.toml | head -1)
+          if [ "$declared" != "$MSRV" ]; then
+            echo "::error file=Cargo.toml::rust-version is \"$declared\" but the MSRV job pins $MSRV"
+            exit 1
+          fi
+          rustc --version
+
+      - name: Build the workspace on the MSRV toolchain
+        run: cargo build --workspace --locked
+
+  # ── Coverage ───────────────────────────────────────────────────────
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python package
+        run: pip install -e "packages/python[dev]"
+
+      - name: Rust coverage
+        run: |
+          mkdir -p coverage-out
+          cargo llvm-cov --workspace --lcov --output-path coverage-out/rust-lcov.info
+          cargo llvm-cov report --json --summary-only --output-path rust-summary.json
+          {
+            echo '## Coverage'
+            echo
+            echo '| SDK | Line coverage |'
+            echo '| --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          totals = json.loads(pathlib.Path('rust-summary.json').read_text())['data'][0]['totals']
+          print(f"| Rust | {totals['lines']['percent']:.2f}% |")
+          PY
+
+      - name: TypeScript coverage
+        working-directory: packages/hushspec
+        run: |
+          npx vitest run --coverage \
+            --coverage.reporter=lcov \
+            --coverage.reporter=json-summary \
+            --coverage.reportsDirectory=coverage
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          total = json.loads(pathlib.Path('coverage/coverage-summary.json').read_text())['total']
+          print(f"| TypeScript | {total['lines']['pct']:.2f}% |")
+          PY
+
+      - name: Collect TypeScript coverage
+        run: cp packages/hushspec/coverage/lcov.info coverage-out/typescript-lcov.info
+
+      - name: Python coverage
+        working-directory: packages/python
+        run: |
+          pytest tests --cov=hushspec --cov-report=xml:coverage.xml --cov-report=term
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          rate = float(ET.parse('coverage.xml').getroot().get('line-rate'))
+          print(f"| Python | {rate * 100:.2f}% |")
+          PY
+
+      - name: Collect Python coverage
+        run: cp packages/python/coverage.xml coverage-out/python-coverage.xml
+
+      - name: Go coverage
+        working-directory: packages/go
+        run: |
+          go test ./... -covermode=atomic -coverprofile=coverage.out
+          total=$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}')
+          printf '| Go | %s |\n' "$total" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect Go coverage
+        run: cp packages/go/coverage.out coverage-out/go-coverage.out
+
+      # No Codecov token is assumed. The reports are kept as build artifacts
+      # so a reviewer (or a later job) can download them from the run.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage-out/
+          if-no-files-found: error
+          retention-days: 14
