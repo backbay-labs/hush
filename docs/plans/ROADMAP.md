@@ -11,6 +11,8 @@
 
 ## 0. Status after RFC 09 Waves 0-5 (2026-09-15)
 
+**Wave 6 (2026-09-15) declared HushSpec 1.0.0.** Every specification document is Stable at 1.0.0 with the stability guarantee in `spec/versioning.md`; the `.v1.` schema lineage is canonical and the `.v0.` files are frozen; engines accept minors 0.1, 0.2, and 1.0; nine registries with drift tests, formal grammars, and a security-considerations document accompany the specs. The git tag and registry publishing remain release actions.
+
 Waves 0 through 5 of [RFC 09](./09-compliance-as-code-plan.md) have landed. That
 plan, not this document, is the source of truth for what remains; this section
 records where the code stands so the phases below can be read against it.
