@@ -143,6 +143,32 @@ fn every_registry_validates_against_its_schema() {
     }
 }
 
+/// A registry schema published without an entry in the table above would be
+/// served to consumers with nothing ever validating a document against it,
+/// and the omission would look exactly like a passing suite.
+#[test]
+fn every_published_registry_schema_is_in_the_table() {
+    const PREFIX: &str = "hushspec-registry-";
+
+    let published: BTreeSet<String> = fs::read_dir(root().join("schemas"))
+        .expect("schemas/ is readable")
+        .filter_map(|entry| {
+            let name = entry.ok()?.file_name().to_string_lossy().into_owned();
+            name.starts_with(PREFIX).then_some(name)
+        })
+        .collect();
+    let tabled: BTreeSet<String> = REGISTRIES
+        .iter()
+        .map(|(_, schema_file)| (*schema_file).to_string())
+        .filter(|schema_file| schema_file.starts_with(PREFIX))
+        .collect();
+    assert_eq!(
+        published, tabled,
+        "schemas/ publishes registry schemas the REGISTRIES table does not name; \
+         add the registry so its document is validated too"
+    );
+}
+
 /// A new registry file is only normative once something checks it, so the
 /// table above must list every registry the directory holds.
 #[test]
@@ -444,35 +470,51 @@ fn action_types_match_the_evaluator() {
 /// Each action type's `rule_blocks` list is the dispatch table (core spec 5),
 /// order included: the evaluator records one trace entry per applicable block
 /// in evaluation order whether or not the document declares the block
-/// (receipt spec 4.3 items 1-2), so the trace of a document that declares
-/// nothing is the dispatch table for that action type.
+/// (receipt spec 4.3 items 1-2), so the trace is the dispatch table for that
+/// action type.
+///
+/// Both a document that declares nothing and one that declares every block
+/// are checked, and the action carries content, because the registry's note
+/// on `egress` and `tool_call` is that `secret_patterns` applies only to an
+/// action that carries some -- a block that ran and a block that was skipped
+/// as absent must both leave their entry.
 #[test]
 fn action_types_dispatch_to_the_rule_blocks_they_register() {
-    let spec = HushSpec::parse("hushspec: \"0.2.0\"\n").expect("minimal document");
     let blocks = ids(&registry("rule-blocks"), "entries");
 
-    for entry in registry("action-types")["entries"].as_array().unwrap() {
-        let action_type = entry["id"].as_str().unwrap();
-        let registered: Vec<&str> = entry["rule_blocks"]
-            .as_array()
-            .unwrap_or_else(|| panic!("{action_type} registers no rule_blocks list"))
-            .iter()
-            .map(|value| value.as_str().expect("a rule block name"))
-            .collect();
+    for (shape, policy) in [
+        ("a document declaring nothing", "hushspec: \"0.2.0\"\n"),
+        ("a document declaring every block", ALL_BLOCKS_POLICY),
+    ] {
+        let spec = HushSpec::parse(policy).expect("the policy parses");
+        for entry in registry("action-types")["entries"].as_array().unwrap() {
+            let action_type = entry["id"].as_str().unwrap();
+            let registered: Vec<&str> = entry["rule_blocks"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{action_type} registers no rule_blocks list"))
+                .iter()
+                .map(|value| value.as_str().expect("a rule block name"))
+                .collect();
 
-        let traced = evaluate_traced(&spec, &action_of(action_type), None, &HashMap::new());
-        let dispatched: Vec<&str> = traced
-            .trace
-            .iter()
-            .map(|entry| entry.rule_block.as_str())
-            .filter(|block| blocks.contains(*block))
-            .collect();
+            let action = EvaluationAction {
+                content: Some("hello".to_string()),
+                ..action_of(action_type)
+            };
+            let traced = evaluate_traced(&spec, &action, None, &HashMap::new());
+            let dispatched: Vec<&str> = traced
+                .trace
+                .iter()
+                .map(|entry| entry.rule_block.as_str())
+                .filter(|block| blocks.contains(*block))
+                .collect();
 
-        assert_eq!(
-            registered, dispatched,
-            "{action_type}: spec/registries/action-types.yaml lists {registered:?}, \
-             the evaluator consults {dispatched:?}"
-        );
+            assert_eq!(
+                registered, dispatched,
+                "{action_type} against {shape}: \
+                 spec/registries/action-types.yaml lists {registered:?}, \
+                 the evaluator consults {dispatched:?}"
+            );
+        }
     }
 }
 
