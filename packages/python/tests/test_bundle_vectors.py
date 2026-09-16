@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VECTOR_DIR = REPO_ROOT / "fixtures" / "bundle"
 VECTOR_FILE = VECTOR_DIR / "vectors.yaml"
 VECTOR_VERSION = "0.1.0"
-BUNDLE_SCHEMA = REPO_ROOT / "schemas" / "hushspec-bundle.v0.schema.json"
+BUNDLE_SCHEMA = REPO_ROOT / "schemas" / "hushspec-bundle.v1.schema.json"
 
 pytest.importorskip(
     "cryptography",

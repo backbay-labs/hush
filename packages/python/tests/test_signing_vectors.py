@@ -8,7 +8,7 @@ failure, not a test-fixture problem.
 
 Beyond the vectors this file covers the signer half -- sign, verify, round
 trip, determinism -- and checks that produced envelopes validate against
-``schemas/hushspec-signature.v0.schema.json``.
+``schemas/hushspec-signature.v1.schema.json``.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ def _signature_schema() -> dict[str, Any]:
     failure, not a skip: keeping the envelopes this SDK writes in step with
     the published schema is what these tests are for.
     """
-    path = REPO_ROOT / "schemas" / "hushspec-signature.v0.schema.json"
+    path = REPO_ROOT / "schemas" / "hushspec-signature.v1.schema.json"
     assert path.is_file(), f"{path} is missing"
     schema = json.loads(path.read_text(encoding="utf-8"))
     declared = schema.get("properties", {}).get("format_version", {}).get("const")

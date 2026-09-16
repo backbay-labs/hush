@@ -27,9 +27,9 @@ FAMILIES = ("core", "posture", "origins", "detection")
 
 #: (extensions key, embedded ``$defs`` name, published file name).
 EMBEDDED_EXTENSIONS = (
-    ("posture", "PostureExtension", "hushspec-posture.v0.schema.json"),
-    ("origins", "OriginsExtension", "hushspec-origins.v0.schema.json"),
-    ("detection", "DetectionExtension", "hushspec-detection.v0.schema.json"),
+    ("posture", "PostureExtension", "hushspec-posture.v1.schema.json"),
+    ("origins", "OriginsExtension", "hushspec-origins.v1.schema.json"),
+    ("detection", "DetectionExtension", "hushspec-detection.v1.schema.json"),
 )
 
 #: Vectors the YAML profile refuses before there is a document to validate.
@@ -47,16 +47,20 @@ PROFILE_ONLY_VECTORS = frozenset(
 
 #: Vectors whose refusal no JSON Schema can express: referential integrity
 #: between two members of a document, uniqueness by a field of a list entry, a
-#: lookup in the IANA time zone database, the HushSpec regex profile, and a
-#: recursion depth bound. The SDKs check them after parsing. They are asserted
-#: to *pass* below, so a schema change that does become able to express one
-#: fails this module until the name is removed.
+#: lookup in the IANA time zone database, the HushSpec regex profile, a
+#: recursion depth bound, and which minor versions *this* engine implements --
+#: the schema states the shape of a version (core spec 2.2, appendix A), while
+#: acceptance is a property of the engine reading it (core spec 10.3). The
+#: SDKs check them after parsing. They are asserted to *pass* below, so a
+#: schema change that does become able to express one fails this module until
+#: the name is removed.
 BEYOND_SCHEMA_VECTORS = frozenset(
     {
         "bad-initial.yaml",
         "duplicate-ids.yaml",
         "duplicate-pattern-names.yaml",
         "regex-mid-pattern-flag.yaml",
+        "version-unsupported-minor.yaml",
         "when-bad-timezone.yaml",
         "when-too-deep.yaml",
     }
@@ -68,7 +72,7 @@ def load_schema(file_name: str) -> dict:
 
 
 def core_validator() -> jsonschema.protocols.Validator:
-    schema = load_schema("hushspec-core.v0.schema.json")
+    schema = load_schema("hushspec-core.v1.schema.json")
     cls = jsonschema.validators.validator_for(schema)
     cls.check_schema(schema)
     return cls(schema, format_checker=cls.FORMAT_CHECKER)
@@ -100,7 +104,7 @@ def test_core_schema_embeds_the_companion_schemas_verbatim():
     companion documents are carried verbatim in ``$defs`` so the references
     resolve with no network access.
     """
-    core = load_schema("hushspec-core.v0.schema.json")
+    core = load_schema("hushspec-core.v1.schema.json")
     extensions = core["$defs"]["Extensions"]
 
     for key, def_name, file_name in EMBEDDED_EXTENSIONS:

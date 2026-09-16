@@ -30,6 +30,7 @@ from functools import lru_cache
 from enum import Enum
 from typing import Optional
 
+from hushspec.canonical import CanonicalError, canonical_json_value
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import (
     OriginMatch,
@@ -122,6 +123,27 @@ class OriginContext:
 class PostureContext:
     current: Optional[str] = None
     signal: Optional[str] = None
+
+
+def args_size_of(arguments: object) -> Optional[int]:
+    """``args_size`` for a tool call whose arguments are a JSON value.
+
+    Core spec 3.7 fixes the unit: the length in bytes of the UTF-8 encoding of
+    the arguments serialized as JSON in the canonical form of the Canonical
+    Form specification, section 4 (RFC 8785). Neither a character count nor a
+    count of escaped characters is that number: a one-key object holding one
+    two-byte character is 9 characters, 10 bytes, and 15 bytes once
+    ``json.dumps`` has escaped that character. So the measurement runs through
+    the canonicalizer rather than through ``len(json.dumps(...))``.
+
+    ``None`` when the arguments have no canonical JSON form. A size that
+    cannot be measured is left unreported rather than guessed at, because
+    ``max_args_size`` denies on the number it is given.
+    """
+    try:
+        return len(canonical_json_value(arguments).encode("utf-8"))
+    except (CanonicalError, TypeError, ValueError):
+        return None
 
 
 @dataclass

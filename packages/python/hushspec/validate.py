@@ -95,6 +95,13 @@ def validate(spec: HushSpec) -> ValidationResult:
             )
         )
 
+    # Core spec 2: `name` is optional, but an empty one names nothing -- and a
+    # bundle subject and a receipt's policy summary both carry it.
+    if spec.name == "":
+        errors.append(
+            ValidationError("empty_name", "name: must not be empty when present")
+        )
+
     if spec.rules is not None:
         _validate_rules(spec.rules, errors)
 

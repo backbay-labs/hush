@@ -286,10 +286,10 @@ def _assert_in_step(schema: dict, root: dict, node: _Obj, label: str, seen: set)
 @pytest.mark.parametrize(
     ("schema_name", "node_name"),
     [
-        ("hushspec-core.v0.schema.json", "_CORE_ROOT"),
-        ("hushspec-posture.v0.schema.json", "_POSTURE_ROOT"),
-        ("hushspec-origins.v0.schema.json", "_ORIGINS_ROOT"),
-        ("hushspec-detection.v0.schema.json", "_DETECTION_ROOT"),
+        ("hushspec-core.v1.schema.json", "_CORE_ROOT"),
+        ("hushspec-posture.v1.schema.json", "_POSTURE_ROOT"),
+        ("hushspec-origins.v1.schema.json", "_ORIGINS_ROOT"),
+        ("hushspec-detection.v1.schema.json", "_DETECTION_ROOT"),
     ],
 )
 def test_projection_schema_matches_published_schema(schema_name: str, node_name: str) -> None:

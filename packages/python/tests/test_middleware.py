@@ -4,6 +4,7 @@ import time
 import pytest
 
 from hushspec import HushGuard, HushSpecDenied
+from hushspec.canonical import canonical_json_value
 from hushspec.evaluate import (
     Decision,
     EvaluationAction,
@@ -186,11 +187,19 @@ class TestHushGuardSwapPolicy:
 
 class TestHushGuardActionMappers:
     def test_map_tool_call_creates_correct_action(self):
-        action = HushGuard.map_tool_call("my_tool", {"key": "value"})
+        args = {"key": "value"}
+        action = HushGuard.map_tool_call("my_tool", args)
         assert action.type == "tool_call"
         assert action.target == "my_tool"
-        assert action.args_size is not None
-        assert action.args_size > 0
+        # Core spec 3.7: UTF-8 bytes of the canonical JSON of the arguments.
+        assert action.args_size == len(canonical_json_value(args).encode("utf-8"))
+
+    def test_map_tool_call_measures_non_ascii_arguments_in_bytes(self):
+        args = {"who": "\u00fcbermensch"}
+        action = HushGuard.map_tool_call("my_tool", args)
+        canonical = canonical_json_value(args)
+        assert action.args_size == len(canonical.encode("utf-8"))
+        assert action.args_size == len(canonical) + 1
 
     def test_map_tool_call_without_args_has_none_args_size(self):
         action = HushGuard.map_tool_call("my_tool")

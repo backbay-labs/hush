@@ -946,14 +946,14 @@ class TestVersionAcceptance:
     """Core spec 2.2: an engine supporting minor X.Y accepts every X.Y.Z."""
 
     def test_accepts_every_patch_of_a_supported_minor(self):
-        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"):
+        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7", "1.0.0", "1.0.3"):
             assert is_supported(version) is True, version
             ok, spec = parse(f'hushspec: "{version}"\nname: v\n')
             assert ok is True, version
             assert validate(spec).is_valid, version
 
     def test_rejects_unsupported_or_malformed_versions(self):
-        for version in ("0.3.0", "1.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
+        for version in ("0.3.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
             assert is_supported(version) is False, version
 
     def test_unsupported_version_names_the_supported_minors(self):
@@ -962,7 +962,7 @@ class TestVersionAcceptance:
         assert not result.is_valid
         message = str(result.errors[0])
         assert message.startswith("unsupported hushspec version: 0.9.0")
-        assert "0.1, 0.2" in message
+        assert "0.1, 0.2, 1.0" in message
         assert result.errors[0].kind == "unsupported_version"
         # And the registry code the shared `invalid/` sidecars pin.
         assert result.errors[0].code == "E002"

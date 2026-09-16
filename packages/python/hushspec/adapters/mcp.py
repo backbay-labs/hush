@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
-from hushspec.evaluate import EvaluationAction, EvaluationResult
+from hushspec.evaluate import EvaluationAction, EvaluationResult, args_size_of
 from hushspec.middleware import HushGuard
 
 
@@ -71,7 +70,8 @@ def map_mcp_tool_call(
     return EvaluationAction(
         type="tool_call",
         target=tool_name,
-        args_size=len(json.dumps(args)) if args else None,
+        # Core spec 3.7: the UTF-8 byte length of the canonical JSON.
+        args_size=args_size_of(args) if args else None,
     )
 
 

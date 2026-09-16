@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Union, TYPE_CHECKING
 
 from hushspec.compiled import CompiledPolicy, compile_policy
-from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
+from hushspec.evaluate import (
+    Decision,
+    EvaluationAction,
+    EvaluationResult,
+    args_size_of,
+    is_panic_active,
+)
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
 from hushspec.resolve import (
@@ -825,7 +830,8 @@ class HushGuard:
         return EvaluationAction(
             type="tool_call",
             target=tool_name,
-            args_size=len(json.dumps(args)) if args is not None else None,
+            # Core spec 3.7: the UTF-8 byte length of the canonical JSON.
+            args_size=args_size_of(args) if args is not None else None,
         )
 
     @staticmethod

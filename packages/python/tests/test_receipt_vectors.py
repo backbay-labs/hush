@@ -42,7 +42,7 @@ from hushspec.resolve import Resolution
 REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "fixtures"
 EXPECTED_ROOT = FIXTURES / "receipts" / "expected"
-SCHEMA_PATH = REPO_ROOT / "schemas" / "hushspec-receipt.v0.schema.json"
+SCHEMA_PATH = REPO_ROOT / "schemas" / "hushspec-receipt.v1.schema.json"
 
 #: The fixed evaluation time of every expected receipt: 2026-09-15T12:00:00Z.
 CLOCK_MILLIS = 1_789_473_600_000
