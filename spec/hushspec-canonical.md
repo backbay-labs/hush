@@ -301,4 +301,3 @@ The security considerations for the whole specification family, including the sh
 
 HushSpec 0.1 defined no canonical form. Each SDK hashed its own serialization of the parsed document, so identical policies produced four different `content_hash` values. This specification replaces all of those with one definition and moves the wire form from bare hex to `sha256:`-prefixed hex.
 
-Within the 0.2 draft, an earlier revision of Section 3.3 also declared the five origins profile overlay lists presence-significant. It no longer does: Origins Section 4 makes an absent overlay list and an empty one evaluate identically, so the distinction never reached a decision, while no SDK's typed model could express it. `OriginProfile.match` is now the only presence-significant field. A document that writes an empty overlay list has a different content hash under this revision than under that earlier draft.

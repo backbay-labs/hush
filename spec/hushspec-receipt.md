@@ -3,8 +3,8 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Date:** 2026-09-15
-**Supersedes:** Receipt format 0.1 (schemas/hushspec-receipt.v1.schema.json as shipped with HushSpec 0.1.x)
-**Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Policy Signing 0.2
+**Supersedes:** Receipt format 0.1, as shipped with HushSpec 0.1.x
+**Companion to:** HushSpec Core 1.0.0, Canonical Form 1.0.0, Policy Signing 1.0.0
 
 ---
 
