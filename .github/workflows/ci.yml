@@ -22,6 +22,8 @@ jobs:
         with:
           python-version: '3.12'
 
+      - run: python3 -m pip install pyyaml
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
