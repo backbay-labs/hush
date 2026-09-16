@@ -814,7 +814,7 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 			record(BundleReasonKeyRevoked, fmt.Sprintf("key %s is revoked", signature.KeyID))
 			continue
 		}
-		if retired, retErr := bundleKeyRetired(entry, predicate.CreatedAt); retErr == nil && retired {
+		if bundleKeyRetired(entry, predicate.CreatedAt) {
 			record(BundleReasonKeyRetired, fmt.Sprintf(
 				"key %s was retired at %s; the bundle is dated %s",
 				signature.KeyID, entry.NotAfter, predicate.CreatedAt))
@@ -892,21 +892,22 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 }
 
 // bundleKeyRetired reports whether entry had already been retired when a bundle
-// dated createdAt was produced (bundle spec 5.2 check 2). An entry with no
-// `not_after` is never retired, and a `not_after` or a `created_at` that will
-// not parse is a retirement this verifier does not read: both are fixed to
-// `YYYY-MM-DDTHH:MM:SS.sssZ` by the keyring schema and the statement shape
-// check, so an unparseable one is an input that never reached here.
-func bundleKeyRetired(entry *TrustedKey, createdAt string) (bool, error) {
+// dated createdAt was produced (bundle spec 5.2 check 2).
+//
+// An entry with no `not_after` is never retired. Both instants are fixed to
+// `YYYY-MM-DDTHH:MM:SS.sssZ` -- by the keyring schema and by the statement
+// shape check -- so one that will not parse is a retirement this verifier will
+// not read out of the keyring, and the key counts as current.
+func bundleKeyRetired(entry *TrustedKey, createdAt string) bool {
 	notAfter, err := entry.NotAfterTime()
 	if err != nil || notAfter == nil {
-		return false, err
+		return false
 	}
 	created, err := parseEnvelopeTime(createdAt, "created_at")
 	if err != nil {
-		return false, err
+		return false
 	}
-	return !created.Before(*notAfter), nil
+	return !created.Before(*notAfter)
 }
 
 // compareBundlePolicy is check 4 (bundle spec 5.3): the resolved documents and
