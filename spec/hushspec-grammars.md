@@ -144,12 +144,13 @@ name           = 1*name-char
 name-char      = %x00-2D / %x2F-5A / %x5C-D7FF / %xE000-10FFFF   ; any scalar value except "." and "["
 index          = "[" 1*DIGIT "]"
 engine-rule    = "__hushspec_panic__" / "__unknown_action_type__"
-               / "__hushspec_policy_unverified__" / "detection"
+               / "__hushspec_policy_unverified__" / "__hushspec_policy_provider__"
+               / "detection"
 ```
 
 A path descends from a rule block or an extension module one segment at a time. A segment is a schema field name (`rules.egress.default`) or the `name` or `id` of a named entry written verbatim (`rules.secret_patterns.patterns.aws_access_key`, `extensions.origins.profiles.ci.egress.block`, `extensions.posture.states.locked.capabilities`). A list of unnamed entries is addressed by a zero-based `index` on the field that holds it (`rules.shell_commands.forbidden_patterns[0]`). Because entry names are verbatim, a name that contains `.` or `[` yields a path that cannot be split unambiguously; authors SHOULD avoid such names. Control mappings address named entries with a bracketed selector instead (Section 6).
 
-The four `engine-rule` values are reserved: three name engine stages that precede rule evaluation, and `detection` is the `matched_rule` of a decision the detection pipeline produced. The closed set of `rule_block` identifiers a receipt's trace may carry is the registry `spec/registries/rule-paths.yaml`.
+The five `engine-rule` values are reserved: four name engine stages that precede rule evaluation, and `detection` is the `matched_rule` of a decision the detection pipeline produced. The closed set of `rule_block` identifiers a receipt's trace may carry is the registry `spec/registries/rule-paths.yaml`.
 
 - `+ rules.egress`, `+ rules.egress.allow`, `+ rules.secret_patterns.patterns.aws_access_key`, `+ rules.tool_access.max_args_size`, `+ rules.patch_integrity.forbidden_patterns[2]`, `+ extensions.origins.profiles.ci.tool_access.allow`, `+ extensions.posture.states.locked.capabilities`, `+ __hushspec_panic__`
 - `- rules.Egress` (case), `- rules.egress.allow[` (unterminated index), `- rule.egress` (prefix)

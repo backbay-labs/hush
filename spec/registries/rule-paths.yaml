@@ -76,6 +76,10 @@ entries:
     kind: reserved_matched_rule
     summary: The enforcement point refused its policy after signature verification failed
     spec: signing 6.5
+  - id: __hushspec_policy_provider__
+    kind: reserved_matched_rule
+    summary: The enforcement point's policy provider could not serve a policy to evaluate against
+    spec: core 1.2
   - id: detection
     kind: reserved_matched_rule
     summary: A decision produced by the detection pipeline
