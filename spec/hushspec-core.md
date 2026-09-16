@@ -35,7 +35,7 @@ A HushSpec document is a YAML file (see Section 2.4 for the YAML profile) with t
 | Field            | Type   | Required | Default        | Description                                      |
 |------------------|--------|----------|----------------|--------------------------------------------------|
 | `hushspec`       | string | REQUIRED | --             | Spec version. See Section 2.2.                   |
-| `name`           | string | OPTIONAL | --             | Human-readable policy name. MUST NOT be empty when present (`fixtures/core/invalid/empty-name.yaml`). |
+| `name`           | string | OPTIONAL | --             | Human-readable policy name. In the 1.0 document format it MUST NOT be empty when present; the frozen 0.x format places no length constraint on it (Section 10; `fixtures/core/invalid/empty-name.yaml`, `fixtures/core/valid/empty-name-0-2.yaml`). |
 | `description`    | string | OPTIONAL | --             | Policy description.                              |
 | `extends`        | string | OPTIONAL | --             | Reference to a base policy.                      |
 | `merge_strategy` | string | OPTIONAL | `"deep_merge"` | One of `replace`, `merge`, `deep_merge`.         |
@@ -927,7 +927,7 @@ The v0.x series was the development series. Breaking changes (field removals, se
 
 ### 10.2 v1.0 and Later
 
-HushSpec 1.0.0 was declared on 2026-09-15 (`versioning.md`, Section 10; `CHANGELOG.md`). Its evaluation semantics are identical to 0.2.0: an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them, and the reference implementation accepts `0.1.Z`, `0.2.Z`, and `1.0.Z`. The one validation difference is that a present `name` MUST be non-empty (Section 2). The stability guarantee of `versioning.md` Section 5 applies from this release. Test vectors: `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
+HushSpec 1.0.0 was declared on 2026-09-15 (`versioning.md`, Section 10; `CHANGELOG.md`). Its evaluation semantics are identical to 0.2.0: an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them, and the reference implementation accepts `0.1.Z`, `0.2.Z`, and `1.0.Z`. The one validation difference is that a present `name` MUST be non-empty (Section 2), which a `0.Y.Z` document is not held to. The stability guarantee of `versioning.md` Section 5 applies from this release. Test vectors: `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/valid/empty-name-0-2.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`, `fixtures/core/invalid/version-unsupported-minor.yaml`.
 
 From 1.0.0, within a major version:
 - Minor versions MAY add new optional fields, rule blocks, and open-registry entries. Existing valid documents remain valid, keep their semantics, and keep their canonical content hash (Canonical Form specification, Section 3.2).

@@ -18,6 +18,7 @@ import pytest
 import yaml
 
 from hushspec.parse import CoreSafeLoader
+from hushspec.version import major_version
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMAS_ROOT = REPO_ROOT / "schemas"
@@ -71,11 +72,28 @@ def load_schema(file_name: str) -> dict:
     return json.loads((SCHEMAS_ROOT / file_name).read_text())
 
 
-def core_validator() -> jsonschema.protocols.Validator:
-    schema = load_schema("hushspec-core.v1.schema.json")
+def core_validator(
+    file_name: str = "hushspec-core.v1.schema.json",
+) -> jsonschema.protocols.Validator:
+    schema = load_schema(file_name)
     cls = jsonschema.validators.validator_for(schema)
     cls.check_schema(schema)
     return cls(schema, format_checker=cls.FORMAT_CHECKER)
+
+
+def validator_for_document(document: object) -> jsonschema.protocols.Validator:
+    """The published core schema of the lineage the document declares.
+
+    The two lineages are one schema apart: 0.x documents are validated against
+    the frozen ``core.v0`` file, 1.x (and anything unreadable, which the v1
+    file refuses) against the current one. They differ only in the version
+    pattern and in ``name``, which 1.0 requires to be non-empty (versioning
+    spec 10).
+    """
+    declared = document.get("hushspec") if isinstance(document, dict) else None
+    if isinstance(declared, str) and major_version(declared) == 0:
+        return core_validator("hushspec-core.v0.schema.json")
+    return core_validator()
 
 
 def policy_vectors(kind: str) -> list[Path]:
@@ -126,7 +144,8 @@ def test_core_schema_embeds_the_companion_schemas_verbatim():
     "path", policy_vectors("valid"), ids=lambda path: f"{path.parent.parent.name}/{path.name}"
 )
 def test_valid_vectors_satisfy_the_core_schema(path: Path):
-    errors = list(core_validator().iter_errors(load_document(path)))
+    document = load_document(path)
+    errors = list(validator_for_document(document).iter_errors(document))
     assert not errors, [error.message for error in errors]
 
 
@@ -137,7 +156,8 @@ def test_invalid_vectors_are_refused_by_the_core_schema(path: Path):
     if path.name in PROFILE_ONLY_VECTORS:
         pytest.skip("refused by the YAML profile, before a document exists")
 
-    valid = core_validator().is_valid(load_document(path))
+    document = load_document(path)
+    valid = validator_for_document(document).is_valid(document)
     if path.name in BEYOND_SCHEMA_VECTORS:
         assert valid, (
             f"{path.name} is listed as beyond JSON Schema but the schema now "

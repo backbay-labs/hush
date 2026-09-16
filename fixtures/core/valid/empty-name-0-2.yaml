@@ -1,0 +1,9 @@
+# A present but empty name is accepted in the frozen 0.x document format,
+# which places no length constraint on `name`. Requiring a non-empty name is
+# the one validation difference 1.0 introduces (versioning spec 10), so it is
+# gated on the declared version rather than applied to every document.
+hushspec: "0.2.0"
+name: ""
+rules:
+  egress:
+    default: block

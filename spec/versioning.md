@@ -66,7 +66,7 @@ JSON Schema files are named `hushspec-<name>.v<major>.schema.json` and carry an 
 
 ## 10. Declaring 1.0.0
 
-HushSpec 1.0.0 was declared on 2026-09-15: every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle `hushspec-conformance-1.0.0.tar.gz` is built from this corpus, and the reference SDKs accept `1.0.z` documents. An engine that supports 1.0 treats a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 evaluation semantics without changing them; the reference implementation accepts `0.1.z`, `0.2.z`, and `1.0.z`. The one validation difference between the 0.2 and 1.0 document formats is that `name`, when present, is non-empty (Core Section 2). Section 5 applies from this release.
+HushSpec 1.0.0 was declared on 2026-09-15: every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle `hushspec-conformance-1.0.0.tar.gz` is built from this corpus, and the reference SDKs accept `1.0.z` documents. An engine that supports 1.0 treats a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 evaluation semantics without changing them; the reference implementation accepts `0.1.z`, `0.2.z`, and `1.0.z`. The one validation difference between the 0.2 and 1.0 document formats is that `name`, when present, is non-empty (Core Section 2); a `0.Y.Z` document keeps the frozen format's behaviour, which places no length constraint on it. Section 5 applies from this release.
 
 ## 11. Conformance Across Versions
 

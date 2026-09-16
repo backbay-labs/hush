@@ -55,7 +55,7 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
         errors.push(ValidationError::UnsupportedVersion(spec.hushspec.clone()));
     }
 
-    if spec.name.as_deref() == Some("") {
+    if spec.name.as_deref() == Some("") && requires_non_empty_name(&spec.hushspec) {
         errors.push(ValidationError::Custom(
             "name: must not be empty when present".to_string(),
         ));
@@ -104,6 +104,18 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
     }
 
     ValidationResult { errors, warnings }
+}
+
+/// Whether a document declaring `version` must give a present `name` a
+/// non-empty value.
+///
+/// This is the one constraint the 1.0 document format adds to 0.2
+/// (spec/versioning.md section 10): the frozen 0.x format allows `name: ""`.
+/// A version this engine cannot read as `MAJOR.MINOR.PATCH` is already refused
+/// as unsupported, and is held to the current format's constraints here so an
+/// unreadable version can never relax one.
+fn requires_non_empty_name(version: &str) -> bool {
+    version::major_version(version).is_none_or(|major| major >= 1)
 }
 
 fn validate_rules(rules: &crate::rules::Rules, errors: &mut Vec<ValidationError>) {

@@ -74,14 +74,35 @@ func (r *rawIssues) addConstraint(path, message string) {
 // an empty name names nothing. Only the raw document separates `name: ""` from
 // an absent `name`, which the typed model spells the same way; `name: null` is
 // an absent name, as it is to every other SDK.
+//
+// The constraint belongs to the 1.0 document format: it is the one thing 1.0
+// adds to 0.2 (spec/versioning.md section 10), and the frozen 0.x format
+// allows `name: ""`.
 func validateRawName(root map[string]any, errs *rawIssues) {
 	value, present := root["name"]
 	if !present {
 		return
 	}
+	if !rawRequiresNonEmptyName(root) {
+		return
+	}
 	if name, isString := value.(string); isString && name == "" {
 		errs.addConstraint("name", "name: must not be empty when present")
 	}
+}
+
+// rawRequiresNonEmptyName reports whether the document's declared version puts
+// it in the 1.0 format or later. A version that is absent, not a string, or
+// unreadable as MAJOR.MINOR.PATCH is refused elsewhere as unsupported, and is
+// held to the current format's constraints here so an unreadable version can
+// never relax one.
+func rawRequiresNonEmptyName(root map[string]any) bool {
+	declared, isString := root["hushspec"].(string)
+	if !isString {
+		return true
+	}
+	major, ok := MajorVersion(declared)
+	return !ok || major >= 1
 }
 
 // rawConditionBlocks are the rule blocks whose `when` the raw validator walks.

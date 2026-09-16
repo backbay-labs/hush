@@ -77,6 +77,41 @@ hushspec: "99.0.0"
     assert!(!result.is_valid());
 }
 
+/// Core spec 2 requires a present `name` to be non-empty, but only from the
+/// 1.0 document format: the frozen 0.x format allows `name: ""`, which is the
+/// one validation difference between the two (spec/versioning.md section 10).
+#[test]
+fn validate_empty_name_only_in_the_1_0_format() {
+    for version in ["0.1.0", "0.2.0", "0.2.7"] {
+        let yaml = format!("hushspec: \"{version}\"\nname: \"\"\n");
+        let spec = HushSpec::parse(&yaml).unwrap();
+        assert!(validate(&spec).is_valid(), "{version} should accept it");
+    }
+    for version in ["1.0.0", "1.0.3"] {
+        let yaml = format!("hushspec: \"{version}\"\nname: \"\"\n");
+        let spec = HushSpec::parse(&yaml).unwrap();
+        assert!(!validate(&spec).is_valid(), "{version} should refuse it");
+    }
+}
+
+/// A version that cannot be read as `MAJOR.MINOR.PATCH` is refused on its own
+/// account, and must never be a way to relax a constraint as well.
+#[test]
+fn validate_empty_name_under_an_unreadable_version() {
+    let spec = HushSpec::parse("hushspec: \"not-a-version\"\nname: \"\"\n").unwrap();
+    let messages: Vec<String> = validate(&spec)
+        .errors
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("name: must not be empty when present")),
+        "{messages:?}"
+    );
+}
+
 #[test]
 fn validate_duplicate_secret_pattern_names() {
     let yaml = r#"

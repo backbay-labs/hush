@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T12:19:31Z",
+  "generated_at": "2026-09-16T14:04:39Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1175,6 +1175,13 @@
     {
       "path": "fixtures/core/valid/egress-only.yaml",
       "sha256": "ea914a183f6e2904c63e07ba33471d53a2d09c3b8b06c3658cfe5048866a3703",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/empty-name-0-2.yaml",
+      "sha256": "bf63c228e0cbbded8770eabb20dea0ceecd5696445d333d9dd90336f18138bb8",
       "category": "valid",
       "module": "core",
       "level": 1

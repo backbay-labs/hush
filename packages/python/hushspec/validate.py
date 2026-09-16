@@ -18,7 +18,7 @@ from hushspec.extensions import DetectionLevel, Extensions, TransitionTrigger
 from hushspec.regex_profile import compile_profile_regex
 from hushspec.rules import Rules
 from hushspec.schema import Classification, HushSpec, LifecycleState
-from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported
+from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported, major_version
 
 _CAPABILITY_NAMES = frozenset(
     {"file_access", "file_write", "egress", "shell", "tool_call", "patch", "custom"}
@@ -81,6 +81,20 @@ class ValidationResult:
         return not self.errors
 
 
+def _requires_non_empty_name(version: str) -> bool:
+    """Whether a document declaring *version* must give a present ``name`` a
+    non-empty value.
+
+    This is the one constraint the 1.0 document format adds to 0.2
+    (spec/versioning.md section 10): the frozen 0.x format allows ``name: ""``.
+    A version this engine cannot read as ``MAJOR.MINOR.PATCH`` is already
+    refused as unsupported, and is held to the current format's constraints
+    here so an unreadable version can never relax one.
+    """
+    major = major_version(version)
+    return major is None or major >= 1
+
+
 def validate(spec: HushSpec) -> ValidationResult:
     errors: list[ValidationError] = []
     warnings: list[str] = []
@@ -97,7 +111,7 @@ def validate(spec: HushSpec) -> ValidationResult:
 
     # Core spec 2: `name` is optional, but an empty one names nothing -- and a
     # bundle subject and a receipt's policy summary both carry it.
-    if spec.name == "":
+    if spec.name == "" and _requires_non_empty_name(spec.hushspec):
         errors.append(
             ValidationError("empty_name", "name: must not be empty when present")
         )

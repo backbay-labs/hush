@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { schemaErrors, schemaValid, type SchemaDocument } from './helpers/json-schema.js';
+import { majorVersion } from '../src/version.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const schemasRoot = path.join(repoRoot, 'schemas');
@@ -67,6 +68,20 @@ function loadSchema(fileName: string): SchemaDocument {
 }
 
 const coreSchema = loadSchema('hushspec-core.v1.schema.json');
+const coreSchemaV0 = loadSchema('hushspec-core.v0.schema.json');
+
+/**
+ * The published core schema of the lineage the document declares.
+ *
+ * The two lineages are one schema apart: 0.x documents are validated against
+ * the frozen `core.v0` file, 1.x (and anything unreadable, which the v1 file
+ * refuses) against the current one. They differ only in the version pattern
+ * and in `name`, which 1.0 requires to be non-empty (versioning spec 10).
+ */
+function schemaFor(document: unknown): SchemaDocument {
+  const declared = (document as Record<string, unknown> | null)?.['hushspec'];
+  return typeof declared === 'string' && majorVersion(declared) === 0 ? coreSchemaV0 : coreSchema;
+}
 
 function policyVectors(kind: 'valid' | 'invalid'): { name: string; file: string }[] {
   return FAMILIES.flatMap((family) => {
@@ -120,7 +135,8 @@ describe('composed core schema', () => {
   });
 
   it.each(policyVectors('valid'))('accepts $name', ({ file }) => {
-    expect(schemaErrors(coreSchema, loadDocument(file))).toEqual([]);
+    const document = loadDocument(file);
+    expect(schemaErrors(schemaFor(document), document)).toEqual([]);
   });
 
   // The YAML-profile vectors are filtered out of the table rather than
@@ -129,7 +145,8 @@ describe('composed core schema', () => {
   it.each(policyVectors('invalid').filter(({ name }) => !PROFILE_ONLY_VECTORS.has(name)))(
     'refuses $name',
     ({ name, file }) => {
-      const valid = schemaValid(coreSchema, loadDocument(file));
+      const document = loadDocument(file);
+      const valid = schemaValid(schemaFor(document), document);
       expect(valid).toBe(BEYOND_SCHEMA_VECTORS.has(name));
     },
   );

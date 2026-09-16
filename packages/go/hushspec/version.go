@@ -2,7 +2,10 @@
 // HushSpec security policy documents.
 package hushspec
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // [SDKName] is this package's own identity, as a receipt log's `sdk` member
 // records it (spec/hushspec-log.md section 6) -- distinct from [Version],
@@ -29,6 +32,30 @@ var SupportedVersions = []string{"0.1.0", "0.2.0", "1.0.0"}
 // accepted (core spec 2.2).
 func IsSupported(version string) bool {
 	return SupportedMinor(version) != ""
+}
+
+// MajorVersion returns the MAJOR component of a well-formed "X.Y.Z" version
+// string, and false when version is not one.
+//
+// The document format is versioned by its major component: the 1.0 format
+// differs from 0.x only in the constraints it places on a document (core spec
+// 10), so a constraint introduced with 1.0 is gated on this rather than on the
+// minor an engine happens to support.
+func MajorVersion(version string) (int, bool) {
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	for _, part := range parts {
+		if !isASCIIDigits(part) {
+			return 0, false
+		}
+	}
+	major, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, false
+	}
+	return major, true
 }
 
 // SupportedMinor returns the "X.Y" minor of a well-formed, supported version

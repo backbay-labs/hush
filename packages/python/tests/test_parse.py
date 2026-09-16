@@ -205,6 +205,31 @@ hushspec: "99.0.0"
         assert not result.is_valid
         assert any("unsupported" in str(e) for e in result.errors)
 
+    def test_empty_name_only_refused_in_the_1_0_format(self):
+        """Core spec 2 requires a present ``name`` to be non-empty, but only
+        from the 1.0 document format: the frozen 0.x format allows ``name: ""``,
+        the one validation difference between the two (versioning spec 10).
+        """
+        for version in ("0.1.0", "0.2.0", "0.2.7"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            assert validate(spec).is_valid, version
+        for version in ("1.0.0", "1.0.3"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            result = validate(spec)
+            assert not result.is_valid, version
+            assert any(
+                "name: must not be empty when present" in str(error)
+                for error in result.errors
+            )
+
+    def test_empty_name_under_an_unreadable_version(self):
+        """A version that cannot be read as MAJOR.MINOR.PATCH is refused on its
+        own account, and must never be a way to relax a constraint as well.
+        """
+        spec = HushSpec(hushspec="not-a-version", name="")
+        codes = [error.code for error in validate(spec).errors]
+        assert "E004" in codes
+
     def test_parse_rejects_duplicate_secret_pattern_names(self):
         yaml = """
 hushspec: "0.1.0"
