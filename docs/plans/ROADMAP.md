@@ -100,6 +100,10 @@ A production-readiness assessment identified 16 gaps between HushSpec v0.1.0 and
 
 ## 2. Gap Coverage Matrix
 
+> **Historical record, assessed 2026-09-14.** The statuses below describe the tree
+> as of that assessment and are not updated in place. Section 0 records where the
+> code stands.
+
 | # | Gap | Description | RFC(s) | Status |
 |---|-----|-------------|--------|--------|
 | 1 | No evaluation engine in non-Rust SDKs | TypeScript, Python, and Go SDKs can parse and validate but cannot evaluate actions against policies | RFC-01 | **Complete** |
@@ -189,6 +193,10 @@ graph TD
 ---
 
 ## 4. Phased Roadmap
+
+> **Historical record, assessed 2026-09-14.** The phase tables below describe the
+> tree as of that assessment and are not updated in place. Section 0 records where
+> the code stands.
 
 ### Phase 0: Foundation (Weeks 1-4) -- Complete
 
@@ -551,7 +559,7 @@ HushSpec is **production-ready** when all of the following criteria are met:
 
 ### Security and Governance
 
-- [x] Policy signing with Ed25519 functional in all SDKs -- all four are conforming verifiers over all 16 `fixtures/signing/vectors.yaml` cases, verify on load, and sign and verify receipts. Rust needs the `signing` Cargo feature; Python needs the `signing` extra, without which the entry points raise `SigningUnavailable` rather than reporting an unverified signature as good
+- [x] Policy signing with Ed25519 functional in all SDKs -- all four are conforming verifiers over all 17 `fixtures/signing/vectors.yaml` cases, verify on load, and sign and verify receipts. Rust needs the `signing` Cargo feature; Python needs the `signing` extra, without which the entry points raise `SigningUnavailable` rather than reporting an unverified signature as good
 - [x] Emergency override / panic mode specified and reference implementation available in all four SDKs, with a sentinel file that fails closed on an I/O error
 - [x] ReDoS protection enforced during validation in all SDKs
 - [x] Separation of duties (author != approver) enforceable via tooling -- `GOV_SOD_VIOLATION` from `h2h audit` (with `--strict` making it fatal), alongside `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER` and `GOV_SELF_SUPERSEDES`; `h2h sign` refuses a policy that is not `approved` or `deployed` without `--allow-unapproved`
