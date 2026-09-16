@@ -1,0 +1,71 @@
+# HushSpec action-type registry
+#
+# Normative companion to spec/hushspec-core.md Section 5. Lists every action
+# type a conformant evaluator recognizes, the rule blocks it is evaluated
+# against (in evaluation order), and the posture capability it requires when
+# the posture extension is active.
+#
+# Status: closed. An action type outside this list is denied with
+# `matched_rule` `__unknown_action_type__`; adding one is a major-version
+# change.
+#
+# Schema: schemas/hushspec-registry-action-types.v0.schema.json
+registry: action-types
+registry_version: "1.0.0"
+status: closed
+
+entries:
+  - id: file_read
+    summary: Reading a file from the filesystem
+    rule_blocks: [forbidden_paths, path_allowlist]
+    required_capability: file_access
+    spec: core 5
+  - id: file_write
+    summary: Writing or creating a file
+    rule_blocks: [forbidden_paths, path_allowlist, secret_patterns]
+    required_capability: file_write
+    spec: core 5
+  - id: patch_apply
+    summary: Applying a patch or diff to a file
+    rule_blocks: [forbidden_paths, path_allowlist, patch_integrity, secret_patterns]
+    required_capability: patch
+    spec: core 5
+  - id: shell_command
+    summary: Executing a shell command
+    rule_blocks: [shell_commands]
+    required_capability: shell
+    spec: core 5
+  - id: egress
+    summary: Outbound network request
+    rule_blocks: [egress, secret_patterns]
+    required_capability: egress
+    spec: core 5
+    notes: secret_patterns applies only when the action carries content (core 3.4).
+  - id: tool_call
+    summary: Invoking a tool or MCP endpoint
+    rule_blocks: [tool_access, secret_patterns]
+    required_capability: tool_call
+    spec: core 5
+    notes: secret_patterns applies only when the action carries content (core 3.4).
+  - id: computer_use
+    summary: Computer-use agent action
+    rule_blocks: [computer_use, remote_desktop_channels]
+    spec: core 5
+  - id: input_inject
+    summary: Injecting keyboard, mouse, or touch input
+    rule_blocks: [input_injection]
+    spec: core 5
+  - id: browser_action
+    summary: Browser automation step
+    rule_blocks: [browser_automation]
+    spec: core 3.11
+  - id: code_exec
+    summary: Executing code in a sandbox or interpreter
+    rule_blocks: [code_execution]
+    spec: core 3.12
+  - id: custom
+    summary: Engine-defined action gated only by posture
+    rule_blocks: []
+    required_capability: custom
+    spec: core 5
+    notes: Denied unless the effective posture state grants the custom capability.

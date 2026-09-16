@@ -1,0 +1,53 @@
+# HushSpec detector registry
+#
+# Normative companion to spec/hushspec-detection.md Section 9. Lists the
+# detector categories, the detectors the reference implementation registers,
+# and which of them are fully specified.
+#
+# Status: open for detector identifiers (an engine MAY register detectors of
+# its own under identifiers of the form `<name>@<version>`, grammars 11, and
+# MUST report them in receipts with the same trace shape); closed for
+# categories.
+#
+# Schema: schemas/hushspec-registry-detectors.v0.schema.json
+registry: detectors
+registry_version: "1.0.0"
+status: open
+
+categories:
+  - id: prompt_injection
+    summary: Instructions embedded in content that try to redirect the agent
+    configured_by: prompt_injection
+    spec: detection 3
+  - id: jailbreak
+    summary: Attempts to remove the agent's safety constraints
+    configured_by: jailbreak
+    spec: detection 4
+  - id: data_exfiltration
+    summary: Attempts to move data out through the agent
+    spec: detection 9.2
+    notes: >-
+      No configuration subsection exists in 1.0; detectors in this category
+      are registered but contribute to neither decisions nor traces.
+
+entries:
+  - id: regex_injection@1
+    category: prompt_injection
+    normative: false
+    summary: Weighted phrase patterns for prompt injection; scoring is engine-defined
+    spec: detection 9.1
+  - id: heuristic_injection@1
+    category: prompt_injection
+    normative: true
+    summary: The fully specified heuristic detector every engine scores identically
+    spec: detection 3.5
+  - id: regex_jailbreak@1
+    category: jailbreak
+    normative: false
+    summary: Weighted phrase patterns for jailbreak attempts; scoring is engine-defined
+    spec: detection 9.1
+  - id: regex_exfiltration@1
+    category: data_exfiltration
+    normative: false
+    summary: Weighted patterns for exfiltration attempts; registered, not folded into decisions
+    spec: detection 9.2
