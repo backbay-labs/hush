@@ -216,8 +216,8 @@ good.
 | Operation | Rust *(feature `signing`)* | TypeScript | Python *(extra `signing`)* | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Parse a bundle | `DsseEnvelope::parse` | `parseBundle` | `parse_bundle` | `ParseBundle` | A DSSE envelope over an in-toto Statement v1 | Readable by generic DSSE and in-toto tooling |
-| Verify a bundle | `verify_bundle` | `verifyBundle` | `verify_bundle` | `VerifyBundle` | The four ordered checks of bundle spec 5.2, returning valid or one of the five closed reason codes of 5.4 | All four pass all 8 `fixtures/bundle/vectors.yaml` cases |
-| Reason codes | `BundleReason` | `BUNDLE_REASONS`, `BundleReason` | `BUNDLE_REASON_CODES` | `BundleReasons`, `BundleReasonMalformed` ... | `malformed_bundle`, `unknown_key_id`, `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch` | |
+| Verify a bundle | `verify_bundle` | `verifyBundle` | `verify_bundle` | `VerifyBundle` | The four ordered checks of bundle spec 5.2, returning valid or one of the seven closed reason codes of 5.4 | All four pass all 10 `fixtures/bundle/vectors.yaml` cases |
+| Reason codes | `BundleReason` | `BUNDLE_REASONS`, `BundleReason` | `BUNDLE_REASON_CODES` | `BundleReasons`, `BundleReasonMalformed` ... | `malformed_bundle`, `unknown_key_id`, `key_revoked`, `key_retired`, `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch` | |
 | Statement and predicate | `Statement`, `PolicyBundlePredicate`, `Subject` | `BundleStatement`, `PolicyBundlePredicate`, `BundleSubject` | `hushspec.bundle` | `BundleStatement`, `PolicyBundlePredicate`, `BundleSubject` | The subject is the canonical form of the resolved document; the predicate carries every hop with its hash and signature status | |
 | PAE | `pae` | `pae` | `hushspec.bundle` | `BundlePAE` | DSSE pre-authentication encoding | |
 | Create and sign | `build_statement`, `sign_statement`, `unsigned_envelope` | -- | -- | -- | Production is Rust and `h2h bundle create` only | Verification is what a relying party depends on, and all four verify |

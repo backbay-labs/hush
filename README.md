@@ -105,7 +105,7 @@ Every "No" is deliberate, and here is why:
 
 - **Bundle creation** lives in Rust and `h2h bundle create`. Producing an
   attestation is a build-time act; verifying one is what a relying party depends
-  on, and all four SDKs verify against all 8 bundle vectors.
+  on, and all four SDKs verify against all 10 bundle vectors.
 - **Rust ships no framework adapters**, because that is not where agent
   frameworks live. The worked example
   `cargo run --example guarded_agent --features otlp` wires a policy through a

@@ -753,7 +753,9 @@ Runs the four ordered checks of bundle spec 5.2 and stops at the first failure.
 |---|---|
 | `malformed_bundle` | 1: not a well-formed envelope, statement, or predicate; an unknown `predicateType` or `bundle_version` lands here. |
 | `unknown_key_id` | 2: no signature names a key in the keyring. |
-| `dsse_signature_mismatch` | 2: a trusted key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
+| `key_revoked` | 2: the only keys that signed are revoked in the keyring. |
+| `key_retired` | 2: the only keys that signed were retired before `predicate.created_at`. |
+| `dsse_signature_mismatch` | 2: a usable key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
 | `subject_digest_mismatch` | 3: `predicate.resolved` does not hash to the declared subject. |
 | `policy_mismatch` | 4: `--policy` resolves to something else, or does not resolve at all. |
 
