@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
-	"sync/atomic"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -806,11 +805,14 @@ func (p *CompiledPolicy) EvaluateWithContext(
 // ---------------------------------------------------------------------------
 
 // compiledCacheLimit bounds the number of documents the free-function cache
-// holds. Past it, evaluation still works -- it just compiles on the fly, as it
-// did before there was a cache.
+// holds. At the bound the whole cache is dropped rather than frozen: a run
+// that evaluates thousands of one-shot documents (the fixture suites, the
+// differential fuzzer) must neither retain them all nor recompile the
+// thousand-and-first on every action.
 const compiledCacheLimit = 64
 
 var (
+	compiledCacheMu sync.RWMutex
 	// compiledCache maps a *HushSpec to its compiled form, so back-to-back
 	// free-function calls on one document compile once. Keying on the pointer
 	// means the entry keeps the document alive, so an address is never reused
@@ -818,27 +820,34 @@ var (
 	// evaluated keeps its old compilation. Resolved documents are treated as
 	// immutable everywhere in this SDK; a caller that edits one should hold a
 	// [CompiledPolicy] of its own instead.
-	compiledCache      sync.Map
-	compiledCacheCount atomic.Int64
+	compiledCache = make(map[*HushSpec]*CompiledPolicy, compiledCacheLimit)
 )
 
-// cachedCompile is the compiled form of spec for the free functions: cached
-// when there is room, compiled on the fly otherwise. It never fails -- an
-// invalid pattern denies during evaluation exactly as it always has.
+// cachedCompile is the compiled form of spec for the free functions. It never
+// fails -- an invalid pattern denies during evaluation exactly as it always
+// has.
 func cachedCompile(spec *HushSpec) *CompiledPolicy {
 	if spec == nil {
 		return compilePolicy(nil)
 	}
-	if cached, ok := compiledCache.Load(spec); ok {
-		return cached.(*CompiledPolicy)
+	compiledCacheMu.RLock()
+	cached, ok := compiledCache[spec]
+	compiledCacheMu.RUnlock()
+	if ok {
+		return cached
 	}
+
 	compiled := compilePolicy(spec)
-	if compiledCacheCount.Load() >= compiledCacheLimit {
-		return compiled
+	compiledCacheMu.Lock()
+	defer compiledCacheMu.Unlock()
+	if existing, ok := compiledCache[spec]; ok {
+		// Another goroutine compiled the same document first; one compiled
+		// policy per document keeps the cache a memo rather than a leak.
+		return existing
 	}
-	if actual, loaded := compiledCache.LoadOrStore(spec, compiled); loaded {
-		return actual.(*CompiledPolicy)
+	if len(compiledCache) >= compiledCacheLimit {
+		clear(compiledCache)
 	}
-	compiledCacheCount.Add(1)
+	compiledCache[spec] = compiled
 	return compiled
 }

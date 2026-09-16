@@ -268,3 +268,35 @@ func TestCompiledEvaluateAuditedMatchesSpecReceipt(t *testing.T) {
 		t.Errorf("rule trace length = %d, want %d", len(got.RuleTrace), len(want.RuleTrace))
 	}
 }
+
+// The free-function cache is bounded, and at the bound it empties rather than
+// freezing: a run that evaluates thousands of one-shot documents must neither
+// retain them all nor recompile every later one on every action.
+func TestCachedCompileEmptiesAtItsBound(t *testing.T) {
+	compiledCacheMu.Lock()
+	clear(compiledCache)
+	compiledCacheMu.Unlock()
+
+	specs := make([]*HushSpec, compiledCacheLimit+1)
+	for index := range specs {
+		spec, err := Parse("hushspec: \"0.1.0\"\n")
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		specs[index] = spec
+		cachedCompile(spec)
+	}
+
+	compiledCacheMu.RLock()
+	size := len(compiledCache)
+	compiledCacheMu.RUnlock()
+	if size != 1 {
+		t.Fatalf("cache holds %d documents after %d, want 1", size, len(specs))
+	}
+
+	// The newest document is still memoized, so back-to-back calls on it do
+	// not recompile.
+	if cachedCompile(specs[len(specs)-1]) != cachedCompile(specs[len(specs)-1]) {
+		t.Error("the most recent document was not cached")
+	}
+}
