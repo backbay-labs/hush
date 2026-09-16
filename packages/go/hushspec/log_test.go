@@ -412,8 +412,11 @@ func TestRotateAtGenesisVerifies(t *testing.T) {
 	}
 
 	resolution := vectorResolution(t)
-	receipt := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
+	receipt, err := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
 		expectedReceiptContext(0))
+	if err != nil {
+		t.Fatalf("cannot build the receipt: %v", err)
+	}
 	if err := sink.Send(&receipt); err != nil {
 		t.Fatalf("cannot append the receipt: %v", err)
 	}
