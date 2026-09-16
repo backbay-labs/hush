@@ -193,6 +193,50 @@ Rotation carries the chain forward: `sink.rotate('./audit-2.jsonl')` writes a
 detectable from a file alone (log spec section 9) -- publish `sink.head()`
 periodically as an external anchor.
 
+### Policy bundles
+
+A receipt says what one decision was; a bundle says which policy was in force
+when it was made. `createBundle` attests a *resolved* policy -- the document
+after `extends` has been followed -- as a DSSE envelope carrying an in-toto
+statement: the content hash, the chain it was resolved from, and the resolver
+that did it.
+
+```typescript
+import {
+  createBundle,
+  bundleToJson,
+  verifyBundle,
+  parseOrThrow,
+  resolveWithOptions,
+  createCompositeLoader,
+} from '@hushspec/core';
+
+// `createBundle` takes a Resolution -- the resolved document plus the chain
+// it came from -- not a bare policy.
+const resolution = resolveWithOptions(parseOrThrow(readFileSync('./policy.yaml', 'utf8')), {
+  source: './policy.yaml',
+  loader: createCompositeLoader(),
+});
+
+const bundle = createBundle(resolution, { privateKeyPem });
+
+writeFileSync('./policy.bundle.json', bundleToJson(bundle));
+
+const outcome = verifyBundle(bundle, { keyring, policy: resolution });
+// outcome.ok, or outcome.reason: 'content_hash_mismatch' when the bundle
+// attests a different policy than the one passed in
+```
+
+Creation is reproducible: two bundlers given the same resolution, the same
+`createdAt`, and the same resolver produce byte-identical bundles, Ed25519
+being deterministic. That is what pins this SDK against the reference CLI's
+published vectors. Omit `privateKeyPem` for an unsigned bundle -- useful for
+inspecting a statement, though `verifyBundle` refuses one.
+
+`resolver.tool` defaults to this SDK rather than to `BUNDLE_RESOLVER_TOOL`
+(`'h2h'`, the reference CLI), so a bundle always names what actually produced
+it; pass `tool` and `version` to override.
+
 ### OTLP export
 
 `OtlpReceiptSink` is a `ReceiptSink` that exports receipts and
