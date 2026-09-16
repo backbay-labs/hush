@@ -1362,7 +1362,7 @@ fn oscal(report: &Report) -> serde_json::Value {
             }));
             findings.push(serde_json::json!({
                 "uuid": stable_uuid(&format!("finding:{id}")),
-                "title": format!("{id}"),
+                "title": id.as_str(),
                 "description": format!(
                     "HushSpec rule paths {} were exercised {} time(s) in this window.",
                     row.rule_paths.join(", "),
