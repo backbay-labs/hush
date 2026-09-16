@@ -1,0 +1,7 @@
+description: >-
+  The `metadata` rule (core spec 2.3): the child's whole `metadata` object
+  replaces the base's under every strategy, `deep_merge` included. Deep merging
+  descends into `extensions`, never into governance metadata, because a
+  half-inherited approval record would attest to something no one approved. Its
+  own directory because it needs a base carrying a full governance block, which
+  the shared core/merge base deliberately does not.

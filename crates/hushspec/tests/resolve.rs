@@ -215,3 +215,20 @@ fn temp_dir(prefix: &str) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     dir
 }
+
+/// Core spec 2.3: a document that declares `merge_strategy` without `extends`
+/// never reaches `merge`, and resolution still hands back a document carrying
+/// neither resolution instruction.
+#[test]
+fn resolution_drops_merge_strategy_from_a_one_hop_chain() {
+    let dir = temp_dir("resolve-one-hop");
+    fs::write(
+        dir.join("leaf.yaml"),
+        "hushspec: \"0.1.0\"\nname: leaf\nmerge_strategy: replace\n",
+    )
+    .unwrap();
+
+    let resolved = resolve_from_path(dir.join("leaf.yaml")).unwrap();
+    assert!(resolved.extends.is_none());
+    assert!(resolved.merge_strategy.is_none());
+}

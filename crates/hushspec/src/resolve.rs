@@ -115,7 +115,8 @@ pub struct ChainLink {
 /// A resolved policy with its provenance.
 #[derive(Clone, Debug)]
 pub struct Resolution {
-    /// The merged document (`extends` consumed).
+    /// The merged document: `extends` and `merge_strategy` are consumed by
+    /// resolution, so neither appears here (core spec 2.3).
     pub spec: HushSpec,
     /// Content hash of `spec` (canonical spec 5).
     pub content_hash: String,
@@ -142,8 +143,14 @@ impl Resolution {
                 document: source.clone(),
                 message: error.to_string(),
             })?;
+        // The wrapped document is a resolution output too, so it carries no
+        // resolution instructions (core spec 2.3). `extends` was already
+        // refused by the hash above; `merge_strategy` is inert here and is
+        // cleared so every `Resolution.spec` looks the same.
+        let mut spec = spec.clone();
+        spec.merge_strategy = None;
         Ok(Self {
-            spec: spec.clone(),
+            spec,
             content_hash: content_hash.clone(),
             chain: vec![ChainLink {
                 source,
@@ -472,7 +479,13 @@ where
         signature = status;
         resolved = Some(merged);
     }
-    let resolved = resolved.expect("at least the leaf");
+    // A resolved document declares neither `extends` nor `merge_strategy`
+    // (core spec 2.3): `merge` consumes both, and a one-hop chain never went
+    // through `merge` at all, so the leaf is cleaned here as well. Canonical
+    // form already ignores both fields, so the hash below does not move.
+    let mut resolved = resolved.expect("at least the leaf");
+    resolved.extends = None;
+    resolved.merge_strategy = None;
     let content_hash =
         canonical::content_hash(&resolved).map_err(|error| ResolveError::Canonical {
             document: leaf_source,

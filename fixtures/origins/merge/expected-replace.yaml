@@ -1,5 +1,4 @@
 hushspec: "0.1.0"
-merge_strategy: replace
 extensions:
   origins:
     default_behavior: minimal_profile

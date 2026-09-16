@@ -2,8 +2,21 @@ package hushspec
 
 import "slices"
 
-// Merge combines a base HushSpec with a child overlay using the child's
-// merge_strategy (defaults to deep_merge).
+// Merge folds a base and a child overlay into one resolved document using the
+// child's merge_strategy (defaults to deep_merge) -- core spec 2.3.
+//
+// `extends` and `merge_strategy` are resolution instructions, not policy: the
+// fold consumes both, so the document that comes back declares neither, under
+// every strategy. The canonical projection drops merge_strategy and refuses
+// extends anyway, so dropping them here moves no hash.
+//
+// Top-level Metadata is replaced wholesale, never field-merged: a child that
+// declares metadata supplies the entire object (the base's approved_by,
+// controls and the rest are gone even if the child restates none of them), and
+// a child that declares none inherits the base's object unchanged. This holds
+// under merge and deep_merge alike -- deep merging descends into extensions,
+// not into governance metadata, because a half-inherited approval record would
+// attest to something no one approved.
 func Merge(base, child *HushSpec) *HushSpec {
 	strategy := child.MergeStrategy
 	if strategy == "" {
@@ -14,6 +27,7 @@ func Merge(base, child *HushSpec) *HushSpec {
 	case MergeStrategyReplace:
 		result := deepCopySpec(child)
 		result.Extends = ""
+		result.MergeStrategy = ""
 		return result
 	case MergeStrategyMerge:
 		return mergeSpecs(base, child, false)
@@ -52,7 +66,8 @@ func mergeSpecs(base, child *HushSpec, deep bool) *HushSpec {
 		result.Description = child.Description
 	}
 	result.Extends = ""
-	result.MergeStrategy = child.MergeStrategy
+	result.MergeStrategy = ""
+	// Whole-object replacement, not a field merge: see Merge.
 	if child.Metadata != nil {
 		result.Metadata = child.Metadata
 	}

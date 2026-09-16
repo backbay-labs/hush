@@ -1,5 +1,4 @@
 hushspec: "0.1.0"
-merge_strategy: merge
 extensions:
   detection:
     prompt_injection:

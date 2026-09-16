@@ -159,6 +159,8 @@ type ChainLink struct {
 // Signature is the leaf's outcome -- what `receipt.policy.signature` carries.
 // It is nil when verification was not attempted.
 type Resolution struct {
+	// Spec is the merged document: resolution consumes `extends` and
+	// `merge_strategy`, so neither is ever set on it (core spec 2.3).
 	Spec        *HushSpec
 	ContentHash string
 	Chain       []ChainLink
@@ -187,7 +189,10 @@ func NewResolutionFromResolved(spec *HushSpec, source string) (*Resolution, erro
 		return nil, fmt.Errorf("no canonical form for %s: %w", describeSource(source), err)
 	}
 	return &Resolution{
-		Spec:        spec,
+		// A resolution's document carries no resolution instructions, however
+		// it was obtained: ContentHash above already refused a lingering
+		// `extends`, and `merge_strategy` is inert here (core spec 2.3).
+		Spec:        resolvedDocument(spec),
 		ContentHash: contentHash,
 		Chain:       []ChainLink{{Source: source, ContentHash: contentHash}},
 	}, nil
@@ -527,7 +532,10 @@ func resolveChain(
 		// the resolved content hash, spec section 3), and at the leaf it is
 		// the document the caller will enforce.
 		if index == 0 {
-			resolved = hop.spec
+			// The root is cleaned on the way in: a resolved document declares
+			// neither resolution field (core spec 2.3), Merge clears both for
+			// every longer chain, and a one-hop chain never reaches Merge.
+			resolved = resolvedDocument(hop.spec)
 		} else {
 			resolved = Merge(resolved, hop.spec)
 		}
@@ -700,12 +708,23 @@ func hopContentHash(spec *HushSpec) (string, error) {
 	if spec == nil {
 		return "", errors.New("cannot hash a nil HushSpec document")
 	}
-	// A shallow copy is enough: only the two scalar fields are cleared and
-	// canonicalization never writes.
+	return ContentHash(resolvedDocument(spec))
+}
+
+// resolvedDocument is a document with its resolution instructions cleared.
+// `extends` and `merge_strategy` say how to assemble a policy, not what it
+// permits, so they never appear in what an engine enforces or in what a chain
+// link hashes (core spec 2.3). A shallow copy is enough: only the two scalar
+// fields change, and neither canonicalization nor merging writes through the
+// shared pointers.
+func resolvedDocument(spec *HushSpec) *HushSpec {
+	if spec == nil || (spec.Extends == "" && spec.MergeStrategy == "") {
+		return spec
+	}
 	own := *spec
 	own.Extends = ""
 	own.MergeStrategy = ""
-	return ContentHash(&own)
+	return &own
 }
 
 var (

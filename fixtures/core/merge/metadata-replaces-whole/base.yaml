@@ -1,0 +1,19 @@
+hushspec: "0.2.0"
+name: metadata-replaces-whole-base
+metadata:
+  author: security@example.com
+  approved_by: ciso@example.com
+  approval_date: "2026-02-01"
+  classification: confidential
+  lifecycle_state: approved
+  policy_version: 7
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths:
+        - rules.egress
+rules:
+  egress:
+    allow:
+      - "base.example.com"
+    default: block

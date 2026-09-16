@@ -1,0 +1,13 @@
+# core 2.3: the child pulls in a base by `extends` and names
+# `merge_strategy: merge`, and the document that comes out declares neither
+# field. What the policy permits survives the fold; how it was assembled does
+# not.
+hushspec: "0.1.0"
+name: child-strategy-consumed
+extends: base
+merge_strategy: merge
+rules:
+  egress:
+    allow:
+      - "child.example.com"
+    default: block

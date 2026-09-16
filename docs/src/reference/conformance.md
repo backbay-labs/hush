@@ -202,7 +202,8 @@ fill in later. Paths are relative to
 | `deep_merge` (core and all three extensions) | 4.1 | `core/merge/child-deep-merge`, `posture/merge`, `origins/merge`, `detection/merge` | 2 |
 | `merge` (core and all three extensions) | 4.1 | `core/merge/child-merge`, `posture/merge/child-merge`, `origins/merge/child-merge`, `detection/merge/child-merge` | 2 |
 | `replace` (core and all three extensions) | 4.1 | `core/merge/child-replace`, `posture/merge/child-replace`, `origins/merge/child-replace`, `detection/merge/child-replace` | 2 |
-| `metadata` merge behaviour | 2.5, 4.1 | `core/merge/metadata/` (replaced and inherited) | 2 |
+| `metadata` merge behaviour | 2.5, 4.1 | `core/merge/metadata/` (replaced and inherited), `core/merge/metadata-replaces-whole/` (under `deep_merge`) | 2 |
+| A resolved document declares no `extends` or `merge_strategy` | 2.3 | `core/merge/resolved-output-is-clean/` | 2 |
 | Circular inheritance is refused | 2.3 | `core/merge/extends-cycle/` | 2 |
 | Multi-hop chain, folded root to leaf | 2.3, 4.2 | `core/merge/three-hop-chain/` and `core/evaluation/extends-three-hop-resolved` | 2, 3 |
 | Digest pinning (`#sha256:`) | 2.3 | `core/resolve/pin-valid`, `pin-mismatch`, `pin-malformed` | 4 |

@@ -219,7 +219,8 @@ class ChainLink:
 class Resolution:
     """A resolved policy and the evidence gathered while resolving it."""
 
-    #: The merged document. Never carries ``extends``.
+    #: The merged document. Resolution consumes ``extends`` and
+    #: ``merge_strategy``, so it never carries either (core spec 2.3).
     spec: HushSpec
     #: Content hash of :attr:`spec` (canonical spec section 5).
     content_hash: str
@@ -256,7 +257,10 @@ class Resolution:
         label = source if source is not None else MEMORY_SOURCE
         digest = content_hash(spec)
         return cls(
-            spec=spec,
+            # A resolution's document carries no resolution instructions,
+            # however it was obtained: the hash above already refused a
+            # lingering ``extends``, and ``merge_strategy`` is inert here.
+            spec=_own_document(spec),
             content_hash=digest,
             chain=[ChainLink(source=label, content_hash=digest)],
             signature=None,
@@ -529,7 +533,10 @@ def _resolve_inner(
 
     chain: list[ChainLink] = []
     if spec.extends is None:
-        resolved = spec
+        # A resolved document declares neither resolution field (core spec
+        # 2.3). `merge` clears both for every longer chain; a one-hop chain
+        # never reaches `merge`, so it is cleaned here.
+        resolved = _own_document(spec)
     else:
         if depth >= _MAX_EXTENDS_DEPTH:
             raise ResolveRejected(
