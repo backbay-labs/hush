@@ -13,7 +13,7 @@
 // the decisions, traces and receipts the free functions produce, including the
 // fail-closed denies a pattern outside the regex profile causes. A pattern that
 // will not compile is kept as a recorded error carrying the rule path, so the
-// evaluator denies with the same matched_rule and reason it always did, and
+// evaluator denies with that rule's matched_rule and reason, and
 // [CompilePolicy] reports it to callers that want compilation itself to fail.
 //
 // A [CompiledPolicy] is immutable once built and safe for concurrent use. It
@@ -145,7 +145,7 @@ func applicableBlocks(actionType string) (blocks []blockID, ok bool) {
 
 // compiledGlobSet is a path-glob list compiled to anchored regexes. A pattern
 // that does not compile is a nil entry, which matches nothing -- the behaviour
-// [PathGlobMatches] has always had for an uncompilable glob.
+// [PathGlobMatches] has for an uncompilable glob.
 type compiledGlobSet []*regexp.Regexp
 
 func compileGlobSet(patterns []string) compiledGlobSet {
@@ -501,8 +501,8 @@ func (p *CompiledPolicy) ContentHash() (string, error) {
 }
 
 // compilePolicy compiles without failing: a pattern outside the regex profile
-// is recorded on the entry that owns it (so the evaluator denies with the same
-// rule path and reason it always did) and remembered in compileErr for
+// is recorded on the entry that owns it (so the evaluator denies with that
+// entry's rule path and reason) and remembered in compileErr for
 // [CompilePolicy]. A nil spec compiles to an empty policy.
 func compilePolicy(spec *HushSpec) *CompiledPolicy {
 	policy := &CompiledPolicy{spec: spec}
@@ -796,8 +796,7 @@ func (p *CompiledPolicy) EvaluateWithContext(
 // ---------------------------------------------------------------------------
 
 // compiledCacheLimit bounds the number of documents the free-function cache
-// holds. Past it, evaluation still works -- it just compiles on the fly, as it
-// did before there was a cache.
+// holds. Past it, evaluation still works -- it just compiles on the fly.
 const compiledCacheLimit = 64
 
 var (
@@ -814,7 +813,7 @@ var (
 
 // cachedCompile is the compiled form of spec for the free functions: cached
 // when there is room, compiled on the fly otherwise. It never fails -- an
-// invalid pattern denies during evaluation exactly as it always has.
+// invalid pattern denies during evaluation instead.
 func cachedCompile(spec *HushSpec) *CompiledPolicy {
 	if spec == nil {
 		return compilePolicy(nil)

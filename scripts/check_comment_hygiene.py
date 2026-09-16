@@ -39,6 +39,7 @@ ALLOWLIST = ROOT / "scripts" / "comment-hygiene-allow.txt"
 #: Everything the check reads. Directories are scanned recursively; the loose
 #: files are the top-level text that ships with a release.
 SCAN_ROOTS = (
+    ".github",
     "crates",
     "packages",
     "scripts",
@@ -76,9 +77,9 @@ EXCLUDED_SUFFIXES = (".lock", ".sum")
 #: and what an allowlist entry names, so it is also the stable identifier for
 #: each rule -- edit one and its allowlist entries must be updated too.
 #:
-#: The two identifier-shaped rules stay case-sensitive: lowercased, `d19` and
-#: `p3-03` collide with ordinary variable names and version strings. Everything
-#: else is prose, where case carries no signal.
+#: `P3-03` stays case-sensitive: lowercased, `p3-03` collides with ordinary
+#: identifiers and version strings. Everything else is prose, where case
+#: carries no signal.
 PATTERNS: tuple[tuple[str, bool], ...] = (
     # Planning-document identifiers. The trailing boundary on the RFC rule is
     # what keeps it off real IETF citations: the receipt spec cites RFC 9562
@@ -87,7 +88,7 @@ PATTERNS: tuple[tuple[str, bool], ...] = (
     (r"\bP[0-6]-[0-9]{2}\b", True),
     (r"\bwave[- ][0-6]\b", False),
     (r"\(D[12]?[0-9]\)", True),
-    (r"\bD[12]?[0-9]\b", True),
+    (r"\bD[12]?[0-9]\b", False),
     # How the work was divided up.
     (r"another agent", False),
     (r"other agents?", False),

@@ -164,13 +164,9 @@ class TestRegexPortabilityScanner:
         # drifting apart. Patterns are serialized via yaml.safe_dump so
         # backslash-heavy patterns round-trip without manual YAML escaping.
         #
-        # Note: we only assert overall rejection (fail-closed), not that the
-        # error text names "RE2" specifically -- lowercase `\z` is not a
-        # recognized Python `re` escape at all (unlike `\Z`), so Python's own
-        # `re.compile` rejects it with a "bad escape" error before our
-        # portability scanner or the RE2-feature check ever runs. That is a
-        # pre-existing, engine-specific quirk unrelated to this scanner; the
-        # pattern is still correctly rejected either way.
+        # Only overall rejection is asserted, not the error text: Python's
+        # `re` rejects lowercase `\z` as a bad escape before the portability
+        # scanner runs.
         for pattern in self.REJECT:
             doc = {
                 "hushspec": "0.1.0",

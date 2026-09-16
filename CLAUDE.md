@@ -119,6 +119,23 @@ h2h keygen
 h2h sign policy.yaml --key h2h.key.pem --expires-in 90d
 h2h verify policy.yaml --key h2h.pub.pem
 h2h verify policy.yaml --keyring keyring.json --last-seen-version 4
+
+# Signed policy bundles (DSSE / in-toto)
+h2h bundle create policy.yaml --key h2h.key.pem --out policy.bundle.json
+h2h bundle verify policy.bundle.json --keyring keyring.json --policy policy.yaml
+h2h bundle inspect policy.bundle.json
+
+# Evidence chain: hash-linked log and decision receipts
+h2h log verify audit.jsonl
+h2h receipts verify receipt.json --policy policy.yaml --keyring keyring.json
+
+# Governance metadata, static analysis and compliance evidence
+h2h audit policy.yaml --controls
+h2h schema core
+h2h report audit.jsonl --policy policy.yaml --format json
+h2h panic status
+h2h completions zsh
+h2h version
 ```
 
 ### Conformance Testkit

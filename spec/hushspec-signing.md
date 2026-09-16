@@ -3,8 +3,8 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Date:** 2026-09-15
-**Supersedes:** Signature format 0.1.0 (schemas/hushspec-signature.v1.schema.json as shipped with HushSpec 0.1.x)
-**Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2
+**Supersedes:** Signature format 0.1.0, as shipped with HushSpec 0.1.x
+**Companion to:** HushSpec Core 1.0.0, Canonical Form 1.0.0, Decision Receipts 1.0.0
 
 ---
 

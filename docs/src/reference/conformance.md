@@ -171,7 +171,7 @@ fill in later. Paths are relative to
 | `patch_integrity` | 3.5 | `core/evaluation/patch-integrity`, `patch-integrity-defaults`, `patch-balance`, `patch-balance-zero` | 3 |
 | `shell_commands` | 3.9 | `core/evaluation/shell-commands`, `regex-dialect` | 3 |
 | `tool_access` | 3.7 | `core/evaluation/tool-access`, `tool-exact-match`, `tool-allowlist-deny`, `tool-glob-literal`, `tool-max-args-size` | 3 |
-| `computer_use` | 3.8 | `core/evaluation/computer-use`, `computer-use-guardrail-deny` | 3 |
+| `computer_use` | 3.8 | `core/evaluation/computer-use` | 3 |
 | `remote_desktop_channels` | 3.10 | `core/valid/remote-desktop-channels-rule`, `core/evaluation/rule-blocks-disabled` | 3 |
 | `input_injection` | 3.10 | `core/evaluation/input-injection` | 3 |
 | `browser_automation` | 3.11 | `core/evaluation/browser-automation` | 3 |
@@ -225,7 +225,7 @@ fill in later. Paths are relative to
 | Canonical form and `content_hash` | canonical 7 | `core/hash/` (15 vectors) | 4 |
 | Receipt format 0.2 | receipt 2 | `receipts/valid/`, `receipts/invalid/` | 4 |
 | Recorded `rule_trace`, per-case receipts | receipt 4.3 | `receipts/expected/<module>/<fixture>/<case>.json` | 4 |
-| Policy signing and verification | signing 2 | `signing/vectors.yaml` (16 cases) | 5 |
+| Policy signing and verification | signing 2 | `signing/vectors.yaml` (17 cases) | 5 |
 | Receipt signing | signing 8 | `receipts/signed/valid/`, `receipts/signed/invalid/` | 5 |
 | Hash-linked log | log | `log/valid/`, `log/invalid/` | 5 |
 | Policy bundle attestation | bundle 7 | `bundle/vectors.yaml` (8 cases) | 5 |

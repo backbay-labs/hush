@@ -10,7 +10,7 @@ Keys are standard PEM (PKCS#8 private, SubjectPublicKeyInfo public); `key_id` is
 
 Verification is an ordered list of ten checks, each with a fixed reason code, ending in `valid` or the first failure. Enforcement points configured to require signatures verify on load and refuse to evaluate against an unverified policy.
 
-Vectors: `fixtures/signing/vectors.yaml` lists sixteen cases signed with a published, test-only key.
+Vectors: `fixtures/signing/vectors.yaml` lists seventeen cases signed with a published, test-only key.
 
 ```bash
 openssl genpkey -algorithm ed25519 -out signing.key.pem

@@ -146,9 +146,11 @@ for the full list and directory layout). To add a new one:
    regex profile is RE2-class -- no lookaround/backreferences).
 6. **Focused scope.** One policy should address one compliance framework or deployment
    scenario, not try to cover everything.
-7. **Test.** Run the validator before submitting. Note that library policies do not yet
-   have per-policy evaluation test suites in `fixtures/library/` -- adding those is on
-   the roadmap, and contributions toward that are welcome.
+7. **Test.** Every library policy ships a control-tagged evaluation suite at
+   `fixtures/library/<vertical>/<name>.test.yaml`; add one with your policy. CI runs
+   `h2h test --fixtures fixtures/library --fail-on-uncovered`, so the suite must pass
+   and its cases must reach every rule block and every named secret pattern of the
+   resolved policy.
 
 ## Releasing
 

@@ -6,21 +6,22 @@ restrictive is not actually enforced. We treat these reports as high priority.
 
 ## Supported Versions
 
-HushSpec is in the `0.x` unstable development series (see
-[`spec/versioning.md`](./spec/versioning.md)). There is no long-term support branch yet:
-security fixes are made against the `main` branch and released in the next `0.x` version.
+Security fixes are made against the `main` branch and released in the next version of the
+`1.x` series. Support tracks the current major version: the latest `1.x` release of each
+component is supported, and earlier releases receive no backports.
 
 | Component | Version | Supported |
 |---|---|---|
-| Specification (`spec/`, `schemas/`) | latest `0.1.x` | Yes |
+| Specification (`spec/`, `schemas/`) | latest `1.x` | Yes |
 | Rust (`hushspec`, `hushspec-cli` / `h2h`) | latest published | Yes |
 | TypeScript (`@hushspec/core`) | latest published | Yes |
 | Python (`hushspec`) | latest published | Yes |
 | Go (`hushspec`) | latest published | Yes |
 | Anything older than the latest release | -- | No |
 
-Once the specification reaches `1.0.0`, this policy will be revised to define a support
-window per major version, per [`spec/versioning.md`](./spec/versioning.md).
+The reference implementation accepts `0.1.z` and `0.2.z` documents
+([`spec/versioning.md`](./spec/versioning.md) Section 4), so a fail-open bug reachable
+through a 0.x document is in scope; the 0.x releases themselves are not.
 
 ## Scope
 

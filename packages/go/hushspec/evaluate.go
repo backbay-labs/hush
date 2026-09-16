@@ -353,7 +353,7 @@ func (e *evaluator) skipAll(blocks []blockID, reason string) {
 // computeMask derives the active-block mask for this evaluation. Applicability
 // is checked in the order the specification states it -- presence, then the
 // action-shaped preconditions, then `enabled` and the conditions -- so an
-// inactive block carries exactly the reason the trace has always recorded.
+// inactive block carries the reason the trace records for that order.
 func (e *evaluator) computeMask(blocks []blockID, profile *compiledOriginProfile) blockMask {
 	var mask blockMask
 	for _, block := range blocks {

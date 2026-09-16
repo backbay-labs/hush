@@ -18,9 +18,8 @@ can be checked against the tree rather than taken on trust.
 | Python | Yes | Yes | Yes | Yes | Yes | Yes | **5** |
 | Go | Yes | Yes | Yes | Yes | Yes | Yes | **5** |
 
-All four SDKs now run every vector family the six levels require, including the
-bundle vectors that were the last Level 5 gap and the `.expect.yaml` error-code
-sidecars that were the last Level 1 gap.
+All four SDKs run every vector family the six levels require, including the
+bundle vectors and the `.expect.yaml` error-code sidecars.
 
 Two qualifications, neither of which changes the level:
 
@@ -55,11 +54,11 @@ Every runner walks the same sixteen directories -- `{core,posture,origins,detect
 
 | Vector family | Level | Rust | TypeScript | Python | Go |
 |---|:--:|---|---|---|---|
-| `fixtures/core/hash/` (14) | 4 | `crates/hushspec/tests/canonical_vectors.rs` | `tests/canonical-vectors.test.ts` | `tests/test_canonical_vectors.py` | `canonical_vectors_test.go` |
+| `fixtures/core/hash/` (15) | 4 | `crates/hushspec/tests/canonical_vectors.rs` | `tests/canonical-vectors.test.ts` | `tests/test_canonical_vectors.py` | `canonical_vectors_test.go` |
 | `fixtures/core/resolve/` | 4 | `crates/hushspec/tests/resolve_vectors.rs` | `tests/resolve-vectors.test.ts` | `tests/test_resolve_vectors.py` | `resolve_vectors_test.go` |
 | `fixtures/receipts/{valid,invalid}/` | 4 | `crates/hushspec/tests/receipt.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_vectors_test.go` |
 | `fixtures/receipts/expected/` | 4 | `crates/hushspec/tests/receipt_expected.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_expected_test.go` |
-| `fixtures/signing/vectors.yaml` (16) | 5 | `crates/hushspec/tests/signing_vectors.rs` | `tests/signing-vectors.test.ts` | `tests/test_signing_vectors.py` | `signing_vectors_test.go` |
+| `fixtures/signing/vectors.yaml` (17) | 5 | `crates/hushspec/tests/signing_vectors.rs` | `tests/signing-vectors.test.ts` | `tests/test_signing_vectors.py` | `signing_vectors_test.go` |
 | Verify-on-load, `receipt.policy.signature` | 5 | `crates/hushspec/src/{resolve,guard}.rs` tests | `tests/verify-load.test.ts`, `tests/guard-evidence.test.ts` | `tests/test_verify_on_load.py`, `tests/test_guard_evidence.py` | `resolve_verify_test.go`, `guard_test.go` |
 | `fixtures/log/{valid,invalid}/`, break identified by line | 5 | `crates/hushspec/tests/log_chain.rs` | `tests/log.test.ts` | `tests/test_log.py` | `log_test.go` |
 | `fixtures/receipts/signed/{valid,invalid}/` | 5 | `crates/hushspec/tests/receipt_signing.rs` | `tests/receipt-signing.test.ts` | `tests/test_receipt_signing.py` | `receipt_vectors_test.go` |
@@ -72,7 +71,7 @@ chain breaks, not only that it does.
 
 ## Error codes at Level 1
 
-All four fixture runners now assert the registered error code, not merely that
+All four fixture runners assert the registered error code, not merely that
 the vector was rejected. Each `fixtures/<module>/invalid/<name>.yaml` has a
 `<name>.expect.yaml` sidecar naming a code from
 [`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml)

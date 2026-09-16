@@ -2,8 +2,11 @@
 
 `h2h` is the reference command-line tool for HushSpec documents. It validates,
 resolves, lints, formats, diffs, evaluates, signs and scaffolds policies, and
-every subcommand is scriptable: machine-readable output through `--format json`
-and exit codes that mean the same thing everywhere.
+every reporting subcommand is scriptable: machine-readable output through
+`--format json` and exit codes that mean the same thing everywhere. The
+exceptions are `init`, `keygen`, `sign`, `panic` and `completions`, which
+take no `--format`, and `hash`, whose `--format` selects `digest` or
+`canonical`.
 
 ```bash
 h2h --help            # subcommand list
@@ -337,7 +340,7 @@ rule-by-rule trace forced on.
 ```bash
 h2h eval policy.yaml --type egress --target api.example.com
 h2h explain builtin:default --type file_read --target /etc/passwd
-h2h eval policy.yaml --action-json '{"action_type":"tool_call","target":"bash"}'
+h2h eval policy.yaml --action-json '{"type":"tool_call","target":"bash"}'
 h2h eval policy.yaml --action-file - --format receipt   # action from stdin
 ```
 

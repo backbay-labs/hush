@@ -142,7 +142,7 @@ Unknown keys within a mapping MUST be rejected (Section 2.1).
 rule-path = root *( "." segment ) [ selector ]
 root      = "rules" / "extensions"
 segment   = 1*( ALPHA / DIGIT / "_" )
-selector  = "[" 1*( %x20-5A / %x5C-7C / %x7E ) "]"   ; any character except "[" and "]"
+selector  = "[" 1*( %x20-5A / %x5C / %x5E-7E ) "]"   ; any character except "[" and "]"
 ```
 
 A selector names one entry of the list or mapping the preceding path resolves to, matching a list entry by its `name` or `id` field and a mapping by its key. Examples: `rules` (the whole rules object), `rules.egress` (one rule block), `rules.egress.allow` (one field), `rules.secret_patterns.patterns[ssn]` (one named secret pattern), `extensions.posture` (an extension subtree).
@@ -435,7 +435,7 @@ Version 0.1.0 described `guardrail` as permitting engine heuristics on borderlin
 
 Action identifiers are engine-defined strings (e.g., `"remote.session.connect"`, `"input.inject"`, `"clipboard.read"`) compared as exact strings. This specification does not mandate a fixed set of action identifiers.
 
-Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`, `fixtures/core/evaluation/computer-use-guardrail-deny.test.yaml`.
+Test vectors: `fixtures/core/evaluation/computer-use.test.yaml`.
 
 ### 3.9 `rules.remote_desktop_channels`
 

@@ -250,7 +250,7 @@ def es6_number(value: float) -> str:
         digits.pop()
         exponent += 1
     k = len(digits)
-    n = exponent + k  # value == 0.d1..dk x 10**n
+    n = exponent + k  # value == 0.<k digits> x 10**n
     ds = "".join(str(d) for d in digits)
     if k <= n <= 21:
         body = ds + "0" * (n - k)

@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn implied_enforcement_follows_d16() {
+    fn implied_enforcement_maps_decision_and_mode() {
         use EnforcementMode::{Enforce, Monitor};
         use EnforcementOutcome::{Allowed, Blocked, WouldBlock};
         assert_eq!(

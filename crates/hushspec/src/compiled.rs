@@ -24,9 +24,8 @@
 //! Compilation never silently skips a pattern. A pattern that is not
 //! expressible in the HushSpec regex profile is recorded with the profile
 //! compiler's error and **denies** the action whose block consults it,
-//! carrying that pattern's rule path -- exactly the deny the per-call
-//! compilation produced (core spec 3.14.3). A path glob or host pattern that
-//! cannot be compiled matches nothing, as before.
+//! carrying that pattern's rule path (core spec 3.14.3). A path glob or host
+//! pattern that cannot be compiled matches nothing.
 //!
 //! [`CompiledPolicy::compile`] itself is a hard error for a document that is
 //! not resolved: a policy still declaring `extends` has no single set of rules
@@ -78,7 +77,7 @@ pub enum CompileError {
 /// One policy-authored regex, compiled through the profile compiler.
 ///
 /// `Err` is kept, not dropped: the block that consults this pattern denies
-/// with the profile compiler's message, the same way per-call compilation did.
+/// with the profile compiler's message.
 pub(crate) type CompiledRegex = Result<Regex, RegexProfileError>;
 
 fn compile_regexes<'a>(patterns: impl IntoIterator<Item = &'a String>) -> Vec<CompiledRegex> {
@@ -90,8 +89,7 @@ fn compile_regexes<'a>(patterns: impl IntoIterator<Item = &'a String>) -> Vec<Co
 
 /// A set of path globs (core spec 3.14.1) compiled into anchored regexes.
 ///
-/// A glob that cannot be compiled is stored as `None` and matches nothing --
-/// the behaviour of the uncompiled matcher, which discarded the same failure.
+/// A glob that cannot be compiled is stored as `None` and matches nothing.
 #[derive(Debug, Default)]
 pub(crate) struct CompiledPathSet {
     matchers: Vec<Option<Regex>>,
@@ -237,7 +235,7 @@ pub(crate) struct CompiledBrowserAutomation {
 ///   compile is discovered once rather than at each action;
 /// * the free `evaluate(&HushSpec, ..)` wrappers start empty
 ///   ([`CompiledMatchers::lazy`]) and fill only the blocks the action actually
-///   consults, so a compile-per-call caller pays no more than it used to.
+///   consults, so a caller that compiles per call pays for nothing else.
 ///
 /// It borrows nothing from the document, so a compiled policy can own the
 /// document behind an `Arc` without being self-referential.
