@@ -7,7 +7,7 @@ import {
   resolveFromFileWithOptions,
   resolveWithOptionsAsync,
 } from './resolve.js';
-import { createHttpLoader } from './http-loader.js';
+import { createHttpLoader, type HttpLoaderConfig } from './http-loader.js';
 
 export interface PolicyProvider {
   load(): Promise<HushSpec>;
@@ -110,22 +110,15 @@ export class HttpProvider implements PolicyProvider {
 
   constructor(url: string, options?: {
     intervalMs?: number;
-    authHeader?: string;
     maxStaleMs?: number;
-    timeoutMs?: number;
-    maxSize?: number;
-    cacheDir?: string;
-  } & ProviderResolveOptions) {
+  } & HttpLoaderConfig & ProviderResolveOptions) {
     this.url = url;
     this.intervalMs = options?.intervalMs ?? 60_000;
     this.maxStaleMs = options?.maxStaleMs ?? Infinity;
     this.resolveOptions = options?.resolveOptions ?? {};
-    this.httpLoader = createHttpLoader({
-      authHeader: options?.authHeader,
-      timeoutMs: options?.timeoutMs,
-      maxSize: options?.maxSize,
-      cacheDir: options?.cacheDir,
-    });
+    // Every rule the HTTPS loader enforces (core spec 2.6.4) is configured
+    // where the loader is, so a provider cannot quietly relax one.
+    this.httpLoader = createHttpLoader(options);
   }
 
   async load(): Promise<HushSpec> {

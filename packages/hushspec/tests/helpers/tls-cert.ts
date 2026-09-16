@@ -1,0 +1,59 @@
+/**
+ * A test-only TLS certificate, so the HTTPS loader's transport paths can be
+ * exercised against a real `node:https` server.
+ *
+ * Self-signed, valid for `localhost` and `127.0.0.1`, and trusted by the tests
+ * through the loader's `tlsCa` option -- certificate verification itself is
+ * never turned off, so these tests still prove the certificate is checked
+ * against the hostname the policy named rather than against the pinned address.
+ * The private key below is published on purpose and secures nothing.
+ */
+
+export const TEST_TLS_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC38tUfygVmRgqa
+1QXcMYhk09PPPkJagCkhthFvEAGAo5twNewWZoKhUdDM7quJ3qxxk53ngzIk52W1
+gDjImtfZzKKATpHlT/QWa71zMJJm7kZNbjp/2QEQIOFsQ6AxVckrTCXt9NItj08I
+eBIaEdW0vN1aAHFTgmqrVp0TzzGdpgnaLIhG4TCbOazTHq1B0UX7B+nPN+nouItj
+NmHlL79y3EpOFdSSqy5NoR0N3H5UT41QDuGIsOiCX4yCq0xG9xzF0Dnue3T1+E9s
+ev1ciIHRr9nHxJ9PHexb8LAN9CAkGFcPgDWhIoYn7Yvb+DVjsqfXpf4Tx6/QwDQT
+ORJRSAFtAgMBAAECggEAB0+4Tebc13q7a2BCA98KJOvQgVSTR/9l4yIJlMI5NRCl
+TUzI+swnSNwBWLi4PVojvSRZBEppx1K7on7oT7AfGgtkS1JHW6riY+bzZRObD7FM
+pQ493NAJluEGF/E8k3ygt6WNFzJO2lW8YygWnBrb+JU0ye62xZ/ehCHrGDSSxcll
+UyYZANLBB5bi0q7hQzejTjpsggckE//YwENNE+6tVXxuQRbRVfABOqRh55Q3m4J0
+WTgKBXLl0Xdoal0w/wd/AacIQlFcGBpxEvQ/PHM51MaJH5egpHn+6V48hXVU0cXD
+2YuWAianqVSHx6/nL/Wm6RYGJFXj7O90vysaOym3VwKBgQDpF+wbCEauk44rkhqA
+WLNlLUhgrW3CK3P4RgSShdWRzSqD+Zls8EEJFFz05yZpx+kpIvMgkBTqAVvsNGeJ
+D3egV/lVA1eNFOs4yeRDGep1H3yAnOtTgNAifovo6jkCSfbihkSJPvgKHEAF3GC0
+spM6QiyC3FTCVoCnh/a3Yl3nHwKBgQDKBoqrXOqJ+etnJ6GZi6fnrTI4eLXUwrrG
+xucgOJs4jLnUVRucKuMRYIlMqidYVjlV8sreUU/LPx4I6e8IWiami6cU5uSTSVak
+AYqSXsHzp7e/DDYJO6v80Jfm+0t8mZMR/k5hQeVG8skFKAtD0Dkt7TPR/6J3vW6G
+3vxc5HGB8wKBgEIPw5zNtaqYqzxyBgzGFuHf+ZlczbSwOAfvYDBeue6+pQQOY4ta
+dDQsj0PhlyN3wv8jpqBd9W90vyasm4Ne3NqW1FVhwxh7C0dnAMh7udVD/Tc+QfvC
+kDqWfvSeHVYmvE/rGdWEASxsYUDH+qh7y/pA8viLlYIWnhPdFvFWcaKlAoGALTjV
+pZJA9e25ofefFs3KIfQE/9sVaLDGOmSfq/i/1iK6HiuG6Kg499TSJxUXhZCXeQPG
+IYm2ANr6ECi9VvNHH5S3K9ibZdTOzhuCN016wN3UJbHIDr0KvKa8ufmaZiPCZg60
+4NRtTDpggQT7sIxVoFAuf11nssH2kb4sY2bHeb0CgYBmoTeA0A+0b08A4W7pBuz8
+9C1uv+5JaXaxJ5LEnhO3Bkk60Hc2x6puaEpa4f+d/c27ryH+pKvX2rVOo7hvxIF2
+Zuq6UYtcAOkysHrcMP9aPlqnnlrzo4fjJnPTEqglpZpn9lVgOK5oZWCety4Xo8Qk
+Ngf87EcmcdHMAn7KlRAlCg==
+-----END PRIVATE KEY-----`;
+
+export const TEST_TLS_CERT = `-----BEGIN CERTIFICATE-----
+MIIDJzCCAg+gAwIBAgIUIvzsJxxmoOoQfeYByYSR5FA/DVgwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MDkxNjAxMDc0M1oYDzIxMjYw
+ODIzMDEwNzQzWjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwggEiMA0GCSqGSIb3DQEB
+AQUAA4IBDwAwggEKAoIBAQC38tUfygVmRgqa1QXcMYhk09PPPkJagCkhthFvEAGA
+o5twNewWZoKhUdDM7quJ3qxxk53ngzIk52W1gDjImtfZzKKATpHlT/QWa71zMJJm
+7kZNbjp/2QEQIOFsQ6AxVckrTCXt9NItj08IeBIaEdW0vN1aAHFTgmqrVp0TzzGd
+pgnaLIhG4TCbOazTHq1B0UX7B+nPN+nouItjNmHlL79y3EpOFdSSqy5NoR0N3H5U
+T41QDuGIsOiCX4yCq0xG9xzF0Dnue3T1+E9sev1ciIHRr9nHxJ9PHexb8LAN9CAk
+GFcPgDWhIoYn7Yvb+DVjsqfXpf4Tx6/QwDQTORJRSAFtAgMBAAGjbzBtMB0GA1Ud
+DgQWBBSQM2wSM0nS+wsERdii08N/Wx/P3jAfBgNVHSMEGDAWgBSQM2wSM0nS+wsE
+Rdii08N/Wx/P3jAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8AAAEwDwYDVR0TAQH/
+BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAJh5cbN+u0DXHH9ov2B0FsNPFc6Tk
+Q4KayVHXTiiMC3TtVx0Fe9GBz3M0v8nExHT/jfuxEPWVM2w5Y6bJD02k5pNBxyB+
+pSuEDgEX9egGEsdbd2qKvtXTXVNm0BGDoV8/CS5HRVtpj6F7aFVFY/zeCOBtRBNy
+lJ1CkIM9ROGBjeoTu3Zm/8eKl0//tC88TeJC0UAPiE+U1U11J9GqHO3TCv9MJJr/
+J61d0Ea82fHnIHBfq567bqA0n2kfVlBiFwIdVBN2tBRb1syo2t2Vw2ywFMXV9THl
+267HcJLW926R6UlcbcfAeOjH8GVCQa73SRue+2U+MPd59eZ1OmAt6P/RZg==
+-----END CERTIFICATE-----`;

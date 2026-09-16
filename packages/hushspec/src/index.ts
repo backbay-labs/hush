@@ -166,7 +166,14 @@ export {
   createHttpLoader,
   createSyncHttpLoader,
   fetchSignature,
+  isBlockedAddress,
+  resolveTarget,
+  CLOUD_METADATA_ADDRESSES,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_READ_TIMEOUT_MS,
+  DEFAULT_MAX_SIZE,
   type HttpLoaderConfig,
+  type HttpTarget,
 } from './http-loader.js';
 export {
   compilePolicy,
