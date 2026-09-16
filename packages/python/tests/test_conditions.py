@@ -747,6 +747,22 @@ class TestRatePredicate:
         assert context.counters == {"shell_commands": 7}
         assert evaluate_condition(self.GTE, context)
 
+    def test_a_counter_that_is_not_a_whole_number_is_dropped(self):
+        context = RuntimeContext.from_dict(
+            {
+                "counters": {
+                    "shell_commands": True,
+                    "egress_calls": "3",
+                    "tool_calls": 2.5,
+                    "file_writes": 4.0,
+                }
+            }
+        )
+        assert context.counters == {"file_writes": 4}
+        # A dropped counter is absent, so the predicate reading it is
+        # unevaluable and the block stays active.
+        assert evaluate_condition(self.GTE, context)
+
 
 class TestRateDecoding:
     """Rate shape violations are parse errors (core spec 3.13, code E001)."""

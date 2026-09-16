@@ -353,9 +353,31 @@ class RuntimeContext:
             session=dict(data.get("session") or {}),
             request=dict(data.get("request") or {}),
             custom=dict(data.get("custom") or {}),
-            counters=dict(data.get("counters") or {}),
+            counters=_coerce_counters(data.get("counters")),
             current_time=data.get("current_time"),
         )
+
+
+def _coerce_counters(counters: Any) -> dict[str, int]:
+    """The integer counters of an untyped ``counters`` mapping.
+
+    A counter is a whole number of events. A value that is not one -- a
+    boolean, a string, a fraction, a non-finite float -- is dropped rather
+    than compared, so the ``rate`` predicate reading it is unevaluable and
+    holds, which leaves the rule block active (core spec 3.13) instead of
+    switching a security control off on malformed input.
+    """
+    if not isinstance(counters, dict):
+        return {}
+    coerced: dict[str, int] = {}
+    for name, value in counters.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            coerced[name] = value
+        elif isinstance(value, float) and value.is_integer():
+            coerced[name] = int(value)
+    return coerced
 
 
 def decode_condition(when: Any) -> Optional[Condition]:
