@@ -1,13 +1,23 @@
-import { createHash, verify as edVerify, type KeyObject } from 'node:crypto';
-import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
+import {
+  createHash,
+  createPrivateKey,
+  sign as edSign,
+  verify as edVerify,
+  type KeyObject,
+} from 'node:crypto';
+import path from 'node:path';
+import { canonicalJson, canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
 import {
   Keyring,
+  keyIdFromPublicKey,
   keyringFromPublicKey,
   loadKeyring,
+  publicKeyPemFromPrivateKey,
   type KeyringDocument,
 } from './signing.js';
 import { resolutionFromResolved, type ChainLink, type Resolution, type SignatureStatus } from './resolve.js';
 import type { HushSpec } from './schema.js';
+import { SDK_NAME, SDK_VERSION } from './version.js';
 
 /**
  * Policy bundle verification (spec/hushspec-bundle.md, format 0.1).
@@ -17,9 +27,15 @@ import type { HushSpec } from './schema.js';
  * that produced it, and the resolver that produced them -- the evidence a
  * signature and a receipt each name by content hash but neither carries.
  *
- * This module verifies bundles; it does not build them. {@link verifyBundle}
- * runs the four ordered checks of bundle spec 5.2 and stops at the first
- * failure, reporting the {@link BundleReason} that check owns:
+ * {@link createBundle} builds one from a {@link Resolution} and
+ * {@link verifyBundle} checks one. Creation is deterministic: the payload is
+ * the RFC 8785 serialization of the statement and Ed25519 is deterministic, so
+ * the same resolution, `createdAt`, and resolver always yield the same bytes
+ * (bundle spec 4).
+ *
+ * {@link verifyBundle} runs the four ordered checks of bundle spec 5.2 and
+ * stops at the first failure, reporting the {@link BundleReason} that check
+ * owns:
  *
  * 1. shape -- envelope, statement, predicate;
  * 2. signature -- Ed25519 over `PAE(payloadType, payload)`, under a key the
@@ -270,6 +286,214 @@ export function bundleStatement(envelope: DsseEnvelope): BundleStatement {
   const outcome = readStatement(envelope);
   if (!outcome.ok) throw new BundleError(outcome.detail);
   return outcome.statement;
+}
+
+// --------------------------------------------------------------------------
+// Creation (bundle spec 4)
+// --------------------------------------------------------------------------
+
+/** The reference CLI's `resolver.tool` (bundle spec 4.2). */
+export const BUNDLE_RESOLVER_TOOL = 'h2h';
+
+/** Options for {@link createBundle} and {@link buildBundleStatement}. */
+export interface CreateBundleOptions {
+  /**
+   * PKCS#8 PEM Ed25519 private key that signs the bundle. Omitting it produces
+   * an **unsigned** bundle: a well-formed envelope with an empty `signatures`
+   * array, which bundle spec 3 says is not evidence and {@link verifyBundle}
+   * rejects. A tool that produces one must say so.
+   */
+  privateKeyPem?: string;
+  /**
+   * `predicate.created_at`. Default now. Pinning it is what makes a bundle
+   * byte-reproducible: two bundlers given the same resolution, the same
+   * `createdAt`, and the same resolver produce identical bytes (bundle spec 4).
+   */
+  createdAt?: Date | string;
+  /**
+   * `resolver.tool`. Default {@link SDK_NAME}. Overriding it is how a bundle
+   * some other tool produced is reproduced byte-for-byte: the vectors in
+   * `fixtures/bundle/` come from the reference CLI, so rebuilding them here
+   * needs `tool: 'h2h'` and that CLI's `version`.
+   */
+  tool?: string;
+  /** `resolver.version`. Default {@link SDK_VERSION}. */
+  version?: string;
+  /** Overrides the subject name, which otherwise comes from the policy. */
+  subjectName?: string;
+  /**
+   * Directory that filesystem chain sources are recorded relative to (bundle
+   * spec 4.4), so a bundle built in CI neither leaks nor depends on a runner's
+   * workspace path. `builtin:` and URL sources are already portable and are
+   * recorded unchanged, as is any path outside the directory.
+   */
+  baseDir?: string;
+}
+
+/**
+ * Build the in-toto statement for a resolved policy (bundle spec 4).
+ *
+ * The subject digest is recomputed from the canonical projection that goes
+ * into `predicate.resolved`, so the statement is internally consistent by
+ * construction: there is no path by which a bundle names the hash of a
+ * document other than the one it carries.
+ *
+ * @throws {BundleError} when the resolved document has no canonical form,
+ *   which for a {@link Resolution} means a resolver bug.
+ */
+export function buildBundleStatement(
+  resolution: Resolution,
+  options: CreateBundleOptions = {},
+): BundleStatement {
+  let resolved: JsonValue;
+  try {
+    // `canonicalJson` serializes the projection of canonical spec 3; parsing
+    // it back yields that projection as a JSON object, which is what
+    // `predicate.resolved` holds. Re-serializing it with RFC 8785 reproduces
+    // the same bytes, so the digest below is the policy's content hash.
+    resolved = JSON.parse(canonicalJson(resolution.spec)) as JsonValue;
+  } catch (error) {
+    throw new BundleError(`the resolved policy has no canonical form: ${describe(error)}`);
+  }
+  const hash = digestOf(canonicalizeValue(resolved));
+
+  const chain: ChainLink[] = resolution.chain.map(link => ({
+    source: relativeSource(link.source, options.baseDir),
+    content_hash: link.content_hash,
+    ...(link.signature === undefined ? {} : { signature: link.signature }),
+  }));
+
+  const spec = resolution.spec;
+  const policyVersion = spec.metadata?.policy_version;
+
+  return {
+    _type: BUNDLE_STATEMENT_TYPE,
+    subject: [
+      {
+        name: options.subjectName ?? spec.name ?? leafFileName(chain) ?? 'policy',
+        // The `sha256:` prefix is stripped here and only here, because that is
+        // the form in-toto requires of a subject digest (bundle spec 4.1).
+        digest: { sha256: hash.replace(/^sha256:/, '') },
+      },
+    ],
+    predicateType: BUNDLE_PREDICATE_TYPE,
+    predicate: {
+      bundle_version: BUNDLE_VERSION,
+      policy: {
+        content_hash: hash,
+        spec_version: spec.hushspec,
+        ...(spec.name === undefined ? {} : { name: spec.name }),
+        ...(policyVersion === undefined ? {} : { policy_version: policyVersion }),
+      },
+      chain,
+      resolved,
+      resolver: {
+        tool: options.tool ?? SDK_NAME,
+        version: options.version ?? SDK_VERSION,
+      },
+      created_at: timestamp(options.createdAt ?? new Date()),
+      // A bundler that attempted no verification omits the member rather than
+      // recording `verified: false`, which would assert a check that never ran
+      // (bundle spec 4.5).
+      ...(resolution.signature === undefined
+        ? {}
+        : { signature_verification: resolution.signature }),
+    },
+  };
+}
+
+/**
+ * The payload bytes of a statement: its RFC 8785 canonical serialization,
+ * UTF-8 encoded (bundle spec 4).
+ *
+ * @throws {BundleError} for a value RFC 8785 cannot represent, which a
+ *   statement's own members never are.
+ */
+export function bundleStatementBytes(statement: BundleStatement): Buffer {
+  try {
+    return Buffer.from(canonicalizeValue(statement as unknown as JsonValue), 'utf8');
+  } catch (error) {
+    throw new BundleError(`the statement has no canonical form: ${describe(error)}`);
+  }
+}
+
+/**
+ * Build a bundle for a resolution: signed when a private key is given,
+ * unsigned otherwise (bundle spec 3 and 4).
+ *
+ * The payload is canonical and Ed25519 is deterministic, so the result is a
+ * pure function of the resolution, `createdAt`, the resolver, and the key.
+ * `tests/bundle-create.test.ts` proves it by rebuilding
+ * `fixtures/bundle/bundles/valid.bundle.json` byte-for-byte.
+ *
+ * @throws {BundleError} when the resolved policy has no canonical form, or
+ *   when the private key will not load as Ed25519.
+ */
+export function createBundle(
+  resolution: Resolution,
+  options: CreateBundleOptions = {},
+): DsseEnvelope {
+  const payloadBytes = bundleStatementBytes(buildBundleStatement(resolution, options));
+  const payload = payloadBytes.toString('base64');
+  const signatures =
+    options.privateKeyPem === undefined
+      ? []
+      : [signPayload(payloadBytes, options.privateKeyPem)];
+  return { payloadType: BUNDLE_PAYLOAD_TYPE, payload, signatures };
+}
+
+/**
+ * Serialize a bundle the way the reference CLI writes one: pretty-printed with
+ * a trailing newline.
+ */
+export function bundleToJson(envelope: DsseEnvelope): string {
+  return `${JSON.stringify(envelope, null, 2)}\n`;
+}
+
+/** One DSSE signature over `PAE(payloadType, payload)` (bundle spec 3.1). */
+function signPayload(payloadBytes: Buffer, privateKeyPem: string): DsseSignature {
+  let key: KeyObject;
+  try {
+    key = createPrivateKey(privateKeyPem);
+  } catch (error) {
+    throw new BundleError(`could not read the PKCS#8 private key: ${describe(error)}`);
+  }
+  if (key.asymmetricKeyType !== 'ed25519') {
+    throw new BundleError(
+      `private key is ${String(key.asymmetricKeyType)}, not Ed25519; `
+        + 'bundle format 0.1 defines Ed25519 only',
+    );
+  }
+  return {
+    // The id is derived from the key itself, never declared independently: a
+    // verifier recomputes it and would reject any other value (signing 5.2).
+    keyid: keyIdFromPublicKey(publicKeyPemFromPrivateKey(privateKeyPem)),
+    sig: edSign(null, pae(BUNDLE_PAYLOAD_TYPE, payloadBytes), key).toString('base64'),
+  };
+}
+
+/**
+ * Record a filesystem source relative to `base` when it lies beneath it
+ * (bundle spec 4.4). `builtin:` and URL sources are already portable and are
+ * returned unchanged, as is any path that is not beneath `base`.
+ */
+function relativeSource(source: string, base?: string): string {
+  if (base === undefined || source.startsWith('builtin:') || source.includes('://')) {
+    return source;
+  }
+  const relative = path.relative(base, source);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return source;
+  }
+  // A bundle is JSON read on every platform, so the separator is `/`.
+  return relative.split(path.sep).join('/');
+}
+
+/** The leaf's file name, for a policy that declares no `name`. */
+function leafFileName(chain: ChainLink[]): string | undefined {
+  const source = chain[chain.length - 1]?.source;
+  const base = source?.split(/[/\\]/).pop();
+  return base === undefined || base === '' ? undefined : base;
 }
 
 // --------------------------------------------------------------------------

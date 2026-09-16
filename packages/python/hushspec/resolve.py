@@ -737,13 +737,20 @@ def default_signature_locator(source: str) -> bytes | None:
     for 0.1 layouts -- ``policy.yaml.sig`` first, then ``policy.sig``.
     ``builtin:`` sources have no envelope.
 
-    ``https:`` sources would be ``<url>.sig``, but this SDK ships no HTTP client
-    (the built-in loaders refuse URLs outright), so they resolve to ``None``
-    here: fetching a signature over the network is a decision for the same code
-    that fetched the policy, and it belongs in a caller-supplied
-    :data:`SignatureLocator`.
+    A URL source is ``<url>.sig``, fetched by whatever
+    :func:`register_scheme_loader` installed for its scheme -- fetching a
+    signature over the network must happen under the same rules as fetching the
+    policy did, so it belongs to the transport rather than here. With no
+    transport registered a URL source resolves to ``None``, exactly as a
+    reference to one would be refused.
     """
-    if source.startswith(("builtin:", "http://", "https://")) or source == MEMORY_SOURCE:
+    if source.startswith("builtin:") or source == MEMORY_SOURCE:
+        return None
+
+    locator = _registered_for(source, _SCHEME_SIGNATURE_LOCATORS)
+    if locator is not None:
+        return locator(source)
+    if source.startswith(("http://", "https://")):
         return None
 
     candidates = [Path(f"{source}.sig")]
@@ -793,6 +800,51 @@ def create_builtin_loader() -> Resolver:
     return _loader
 
 
+#: Loaders registered for a URL scheme, and the signature locators that go with
+#: them. A transport lives outside this module -- :mod:`hushspec.http_loader`
+#: is the one this SDK ships -- and registers itself here, so the built-in
+#: loaders gain a scheme without this module growing a network client or a
+#: dependency. Empty until something registers, which is why a URL reference is
+#: refused by default.
+_SCHEME_LOADERS: dict[str, Resolver] = {}
+_SCHEME_SIGNATURE_LOCATORS: dict[str, SignatureLocator] = {}
+
+
+def register_scheme_loader(
+    scheme: str,
+    loader: Resolver,
+    *,
+    signature_locator: SignatureLocator | None = None,
+) -> None:
+    """Serve ``<scheme>://`` references through *loader* in the default loaders.
+
+    Registering a scheme is a deployment decision, never a document's: a policy
+    that names an ``https:`` base is refused until the process that loads it
+    has said that fetching over the network is acceptable.
+
+    ``signature_locator`` is consulted by :func:`default_signature_locator` for
+    sources with this scheme, so a transport that can fetch a policy can also
+    fetch the ``<source>.sig`` beside it (signing spec section 7.1).
+    """
+    _SCHEME_LOADERS[scheme] = loader
+    if signature_locator is not None:
+        _SCHEME_SIGNATURE_LOCATORS[scheme] = signature_locator
+    else:
+        _SCHEME_SIGNATURE_LOCATORS.pop(scheme, None)
+
+
+def unregister_scheme_loader(scheme: str) -> None:
+    """Undo :func:`register_scheme_loader`, restoring the refusal."""
+    _SCHEME_LOADERS.pop(scheme, None)
+    _SCHEME_SIGNATURE_LOCATORS.pop(scheme, None)
+
+
+def _registered_for(reference: str, table: dict[str, Any]) -> Any | None:
+    """The entry registered for *reference*'s scheme, if any."""
+    scheme, separator, _rest = reference.partition("://")
+    return table.get(scheme) if separator else None
+
+
 def create_composite_loader() -> Resolver:
     """Public alias for the builtin + filesystem loader."""
     return _create_composite_loader()
@@ -804,9 +856,12 @@ def _create_composite_loader() -> Resolver:
     separators or dots is tried as a builtin before falling back to the
     filesystem.
 
-    `http://`/`https://` references are rejected outright: this loader has no
-    HTTP client, so silently handing a URL to the filesystem loader would fail
-    with a confusing "no such file or directory" error instead of a clear one.
+    A URL reference is served by the loader :func:`register_scheme_loader`
+    installed for its scheme, and refused outright when none is installed: this
+    module ships no HTTP client, and silently handing a URL to the filesystem
+    loader would fail with a confusing "no such file or directory" instead of a
+    clear refusal. :func:`hushspec.http_loader.install_https_loader` is what
+    installs ``https:``.
     """
 
     def _loader(reference: str, source: str | None) -> LoadedSpec:
@@ -816,10 +871,15 @@ def _create_composite_loader() -> Resolver:
                 raise ValueError(f"unknown builtin ruleset '{reference}'")
             return LoadedSpec(source=reference, spec=spec)
 
+        registered = _registered_for(reference, _SCHEME_LOADERS)
+        if registered is not None:
+            return registered(reference, source)
+
         if reference.startswith("http://") or reference.startswith("https://"):
             raise ValueError(
                 "HTTP-based policy loading is not supported by the default "
-                f"loader; provide a custom `loader` for '{reference}'"
+                f"loader; call hushspec.http_loader.install_https_loader() or "
+                f"provide a custom `loader` for '{reference}'"
             )
 
         if "/" not in reference and "\\" not in reference and "." not in reference:
