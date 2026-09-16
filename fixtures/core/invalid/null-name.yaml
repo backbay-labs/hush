@@ -1,0 +1,7 @@
+# The core schema types `name` as a string, so a written `null` is a value of
+# the wrong type rather than an absent name (canonical spec 2.2).
+hushspec: "1.0.0"
+name: null
+rules:
+  egress:
+    default: block
