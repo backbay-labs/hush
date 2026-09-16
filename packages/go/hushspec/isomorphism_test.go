@@ -35,6 +35,9 @@ var isomorphicEntryPoints = []string{
 	"Version", "SupportedMinors", "SupportedVersions", "IsSupported", "SupportedMinor",
 	// Error codes.
 	"ErrorCodes", "ErrorCodeOf", "ValidationError",
+	// Tool adapters.
+	"MapClaudeToolToAction", "CreateSecureToolHandler",
+	"MapOpenAIToolCall", "MapMCPToolCall", "ExtractDomain",
 }
 
 func TestPackageExportsTheIsomorphicEntryPoints(t *testing.T) {

@@ -301,6 +301,52 @@ describe('mapClaudeToolToAction', () => {
     expect(action.type).toBe('file_write');
   });
 
+  it('maps str_replace_based_edit_tool create to file_write carrying the whole file', () => {
+    const action = mapClaudeToolToAction('str_replace_based_edit_tool', {
+      command: 'create',
+      path: '/app/x.env',
+      file_text: 'AKIA0123',
+    });
+    expect(action.type).toBe('file_write');
+    expect(action.target).toBe('/app/x.env');
+    expect(action.content).toBe('AKIA0123');
+  });
+
+  it('maps the undated text_editor name', () => {
+    const action = mapClaudeToolToAction('text_editor', {
+      command: 'view',
+      path: '/etc/passwd',
+    });
+    expect(action.type).toBe('file_read');
+    expect(action.target).toBe('/etc/passwd');
+  });
+
+  it('maps any dated revision of a built-in tool', () => {
+    const action = mapClaudeToolToAction('bash_20250124', { command: 'ls' });
+    expect(action.type).toBe('shell_command');
+    expect(action.target).toBe('ls');
+  });
+
+  it('maps web_fetch to egress against the URL host', () => {
+    const action = mapClaudeToolToAction('web_fetch', {
+      url: 'https://evil.example.com/x',
+    });
+    expect(action.type).toBe('egress');
+    expect(action.target).toBe('evil.example.com');
+  });
+
+  it('maps fetch to egress against the URL host', () => {
+    const action = mapClaudeToolToAction('fetch', { url: 'https://api.example.com/data' });
+    expect(action.type).toBe('egress');
+    expect(action.target).toBe('api.example.com');
+  });
+
+  it('maps a missing field to an empty target', () => {
+    const action = mapClaudeToolToAction('bash', {});
+    expect(action.type).toBe('shell_command');
+    expect(action.target).toBe('');
+  });
+
   it('maps computer tool to computer_use', () => {
     const action = mapClaudeToolToAction('computer', { action: 'screenshot' });
     expect(action.type).toBe('computer_use');

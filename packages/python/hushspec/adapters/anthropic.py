@@ -19,7 +19,6 @@ import re
 from typing import Any, Callable
 
 from hushspec.adapters.mcp import extract_domain
-
 from hushspec.evaluate import EvaluationAction, args_size_of
 from hushspec.middleware import HushGuard
 
@@ -54,12 +53,6 @@ def _member(block: Any, name: str) -> Any:
 
 def _text(value: Any) -> str:
     return value if isinstance(value, str) else ""
-
-
-def _host(url: str) -> str:
-    """The host a fetch would reach, reduced as the evaluator reduces an egress
-    target, or the raw value when there is none."""
-    return extract_domain(url)
 
 
 def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
@@ -124,7 +117,7 @@ def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:
     if base in _FETCH_TOOLS:
         return EvaluationAction(
             type="egress",
-            target=_host(_text(tool_input.get("url"))),
+            target=extract_domain(_text(tool_input.get("url"))),
         )
 
     if name.startswith("mcp__"):

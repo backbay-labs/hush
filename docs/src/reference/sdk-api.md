@@ -285,7 +285,7 @@ good.
 
 | Framework | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Anthropic / Claude | -- | `mapClaudeToolToAction`, `createSecureToolHandler` | `adapters.map_claude_tool_to_action`, `adapters.create_secure_tool_handler` | `MapAnthropicToolUse`, `GuardedAnthropicToolHandler` | Maps a `tool_use` block onto the action a policy evaluates: `bash` to `shell_command`, text editor to `file_read` / `file_write`, `computer` to `computer_use`, `web_fetch` to `egress` on the host, `mcp__server__tool` to the inner tool name | No adapter imports the framework it adapts -- blocks are read structurally |
+| Anthropic / Claude | -- | `mapClaudeToolToAction`, `createSecureToolHandler` | `adapters.map_claude_tool_to_action`, `adapters.create_secure_tool_handler` | `MapClaudeToolToAction`, `CreateSecureToolHandler` | Maps a `tool_use` block onto the action a policy evaluates: `bash` to `shell_command`, text editor to `file_read` / `file_write`, `computer` to `computer_use`, `web_fetch` to `egress` on the host, `mcp__server__tool` to the inner tool name | No adapter imports the framework it adapts -- blocks are read structurally |
 | OpenAI | -- | `mapOpenAIToolCall`, `createOpenAIGuard` | `adapters.map_openai_tool_call`, `adapters.create_openai_guard` | `MapOpenAIToolCall`, `GuardedOpenAIToolHandler` | | |
 | MCP | -- | `mapMCPToolCall`, `extractDomain`, `createMCPGuard` | `adapters.map_mcp_tool_call`, `adapters.extract_domain`, `adapters.create_mcp_guard` | `MapMCPToolCall`, `ExtractDomain`, `GuardedMCPToolHandler` | | |
 | Vercel AI SDK | -- | `mapVercelToolCall`, `createVercelGuard` | -- | -- | Gates each tool's `execute` | |
