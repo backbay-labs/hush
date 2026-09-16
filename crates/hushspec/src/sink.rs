@@ -33,6 +33,21 @@ pub trait ReceiptSink: Send + Sync {
     fn record_policy_event(&self, _event: &crate::log::PolicyEvent) -> Result<(), SinkError> {
         Ok(())
     }
+
+    /// How a `sink.error` observer event names this sink in its `source`.
+    ///
+    /// Defaults to the implementing type's own name; override it with
+    /// something an operator can place, such as a path or an endpoint.
+    fn name(&self) -> &'static str {
+        short_type_name(std::any::type_name::<Self>())
+    }
+}
+
+/// The last segment of a fully qualified type path, with any generic
+/// arguments left off: `hushspec::sink::FilteredSink` is `FilteredSink`.
+fn short_type_name(path: &'static str) -> &'static str {
+    let bare = path.split('<').next().unwrap_or(path);
+    bare.rsplit("::").next().unwrap_or(bare)
 }
 
 /// Appends receipts as JSON Lines to a file.

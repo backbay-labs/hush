@@ -55,7 +55,7 @@ use crate::compiled::CompiledPolicy;
 use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, PANIC_RULE};
 use crate::generated_contract::{EXTENSION_KEYS, RULE_KEYS};
 use crate::log::PolicyEvent;
-use crate::observer::{EvaluationObserver, ObservableEvaluator};
+use crate::observer::{ErrorEvent, EvaluationObserver, ObservableEvaluator};
 use crate::panic::PanicState;
 use crate::policy::{Policy, PolicyError};
 use crate::receipt::{
@@ -64,7 +64,7 @@ use crate::receipt::{
     unverified_policy_receipt,
 };
 use crate::resolve::{Resolution, ResolveError, SignatureStatus, own_content_hash};
-use crate::sink::ReceiptSink;
+use crate::sink::{ReceiptSink, SinkError};
 
 /// Decides whether a `warn` may proceed. Returning `true` is the runtime
 /// saying "the operator confirmed this"; the receipt records
@@ -959,8 +959,11 @@ impl HushGuard {
         }
         if let (Some(sink), Some(receipt)) = (self.sink.as_ref(), receipt.as_ref()) {
             // A sink must never break enforcement: a full disk is not a reason
-            // to let an action through, nor to stop one.
-            let _ = sink.send(receipt);
+            // to let an action through, nor to stop one. The failure still
+            // reaches the observers, so the gap in the evidence is visible.
+            if let Err(error) = sink.send(receipt) {
+                self.report_sink_failure(sink.as_ref(), &error);
+            }
         }
         self.observers.notify_evaluation_completed(
             action,
@@ -975,8 +978,19 @@ impl HushGuard {
     fn emit_policy_event(&self, event: PolicyEvent) {
         if let Some(sink) = self.sink.as_ref() {
             // Sinks must not break policy loading, either.
-            let _ = sink.record_policy_event(&event);
+            if let Err(error) = sink.record_policy_event(&event) {
+                self.report_sink_failure(sink.as_ref(), &error);
+            }
         }
+    }
+
+    /// Put a sink failure on the observer channel as a `sink.error` event,
+    /// named by the sink that refused.
+    fn report_sink_failure(&self, sink: &dyn ReceiptSink, error: &SinkError) {
+        self.observers.notify_error(ErrorEvent::sink_error(
+            error.to_string(),
+            Some(sink.name().to_string()),
+        ));
     }
 }
 
@@ -990,9 +1004,10 @@ struct Evaluated {
 mod tests {
     use super::*;
     use crate::observer::{
-        ErrorEvent, EvaluationCompletedEvent, MetricsCollector, PolicyLoadedEvent,
+        ErrorEvent, EvaluationCompletedEvent, MetricsCollector, ObserverEventType,
+        PolicyLoadedEvent,
     };
-    use crate::sink::{NullSink, SinkError};
+    use crate::sink::{FilteredSink, NullSink, SinkError};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const EGRESS_POLICY: &str = r#"
@@ -1608,6 +1623,80 @@ rules:
         assert_eq!(capture.policies.lock().expect("lock").len(), 1);
         guard.report_load_failure("boom", Some("p.yaml"));
         assert_eq!(capture.errors.lock().expect("lock").len(), 1);
+    }
+
+    /// Refuses everything it is handed, and says so.
+    struct FailingSink;
+
+    impl ReceiptSink for FailingSink {
+        fn send(&self, _receipt: &DecisionReceipt) -> Result<(), SinkError> {
+            Err(SinkError::Chain("no space left on device".to_string()))
+        }
+        fn record_policy_event(&self, _event: &PolicyEvent) -> Result<(), SinkError> {
+            Err(SinkError::Chain("no space left on device".to_string()))
+        }
+    }
+
+    #[derive(Default)]
+    struct ErrorCapture {
+        errors: Mutex<Vec<ErrorEvent>>,
+    }
+
+    impl EvaluationObserver for ErrorCapture {
+        fn on_error(&self, event: &ErrorEvent) {
+            self.errors.lock().expect("lock").push(event.clone());
+        }
+    }
+
+    #[test]
+    fn a_sink_that_refuses_a_receipt_leaves_the_decision_and_raises_sink_error() {
+        let capture = Arc::new(ErrorCapture::default());
+        let guard = HushGuard::builder()
+            .sink(Box::new(FailingSink))
+            .observer(capture.clone())
+            .build_from_policy(policy(EGRESS_POLICY))
+            .expect("builds");
+        // The policy event at construction failed too; only the decision's own
+        // failure is under test here.
+        capture.errors.lock().expect("lock").clear();
+
+        let allowed = guard.check(&action("egress", "api.example.com"));
+        assert!(allowed.allowed(), "a full disk must not stop an action");
+        let denied = guard.check(&action("egress", "evil.test"));
+        assert!(!denied.allowed(), "nor let one through");
+
+        let errors = capture.errors.lock().expect("lock");
+        assert_eq!(errors.len(), 2, "one event per refused receipt");
+        assert_eq!(errors[0].event_type, ObserverEventType::SinkError);
+        assert_eq!(errors[0].source.as_deref(), Some("FailingSink"));
+        assert!(errors[0].error.contains("no space left on device"));
+    }
+
+    #[test]
+    fn a_sink_that_refuses_a_policy_event_still_lets_the_policy_take_effect() {
+        let capture = Arc::new(ErrorCapture::default());
+        let guard = HushGuard::builder()
+            .sink(Box::new(FailingSink))
+            .observer(capture.clone())
+            .build_from_policy(policy(EGRESS_POLICY))
+            .expect("builds");
+
+        assert!(guard.check(&action("egress", "api.example.com")).allowed());
+
+        let errors = capture.errors.lock().expect("lock");
+        let load = &errors[0];
+        assert_eq!(load.event_type, ObserverEventType::SinkError);
+        assert_eq!(load.source.as_deref(), Some("FailingSink"));
+        assert!(load.error.contains("no space left on device"));
+    }
+
+    #[test]
+    fn a_sink_names_itself_by_its_own_type() {
+        assert_eq!(NullSink.name(), "NullSink");
+        assert_eq!(
+            FilteredSink::deny_only(Box::new(NullSink)).name(),
+            "FilteredSink"
+        );
     }
 
     #[test]
