@@ -217,9 +217,8 @@ When adding a new policy to the library:
 
 ## Compliance Control Matrix
 
-Every policy declares its control mappings in `metadata.controls`, so this matrix is
-derived from the policies rather than maintained alongside them. Regenerate the
-per-policy view with:
+Every policy declares its control mappings in `metadata.controls`. The matrix below is
+maintained by hand and must be updated with them. Print the per-policy view with:
 
 ```bash
 h2h audit --controls library/healthcare/hipaa-base.yaml
