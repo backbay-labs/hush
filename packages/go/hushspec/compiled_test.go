@@ -154,6 +154,19 @@ func TestCompilePolicyRejectsNilSpec(t *testing.T) {
 	}
 }
 
+// Core spec 2.3: compiling an unresolved document would drop every rule block
+// its base contributes.
+func TestCompilePolicyRejectsADocumentThatStillExtends(t *testing.T) {
+	spec, err := Parse("hushspec: \"0.1.0\"\nextends: \"builtin:default\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	_, err = CompilePolicy(spec)
+	if err == nil || !strings.Contains(err.Error(), "builtin:default") {
+		t.Fatalf("expected a refusal naming the unresolved reference, got %v", err)
+	}
+}
+
 // TestCompiledPolicyConcurrentUse exercises the shared-policy path the race
 // detector is there to police.
 func TestCompiledPolicyConcurrentUse(t *testing.T) {

@@ -456,9 +456,10 @@ func (e *CompileError) Unwrap() error { return e.Err }
 // CompilePolicy compiles a resolved HushSpec document once, so repeated
 // evaluations do no pattern compilation at all.
 //
-// It is fail-closed: any pattern outside the HushSpec regex profile is a
-// [CompileError] rather than a policy that denies later, since a pattern the
-// engine cannot evaluate is a policy the author cannot rely on. Path globs and
+// It is fail-closed: a document that still declares `extends` is refused, and
+// any pattern outside the HushSpec regex profile is a [CompileError] rather
+// than a policy that denies later, since a pattern the engine cannot evaluate
+// is a policy the author cannot rely on. Path globs and
 // host patterns are not regexes and are never an error -- an uncompilable one
 // matches nothing, exactly as it does during evaluation.
 //
@@ -467,6 +468,15 @@ func (e *CompileError) Unwrap() error { return e.Err }
 func CompilePolicy(spec *HushSpec) (*CompiledPolicy, error) {
 	if spec == nil {
 		return nil, errors.New("cannot compile a nil HushSpec document")
+	}
+	if spec.Extends != nil {
+		// Core spec 2.3: an engine MUST refuse to evaluate a document that
+		// still declares `extends`. Its rules are not the rules that would be
+		// in force -- every block its base contributes would silently be
+		// missing -- so there is nothing safe to compile.
+		return nil, fmt.Errorf(
+			"policy still declares 'extends: %s'; resolve the chain before compiling it",
+			*spec.Extends)
 	}
 	policy := compilePolicy(spec)
 	if policy.compileErr != nil {
