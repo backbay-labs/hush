@@ -9,6 +9,10 @@ on:
         description: "Existing tag to (re)build artifacts for"
         required: true
 
+# Read-only by default; the jobs that publish widen it themselves.
+permissions:
+  contents: read
+
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
