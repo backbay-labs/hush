@@ -791,6 +791,9 @@ proptest! {
         assert_block_preserved_or_overridden!(base_rules, child_rules, merged_rules, browser_automation);
         assert_block_preserved_or_overridden!(base_rules, child_rules, merged_rules, code_execution);
 
+        // Core spec 2.3: the child names `deep_merge`, and the resolved
+        // document that comes back says nothing about how it was assembled.
         prop_assert!(merged.extends.is_none());
+        prop_assert!(merged.merge_strategy.is_none());
     }
 }
