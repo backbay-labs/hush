@@ -23,9 +23,11 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - **HushSpec 1.0.0 is declared** (core spec 10.2; versioning spec 10). A `1.0.Z` document is
   treated exactly as a `0.2.Z` document; the reference implementation accepts `0.1`, `0.2`, and
   `1.0` and rejects any other minor with E002. The one validation change from 0.2 is that `name`,
-  when present, MUST be non-empty (core spec 2), rejected with E004. Vectors:
+  when present, MUST be non-empty (core spec 2), rejected with E004; a `0.Y.Z` document keeps the
+  frozen format's behaviour and is not held to it. Vectors:
   `fixtures/core/valid/version-1-0.yaml`, `fixtures/core/evaluation/version-1-0.test.yaml`,
-  `fixtures/core/invalid/version-unsupported-minor.yaml`, `fixtures/core/invalid/empty-name.yaml`.
+  `fixtures/core/invalid/version-unsupported-minor.yaml`, `fixtures/core/invalid/empty-name.yaml`,
+  `fixtures/core/valid/empty-name-0-2.yaml`.
 - **Conformance levels 4 and 5** are normative in `spec/hushspec-core.md` section 8, closing the
   forward references the receipt and signing specifications already made. **Level 4 (Auditor)**:
   receipt format 0.2, a canonical `policy.content_hash` over the resolved document, a `rule_trace`
@@ -46,7 +48,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `schemas/hushspec-receipt.v1.schema.json` is the 0.2 schema.
 - `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
   (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
-  expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
+  expiry, rollback protection, and 17 verification vectors under `fixtures/signing/` signed
   with a published test-only key.
 - `spec/hushspec-log.md` and `spec/hushspec-bundle.md`: the hash-linked receipt log and the
   policy bundle attestation format, with their schemas and vectors.
@@ -612,6 +614,57 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   reports `L004` and `L017` by design.
 
 ### Fixed
+
+**Spec and SDKs**
+
+- `when` conditions evaluate to true, false, or unevaluable (core spec 3.13). `not` over an
+  unevaluable predicate (a `rate` counter the engine did not supply, a `capability` on a policy
+  with no posture extension, a time window whose clock cannot be read) is itself unevaluable and
+  leaves the block active; `all_of` and `any_of` propagate unevaluable the same way. Previously
+  `not` negated the held result into false and switched the block off. Vectors:
+  `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`,
+  `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
+- The posture guard looks the current state up before consulting the capability table (posture
+  spec 3.3), so an action whose `posture.current` names an undeclared state is denied whatever
+  its action type, including the types the table does not gate. Vector:
+  `fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml`.
+- Host normalization ends the URL authority at a backslash as well as at `/`, `?` and `#` (core
+  spec 3.14.2), the way browsers parse special-scheme URLs, so
+  `http://blocked.example\@allowed.example` names `blocked.example`. Vector:
+  `fixtures/core/evaluation/host-normalization-backslash.test.yaml`.
+- `ChainedFileSink` in every SDK derives `seq` and `prev_hash` from the file's last entry while
+  holding the write lock (log spec 4), so two sinks or processes appending to one log extend a
+  single chain instead of forking it.
+- Log verification validates every receipt payload as a 0.2 receipt (log spec 8, step 8). The
+  TypeScript, Python and Go verifiers previously checked only `receipt_version`; their receipt
+  parsers now enforce the required members, types, closed enums and timestamp spelling the Rust
+  model enforces, and every SDK rejects a timestamp naming an impossible calendar date. Vector:
+  `fixtures/log/invalid/malformed-receipt-line-2.jsonl`.
+- The v1 schemas bound the month, day, hour, minute and second of every timestamp to its
+  calendar range and carry `format: date-time`.
+- Signing spec 6.2 step 1 defers the `format_version` and `algorithm` value constraints to
+  steps 2 and 3, so `unsupported_format_version` and `unsupported_algorithm` stay reachable. The
+  vector `impossible-signed-at-date` expects `malformed_envelope` for a February 30 `signed_at`.
+- TypeScript: the regex profile's `.`, negated classes and negated shorthands consume an astral
+  character as one code point and no longer backtrack into half a surrogate pair
+  (`fixtures/core/evaluation/regex-dialect.test.yaml`); canonicalization refuses an integer
+  outside the safe range (canonical spec 4.3) instead of hashing the rounded double;
+  `HttpProvider` fetches a policy's `.sig` sidecar under the same TLS, loopback and
+  authorization configuration as the policy; bundle creation treats only a `..` path segment as
+  leaving `baseDir`.
+- Auditing with the rule trace switched off records no trace at all; `AuditConfig`'s
+  low-overhead mode no longer allocates a trace it discards.
+
+**CLI and tooling**
+
+- `h2h report` treats a file holding any log entry as a log and verifies its chain, so a plain
+  receipt prepended to a log cannot carry it past verification; mixed record types are reported.
+- Control coverage (lint L011, `h2h audit --controls`, `h2h report`) counts a mapping only when
+  its rule path resolves in the document.
+- The GitHub Action reads its inputs from the environment instead of interpolating them into
+  the shell script.
+- The `h2h` build script watches the branch ref and `packed-refs` as well as `.git/HEAD`,
+  including from a linked worktree, so `h2h version` reports the current commit.
 
 **Library**
 
