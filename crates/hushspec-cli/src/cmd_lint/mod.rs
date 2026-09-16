@@ -604,6 +604,9 @@ pub(crate) fn run_all_checks(spec: &HushSpec, file: &str) -> Vec<LintFinding> {
     // L021: a `when.capability` no posture state grants
     checks::check_ungranted_capability_conditions(spec, file, &mut findings);
 
+    // L022: an empty string in a tool or host list
+    checks::check_empty_list_entries(spec, file, &mut findings);
+
     findings
 }
 

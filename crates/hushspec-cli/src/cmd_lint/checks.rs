@@ -875,6 +875,66 @@ fn rule_block_conditions(rules: &Rules) -> Vec<(&'static str, Option<&Condition>
     ]
 }
 
+/// L022 (warning): an empty string in `tool_access.allow`, `block`, or
+/// `require_confirmation`, or in an origins overlay list. Tool names match
+/// exactly (core spec 3.7) and host patterns match normalized hosts (core
+/// spec 3.3), so an empty entry can never match anything: it is dead weight
+/// and usually a templating or editing mistake.
+pub(super) fn check_empty_list_entries(
+    spec: &HushSpec,
+    file: &str,
+    findings: &mut Vec<LintFinding>,
+) {
+    let mut report = |path: String, entries: &[String]| {
+        for (index, entry) in entries.iter().enumerate() {
+            if entry.is_empty() {
+                findings.push(LintFinding::keyed(
+                    "L022",
+                    "warning",
+                    format!("{path}[{index}] is an empty string and can never match"),
+                    file,
+                    format!("{path}[{index}]"),
+                ));
+            }
+        }
+    };
+
+    if let Some(tool_access) = spec
+        .rules
+        .as_ref()
+        .and_then(|rules| rules.tool_access.as_ref())
+    {
+        report("rules.tool_access.allow".to_string(), &tool_access.allow);
+        report("rules.tool_access.block".to_string(), &tool_access.block);
+        report(
+            "rules.tool_access.require_confirmation".to_string(),
+            &tool_access.require_confirmation,
+        );
+    }
+
+    let profiles = spec
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.origins.as_ref())
+        .map(|origins| origins.profiles.as_slice())
+        .unwrap_or_default();
+    for profile in profiles {
+        let prefix = format!("extensions.origins.profiles.{}", profile.id);
+        if let Some(overlay) = &profile.tool_access {
+            report(format!("{prefix}.tool_access.allow"), &overlay.allow);
+            report(format!("{prefix}.tool_access.block"), &overlay.block);
+            report(
+                format!("{prefix}.tool_access.require_confirmation"),
+                &overlay.require_confirmation,
+            );
+        }
+        if let Some(overlay) = &profile.egress {
+            report(format!("{prefix}.egress.allow"), &overlay.allow);
+            report(format!("{prefix}.egress.block"), &overlay.block);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

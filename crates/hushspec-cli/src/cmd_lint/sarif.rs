@@ -209,6 +209,13 @@ pub(super) const RULES: &[RuleDoc] = &[
         full: "With a posture extension present, a `when.capability` that no state grants can never be true, so its rule block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported.",
         level: "warning",
     },
+    RuleDoc {
+        id: "L022",
+        name: "empty-list-entry",
+        short: "An empty string in a tool or host list can never match.",
+        full: "Tool names match exactly (core spec 3.7) and host patterns match normalized hosts (core spec 3.3), so an empty entry in `tool_access.allow`, `block`, `require_confirmation`, or an origins overlay list is dead weight and usually an editing mistake.",
+        level: "warning",
+    },
 ];
 
 fn rule_index(code: &str) -> Option<usize> {

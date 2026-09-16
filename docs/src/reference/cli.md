@@ -244,6 +244,7 @@ rows.
 | `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
 | `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
 | `L021` | warning | ungranted-capability | A `when.capability` naming a capability no posture state grants can never be true while the policy has a posture extension, so the block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported. |
+| `L022` | warning | empty-list-entry | An empty string in `tool_access.allow`, `block`, or `require_confirmation`, or in an origins overlay list, can never match a tool or host (core spec 3.3, 3.7) and is usually an editing mistake. |
 | `L020` | info | inert-condition | The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. Listing all seven days is likewise the default. An `all_of`/`any_of` with no members is always true. (There is no "never true" window to report: core spec 3.13 keeps a block active when a window cannot be evaluated.) |
 
 ## `h2h fmt`
@@ -470,15 +471,16 @@ Print a published HushSpec JSON Schema. The schemas are embedded in the binary,
 so this works offline and from an installed release.
 
 ```bash
-h2h schema core > hushspec-core.v0.schema.json
-h2h schema hushspec-receipt.v0.schema.json     # full file name also accepted
+h2h schema core > hushspec-core.v1.schema.json
+h2h schema hushspec-receipt.v1.schema.json     # full file name also accepted
+h2h schema core.v0                              # the frozen 0.x lineage
 h2h schema --list
 h2h schema --list --format json
 ```
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | `core`, `detection`, `evaluator-test`, `keyring`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
+| `[NAME]` | A short name for the current `.v1.` lineage — `core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector` — the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -519,7 +521,7 @@ what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
 key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
 recomputes that id from the public key rather than trusting a keyring's claim.
 
-`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v0.schema.json)
+`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v1.schema.json)
 listing the trusted keys, each of which may carry `not_after` (retire a key
 without invalidating older signatures) or `revoked: true` (reject everything it
 signed). `--key` is the one-key shorthand.
@@ -697,7 +699,7 @@ A mapping that names a rule block (`rules.egress`) is evidenced by everything th
 
 ### Formats
 
-`--format json` emits one document validated by [`schemas/hushspec-report.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v0.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
+`--format json` emits one document validated by [`schemas/hushspec-report.v1.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v1.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
 
 `--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
 
