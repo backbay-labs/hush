@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
@@ -48,21 +48,20 @@ const manifest = YAML.parse(
   readFileSync(path.join(fixturesRoot, 'vectors.yaml'), 'utf8'),
 ) as Manifest;
 
-/** Resolve a policy the way `h2h bundle verify --policy` does. */
-function resolvePolicy(filePath: string): Resolution | undefined {
-  if (!existsSync(filePath)) return undefined;
+/**
+ * Resolve a policy the way `h2h bundle verify --policy` does.
+ *
+ * A case that names a policy names one the suite can resolve: an unresolvable
+ * one would report `policy_mismatch` whatever the bundle said, so the case
+ * would pass without testing anything.
+ */
+function resolvePolicy(filePath: string): Resolution {
   const parsed = parse(readFileSync(filePath, 'utf8'));
-  if (!parsed.ok) return undefined;
-  try {
-    return resolveWithOptions(parsed.value, {
-      source: filePath,
-      loader: createCompositeLoader(),
-    });
-  } catch {
-    // A policy that will not resolve has nothing to compare, which is check
-    // 4's own failure -- never a thrown error out of the runner.
-    return undefined;
-  }
+  if (!parsed.ok) throw new Error(`${filePath} does not parse: ${parsed.error}`);
+  return resolveWithOptions(parsed.value, {
+    source: filePath,
+    loader: createCompositeLoader(),
+  });
 }
 
 describe('policy bundle vectors', () => {
@@ -80,16 +79,12 @@ describe('policy bundle vectors', () => {
         ),
       );
       const bundleJson = readFileSync(path.join(fixturesRoot, testCase.bundle), 'utf8');
-      const policy = testCase.policy == null
-        ? undefined
-        : resolvePolicy(path.join(fixturesRoot, testCase.policy));
-
       const outcome = verifyBundle(bundleJson, {
         keyring,
         now: testCase.now ?? manifest.defaults.now,
-        // A policy the manifest names but that does not resolve is still
-        // check 4's input: `verifyBundle` reports `policy_mismatch` for it.
-        ...(testCase.policy == null ? {} : { policy: policy ?? { hushspec: '0.0.0' } }),
+        ...(testCase.policy == null
+          ? {}
+          : { policy: resolvePolicy(path.join(fixturesRoot, testCase.policy)) }),
       });
 
       if (testCase.expect === 'valid') {

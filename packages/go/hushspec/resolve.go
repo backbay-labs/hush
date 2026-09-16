@@ -131,7 +131,16 @@ type SignatureStatus struct {
 
 // FailedSignature is the status recorded for a document whose verification
 // failed at the check named by reason.
+//
+// keyID is what the envelope *claimed*, which is worth recording even though
+// nothing about it was trusted -- it is how a rotation mistake stays
+// distinguishable from an attack. It is dropped unless it is a well-formed
+// key id: the receipt schema admits only `sha256:` plus 64 lowercase hex, and
+// an envelope that failed its own shape check may carry anything at all.
 func FailedSignature(reason, keyID string) SignatureStatus {
+	if !digestPinPattern.MatchString(keyID) {
+		keyID = ""
+	}
 	return SignatureStatus{Verified: false, KeyID: keyID, Reason: reason}
 }
 
@@ -225,9 +234,6 @@ const (
 	ReasonCycle = "cycle"
 	// ReasonMaxDepth is an extends chain longer than [maxExtendsDepth].
 	ReasonMaxDepth = "max_depth"
-	// ReasonSignatureRequired is a hop that required a signature and had none
-	// that verified. [SignatureRequiredError.Status] carries the finer code.
-	ReasonSignatureRequired = "signature_required"
 )
 
 // InvalidPinError reports an `extends` reference whose digest-pin fragment is
@@ -273,11 +279,11 @@ func (e *MaxDepthError) Error() string {
 // ResolveReason maps a resolution failure onto its reason code, so a vector
 // runner or a CLI reports the same vocabulary the spec uses. It reports false
 // for an error that carries no code of its own (an I/O or parse failure).
+//
+// The codes below are the ones only the walk can produce; everything a
+// verifier also produces comes from [ReasonFromError], so one error never
+// reports two different codes depending on which helper read it.
 func ResolveReason(err error) (string, bool) {
-	var digestErr *DigestMismatchError
-	if errors.As(err, &digestErr) {
-		return ReasonDigestMismatch, true
-	}
 	var pinErr *InvalidPinError
 	if errors.As(err, &pinErr) {
 		return ReasonInvalidPin, true
@@ -294,11 +300,7 @@ func ResolveReason(err error) (string, bool) {
 	if errors.As(err, &depthErr) {
 		return ReasonMaxDepth, true
 	}
-	var signatureErr *SignatureRequiredError
-	if errors.As(err, &signatureErr) {
-		return ReasonSignatureRequired, true
-	}
-	return "", false
+	return ReasonFromError(err)
 }
 
 // SignatureRequiredError reports the first chain hop that [ResolveOptions]

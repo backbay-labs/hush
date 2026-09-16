@@ -107,6 +107,16 @@ class TestFailClosed:
             == "rules.secret_patterns.patterns.lookahead.pattern"
         )
 
+    def test_compile_refuses_a_document_that_still_extends(self):
+        # Core spec 2.3: compiling an unresolved document would drop every rule
+        # block its base contributes.
+        spec = parse_or_raise('hushspec: "0.1.0"\nextends: "builtin:default"\n')
+        for kwargs in ({}, {"strict": False}):
+            with pytest.raises(CompileError) as excinfo:
+                compile_policy(spec, **kwargs)
+            assert excinfo.value.rule_path == "extends"
+            assert "builtin:default" in str(excinfo.value)
+
     def test_lenient_compile_records_every_offending_pattern(self):
         compiled = compile_policy(_invalid_pattern_policy(), strict=False)
         assert [error.rule_path for error in compiled.errors] == [

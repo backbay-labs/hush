@@ -350,17 +350,17 @@ fn verify(args: VerifyArgs) -> i32 {
     };
 
     // Check 4's input: the caller's own resolution of the policy file. A
-    // policy that will not resolve is a `policy_mismatch`, not a crash --
-    // there is nothing to compare.
+    // policy that will not resolve -- because it is absent, or because the
+    // chain will not merge -- is a `policy_mismatch` (bundle spec 5.2): there
+    // is nothing to compare the bundle against.
     let resolution = match args.policy.as_deref() {
         Some(reference) => {
             match crate::cmd_resolve::load_with(reference, &hushspec::ResolveOptions::default()) {
                 Ok(resolution) => Some(resolution),
-                Err(crate::cmd_resolve::LoadError::NotFound(message)) => {
-                    eprintln!("{} {message}", "error:".red());
-                    return 2;
-                }
-                Err(crate::cmd_resolve::LoadError::Failed(message)) => {
+                Err(
+                    crate::cmd_resolve::LoadError::NotFound(message)
+                    | crate::cmd_resolve::LoadError::Failed(message),
+                ) => {
                     report_failure(
                         &BundleVerifyError {
                             reason: hushspec::bundle::BundleReason::PolicyMismatch,

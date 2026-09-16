@@ -26,6 +26,8 @@ from hushspec.bundle import (
     PREDICATE_TYPE,
     STATEMENT_TYPE,
     REASON_DSSE_SIGNATURE_MISMATCH,
+    REASON_KEY_RETIRED,
+    REASON_KEY_REVOKED,
     DsseEnvelope,
     build_statement,
     bundle_to_json,
@@ -197,6 +199,41 @@ def test_a_created_bundle_verifies() -> None:
     assert result.policy_checked
 
 
+def test_retirement_is_graceful_and_revocation_is_not() -> None:
+    # Spec section 5.2 check 2: a bundle produced while the key was current
+    # keeps verifying after the key is retired; one produced at or after
+    # `not_after` does not, and a revoked key attests nothing at all.
+    bundle = bundle_to_json(
+        create_bundle(
+            vector_resolution(),
+            private_key_pem=read_key("test-signing.key.pem"),
+            created_at=VECTOR_CREATED_AT,
+        )
+    )
+    document = json.loads((KEYS / "keyring.json").read_text(encoding="utf-8"))
+
+    def with_entry(**fields: object) -> dict[str, object]:
+        return {**document, "keys": [{**document["keys"][0], **fields}]}
+
+    assert verify_bundle(
+        bundle,
+        keyring=with_entry(not_after="2026-09-16T00:00:00.000Z"),
+        now=VECTOR_CREATED_AT,
+    ).valid
+
+    retired = verify_bundle(
+        bundle, keyring=with_entry(not_after=VECTOR_CREATED_AT), now=VECTOR_CREATED_AT
+    )
+    assert not retired.valid
+    assert retired.reason == REASON_KEY_RETIRED
+
+    revoked = verify_bundle(
+        bundle, keyring=with_entry(revoked=True), now=VECTOR_CREATED_AT
+    )
+    assert not revoked.valid
+    assert revoked.reason == REASON_KEY_REVOKED
+
+
 def test_an_unsigned_bundle_is_refused_at_verification() -> None:
     # Spec section 3: an unsigned bundle is well formed and is not evidence.
     bundle = create_bundle(vector_resolution(), created_at=VECTOR_CREATED_AT)
@@ -247,6 +284,33 @@ def test_a_source_outside_base_dir_is_left_alone() -> None:
     # `builtin:strict` is portable already; the leaf is not beneath `crates/`.
     assert statement.predicate.chain[0].source == "builtin:strict"
     assert statement.predicate.chain[1].source == resolution.chain[1].source
+
+
+def test_a_symlinked_base_records_the_same_source(tmp_path: Path) -> None:
+    # A chain link's ``source`` is a provenance label the four SDKs must spell
+    # the same way, and the other three compare paths lexically: resolving
+    # symlinks here would make the same policy recorded differently depending
+    # on how the base directory was reached.
+    real = tmp_path / "real"
+    (real / "policies").mkdir(parents=True)
+    policy = real / "policies" / "leaf.yaml"
+    policy.write_text(
+        'hushspec: "0.1.0"\nname: leaf\nrules:\n  egress:\n'
+        '    allow: ["api.example.com"]\n    default: block\n',
+        encoding="utf-8",
+    )
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+
+    resolution = resolve_with_options_or_raise(
+        parse_or_raise(policy.read_text(encoding="utf-8")),
+        source=str(link / "policies" / "leaf.yaml"),
+        loader=create_composite_loader(),
+    )
+    statement = build_statement(
+        resolution, created_at=VECTOR_CREATED_AT, base_dir=link
+    )
+    assert [c.source for c in statement.predicate.chain] == ["policies/leaf.yaml"]
 
 
 def test_signature_verification_is_omitted_when_none_was_attempted() -> None:

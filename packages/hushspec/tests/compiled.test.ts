@@ -94,6 +94,20 @@ describe('CompileError', () => {
     },
   };
 
+  it('is raised for a document that still declares extends', () => {
+    // Core spec 2.3: compiling an unresolved document would drop every rule
+    // block its base contributes.
+    const unresolved: HushSpec = { hushspec: '0.1.0', extends: 'builtin:default' };
+    for (const compile of [
+      () => compilePolicy(unresolved),
+      () => compileResolution({ spec: unresolved, content_hash: '', chain: [] }),
+      () => compilePolicy(unresolved, { strict: false }),
+    ]) {
+      expect(compile).toThrow(CompileError);
+      expect(compile).toThrow(/builtin:default/);
+    }
+  });
+
   it('is raised for a pattern outside the regex profile', () => {
     expect(() => compilePolicy(badSpec)).toThrow(CompileError);
     try {

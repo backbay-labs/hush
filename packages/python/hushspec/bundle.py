@@ -12,8 +12,9 @@ The four checks of spec section 5.2, in order, stopping at the first failure:
 1. **Shape** -- the envelope and the statement it carries are well formed and
    name the constants this build knows (:data:`REASON_MALFORMED_BUNDLE`).
 2. **Signature** -- some signature verifies as Ed25519 over the PAE, under a
-   key the keyring holds whose id is *recomputed* from the public key
-   (:data:`REASON_UNKNOWN_KEY_ID`, :data:`REASON_DSSE_SIGNATURE_MISMATCH`).
+   key the keyring holds and still trusts, whose id is *recomputed* from the
+   public key (:data:`REASON_UNKNOWN_KEY_ID`, :data:`REASON_KEY_REVOKED`,
+   :data:`REASON_KEY_RETIRED`, :data:`REASON_DSSE_SIGNATURE_MISMATCH`).
 3. **Subject** -- ``predicate.resolved`` canonicalizes to the content hash the
    predicate declares, and to the subject digest
    (:data:`REASON_SUBJECT_DIGEST_MISMATCH`).
@@ -48,10 +49,11 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 from hushspec.canonical import (
@@ -85,6 +87,8 @@ __all__ = [
     "PREDICATE_TYPE",
     "STATEMENT_TYPE",
     "REASON_DSSE_SIGNATURE_MISMATCH",
+    "REASON_KEY_RETIRED",
+    "REASON_KEY_REVOKED",
     "REASON_MALFORMED_BUNDLE",
     "REASON_POLICY_MISMATCH",
     "REASON_SUBJECT_DIGEST_MISMATCH",
@@ -123,6 +127,8 @@ _PAE_PREFIX = b"DSSEv1"
 REASON_MALFORMED_BUNDLE = "malformed_bundle"
 REASON_DSSE_SIGNATURE_MISMATCH = "dsse_signature_mismatch"
 REASON_UNKNOWN_KEY_ID = "unknown_key_id"
+REASON_KEY_REVOKED = "key_revoked"
+REASON_KEY_RETIRED = "key_retired"
 REASON_SUBJECT_DIGEST_MISMATCH = "subject_digest_mismatch"
 REASON_POLICY_MISMATCH = "policy_mismatch"
 
@@ -130,11 +136,18 @@ REASON_POLICY_MISMATCH = "policy_mismatch"
 #: verifier never invents a code.
 BUNDLE_REASON_CODES: tuple[str, ...] = (
     REASON_MALFORMED_BUNDLE,
-    REASON_DSSE_SIGNATURE_MISMATCH,
     REASON_UNKNOWN_KEY_ID,
+    REASON_KEY_REVOKED,
+    REASON_KEY_RETIRED,
+    REASON_DSSE_SIGNATURE_MISMATCH,
     REASON_SUBJECT_DIGEST_MISMATCH,
     REASON_POLICY_MISMATCH,
 )
+
+#: Rank of the reason a failed signature contributes, lowest first: spec
+#: section 5.2 check 2 reports a withdrawn key ahead of a wrong signature, the
+#: way the signing specification's own checks 5 and 6 precede its check 8.
+_REASON_PRECEDENCE = {REASON_KEY_REVOKED: 0, REASON_KEY_RETIRED: 1}
 
 
 class BundleError(ValueError):
@@ -769,15 +782,28 @@ def _relative_source(source: str, base_dir: str | Path | None) -> str:
 
     ``builtin:`` and URL sources are already portable and are returned
     unchanged, as is any path that is not beneath *base_dir*.
+
+    The comparison is lexical, and deliberately so: resolving symlinks would
+    make the same policy reached through a symlinked base record a different
+    ``source`` than one reached directly, and a chain link's ``source`` is a
+    provenance label that every SDK must spell the same way.
     """
     if base_dir is None or source.startswith("builtin:") or "://" in source:
         return source
     try:
-        relative = Path(source).resolve().relative_to(Path(base_dir).resolve())
+        relative = os.path.relpath(source, os.fspath(base_dir))
     except (OSError, ValueError):
         return source
+    # Only a `..` *segment* leaves the base directory: a name that merely
+    # starts with two dots (`..cache/policy.yaml`) is beneath it like any other.
+    if (
+        relative in (os.curdir, os.pardir)
+        or relative.startswith(os.pardir + os.sep)
+        or os.path.isabs(relative)
+    ):
+        return source
     # A bundle is JSON read on every platform, so the separator is `/`.
-    return relative.as_posix() or source
+    return PurePath(relative).as_posix()
 
 
 def _subject_name(
@@ -895,7 +921,9 @@ def verify_bundle(
     predicate = statement.predicate
 
     # -- check 2: DSSE signature ------------------------------------------- #
-    signature_failure = _check_signatures(envelope, trusted, pae_bytes)
+    signature_failure = _check_signatures(
+        envelope, trusted, pae_bytes, predicate.created_at
+    )
     if isinstance(signature_failure, BundleVerifyResult):
         return signature_failure
     key_ids = signature_failure
@@ -944,17 +972,26 @@ def verify_bundle(
 
 
 def _check_signatures(
-    envelope: DsseEnvelope, trusted: Any, pae_bytes: bytes
+    envelope: DsseEnvelope, trusted: Any, pae_bytes: bytes, created_at: str
 ) -> "list[str] | BundleVerifyResult":
     """Check 2: the keys that verified, or the failure to report.
 
     A signature entry counts only when the keyring holds its ``keyid`` *and*
     the id recomputed from that key's public bytes matches what the bundle
-    declared -- a verifier must not trust the id a bundle names itself.
+    declared -- a verifier must not trust the id a bundle names itself -- *and*
+    the keyring still vouches for that key: a revoked entry attests nothing,
+    and a retired one attests nothing dated at or after its ``not_after``
+    (signing spec section 5.3).
     """
     key_ids: list[str] = []
-    named_a_trusted_key = False
-    mismatch_detail = ""
+    refusal: BundleVerifyResult | None = None
+
+    def record(reason: str, detail: str) -> None:
+        nonlocal refusal
+        if refusal is None or _REASON_PRECEDENCE.get(reason, 2) < _REASON_PRECEDENCE.get(
+            refusal.reason or "", 2
+        ):
+            refusal = BundleVerifyResult.fail(reason, detail)
 
     for signature in envelope.signatures:
         entry = trusted.find(signature.keyid)
@@ -965,29 +1002,42 @@ def _check_signatures(
                 continue
         except SigningError:
             continue
-        named_a_trusted_key = True
+        if entry.revoked:
+            record(REASON_KEY_REVOKED, f"key {signature.keyid} is revoked")
+            continue
+        if entry.not_after is not None and _retired_at(entry.not_after, created_at):
+            record(
+                REASON_KEY_RETIRED,
+                f"key {signature.keyid} was retired at {entry.not_after}; the bundle "
+                f"is dated {created_at}",
+            )
+            continue
         try:
             raw = base64.b64decode(signature.sig, validate=True)
         except (binascii.Error, ValueError):
-            mismatch_detail = f"signature by {signature.keyid} is not valid base64"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"signature by {signature.keyid} is not valid base64",
+            )
             continue
         if len(raw) != 64:
-            mismatch_detail = (
-                f"signature by {signature.keyid} is {len(raw)} bytes, not 64"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"signature by {signature.keyid} is {len(raw)} bytes, not 64",
             )
             continue
         if _verify_raw(entry.public_key, raw, pae_bytes):
             key_ids.append(signature.keyid)
         else:
-            mismatch_detail = f"Ed25519 verification failed for {signature.keyid}"
+            record(
+                REASON_DSSE_SIGNATURE_MISMATCH,
+                f"Ed25519 verification failed for {signature.keyid}",
+            )
 
     if key_ids:
         return key_ids
-    if named_a_trusted_key:
-        return BundleVerifyResult.fail(
-            REASON_DSSE_SIGNATURE_MISMATCH,
-            mismatch_detail or "no signature verified under a trusted key",
-        )
+    if refusal is not None:
+        return refusal
     if not envelope.signatures:
         return BundleVerifyResult.fail(
             REASON_DSSE_SIGNATURE_MISMATCH,
@@ -998,6 +1048,23 @@ def _check_signatures(
         f"none of the {len(envelope.signatures)} signature(s) names a key in the "
         f"keyring ({len(trusted.keys)} trusted)",
     )
+
+
+def _retired_at(not_after: str, created_at: str) -> bool:
+    """Whether a key retired at *not_after* was already retired when a bundle
+    dated *created_at* was produced (spec section 5.2 check 2).
+
+    Both are ``YYYY-MM-DDTHH:MM:SS.sssZ`` -- the keyring schema and the
+    statement shape check admit no other form -- so an unparseable one is a
+    keyring this verifier will not read a retirement out of, and the key is
+    treated as current.
+    """
+    try:
+        retired = datetime.fromisoformat(not_after.replace("Z", "+00:00"))
+        created = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return created >= retired
 
 
 def _compare_policy(

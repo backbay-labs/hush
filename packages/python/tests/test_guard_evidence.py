@@ -10,10 +10,10 @@ from pathlib import Path
 from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.log import ChainedFileSink, EntryType, verify_log
 from hushspec.middleware import (
-    UNVERIFIED_POLICY_HASH,
     EnforcementConfig,
     HushGuard,
 )
+from hushspec.canonical import content_hash
 from hushspec.parse import parse_or_raise
 from hushspec.receipt import POLICY_UNVERIFIED_RULE, Actor
 from hushspec.sinks import CallbackSink
@@ -175,7 +175,9 @@ class TestRefusedPolicy:
         assert receipt.decision == Decision.DENY
         assert receipt.matched_rule == POLICY_UNVERIFIED_RULE
         assert receipt.rule_trace == []
-        assert receipt.policy.content_hash == UNVERIFIED_POLICY_HASH
+        # The refused document's own hash, so an auditor can see which load
+        # was refused; `signature.verified` is what says it was not proven.
+        assert receipt.policy.content_hash == content_hash(parse_or_raise(POLICY))
         assert receipt.policy.signature.verified is False
         assert receipt.enforcement.outcome == "blocked"
 

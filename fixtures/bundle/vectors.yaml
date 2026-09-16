@@ -25,6 +25,19 @@ cases:
   expect:
     invalid: unknown_key_id
   note: signed with keys/test-untrusted, which the default keyring does not hold
+- name: revoked-key
+  bundle: bundles/valid.bundle.json
+  keyring: ../signing/keys/keyring-revoked.json
+  expect:
+    invalid: key_revoked
+  note: the keyring holds the signing key and has withdrawn it; a revoked key attests nothing
+- name: retired-key
+  bundle: bundles/valid.bundle.json
+  keyring: ../signing/keys/keyring-retired.json
+  expect:
+    invalid: key_retired
+  note: the entry's not_after is before predicate.created_at, so the key was already retired when the bundle was
+    produced
 - name: unsigned
   bundle: bundles/unsigned.bundle.json
   expect:

@@ -67,7 +67,13 @@ const (
 	// BundleReasonUnknownKeyID: no signature names a key the keyring holds
 	// (check 2).
 	BundleReasonUnknownKeyID = "unknown_key_id"
-	// BundleReasonSignatureMismatch: a trusted key was found but no signature
+	// BundleReasonKeyRevoked: the only keys that signed are revoked
+	// (check 2, signing spec 5.3).
+	BundleReasonKeyRevoked = "key_revoked"
+	// BundleReasonKeyRetired: the only keys that signed were retired before
+	// the bundle was created (check 2, signing spec 5.3).
+	BundleReasonKeyRetired = "key_retired"
+	// BundleReasonSignatureMismatch: a usable key was found but no signature
 	// verifies over the PAE; also an empty `signatures` array (check 2).
 	BundleReasonSignatureMismatch = "dsse_signature_mismatch"
 	// BundleReasonSubjectDigestMismatch: `predicate.resolved` does not hash to
@@ -82,9 +88,26 @@ const (
 var BundleReasons = []string{
 	BundleReasonMalformed,
 	BundleReasonUnknownKeyID,
+	BundleReasonKeyRevoked,
+	BundleReasonKeyRetired,
 	BundleReasonSignatureMismatch,
 	BundleReasonSubjectDigestMismatch,
 	BundleReasonPolicyMismatch,
+}
+
+// bundleReasonPrecedence ranks the reason a failed signature contributes,
+// lowest first: bundle spec 5.2 check 2 reports a withdrawn key ahead of a
+// wrong signature, the way the signing specification's own checks 5 and 6
+// precede its check 8.
+func bundleReasonPrecedence(reason string) int {
+	switch reason {
+	case BundleReasonKeyRevoked:
+		return 0
+	case BundleReasonKeyRetired:
+		return 1
+	default:
+		return 2
+	}
 }
 
 // Patterns transcribed from schemas/hushspec-bundle.v1.schema.json, so shape
@@ -769,8 +792,12 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 		return result
 	}
 
-	namedATrustedKey := false
-	mismatchDetail := ""
+	refusalReason, refusalDetail := "", ""
+	record := func(reason, detail string) {
+		if refusalReason == "" || bundleReasonPrecedence(reason) < bundleReasonPrecedence(refusalReason) {
+			refusalReason, refusalDetail = reason, detail
+		}
+	}
 	for _, signature := range envelope.Signatures {
 		entry := keyring.Find(signature.KeyID)
 		if entry == nil {
@@ -781,22 +808,35 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 		if keyErr != nil || recomputed != signature.KeyID {
 			continue
 		}
-		namedATrustedKey = true
+		// The keyring holds the key; whether it still vouches for it is the
+		// next question (signing spec 5.3).
+		if entry.Revoked {
+			record(BundleReasonKeyRevoked, fmt.Sprintf("key %s is revoked", signature.KeyID))
+			continue
+		}
+		if bundleKeyRetired(entry, predicate.CreatedAt) {
+			record(BundleReasonKeyRetired, fmt.Sprintf(
+				"key %s was retired at %s; the bundle is dated %s",
+				signature.KeyID, entry.NotAfter, predicate.CreatedAt))
+			continue
+		}
 		raw, decodeErr := base64.StdEncoding.DecodeString(signature.Sig)
 		if decodeErr != nil || len(raw) != ed25519.SignatureSize {
-			mismatchDetail = fmt.Sprintf("signature by %s is not 64 bytes", signature.KeyID)
+			record(BundleReasonSignatureMismatch,
+				fmt.Sprintf("signature by %s is not 64 bytes", signature.KeyID))
 			continue
 		}
 		if ed25519.Verify(public, pae, raw) {
 			result.KeyIDs = append(result.KeyIDs, signature.KeyID)
 			continue
 		}
-		mismatchDetail = fmt.Sprintf("Ed25519 verification failed for %s", signature.KeyID)
+		record(BundleReasonSignatureMismatch,
+			fmt.Sprintf("Ed25519 verification failed for %s", signature.KeyID))
 	}
 	if len(result.KeyIDs) == 0 {
 		switch {
-		case namedATrustedKey:
-			result.Reason, result.Detail = BundleReasonSignatureMismatch, mismatchDetail
+		case refusalReason != "":
+			result.Reason, result.Detail = refusalReason, refusalDetail
 		case len(envelope.Signatures) == 0:
 			result.Reason = BundleReasonSignatureMismatch
 			result.Detail = "the bundle is unsigned; an unsigned bundle is not evidence"
@@ -849,6 +889,25 @@ func VerifyBundle(bundle []byte, opts VerifyBundleOptions) VerifyBundleResult {
 
 	result.OK = true
 	return result
+}
+
+// bundleKeyRetired reports whether entry had already been retired when a bundle
+// dated createdAt was produced (bundle spec 5.2 check 2).
+//
+// An entry with no `not_after` is never retired. Both instants are fixed to
+// `YYYY-MM-DDTHH:MM:SS.sssZ` -- by the keyring schema and by the statement
+// shape check -- so one that will not parse is a retirement this verifier will
+// not read out of the keyring, and the key counts as current.
+func bundleKeyRetired(entry *TrustedKey, createdAt string) bool {
+	notAfter, err := entry.NotAfterTime()
+	if err != nil || notAfter == nil {
+		return false
+	}
+	created, err := parseEnvelopeTime(createdAt, "created_at")
+	if err != nil {
+		return false
+	}
+	return !created.Before(*notAfter)
 }
 
 // compareBundlePolicy is check 4 (bundle spec 5.3): the resolved documents and

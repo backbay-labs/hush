@@ -11,4 +11,5 @@ pub mod manifest;
 pub mod merge_vector;
 pub mod minimize;
 pub mod report;
+pub mod resolve_vector;
 pub mod runner;

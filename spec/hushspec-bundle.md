@@ -170,7 +170,11 @@ A verifier receives: the bundle, a keyring (Signing Section 5.3), the current ti
 Verifiers MUST perform these checks in this order and stop at the first failure, reporting its reason code:
 
 1. **Shape.** The document parses as JSON, validates against the bundle schema, the payload decodes as base64 into valid UTF-8 JSON, and that JSON is a statement whose `_type`, `predicateType`, and `predicate.bundle_version` are the constants of Sections 3 and 4, with exactly one subject. Else `malformed_bundle`.
-2. **Signature.** At least one entry of `signatures` names a key the keyring holds, and at least one such entry's `sig` verifies as Ed25519 over `PAE(payloadType, payload_bytes)` under that key, with the key's id recomputed from the public key. If no entry names a key in the keyring, `unknown_key_id`; otherwise, if none verifies, `dsse_signature_mismatch`. An empty `signatures` array is `dsse_signature_mismatch`.
+2. **Signature.** At least one entry of `signatures` names a key the keyring holds *and still trusts*, and at least one such entry's `sig` verifies as Ed25519 over `PAE(payloadType, payload_bytes)` under that key, with the key's id recomputed from the public key. A keyring entry is still trusted when it is not `revoked` and, if it carries `not_after`, `predicate.created_at` is before that instant (Signing Section 5.3). Retirement is graceful here exactly as it is for a policy signature: `predicate.created_at` is when the evidence was produced, so a bundle a key signed while it was current stays valid after the key is retired, while a bundle dated at or after `not_after` does not. When no signature verifies, the reason code is the first of these that applies:
+   1. some entry named a `revoked` key: `key_revoked`;
+   2. some entry named a retired key: `key_retired`;
+   3. some entry named a trusted, usable key: `dsse_signature_mismatch`, which includes an empty `signatures` array;
+   4. otherwise: `unknown_key_id`.
 3. **Subject.** The RFC 8785 canonical form of `predicate.resolved` hashes to `predicate.policy.content_hash`, and `subject[0].digest.sha256` is that hash without its prefix. Else `subject_digest_mismatch`.
 4. **Policy.** Only when the verifier was given a policy file: resolving that file yields a canonical form byte-identical to that of `predicate.resolved` -- equivalently, its content hash equals `predicate.policy.content_hash`, which check 3 has already tied to `predicate.resolved` -- and a chain whose `content_hash` values, in order, equal the bundle's. Else `policy_mismatch`. (A policy file that does not resolve or validate is `policy_mismatch` as well: there is nothing to compare.)
 
@@ -194,6 +198,8 @@ A verifier MAY report a `source` difference as informational detail. It MUST NOT
 |---|---|
 | `malformed_bundle` | 1 |
 | `unknown_key_id` | 2 |
+| `key_revoked` | 2 |
+| `key_retired` | 2 |
 | `dsse_signature_mismatch` | 2 |
 | `subject_digest_mismatch` | 3 |
 | `policy_mismatch` | 4 |
@@ -226,6 +232,8 @@ The envelope is ordinary DSSE and the payload is an ordinary in-toto Statement, 
 | `valid-with-policy` | valid (re-resolves `library/healthcare/hipaa-base.yaml`) |
 | `tampered-payload` | `dsse_signature_mismatch` |
 | `wrong-key` | `unknown_key_id` |
+| `revoked-key` | `key_revoked` |
+| `retired-key` | `key_retired` |
 | `unsigned` | `dsse_signature_mismatch` |
 | `subject-digest-mismatch` | `subject_digest_mismatch` |
 | `policy-mismatch` | `policy_mismatch` |
@@ -241,6 +249,7 @@ The security considerations for the whole specification family, including the sh
 
 - **A bundle is not a policy.** Nothing here authorizes loading `predicate.resolved` and enforcing it. An enforcement point loads policy files and verifies them under the Policy Signing specification; a bundle an attacker could feed to a loader would be a signed document its signer never intended to be enforced.
 - **The bundler is in the trusted computing base.** The subject digest is computed by the bundler from the document the bundler resolved. A verifier that never re-resolves is trusting that resolution. Check 4 (`--policy`) is how an auditor removes that trust, and `chain` is what lets them see which bases were in force.
+- **Revocation reaches bundles.** A key marked `revoked` is refused here as it is for a policy signature, so revoking a compromised key withdraws the evidence it produced as well as the policies it approved. Retirement does not: a bundle a key signed while it was current keeps verifying, which is what makes rotation safe for evidence already in an archive.
 - **Key reuse.** One key for policies, receipts, log entries, and bundles keeps the trust model small, but one compromise then covers all four. The signing inputs are domain-separated in practice -- a policy envelope signs RFC 8785 JSON, a bundle signs a `DSSEv1`-prefixed PAE -- so a signature cannot be lifted from one context to the other. Deployments wanting stronger separation SHOULD use distinct keys and distinct keyrings.
 - **Unsigned bundles.** An unsigned bundle carries a complete, readable statement and no attestation. It MUST NOT be treated as evidence, which is why Section 5.2 rejects it rather than reporting a weaker outcome.
 - **Size.** A bundle embeds a whole resolved policy, which the YAML profile bounds at 1 MiB (Core Section 2.4); base64 and the predicate add a constant factor. Verifiers SHOULD bound the input they will parse.

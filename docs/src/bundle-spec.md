@@ -12,8 +12,8 @@ h2h bundle verify hipaa.bundle.json --keyring keyring.json --policy library/heal
 h2h bundle inspect hipaa.bundle.json
 ```
 
-Verification runs four ordered checks and stops at the first failure, reporting its reason code: shape (`malformed_bundle`), signature (`unknown_key_id`, `dsse_signature_mismatch`), subject digest (`subject_digest_mismatch`), and — only with `--policy` — a re-resolution cross-check (`policy_mismatch`). Signature verification comes before the digest check on purpose, so an edit in transit reads as tampering rather than as an inconsistency.
+Verification runs four ordered checks and stops at the first failure, reporting its reason code: shape (`malformed_bundle`), signature (`unknown_key_id`, `key_revoked`, `key_retired`, `dsse_signature_mismatch`), subject digest (`subject_digest_mismatch`), and — only with `--policy` — a re-resolution cross-check (`policy_mismatch`). Signature verification comes before the digest check on purpose, so an edit in transit reads as tampering rather than as an inconsistency.
 
 Because the envelope is ordinary DSSE, generic supply-chain tooling reads a bundle too: `cosign verify-blob-attestation` checks the same signature over the same PAE bytes, and `openssl pkeyutl -verify -rawin` checks it by hand. Such a tool covers the signature check only; the other three are HushSpec semantics.
 
-Vectors: `fixtures/bundle/vectors.yaml`, eight cases over bundles built from `library/healthcare/hipaa-base.yaml` with `created_at` pinned so they are byte-reproducible. Every release attaches a bundle for each `library/` and `rulesets/` policy, covered by GitHub build provenance.
+Vectors: `fixtures/bundle/vectors.yaml`, ten cases over bundles built from `library/healthcare/hipaa-base.yaml` with `created_at` pinned so they are byte-reproducible. Every release attaches a bundle for each `library/` and `rulesets/` policy, covered by GitHub build provenance.

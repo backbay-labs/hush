@@ -10,7 +10,7 @@ use hushspec::bundle::{
     BundleOptions, BundleReason, DsseEnvelope, VerifyBundleOptions, build_statement,
     sign_statement, unsigned_envelope, verify_bundle,
 };
-use hushspec::resolve::{Resolution, ResolveOptions, resolve_path_with_options};
+use hushspec::resolve::{Resolution, ResolveError, ResolveOptions, resolve_path_with_options};
 use hushspec::signing::{Keyring, generate_keypair};
 use serde::Deserialize;
 use std::collections::BTreeSet;
@@ -91,8 +91,8 @@ fn instant(value: &str) -> chrono::DateTime<chrono::Utc> {
 }
 
 /// Resolve a policy the way `h2h bundle verify --policy` does.
-fn resolve(path: &Path) -> Option<Resolution> {
-    resolve_path_with_options(path, &ResolveOptions::default()).ok()
+fn resolve(path: &Path) -> Result<Resolution, ResolveError> {
+    resolve_path_with_options(path, &ResolveOptions::default())
 }
 
 // --------------------------------------------------------------------------
@@ -127,26 +127,30 @@ fn every_vector_returns_its_expected_outcome() {
             panic!("{}: {} is unreadable: {error}", case.name, case.bundle)
         });
 
-        // A policy that will not resolve has nothing to compare, which is
-        // check 4's own failure -- never a panic.
-        let resolution = case
-            .policy
-            .as_deref()
-            .map(|policy| resolve(&root.join(policy)));
-        let policy_missing = matches!(resolution, Some(None));
+        // Check 4's input. A case that names a policy names one the suite can
+        // resolve: an unresolvable one would report `policy_mismatch` whatever
+        // the bundle said, so the case would pass without testing anything.
+        let resolution = match case.policy.as_deref() {
+            None => None,
+            Some(policy) => match resolve(&root.join(policy)) {
+                Ok(resolution) => Some(resolution),
+                Err(error) => {
+                    failures.push(format!("{}: {policy} did not resolve: {error}", case.name));
+                    continue;
+                }
+            },
+        };
 
         let outcome = match DsseEnvelope::parse(&text) {
             Ok(envelope) => {
-                verify_bundle(&envelope, &keyring, resolution.flatten().as_ref(), &options)
-                    .map(|_| ())
+                verify_bundle(&envelope, &keyring, resolution.as_ref(), &options).map(|_| ())
             }
             Err(error) => Err(error),
         };
 
-        let actual = match (&outcome, policy_missing) {
-            (_, true) => "policy_mismatch".to_string(),
-            (Ok(()), _) => "valid".to_string(),
-            (Err(error), _) => error.reason_code().to_string(),
+        let actual = match &outcome {
+            Ok(()) => "valid".to_string(),
+            Err(error) => error.reason_code().to_string(),
         };
         let expected = match &case.expect {
             Expect::Valid(ValidMarker::Valid) => "valid".to_string(),
@@ -170,7 +174,11 @@ fn every_vector_returns_its_expected_outcome() {
         "bundle vectors failed:\n  {}",
         failures.join("\n  ")
     );
-    assert_eq!(manifest.cases.len(), 8, "bundle spec 7 publishes 8 vectors");
+    assert_eq!(
+        manifest.cases.len(),
+        10,
+        "bundle spec 7 publishes 10 vectors"
+    );
 }
 
 /// Every reason code a vector names is one this implementation can produce,
@@ -431,6 +439,40 @@ fn a_freshly_built_bundle_verifies() {
     let path = dir.path().join("policy.bundle.json");
     envelope.save(&path).expect("the bundle is writable");
     assert_eq!(DsseEnvelope::load(&path).expect("it reads back"), envelope);
+}
+
+/// Retirement is graceful (bundle spec 5.2 check 2): a bundle produced while
+/// the key was current keeps verifying after it is retired, and one produced
+/// at or after `not_after` does not.
+#[test]
+fn a_retired_key_still_attests_the_bundles_it_signed_while_current() {
+    let resolution = resolve(&hipaa_base()).expect("the library policy resolves");
+    let (signing_key, verifying_key) = generate_keypair();
+    let statement = build_statement(
+        &resolution,
+        &BundleOptions {
+            created_at: Some(instant(PINNED_CREATED_AT)),
+            ..BundleOptions::default()
+        },
+    )
+    .expect("the statement builds");
+    let envelope = sign_statement(&statement, &signing_key).expect("it signs");
+
+    let mut keyring = Keyring::from_verifying_keys([verifying_key]).expect("a one-key keyring");
+    keyring.keys[0].not_after = Some("2026-09-16T00:00:00.000Z".to_string());
+    verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect("a bundle dated before not_after still verifies");
+
+    keyring.keys[0].not_after = Some(PINNED_CREATED_AT.to_string());
+    let error = verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect_err("a bundle dated at not_after does not");
+    assert_eq!(error.reason, BundleReason::KeyRetired);
+
+    keyring.keys[0].not_after = None;
+    keyring.keys[0].revoked = true;
+    let error = verify_bundle(&envelope, &keyring, None, &VerifyBundleOptions::default())
+        .expect_err("a revoked key attests nothing");
+    assert_eq!(error.reason, BundleReason::KeyRevoked);
 }
 
 #[test]

@@ -93,7 +93,12 @@ pub use evaluate::{
     evaluate, evaluate_with_context,
 };
 pub use extensions::Extensions;
-pub use governance::{ControlMapping, GovernanceMetadata, GovernanceWarning, validate_governance};
+#[allow(deprecated)]
+pub use governance::GovernanceWarning;
+pub use governance::{
+    ChangelogEntry, ControlMapping, GovernanceFinding, GovernanceMetadata, GovernanceSeverity,
+    validate_governance,
+};
 pub use guard::{
     Denied, EnforcementConfig, GuardDecision, GuardError, HushGuard, HushGuardBuilder, WarnHandler,
     matches_rule_path_prefix,

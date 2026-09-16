@@ -238,8 +238,11 @@ func writeVectorChain(t *testing.T, path string, signed bool) *ChainedFileSink {
 		t.Fatalf("cannot record the policy event: %v", err)
 	}
 	for index, action := range vectorActions() {
-		receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+		receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
 			expectedReceiptContext(index))
+		if err != nil {
+			t.Fatalf("audited: %v", err)
+		}
 		if err := sink.Send(&receipt); err != nil {
 			t.Fatalf("cannot append receipt %d: %v", index, err)
 		}
@@ -413,9 +416,12 @@ func TestChainedSinkContinuesAnExistingChain(t *testing.T) {
 			seqAfter, headAfter, seqBefore, headBefore)
 	}
 
-	receipt := EvaluateAudited(vectorResolution(t),
+	receipt, err := EvaluateAudited(vectorResolution(t),
 		&EvaluationAction{Type: "egress", Target: "example.com"},
 		expectedReceiptConfig(), expectedReceiptContext(9))
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 	if err := reopened.Send(&receipt); err != nil {
 		t.Fatalf("cannot append: %v", err)
 	}
@@ -455,8 +461,11 @@ func TestTwoSinksOnOneFileExtendOneChain(t *testing.T) {
 		if index%2 == 0 {
 			sink = second
 		}
-		receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+		receipt, err := EvaluateAudited(resolution, action, expectedReceiptConfig(),
 			expectedReceiptContext(index))
+		if err != nil {
+			t.Fatalf("audited: %v", err)
+		}
 		if err := sink.Send(&receipt); err != nil {
 			t.Fatalf("cannot append receipt %d: %v", index, err)
 		}

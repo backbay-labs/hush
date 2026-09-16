@@ -182,8 +182,11 @@ func TestReceiptRecordsTheExtendsChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve failed: %v", err)
 	}
-	receipt := EvaluateAudited(resolution,
+	receipt, err := EvaluateAudited(resolution,
 		&EvaluationAction{Type: "tool_call", Target: "test"}, enabledConfig(), nil)
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 
 	chain := receipt.Policy.ExtendsChain
 	if len(chain) != 2 {
@@ -607,4 +610,21 @@ func findTraceEntry(t *testing.T, receipt DecisionReceipt, block string) RuleTra
 	}
 	t.Fatalf("no %q trace entry found in %+v", block, receipt.RuleTrace)
 	return RuleTraceEntry{}
+}
+
+// A receipt names the policy a decision was made under (receipt spec 4.2), so
+// a document with no canonical form -- and therefore no content hash -- has no
+// receipt, rather than one carrying an empty hash the schema would reject.
+func TestEvaluateAuditedRefusesAPolicyWithNoContentHash(t *testing.T) {
+	spec, err := Parse("hushspec: \"0.1.0\"\nextends: \"builtin:default\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	action := &EvaluationAction{Type: "egress", Target: "example.com"}
+	if _, err := EvaluateAudited(nil, action, nil, nil); err == nil {
+		t.Error("expected an error with no policy at all")
+	}
+	if _, err := cachedCompile(spec).EvaluateAudited(nil, action, nil, nil); err == nil {
+		t.Error("expected an error for a document that still declares extends")
+	}
 }

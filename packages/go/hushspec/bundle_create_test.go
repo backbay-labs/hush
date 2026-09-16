@@ -237,6 +237,45 @@ func TestCreatedBundleVerifies(t *testing.T) {
 	}
 }
 
+// Bundle spec 5.2 check 2: a bundle produced while the key was current keeps
+// verifying after the key is retired, one produced at or after `not_after`
+// does not, and a revoked key attests nothing whenever it signed.
+func TestCreatedBundleHonoursRevocationAndRetirement(t *testing.T) {
+	bundle, err := CreateBundle(bundleVectorResolution(t), bundleVectorOptions(t, "test-signing.key.pem"))
+	if err != nil {
+		t.Fatalf("CreateBundle: %v", err)
+	}
+	encoded, err := MarshalBundle(bundle)
+	if err != nil {
+		t.Fatalf("MarshalBundle: %v", err)
+	}
+	now, _ := time.Parse(time.RFC3339, bundleVectorCreatedAt)
+
+	verify := func(mutate func(*TrustedKey)) VerifyBundleResult {
+		keyring := bundleVectorKeyring(t)
+		entry := keyring.Keys[0]
+		mutate(&entry)
+		keyring.Keys = []TrustedKey{entry}
+		return VerifyBundle(encoded, VerifyBundleOptions{Keyring: keyring, Now: now})
+	}
+
+	if result := verify(func(key *TrustedKey) {
+		key.NotAfter = "2026-09-16T00:00:00.000Z"
+	}); !result.OK {
+		t.Errorf("a bundle dated before not_after was refused: %s: %s", result.Reason, result.Detail)
+	}
+	if result := verify(func(key *TrustedKey) {
+		key.NotAfter = bundleVectorCreatedAt
+	}); result.OK || result.Reason != BundleReasonKeyRetired {
+		t.Errorf("a bundle dated at not_after verified as %+v, want %s", result, BundleReasonKeyRetired)
+	}
+	if result := verify(func(key *TrustedKey) {
+		key.Revoked = true
+	}); result.OK || result.Reason != BundleReasonKeyRevoked {
+		t.Errorf("a revoked key attested %+v, want %s", result, BundleReasonKeyRevoked)
+	}
+}
+
 func TestCreatedUnsignedBundleIsRefused(t *testing.T) {
 	// Bundle spec 3: an unsigned bundle is well formed and is not evidence.
 	bundle, err := CreateBundle(bundleVectorResolution(t), bundleVectorOptions(t, ""))

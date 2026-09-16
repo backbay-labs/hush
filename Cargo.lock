@@ -938,6 +938,7 @@ dependencies = [
  "chrono-tz",
  "criterion",
  "ed25519-dalek",
+ "hushspec-testkit",
  "jsonschema",
  "pretty_assertions",
  "proptest",

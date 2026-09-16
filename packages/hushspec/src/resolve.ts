@@ -689,13 +689,14 @@ function buildResolution(
     }
 
     const envelope = envelopes[index] ?? null;
-    if (options.keyring !== undefined && envelope !== null) {
-      link.signature = verifyLink(
-        partials[index]!,
-        envelope,
-        options,
-        index === leafIndex,
-      );
+    if (options.keyring !== undefined && !isBuiltinSource(hop.source)) {
+      // Verification was attempted, so the outcome is always recorded
+      // (signing spec section 6.5): a hop with no envelope carries
+      // `missing_signature` rather than nothing at all, which a reader could
+      // only take for "no check was configured".
+      link.signature = envelope === null
+        ? { verified: false, reason: 'missing_signature' }
+        : verifyLink(partials[index]!, envelope, options, index === leafIndex);
     }
 
     if (options.requireSignature !== true || isBuiltinSource(hop.source) || pinned) {
@@ -774,15 +775,21 @@ function verifyLink(
   };
 }
 
+/** `sha256:` plus 64 lowercase hex: the only `key_id` the receipt schema admits. */
+const KEY_ID_PATTERN = /^sha256:[0-9a-f]{64}$/;
+
 /**
  * The `key_id` a failed envelope *claimed*, for the receipt. Claimed, not
  * trusted: verification already refused it, and recording which key was named
  * is what makes a rotation mistake distinguishable from an attack.
+ *
+ * An envelope that failed its own shape check may carry anything at all under
+ * `key_id`, so only a well-formed one is surfaced.
  */
 function describeEnvelopeKey(document: unknown): { key_id?: string } {
   if (typeof document !== 'object' || document === null) return {};
   const keyId = (document as { key_id?: unknown }).key_id;
-  return typeof keyId === 'string' ? { key_id: keyId } : {};
+  return typeof keyId === 'string' && KEY_ID_PATTERN.test(keyId) ? { key_id: keyId } : {};
 }
 
 // --------------------------------------------------------------------------

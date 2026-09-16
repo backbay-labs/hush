@@ -204,7 +204,7 @@ if err != nil {
 }
 
 result := policy.Evaluate(action)
-receipt := policy.EvaluateAudited(resolution, action, nil, nil)
+receipt, err := policy.EvaluateAudited(resolution, action, nil, nil)
 ```
 
 `CompiledPolicy` mirrors the free functions minus the document argument:
@@ -232,9 +232,13 @@ if err != nil {
 }
 
 config := hushspec.DefaultAuditConfig()
-receipt := hushspec.EvaluateAudited(resolution, action, &config, &hushspec.AuditContext{
+receipt, err := hushspec.EvaluateAudited(resolution, action, &config, &hushspec.AuditContext{
 	Actor: &hushspec.Actor{AgentID: "deploy-bot-3", SessionID: "run-0042"},
 })
+if err != nil {
+	// The policy has no content hash, so there is no receipt that could name it.
+	log.Fatal(err)
+}
 
 fmt.Println(receipt.ReceiptID, receipt.Decision, receipt.Policy.ContentHash)
 

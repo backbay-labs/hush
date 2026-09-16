@@ -1,11 +1,11 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T18:52:37Z",
+  "generated_at": "2026-09-16T19:16:40Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
-      "sha256": "1061ad9f3dba955e6bb2f833beebf798a10c54063f15f7fb290e4ab28e5415c8",
+      "sha256": "672978e708bc976eb9deba6fadfc684a499f922640e8848da320ade79d65641e",
       "category": "doc",
       "module": "bundle",
       "level": 0
@@ -54,7 +54,7 @@
     },
     {
       "path": "fixtures/bundle/vectors.yaml",
-      "sha256": "3236f1de9f5a102841dcfdf4ef249f964462949fb5de30d20fee5b4face25d1b",
+      "sha256": "5fbaab8700ad1d03d213b3a48681b46957fc5a08327c48dcaebb2231ea6d257a",
       "category": "bundle",
       "module": "bundle",
       "level": 5

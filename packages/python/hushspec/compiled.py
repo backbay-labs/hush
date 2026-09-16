@@ -124,18 +124,20 @@ __all__ = [
 
 
 class CompileError(ValueError):
-    """A policy pattern is outside the HushSpec regex profile.
+    """A document cannot be compiled: it still declares ``extends``, or a
+    pattern is outside the HushSpec regex profile.
 
     Raised by :func:`compile_policy` (which is strict by default) so a caller
     that compiles ahead of time learns about an unusable pattern then, rather
-    than as a deny on the first action that reaches it.
+    than as a deny on the first action that reaches it. An unresolved document
+    is refused whatever ``strict`` says: core spec 2.3 forbids evaluating one.
     """
 
     def __init__(self, rule_path: str, message: str) -> None:
         super().__init__(f"{rule_path}: {message}")
-        #: Document path of the offending pattern, as a receipt would spell it.
+        #: The document path the refusal is about, as a receipt would spell it.
         self.rule_path = rule_path
-        #: The regex-profile rejection message.
+        #: Why, in the words of the check that refused it.
         self.message = message
 
 
@@ -2197,17 +2199,29 @@ def compile_policy(
     :class:`~hushspec.resolve.Resolution` (whose provenance the compiled policy
     then carries into receipts).
 
-    Raises :class:`CompileError` for the first pattern outside the HushSpec
-    regex profile. Pass ``strict=False`` to keep the reference evaluator's
-    deferred behaviour instead: the offending pattern is recorded in
+    Raises :class:`CompileError` for a document that still declares ``extends``
+    and for the first pattern outside the HushSpec regex profile. Pass
+    ``strict=False`` to keep the reference evaluator's deferred behaviour for
+    patterns instead: the offending pattern is recorded in
     :attr:`CompiledPolicy.errors` and denies the actions that reach it, with
-    the same ``matched_rule`` and ``reason`` an uncompiled evaluation gave.
+    the same ``matched_rule`` and ``reason`` an uncompiled evaluation gave. An
+    unresolved document is refused either way (core spec 2.3).
     """
     resolution = None
     spec = policy
     if not isinstance(policy, HushSpec):
         resolution = policy
         spec = policy.spec
+    if spec.extends is not None:
+        # Core spec 2.3: an engine MUST refuse to evaluate a document that
+        # still declares `extends`. Its rules are not the rules that would be
+        # in force -- every block its base contributes would silently be
+        # missing -- so there is nothing safe to compile.
+        raise CompileError(
+            "extends",
+            f"policy still declares 'extends: {spec.extends}'; resolve the chain "
+            "before compiling it",
+        )
     compiled = CompiledPolicy(spec, strict)
     if resolution is not None:
         compiled._resolution = resolution

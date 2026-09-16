@@ -28,6 +28,10 @@ base64 = { version = "0.22", optional = true }
 rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
+# Path-only, so `cargo package` drops it: the testkit depends on this crate,
+# and the resolve-vector reader they share lives there because two runners
+# read the same fixture directory.
+hushspec-testkit = { path = "../hushspec-testkit" }
 pretty_assertions = "1"
 criterion = "0.5"
 jsonschema = { version = "0.18", features = ["draft202012"] }

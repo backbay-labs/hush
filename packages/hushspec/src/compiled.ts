@@ -107,18 +107,20 @@ import { truncateUtf8 } from './utf8.js';
 // ---------------------------------------------------------------------------
 
 /**
- * A policy could not be compiled: a pattern outside the HushSpec regex profile
- * (core spec 3.14.3).
+ * A document could not be compiled: it still declares `extends`, or it carries
+ * a pattern outside the HushSpec regex profile (core spec 3.14.3).
  *
  * {@link compilePolicy} raises this rather than handing back a policy that
  * would deny at evaluation time with the same message -- an operator who
  * compiles ahead of time learns about a broken pattern before an action does.
  * The non-throwing form ({@link compilePolicy} with `strict: false`, which is
  * what the free `evaluate()` functions and `HushGuard` use) keeps the
- * fail-closed evaluation-time deny instead, so those paths are unchanged.
+ * fail-closed evaluation-time deny instead, so those paths are unchanged. An
+ * unresolved document is refused either way: core spec 2.3 forbids evaluating
+ * one, whatever the caller asked for.
  */
 export class CompileError extends Error {
-  /** The `matched_rule` path of the offending pattern. */
+  /** The document path the refusal is about: `extends`, or a pattern's path. */
   readonly path: string;
 
   constructor(path: string, detail: string) {
@@ -591,7 +593,21 @@ export interface CompileOptions {
  * @throws {CompileError}
  */
 export function compilePolicy(spec: HushSpec, options?: CompileOptions): CompiledPolicy {
+  refuseUnresolved(spec);
   return new CompiledPolicy(spec, undefined, options?.strict !== false);
+}
+
+/**
+ * An engine MUST refuse to evaluate a document that still declares `extends`
+ * (core spec 2.3): its rules are not the rules that would be in force, and
+ * every block its base contributes would silently be missing.
+ */
+function refuseUnresolved(spec: HushSpec): void {
+  if (spec.extends == null) return;
+  throw new CompileError(
+    'extends',
+    `policy still declares 'extends: ${spec.extends}'; resolve the chain before compiling it`,
+  );
 }
 
 /**
@@ -601,6 +617,7 @@ export function compilePolicy(spec: HushSpec, options?: CompileOptions): Compile
  * from the document.
  */
 export function compileResolution(resolution: Resolution, options?: CompileOptions): CompiledPolicy {
+  refuseUnresolved(resolution.spec);
   return new CompiledPolicy(resolution.spec, resolution, options?.strict !== false);
 }
 

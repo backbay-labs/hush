@@ -97,7 +97,12 @@ pub enum BundleReason {
     MalformedBundle,
     /// Check 2: no signature names a key the keyring holds.
     UnknownKeyId,
-    /// Check 2: a key was found but no signature verifies over the PAE.
+    /// Check 2: the only keys that signed are revoked (signing spec 5.3).
+    KeyRevoked,
+    /// Check 2: the only keys that signed were retired before the bundle was
+    /// created (signing spec 5.3).
+    KeyRetired,
+    /// Check 2: a usable key was found but no signature verifies over the PAE.
     DsseSignatureMismatch,
     /// Check 3: `predicate.resolved` does not hash to the declared subject.
     SubjectDigestMismatch,
@@ -107,9 +112,11 @@ pub enum BundleReason {
 
 impl BundleReason {
     /// Every reason code, in check order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::MalformedBundle,
         Self::UnknownKeyId,
+        Self::KeyRevoked,
+        Self::KeyRetired,
         Self::DsseSignatureMismatch,
         Self::SubjectDigestMismatch,
         Self::PolicyMismatch,
@@ -121,6 +128,8 @@ impl BundleReason {
         match self {
             Self::MalformedBundle => "malformed_bundle",
             Self::UnknownKeyId => "unknown_key_id",
+            Self::KeyRevoked => "key_revoked",
+            Self::KeyRetired => "key_retired",
             Self::DsseSignatureMismatch => "dsse_signature_mismatch",
             Self::SubjectDigestMismatch => "subject_digest_mismatch",
             Self::PolicyMismatch => "policy_mismatch",
@@ -757,13 +766,21 @@ pub fn verify_bundle(
     let statement = envelope.statement()?;
     let predicate = &statement.predicate;
 
-    // 2. Signature. A bundle may carry several; one that verifies under a
-    //    trusted key is enough, and the reason code distinguishes "we trust
-    //    nobody who signed this" from "the signature is wrong".
+    // 2. Signature. A bundle may carry several; one that verifies under a key
+    //    the keyring still trusts is enough, and the reason code distinguishes
+    //    "we trust nobody who signed this" from "the key is withdrawn" from
+    //    "the signature is wrong".
     let pae_bytes = envelope.pae()?;
     let mut key_ids = Vec::new();
-    let mut named_a_trusted_key = false;
-    let mut mismatch_detail = String::new();
+    let mut refusal: Option<BundleVerifyError> = None;
+    let mut record = |candidate: BundleVerifyError| {
+        let keep = refusal
+            .as_ref()
+            .is_none_or(|held| precedence(candidate.reason) < precedence(held.reason));
+        if keep {
+            refusal = Some(candidate);
+        }
+    };
     for signature in &envelope.signatures {
         let Some(entry) = keyring.find(&signature.keyid) else {
             continue;
@@ -776,32 +793,53 @@ pub fn verify_bundle(
             Ok(recomputed) if recomputed == signature.keyid => {}
             _ => continue,
         }
-        named_a_trusted_key = true;
+        // The keyring holds the key; whether it still vouches for it is the
+        // next question (signing spec 5.3).
+        if entry.revoked {
+            record(BundleVerifyError::new(
+                BundleReason::KeyRevoked,
+                format!("key {} is revoked", signature.keyid),
+            ));
+            continue;
+        }
+        if let Some(not_after) = &entry.not_after
+            && retired_at(not_after, &predicate.created_at)
+        {
+            record(BundleVerifyError::new(
+                BundleReason::KeyRetired,
+                format!(
+                    "key {} was retired at {not_after}; the bundle is dated {}",
+                    signature.keyid, predicate.created_at
+                ),
+            ));
+            continue;
+        }
         let Some(bytes) = BASE64
             .decode(&signature.sig)
             .ok()
             .and_then(|raw| Signature::from_slice(&raw).ok())
         else {
-            mismatch_detail = format!("signature by {} is not 64 bytes", signature.keyid);
+            record(BundleVerifyError::new(
+                BundleReason::DsseSignatureMismatch,
+                format!("signature by {} is not 64 bytes", signature.keyid),
+            ));
             continue;
         };
         // `verify_strict` rejects small-order keys and malleable signatures.
         match verifying_key.verify_strict(&pae_bytes, &bytes) {
             Ok(()) => key_ids.push(signature.keyid.clone()),
-            Err(error) => {
-                mismatch_detail = format!(
+            Err(error) => record(BundleVerifyError::new(
+                BundleReason::DsseSignatureMismatch,
+                format!(
                     "Ed25519 verification failed for {}: {error}",
                     signature.keyid
-                );
-            }
+                ),
+            )),
         }
     }
     if key_ids.is_empty() {
-        if named_a_trusted_key {
-            return Err(BundleVerifyError::new(
-                BundleReason::DsseSignatureMismatch,
-                mismatch_detail,
-            ));
+        if let Some(error) = refusal {
+            return Err(error);
         }
         if envelope.signatures.is_empty() {
             return Err(BundleVerifyError::new(
@@ -909,6 +947,37 @@ fn compare_policy(
     Ok(())
 }
 
+/// Rank of the reason a failed signature contributes, lowest first: bundle
+/// spec 5.2 check 2 reports a withdrawn key ahead of a wrong signature, the
+/// way the signing specification's own checks 5 and 6 precede its check 8.
+fn precedence(reason: BundleReason) -> u8 {
+    match reason {
+        BundleReason::KeyRevoked => 0,
+        BundleReason::KeyRetired => 1,
+        _ => 2,
+    }
+}
+
+/// Whether a key whose `not_after` is `not_after` had already been retired
+/// when a bundle dated `created_at` was produced (bundle spec 5.2 check 2).
+///
+/// Both timestamps are `YYYY-MM-DDTHH:MM:SS.sssZ` -- the keyring schema and
+/// [`Statement::check_shape`] admit no other form -- so an unparseable one is
+/// a keyring this verifier will not read a retirement out of, and the key is
+/// treated as current.
+fn retired_at(not_after: &str, created_at: &str) -> bool {
+    match (instant(not_after), instant(created_at)) {
+        (Some(retired), Some(created)) => created >= retired,
+        _ => false,
+    }
+}
+
+fn instant(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|parsed| parsed.with_timezone(&Utc))
+}
+
 // --------------------------------------------------------------------------
 // Shape helpers
 // --------------------------------------------------------------------------
@@ -973,6 +1042,26 @@ mod tests {
         ] {
             assert!(!is_millisecond_timestamp(bad), "{bad:?} should not parse");
         }
+    }
+
+    #[test]
+    fn retirement_is_graceful_and_the_boundary_is_inclusive() {
+        let not_after = "2026-09-15T00:00:00.000Z";
+        assert!(!retired_at(not_after, "2026-09-14T23:59:59.999Z"));
+        assert!(retired_at(not_after, not_after));
+        assert!(retired_at(not_after, "2026-09-15T00:00:00.001Z"));
+        // A timestamp neither the keyring schema nor the statement shape check
+        // would have admitted leaves the key current rather than guessing.
+        assert!(!retired_at("not a timestamp", "2026-09-15T00:00:00.001Z"));
+        assert!(!retired_at(not_after, "not a timestamp"));
+    }
+
+    #[test]
+    fn a_withdrawn_key_outranks_a_wrong_signature() {
+        assert!(precedence(BundleReason::KeyRevoked) < precedence(BundleReason::KeyRetired));
+        assert!(
+            precedence(BundleReason::KeyRetired) < precedence(BundleReason::DsseSignatureMismatch)
+        );
     }
 
     #[test]
