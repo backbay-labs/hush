@@ -92,6 +92,17 @@ type HushSpec struct {
 	Metadata        *GovernanceMetadata `yaml:"metadata,omitempty" json:"metadata,omitempty"`
 }
 
+// initEmptyCollections gives every required collection a non-nil value and
+// recurses into the structs below it, so a collection that is empty serializes
+// as an empty container in Go exactly as it does in the other three SDKs.
+func (x *HushSpec) initEmptyCollections() {
+	if x == nil {
+		return
+	}
+	x.Extensions.initEmptyCollections()
+	x.Metadata.initEmptyCollections()
+}
+
 type Rules struct {
 	ForbiddenPaths        *ForbiddenPathsRule        `yaml:"forbidden_paths,omitempty" json:"forbidden_paths,omitempty"`
 	PathAllowlist         *PathAllowlistRule         `yaml:"path_allowlist,omitempty" json:"path_allowlist,omitempty"`
@@ -219,10 +230,35 @@ type Extensions struct {
 	Detection *DetectionExtension `yaml:"detection,omitempty" json:"detection,omitempty"`
 }
 
+// initEmptyCollections gives every required collection a non-nil value and
+// recurses into the structs below it, so a collection that is empty serializes
+// as an empty container in Go exactly as it does in the other three SDKs.
+func (x *Extensions) initEmptyCollections() {
+	if x == nil {
+		return
+	}
+	x.Posture.initEmptyCollections()
+}
+
 type PostureExtension struct {
 	Initial     string                  `yaml:"initial" json:"initial"`
-	States      map[string]PostureState `yaml:"states,omitempty" json:"states,omitempty"`
-	Transitions []PostureTransition     `yaml:"transitions,omitempty" json:"transitions,omitempty"`
+	States      map[string]PostureState `yaml:"states" json:"states"`
+	Transitions []PostureTransition     `yaml:"transitions" json:"transitions"`
+}
+
+// initEmptyCollections gives every required collection a non-nil value and
+// recurses into the structs below it, so a collection that is empty serializes
+// as an empty container in Go exactly as it does in the other three SDKs.
+func (x *PostureExtension) initEmptyCollections() {
+	if x == nil {
+		return
+	}
+	if x.States == nil {
+		x.States = map[string]PostureState{}
+	}
+	if x.Transitions == nil {
+		x.Transitions = []PostureTransition{}
+	}
 }
 
 type PostureState struct {
@@ -342,8 +378,20 @@ type ThreatIntelDetection struct {
 type ControlMapping struct {
 	Framework string   `yaml:"framework" json:"framework"`
 	ControlID string   `yaml:"control_id" json:"control_id"`
-	RulePaths []string `yaml:"rule_paths,omitempty" json:"rule_paths,omitempty"`
+	RulePaths []string `yaml:"rule_paths" json:"rule_paths"`
 	Notes     string   `yaml:"notes,omitempty" json:"notes,omitempty"`
+}
+
+// initEmptyCollections gives every required collection a non-nil value and
+// recurses into the structs below it, so a collection that is empty serializes
+// as an empty container in Go exactly as it does in the other three SDKs.
+func (x *ControlMapping) initEmptyCollections() {
+	if x == nil {
+		return
+	}
+	if x.RulePaths == nil {
+		x.RulePaths = []string{}
+	}
 }
 
 type ChangelogEntry struct {
@@ -369,4 +417,16 @@ type GovernanceMetadata struct {
 	Changelog      []ChangelogEntry `yaml:"changelog,omitempty" json:"changelog,omitempty"`
 	Supersedes     string           `yaml:"supersedes,omitempty" json:"supersedes,omitempty"`
 	Controls       []ControlMapping `yaml:"controls,omitempty" json:"controls,omitempty"`
+}
+
+// initEmptyCollections gives every required collection a non-nil value and
+// recurses into the structs below it, so a collection that is empty serializes
+// as an empty container in Go exactly as it does in the other three SDKs.
+func (x *GovernanceMetadata) initEmptyCollections() {
+	if x == nil {
+		return
+	}
+	for i := range x.Controls {
+		x.Controls[i].initEmptyCollections()
+	}
 }

@@ -75,6 +75,12 @@ func Parse(yamlStr string) (*HushSpec, error) {
 			normalizeDecoderMessage(err.Error()))
 	}
 	applyParseDefaults(&spec, &presence)
+	// Go cannot give a field a default and writes a nil slice as JSON `null`,
+	// so a required collection that decoded to nil is given an empty value
+	// here -- the same place the Python model does it. Without this the other
+	// three SDKs would serialize an empty `states`, `transitions` or
+	// `rule_paths` and Go alone would drop it.
+	spec.initEmptyCollections()
 
 	// Raw-document checks catch structural issues the typed decode swallows
 	// (non-integer floats truncated into int fields, empty/invalid enum
