@@ -1548,8 +1548,9 @@ fn detection_scan_edge_strategy() -> impl Strategy<Value = String> {
 /// digits (a Unicode `\d`), a non-ASCII letter (a Unicode `\w`, and so a `\b`
 /// boundary or not), NBSP (whitespace to JavaScript's `\s`), the vertical tab
 /// (absent from Go RE2's `\s`), `\r` (excluded by JavaScript's `.`), `\n`
-/// (Python's `$` matches before a trailing one) and an astral code point (two
-/// UTF-16 code units to JavaScript).
+/// (Python's `$` matches before a trailing one), an astral code point (two
+/// UTF-16 code units to JavaScript), and U+017F / U+212A, which the full
+/// Unicode case-folding table folds to ASCII `s` and `k` under `(?i)`.
 fn dialect_content_strategy() -> impl Strategy<Value = String> {
     let piece = prop_oneof![
         string_regex("[a-z]{1,6}").expect("valid generator regex"),
@@ -1564,6 +1565,8 @@ fn dialect_content_strategy() -> impl Strategy<Value = String> {
         Just(" ".to_string()),
         Just("_".to_string()),
         Just("\u{1F600}".to_string()),
+        Just("\u{17F}".to_string()),
+        Just("\u{212A}".to_string()),
     ];
     prop::collection::vec(piece, 0..10).prop_map(|pieces| pieces.concat())
 }
