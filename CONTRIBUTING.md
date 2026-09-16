@@ -21,6 +21,14 @@ When a spec change lands before every SDK implements it, keep its vectors out of
 directories the conformance runners walk and say so in the fixture README for that area:
 a format no engine emits yet must never read as a passing conformance claim.
 
+### Specification Changes
+
+A change to normative prose ships with the vectors that pin it, and with updates to the
+places that restate it: the grammars (`spec/hushspec-grammars.md`), the registries
+(`spec/registries/`, checked against the code by `crates/hushspec/tests/registries.rs`),
+the docs mirrors under `docs/src/`, and the change appendix of the affected
+specification. Prose-only corrections follow `spec/errata.md`.
+
 ## Build and Test Commands
 
 ### Rust
