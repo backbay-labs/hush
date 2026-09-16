@@ -116,7 +116,7 @@ describe('CompileError', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(CompileError);
       expect((error as CompileError).path).toBe('rules.shell_commands.forbidden_patterns[0]');
-      expect((error as CompileError).message).toContain('RE2 subset');
+      expect((error as CompileError).message).toContain('group form');
     }
   });
 
@@ -138,7 +138,7 @@ describe('CompileError', () => {
     const result = compiled.evaluate({ type: 'shell_command', target: 'sudo rm -rf /tmp/demo' });
     expect(result.decision).toBe('deny');
     expect(result.matched_rule).toBe('rules.shell_commands.forbidden_patterns[0]');
-    expect(result.reason).toContain('RE2 subset');
+    expect(result.reason).toContain('group form');
   });
 
   it('is never raised through the free functions', () => {

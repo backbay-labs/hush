@@ -571,20 +571,33 @@ fn parse_timezone_offset(tz: &str) -> Option<i32> {
     }
 }
 
+/// Minutes for a fixed offset body, the part of a `timezone` after its sign:
+/// `HH` or `HH:MM`, two ASCII digits per field (core spec 3.13).
+///
+/// Anything else is not an offset. A zone that cannot be resolved leaves the
+/// rule block active, so accepting a one-digit field, a missing colon or a
+/// second sign here would resolve a zone another engine refuses and could
+/// switch a control off.
 fn parse_offset_value(s: &str) -> Option<i32> {
-    if let Some((hours, minutes)) = s.split_once(':') {
-        let hours = hours.parse::<i32>().ok()?;
-        let minutes = minutes.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
-            return None;
+    let (hours, minutes) = match s.split_once(':') {
+        Some((hours, minutes)) => (hours, minutes),
+        None => (s, "00"),
+    };
+    let hours = parse_two_digits(hours)?;
+    let minutes = parse_two_digits(minutes)?;
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(hours * 60 + minutes)
+}
+
+/// Exactly two ASCII digits as a number, or `None`.
+fn parse_two_digits(field: &str) -> Option<i32> {
+    match field.as_bytes() {
+        [tens @ b'0'..=b'9', ones @ b'0'..=b'9'] => {
+            Some(i32::from(tens - b'0') * 10 + i32::from(ones - b'0'))
         }
-        Some(hours.saturating_mul(60).saturating_add(minutes))
-    } else {
-        let hours = s.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) {
-            return None;
-        }
-        Some(hours.saturating_mul(60))
+        _ => None,
     }
 }
 
@@ -1124,6 +1137,18 @@ mod tests {
         };
         assert!(evaluate_condition(&cond, &ctx));
         assert!(!validate_condition(&cond, "rules.x.when").is_empty());
+    }
+
+    #[test]
+    fn fixed_offset_grammar_is_two_digit_fields() {
+        for zone in ["+05:30", "-08:00", "+05", "-08", "+00:00"] {
+            assert!(timezone_is_known(zone), "{zone} should conform");
+        }
+        // A zone the engine cannot resolve leaves the rule block active, so an
+        // offset another engine refuses must not resolve here either.
+        for zone in ["+5", "+0530", "+5:0", "++5", "+05:3", "+ 5:30", "+05:30 "] {
+            assert!(!timezone_is_known(zone), "{zone} should be refused");
+        }
     }
 
     #[test]

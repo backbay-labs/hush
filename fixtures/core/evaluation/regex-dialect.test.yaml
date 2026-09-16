@@ -35,6 +35,14 @@ policy:
         # this set", so they take an astral character whole as well.
         - "^z[^a]$"
         - "^w\\D$"
+        # The `i` flag folds ASCII letters only: an engine applying the full
+        # Unicode simple case-folding table would also match U+017F (long s)
+        # and U+212A (Kelvin sign) here.
+        - "(?i)^sk$"
+        # An astral character inside a class is one scalar value, never either
+        # half of its UTF-16 surrogate pair.
+        - "^[\U0001F600a]$"
+        - "^[^\U0001F600]$"
 cases:
   - description: "allow key followed by Arabic-Indic digits (ASCII \\d does not match)"
     action:
@@ -139,3 +147,37 @@ cases:
     expect:
       decision: deny
       matched_rule: rules.shell_commands.forbidden_patterns[6]
+  - description: "deny an ASCII-cased subject under (?i)"
+    action:
+      type: shell_command
+      target: "SK"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[7]
+  - description: "allow the long s and the Kelvin sign under (?i) (ASCII folding only)"
+    action:
+      type: shell_command
+      target: "\u017f\u212a"
+    expect:
+      decision: allow
+  - description: "deny an astral class member against that character"
+    action:
+      type: shell_command
+      target: "\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[8]
+  - description: "deny the same class against its other, BMP member"
+    action:
+      type: shell_command
+      target: "a"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[8]
+  - description: "deny one astral character against a negated astral class"
+    action:
+      type: shell_command
+      target: "\U0001F64F"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[9]

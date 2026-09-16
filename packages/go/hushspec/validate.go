@@ -760,6 +760,10 @@ func validateRegex(pattern, path string, result *ValidationResult) {
 // quantifiers.
 const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines"
 
+// openLowerBoundRegexMessage is the shared rejection message for the
+// open-lower-bound quantifier {,n}.
+const openLowerBoundRegexMessage = "the {,n} quantifier is not portable across the HushSpec SDK regex engines (Python reads it as {0,n}, the others as literal text); write {0,n}"
+
 // disallowedRegexFeature is a portability pre-check: it rejects regex
 // constructs that are unsupported by, or behave differently across, the four
 // SDK engines so a pattern validates identically everywhere. Scanning outside
@@ -769,7 +773,9 @@ const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+,
 //     RegExp and Go RE2 reject them at compile time),
 //   - \Z and \z end-anchors (Rust/Python/Go accept them with differing
 //     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
-//   - empty character classes [] and [^] (JS accepts them; the others reject).
+//   - empty character classes [] and [^] (JS accepts them; the others reject),
+//   - the {,n} quantifier (Python reads it as {0,n}; the others read the whole
+//     brace as literal text).
 //
 // The rules are part of the HushSpec regex profile, so every engine must apply
 // them identically.
@@ -826,6 +832,9 @@ func disallowedRegexFeature(pattern string) (string, bool) {
 			if j < n {
 				inner := string(chars[i+1 : j])
 				if braceKind(inner) != quantNone {
+					if strings.HasPrefix(inner, ",") {
+						return openLowerBoundRegexMessage, true
+					}
 					if j+1 < n && chars[j+1] == '+' {
 						return possessiveRegexMessage, true
 					}

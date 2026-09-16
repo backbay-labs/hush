@@ -41,13 +41,21 @@ const PROFILE_ONLY_VECTORS: [&str; 4] = [
 /// validated by the SDKs after parsing; here they are asserted to *pass*, so
 /// that a schema change which does become able to express one fails this
 /// test until the name is removed.
-const BEYOND_SCHEMA_VECTORS: [&str; 7] = [
+const BEYOND_SCHEMA_VECTORS: [&str; 15] = [
     "bad-initial.yaml",
     "duplicate-ids.yaml",
     "duplicate-pattern-names.yaml",
+    "regex-comment-group.yaml",
+    "regex-lookahead.yaml",
     "regex-mid-pattern-flag.yaml",
+    "regex-open-lower-bound.yaml",
+    "regex-posix-bracket.yaml",
     "version-unsupported-minor.yaml",
     "when-bad-timezone.yaml",
+    "when-timezone-double-sign.yaml",
+    "when-timezone-no-colon.yaml",
+    "when-timezone-short-hour.yaml",
+    "when-timezone-short-minute.yaml",
     "when-too-deep.yaml",
 ];
 

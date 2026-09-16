@@ -644,3 +644,19 @@ describe('timezoneIsKnown', () => {
     }
   });
 });
+
+describe('fixed-offset timezone grammar', () => {
+  it('accepts two-digit hour and minute fields', () => {
+    for (const zone of ['+05:30', '-08:00', '+05', '-08', '+00:00']) {
+      expect(timezoneIsKnown(zone), zone).toBe(true);
+    }
+  });
+
+  // A zone the engine cannot resolve leaves the rule block active (core spec
+  // 3.13), so an offset another engine refuses must not resolve here either.
+  it('rejects one-digit fields, a missing colon and a doubled sign', () => {
+    for (const zone of ['+5', '+0530', '+5:0', '++5', '+05:3', '+ 5:30', '+05:30 ']) {
+      expect(timezoneIsKnown(zone), zone).toBe(false);
+    }
+  });
+});

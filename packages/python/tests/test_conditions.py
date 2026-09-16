@@ -942,3 +942,9 @@ class TestTimezoneOffsetStrictness:
     def test_an_out_of_range_offset_is_unknown(self):
         assert not timezone_is_known("+24:00")
         assert not timezone_is_known("+09:60")
+
+    def test_the_offset_grammar_is_two_digit_fields(self):
+        for zone in ("+05:30", "-08:00", "+05", "-08", "+00:00"):
+            assert timezone_is_known(zone), zone
+        for zone in ("+5", "+0530", "+5:0", "++5", "+05:3", "+05:30 "):
+            assert not timezone_is_known(zone), zone

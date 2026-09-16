@@ -219,19 +219,21 @@ punct          = %x21-2F / %x3A-40 / %x5B-60 / %x7B-7E
 class-escape   = "\" ( "d" / "D" / "w" / "W" / "s" / "S" )
 any            = "."
 assertion      = "^" / "$" / "\b" / "\B"
-group          = "(" [ "?:" ] alternation ")"
+group          = "(" [ "?:" / named ] alternation ")"
+named          = ( "?P<" / "?<" ) group-name ">"
+group-name     = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
 bracket        = "[" [ "^" ] 1*bracket-item "]"
 bracket-item   = class-escape / bracket-range / bracket-atom
 bracket-range  = bracket-atom "-" bracket-atom
-bracket-atom   = escape / %x20-5B / %x5E-D7FF / %xE000-10FFFF   ; any scalar value except "]" and "\"
+bracket-atom   = escape / %x20-5A / %x5E-D7FF / %xE000-10FFFF   ; any scalar value except "[", "]" and "\"
 ```
 
-Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences, possessive quantifiers, atomic groups, conditionals, named groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or flag groups after the first character; a quantified group whose body is itself unbounded is rejected. The specification sets no length limit on a pattern.
+Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences (named ones included), possessive quantifiers, atomic groups, conditionals, comment groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or flag groups after the first character; a quantified group whose body is itself unbounded is rejected, and a `bracket-range` endpoint outside the Basic Multilingual Plane is rejected. A pattern MUST NOT exceed 2048 bytes.
 
 - `+ (?i)ignore (all )?previous instructions`, `+ [0-9]{3}-[0-9]{2}-[0-9]{4}`, `+ \bsecret\b`
-- `- (?=rm)` (lookahead), `- (a+)+` (nested unbounded), `- foo(?i)bar` (mid-pattern flag), `- \p{L}` (property class)
+- `- (?=rm)` (lookahead), `- (a+)+` (nested unbounded), `- foo(?i)bar` (mid-pattern flag), `- \p{L}` (property class), `- [[:alpha:]]` (POSIX bracket expression), `- a{,3}` (open lower bound)
 
-Fixture: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/core/invalid/regex-mid-pattern-flag.yaml`.
+Fixture: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/core/invalid/regex-*.yaml`.
 
 ---
 

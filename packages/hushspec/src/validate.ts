@@ -1400,21 +1400,12 @@ function validateBounds(
 }
 
 function validateRegex(pattern: string, ctx: ValidationContext, path: string): void {
-  // RE2/ReDoS safety first, so a lookaround or `(a+)+` keeps reporting the
-  // dedicated `non_re2_regex` code rather than being swallowed by the profile
-  // compile below (which also rejects them, to stay fail-closed at eval time).
-  if (!isSafeRegex(pattern)) {
-    addError(
-      ctx,
-      'E005',
-      `${path}: pattern uses features not in the RE2 subset (backreferences, lookaround, etc.) which may cause ReDoS`,
-    );
-    return;
-  }
-
-  // Profile check second: `compileProfileRegex` is the exact call the evaluator
-  // makes, so a pattern that validates here can never fail to compile at
-  // evaluation time -- and vice versa.
+  // `compileProfileRegex` is the exact call the evaluator makes, so a pattern
+  // that validates here can never fail to compile at evaluation time -- and
+  // vice versa. It runs the portability pre-check (possessive quantifiers,
+  // `\Z`/`\z` end-anchors, `{,n}`, empty character classes) and the ReDoS
+  // nested-quantifier heuristic before translating, and the wording of each
+  // rejection is shared with the other three SDKs.
   try {
     compileProfileRegex(pattern);
   } catch (error) {

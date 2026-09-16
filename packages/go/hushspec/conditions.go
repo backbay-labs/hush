@@ -635,23 +635,27 @@ func resolveConditionLocation(tz string) *time.Location {
 	return nil
 }
 
+// parseTimezoneOffset returns the minutes of a fixed offset body, the part of a
+// `timezone` after its sign: `HH` or `HH:MM`, two ASCII digits per field (core
+// spec 3.13). Anything else is not an offset and leaves the time window
+// unresolvable, which keeps the rule block active rather than inert.
 func parseTimezoneOffset(s string) (int, bool) {
+	hoursField, minutesField := s, "00"
 	if idx := strings.Index(s, ":"); idx >= 0 {
-		hours, err := strconv.Atoi(s[:idx])
-		if err != nil {
-			return 0, false
-		}
-		minutes, err := strconv.Atoi(s[idx+1:])
-		if err != nil || hours < 0 || hours > 23 || minutes < 0 || minutes > 59 {
-			return 0, false
-		}
-		return hours*60 + minutes, true
+		hoursField, minutesField = s[:idx], s[idx+1:]
 	}
-	hours, err := strconv.Atoi(s)
-	if err != nil || hours < 0 || hours > 23 {
+	if len(hoursField) != 2 || len(minutesField) != 2 {
 		return 0, false
 	}
-	return hours * 60, true
+	if !isASCIIDigits(hoursField) || !isASCIIDigits(minutesField) {
+		return 0, false
+	}
+	hours := int(hoursField[0]-'0')*10 + int(hoursField[1]-'0')
+	minutes := int(minutesField[0]-'0')*10 + int(minutesField[1]-'0')
+	if hours > 23 || minutes > 59 {
+		return 0, false
+	}
+	return hours*60 + minutes, true
 }
 
 func checkContextMatch(expected map[string]any, context *RuntimeContext) bool {

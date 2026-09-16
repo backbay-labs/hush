@@ -326,6 +326,21 @@ func TestTimezoneIsKnownAcceptsIANAAndFixedOffsets(t *testing.T) {
 	}
 }
 
+func TestFixedOffsetGrammarIsTwoDigitFields(t *testing.T) {
+	for _, tz := range []string{"+05:30", "-08:00", "+05", "-08", "+00:00"} {
+		if !TimezoneIsKnown(tz) {
+			t.Errorf("expected %q to conform to the fixed-offset grammar", tz)
+		}
+	}
+	// One-digit fields, a missing colon, and a doubled sign are each an offset
+	// only some engines would read, so none of them resolve (core spec 3.13).
+	for _, tz := range []string{"+5", "+0530", "+5:0", "++5", "+05:3", "+ 5:30", "+05:30 "} {
+		if TimezoneIsKnown(tz) {
+			t.Errorf("expected %q to be rejected", tz)
+		}
+	}
+}
+
 func TestAllOfRequiresAllConditions(t *testing.T) {
 	cond := &Condition{
 		AllOf: []Condition{

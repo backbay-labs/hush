@@ -11,7 +11,7 @@
   },
   "policy": {
     "spec_version": "0.1.0",
-    "content_hash": "sha256:25b7e644a29b0279a760057ee8500ef295bf264faa4acf44708b8193385f731d"
+    "content_hash": "sha256:85dd0a1230779b70cf89d553337fbcb7eeb65d80cb712a94185623be39d0aaa2"
   },
   "action": {
     "type": "file_write",
