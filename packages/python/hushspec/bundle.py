@@ -49,10 +49,11 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 from hushspec.canonical import (
@@ -781,15 +782,28 @@ def _relative_source(source: str, base_dir: str | Path | None) -> str:
 
     ``builtin:`` and URL sources are already portable and are returned
     unchanged, as is any path that is not beneath *base_dir*.
+
+    The comparison is lexical, and deliberately so: resolving symlinks would
+    make the same policy reached through a symlinked base record a different
+    ``source`` than one reached directly, and a chain link's ``source`` is a
+    provenance label that every SDK must spell the same way.
     """
     if base_dir is None or source.startswith("builtin:") or "://" in source:
         return source
     try:
-        relative = Path(source).resolve().relative_to(Path(base_dir).resolve())
+        relative = os.path.relpath(source, os.fspath(base_dir))
     except (OSError, ValueError):
         return source
+    # Only a `..` *segment* leaves the base directory: a name that merely
+    # starts with two dots (`..cache/policy.yaml`) is beneath it like any other.
+    if (
+        relative in (os.curdir, os.pardir)
+        or relative.startswith(os.pardir + os.sep)
+        or os.path.isabs(relative)
+    ):
+        return source
     # A bundle is JSON read on every platform, so the separator is `/`.
-    return relative.as_posix() or source
+    return PurePath(relative).as_posix()
 
 
 def _subject_name(

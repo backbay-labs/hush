@@ -286,6 +286,33 @@ def test_a_source_outside_base_dir_is_left_alone() -> None:
     assert statement.predicate.chain[1].source == resolution.chain[1].source
 
 
+def test_a_symlinked_base_records_the_same_source(tmp_path: Path) -> None:
+    # A chain link's ``source`` is a provenance label the four SDKs must spell
+    # the same way, and the other three compare paths lexically: resolving
+    # symlinks here would make the same policy recorded differently depending
+    # on how the base directory was reached.
+    real = tmp_path / "real"
+    (real / "policies").mkdir(parents=True)
+    policy = real / "policies" / "leaf.yaml"
+    policy.write_text(
+        'hushspec: "0.1.0"\nname: leaf\nrules:\n  egress:\n'
+        '    allow: ["api.example.com"]\n    default: block\n',
+        encoding="utf-8",
+    )
+    link = tmp_path / "linked"
+    link.symlink_to(real, target_is_directory=True)
+
+    resolution = resolve_with_options_or_raise(
+        parse_or_raise(policy.read_text(encoding="utf-8")),
+        source=str(link / "policies" / "leaf.yaml"),
+        loader=create_composite_loader(),
+    )
+    statement = build_statement(
+        resolution, created_at=VECTOR_CREATED_AT, base_dir=link
+    )
+    assert [c.source for c in statement.predicate.chain] == ["policies/leaf.yaml"]
+
+
 def test_signature_verification_is_omitted_when_none_was_attempted() -> None:
     statement = build_statement(vector_resolution(), created_at=VECTOR_CREATED_AT)
     # Recording ``verified: false`` would assert a check that never ran
