@@ -476,6 +476,30 @@ fn action_types_dispatch_to_the_rule_blocks_they_register() {
     }
 }
 
+/// The evaluator-test schema accepts any string for an action's `type`, so
+/// that a vector can assert the fail-closed deny for an unknown one; the
+/// reference types it names in prose are the registry's, and a vector author
+/// reading the schema must not be handed a stale list.
+#[test]
+fn action_types_match_the_evaluator_test_schema() {
+    let schema = load_json("schemas/hushspec-evaluator-test.v0.schema.json");
+    let description = schema["$defs"]["Action"]["properties"]["type"]["description"]
+        .as_str()
+        .expect("the action type is documented");
+    let listed = description
+        .split_once("reference types are ")
+        .map(|(_, tail)| tail.trim_end().trim_end_matches('.'))
+        .unwrap_or_else(|| {
+            panic!("the evaluator-test schema no longer names its reference types: {description}")
+        });
+    assert_no_drift(
+        "action-types",
+        &ids(&registry("action-types"), "entries"),
+        "the evaluator-test schema's `type` description",
+        &set(listed.split(", ")),
+    );
+}
+
 /// The registry is closed (core spec 5), so it lists the action types of the
 /// normative table and no others.
 #[test]
