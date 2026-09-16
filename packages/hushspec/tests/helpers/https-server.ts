@@ -2,11 +2,14 @@
  * A local HTTPS server for exercising the `extends` loader's transport paths
  * (core spec 2.6.4) without reaching the network.
  *
- * It listens on `127.0.0.1` and is addressed as `localhost`, so a test proves
+ * It is addressed as `localhost` and listens on the loopback address that name
+ * resolves to first, which is the address the loader pins, so a test proves
  * the loader dials the address it checked while the certificate is still
- * verified against the name the URL carried.
+ * verified against the name the URL carried. Which loopback address comes
+ * first is the host's choice: `::1` where the resolver lists IPv6 first.
  */
 
+import { lookup } from 'node:dns/promises';
 import https from 'node:https';
 import type { AddressInfo } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -28,7 +31,9 @@ export async function startTestServer(handler: Handler): Promise<TestServer> {
     requests.push(req);
     handler(req, res);
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const [first] = await lookup('localhost', { all: true });
+  if (first === undefined) throw new Error('localhost did not resolve to any address');
+  await new Promise<void>((resolve) => server.listen(0, first.address, resolve));
   const { port } = server.address() as AddressInfo;
   return {
     origin: `https://localhost:${port}`,

@@ -10,7 +10,7 @@
  * IPv4-in-IPv6 forms, the scheme check, the allowlist.
  *
  * The fetch, revalidation, redirect and size-cap paths run against a real
- * `node:https` server on `127.0.0.1`. The tests trust the server's certificate
+ * `node:https` server on the loopback address. The tests trust the server's certificate
  * through the loader's `tlsCa` option -- verification is never disabled, so the
  * certificate is still checked against `localhost`, the name the URL carries,
  * and not against the pinned address -- and pass the documented test-only
@@ -265,7 +265,7 @@ describe('http loader transport', () => {
     const loaded = await loader(`${server.origin}/policy.yaml`);
     expect(loaded.spec.name).toBe('remote-base');
     expect(loaded.source).toBe(`${server.origin}/policy.yaml`);
-    // The socket went to the pinned 127.0.0.1, but the request still names the
+    // The socket went to the pinned loopback address, but the request still names the
     // host the URL did -- which is also the name the certificate was checked
     // against, since `tlsCa` trusts the certificate without disabling
     // verification.
