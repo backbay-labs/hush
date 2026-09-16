@@ -480,7 +480,14 @@ function relativeSource(source: string, base?: string): string {
     return source;
   }
   const relative = path.relative(base, source);
-  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+  // Only a `..` *segment* leaves `base`: a name that merely starts with two
+  // dots (`..cache/policy.yaml`) is beneath it like any other.
+  if (
+    relative === ''
+    || relative === '..'
+    || relative.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relative)
+  ) {
     return source;
   }
   // A bundle is JSON read on every platform, so the separator is `/`.

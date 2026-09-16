@@ -1,5 +1,6 @@
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -235,6 +236,33 @@ describe('buildBundleStatement', () => {
     // `builtin:strict` is portable already; the leaf is not beneath `crates/`.
     expect(statement.predicate.chain[0]?.source).toBe('builtin:strict');
     expect(statement.predicate.chain[1]?.source).toBe(resolution.chain[1]?.source);
+  });
+
+  it('records a directory whose name merely starts with two dots as relative', () => {
+    // `..cache` is a name, not a parent segment: only `..` on its own or
+    // followed by a separator leaves `baseDir` (bundle spec 4.4).
+    const base = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'hushspec-bundle-')));
+    try {
+      const directory = path.join(base, '..cache');
+      mkdirSync(directory);
+      const file = path.join(directory, 'policy.yaml');
+      writeFileSync(file, 'hushspec: "1.0.0"\nname: dotted\nrules:\n  egress:\n    default: block\n');
+
+      const parsed = parse(readFileSync(file, 'utf8'));
+      if (!parsed.ok) throw new Error(parsed.error);
+      const resolution = resolveWithOptions(parsed.value, {
+        source: file,
+        loader: createCompositeLoader(),
+      });
+
+      const statement = buildBundleStatement(resolution, {
+        createdAt: vectorCreatedAt,
+        baseDir: base,
+      });
+      expect(statement.predicate.chain[0]?.source).toBe('..cache/policy.yaml');
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('omits signature_verification when no verification was attempted', () => {
