@@ -124,7 +124,7 @@ func (g grantedCapabilities) grants(name string) bool {
 // resolved the effective posture state calls
 // [EvaluateConditionWithCapabilities] instead.
 func EvaluateCondition(condition *Condition, context *RuntimeContext) bool {
-	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0)
+	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0) != verdictFalse
 }
 
 // EvaluateConditionWithCapabilities is [EvaluateCondition] with the
@@ -139,7 +139,59 @@ func EvaluateConditionWithCapabilities(
 	hasPosture bool,
 ) bool {
 	return evaluateConditionDepth(condition, context,
-		grantedCapabilities{known: hasPosture, list: capabilities}, 0)
+		grantedCapabilities{known: hasPosture, list: capabilities}, 0) != verdictFalse
+}
+
+// conditionVerdict is what a condition evaluates to (core spec 3.13).
+// verdictUnevaluable is a predicate the engine lacks the means to decide --
+// no posture extension, no such counter, a clock it cannot read -- and it
+// never switches a block off: a block is inert only on an evaluated false.
+type conditionVerdict uint8
+
+const (
+	verdictTrue conditionVerdict = iota
+	verdictFalse
+	verdictUnevaluable
+)
+
+func verdictOf(value bool) conditionVerdict {
+	if value {
+		return verdictTrue
+	}
+	return verdictFalse
+}
+
+func (v conditionVerdict) negate() conditionVerdict {
+	switch v {
+	case verdictTrue:
+		return verdictFalse
+	case verdictFalse:
+		return verdictTrue
+	default:
+		return verdictUnevaluable
+	}
+}
+
+// and is AND: false wins, then unevaluable, then true.
+func (v conditionVerdict) and(other conditionVerdict) conditionVerdict {
+	if v == verdictFalse || other == verdictFalse {
+		return verdictFalse
+	}
+	if v == verdictUnevaluable || other == verdictUnevaluable {
+		return verdictUnevaluable
+	}
+	return verdictTrue
+}
+
+// or is OR: true wins, then unevaluable, then false.
+func (v conditionVerdict) or(other conditionVerdict) conditionVerdict {
+	if v == verdictTrue || other == verdictTrue {
+		return verdictTrue
+	}
+	if v == verdictUnevaluable || other == verdictUnevaluable {
+		return verdictUnevaluable
+	}
+	return verdictFalse
 }
 
 func evaluateConditionDepth(
@@ -147,91 +199,108 @@ func evaluateConditionDepth(
 	context *RuntimeContext,
 	capabilities grantedCapabilities,
 	depth int,
-) bool {
+) conditionVerdict {
 	if depth > MaxNestingDepth {
 		// Validation rejects this at parse time; an out-of-band condition that
 		// exceeds the depth cannot be evaluated, and an unevaluable condition
-		// must not switch a control off (core spec 3.13), so treat it as held.
-		return true
+		// must not switch a control off (core spec 3.13).
+		return verdictUnevaluable
 	}
 
+	// The fields of one condition object are ANDed. An evaluated false
+	// settles the object, so later fields are not consulted.
+	verdict := verdictTrue
+
 	if condition.TimeWindow != nil {
-		if !checkTimeWindow(condition.TimeWindow, context) {
-			return false
+		verdict = verdict.and(checkTimeWindow(condition.TimeWindow, context))
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if condition.Context != nil {
-		if !checkContextMatch(condition.Context, context) {
-			return false
+		verdict = verdict.and(verdictOf(checkContextMatch(condition.Context, context)))
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
-	// `capability`: unevaluable without a posture extension (held); otherwise
-	// the effective state must list the capability.
-	if condition.Capability != "" && capabilities.known && !capabilities.grants(condition.Capability) {
-		return false
+	// `capability`: unevaluable without a posture extension; otherwise the
+	// effective state must list the capability.
+	if condition.Capability != "" {
+		if capabilities.known {
+			verdict = verdict.and(verdictOf(capabilities.grants(condition.Capability)))
+		} else {
+			verdict = verdict.and(verdictUnevaluable)
+		}
+		if verdict == verdictFalse {
+			return verdict
+		}
 	}
 
-	// `rate`: unevaluable when the engine supplied no such counter (held).
+	// `rate`: unevaluable when the engine supplied no such counter.
 	if rate := condition.Rate; rate != nil {
 		if count, ok := context.Counters[rate.Counter]; ok {
 			satisfied := count >= rate.Threshold
 			if rate.Comparison == RateComparisonLt {
 				satisfied = count < rate.Threshold
 			}
-			if !satisfied {
-				return false
-			}
+			verdict = verdict.and(verdictOf(satisfied))
+		} else {
+			verdict = verdict.and(verdictUnevaluable)
+		}
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
-	for index := range condition.AllOf {
-		if !evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1) {
-			return false
+	if len(condition.AllOf) > 0 {
+		combined := verdictTrue
+		for index := range condition.AllOf {
+			combined = combined.and(evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1))
+		}
+		verdict = verdict.and(combined)
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if len(condition.AnyOf) > 0 {
-		found := false
+		combined := verdictFalse
 		for index := range condition.AnyOf {
-			if evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1) {
-				found = true
-				break
-			}
+			combined = combined.or(evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1))
 		}
-		if !found {
-			return false
+		verdict = verdict.and(combined)
+		if verdict == verdictFalse {
+			return verdict
 		}
 	}
 
 	if condition.Not != nil {
-		if evaluateConditionDepth(condition.Not, context, capabilities, depth+1) {
-			return false
-		}
+		verdict = verdict.and(evaluateConditionDepth(condition.Not, context, capabilities, depth+1).negate())
 	}
 
-	return true
+	return verdict
 }
 
-func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) bool {
-	// Fail closed toward enforcement (core spec 3.13): a window the engine
-	// cannot evaluate -- unresolvable time zone, unparsable current_time, or a
-	// malformed HH:MM that escaped validation -- leaves the block ACTIVE.
+func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) conditionVerdict {
+	// A window the engine cannot evaluate -- unresolvable time zone,
+	// unparsable current_time, or a malformed HH:MM that escaped validation --
+	// is unevaluable and leaves the block active (core spec 3.13).
 	now := resolveCurrentTimeForCondition(context, tw.Timezone)
 	if now == nil {
-		return true
+		return verdictUnevaluable
 	}
 
 	hour, minute, dayOfWeek := now[0], now[1], now[2]
 
 	startH, startM, ok := parseHHMM(tw.Start)
 	if !ok {
-		return true
+		return verdictUnevaluable
 	}
 	endH, endM, ok := parseHHMM(tw.End)
 	if !ok {
-		return true
+		return verdictUnevaluable
 	}
 
 	currentMinutes := hour*60 + minute
@@ -253,17 +322,17 @@ func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) bool {
 			}
 		}
 		if !found {
-			return false
+			return verdictFalse
 		}
 	}
 
 	if startMinutes == endMinutes {
-		return true
+		return verdictTrue
 	}
 	if startMinutes < endMinutes {
-		return currentMinutes >= startMinutes && currentMinutes < endMinutes
+		return verdictOf(currentMinutes >= startMinutes && currentMinutes < endMinutes)
 	}
-	return currentMinutes >= startMinutes || currentMinutes < endMinutes
+	return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes)
 }
 
 func parseHHMM(s string) (int, int, bool) {

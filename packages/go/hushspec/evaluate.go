@@ -435,12 +435,12 @@ func (e *evaluator) activity(block blockID) *inactive {
 	if !gate.enabled {
 		return inactiveDisabled
 	}
-	if gate.when != nil && !evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) {
+	if gate.when != nil && evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) == verdictFalse {
 		return inactiveConditionFalse
 	}
 	if len(e.conditions) > 0 {
 		condition, ok := e.conditions[blockNames[block]]
-		if ok && condition != nil && !evaluateConditionDepth(condition, e.context, e.capabilities, 0) {
+		if ok && condition != nil && evaluateConditionDepth(condition, e.context, e.capabilities, 0) == verdictFalse {
 			return inactiveOutOfBandCondition
 		}
 	}

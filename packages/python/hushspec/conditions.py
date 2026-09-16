@@ -488,7 +488,7 @@ def evaluate_condition(condition: Condition, context: RuntimeContext) -> bool:
     therefore holds; an evaluator that has resolved the effective posture
     state calls :func:`evaluate_condition_with_capabilities` instead.
     """
-    return _evaluate_condition_depth(condition, context, None, 0)
+    return _evaluate_condition_depth(condition, context, None, 0) is not _Verdict.FALSE
 
 
 def evaluate_condition_with_capabilities(
@@ -504,7 +504,49 @@ def evaluate_condition_with_capabilities(
     empty) sequence otherwise, so an unknown state grants nothing and the
     predicate is false.
     """
-    return _evaluate_condition_depth(condition, context, capabilities, 0)
+    return _evaluate_condition_depth(condition, context, capabilities, 0) is not _Verdict.FALSE
+
+
+class _Verdict(Enum):
+    """What a condition evaluates to (core spec 3.13).
+
+    ``UNEVALUABLE`` is a predicate the engine lacks the means to decide -- no
+    posture extension, no such counter, a clock it cannot read -- and it
+    never switches a block off: a block is inert only on an evaluated
+    ``FALSE``.
+    """
+
+    TRUE = "true"
+    FALSE = "false"
+    UNEVALUABLE = "unevaluable"
+
+
+def _verdict_of(value: bool) -> _Verdict:
+    return _Verdict.TRUE if value else _Verdict.FALSE
+
+
+def _negate(verdict: _Verdict) -> _Verdict:
+    if verdict is _Verdict.UNEVALUABLE:
+        return _Verdict.UNEVALUABLE
+    return _Verdict.FALSE if verdict is _Verdict.TRUE else _Verdict.TRUE
+
+
+def _conjoin(left: _Verdict, right: _Verdict) -> _Verdict:
+    """AND: false wins, then unevaluable, then true."""
+    if _Verdict.FALSE in (left, right):
+        return _Verdict.FALSE
+    if _Verdict.UNEVALUABLE in (left, right):
+        return _Verdict.UNEVALUABLE
+    return _Verdict.TRUE
+
+
+def _disjoin(left: _Verdict, right: _Verdict) -> _Verdict:
+    """OR: true wins, then unevaluable, then false."""
+    if _Verdict.TRUE in (left, right):
+        return _Verdict.TRUE
+    if _Verdict.UNEVALUABLE in (left, right):
+        return _Verdict.UNEVALUABLE
+    return _Verdict.FALSE
 
 
 def _evaluate_condition_depth(
@@ -512,52 +554,84 @@ def _evaluate_condition_depth(
     context: RuntimeContext,
     capabilities: Optional[Sequence[str]],
     depth: int,
-) -> bool:
+) -> _Verdict:
     if depth > MAX_NESTING_DEPTH:
         # Validation rejects this at parse time; an out-of-band condition that
         # exceeds the depth cannot be evaluated, and an unevaluable condition
-        # must not switch a control off (core spec 3.13), so treat it as held.
-        return True
+        # must not switch a control off (core spec 3.13).
+        return _Verdict.UNEVALUABLE
+
+    # The fields of one condition object are ANDed. An evaluated false
+    # settles the object, so later fields are not consulted.
+    verdict = _Verdict.TRUE
 
     if condition.time_window is not None:
-        if not _check_time_window(condition.time_window, context):
-            return False
+        verdict = _conjoin(verdict, _check_time_window(condition.time_window, context))
+        if verdict is _Verdict.FALSE:
+            return verdict
 
     if condition.context is not None:
-        if not _check_context_match(condition.context, context):
-            return False
+        verdict = _conjoin(
+            verdict, _verdict_of(_check_context_match(condition.context, context))
+        )
+        if verdict is _Verdict.FALSE:
+            return verdict
 
-    # `capability`: unevaluable without a posture extension (held); otherwise
-    # the effective state must list the capability.
-    if condition.capability is not None and capabilities is not None:
-        if condition.capability not in capabilities:
-            return False
+    # `capability`: unevaluable without a posture extension; otherwise the
+    # effective state must list the capability.
+    if condition.capability is not None:
+        verdict = _conjoin(
+            verdict,
+            _Verdict.UNEVALUABLE
+            if capabilities is None
+            else _verdict_of(condition.capability in capabilities),
+        )
+        if verdict is _Verdict.FALSE:
+            return verdict
 
-    # `rate`: unevaluable when the engine supplied no such counter (held).
+    # `rate`: unevaluable when the engine supplied no such counter.
     if condition.rate is not None:
         count = context.counters.get(condition.rate.counter)
-        if count is not None and not _compare_rate(condition.rate, count):
-            return False
+        verdict = _conjoin(
+            verdict,
+            _Verdict.UNEVALUABLE
+            if count is None
+            else _verdict_of(_compare_rate(condition.rate, count)),
+        )
+        if verdict is _Verdict.FALSE:
+            return verdict
 
     if condition.all_of is not None:
-        if not all(
-            _evaluate_condition_depth(c, context, capabilities, depth + 1)
-            for c in condition.all_of
-        ):
-            return False
+        combined = _Verdict.TRUE
+        for member in condition.all_of:
+            combined = _conjoin(
+                combined,
+                _evaluate_condition_depth(member, context, capabilities, depth + 1),
+            )
+        verdict = _conjoin(verdict, combined)
+        if verdict is _Verdict.FALSE:
+            return verdict
 
     if condition.any_of:
-        if not any(
-            _evaluate_condition_depth(c, context, capabilities, depth + 1)
-            for c in condition.any_of
-        ):
-            return False
+        combined = _Verdict.FALSE
+        for member in condition.any_of:
+            combined = _disjoin(
+                combined,
+                _evaluate_condition_depth(member, context, capabilities, depth + 1),
+            )
+        verdict = _conjoin(verdict, combined)
+        if verdict is _Verdict.FALSE:
+            return verdict
 
     if condition.not_ is not None:
-        if _evaluate_condition_depth(condition.not_, context, capabilities, depth + 1):
-            return False
+        verdict = _conjoin(
+            verdict,
+            _negate(
+                _evaluate_condition_depth(condition.not_, context, capabilities, depth + 1)
+            ),
+        )
 
-    return True
+    return verdict
 
 
 def _compare_rate(rate: RateCondition, count: int) -> bool:
@@ -566,22 +640,22 @@ def _compare_rate(rate: RateCondition, count: int) -> bool:
     return count < rate.threshold
 
 
-def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> bool:
-    # Fail closed toward enforcement (core spec 3.13): a window the engine
-    # cannot evaluate -- unresolvable time zone, unparsable current_time, or a
-    # malformed HH:MM that escaped validation -- leaves the block ACTIVE.
+def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> _Verdict:
+    # A window the engine cannot evaluate -- unresolvable time zone,
+    # unparsable current_time, or a malformed HH:MM that escaped validation --
+    # is unevaluable and leaves the block active (core spec 3.13).
     now = _resolve_current_time(context, tw.timezone)
     if now is None:
-        return True
+        return _Verdict.UNEVALUABLE
 
     hour, minute, day_of_week = now
 
     start_parsed = _parse_hhmm(tw.start)
     if start_parsed is None:
-        return True
+        return _Verdict.UNEVALUABLE
     end_parsed = _parse_hhmm(tw.end)
     if end_parsed is None:
-        return True
+        return _Verdict.UNEVALUABLE
 
     start_h, start_m = start_parsed
     end_h, end_m = end_parsed
@@ -598,15 +672,15 @@ def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> bool
         )
         day_abbrev = _day_abbreviation(effective_day)
         if not any(d.lower() == day_abbrev for d in tw.days):
-            return False
+            return _Verdict.FALSE
 
     if start_minutes == end_minutes:
-        return True
+        return _Verdict.TRUE
 
     if start_minutes < end_minutes:
-        return start_minutes <= current_minutes < end_minutes
+        return _verdict_of(start_minutes <= current_minutes < end_minutes)
 
-    return current_minutes >= start_minutes or current_minutes < end_minutes
+    return _verdict_of(current_minutes >= start_minutes or current_minutes < end_minutes)
 
 
 def _parse_hhmm(s: str) -> Optional[tuple[int, int]]:

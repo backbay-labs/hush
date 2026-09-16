@@ -104,7 +104,7 @@ export function evaluateCondition(
   condition: Condition,
   context: RuntimeContext,
 ): boolean {
-  return evaluateConditionDepth(condition, context, undefined, 0);
+  return evaluateConditionDepth(condition, context, undefined, 0) !== 'false';
 }
 
 /**
@@ -124,7 +124,38 @@ export function evaluateConditionWithCapabilities(
   context: RuntimeContext,
   capabilities: GrantedCapabilities | undefined,
 ): boolean {
-  return evaluateConditionDepth(condition, context, capabilities, 0);
+  return evaluateConditionDepth(condition, context, capabilities, 0) !== 'false';
+}
+
+/**
+ * What a condition evaluates to (core spec 3.13). `unevaluable` is a
+ * predicate the engine lacks the means to decide -- no posture extension, no
+ * such counter, a clock it cannot read -- and it never switches a block off:
+ * a block is inert only on an evaluated `false`.
+ */
+type Verdict = 'true' | 'false' | 'unevaluable';
+
+function verdictOf(value: boolean): Verdict {
+  return value ? 'true' : 'false';
+}
+
+function negate(verdict: Verdict): Verdict {
+  if (verdict === 'unevaluable') return 'unevaluable';
+  return verdict === 'true' ? 'false' : 'true';
+}
+
+/** AND: `false` wins, then `unevaluable`, then `true`. */
+function conjoin(left: Verdict, right: Verdict): Verdict {
+  if (left === 'false' || right === 'false') return 'false';
+  if (left === 'unevaluable' || right === 'unevaluable') return 'unevaluable';
+  return 'true';
+}
+
+/** OR: `true` wins, then `unevaluable`, then `false`. */
+function disjoin(left: Verdict, right: Verdict): Verdict {
+  if (left === 'true' || right === 'true') return 'true';
+  if (left === 'unevaluable' || right === 'unevaluable') return 'unevaluable';
+  return 'false';
 }
 
 function grants(capabilities: GrantedCapabilities, name: string): boolean {
@@ -138,69 +169,74 @@ function evaluateConditionDepth(
   context: RuntimeContext,
   capabilities: GrantedCapabilities | undefined,
   depth: number,
-): boolean {
+): Verdict {
   if (depth > MAX_NESTING_DEPTH) {
     // Validation rejects this at parse time; an out-of-band condition that
     // exceeds the depth cannot be evaluated, and an unevaluable condition must
-    // not switch a control off (core spec 3.13), so treat it as held.
-    return true;
+    // not switch a control off (core spec 3.13).
+    return 'unevaluable';
   }
 
+  // The fields of one condition object are ANDed. An evaluated `false`
+  // settles the object, so later fields are not consulted.
+  let verdict: Verdict = 'true';
+
   if (condition.time_window != null) {
-    if (!checkTimeWindow(condition.time_window, context)) {
-      return false;
-    }
+    verdict = conjoin(verdict, checkTimeWindow(condition.time_window, context));
+    if (verdict === 'false') return verdict;
   }
 
   if (condition.context != null) {
-    if (!checkContextMatch(condition.context, context)) {
-      return false;
-    }
+    verdict = conjoin(verdict, verdictOf(checkContextMatch(condition.context, context)));
+    if (verdict === 'false') return verdict;
   }
 
-  // `capability`: unevaluable without a posture extension (held); otherwise
-  // the effective state must list the capability.
-  if (condition.capability != null && capabilities != null) {
-    if (!grants(capabilities, condition.capability)) {
-      return false;
-    }
+  // `capability`: unevaluable without a posture extension; otherwise the
+  // effective state must list the capability.
+  if (condition.capability != null) {
+    verdict = conjoin(
+      verdict,
+      capabilities == null ? 'unevaluable' : verdictOf(grants(capabilities, condition.capability)),
+    );
+    if (verdict === 'false') return verdict;
   }
 
-  // `rate`: unevaluable when the engine supplied no such counter (held).
+  // `rate`: unevaluable when the engine supplied no such counter.
   if (condition.rate != null) {
     const count = counterValue(context, condition.rate.counter);
-    if (count != null && !rateHolds(condition.rate, count)) {
-      return false;
-    }
+    verdict = conjoin(
+      verdict,
+      count == null ? 'unevaluable' : verdictOf(rateHolds(condition.rate, count)),
+    );
+    if (verdict === 'false') return verdict;
   }
 
   if (condition.all_of != null) {
-    if (
-      !condition.all_of.every((c) =>
-        evaluateConditionDepth(c, context, capabilities, depth + 1),
-      )
-    ) {
-      return false;
+    let combined: Verdict = 'true';
+    for (const member of condition.all_of) {
+      combined = conjoin(combined, evaluateConditionDepth(member, context, capabilities, depth + 1));
     }
+    verdict = conjoin(verdict, combined);
+    if (verdict === 'false') return verdict;
   }
 
   if (condition.any_of != null && condition.any_of.length > 0) {
-    if (
-      !condition.any_of.some((c) =>
-        evaluateConditionDepth(c, context, capabilities, depth + 1),
-      )
-    ) {
-      return false;
+    let combined: Verdict = 'false';
+    for (const member of condition.any_of) {
+      combined = disjoin(combined, evaluateConditionDepth(member, context, capabilities, depth + 1));
     }
+    verdict = conjoin(verdict, combined);
+    if (verdict === 'false') return verdict;
   }
 
   if (condition.not != null) {
-    if (evaluateConditionDepth(condition.not, context, capabilities, depth + 1)) {
-      return false;
-    }
+    verdict = conjoin(
+      verdict,
+      negate(evaluateConditionDepth(condition.not, context, capabilities, depth + 1)),
+    );
   }
 
-  return true;
+  return verdict;
 }
 
 /**
@@ -225,24 +261,24 @@ function rateHolds(rate: RateCondition, count: number): boolean {
 function checkTimeWindow(
   tw: TimeWindowCondition,
   context: RuntimeContext,
-): boolean {
-  // Fail closed toward enforcement (core spec 3.13): a window the engine
-  // cannot evaluate -- unresolvable time zone, unparsable current_time, or a
-  // malformed HH:MM that escaped validation -- leaves the block ACTIVE.
+): Verdict {
+  // A window the engine cannot evaluate -- unresolvable time zone, unparsable
+  // current_time, or a malformed HH:MM that escaped validation -- is
+  // unevaluable and leaves the block active (core spec 3.13).
   const now = resolveCurrentTime(context, tw.timezone);
   if (now == null) {
-    return true;
+    return 'unevaluable';
   }
 
   const [hour, minute, dayOfWeek] = now;
 
   const startParsed = parseHHMM(tw.start);
   if (startParsed == null) {
-    return true;
+    return 'unevaluable';
   }
   const endParsed = parseHHMM(tw.end);
   if (endParsed == null) {
-    return true;
+    return 'unevaluable';
   }
 
   const [startH, startM] = startParsed;
@@ -263,19 +299,18 @@ function checkTimeWindow(
         (d) => d.toLowerCase() === dayAbbrev,
       )
     ) {
-      return false;
+      return 'false';
     }
   }
 
   if (startMinutes === endMinutes) {
-    return true;
+    return 'true';
   }
 
   if (startMinutes < endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
-  } else {
-    return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+    return verdictOf(currentMinutes >= startMinutes && currentMinutes < endMinutes);
   }
+  return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes);
 }
 
 function parseHHMM(s: string): [number, number] | undefined {
