@@ -19,6 +19,13 @@ pub const SCHEMA_NAMES: &[&str] = &[
     "origins",
     "posture",
     "receipt",
+    "registry-action-types",
+    "registry-capabilities",
+    "registry-condition-types",
+    "registry-detectors",
+    "registry-media-types",
+    "registry-rule-blocks",
+    "registry-rule-paths",
     "report",
     "signature",
 ];
@@ -45,6 +52,34 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("origins", "hushspec-origins.v0.schema.json"),
     ("posture", "hushspec-posture.v0.schema.json"),
     ("receipt", "hushspec-receipt.v0.schema.json"),
+    (
+        "registry-action-types",
+        "hushspec-registry-action-types.v0.schema.json",
+    ),
+    (
+        "registry-capabilities",
+        "hushspec-registry-capabilities.v0.schema.json",
+    ),
+    (
+        "registry-condition-types",
+        "hushspec-registry-condition-types.v0.schema.json",
+    ),
+    (
+        "registry-detectors",
+        "hushspec-registry-detectors.v0.schema.json",
+    ),
+    (
+        "registry-media-types",
+        "hushspec-registry-media-types.v0.schema.json",
+    ),
+    (
+        "registry-rule-blocks",
+        "hushspec-registry-rule-blocks.v0.schema.json",
+    ),
+    (
+        "registry-rule-paths",
+        "hushspec-registry-rule-paths.v0.schema.json",
+    ),
     ("report", "hushspec-report.v0.schema.json"),
     ("signature", "hushspec-signature.v0.schema.json"),
 ];
@@ -3596,6 +3631,560 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
   }
 }
 "##,
+    ),
+    (
+        "registry-action-types",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-action-types.v0.schema.json",
+  "title": "HushSpec Action-Type Registry v0",
+  "description": "Shape of spec/registries/action-types.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "action-types"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "summary",
+          "rule_blocks",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rule_blocks": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+            },
+            "uniqueItems": true
+          },
+          "required_capability": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-capabilities",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-capabilities.v0.schema.json",
+  "title": "HushSpec Capability Registry v0",
+  "description": "Shape of spec/registries/capabilities.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "capabilities"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "summary",
+          "gates",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+            },
+            "uniqueItems": true
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-condition-types",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-condition-types.v0.schema.json",
+  "title": "HushSpec Condition-Type Registry v0",
+  "description": "Shape of spec/registries/condition-types.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "condition-types"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "summary",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "predicate",
+              "combinator"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-detectors",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-detectors.v0.schema.json",
+  "title": "HushSpec Detector Registry v0",
+  "description": "Shape of spec/registries/detectors.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries",
+    "categories"
+  ],
+  "properties": {
+    "registry": {
+      "const": "detectors"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "category",
+          "normative",
+          "summary",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*@[0-9]+$"
+          },
+          "category": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "normative": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "categories": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "summary",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "configured_by": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-media-types",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-media-types.v0.schema.json",
+  "title": "HushSpec Media-Type Registry v0",
+  "description": "Shape of spec/registries/media-types.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "media-types"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "carries",
+          "extensions",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^application/vnd\\.hushspec(\\.[a-z]+)?\\+(yaml|json|jsonl)$"
+          },
+          "carries": {
+            "type": "string",
+            "minLength": 1
+          },
+          "extensions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "pattern": "^\\.[a-z0-9.]+$"
+            }
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-rule-blocks",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-rule-blocks.v0.schema.json",
+  "title": "HushSpec Rule-Block Registry v0",
+  "description": "Shape of spec/registries/rule-blocks.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "rule-blocks"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "summary",
+          "enabled_default",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled_default": {
+            "type": "boolean"
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
+"#,
+    ),
+    (
+        "registry-rule-paths",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-registry-rule-paths.v0.schema.json",
+  "title": "HushSpec Rule-Path Registry v0",
+  "description": "Shape of spec/registries/rule-paths.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registry",
+    "registry_version",
+    "status",
+    "entries"
+  ],
+  "properties": {
+    "registry": {
+      "const": "rule-paths"
+    },
+    "registry_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "closed",
+        "open"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "spec"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(__[a-z_]+__|[a-z][a-z0-9_]*)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "rule_block",
+              "engine_stage",
+              "reserved_matched_rule"
+            ]
+          },
+          "matched_rule": {
+            "type": "string",
+            "pattern": "^__[a-z_]+__$"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "spec": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The defining specification and section, for example `core 3.4`."
+          }
+        }
+      }
+    }
+  }
+}
+"#,
     ),
     (
         "report",
