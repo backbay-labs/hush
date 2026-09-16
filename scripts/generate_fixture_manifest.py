@@ -6,10 +6,7 @@ of every vector a third-party implementation was tested against, so a report
 (`schemas/hushspec-conformance-report.v1.schema.json`) can name the corpus by
 `manifest_sha256` instead of "the fixtures directory, some time in September".
 
-Every file under `fixtures/` is listed except `fixtures/staged/`, which holds
-vectors for behavior ratified in the spec but not yet shipped by the reference
-implementation (core spec 1.1, "Test vector"): staged vectors are not part of
-any conformance level until they are promoted.
+Every file under `fixtures/` is listed, except the manifest itself.
 
 Each entry carries:
 
@@ -43,9 +40,7 @@ CORE_SPEC = ROOT / "spec" / "hushspec-core.md"
 
 MANIFEST_VERSION = "0.1"
 
-#: Excluded from the manifest. `staged/` is not normative yet; the manifest
-#: itself cannot list its own digest.
-EXCLUDED_PREFIXES = ("fixtures/staged/",)
+#: The manifest cannot list its own digest.
 EXCLUDED_PATHS = ("fixtures/MANIFEST.json",)
 
 #: The spec modules that carry document vectors: core plus the three
@@ -111,8 +106,6 @@ def iter_files() -> list[Path]:
     for path in files:
         relative = path.relative_to(ROOT).as_posix()
         if relative in EXCLUDED_PATHS:
-            continue
-        if any(relative.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
             continue
         kept.append(path)
     return sorted(kept, key=lambda path: path.relative_to(ROOT).as_posix())

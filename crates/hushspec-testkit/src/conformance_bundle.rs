@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use flate2::Compression;
 
-use crate::manifest::{EXCLUDED_PREFIXES, Manifest};
+use crate::manifest::Manifest;
 
 /// Everything in the bundle, relative to the repository root. `fixtures/`
 /// carries `MANIFEST.json` with it.
@@ -57,12 +57,6 @@ pub fn build(root: &Path) -> Result<Vec<u8>, String> {
                 .map_err(|error| format!("{}: {error}", path.display()))?
                 .to_string_lossy()
                 .replace('\\', "/");
-            if EXCLUDED_PREFIXES
-                .iter()
-                .any(|excluded| relative.starts_with(excluded))
-            {
-                continue;
-            }
             let bytes =
                 std::fs::read(&path).map_err(|error| format!("{}: {error}", path.display()))?;
             entries.push((format!("{prefix}/{relative}"), bytes));
@@ -245,10 +239,6 @@ mod tests {
                 entry.path
             );
         }
-        assert!(
-            !names.iter().any(|name| name.contains("/fixtures/staged/")),
-            "staged vectors are not normative and must stay out of the bundle"
-        );
     }
 
     /// Entry order and metadata are what make the bytes reproducible, so they

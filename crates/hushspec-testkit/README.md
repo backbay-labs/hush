@@ -45,8 +45,8 @@ all pass; a level with any unattempted vector is never a pass.
 hushspec-testkit bundle --root . --out hushspec-conformance-1.0.0.tar.gz
 ```
 
-The archive holds `spec/`, `schemas/`, and `fixtures/` (minus `staged/`, which
-is not normative yet) plus a README on running it against an implementation.
+The archive holds `spec/`, `schemas/`, and `fixtures/` plus a README on
+running it against an implementation.
 It is reproducible -- sorted entries, fixed modes, zeroed mtimes, no gzip
 timestamp -- so the same tree always produces the same bytes and the digest in
 a release attestation means something. `release.yml` attaches it to every
