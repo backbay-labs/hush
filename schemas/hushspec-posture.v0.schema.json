@@ -1,10 +1,15 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Posture Extension v0",
   "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
   "type": "object",
-  "required": ["initial", "states", "transitions"],
+  "required": [
+    "initial",
+    "states",
+    "transitions"
+  ],
   "additionalProperties": false,
   "properties": {
     "initial": {
@@ -55,7 +60,11 @@
     },
     "PostureTransition": {
       "type": "object",
-      "required": ["from", "to", "on"],
+      "required": [
+        "from",
+        "to",
+        "on"
+      ],
       "additionalProperties": false,
       "description": "A transition between posture states.",
       "properties": {
@@ -95,10 +104,17 @@
             "const": "timeout"
           }
         },
-        "required": ["on"]
+        "required": [
+          "on"
+        ]
       },
       "then": {
-        "required": ["from", "to", "on", "after"]
+        "required": [
+          "from",
+          "to",
+          "on",
+          "after"
+        ]
       }
     }
   }

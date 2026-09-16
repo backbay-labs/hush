@@ -44,11 +44,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = REPO_ROOT / "schemas"
 
-CORE_SCHEMA = "hushspec-core.v0.schema.json"
+CORE_SCHEMA = "hushspec-core.v1.schema.json"
 EXTENSION_SCHEMAS = {
-    "posture": "hushspec-posture.v0.schema.json",
-    "origins": "hushspec-origins.v0.schema.json",
-    "detection": "hushspec-detection.v0.schema.json",
+    "posture": "hushspec-posture.v1.schema.json",
+    "origins": "hushspec-origins.v1.schema.json",
+    "detection": "hushspec-detection.v1.schema.json",
 }
 
 # Fields consumed by resolution; never part of a resolved document.
@@ -64,7 +64,7 @@ INLINE_SIGNATURE_FIELD = "signature"
 # the origins profile overlay lists included, because an absent overlay list
 # and an empty one evaluate identically (origins spec section 4).
 PRESERVE_EMPTY = {
-    ("hushspec-origins.v0.schema.json", "OriginProfile", "match"),
+    ("hushspec-origins.v1.schema.json", "OriginProfile", "match"),
 }
 
 SAFE_INTEGER_MAX = 2**53 - 1

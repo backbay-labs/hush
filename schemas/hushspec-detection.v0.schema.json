@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Detection Extension v0",
   "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
   "type": "object",
@@ -19,7 +20,12 @@
   "$defs": {
     "Level": {
       "type": "string",
-      "enum": ["safe", "suspicious", "high", "critical"],
+      "enum": [
+        "safe",
+        "suspicious",
+        "high",
+        "critical"
+      ],
       "description": "Detection severity level, ordered: safe < suspicious < high < critical."
     },
     "PromptInjectionDetection": {

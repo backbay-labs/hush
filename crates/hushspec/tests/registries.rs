@@ -39,8 +39,8 @@ const REGISTRIES: [(&str, &str); 9] = [
         "hushspec-registry-condition-types.v0.schema.json",
     ),
     ("detectors", "hushspec-registry-detectors.v0.schema.json"),
-    ("error-codes", "hushspec-error-codes.v0.schema.json"),
-    ("frameworks", "hushspec-framework-registry.v0.schema.json"),
+    ("error-codes", "hushspec-error-codes.v1.schema.json"),
+    ("frameworks", "hushspec-framework-registry.v1.schema.json"),
     (
         "media-types",
         "hushspec-registry-media-types.v0.schema.json",
@@ -194,7 +194,7 @@ fn every_registry_file_is_in_the_table() {
 
 #[test]
 fn rule_blocks_match_the_core_schema() {
-    let core = load_json("schemas/hushspec-core.v0.schema.json");
+    let core = load_json("schemas/hushspec-core.v1.schema.json");
     assert_no_drift(
         "rule-blocks",
         &ids(&registry("rule-blocks"), "entries"),
@@ -205,7 +205,7 @@ fn rule_blocks_match_the_core_schema() {
 
 #[test]
 fn condition_types_match_the_core_schema() {
-    let core = load_json("schemas/hushspec-core.v0.schema.json");
+    let core = load_json("schemas/hushspec-core.v1.schema.json");
     assert_no_drift(
         "condition-types",
         &ids(&registry("condition-types"), "entries"),
@@ -258,7 +258,7 @@ fn condition_types_match_the_condition_type() {
 
 #[test]
 fn rule_paths_match_the_receipt_schema() {
-    let receipt = load_json("schemas/hushspec-receipt.v0.schema.json");
+    let receipt = load_json("schemas/hushspec-receipt.v1.schema.json");
     let trace_ids: BTreeSet<String> =
         receipt["$defs"]["RuleEvaluation"]["properties"]["rule_block"]["enum"]
             .as_array()
@@ -524,7 +524,7 @@ fn action_types_dispatch_to_the_rule_blocks_they_register() {
 /// reading the schema must not be handed a stale list.
 #[test]
 fn action_types_match_the_evaluator_test_schema() {
-    let schema = load_json("schemas/hushspec-evaluator-test.v0.schema.json");
+    let schema = load_json("schemas/hushspec-evaluator-test.v1.schema.json");
     let description = schema["$defs"]["Action"]["properties"]["type"]["description"]
         .as_str()
         .expect("the action type is documented");

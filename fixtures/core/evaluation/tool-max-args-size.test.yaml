@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.1.0"
 description: "core 3.7: tool_access.max_args_size is an inclusive ceiling -- an argument payload at the limit passes, one byte over is denied, and the limit is checked before the allow, block and require_confirmation lists so an oversized payload cannot be waved through by an allowlisted tool name."
 policy:

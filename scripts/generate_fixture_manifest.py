@@ -3,7 +3,7 @@
 
 The manifest is what makes a conformance run citable: it pins the exact bytes
 of every vector a third-party implementation was tested against, so a report
-(`schemas/hushspec-conformance-report.v0.schema.json`) can name the corpus by
+(`schemas/hushspec-conformance-report.v1.schema.json`) can name the corpus by
 `manifest_sha256` instead of "the fixtures directory, some time in September".
 
 Every file under `fixtures/` is listed except `fixtures/staged/`, which holds

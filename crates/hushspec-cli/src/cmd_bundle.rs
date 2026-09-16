@@ -84,7 +84,7 @@ pub struct VerifyArgs {
     #[arg(short, long, conflicts_with = "keyring", value_name = "PATH")]
     key: Option<PathBuf>,
 
-    /// Trusted keyring JSON (hushspec-keyring.v0.schema.json)
+    /// Trusted keyring JSON (hushspec-keyring.v1.schema.json)
     #[arg(long, value_name = "PATH")]
     keyring: Option<PathBuf>,
 

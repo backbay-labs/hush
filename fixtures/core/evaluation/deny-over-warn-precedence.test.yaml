@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.1.0"
 description: "core 6.1: with a warn and a deny both produced for one action, the aggregate is deny and the receipt attributes it to the denying rule -- the warn never wins and never masks the deny. Each case makes both outcomes real at once rather than testing them apart."
 policy:

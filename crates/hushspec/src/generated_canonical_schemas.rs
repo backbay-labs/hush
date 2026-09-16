@@ -8,25 +8,29 @@
 // `cargo package` cannot reach files outside the crate directory.
 
 /// File name of the core schema, as published under `schemas/`.
-pub(crate) const CORE_SCHEMA_NAME: &str = "hushspec-core.v0.schema.json";
+pub(crate) const CORE_SCHEMA_NAME: &str = "hushspec-core.v1.schema.json";
 
 /// Body of the core schema.
 pub(crate) const CORE_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json",
+  "$id": "https://hushspec.dev/schemas/hushspec-core.v1.schema.json",
   "title": "HushSpec Core v0",
   "description": "Schema for HushSpec Core v0.x documents. Validates portable, engine-neutral AI agent security rules.",
   "type": "object",
-  "required": ["hushspec"],
+  "required": [
+    "hushspec"
+  ],
   "additionalProperties": false,
   "properties": {
     "hushspec": {
       "type": "string",
-      "pattern": "^0\\.\\d+\\.\\d+$",
-      "description": "HushSpec version. Must match ^0\\. for v0.x documents."
+      "pattern": "^(0|1)\\.\\d+\\.\\d+$",
+      "description": "HushSpec document format version, MAJOR.MINOR.PATCH. The 0.x and 1.x lineages are accepted; an engine supporting minor X.Y accepts every X.Y.Z (core spec 2.2)."
     },
     "name": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "description": "Policy name. When present it must not be empty: bundle subjects and receipt policy summaries carry it (core spec 2)."
     },
     "description": {
       "type": "string"
@@ -37,7 +41,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     },
     "merge_strategy": {
       "type": "string",
-      "enum": ["replace", "merge", "deep_merge"],
+      "enum": [
+        "replace",
+        "merge",
+        "deep_merge"
+      ],
       "default": "deep_merge",
       "description": "Strategy for merging with the base policy."
     },
@@ -199,7 +207,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "default": "block",
           "description": "Default decision when no pattern matches."
         }
@@ -209,7 +220,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
       "type": "object",
       "additionalProperties": false,
       "description": "A named regex pattern for secret detection.",
-      "required": ["name", "pattern", "severity"],
+      "required": [
+        "name",
+        "pattern",
+        "severity"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -221,7 +236,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "severity": {
           "type": "string",
-          "enum": ["critical", "error", "warn"],
+          "enum": [
+            "critical",
+            "error",
+            "warn"
+          ],
           "description": "Severity level of a match."
         },
         "description": {
@@ -373,7 +392,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "default": "allow",
           "description": "Default decision when no list matches."
         },
@@ -400,7 +422,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "mode": {
           "type": "string",
-          "enum": ["observe", "guardrail", "fail_closed"],
+          "enum": [
+            "observe",
+            "guardrail",
+            "fail_closed"
+          ],
           "default": "guardrail",
           "description": "Enforcement mode."
         },
@@ -623,7 +649,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "RateCondition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["counter", "threshold", "comparison"],
+      "required": [
+        "counter",
+        "threshold",
+        "comparison"
+      ],
       "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
       "properties": {
         "counter": {
@@ -638,7 +668,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "comparison": {
           "type": "string",
-          "enum": ["gte", "lt"],
+          "enum": [
+            "gte",
+            "lt"
+          ],
           "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
@@ -646,7 +679,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "TimeWindow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["start", "end"],
+      "required": [
+        "start",
+        "end"
+      ],
       "description": "Daily time window; half-open [start, end), wrapping midnight when start > end.",
       "properties": {
         "start": {
@@ -682,19 +718,19 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
       "properties": {
         "posture": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+          "$ref": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Stateful capability and budget management, as defined by the posture companion schema."
         },
         "origins": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+          "$ref": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Origin-aware policy profiles, as defined by the origins companion schema."
         },
         "detection": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+          "$ref": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Detection engine thresholds and configuration, as defined by the detection companion schema."
         }
@@ -720,7 +756,12 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "classification": {
           "type": "string",
-          "enum": ["public", "internal", "confidential", "restricted"],
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
           "description": "Data classification level of the policy."
         },
         "change_ticket": {
@@ -729,7 +770,14 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "lifecycle_state": {
           "type": "string",
-          "enum": ["draft", "review", "approved", "deployed", "deprecated", "archived"],
+          "enum": [
+            "draft",
+            "review",
+            "approved",
+            "deployed",
+            "deprecated",
+            "archived"
+          ],
           "description": "Current lifecycle state of the policy."
         },
         "policy_version": {
@@ -753,7 +801,9 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "reviewers": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Identities who reviewed the policy. Advisory only; separation of duties is checked by tooling, never by an engine."
         },
         "next_review_date": {
@@ -763,7 +813,9 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "changelog": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ChangelogEntry" },
+          "items": {
+            "$ref": "#/$defs/ChangelogEntry"
+          },
           "description": "Revision history, newest first. Declarative only: entries never influence evaluation."
         },
         "supersedes": {
@@ -772,7 +824,9 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "controls": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ControlMapping" },
+          "items": {
+            "$ref": "#/$defs/ControlMapping"
+          },
           "description": "Compliance control mappings for this policy. Declarative only: mappings never influence evaluation."
         }
       }
@@ -780,7 +834,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "ControlMapping": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["framework", "control_id", "rule_paths"],
+      "required": [
+        "framework",
+        "control_id",
+        "rule_paths"
+      ],
       "description": "Maps one compliance control onto the parts of this document that implement it. Advisory metadata: it has no effect on evaluation.",
       "properties": {
         "framework": {
@@ -811,7 +869,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "ChangelogEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "date", "summary"],
+      "required": [
+        "version",
+        "date",
+        "summary"
+      ],
       "description": "One revision of the policy. Advisory metadata: it has no effect on evaluation.",
       "properties": {
         "version": {
@@ -837,11 +899,15 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     },
     "PostureExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+      "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
       "title": "HushSpec Posture Extension v0",
       "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
       "type": "object",
-      "required": ["initial", "states", "transitions"],
+      "required": [
+        "initial",
+        "states",
+        "transitions"
+      ],
       "additionalProperties": false,
       "properties": {
         "initial": {
@@ -892,7 +958,11 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         },
         "PostureTransition": {
           "type": "object",
-          "required": ["from", "to", "on"],
+          "required": [
+            "from",
+            "to",
+            "on"
+          ],
           "additionalProperties": false,
           "description": "A transition between posture states.",
           "properties": {
@@ -932,17 +1002,24 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
                 "const": "timeout"
               }
             },
-            "required": ["on"]
+            "required": [
+              "on"
+            ]
           },
           "then": {
-            "required": ["from", "to", "on", "after"]
+            "required": [
+              "from",
+              "to",
+              "on",
+              "after"
+            ]
           }
         }
       }
     },
     "OriginsExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+      "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
       "title": "HushSpec Origins Extension v0",
       "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
       "type": "object",
@@ -950,7 +1027,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
       "properties": {
         "default_behavior": {
           "type": "string",
-          "enum": ["deny", "minimal_profile"],
+          "enum": [
+            "deny",
+            "minimal_profile"
+          ],
           "default": "deny",
           "description": "Behavior when no profile matches. \"deny\" blocks unmatched origins; \"minimal_profile\" proceeds under base policy."
         },
@@ -965,7 +1045,9 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
       "$defs": {
         "OriginProfile": {
           "type": "object",
-          "required": ["id"],
+          "required": [
+            "id"
+          ],
           "additionalProperties": false,
           "description": "An origin profile that narrows the base policy for matching requests.",
           "properties": {
@@ -1090,7 +1172,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
             },
             "default": {
               "type": "string",
-              "enum": ["allow", "block"],
+              "enum": [
+                "allow",
+                "block"
+              ],
               "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
             },
             "max_args_size": {
@@ -1121,7 +1206,10 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
             },
             "default": {
               "type": "string",
-              "enum": ["allow", "block"],
+              "enum": [
+                "allow",
+                "block"
+              ],
               "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
             }
           }
@@ -1240,7 +1328,7 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     },
     "DetectionExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+      "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
       "title": "HushSpec Detection Extension v0",
       "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
       "type": "object",
@@ -1259,7 +1347,12 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
       "$defs": {
         "Level": {
           "type": "string",
-          "enum": ["safe", "suspicious", "high", "critical"],
+          "enum": [
+            "safe",
+            "suspicious",
+            "high",
+            "critical"
+          ],
           "description": "Detection severity level, ordered: safe < suspicious < high < critical."
         },
         "PromptInjectionDetection": {
@@ -1380,12 +1473,12 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
 "##;
 
 /// File name of the detection extension schema.
-pub(crate) const DETECTION_SCHEMA_NAME: &str = "hushspec-detection.v0.schema.json";
+pub(crate) const DETECTION_SCHEMA_NAME: &str = "hushspec-detection.v1.schema.json";
 
 /// Body of the detection extension schema.
 pub(crate) const DETECTION_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+  "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
   "title": "HushSpec Detection Extension v0",
   "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
   "type": "object",
@@ -1404,7 +1497,12 @@ pub(crate) const DETECTION_SCHEMA: &str = r##"{
   "$defs": {
     "Level": {
       "type": "string",
-      "enum": ["safe", "suspicious", "high", "critical"],
+      "enum": [
+        "safe",
+        "suspicious",
+        "high",
+        "critical"
+      ],
       "description": "Detection severity level, ordered: safe < suspicious < high < critical."
     },
     "PromptInjectionDetection": {
@@ -1523,12 +1621,12 @@ pub(crate) const DETECTION_SCHEMA: &str = r##"{
 "##;
 
 /// File name of the origins extension schema.
-pub(crate) const ORIGINS_SCHEMA_NAME: &str = "hushspec-origins.v0.schema.json";
+pub(crate) const ORIGINS_SCHEMA_NAME: &str = "hushspec-origins.v1.schema.json";
 
 /// Body of the origins extension schema.
 pub(crate) const ORIGINS_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+  "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
   "title": "HushSpec Origins Extension v0",
   "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
   "type": "object",
@@ -1536,7 +1634,10 @@ pub(crate) const ORIGINS_SCHEMA: &str = r##"{
   "properties": {
     "default_behavior": {
       "type": "string",
-      "enum": ["deny", "minimal_profile"],
+      "enum": [
+        "deny",
+        "minimal_profile"
+      ],
       "default": "deny",
       "description": "Behavior when no profile matches. \"deny\" blocks unmatched origins; \"minimal_profile\" proceeds under base policy."
     },
@@ -1551,7 +1652,9 @@ pub(crate) const ORIGINS_SCHEMA: &str = r##"{
   "$defs": {
     "OriginProfile": {
       "type": "object",
-      "required": ["id"],
+      "required": [
+        "id"
+      ],
       "additionalProperties": false,
       "description": "An origin profile that narrows the base policy for matching requests.",
       "properties": {
@@ -1676,7 +1779,10 @@ pub(crate) const ORIGINS_SCHEMA: &str = r##"{
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
         },
         "max_args_size": {
@@ -1707,7 +1813,10 @@ pub(crate) const ORIGINS_SCHEMA: &str = r##"{
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
         }
       }
@@ -1827,16 +1936,20 @@ pub(crate) const ORIGINS_SCHEMA: &str = r##"{
 "##;
 
 /// File name of the posture extension schema.
-pub(crate) const POSTURE_SCHEMA_NAME: &str = "hushspec-posture.v0.schema.json";
+pub(crate) const POSTURE_SCHEMA_NAME: &str = "hushspec-posture.v1.schema.json";
 
 /// Body of the posture extension schema.
 pub(crate) const POSTURE_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+  "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
   "title": "HushSpec Posture Extension v0",
   "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
   "type": "object",
-  "required": ["initial", "states", "transitions"],
+  "required": [
+    "initial",
+    "states",
+    "transitions"
+  ],
   "additionalProperties": false,
   "properties": {
     "initial": {
@@ -1887,7 +2000,11 @@ pub(crate) const POSTURE_SCHEMA: &str = r##"{
     },
     "PostureTransition": {
       "type": "object",
-      "required": ["from", "to", "on"],
+      "required": [
+        "from",
+        "to",
+        "on"
+      ],
       "additionalProperties": false,
       "description": "A transition between posture states.",
       "properties": {
@@ -1927,10 +2044,17 @@ pub(crate) const POSTURE_SCHEMA: &str = r##"{
             "const": "timeout"
           }
         },
-        "required": ["on"]
+        "required": [
+          "on"
+        ]
       },
       "then": {
-        "required": ["from", "to", "on", "after"]
+        "required": [
+          "from",
+          "to",
+          "on",
+          "after"
+        ]
       }
     }
   }

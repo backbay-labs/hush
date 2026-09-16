@@ -625,12 +625,12 @@ fn action_strategy() -> impl Strategy<Value = EvaluationAction> {
 static RECEIPT_SCHEMA: std::sync::LazyLock<jsonschema::JSONSchema> =
     std::sync::LazyLock::new(compile_receipt_schema);
 
-/// Compiles `schemas/hushspec-receipt.v0.schema.json`. `tests/receipt.rs` has
+/// Compiles `schemas/hushspec-receipt.v1.schema.json`. `tests/receipt.rs` has
 /// its own copy: integration test files are separate compilation units.
 fn compile_receipt_schema() -> jsonschema::JSONSchema {
     let schema_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../schemas/hushspec-receipt.v0.schema.json"
+        "/../../schemas/hushspec-receipt.v1.schema.json"
     );
     let schema_text = std::fs::read_to_string(schema_path)
         .unwrap_or_else(|e| panic!("failed to read {schema_path}: {e}"));

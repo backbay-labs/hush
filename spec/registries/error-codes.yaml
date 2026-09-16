@@ -14,7 +14,7 @@
 # `superseded_by` and stop being emitted; it is never reused for a different
 # condition.
 #
-# Schema: schemas/hushspec-error-codes.v0.schema.json
+# Schema: schemas/hushspec-error-codes.v1.schema.json
 registry_version: "0.1.0"
 
 codes:

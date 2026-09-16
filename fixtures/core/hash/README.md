@@ -1,7 +1,7 @@
 # Canonical form vectors
 
 Normative test vectors for [`spec/hushspec-canonical.md`](../../../spec/hushspec-canonical.md).
-Each file conforms to [`schemas/hushspec-hash-vector.v0.schema.json`](../../../schemas/hushspec-hash-vector.v0.schema.json)
+Each file conforms to [`schemas/hushspec-hash-vector.v1.schema.json`](../../../schemas/hushspec-hash-vector.v1.schema.json)
 and pairs a **resolved** HushSpec document (`policy`) with the exact canonical JSON text
 (`canonical`) and content hash (`content_hash`) a conformant implementation MUST produce.
 

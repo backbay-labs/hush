@@ -6,7 +6,7 @@ use crate::generated_schemas::{SCHEMA_FILE_NAMES, SCHEMA_NAMES, schema_body};
 #[derive(clap::Args)]
 pub struct SchemaArgs {
     /// Schema to print: a short name (core, posture, ...) or a published file
-    /// name (hushspec-core.v0.schema.json)
+    /// name (hushspec-core.v1.schema.json)
     #[arg(required_unless_present = "list")]
     name: Option<String>,
 
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn schema_body_accepts_published_file_names() {
         assert_eq!(
-            schema_body("hushspec-core.v0.schema.json"),
+            schema_body("hushspec-core.v1.schema.json"),
             schema_body("core")
         );
     }
@@ -144,10 +144,10 @@ mod tests {
         let mut seen = 0;
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "json") {
+            let file = path.file_name().unwrap().to_string_lossy().to_string();
+            if !file.ends_with(".schema.json") {
                 continue;
             }
-            let file = path.file_name().unwrap().to_string_lossy().to_string();
             let on_disk = std::fs::read_to_string(&path).unwrap();
             assert_eq!(
                 schema_body(&file),

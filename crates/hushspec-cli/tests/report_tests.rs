@@ -447,7 +447,7 @@ fn the_synthetic_log_and_its_report_are_current() {
 #[test]
 fn the_expected_report_validates_against_the_report_schema() {
     let schema: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(repo_root().join("schemas/hushspec-report.v0.schema.json"))
+        &std::fs::read_to_string(repo_root().join("schemas/hushspec-report.v1.schema.json"))
             .unwrap(),
     )
     .unwrap();

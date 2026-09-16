@@ -1,15 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json",
+  "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json",
   "title": "HushSpec Evaluator Fixture v0",
   "description": "Schema for versioned evaluator fixtures used by the HushSpec reference evaluator and conformance testkit.",
   "type": "object",
-  "required": ["hushspec_test", "description", "policy", "cases"],
+  "required": [
+    "hushspec_test",
+    "description",
+    "policy",
+    "cases"
+  ],
   "additionalProperties": false,
   "properties": {
     "hushspec_test": {
       "type": "string",
-      "enum": ["0.1.0", "0.2.0"],
+      "enum": [
+        "0.1.0",
+        "0.2.0"
+      ],
       "description": "Fixture format version. 0.2.0 adds per-case `controls` and `tags` and the `expect.rule_trace` / `expect.receipt` assertions; a fixture that uses any of them declares 0.2.0."
     },
     "description": {
@@ -18,7 +26,9 @@
     },
     "policy": {
       "type": "object",
-      "required": ["hushspec"],
+      "required": [
+        "hushspec"
+      ],
       "description": "Embedded HushSpec document. Full policy validation is performed separately by the SDK.",
       "additionalProperties": true
     },
@@ -33,7 +43,11 @@
   "$defs": {
     "EvaluationCase": {
       "type": "object",
-      "required": ["description", "action", "expect"],
+      "required": [
+        "description",
+        "action",
+        "expect"
+      ],
       "additionalProperties": false,
       "properties": {
         "description": {
@@ -49,12 +63,17 @@
         "controls": {
           "type": "array",
           "description": "The controls this case proves (test-as-evidence). Reported by `h2h test --format junit` as `<property>` entries and by `--format json` per case.",
-          "items": { "$ref": "#/$defs/ControlRef" }
+          "items": {
+            "$ref": "#/$defs/ControlRef"
+          }
         },
         "tags": {
           "type": "array",
           "description": "Free-form labels for selecting or grouping cases (for example `deny`, `phi`, `smoke`).",
-          "items": { "type": "string", "minLength": 1 }
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "expect": {
           "$ref": "#/$defs/ExpectedResult"
@@ -66,27 +85,52 @@
       "additionalProperties": false,
       "description": "Runtime context supplied to `when` conditions (core spec 3.13).",
       "properties": {
-        "user": { "type": "object", "additionalProperties": true },
-        "environment": { "type": "string" },
-        "deployment": { "type": "object", "additionalProperties": true },
-        "agent": { "type": "object", "additionalProperties": true },
-        "session": { "type": "object", "additionalProperties": true },
-        "request": { "type": "object", "additionalProperties": true },
-        "custom": { "type": "object", "additionalProperties": true },
+        "user": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "environment": {
+          "type": "string"
+        },
+        "deployment": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "session": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "request": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "custom": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "current_time": {
           "type": "string",
           "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
         },
         "counters": {
           "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
           "description": "Engine-maintained counters consulted by `rate` conditions (core spec 3.13)."
         }
       }
     },
     "Action": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
         "type": {
@@ -129,36 +173,64 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": { "type": "string" },
-        "tenant_id": { "type": "string" },
-        "space_id": { "type": "string" },
-        "space_type": { "type": "string" },
-        "visibility": { "type": "string" },
-        "external_participants": { "type": "boolean" },
+        "provider": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "space_id": {
+          "type": "string"
+        },
+        "space_type": {
+          "type": "string"
+        },
+        "visibility": {
+          "type": "string"
+        },
+        "external_participants": {
+          "type": "boolean"
+        },
         "tags": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
-        "sensitivity": { "type": "string" },
-        "actor_role": { "type": "string" }
+        "sensitivity": {
+          "type": "string"
+        },
+        "actor_role": {
+          "type": "string"
+        }
       }
     },
     "PostureInput": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "current": { "type": "string" },
-        "signal": { "type": "string" }
+        "current": {
+          "type": "string"
+        },
+        "signal": {
+          "type": "string"
+        }
       }
     },
     "ExpectedResult": {
       "type": "object",
-      "required": ["decision"],
+      "required": [
+        "decision"
+      ],
       "additionalProperties": false,
       "properties": {
         "decision": {
           "type": "string",
-          "enum": ["allow", "warn", "deny"]
+          "enum": [
+            "allow",
+            "warn",
+            "deny"
+          ]
         },
         "matched_rule": {
           "type": "string"
@@ -175,7 +247,9 @@
         "rule_trace": {
           "type": "array",
           "description": "The recorded rule trace (receipt spec 4.3), compared in order and in full: the actual trace must have exactly this many entries, and each entry must match the members declared here.",
-          "items": { "$ref": "#/$defs/RuleTraceExpectation" }
+          "items": {
+            "$ref": "#/$defs/RuleTraceExpectation"
+          }
         },
         "receipt": {
           "type": "object",
@@ -188,34 +262,64 @@
     "ControlRef": {
       "type": "object",
       "description": "A control this case is evidence for. `framework` is an id from spec/registries/frameworks.yaml.",
-      "required": ["framework", "control_id"],
+      "required": [
+        "framework",
+        "control_id"
+      ],
       "additionalProperties": false,
       "properties": {
-        "framework": { "type": "string", "minLength": 1 },
-        "control_id": { "type": "string", "minLength": 1 }
+        "framework": {
+          "type": "string",
+          "minLength": 1
+        },
+        "control_id": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "RuleTraceExpectation": {
       "type": "object",
       "description": "One expected rule-trace entry. `rule_block` uses the closed ids of the receipt schema; `rule_path` is compared only when present.",
-      "required": ["rule_block", "outcome"],
+      "required": [
+        "rule_block",
+        "outcome"
+      ],
       "additionalProperties": false,
       "properties": {
-        "rule_block": { "type": "string", "minLength": 1 },
+        "rule_block": {
+          "type": "string",
+          "minLength": 1
+        },
         "outcome": {
           "type": "string",
-          "enum": ["allow", "warn", "deny", "skip"]
+          "enum": [
+            "allow",
+            "warn",
+            "deny",
+            "skip"
+          ]
         },
-        "rule_path": { "type": "string", "minLength": 1 }
+        "rule_path": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "PostureResult": {
       "type": "object",
-      "required": ["current", "next"],
+      "required": [
+        "current",
+        "next"
+      ],
       "additionalProperties": false,
       "properties": {
-        "current": { "type": "string" },
-        "next": { "type": "string" }
+        "current": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        }
       }
     }
   }

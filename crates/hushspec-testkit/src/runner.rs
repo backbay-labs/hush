@@ -782,7 +782,7 @@ fn test_merge_case(
     }
 }
 
-/// Vector format version (`schemas/hushspec-hash-vector.v0.schema.json`).
+/// Vector format version (`schemas/hushspec-hash-vector.v1.schema.json`).
 const HASH_VECTOR_VERSION: &str = "0.1.0";
 
 #[derive(Debug, Deserialize)]

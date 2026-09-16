@@ -284,7 +284,7 @@ fn write_policy(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 fn envelope_schema() -> jsonschema::JSONSchema {
-    let raw = std::fs::read_to_string(schemas().join("hushspec-signature.v0.schema.json"))
+    let raw = std::fs::read_to_string(schemas().join("hushspec-signature.v1.schema.json"))
         .expect("the signature schema is published");
     let document: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
     jsonschema::JSONSchema::options()

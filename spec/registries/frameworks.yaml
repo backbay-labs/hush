@@ -14,7 +14,7 @@
 # regex profile (core Section 3.14): ASCII classes only, no lookaround, no
 # backreferences.
 #
-# Schema: schemas/hushspec-framework-registry.v0.schema.json
+# Schema: schemas/hushspec-framework-registry.v1.schema.json
 registry_version: "0.1.0"
 
 frameworks:

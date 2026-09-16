@@ -225,21 +225,21 @@ fn schema_prints_a_schema_by_short_name() {
     let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
         parsed["$id"],
-        "https://hushspec.dev/schemas/hushspec-core.v0.schema.json"
+        "https://hushspec.dev/schemas/hushspec-core.v1.schema.json"
     );
 }
 
 #[test]
 fn schema_output_matches_the_file_on_disk() {
     for (name, file) in [
-        ("core", "hushspec-core.v0.schema.json"),
-        ("posture", "hushspec-posture.v0.schema.json"),
-        ("origins", "hushspec-origins.v0.schema.json"),
-        ("detection", "hushspec-detection.v0.schema.json"),
-        ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
-        ("receipt", "hushspec-receipt.v0.schema.json"),
-        ("signature", "hushspec-signature.v0.schema.json"),
-        ("keyring", "hushspec-keyring.v0.schema.json"),
+        ("core", "hushspec-core.v1.schema.json"),
+        ("posture", "hushspec-posture.v1.schema.json"),
+        ("origins", "hushspec-origins.v1.schema.json"),
+        ("detection", "hushspec-detection.v1.schema.json"),
+        ("evaluator-test", "hushspec-evaluator-test.v1.schema.json"),
+        ("receipt", "hushspec-receipt.v1.schema.json"),
+        ("signature", "hushspec-signature.v1.schema.json"),
+        ("keyring", "hushspec-keyring.v1.schema.json"),
     ] {
         let output = h2h()
             .arg("schema")
@@ -263,10 +263,10 @@ fn schema_output_matches_the_file_on_disk() {
 fn schema_accepts_the_published_file_name() {
     h2h()
         .arg("schema")
-        .arg("hushspec-receipt.v0.schema.json")
+        .arg("hushspec-receipt.v1.schema.json")
         .assert()
         .success()
-        .stdout(predicate::str::contains("hushspec-receipt.v0.schema.json"));
+        .stdout(predicate::str::contains("hushspec-receipt.v1.schema.json"));
 }
 
 #[test]
@@ -303,7 +303,12 @@ fn schema_list_json_is_machine_readable() {
     let published = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas"))
         .expect("schemas/ is readable")
         .flatten()
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".schema.json")
+        })
         .count();
     assert_eq!(
         entries.len(),
@@ -775,7 +780,7 @@ fn fmt_still_formats_a_document_whose_only_comment_is_the_modeline() {
         tmp.path(),
         "modeline.yaml",
         &format!(
-            "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json\n{SIMPLE_POLICY}"
+            "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json\n{SIMPLE_POLICY}"
         ),
     );
 

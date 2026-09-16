@@ -331,19 +331,19 @@ fn test_accepts_the_repo_fixtures() {
 #[test]
 fn evaluator_schema_matches_workspace_copy() {
     let vendored: serde_json::Value = serde_json::from_str(include_str!(
-        "../schemas/hushspec-evaluator-test.v0.schema.json"
+        "../schemas/hushspec-evaluator-test.v1.schema.json"
     ))
     .unwrap();
     let canonical: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(
-            workspace_root().join("schemas/hushspec-evaluator-test.v0.schema.json"),
+            workspace_root().join("schemas/hushspec-evaluator-test.v1.schema.json"),
         )
         .unwrap(),
     )
     .unwrap();
     assert_eq!(
         vendored, canonical,
-        "crates/hushspec-cli/schemas/hushspec-evaluator-test.v0.schema.json is out of date -- \
-         copy schemas/hushspec-evaluator-test.v0.schema.json over it"
+        "crates/hushspec-cli/schemas/hushspec-evaluator-test.v1.schema.json is out of date -- \
+         copy schemas/hushspec-evaluator-test.v1.schema.json over it"
     );
 }

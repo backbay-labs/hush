@@ -28,12 +28,12 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = ROOT / "schemas"
 OUTPUT = ROOT / "crates" / "hushspec" / "src" / "generated_canonical_schemas.rs"
 
-CORE_SCHEMA = "hushspec-core.v0.schema.json"
+CORE_SCHEMA = "hushspec-core.v1.schema.json"
 # `extensions` key -> schema file, in the order the constant is rendered.
 EXTENSION_SCHEMAS = {
-    "detection": "hushspec-detection.v0.schema.json",
-    "origins": "hushspec-origins.v0.schema.json",
-    "posture": "hushspec-posture.v0.schema.json",
+    "detection": "hushspec-detection.v1.schema.json",
+    "origins": "hushspec-origins.v1.schema.json",
+    "posture": "hushspec-posture.v1.schema.json",
 }
 
 

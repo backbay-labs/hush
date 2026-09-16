@@ -216,7 +216,7 @@ fn the_vectors_cover_every_reason_code() {
 // --------------------------------------------------------------------------
 
 fn bundle_schema() -> serde_json::Value {
-    let raw = std::fs::read_to_string(schemas().join("hushspec-bundle.v0.schema.json"))
+    let raw = std::fs::read_to_string(schemas().join("hushspec-bundle.v1.schema.json"))
         .expect("the bundle schema is published");
     serde_json::from_str(&raw).expect("it is JSON")
 }

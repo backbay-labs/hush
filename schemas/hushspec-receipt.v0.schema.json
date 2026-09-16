@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-receipt.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Decision Receipt v0.2",
   "description": "A self-contained, tamper-evident record of one HushSpec policy evaluation. Normative prose: spec/hushspec-receipt.md. A receipt identifies the resolved policy by content hash (spec/hushspec-canonical.md), the actor on whose behalf the action was evaluated, the action (never its content), the decision and why, the rule blocks and detectors that ran, and how the runtime applied the decision. Field order in this file is documentation order; receipts are hashed in canonical form (RFC 8785).",
   "type": "object",
@@ -34,7 +35,12 @@
     },
     "time_source": {
       "type": "string",
-      "enum": ["system", "monotonic_adjusted", "trusted", "unknown"],
+      "enum": [
+        "system",
+        "monotonic_adjusted",
+        "trusted",
+        "unknown"
+      ],
       "description": "Where the timestamp came from: the local system clock; a monotonic clock re-based on the system clock at startup; a trusted time source (NTP-disciplined, TPM, or roughtree/roughtime attestation); or unknown. Auditors weigh timestamps by this field."
     },
     "actor": {
@@ -48,7 +54,11 @@
     },
     "decision": {
       "type": "string",
-      "enum": ["allow", "warn", "deny"],
+      "enum": [
+        "allow",
+        "warn",
+        "deny"
+      ],
       "description": "The evaluated policy decision (core spec section 6), independent of enforcement."
     },
     "matched_rule": {
@@ -62,12 +72,16 @@
     },
     "rule_trace": {
       "type": "array",
-      "items": { "$ref": "#/$defs/RuleEvaluation" },
+      "items": {
+        "$ref": "#/$defs/RuleEvaluation"
+      },
       "description": "Every rule block consulted, in evaluation order, as recorded during evaluation (not reconstructed afterwards). Blocks that were not applicable to the action type are not listed; blocks that were applicable but inert (disabled, or a false `when`) are listed with outcome skip."
     },
     "detection_trace": {
       "type": "array",
-      "items": { "$ref": "#/$defs/DetectorEvaluation" },
+      "items": {
+        "$ref": "#/$defs/DetectorEvaluation"
+      },
       "description": "Detectors that ran, in order. Absent when the evaluation did not run the detection pipeline; empty when it ran and no detector was enabled."
     },
     "enforcement": {
@@ -122,7 +136,10 @@
     },
     "PolicySummary": {
       "type": "object",
-      "required": ["spec_version", "content_hash"],
+      "required": [
+        "spec_version",
+        "content_hash"
+      ],
       "additionalProperties": false,
       "description": "Identity of the resolved policy the decision was evaluated against.",
       "properties": {
@@ -146,7 +163,9 @@
         },
         "extends_chain": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ChainLink" },
+          "items": {
+            "$ref": "#/$defs/ChainLink"
+          },
           "description": "The documents that were merged to produce the resolved policy, root first, leaf last. Absent when the policy had no `extends`. Each link's hash is the content hash of that document canonicalized on its own (unresolved fragments are canonicalized with their own `extends` stripped)."
         },
         "signature": {
@@ -156,7 +175,10 @@
     },
     "ChainLink": {
       "type": "object",
-      "required": ["source", "content_hash"],
+      "required": [
+        "source",
+        "content_hash"
+      ],
       "additionalProperties": false,
       "properties": {
         "source": {
@@ -164,12 +186,16 @@
           "minLength": 1,
           "description": "The reference as written or resolved by the loader: builtin:default, a file path, an https URL, or the leaf's own source."
         },
-        "content_hash": { "$ref": "#/$defs/ContentHash" }
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        }
       }
     },
     "SignatureStatus": {
       "type": "object",
-      "required": ["verified"],
+      "required": [
+        "verified"
+      ],
       "additionalProperties": false,
       "description": "Outcome of policy signature verification at load time (spec/hushspec-signing.md). Absent when the runtime did not attempt verification.",
       "properties": {
@@ -194,7 +220,9 @@
     },
     "ActionSummary": {
       "type": "object",
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "additionalProperties": false,
       "description": "The evaluated action. Content is never stored; only its hash and size are, so a receipt log can prove what was evaluated without containing secrets.",
       "properties": {
@@ -233,7 +261,11 @@
     },
     "RuleEvaluation": {
       "type": "object",
-      "required": ["rule_block", "outcome", "evaluated"],
+      "required": [
+        "rule_block",
+        "outcome",
+        "evaluated"
+      ],
       "additionalProperties": false,
       "description": "One rule block's contribution, recorded as it happened.",
       "properties": {
@@ -267,7 +299,12 @@
         },
         "outcome": {
           "type": "string",
-          "enum": ["allow", "warn", "deny", "skip"],
+          "enum": [
+            "allow",
+            "warn",
+            "deny",
+            "skip"
+          ],
           "description": "This block's own decision, before aggregation. skip means the block was applicable but inert (disabled or a false `when`)."
         },
         "evaluated": {
@@ -282,7 +319,12 @@
     },
     "DetectorEvaluation": {
       "type": "object",
-      "required": ["detector_id", "category", "score", "level"],
+      "required": [
+        "detector_id",
+        "category",
+        "score",
+        "level"
+      ],
       "additionalProperties": false,
       "properties": {
         "detector_id": {
@@ -292,7 +334,12 @@
         },
         "category": {
           "type": "string",
-          "enum": ["prompt_injection", "jailbreak", "data_exfiltration", "threat_intel"],
+          "enum": [
+            "prompt_injection",
+            "jailbreak",
+            "data_exfiltration",
+            "threat_intel"
+          ],
           "description": "Detection category the detector reports under."
         },
         "score": {
@@ -303,7 +350,13 @@
         },
         "level": {
           "type": "string",
-          "enum": ["none", "low", "suspicious", "high", "critical"],
+          "enum": [
+            "none",
+            "low",
+            "suspicious",
+            "high",
+            "critical"
+          ],
           "description": "Level the score mapped to under the policy's thresholds."
         },
         "matched": {
@@ -314,25 +367,39 @@
     },
     "EnforcementSummary": {
       "type": "object",
-      "required": ["mode", "outcome"],
+      "required": [
+        "mode",
+        "outcome"
+      ],
       "additionalProperties": false,
       "description": "What the enforcement point did with the decision. Required in 0.2: a receipt without an enforcement disposition cannot serve as evidence that a control operated. Pure evaluations (no enforcement point, e.g. `h2h eval`) record mode enforce and the outcome implied by the decision.",
       "properties": {
         "mode": {
           "type": "string",
-          "enum": ["enforce", "monitor"],
+          "enum": [
+            "enforce",
+            "monitor"
+          ],
           "description": "Effective enforcement mode after overrides and panic resolution. Panic always enforces."
         },
         "outcome": {
           "type": "string",
-          "enum": ["allowed", "confirmed", "blocked", "would_block"],
+          "enum": [
+            "allowed",
+            "confirmed",
+            "blocked",
+            "would_block"
+          ],
           "description": "allowed: the action proceeded on an allow; confirmed: a warn was approved through a confirmation channel; blocked: execution was prevented; would_block: monitor mode let a warn or deny proceed."
         }
       }
     },
     "PostureResult": {
       "type": "object",
-      "required": ["current", "next"],
+      "required": [
+        "current",
+        "next"
+      ],
       "additionalProperties": false,
       "properties": {
         "current": {

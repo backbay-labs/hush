@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
+  "title": "HushSpec Detection Extension v0",
+  "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "prompt_injection": {
+      "$ref": "#/$defs/PromptInjectionDetection"
+    },
+    "jailbreak": {
+      "$ref": "#/$defs/JailbreakDetection"
+    },
+    "threat_intel": {
+      "$ref": "#/$defs/ThreatIntelDetection"
+    }
+  },
+  "$defs": {
+    "Level": {
+      "type": "string",
+      "enum": [
+        "safe",
+        "suspicious",
+        "high",
+        "critical"
+      ],
+      "description": "Detection severity level, ordered: safe < suspicious < high < critical."
+    },
+    "PromptInjectionDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration for prompt injection detection.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether prompt injection detection is active."
+        },
+        "warn_at_or_above": {
+          "$ref": "#/$defs/Level",
+          "default": "suspicious",
+          "description": "Minimum detection level that produces a warning."
+        },
+        "block_at_or_above": {
+          "$ref": "#/$defs/Level",
+          "default": "high",
+          "description": "Minimum detection level that produces a denial."
+        },
+        "max_scan_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000,
+          "description": "Maximum input size to scan, in bytes."
+        },
+        "heuristics": {
+          "$ref": "#/$defs/PromptInjectionHeuristics"
+        }
+      }
+    },
+    "PromptInjectionHeuristics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration of the normative heuristic_injection@1 detector (detection spec 3.5).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the heuristic detector runs alongside the regex detector."
+        },
+        "min_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Integer scores below this floor are reported as 0 (no signal)."
+        }
+      }
+    },
+    "JailbreakDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration for jailbreak detection.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether jailbreak detection is active."
+        },
+        "block_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 80,
+          "description": "Risk score (0-100) at or above which input is denied."
+        },
+        "warn_threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 50,
+          "description": "Risk score (0-100) at or above which a warning is produced."
+        },
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000,
+          "description": "Maximum input size to scan, in bytes."
+        }
+      }
+    },
+    "ThreatIntelDetection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration for threat intelligence screening.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether threat intelligence screening is active."
+        },
+        "pattern_db": {
+          "type": "string",
+          "description": "Path to pattern database file or \"builtin:<name>\" for engine-bundled databases."
+        },
+        "similarity_threshold": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.7,
+          "description": "Minimum similarity score (0.0-1.0) for a pattern match to be considered a finding."
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5,
+          "description": "Number of top matches to include in evaluation evidence."
+        }
+      }
+    }
+  }
+}

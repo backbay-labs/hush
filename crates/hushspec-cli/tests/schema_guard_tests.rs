@@ -6,17 +6,17 @@ const EMBEDDED_EXTENSIONS: [(&str, &str, &str); 3] = [
     (
         "posture",
         "PostureExtension",
-        "hushspec-posture.v0.schema.json",
+        "hushspec-posture.v1.schema.json",
     ),
     (
         "origins",
         "OriginsExtension",
-        "hushspec-origins.v0.schema.json",
+        "hushspec-origins.v1.schema.json",
     ),
     (
         "detection",
         "DetectionExtension",
-        "hushspec-detection.v0.schema.json",
+        "hushspec-detection.v1.schema.json",
     ),
 ];
 
@@ -35,15 +35,18 @@ const PROFILE_ONLY_VECTORS: [&str; 4] = [
 /// Vectors whose refusal no JSON Schema can express, each for a reason the
 /// vocabulary has no keyword for: referential integrity between two members
 /// of a document, uniqueness by a field of a list entry, a lookup in the IANA
-/// time zone database, the HushSpec regex profile, and a recursion depth
-/// bound. They are validated by the SDKs after parsing; here they are
-/// asserted to *pass*, so that a schema change which does become able to
-/// express one fails this test until the name is removed.
-const BEYOND_SCHEMA_VECTORS: [&str; 6] = [
+/// time zone database, the HushSpec regex profile, a recursion depth bound,
+/// and the set of minor versions an engine supports (the schema admits every
+/// `1.y.z`; core spec 2.2 makes acceptance the engine's decision). They are
+/// validated by the SDKs after parsing; here they are asserted to *pass*, so
+/// that a schema change which does become able to express one fails this
+/// test until the name is removed.
+const BEYOND_SCHEMA_VECTORS: [&str; 7] = [
     "bad-initial.yaml",
     "duplicate-ids.yaml",
     "duplicate-pattern-names.yaml",
     "regex-mid-pattern-flag.yaml",
+    "version-unsupported-minor.yaml",
     "when-bad-timezone.yaml",
     "when-too-deep.yaml",
 ];
@@ -54,7 +57,7 @@ fn every_schema_meta_validates_and_id_matches_filename() {
     let mut checked = 0;
     for entry in fs::read_dir(schema_dir).unwrap() {
         let path = entry.unwrap().path();
-        if path.extension().is_none_or(|e| e != "json") {
+        if !path.to_string_lossy().ends_with(".schema.json") {
             continue;
         }
         let raw = fs::read_to_string(&path).unwrap();
@@ -102,7 +105,9 @@ fn every_schema_meta_validates_and_id_matches_filename() {
 /// whole of `schemas/`. A schema added without a row is one a reader has no
 /// way to discover from the docs, and the claim on the page turns into a
 /// quiet falsehood -- so the table is compared with the directory rather
-/// than maintained by hand.
+/// than maintained by hand. The frozen `.v0.` predecessors of the `.v1.`
+/// files are described once as a lineage rather than row by row; the
+/// registry schemas have no `.v1.` successor and keep their rows.
 #[test]
 fn the_json_schema_reference_lists_every_published_schema() {
     let root = repo_root();
@@ -117,12 +122,20 @@ fn the_json_schema_reference_lists_every_published_schema() {
         })
         .collect();
 
-    let mut published: Vec<String> = fs::read_dir(format!("{root}/schemas"))
+    let names: Vec<String> = fs::read_dir(format!("{root}/schemas"))
         .expect("schemas/ is readable")
         .filter_map(|entry| {
             let name = entry.ok()?.file_name().to_string_lossy().into_owned();
-            name.ends_with(".json").then_some(name)
+            name.ends_with(".schema.json").then_some(name)
         })
+        .collect();
+    let mut published: Vec<String> = names
+        .iter()
+        .filter(|name| {
+            name.strip_suffix(".v0.schema.json")
+                .is_none_or(|stem| !names.contains(&format!("{stem}.v1.schema.json")))
+        })
+        .cloned()
         .collect();
 
     documented.sort();
@@ -132,6 +145,16 @@ fn the_json_schema_reference_lists_every_published_schema() {
         "docs/src/reference/json-schema.md and schemas/ have diverged; \
          add a row for each new schema"
     );
+    for needle in [
+        "schemas/frozen-v0.json",
+        "`core.v0`",
+        "hushspec-core.v0.schema.json",
+    ] {
+        assert!(
+            page.contains(needle),
+            "the JSON Schema reference must describe the frozen lineage ({needle})"
+        );
+    }
 }
 
 /// The framework registry is normative input to lint L013 and to the embedded
@@ -141,7 +164,7 @@ fn the_json_schema_reference_lists_every_published_schema() {
 fn framework_registry_validates_against_its_schema() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     let schema_raw = fs::read_to_string(format!(
-        "{root}/schemas/hushspec-framework-registry.v0.schema.json"
+        "{root}/schemas/hushspec-framework-registry.v1.schema.json"
     ))
     .expect("framework registry schema is readable");
     let schema: serde_json::Value =
@@ -206,7 +229,7 @@ fn framework_registry_patterns_compile_and_are_anchored() {
 #[test]
 fn the_bundle_schema_validates_the_published_vectors() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
-    let raw = fs::read_to_string(format!("{root}/schemas/hushspec-bundle.v0.schema.json"))
+    let raw = fs::read_to_string(format!("{root}/schemas/hushspec-bundle.v1.schema.json"))
         .expect("the bundle schema is published");
     let document: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
 
@@ -560,7 +583,7 @@ fn read_schema(file_name: &str) -> serde_json::Value {
 }
 
 fn core_schema() -> serde_json::Value {
-    read_schema("hushspec-core.v0.schema.json")
+    read_schema("hushspec-core.v1.schema.json")
 }
 
 fn compile(document: &serde_json::Value) -> jsonschema::JSONSchema {
@@ -761,7 +784,7 @@ fn the_editor_setup_table_lists_the_prepared_file_match_patterns() {
 /// can only ever tighten something that already exists.
 #[test]
 fn the_origins_overlays_narrow_a_base_rule_and_cannot_disable_it() {
-    let origins = read_schema("hushspec-origins.v0.schema.json");
+    let origins = read_schema("hushspec-origins.v1.schema.json");
     let core = core_schema();
 
     for (overlay_def, base_def) in [("ToolAccessRule", "ToolAccess"), ("EgressRule", "Egress")] {

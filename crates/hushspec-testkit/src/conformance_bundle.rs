@@ -138,7 +138,7 @@ spec/                the normative specifications (core, canonical, receipt,
                      log, signing, bundle, and the extension modules) plus
                      spec/registries/, including the error-code registry
 schemas/             JSON Schema 2020-12 documents, including
-                     hushspec-conformance-report.v0.schema.json
+                     hushspec-conformance-report.v1.schema.json
 fixtures/            the vectors, and MANIFEST.json describing every one of
                      them: path, sha256, category, module, and the
                      conformance level at which it becomes required
@@ -175,14 +175,14 @@ vectors are the manifest entries whose `level` is at or below it.
 | 5 | Attested | `signing/`, `log/`, `bundle/`, `receipts/signed/` |
 
 The file formats are schema'd: evaluator tests by
-`hushspec-evaluator-test.v0.schema.json`, canonical-form vectors by
-`hushspec-hash-vector.v0.schema.json`, merge vector directories by
-`hushspec-merge-vector.v0.schema.json`, and the expected-error sidecars by
-`hushspec-error-codes.v0.schema.json`.
+`hushspec-evaluator-test.v1.schema.json`, canonical-form vectors by
+`hushspec-hash-vector.v1.schema.json`, merge vector directories by
+`hushspec-merge-vector.v1.schema.json`, and the expected-error sidecars by
+`hushspec-error-codes.v1.schema.json`.
 
 ## Report what you found
 
-Emit a `hushspec-conformance-report.v0.schema.json` document. It must carry the
+Emit a `hushspec-conformance-report.v1.schema.json` document. It must carry the
 SHA-256 of the `fixtures/MANIFEST.json` in this bundle, which is what ties a
 report to a corpus. `docs/src/reference/conformance-statement.md` in the
 reference repository is the statement template that cites it.
@@ -236,7 +236,7 @@ mod tests {
         assert!(names.contains(&format!("{prefix}/fixtures/MANIFEST.json")));
         assert!(names.contains(&format!("{prefix}/spec/hushspec-core.md")));
         assert!(names.contains(&format!(
-            "{prefix}/schemas/hushspec-conformance-report.v0.schema.json"
+            "{prefix}/schemas/hushspec-conformance-report.v1.schema.json"
         )));
         for entry in &manifest.files {
             assert!(

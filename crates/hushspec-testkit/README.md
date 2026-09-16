@@ -33,7 +33,7 @@ hushspec-testkit --fixtures fixtures --report report.json \
 ```
 
 The report validates against
-`schemas/hushspec-conformance-report.v0.schema.json` before it is written: it
+`schemas/hushspec-conformance-report.v1.schema.json` before it is written: it
 names the implementation, pins the corpus by the SHA-256 of
 `fixtures/MANIFEST.json`, gives an outcome for each of levels 0-5, and lists
 every vector it ran. `highest_level` is the largest N for which levels 0..=N

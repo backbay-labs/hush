@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-report.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Evidence Report v0.1",
   "description": "An aggregation over decision receipts and policy-in-effect events for one window (`h2h report --format json`). A report is derived evidence: every number is counted from recorded receipts (spec/hushspec-receipt.md) and never re-evaluated, so a report cannot disagree with the receipts it summarizes. When the inputs were hash-linked logs (spec/hushspec-log.md), `chain_verified` says whether the chain verified; a report over a broken chain is only produced when the operator asked for one, and is stamped false.",
   "type": "object",
@@ -30,7 +31,10 @@
     },
     "sources": {
       "type": "array",
-      "items": { "type": "string", "minLength": 1 },
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "description": "The inputs, as the caller named them, in the order they were read."
     },
     "chain_verified": {
@@ -48,27 +52,37 @@
     },
     "rule_blocks": {
       "type": "array",
-      "items": { "$ref": "#/$defs/RuleBlockRow" },
+      "items": {
+        "$ref": "#/$defs/RuleBlockRow"
+      },
       "description": "One row per rule block or engine stage named by any receipt's trace, ordered by block id."
     },
     "action_types": {
       "type": "array",
-      "items": { "$ref": "#/$defs/ActionTypeRow" },
+      "items": {
+        "$ref": "#/$defs/ActionTypeRow"
+      },
       "description": "One row per evaluated action type, ordered by type."
     },
     "policies": {
       "type": "array",
-      "items": { "$ref": "#/$defs/PolicyRow" },
+      "items": {
+        "$ref": "#/$defs/PolicyRow"
+      },
       "description": "One row per policy content hash the receipts named, ordered by hash."
     },
     "policy_timeline": {
       "type": "array",
-      "items": { "$ref": "#/$defs/PolicyTimelineRow" },
+      "items": {
+        "$ref": "#/$defs/PolicyTimelineRow"
+      },
       "description": "The policy_loaded and policy_swapped records in the window, in log order: what was in force, and when it changed."
     },
     "actors": {
       "type": "array",
-      "items": { "$ref": "#/$defs/ActorRow" },
+      "items": {
+        "$ref": "#/$defs/ActorRow"
+      },
       "description": "One row per distinct (agent_id, session_id, principal) triple, ordered by that triple."
     },
     "signatures": {
@@ -76,7 +90,9 @@
     },
     "detections": {
       "type": "array",
-      "items": { "$ref": "#/$defs/DetectorRow" },
+      "items": {
+        "$ref": "#/$defs/DetectorRow"
+      },
       "description": "One row per detector that ran, ordered by detector id."
     },
     "controls": {
@@ -100,48 +116,94 @@
     },
     "DecisionTotals": {
       "type": "object",
-      "required": ["allow", "warn", "deny"],
+      "required": [
+        "allow",
+        "warn",
+        "deny"
+      ],
       "additionalProperties": false,
       "description": "Receipts by evaluated policy decision (core spec section 6), independent of what the enforcement point did.",
       "properties": {
-        "allow": { "$ref": "#/$defs/Count" },
-        "warn": { "$ref": "#/$defs/Count" },
-        "deny": { "$ref": "#/$defs/Count" }
+        "allow": {
+          "$ref": "#/$defs/Count"
+        },
+        "warn": {
+          "$ref": "#/$defs/Count"
+        },
+        "deny": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "ModeTotals": {
       "type": "object",
-      "required": ["enforce", "monitor"],
+      "required": [
+        "enforce",
+        "monitor"
+      ],
       "additionalProperties": false,
       "description": "Receipts by the effective enforcement mode (receipt spec section 4.7).",
       "properties": {
-        "enforce": { "$ref": "#/$defs/Count" },
-        "monitor": { "$ref": "#/$defs/Count" }
+        "enforce": {
+          "$ref": "#/$defs/Count"
+        },
+        "monitor": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "OutcomeTotals": {
       "type": "object",
-      "required": ["allowed", "confirmed", "blocked", "would_block"],
+      "required": [
+        "allowed",
+        "confirmed",
+        "blocked",
+        "would_block"
+      ],
       "additionalProperties": false,
       "description": "Receipts by what the enforcement point did (receipt spec section 4.7).",
       "properties": {
-        "allowed": { "$ref": "#/$defs/Count" },
-        "confirmed": { "$ref": "#/$defs/Count" },
-        "blocked": { "$ref": "#/$defs/Count" },
-        "would_block": { "$ref": "#/$defs/Count" }
+        "allowed": {
+          "$ref": "#/$defs/Count"
+        },
+        "confirmed": {
+          "$ref": "#/$defs/Count"
+        },
+        "blocked": {
+          "$ref": "#/$defs/Count"
+        },
+        "would_block": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "LevelTotals": {
       "type": "object",
-      "required": ["none", "low", "suspicious", "high", "critical"],
+      "required": [
+        "none",
+        "low",
+        "suspicious",
+        "high",
+        "critical"
+      ],
       "additionalProperties": false,
       "description": "Detector evaluations by the level their score mapped to under the policy's thresholds.",
       "properties": {
-        "none": { "$ref": "#/$defs/Count" },
-        "low": { "$ref": "#/$defs/Count" },
-        "suspicious": { "$ref": "#/$defs/Count" },
-        "high": { "$ref": "#/$defs/Count" },
-        "critical": { "$ref": "#/$defs/Count" }
+        "none": {
+          "$ref": "#/$defs/Count"
+        },
+        "low": {
+          "$ref": "#/$defs/Count"
+        },
+        "suspicious": {
+          "$ref": "#/$defs/Count"
+        },
+        "high": {
+          "$ref": "#/$defs/Count"
+        },
+        "critical": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "Window": {
@@ -150,8 +212,12 @@
       "additionalProperties": false,
       "description": "The window the report covers: the bounds asked for, and the bounds observed. Both bounds are inclusive; a record whose timestamp is not RFC 3339 is outside any bounded window.",
       "properties": {
-        "since": { "$ref": "#/$defs/Timestamp" },
-        "until": { "$ref": "#/$defs/Timestamp" },
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
+        },
         "first_receipt": {
           "$ref": "#/$defs/Timestamp",
           "description": "Timestamp of the earliest receipt counted."
@@ -176,14 +242,30 @@
       "additionalProperties": false,
       "description": "What the log verifier said about the inputs, summed across files. Each input file is verified on its own; the link between rotated files is `h2h log verify`'s job.",
       "properties": {
-        "verified": { "type": "boolean" },
-        "files": { "$ref": "#/$defs/Count" },
-        "entries": { "$ref": "#/$defs/Count" },
-        "receipts": { "$ref": "#/$defs/Count" },
-        "policy_events": { "$ref": "#/$defs/Count" },
-        "signed_entries": { "$ref": "#/$defs/Count" },
-        "last_seq": { "$ref": "#/$defs/Count" },
-        "last_entry_hash": { "$ref": "#/$defs/ContentHash" },
+        "verified": {
+          "type": "boolean"
+        },
+        "files": {
+          "$ref": "#/$defs/Count"
+        },
+        "entries": {
+          "$ref": "#/$defs/Count"
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count"
+        },
+        "policy_events": {
+          "$ref": "#/$defs/Count"
+        },
+        "signed_entries": {
+          "$ref": "#/$defs/Count"
+        },
+        "last_seq": {
+          "$ref": "#/$defs/Count"
+        },
+        "last_entry_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
         "reason": {
           "type": "string",
           "description": "Why verification failed, as file:line: message. Present only when verified is false."
@@ -202,24 +284,42 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "receipts": { "$ref": "#/$defs/Count" },
-        "policy_events": { "$ref": "#/$defs/Count" },
+        "receipts": {
+          "$ref": "#/$defs/Count"
+        },
+        "policy_events": {
+          "$ref": "#/$defs/Count"
+        },
         "skipped_lines": {
           "$ref": "#/$defs/Count",
           "description": "Input lines that did not parse and were skipped under --lenient. Zero in a fail-closed run, which refuses to report at all when a line does not parse."
         },
-        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
-        "by_mode": { "$ref": "#/$defs/ModeTotals" },
-        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+        "by_decision": {
+          "$ref": "#/$defs/DecisionTotals"
+        },
+        "by_mode": {
+          "$ref": "#/$defs/ModeTotals"
+        },
+        "by_outcome": {
+          "$ref": "#/$defs/OutcomeTotals"
+        }
       }
     },
     "RulePathCount": {
       "type": "object",
-      "required": ["rule_path", "count"],
+      "required": [
+        "rule_path",
+        "count"
+      ],
       "additionalProperties": false,
       "properties": {
-        "rule_path": { "type": "string", "minLength": 1 },
-        "count": { "$ref": "#/$defs/Count" }
+        "rule_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "count": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "RuleBlockRow": {
@@ -272,25 +372,47 @@
           "$ref": "#/$defs/Count",
           "description": "Trace entries recorded as applicable but inert (absent, disabled, or a false `when`)."
         },
-        "fired": { "$ref": "#/$defs/Count" },
-        "warn": { "$ref": "#/$defs/Count" },
-        "deny": { "$ref": "#/$defs/Count" },
+        "fired": {
+          "$ref": "#/$defs/Count"
+        },
+        "warn": {
+          "$ref": "#/$defs/Count"
+        },
+        "deny": {
+          "$ref": "#/$defs/Count"
+        },
         "top_rule_paths": {
           "type": "array",
-          "items": { "$ref": "#/$defs/RulePathCount" },
+          "items": {
+            "$ref": "#/$defs/RulePathCount"
+          },
           "description": "The most frequently recorded rule paths for this block, most frequent first, ties broken by path."
         }
       }
     },
     "ActionTypeRow": {
       "type": "object",
-      "required": ["action_type", "receipts", "by_decision", "by_outcome"],
+      "required": [
+        "action_type",
+        "receipts",
+        "by_decision",
+        "by_outcome"
+      ],
       "additionalProperties": false,
       "properties": {
-        "action_type": { "type": "string", "minLength": 1 },
-        "receipts": { "$ref": "#/$defs/Count" },
-        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
-        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+        "action_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count"
+        },
+        "by_decision": {
+          "$ref": "#/$defs/DecisionTotals"
+        },
+        "by_outcome": {
+          "$ref": "#/$defs/OutcomeTotals"
+        }
       }
     },
     "PolicyRow": {
@@ -306,17 +428,31 @@
       "additionalProperties": false,
       "description": "One policy, identified the way a receipt identifies it: by the content hash of the resolved document.",
       "properties": {
-        "content_hash": { "$ref": "#/$defs/ContentHash" },
-        "name": { "type": "string" },
-        "version": { "$ref": "#/$defs/Count" },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "$ref": "#/$defs/Count"
+        },
         "spec_version": {
           "type": "string",
           "pattern": "^0\\.[0-9]+\\.[0-9]+$"
         },
-        "receipts": { "$ref": "#/$defs/Count" },
-        "first_seen": { "$ref": "#/$defs/Timestamp" },
-        "last_seen": { "$ref": "#/$defs/Timestamp" },
-        "by_decision": { "$ref": "#/$defs/DecisionTotals" }
+        "receipts": {
+          "$ref": "#/$defs/Count"
+        },
+        "first_seen": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "last_seen": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "by_decision": {
+          "$ref": "#/$defs/DecisionTotals"
+        }
       }
     },
     "PolicyTimelineRow": {
@@ -332,15 +468,29 @@
       "properties": {
         "event": {
           "type": "string",
-          "enum": ["loaded", "swapped"]
+          "enum": [
+            "loaded",
+            "swapped"
+          ]
         },
-        "timestamp": { "$ref": "#/$defs/Timestamp" },
-        "content_hash": { "$ref": "#/$defs/ContentHash" },
-        "name": { "type": "string" },
-        "previous_content_hash": { "$ref": "#/$defs/ContentHash" },
+        "timestamp": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "name": {
+          "type": "string"
+        },
+        "previous_content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
         "enforcement_mode": {
           "type": "string",
-          "enum": ["enforce", "monitor"]
+          "enum": [
+            "enforce",
+            "monitor"
+          ]
         },
         "sdk": {
           "type": "string",
@@ -351,49 +501,97 @@
     },
     "ActorRow": {
       "type": "object",
-      "required": ["receipts", "by_decision", "by_outcome"],
+      "required": [
+        "receipts",
+        "by_decision",
+        "by_outcome"
+      ],
       "additionalProperties": false,
       "description": "One actor across the window. A row with no identity fields counts the receipts that named no actor at all.",
       "properties": {
-        "agent_id": { "type": "string", "minLength": 1 },
-        "session_id": { "type": "string", "minLength": 1 },
-        "principal": { "type": "string", "minLength": 1 },
-        "receipts": { "$ref": "#/$defs/Count" },
-        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
-        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+        "agent_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "principal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count"
+        },
+        "by_decision": {
+          "$ref": "#/$defs/DecisionTotals"
+        },
+        "by_outcome": {
+          "$ref": "#/$defs/OutcomeTotals"
+        }
       }
     },
     "ReasonCount": {
       "type": "object",
-      "required": ["reason", "count"],
+      "required": [
+        "reason",
+        "count"
+      ],
       "additionalProperties": false,
       "properties": {
-        "reason": { "type": "string" },
-        "count": { "$ref": "#/$defs/Count" }
+        "reason": {
+          "type": "string"
+        },
+        "count": {
+          "$ref": "#/$defs/Count"
+        }
       }
     },
     "SignatureSummary": {
       "type": "object",
-      "required": ["verified", "unverified", "absent", "reasons"],
+      "required": [
+        "verified",
+        "unverified",
+        "absent",
+        "reasons"
+      ],
       "additionalProperties": false,
       "description": "Policy-signature status as each receipt recorded it at load time (signing spec section 6). `absent` counts receipts whose runtime did not attempt verification at all.",
       "properties": {
-        "verified": { "$ref": "#/$defs/Count" },
-        "unverified": { "$ref": "#/$defs/Count" },
-        "absent": { "$ref": "#/$defs/Count" },
+        "verified": {
+          "$ref": "#/$defs/Count"
+        },
+        "unverified": {
+          "$ref": "#/$defs/Count"
+        },
+        "absent": {
+          "$ref": "#/$defs/Count"
+        },
         "reasons": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ReasonCount" },
+          "items": {
+            "$ref": "#/$defs/ReasonCount"
+          },
           "description": "Why verification failed, by reason code, ordered by reason."
         }
       }
     },
     "DetectorRow": {
       "type": "object",
-      "required": ["detector_id", "category", "evaluated", "matched", "by_level"],
+      "required": [
+        "detector_id",
+        "category",
+        "evaluated",
+        "matched",
+        "by_level"
+      ],
       "additionalProperties": false,
       "properties": {
-        "detector_id": { "type": "string", "minLength": 1 },
+        "detector_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "category": {
           "type": "string",
           "enum": [
@@ -403,12 +601,16 @@
             "threat_intel"
           ]
         },
-        "evaluated": { "$ref": "#/$defs/Count" },
+        "evaluated": {
+          "$ref": "#/$defs/Count"
+        },
         "matched": {
           "$ref": "#/$defs/Count",
           "description": "Evaluations that met a policy threshold and contributed to a decision."
         },
-        "by_level": { "$ref": "#/$defs/LevelTotals" }
+        "by_level": {
+          "$ref": "#/$defs/LevelTotals"
+        }
       }
     },
     "ControlEvidenceRow": {
@@ -425,31 +627,52 @@
       "additionalProperties": false,
       "description": "One control's evidence: what the policy says implements it, and what the receipts recorded against those paths.",
       "properties": {
-        "control_id": { "type": "string", "minLength": 1 },
+        "control_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "rule_paths": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "metadata.controls[].rule_paths, verbatim (core spec section 2.5.1)."
         },
         "rule_blocks": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "The rule blocks those paths were observed under in the receipts."
         },
         "receipts": {
           "$ref": "#/$defs/Count",
           "description": "Receipts in which at least one mapped path was consulted."
         },
-        "evaluated": { "$ref": "#/$defs/Count" },
-        "fired": { "$ref": "#/$defs/Count" },
-        "denied": { "$ref": "#/$defs/Count" },
-        "last_seen": { "$ref": "#/$defs/Timestamp" }
+        "evaluated": {
+          "$ref": "#/$defs/Count"
+        },
+        "fired": {
+          "$ref": "#/$defs/Count"
+        },
+        "denied": {
+          "$ref": "#/$defs/Count"
+        },
+        "last_seen": {
+          "$ref": "#/$defs/Timestamp"
+        }
       }
     },
     "FrameworkEvidence": {
       "type": "object",
-      "required": ["framework", "registered", "controls"],
+      "required": [
+        "framework",
+        "registered",
+        "controls"
+      ],
       "additionalProperties": false,
       "properties": {
         "framework": {
@@ -462,7 +685,9 @@
         },
         "controls": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ControlEvidenceRow" },
+          "items": {
+            "$ref": "#/$defs/ControlEvidenceRow"
+          },
           "description": "In the order the policy declared the mappings."
         }
       }
@@ -484,18 +709,25 @@
           "minLength": 1,
           "description": "The policy the mappings were read from, as the caller named it."
         },
-        "policy_content_hash": { "$ref": "#/$defs/ContentHash" },
+        "policy_content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
         "receipts_matching_policy": {
           "$ref": "#/$defs/Count",
           "description": "Receipts in the window that name policy_content_hash. Evidence for a control is only as strong as this number: a receipt evaluated under a different policy proves nothing about these mappings."
         },
         "frameworks": {
           "type": "array",
-          "items": { "$ref": "#/$defs/FrameworkEvidence" }
+          "items": {
+            "$ref": "#/$defs/FrameworkEvidence"
+          }
         },
         "unmapped_fired_rule_blocks": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Rule blocks that fired in the window with no control mapping behind them: the coverage gap lint L011 flags statically, observed dynamically."
         }
       }

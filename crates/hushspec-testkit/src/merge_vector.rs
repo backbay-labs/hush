@@ -1,4 +1,4 @@
-//! The merge-vector directory convention (`schemas/hushspec-merge-vector.v0.schema.json`).
+//! The merge-vector directory convention (`schemas/hushspec-merge-vector.v1.schema.json`).
 //!
 //! Merge vectors are a directory shape rather than a file format: a
 //! `base.yaml`, one or more `child-<name>.yaml` overlays, and an
@@ -177,7 +177,7 @@ pub fn compose(base: &HushSpec, child_path: &Path) -> Result<HushSpec, String> {
 }
 
 /// Describe a merge directory as the descriptor
-/// `schemas/hushspec-merge-vector.v0.schema.json` validates.
+/// `schemas/hushspec-merge-vector.v1.schema.json` validates.
 pub fn describe(dir: &Path) -> Result<serde_json::Value, String> {
     let relative = crate::manifest::relative_fixture_path(dir)
         .ok_or_else(|| format!("{} is not under fixtures/", dir.display()))?;

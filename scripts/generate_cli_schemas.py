@@ -23,30 +23,60 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = ROOT / "schemas"
 OUTPUT = ROOT / "crates" / "hushspec-cli" / "src" / "generated_schemas.rs"
 
-FILENAME_RE = re.compile(r"^hushspec-(?P<name>[a-z0-9-]+)\.v0\.schema\.json$")
+FILENAME_RE = re.compile(r"^hushspec-(?P<name>[a-z0-9-]+)\.v(?P<lineage>\d+)\.schema\.json$")
+
+# Files in schemas/ that are not schemas themselves.
+NON_SCHEMA_FILES = {"frozen-v0.json"}
 
 
 def discover() -> list[tuple[str, str, str]]:
-    """Return (short_name, file_name, body) triples, sorted by short name."""
-    entries: list[tuple[str, str, str]] = []
+    """Return (short_name, file_name, body) triples in the order `h2h schema --list` prints.
+
+    The current lineage (`.v1.`) takes the bare short name; the frozen `.v0.`
+    lineage keeps a `.v0` suffix; registries exist only at `.v0` and keep their
+    bare name. Current document formats come first, then registries, then the
+    frozen lineage.
+    """
+    entries: list[tuple[str, str, str, int]] = []
 
     for path in sorted(SCHEMAS_DIR.glob("*.json")):
+        if path.name in NON_SCHEMA_FILES:
+            continue
         match = FILENAME_RE.match(path.name)
         if not match:
             raise SystemExit(
-                f"{path.name} does not match hushspec-<name>.v0.schema.json; "
+                f"{path.name} does not match hushspec-<name>.v<lineage>.schema.json; "
                 "update scripts/generate_cli_schemas.py if the naming changed"
             )
         body = path.read_text()
         # Validate as JSON so a malformed schema fails the generator, not the
         # user running `h2h schema`.
         json.loads(body)
-        entries.append((match.group("name"), path.name, body))
+        entries.append((match.group("name"), path.name, body, int(match.group("lineage"))))
 
     if not entries:
         raise SystemExit(f"no schemas found in {SCHEMAS_DIR}")
 
-    return entries
+    current = max(lineage for _, _, _, lineage in entries)
+    names_at_current = {name for name, _, _, lineage in entries if lineage == current}
+
+    def short_name(name: str, lineage: int) -> str:
+        if lineage == current or name not in names_at_current:
+            return name
+        return f"{name}.v{lineage}"
+
+    def rank(entry: tuple[str, str, str, int]) -> tuple[int, str]:
+        name, _, _, lineage = entry
+        if lineage == current:
+            return (0, name)
+        if name not in names_at_current:
+            return (1, name)
+        return (2, name)
+
+    return [
+        (short_name(name, lineage), file_name, body)
+        for name, file_name, body, lineage in sorted(entries, key=rank)
+    ]
 
 
 def raw_string(body: str) -> str:
@@ -110,7 +140,8 @@ def render() -> str:
             "];",
             "",
             "/// Look up a schema body by short name (`core`) or published file",
-            "/// name (`hushspec-core.v0.schema.json`).",
+            "/// name (`hushspec-core.v1.schema.json`); the frozen 0.x lineage is",
+            "/// addressed as `core.v0`.",
             "#[must_use]",
             "pub fn schema_body(name: &str) -> Option<&'static str> {",
             "    let short = SCHEMA_FILE_NAMES",

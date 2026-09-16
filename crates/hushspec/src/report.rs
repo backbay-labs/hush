@@ -15,7 +15,7 @@
 //! `metadata.controls` join needs the resolved policy and the framework
 //! registry, which are `h2h`'s business (`crates/hushspec-cli/src/controls.rs`).
 //! The types are declared here so the whole report has one schema
-//! (`schemas/hushspec-report.v0.schema.json`) and one serialization.
+//! (`schemas/hushspec-report.v1.schema.json`) and one serialization.
 
 use std::collections::{BTreeMap, BTreeSet};
 

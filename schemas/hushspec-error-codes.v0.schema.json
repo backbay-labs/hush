@@ -1,10 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Error Code Registry v0",
   "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
   "type": "object",
-  "required": ["registry_version", "codes"],
+  "required": [
+    "registry_version",
+    "codes"
+  ],
   "additionalProperties": false,
   "properties": {
     "registry_version": {
@@ -16,7 +20,9 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "$ref": "#/$defs/ErrorCode" },
+      "items": {
+        "$ref": "#/$defs/ErrorCode"
+      },
       "description": "Registered error codes, ordered by code."
     }
   },
@@ -28,11 +34,18 @@
     },
     "ErrorCode": {
       "type": "object",
-      "required": ["code", "summary", "description", "phase"],
+      "required": [
+        "code",
+        "summary",
+        "description",
+        "phase"
+      ],
       "additionalProperties": false,
       "description": "One registered error code.",
       "properties": {
-        "code": { "$ref": "#/$defs/Code" },
+        "code": {
+          "$ref": "#/$defs/Code"
+        },
         "summary": {
           "type": "string",
           "minLength": 1,
@@ -45,12 +58,20 @@
           "description": "What the code means and which specification requirement it enforces."
         },
         "phase": {
-          "enum": ["io", "parse", "validate", "resolve"],
+          "enum": [
+            "io",
+            "parse",
+            "validate",
+            "resolve"
+          ],
           "description": "Where in load -> parse -> validate -> resolve the refusal happens. A code from an earlier phase pre-empts later ones: a document that fails to parse is never validated."
         },
         "emitted_by": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "description": "Reference-implementation commands that report this code today. Informative."
         },
         "superseded_by": {
@@ -61,7 +82,10 @@
     },
     "ExpectedError": {
       "type": "object",
-      "required": ["reject", "code"],
+      "required": [
+        "reject",
+        "code"
+      ],
       "additionalProperties": false,
       "description": "A fixtures/<module>/invalid/<name>.expect.yaml sidecar: the outcome the vector beside it MUST produce. Level 1 requires the rejection; naming the code is required of implementations that emit registry codes (core spec Section 8, Level 1).",
       "properties": {

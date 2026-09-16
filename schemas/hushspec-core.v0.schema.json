@@ -1,10 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Core v0",
   "description": "Schema for HushSpec Core v0.x documents. Validates portable, engine-neutral AI agent security rules.",
   "type": "object",
-  "required": ["hushspec"],
+  "required": [
+    "hushspec"
+  ],
   "additionalProperties": false,
   "properties": {
     "hushspec": {
@@ -24,7 +27,11 @@
     },
     "merge_strategy": {
       "type": "string",
-      "enum": ["replace", "merge", "deep_merge"],
+      "enum": [
+        "replace",
+        "merge",
+        "deep_merge"
+      ],
       "default": "deep_merge",
       "description": "Strategy for merging with the base policy."
     },
@@ -186,7 +193,10 @@
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "default": "block",
           "description": "Default decision when no pattern matches."
         }
@@ -196,7 +206,11 @@
       "type": "object",
       "additionalProperties": false,
       "description": "A named regex pattern for secret detection.",
-      "required": ["name", "pattern", "severity"],
+      "required": [
+        "name",
+        "pattern",
+        "severity"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -208,7 +222,11 @@
         },
         "severity": {
           "type": "string",
-          "enum": ["critical", "error", "warn"],
+          "enum": [
+            "critical",
+            "error",
+            "warn"
+          ],
           "description": "Severity level of a match."
         },
         "description": {
@@ -360,7 +378,10 @@
         },
         "default": {
           "type": "string",
-          "enum": ["allow", "block"],
+          "enum": [
+            "allow",
+            "block"
+          ],
           "default": "allow",
           "description": "Default decision when no list matches."
         },
@@ -387,7 +408,11 @@
         },
         "mode": {
           "type": "string",
-          "enum": ["observe", "guardrail", "fail_closed"],
+          "enum": [
+            "observe",
+            "guardrail",
+            "fail_closed"
+          ],
           "default": "guardrail",
           "description": "Enforcement mode."
         },
@@ -610,7 +635,11 @@
     "RateCondition": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["counter", "threshold", "comparison"],
+      "required": [
+        "counter",
+        "threshold",
+        "comparison"
+      ],
       "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
       "properties": {
         "counter": {
@@ -625,7 +654,10 @@
         },
         "comparison": {
           "type": "string",
-          "enum": ["gte", "lt"],
+          "enum": [
+            "gte",
+            "lt"
+          ],
           "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
@@ -633,7 +665,10 @@
     "TimeWindow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["start", "end"],
+      "required": [
+        "start",
+        "end"
+      ],
       "description": "Daily time window; half-open [start, end), wrapping midnight when start > end.",
       "properties": {
         "start": {
@@ -707,7 +742,12 @@
         },
         "classification": {
           "type": "string",
-          "enum": ["public", "internal", "confidential", "restricted"],
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
           "description": "Data classification level of the policy."
         },
         "change_ticket": {
@@ -716,7 +756,14 @@
         },
         "lifecycle_state": {
           "type": "string",
-          "enum": ["draft", "review", "approved", "deployed", "deprecated", "archived"],
+          "enum": [
+            "draft",
+            "review",
+            "approved",
+            "deployed",
+            "deprecated",
+            "archived"
+          ],
           "description": "Current lifecycle state of the policy."
         },
         "policy_version": {
@@ -740,7 +787,9 @@
         },
         "reviewers": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Identities who reviewed the policy. Advisory only; separation of duties is checked by tooling, never by an engine."
         },
         "next_review_date": {
@@ -750,7 +799,9 @@
         },
         "changelog": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ChangelogEntry" },
+          "items": {
+            "$ref": "#/$defs/ChangelogEntry"
+          },
           "description": "Revision history, newest first. Declarative only: entries never influence evaluation."
         },
         "supersedes": {
@@ -759,7 +810,9 @@
         },
         "controls": {
           "type": "array",
-          "items": { "$ref": "#/$defs/ControlMapping" },
+          "items": {
+            "$ref": "#/$defs/ControlMapping"
+          },
           "description": "Compliance control mappings for this policy. Declarative only: mappings never influence evaluation."
         }
       }
@@ -767,7 +820,11 @@
     "ControlMapping": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["framework", "control_id", "rule_paths"],
+      "required": [
+        "framework",
+        "control_id",
+        "rule_paths"
+      ],
       "description": "Maps one compliance control onto the parts of this document that implement it. Advisory metadata: it has no effect on evaluation.",
       "properties": {
         "framework": {
@@ -798,7 +855,11 @@
     "ChangelogEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version", "date", "summary"],
+      "required": [
+        "version",
+        "date",
+        "summary"
+      ],
       "description": "One revision of the policy. Advisory metadata: it has no effect on evaluation.",
       "properties": {
         "version": {
@@ -825,10 +886,15 @@
     "PostureExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+      "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
       "title": "HushSpec Posture Extension v0",
       "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
       "type": "object",
-      "required": ["initial", "states", "transitions"],
+      "required": [
+        "initial",
+        "states",
+        "transitions"
+      ],
       "additionalProperties": false,
       "properties": {
         "initial": {
@@ -879,7 +945,11 @@
         },
         "PostureTransition": {
           "type": "object",
-          "required": ["from", "to", "on"],
+          "required": [
+            "from",
+            "to",
+            "on"
+          ],
           "additionalProperties": false,
           "description": "A transition between posture states.",
           "properties": {
@@ -919,10 +989,17 @@
                 "const": "timeout"
               }
             },
-            "required": ["on"]
+            "required": [
+              "on"
+            ]
           },
           "then": {
-            "required": ["from", "to", "on", "after"]
+            "required": [
+              "from",
+              "to",
+              "on",
+              "after"
+            ]
           }
         }
       }
@@ -930,6 +1007,7 @@
     "OriginsExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+      "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
       "title": "HushSpec Origins Extension v0",
       "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
       "type": "object",
@@ -937,7 +1015,10 @@
       "properties": {
         "default_behavior": {
           "type": "string",
-          "enum": ["deny", "minimal_profile"],
+          "enum": [
+            "deny",
+            "minimal_profile"
+          ],
           "default": "deny",
           "description": "Behavior when no profile matches. \"deny\" blocks unmatched origins; \"minimal_profile\" proceeds under base policy."
         },
@@ -952,7 +1033,9 @@
       "$defs": {
         "OriginProfile": {
           "type": "object",
-          "required": ["id"],
+          "required": [
+            "id"
+          ],
           "additionalProperties": false,
           "description": "An origin profile that narrows the base policy for matching requests.",
           "properties": {
@@ -1077,7 +1160,10 @@
             },
             "default": {
               "type": "string",
-              "enum": ["allow", "block"],
+              "enum": [
+                "allow",
+                "block"
+              ],
               "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
             },
             "max_args_size": {
@@ -1108,7 +1194,10 @@
             },
             "default": {
               "type": "string",
-              "enum": ["allow", "block"],
+              "enum": [
+                "allow",
+                "block"
+              ],
               "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
             }
           }
@@ -1228,6 +1317,7 @@
     "DetectionExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+      "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
       "title": "HushSpec Detection Extension v0",
       "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
       "type": "object",
@@ -1246,7 +1336,12 @@
       "$defs": {
         "Level": {
           "type": "string",
-          "enum": ["safe", "suspicious", "high", "critical"],
+          "enum": [
+            "safe",
+            "suspicious",
+            "high",
+            "critical"
+          ],
           "description": "Detection severity level, ordered: safe < suspicious < high < critical."
         },
         "PromptInjectionDetection": {

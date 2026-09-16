@@ -35,6 +35,8 @@ HOST = "https://hushspec.dev/schemas/"
 def build() -> dict:
     entries = []
     for path in sorted(SCHEMAS_DIR.glob("*.json")):
+        if path.name == "frozen-v0.json":
+            continue
         document = json.loads(path.read_text(encoding="utf-8"))
         identifier = document.get("$id")
         expected = f"{HOST}{path.name}"

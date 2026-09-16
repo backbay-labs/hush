@@ -1,10 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-keyring.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
   "title": "HushSpec Trusted Keyring v0.2",
   "description": "The set of public keys a verifier trusts for policy signatures. Normative prose: spec/hushspec-signing.md section 5. A verifier MUST select the key whose key_id equals the envelope's key_id and MUST NOT fall back to any other key.",
   "type": "object",
-  "required": ["keyring_version", "keys"],
+  "required": [
+    "keyring_version",
+    "keys"
+  ],
   "additionalProperties": false,
   "properties": {
     "keyring_version": {
@@ -14,13 +18,19 @@
     "keys": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/TrustedKey" }
+      "items": {
+        "$ref": "#/$defs/TrustedKey"
+      }
     }
   },
   "$defs": {
     "TrustedKey": {
       "type": "object",
-      "required": ["key_id", "algorithm", "public_key"],
+      "required": [
+        "key_id",
+        "algorithm",
+        "public_key"
+      ],
       "additionalProperties": false,
       "properties": {
         "key_id": {

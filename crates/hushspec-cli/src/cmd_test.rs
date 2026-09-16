@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 /// the testkit (never published) does. `evaluator_schema_matches_workspace_copy`
 /// in `tests/resolve_tests.rs` fails if the two ever drift.
 const EVALUATOR_TEST_SCHEMA: &str =
-    include_str!("../schemas/hushspec-evaluator-test.v0.schema.json");
+    include_str!("../schemas/hushspec-evaluator-test.v1.schema.json");
 
 /// Fixture format versions this runner accepts (evaluator-test schema).
 const SUPPORTED_TEST_VERSIONS: &[&str] = &["0.1.0", "0.2.0"];

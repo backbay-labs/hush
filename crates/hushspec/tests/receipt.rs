@@ -76,7 +76,7 @@ static RECEIPT_SCHEMA: std::sync::LazyLock<jsonschema::JSONSchema> =
     std::sync::LazyLock::new(compile_receipt_schema);
 
 fn compile_receipt_schema() -> jsonschema::JSONSchema {
-    let path = repo_root().join("schemas/hushspec-receipt.v0.schema.json");
+    let path = repo_root().join("schemas/hushspec-receipt.v1.schema.json");
     let text = std::fs::read_to_string(&path).unwrap();
     let schema: serde_json::Value = serde_json::from_str(&text).unwrap();
     jsonschema::JSONSchema::options()
