@@ -26,10 +26,11 @@ import (
 //   - A posture extension missing its required `transitions` key, which the
 //     schema requires and supplies no default for.
 //
-// A fourth class is a `null` written for a property the document format
-// declares: gopkg.in/yaml.v3 decodes one into the zero value -- a nil pointer,
-// an empty slice -- which the typed model cannot tell apart from an absent
-// key. See [validateRawNullProperties].
+// A fourth class is a `null` written where the document format types a value:
+// gopkg.in/yaml.v3 decodes one into the zero value -- a nil pointer, an empty
+// slice, an empty string -- which the typed model cannot tell apart from an
+// absent key, or from a value the author wrote. See
+// [validateRawNullProperties].
 //
 // It also refuses, at parse time, the present-but-empty strings the schema
 // gives a minimum length: the top-level `name` and the free-text origin match
@@ -117,15 +118,20 @@ func rawRequiresNonEmptyName(root map[string]any) bool {
 	return requiresNonEmptyName(declared)
 }
 
-// validateRawNullProperties refuses a `null` written for a property the
-// document format declares. No HushSpec property is nullable (canonical spec
-// 2.2 and 3.2), but gopkg.in/yaml.v3 decodes a written null into the zero
-// value, which for an optional field is exactly what an absent key decodes to:
+// validateRawNullProperties refuses a `null` written anywhere the document
+// format types a value. No HushSpec property is nullable (canonical spec 2.2
+// and 3.2), but gopkg.in/yaml.v3 decodes a written null into the zero value,
+// which for an optional field is exactly what an absent key decodes to:
 // without this check the block would silently evaluate as if it had never been
 // written, and the document would hash as if it had never carried the key.
 //
+// The same holds for the values a declared property contains. A null element
+// of a string slice decodes into "" -- `allow: [null]` becomes an egress
+// allowlist with one empty entry -- and a null value in a schema map decodes
+// into that entry's zero value, neither of which the author wrote.
+//
 // The walk follows the generated model, so every declared object, array,
-// string, number and boolean property is covered at every depth. A free-form
+// string, number and boolean value is covered at every depth. A free-form
 // value -- a `when.context` entry, whose model type is `any` -- is a leaf: the
 // null there is a value to compare against, not a property of the format.
 func validateRawNullProperties(root map[string]any, errs *rawIssues) {
@@ -156,13 +162,7 @@ func walkRawNulls(node map[string]any, model reflect.Type, path string, errs *ra
 		if path != "" {
 			childPath = path + "." + key
 		}
-		value := node[key]
-		if value == nil {
-			errs.add(fmt.Sprintf("%s: invalid type: null, expected %s",
-				childPath, describeRawModelType(field.Type)))
-			continue
-		}
-		walkRawNullsValue(value, field.Type, childPath, errs)
+		checkRawNull(node[key], field.Type, childPath, errs)
 	}
 }
 
@@ -182,7 +182,7 @@ func walkRawNullsValue(value any, model reflect.Type, path string, errs *rawIssu
 			return
 		}
 		for index, item := range items {
-			walkRawNullsValue(item, model.Elem(), fmt.Sprintf("%s[%d]", path, index), errs)
+			checkRawNull(item, model.Elem(), fmt.Sprintf("%s[%d]", path, index), errs)
 		}
 	case reflect.Map:
 		entries, ok := value.(map[string]any)
@@ -195,9 +195,25 @@ func walkRawNullsValue(value any, model reflect.Type, path string, errs *rawIssu
 		}
 		sort.Strings(keys)
 		for _, key := range keys {
-			walkRawNullsValue(entries[key], model.Elem(), path+"."+key, errs)
+			checkRawNull(entries[key], model.Elem(), path+"."+key, errs)
 		}
 	}
+}
+
+// checkRawNull refuses a `null` written where the model types a value, then
+// descends into it. A position the model leaves free-form -- a `when.context`
+// entry, whose type is `any` -- is a leaf: the null there is a value to
+// compare against, not a property of the format.
+func checkRawNull(value any, model reflect.Type, path string, errs *rawIssues) {
+	if value == nil {
+		if rawModelElement(model).Kind() == reflect.Interface {
+			return
+		}
+		errs.add(fmt.Sprintf("%s: invalid type: null, expected %s",
+			path, describeRawModelType(model)))
+		return
+	}
+	walkRawNullsValue(value, model, path, errs)
 }
 
 // rawModelFieldCache memoizes [rawModelFields]: a parse walks the same handful

@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T20:03:46Z",
+  "generated_at": "2026-09-16T20:14:04Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -669,6 +669,20 @@
       "level": 1
     },
     {
+      "path": "fixtures/core/invalid/null-array-element.expect.yaml",
+      "sha256": "4f6d5ae1f704d2dd9db84a3061682bfdc2691814448b4927b34f2bb3dc6aeeb3",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-array-element.yaml",
+      "sha256": "85b852c66ef25ac1de2b5118192cf75aaa17b345ef622cfbad19c58742bd4a28",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
       "path": "fixtures/core/invalid/null-description.expect.yaml",
       "sha256": "bb2d762ea6ad814739394ee07cf4a3e9bb56efc621d73389266b23859d22d51a",
       "category": "expect",
@@ -678,6 +692,20 @@
     {
       "path": "fixtures/core/invalid/null-description.yaml",
       "sha256": "e702342456fe3af8342507a77bf9984cb816837d5060eeaa7d58c4c452289008",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-map-entry.expect.yaml",
+      "sha256": "6d443a3170c88f5066b6c5003102141aea6f9421b420ab53340a0e8d34230777",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-map-entry.yaml",
+      "sha256": "786a95bfba9bdcd15ed08caa1565cb088d193127b35a8aae09ba0c4d041fbf8c",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -706,6 +734,20 @@
     {
       "path": "fixtures/core/invalid/null-rule-block.yaml",
       "sha256": "d325622fcb078ef3d5fbdd3e913e0b80decc252e0c56ad66f0314310552f213c",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-version.expect.yaml",
+      "sha256": "60871ae7e1f56b9089e407f50d75f236d48d836453872717e947d717d113d9a3",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-version.yaml",
+      "sha256": "f78e69812360fc9b79bef5415fcb4c3ef6f32902e0a87a035b36e5c0e8db2053",
       "category": "invalid",
       "module": "core",
       "level": 1
@@ -1476,6 +1518,13 @@
     {
       "path": "fixtures/core/valid/when-conditions.yaml",
       "sha256": "b0a3770b2825fd2ebd29fd3194d1a2db37e14f81011939c083f1eb297cdcd5c5",
+      "category": "valid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/valid/when-context-null.yaml",
+      "sha256": "46e4bbeb3b901b45f93fd6934a2fc89d256979ee525bb6e725fe7c0217810c37",
       "category": "valid",
       "module": "core",
       "level": 1

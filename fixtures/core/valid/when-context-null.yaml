@@ -1,0 +1,12 @@
+# `when.context` holds values to compare against the runtime context, so a
+# `null` there is data rather than a property of the document format: it is
+# matched against whatever the engine supplies at that path, and survives into
+# the canonical form (canonical spec 2.2; core spec 3.13).
+hushspec: "1.0.0"
+name: when-context-null
+rules:
+  egress:
+    default: block
+    when:
+      context:
+        user.tenant: null

@@ -243,11 +243,12 @@ func TestEmptyNameUnderAnUnreadableVersion(t *testing.T) {
 	}
 }
 
-// TestAWrittenNullIsRefusedForEveryDeclaredProperty covers canonical spec 2.2:
-// no HushSpec property is nullable, and yaml.v3 would otherwise decode a
+// TestAWrittenNullIsRefusedWhereTheFormatTypesAValue covers canonical spec
+// 2.2: no HushSpec property is nullable, and yaml.v3 would otherwise decode a
 // written null into the zero value -- for an optional field, exactly what an
-// absent key decodes to.
-func TestAWrittenNullIsRefusedForEveryDeclaredProperty(t *testing.T) {
+// absent key decodes to; for a list element or a schema-map entry, a value the
+// author never wrote.
+func TestAWrittenNullIsRefusedWhereTheFormatTypesAValue(t *testing.T) {
 	cases := []struct{ name, source, want string }{
 		{
 			name:   "rule block",
@@ -280,6 +281,37 @@ func TestAWrittenNullIsRefusedForEveryDeclaredProperty(t *testing.T) {
 			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
 				"    transitions: []\n    states:\n      standard:\n        description: null\n",
 			want: "extensions.posture.states.standard.description: invalid type: null, expected a string",
+		},
+		{
+			name:   "string list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    allow: [null]\n",
+			want:   "rules.egress.allow[0]: invalid type: null, expected a string",
+		},
+		{
+			name: "object list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  secret_patterns:\n    patterns:\n" +
+				"      - null\n",
+			want: "rules.secret_patterns.patterns[0]: invalid type: null, expected an object",
+		},
+		{
+			name: "condition list element",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    when:\n" +
+				"      all_of:\n        - null\n",
+			want: "rules.egress.when.all_of[0]: invalid type: null, expected an object",
+		},
+		{
+			name: "schema map entry",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard: null\n",
+			want: "extensions.posture.states.standard: invalid type: null, expected an object",
+		},
+		{
+			name: "schema map entry with a scalar value",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard:\n        budgets:\n" +
+				"          file_writes: null\n",
+			want: "extensions.posture.states.standard.budgets.file_writes: " +
+				"invalid type: null, expected an integer",
 		},
 	}
 	for _, testCase := range cases {
