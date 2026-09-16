@@ -1,0 +1,51 @@
+# pre-commit hooks for HushSpec policy documents (https://pre-commit.com).
+#
+# All four hooks run `h2h` as `language: system` -- pre-commit does not
+# install it for you, so the CLI must already be on PATH (cargo install
+# hushspec-cli, npm install -g @hushspec/cli, brew install
+# backbay-labs/tap/h2h, or a prebuilt binary; see README.md#installation).
+#
+# Usage, in a consumer repository's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/backbay-labs/hush
+#       rev: v0.2.0          # a released tag; see docs/src/guides/ci.md
+#       hooks:
+#         - id: hushspec-validate
+#         - id: hushspec-lint
+#         - id: hushspec-fmt-check
+#
+# The default `files` pattern matches `*.hushspec.yaml` / `*.hushspec.yml`,
+# `.hushspec.yaml` / `.hushspec.yml`, and any `*policy*.yaml` / `*policy*.yml`
+# -- override it per-repo if your policies live somewhere else.
+- id: hushspec-validate
+  name: HushSpec validate
+  description: Validate HushSpec policy documents against the schema.
+  entry: h2h validate
+  language: system
+  files: '\.hush(spec)?\.ya?ml$|policy.*\.ya?ml$'
+  types: [yaml]
+
+- id: hushspec-lint
+  name: HushSpec lint
+  description: Static analysis for HushSpec policy documents (warnings do not fail the commit).
+  entry: h2h lint
+  language: system
+  files: '\.hush(spec)?\.ya?ml$|policy.*\.ya?ml$'
+  types: [yaml]
+
+- id: hushspec-lint-strict
+  name: HushSpec lint (strict)
+  description: Static analysis for HushSpec policy documents; warnings also fail the commit.
+  entry: h2h lint --fail-on-warnings
+  language: system
+  files: '\.hush(spec)?\.ya?ml$|policy.*\.ya?ml$'
+  types: [yaml]
+
+- id: hushspec-fmt-check
+  name: HushSpec fmt --check
+  description: Check that HushSpec policy documents are canonically formatted.
+  entry: h2h fmt --check
+  language: system
+  files: '\.hush(spec)?\.ya?ml$|policy.*\.ya?ml$'
+  types: [yaml]

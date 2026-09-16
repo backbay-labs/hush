@@ -580,7 +580,7 @@ func TestTraceUnknownActionType(t *testing.T) {
 	receipt := auditReceipt(t, &HushSpec{HushSpecVersion: "0.1.0"},
 		&EvaluationAction{Type: "unknown_action", Target: "test"}, enabledConfig())
 
-	// D1: an action type unknown to the specification denies.
+	// An action type unknown to the specification denies (core spec 5).
 	if receipt.Decision != DecisionDeny {
 		t.Errorf("expected deny, got %q", receipt.Decision)
 	}

@@ -29,6 +29,31 @@ export interface TimeWindowCondition {
   days?: string[];
 }
 
+/**
+ * How a {@link RateCondition} compares its counter with its threshold.
+ *
+ * `gte`: true when `counter >= threshold`; `lt`: true when `counter < threshold`.
+ */
+export const RATE_COMPARISONS = ['gte', 'lt'] as const;
+
+export type RateComparison = (typeof RATE_COMPARISONS)[number];
+
+/**
+ * A rate predicate: an engine-supplied counter compared with a threshold
+ * (core spec 3.13).
+ *
+ * HushSpec never stores state and never increments anything; the engine owns
+ * the counter and its window and supplies the current value in
+ * {@link RuntimeContext.counters}.
+ */
+export interface RateCondition {
+  /** Name of the counter in {@link RuntimeContext.counters}. */
+  counter: string;
+  /** Non-negative threshold the counter is compared against. */
+  threshold: number;
+  comparison: RateComparison;
+}
+
 /** Multiple fields are ANDed; all present fields must evaluate to true. */
 export interface Condition {
   time_window?: TimeWindowCondition;
@@ -36,6 +61,18 @@ export interface Condition {
   all_of?: Condition[];
   any_of?: Condition[];
   not?: Condition;
+  /**
+   * The effective posture state must grant this capability (core spec 3.13).
+   * Unevaluable -- and therefore held -- when the policy has no posture
+   * extension.
+   */
+  capability?: string;
+  /**
+   * A runtime counter compared against a threshold (core spec 3.13).
+   * Unevaluable -- and therefore held -- when the context carries no such
+   * counter.
+   */
+  rate?: RateCondition;
 }
 
 export interface RuntimeContext {
@@ -46,21 +83,60 @@ export interface RuntimeContext {
   session?: Record<string, unknown>;
   request?: Record<string, unknown>;
   custom?: Record<string, unknown>;
+  /**
+   * Engine-maintained counters consulted by `rate` conditions (core spec
+   * 3.13). The engine owns the window; HushSpec only compares.
+   */
+  counters?: Record<string, number>;
   /** Override for testing (ISO 8601). */
   current_time?: string;
 }
 
-/** Missing context fields evaluate to false (fail-closed). */
+/**
+ * Missing context fields evaluate to false (fail-closed).
+ *
+ * A `capability` predicate is unevaluable through this entry point (no
+ * posture state is known) and therefore holds; use
+ * {@link evaluateConditionWithCapabilities} from an evaluator that has
+ * resolved the effective posture state.
+ */
 export function evaluateCondition(
   condition: Condition,
   context: RuntimeContext,
 ): boolean {
-  return evaluateConditionDepth(condition, context, 0);
+  return evaluateConditionDepth(condition, context, undefined, 0);
+}
+
+/**
+ * The capabilities an effective posture state grants, as either a list (the
+ * document spelling) or a set (what a compiled policy holds).
+ */
+export type GrantedCapabilities = ReadonlySet<string> | readonly string[];
+
+/**
+ * {@link evaluateCondition} with the capabilities the effective posture state
+ * grants: `undefined` when the policy has no posture extension (a
+ * `capability` predicate is then unevaluable and holds), a list otherwise (an
+ * unknown state grants nothing, so the predicate is false).
+ */
+export function evaluateConditionWithCapabilities(
+  condition: Condition,
+  context: RuntimeContext,
+  capabilities: GrantedCapabilities | undefined,
+): boolean {
+  return evaluateConditionDepth(condition, context, capabilities, 0);
+}
+
+function grants(capabilities: GrantedCapabilities, name: string): boolean {
+  return Array.isArray(capabilities)
+    ? capabilities.includes(name)
+    : (capabilities as ReadonlySet<string>).has(name);
 }
 
 function evaluateConditionDepth(
   condition: Condition,
   context: RuntimeContext,
+  capabilities: GrantedCapabilities | undefined,
   depth: number,
 ): boolean {
   if (depth > MAX_NESTING_DEPTH) {
@@ -82,10 +158,26 @@ function evaluateConditionDepth(
     }
   }
 
+  // `capability`: unevaluable without a posture extension (held); otherwise
+  // the effective state must list the capability.
+  if (condition.capability != null && capabilities != null) {
+    if (!grants(capabilities, condition.capability)) {
+      return false;
+    }
+  }
+
+  // `rate`: unevaluable when the engine supplied no such counter (held).
+  if (condition.rate != null) {
+    const count = counterValue(context, condition.rate.counter);
+    if (count != null && !rateHolds(condition.rate, count)) {
+      return false;
+    }
+  }
+
   if (condition.all_of != null) {
     if (
       !condition.all_of.every((c) =>
-        evaluateConditionDepth(c, context, depth + 1),
+        evaluateConditionDepth(c, context, capabilities, depth + 1),
       )
     ) {
       return false;
@@ -95,7 +187,7 @@ function evaluateConditionDepth(
   if (condition.any_of != null && condition.any_of.length > 0) {
     if (
       !condition.any_of.some((c) =>
-        evaluateConditionDepth(c, context, depth + 1),
+        evaluateConditionDepth(c, context, capabilities, depth + 1),
       )
     ) {
       return false;
@@ -103,12 +195,31 @@ function evaluateConditionDepth(
   }
 
   if (condition.not != null) {
-    if (evaluateConditionDepth(condition.not, context, depth + 1)) {
+    if (evaluateConditionDepth(condition.not, context, capabilities, depth + 1)) {
       return false;
     }
   }
 
   return true;
+}
+
+/**
+ * The counter the engine supplied under `name`, or `undefined` when it
+ * supplied none. A value that is not a finite number is read as absent: the
+ * predicate is then unevaluable and holds, which leaves the block active
+ * (core spec 3.13) rather than switching a control off on malformed input.
+ */
+function counterValue(context: RuntimeContext, name: string): number | undefined {
+  const counters = context.counters;
+  if (counters == null || !Object.prototype.hasOwnProperty.call(counters, name)) {
+    return undefined;
+  }
+  const value = counters[name];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function rateHolds(rate: RateCondition, count: number): boolean {
+  return rate.comparison === 'gte' ? count >= rate.threshold : count < rate.threshold;
 }
 
 function checkTimeWindow(
@@ -170,14 +281,14 @@ function checkTimeWindow(
 function parseHHMM(s: string): [number, number] | undefined {
   const parts = s.split(':');
   if (parts.length !== 2) return undefined;
-  // Reject any token that is not purely digits (Rust parses each part as u8;
-  // "09.9" / "09xx" must fail rather than truncate).
+  // Both halves must be purely digits: `09.9` and `09xx` are malformed times
+  // rather than values to truncate to 9.
   if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
     return undefined;
   }
   const hour = parseInt(parts[0], 10);
   const minute = parseInt(parts[1], 10);
-  if (isNaN(hour) || isNaN(minute) || hour > 23 || minute > 59 || hour < 0 || minute < 0) {
+  if (hour > 23 || minute > 59) {
     return undefined;
   }
   return [hour, minute];
@@ -195,8 +306,9 @@ function resolveCurrentTime(
   let date: Date;
 
   if (context.current_time != null) {
-    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is interpreted
-    // as UTC to match Rust/Python/Go, not the host's local time.
+    // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is read as
+    // UTC rather than as the host's local time, so the same context evaluates
+    // the same way wherever the engine runs.
     const raw = context.current_time;
     const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
     const normalized = !hasTimezone && raw.includes('T') ? `${raw}Z` : raw;
@@ -209,9 +321,8 @@ function resolveCurrentTime(
   }
 
   const tz = timezone ?? 'UTC';
-  // Order mirrors Rust: the IANA database (chrono-tz there, Intl here) is
-  // consulted before the fixed-offset table, so `US/Eastern` keeps its DST
-  // rules rather than collapsing to a fixed -05:00.
+  // The IANA database is consulted before the fixed-offset table, so
+  // `US/Eastern` keeps its DST rules rather than collapsing to a fixed -05:00.
   const utcOffset = parseUtcOrNumericOffsetMinutes(tz);
   if (utcOffset != null) {
     const adjusted = new Date(date.getTime() + utcOffset * 60_000);
@@ -267,9 +378,9 @@ function utcDateParts(date: Date): [number, number, number] {
 }
 
 /**
- * Fixed-offset aliases accepted by the reference engine (Rust
- * `parse_timezone_offset`). Consulted only after the IANA database, so a name
- * the platform knows (e.g. `EST`, `CET`, `US/Eastern`) keeps its real rules.
+ * Legacy zone names accepted as fixed offsets. Consulted only after the IANA
+ * database, so a name the platform knows (`EST`, `CET`, `US/Eastern`) keeps
+ * its real rules and only an unknown one falls back to the offset here.
  */
 const FIXED_OFFSET_ALIASES: Record<string, number> = {
   'US/Eastern': -5 * 60,
@@ -320,7 +431,7 @@ export function timezoneIsKnown(tz: string): boolean {
   if (parseUtcOrNumericOffsetMinutes(tz) != null) return true;
   if (Object.prototype.hasOwnProperty.call(FIXED_OFFSET_ALIASES, tz)) return true;
   try {
-    // Intl throws RangeError on an unknown time zone.
+    // `Intl` throws RangeError on an unknown time zone.
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
     return true;
   } catch {
@@ -370,10 +481,9 @@ function resolveContextValue(
 }
 
 /**
- * Typed scalar equality with no cross-type coercion -- mirrors Rust's
- * `values_equal` (crates/hushspec/src/conditions.rs). A number is never
- * equal to a boolean or a string even if JS's `==` would agree (`1 == true`),
- * because `===` (used below) already enforces matching types.
+ * Typed scalar equality with no cross-type coercion (core spec 3.13): a number
+ * is never equal to a boolean or a string even where JavaScript's `==` would
+ * agree (`1 == true`), because `===` already enforces matching types.
  */
 function valuesEqual(actual: unknown, expected: unknown): boolean {
   if (typeof expected === 'string' || typeof expected === 'boolean' || typeof expected === 'number') {
@@ -383,9 +493,8 @@ function valuesEqual(actual: unknown, expected: unknown): boolean {
 }
 
 /**
- * Mirrors Rust's `matches_scalar_or_membership`: if `actual` is an array,
- * true iff any element equals `expected` (membership); otherwise a direct
- * scalar comparison.
+ * If `actual` is an array, true when any element equals `expected`
+ * (membership); otherwise a direct scalar comparison.
  */
 function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean {
   if (Array.isArray(actual)) {
@@ -395,8 +504,8 @@ function matchesScalarOrMembership(actual: unknown, expected: unknown): boolean 
 }
 
 /**
- * Mirrors Rust's `match_value`. Missing/null context fields fail closed. A
- * scalar `expected` (string/bool/number) matches via
+ * One `context` predicate (core spec 3.13). Missing or null context fields
+ * fail closed. A scalar `expected` (string/bool/number) matches via
  * `matchesScalarOrMembership`, which covers both scalar-vs-scalar equality
  * and scalar-vs-array membership (in either direction: a number/bool/string
  * `expected` matches an `actual` array containing it, and vice versa). An
@@ -476,6 +585,19 @@ function validateConditionDepth(
     }
   }
 
+  if (condition.capability != null && !isCapabilityIdentifier(condition.capability)) {
+    errors.push(
+      `${path}.capability: ${debugQuote(condition.capability)} is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)`,
+    );
+  }
+
+  const rate = condition.rate;
+  if (rate != null && typeof rate === 'object' && !isCapabilityIdentifier(rate.counter)) {
+    errors.push(
+      `${path}.rate.counter: ${debugQuote(rate.counter)} is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)`,
+    );
+  }
+
   if (Array.isArray(condition.all_of)) {
     condition.all_of.forEach((child, index) => {
       validateConditionDepth(child, `${path}.all_of[${index}]`, depth + 1, errors);
@@ -493,6 +615,22 @@ function validateConditionDepth(
 
 function debugQuote(value: unknown): string {
   return typeof value === 'string' ? JSON.stringify(value) : String(value);
+}
+
+/**
+ * The identifier grammar shared by posture capabilities and rate counters
+ * (core spec 3.13): one or more dot-separated segments, each a lowercase
+ * ASCII letter followed by lowercase letters, digits or underscores.
+ *
+ * ```abnf
+ * identifier = segment *("." segment)
+ * segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+ * ```
+ */
+export function isCapabilityIdentifier(name: unknown): boolean {
+  return typeof name === 'string'
+    && name.length > 0
+    && name.split('.').every(segment => /^[a-z][a-z0-9_]*$/.test(segment));
 }
 
 /**

@@ -404,7 +404,7 @@ fn load_keyring(key: Option<&Path>, keyring: Option<&Path>) -> Result<Keyring, i
                 "error:".red(),
                 path.display()
             );
-            if path.exists() { 1 } else { 2 }
+            crate::cmd_verify::keyring_exit_code(&e)
         }),
         (Some(path), None) => {
             let text = std::fs::read_to_string(path).map_err(|e| {

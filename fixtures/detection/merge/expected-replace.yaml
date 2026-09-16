@@ -1,0 +1,8 @@
+hushspec: "0.1.0"
+merge_strategy: replace
+extensions:
+  detection:
+    jailbreak:
+      enabled: true
+      warn_threshold: 10
+      block_threshold: 20

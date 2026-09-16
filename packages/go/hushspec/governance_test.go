@@ -109,7 +109,7 @@ func TestGovernanceChangelogStructure(t *testing.T) {
 	if incomplete.valid {
 		t.Fatal("a changelog entry without date/summary must be rejected")
 	}
-	if !strings.Contains(incomplete.messages, "metadata.changelog[0].date is required") {
+	if !strings.Contains(incomplete.messages, "metadata.changelog[0]: missing field `date`") {
 		t.Fatalf("expected the missing-date message, got %s", incomplete.messages)
 	}
 }

@@ -1,0 +1,415 @@
+{
+  "report_version": "0.1",
+  "generated_at": "2026-09-16T00:00:00.000Z",
+  "sources": [
+    "fixtures/report/24h.jsonl"
+  ],
+  "chain_verified": true,
+  "chain": {
+    "verified": true,
+    "files": 1,
+    "entries": 20,
+    "receipts": 18,
+    "policy_events": 2,
+    "signed_entries": 0,
+    "last_seq": 20,
+    "last_entry_hash": "sha256:721a4fe7fcf638c34785c7b3857f3067ba46956fa02725306f129b6bd0329f96"
+  },
+  "window": {
+    "first_receipt": "2026-09-15T01:05:00.000Z",
+    "last_receipt": "2026-09-15T20:30:00.000Z"
+  },
+  "totals": {
+    "receipts": 18,
+    "policy_events": 2,
+    "skipped_lines": 0,
+    "by_decision": {
+      "allow": 6,
+      "warn": 2,
+      "deny": 10
+    },
+    "by_mode": {
+      "enforce": 16,
+      "monitor": 2
+    },
+    "by_outcome": {
+      "allowed": 6,
+      "confirmed": 1,
+      "blocked": 9,
+      "would_block": 2
+    }
+  },
+  "rule_blocks": [
+    {
+      "rule_block": "egress",
+      "receipts": 5,
+      "evaluated": 5,
+      "skipped": 0,
+      "fired": 3,
+      "warn": 0,
+      "deny": 3,
+      "top_rule_paths": [
+        {
+          "rule_path": "rules.egress.allow",
+          "count": 2
+        },
+        {
+          "rule_path": "rules.egress.block",
+          "count": 2
+        },
+        {
+          "rule_path": "rules.egress.default",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule_block": "forbidden_paths",
+      "receipts": 6,
+      "evaluated": 6,
+      "skipped": 0,
+      "fired": 4,
+      "warn": 0,
+      "deny": 4,
+      "top_rule_paths": [
+        {
+          "rule_path": "rules.forbidden_paths.patterns",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "rule_block": "path_allowlist",
+      "receipts": 6,
+      "evaluated": 0,
+      "skipped": 6,
+      "fired": 0,
+      "warn": 0,
+      "deny": 0,
+      "top_rule_paths": []
+    },
+    {
+      "rule_block": "secret_patterns",
+      "receipts": 13,
+      "evaluated": 2,
+      "skipped": 11,
+      "fired": 1,
+      "warn": 0,
+      "deny": 1,
+      "top_rule_paths": [
+        {
+          "rule_path": "rules.secret_patterns.patterns.ssn",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule_block": "shell_commands",
+      "receipts": 1,
+      "evaluated": 1,
+      "skipped": 0,
+      "fired": 1,
+      "warn": 0,
+      "deny": 1,
+      "top_rule_paths": [
+        {
+          "rule_path": "rules.shell_commands.forbidden_patterns[10]",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "rule_block": "tool_access",
+      "receipts": 6,
+      "evaluated": 6,
+      "skipped": 0,
+      "fired": 3,
+      "warn": 2,
+      "deny": 1,
+      "top_rule_paths": [
+        {
+          "rule_path": "rules.tool_access.allow",
+          "count": 2
+        },
+        {
+          "rule_path": "rules.tool_access.require_confirmation",
+          "count": 2
+        },
+        {
+          "rule_path": "rules.tool_access.block",
+          "count": 1
+        },
+        {
+          "rule_path": "rules.tool_access.default",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "action_types": [
+    {
+      "action_type": "egress",
+      "receipts": 5,
+      "by_decision": {
+        "allow": 2,
+        "warn": 0,
+        "deny": 3
+      },
+      "by_outcome": {
+        "allowed": 2,
+        "confirmed": 0,
+        "blocked": 2,
+        "would_block": 1
+      }
+    },
+    {
+      "action_type": "file_read",
+      "receipts": 4,
+      "by_decision": {
+        "allow": 1,
+        "warn": 0,
+        "deny": 3
+      },
+      "by_outcome": {
+        "allowed": 1,
+        "confirmed": 0,
+        "blocked": 2,
+        "would_block": 1
+      }
+    },
+    {
+      "action_type": "file_write",
+      "receipts": 2,
+      "by_decision": {
+        "allow": 0,
+        "warn": 0,
+        "deny": 2
+      },
+      "by_outcome": {
+        "allowed": 0,
+        "confirmed": 0,
+        "blocked": 2,
+        "would_block": 0
+      }
+    },
+    {
+      "action_type": "shell_command",
+      "receipts": 1,
+      "by_decision": {
+        "allow": 0,
+        "warn": 0,
+        "deny": 1
+      },
+      "by_outcome": {
+        "allowed": 0,
+        "confirmed": 0,
+        "blocked": 1,
+        "would_block": 0
+      }
+    },
+    {
+      "action_type": "tool_call",
+      "receipts": 6,
+      "by_decision": {
+        "allow": 3,
+        "warn": 2,
+        "deny": 1
+      },
+      "by_outcome": {
+        "allowed": 3,
+        "confirmed": 1,
+        "blocked": 2,
+        "would_block": 0
+      }
+    }
+  ],
+  "policies": [
+    {
+      "content_hash": "sha256:878b68aa0b4052de297925b1abf09bea95b58275ae8321922997c2de96b96f7d",
+      "name": "default",
+      "spec_version": "0.1.0",
+      "receipts": 2,
+      "first_seen": "2026-09-15T19:00:00.000Z",
+      "last_seen": "2026-09-15T20:30:00.000Z",
+      "by_decision": {
+        "allow": 1,
+        "warn": 0,
+        "deny": 1
+      }
+    },
+    {
+      "content_hash": "sha256:dca0cdc560c16199f56921b360cd736750d8bd33899bd6cc05106930909d55b6",
+      "name": "hipaa-base",
+      "spec_version": "0.1.0",
+      "receipts": 16,
+      "first_seen": "2026-09-15T01:05:00.000Z",
+      "last_seen": "2026-09-15T16:10:00.000Z",
+      "by_decision": {
+        "allow": 5,
+        "warn": 2,
+        "deny": 9
+      }
+    }
+  ],
+  "policy_timeline": [
+    {
+      "event": "loaded",
+      "timestamp": "2026-09-15T00:00:00.000Z",
+      "content_hash": "sha256:dca0cdc560c16199f56921b360cd736750d8bd33899bd6cc05106930909d55b6",
+      "name": "hipaa-base",
+      "enforcement_mode": "enforce",
+      "sdk": "hushspec-conformance/0.2"
+    },
+    {
+      "event": "swapped",
+      "timestamp": "2026-09-15T18:00:00.000Z",
+      "content_hash": "sha256:878b68aa0b4052de297925b1abf09bea95b58275ae8321922997c2de96b96f7d",
+      "name": "default",
+      "previous_content_hash": "sha256:dca0cdc560c16199f56921b360cd736750d8bd33899bd6cc05106930909d55b6",
+      "enforcement_mode": "enforce",
+      "sdk": "hushspec-conformance/0.2"
+    }
+  ],
+  "actors": [
+    {
+      "agent_id": "clinical-assistant",
+      "session_id": "session-alpha",
+      "principal": "nurse@hospital.example",
+      "receipts": 9,
+      "by_decision": {
+        "allow": 4,
+        "warn": 1,
+        "deny": 4
+      },
+      "by_outcome": {
+        "allowed": 4,
+        "confirmed": 1,
+        "blocked": 3,
+        "would_block": 1
+      }
+    },
+    {
+      "agent_id": "ops-assistant",
+      "session_id": "session-beta",
+      "principal": "sre@hospital.example",
+      "receipts": 9,
+      "by_decision": {
+        "allow": 2,
+        "warn": 1,
+        "deny": 6
+      },
+      "by_outcome": {
+        "allowed": 2,
+        "confirmed": 0,
+        "blocked": 6,
+        "would_block": 1
+      }
+    }
+  ],
+  "signatures": {
+    "verified": 0,
+    "unverified": 0,
+    "absent": 18,
+    "reasons": []
+  },
+  "detections": [],
+  "controls": {
+    "policy_source": "library/healthcare/hipaa-base.yaml",
+    "policy_content_hash": "sha256:dca0cdc560c16199f56921b360cd736750d8bd33899bd6cc05106930909d55b6",
+    "receipts_matching_policy": 16,
+    "frameworks": [
+      {
+        "framework": "hipaa-2013",
+        "registered": true,
+        "controls": [
+          {
+            "control_id": "164.312(a)(1)",
+            "rule_paths": [
+              "rules.forbidden_paths",
+              "rules.tool_access"
+            ],
+            "rule_blocks": [
+              "forbidden_paths",
+              "tool_access"
+            ],
+            "receipts": 10,
+            "evaluated": 10,
+            "fired": 6,
+            "denied": 4,
+            "last_seen": "2026-09-15T16:10:00.000Z"
+          },
+          {
+            "control_id": "164.312(b)",
+            "rule_paths": [
+              "rules.forbidden_paths.patterns"
+            ],
+            "rule_blocks": [
+              "forbidden_paths"
+            ],
+            "receipts": 3,
+            "evaluated": 3,
+            "fired": 3,
+            "denied": 3,
+            "last_seen": "2026-09-15T15:45:00.000Z"
+          },
+          {
+            "control_id": "164.312(c)(1)",
+            "rule_paths": [
+              "rules.patch_integrity"
+            ],
+            "rule_blocks": [],
+            "receipts": 0,
+            "evaluated": 0,
+            "fired": 0,
+            "denied": 0
+          },
+          {
+            "control_id": "164.312(e)(1)",
+            "rule_paths": [
+              "rules.egress"
+            ],
+            "rule_blocks": [
+              "egress"
+            ],
+            "receipts": 5,
+            "evaluated": 5,
+            "fired": 3,
+            "denied": 3,
+            "last_seen": "2026-09-15T14:00:00.000Z"
+          },
+          {
+            "control_id": "164.502",
+            "rule_paths": [
+              "rules.egress.block",
+              "rules.shell_commands"
+            ],
+            "rule_blocks": [
+              "egress",
+              "shell_commands"
+            ],
+            "receipts": 3,
+            "evaluated": 3,
+            "fired": 3,
+            "denied": 3,
+            "last_seen": "2026-09-15T14:00:00.000Z"
+          },
+          {
+            "control_id": "164.514(b)(2)",
+            "rule_paths": [
+              "rules.secret_patterns"
+            ],
+            "rule_blocks": [
+              "secret_patterns"
+            ],
+            "receipts": 12,
+            "evaluated": 2,
+            "fired": 1,
+            "denied": 1,
+            "last_seen": "2026-09-15T16:10:00.000Z"
+          }
+        ]
+      }
+    ],
+    "unmapped_fired_rule_blocks": []
+  }
+}

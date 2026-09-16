@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D10 (core 3.5 item 4): with require_balance, a patch where exactly one count is zero is denied regardless of the ratio limit"
+description: "With require_balance, a patch where exactly one count is zero is denied regardless of the ratio limit (core spec 3.5 item 4)"
 policy:
   hushspec: "0.1.0"
   rules:

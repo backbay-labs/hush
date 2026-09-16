@@ -48,6 +48,43 @@ pub struct Condition {
     /// The sub-condition must be false (NOT).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not: Option<Box<Condition>>,
+
+    /// The effective posture state must grant this capability (core spec
+    /// 3.13). Unevaluable -- and therefore held -- when the policy has no
+    /// posture extension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability: Option<String>,
+
+    /// A runtime counter compared against a threshold (core spec 3.13).
+    /// Unevaluable -- and therefore held -- when the context carries no such
+    /// counter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<RateCondition>,
+}
+
+/// Rate condition: compares an engine-supplied counter with a threshold.
+///
+/// HushSpec never stores state; the engine owns the window and supplies the
+/// current count in `RuntimeContext::counters`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateCondition {
+    /// Name of the counter in `RuntimeContext::counters`.
+    pub counter: String,
+    /// Non-negative threshold the counter is compared against.
+    pub threshold: u64,
+    /// `gte`: true when `counter >= threshold`; `lt`: true when `counter < threshold`.
+    pub comparison: RateComparison,
+}
+
+/// How a [`RateCondition`] compares the counter with its threshold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RateComparison {
+    /// The counter is at or above the threshold.
+    Gte,
+    /// The counter is below the threshold.
+    Lt,
 }
 
 /// Time window condition: activates a rule block during specific time periods.
@@ -103,6 +140,11 @@ pub struct RuntimeContext {
     #[serde(default)]
     pub custom: HashMap<String, serde_json::Value>,
 
+    /// Engine-maintained counters consulted by `rate` conditions (core spec
+    /// 3.13). The engine owns the window; HushSpec only compares.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub counters: HashMap<String, u64>,
+
     /// Current time override for testing (ISO 8601).
     /// If `None`, the system clock is used.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,8 +152,25 @@ pub struct RuntimeContext {
 }
 
 /// Missing context fields cause the condition to evaluate to false (fail-closed).
+///
+/// A `capability` predicate is unevaluable through this entry point (no
+/// posture state is known) and therefore holds; use
+/// [`evaluate_condition_with_capabilities`] from an evaluator that has
+/// resolved the effective posture state.
 pub fn evaluate_condition(condition: &Condition, context: &RuntimeContext) -> bool {
-    evaluate_condition_depth(condition, context, 0)
+    evaluate_condition_depth(condition, context, None, 0)
+}
+
+/// [`evaluate_condition`] with the capabilities the effective posture state
+/// grants: `None` when the policy has no posture extension (a `capability`
+/// predicate is then unevaluable and holds), `Some(list)` otherwise (an
+/// unknown state grants nothing, so the predicate is false).
+pub fn evaluate_condition_with_capabilities(
+    condition: &Condition,
+    context: &RuntimeContext,
+    capabilities: Option<&[String]>,
+) -> bool {
+    evaluate_condition_depth(condition, context, capabilities, 0)
 }
 
 /// Parse-time validation of a condition (core spec 3.13): unknown keys are
@@ -162,6 +221,21 @@ fn validate_condition_depth(
             }
         }
     }
+    if let Some(name) = &condition.capability
+        && !is_capability_identifier(name)
+    {
+        errors.push(format!(
+            "{path}.capability: {name:?} is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)"
+        ));
+    }
+    if let Some(rate) = &condition.rate
+        && !is_capability_identifier(&rate.counter)
+    {
+        errors.push(format!(
+            "{path}.rate.counter: {:?} is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+            rate.counter
+        ));
+    }
     if let Some(all) = &condition.all_of {
         for (index, child) in all.iter().enumerate() {
             validate_condition_depth(child, &format!("{path}.all_of[{index}]"), depth + 1, errors);
@@ -177,6 +251,18 @@ fn validate_condition_depth(
     }
 }
 
+/// The identifier grammar shared by posture capabilities and rate counters
+/// (core spec 3.13): one or more dot-separated segments, each a lowercase
+/// ASCII letter followed by lowercase letters, digits or underscores.
+pub fn is_capability_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|segment| {
+            let mut chars = segment.chars();
+            matches!(chars.next(), Some('a'..='z'))
+                && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_'))
+        })
+}
+
 /// Whether `tz` is an IANA identifier known to this engine, a known alias, or
 /// a fixed `+HH:MM` / `-HH:MM` offset.
 pub fn timezone_is_known(tz: &str) -> bool {
@@ -184,7 +270,12 @@ pub fn timezone_is_known(tz: &str) -> bool {
     chrono_tz::Tz::from_str(tz).is_ok() || parse_timezone_offset(tz).is_some()
 }
 
-fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, depth: usize) -> bool {
+fn evaluate_condition_depth(
+    condition: &Condition,
+    context: &RuntimeContext,
+    capabilities: Option<&[String]>,
+    depth: usize,
+) -> bool {
     if depth > MAX_NESTING_DEPTH {
         // Validation rejects this at parse time; an out-of-band condition that
         // exceeds the depth cannot be evaluated, and an unevaluable condition
@@ -204,10 +295,30 @@ fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, dep
         return false;
     }
 
+    // `capability`: unevaluable without a posture extension (held); otherwise
+    // the effective state must list the capability.
+    if let Some(name) = &condition.capability
+        && let Some(granted) = capabilities
+        && !granted.iter().any(|granted| granted == name)
+    {
+        return false;
+    }
+
+    // `rate`: unevaluable when the engine supplied no such counter (held).
+    if let Some(rate) = &condition.rate
+        && let Some(&count) = context.counters.get(&rate.counter)
+        && !match rate.comparison {
+            RateComparison::Gte => count >= rate.threshold,
+            RateComparison::Lt => count < rate.threshold,
+        }
+    {
+        return false;
+    }
+
     if let Some(all) = &condition.all_of
         && !all
             .iter()
-            .all(|c| evaluate_condition_depth(c, context, depth + 1))
+            .all(|c| evaluate_condition_depth(c, context, capabilities, depth + 1))
     {
         return false;
     }
@@ -216,13 +327,13 @@ fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, dep
         && !any.is_empty()
         && !any
             .iter()
-            .any(|c| evaluate_condition_depth(c, context, depth + 1))
+            .any(|c| evaluate_condition_depth(c, context, capabilities, depth + 1))
     {
         return false;
     }
 
     if let Some(not_cond) = &condition.not
-        && evaluate_condition_depth(not_cond, context, depth + 1)
+        && evaluate_condition_depth(not_cond, context, capabilities, depth + 1)
     {
         return false;
     }
@@ -535,6 +646,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
     }
@@ -550,6 +663,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond, &ctx_with_env("staging")));
     }
@@ -565,6 +680,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         // Empty context -- missing field should fail.
         assert!(!evaluate_condition(&cond, &RuntimeContext::default()));
@@ -581,6 +698,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_user_role("admin")));
         assert!(!evaluate_condition(&cond, &ctx_with_user_role("viewer")));
@@ -597,6 +716,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
         assert!(evaluate_condition(&cond, &ctx_with_env("staging")));
@@ -625,6 +746,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -640,6 +763,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         let ctx = RuntimeContext {
             session: HashMap::from([("action_count".to_string(), serde_json::json!(2))]),
@@ -659,6 +784,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         let ctx = RuntimeContext {
             request: HashMap::from([("interactive".to_string(), serde_json::json!(true))]),
@@ -682,6 +809,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -701,6 +830,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond, &ctx));
     }
@@ -727,6 +858,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond_weekday, &ctx));
 
@@ -741,6 +874,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond_weekend, &ctx));
     }
@@ -765,6 +900,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_late));
         assert!(evaluate_condition(&cond, &ctx_early));
@@ -785,6 +922,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -872,6 +1011,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
         assert!(!validate_condition(&cond, "rules.x.when").is_empty());
@@ -965,6 +1106,8 @@ mod tests {
             ]),
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         let mut ctx = ctx_with_env("production");
@@ -1001,6 +1144,8 @@ mod tests {
                 },
             ]),
             not: None,
+            capability: None,
+            rate: None,
         };
 
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
@@ -1032,6 +1177,8 @@ mod tests {
                 )])),
                 ..Default::default()
             })),
+            capability: None,
+            rate: None,
         };
 
         assert!(!evaluate_condition(&cond, &ctx_with_env("production")));
@@ -1083,6 +1230,8 @@ mod tests {
             ]),
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         // 10:00 UTC Wed, production, admin
@@ -1144,6 +1293,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         let yaml = serde_yaml::to_string(&cond).unwrap();
@@ -1159,6 +1310,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &RuntimeContext::default()));
     }

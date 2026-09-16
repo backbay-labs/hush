@@ -17,6 +17,7 @@ from hushspec.generated_models import (
     PostureState,
     PostureTransition,
     PromptInjectionDetection,
+    PromptInjectionHeuristics,
     ThreatIntelDetection,
     TransitionTrigger,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "DetectionExtension",
     "DetectionLevel",
     "PromptInjectionDetection",
+    "PromptInjectionHeuristics",
     "JailbreakDetection",
     "ThreatIntelDetection",
 ]

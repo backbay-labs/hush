@@ -2,10 +2,10 @@ package hushspec
 
 import (
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -47,6 +47,72 @@ var (
 	}
 )
 
+// expectedErrorSidecarSuffix names the file beside an `invalid/` vector that
+// says which registered error code its rejection must carry. A file with this
+// suffix is metadata, never a vector.
+const expectedErrorSidecarSuffix = ".expect.yaml"
+
+// expectedError is a `<name>.expect.yaml` sidecar
+// (schemas/hushspec-error-codes.v0.schema.json#/$defs/ExpectedError).
+type expectedError struct {
+	// Reject is always true: a sidecar describes a refusal and nothing else.
+	Reject bool `yaml:"reject"`
+	// Code is the registered code of spec/registries/error-codes.yaml.
+	Code string `yaml:"code"`
+	// MessageContains is an optional literal substring the diagnostic must
+	// contain, for the broad codes where the code alone does not identify the
+	// requirement.
+	MessageContains string `yaml:"message_contains"`
+}
+
+// loadExpectedError reads the sidecar beside an `invalid/` vector. A missing
+// sidecar returns nil; a present but unusable one fails the test, because a
+// sidecar that cannot be read is a check that silently stops running.
+func loadExpectedError(t *testing.T, vectorPath string) *expectedError {
+	t.Helper()
+	stem := strings.TrimSuffix(strings.TrimSuffix(vectorPath, ".yaml"), ".yml")
+	data, err := os.ReadFile(stem + expectedErrorSidecarSuffix)
+	if err != nil {
+		return nil
+	}
+	var expected expectedError
+	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&expected); err != nil {
+		t.Fatalf("%s%s: not an expected-error sidecar: %v", stem, expectedErrorSidecarSuffix, err)
+	}
+	if !expected.Reject {
+		t.Fatalf("%s%s: `reject` must be true; a sidecar exists only to describe a refusal",
+			stem, expectedErrorSidecarSuffix)
+	}
+	if !slices.Contains(ErrorCodes, expected.Code) {
+		t.Fatalf("%s%s: %q is not a registered error code",
+			stem, expectedErrorSidecarSuffix, expected.Code)
+	}
+	return &expected
+}
+
+// rejectFixture parses and validates a vector, returning the registered code
+// and the message of the first refusal. Parse and Validate are one gate: a
+// document either survives both or it is rejected.
+func rejectFixture(t *testing.T, fixturePath string) (code, message string, rejected bool) {
+	t.Helper()
+	spec, err := Parse(readFixtureOrFail(t, fixturePath))
+	if err != nil {
+		found, ok := ErrorCodeOf(err)
+		if !ok {
+			t.Fatalf("%s: a refusal must carry a registered code, got %T: %v",
+				fixturePath, err, err)
+		}
+		return found, err.Error(), true
+	}
+	if result := Validate(spec); !result.IsValid() {
+		first := result.Errors[0]
+		return first.Code, first.Message, true
+	}
+	return "", "", false
+}
+
 type evaluationFixture struct {
 	HushSpecTest string                  `yaml:"hushspec_test"`
 	Description  string                  `yaml:"description"`
@@ -79,12 +145,30 @@ func TestSharedFixtures(t *testing.T) {
 
 	for _, dir := range invalidFixtureDirs {
 		for _, fixturePath := range fixtureFiles(t, repoRoot, dir) {
+			if strings.HasSuffix(fixturePath, expectedErrorSidecarSuffix) {
+				continue
+			}
 			t.Run("invalid/"+filepath.ToSlash(strings.TrimPrefix(fixturePath, repoRoot+string(os.PathSeparator))), func(t *testing.T) {
-				spec, err := Parse(readFixtureOrFail(t, fixturePath))
-				if err == nil {
-					if result := Validate(spec); result.IsValid() {
-						t.Fatalf("%s: expected rejection", fixturePath)
-					}
+				code, message, rejected := rejectFixture(t, fixturePath)
+				if !rejected {
+					t.Fatalf("%s: expected rejection", fixturePath)
+				}
+				// Every invalid vector carries a sidecar naming the registered
+				// code its rejection must have (core spec 8, Level 1), so
+				// "the document was rejected" is checked as "rejected for this
+				// reason".
+				expected := loadExpectedError(t, fixturePath)
+				if expected == nil {
+					t.Fatalf("%s: every invalid vector needs an %s sidecar",
+						fixturePath, expectedErrorSidecarSuffix)
+				}
+				if code != expected.Code {
+					t.Errorf("expected %s but the document was rejected with %s: %s",
+						expected.Code, code, message)
+				}
+				if expected.MessageContains != "" && !strings.Contains(message, expected.MessageContains) {
+					t.Errorf("%s was reported, but the message does not contain %q: %s",
+						code, expected.MessageContains, message)
 				}
 			})
 		}
@@ -141,8 +225,9 @@ func TestSharedFixtures(t *testing.T) {
 				if err := yaml.Unmarshal([]byte(source), &fixture); err != nil {
 					t.Fatalf("%s: failed to parse evaluator fixture: %v", fixturePath, err)
 				}
-				if !evaluatorTestVersionRE.MatchString(fixture.HushSpecTest) {
-					t.Fatalf("%s: expected an 0.Y.Z hushspec_test version, got %q", fixturePath, fixture.HushSpecTest)
+				if !slices.Contains(supportedTestVersions, fixture.HushSpecTest) {
+					t.Fatalf("%s: unsupported hushspec_test version %q (supported: %s)",
+						fixturePath, fixture.HushSpecTest, strings.Join(supportedTestVersions, ", "))
 				}
 				if strings.TrimSpace(fixture.Description) == "" {
 					t.Fatalf("%s: evaluator fixture description must be non-empty", fixturePath)
@@ -158,7 +243,7 @@ func TestSharedFixtures(t *testing.T) {
 						t.Fatalf("%s: cases[%d].expect.decision must be allow, warn, or deny", fixturePath, index)
 					}
 					// The evaluator-test schema accepts any non-empty action
-					// type so unknown-type vectors can assert the D1 deny.
+					// type so unknown-type vectors can assert their deny.
 					actionType, ok := testCase.Action["type"].(string)
 					if !ok || actionType == "" {
 						t.Fatalf("%s: cases[%d].action.type must be a non-empty string", fixturePath, index)
@@ -277,10 +362,10 @@ func mergeFixtureLoader(basePath string) ResolveLoader {
 }
 
 // mergeFixtureExpectsReject reports whether a merge vector is supposed to fail.
-// Two conventions are honoured, because the shared fixtures are written by the
-// Rust reference implementation and either may appear: an "expect-reject"
-// marker file (beside the child, named for it or for the whole directory), or
-// `reject: true` in a fixture.yaml manifest (per child or per directory).
+// The shared fixtures spell it two ways and either may appear: an
+// "expect-reject" marker file (beside the child, named for it or for the whole
+// directory), or `reject: true` in a fixture.yaml manifest (per child or per
+// directory).
 func mergeFixtureExpectsReject(t *testing.T, childPath string) bool {
 	t.Helper()
 	dir := filepath.Dir(childPath)
@@ -354,17 +439,29 @@ func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, b
 	return false, false
 }
 
-// evaluatorTestVersionRE matches the `hushspec_test` fixture-format version
-// (schemas/hushspec-evaluator-test.v0.schema.json).
-var evaluatorTestVersionRE = regexp.MustCompile(`^0\.\d+\.\d+$`)
+// supportedTestVersions are the `hushspec_test` fixture-format versions this
+// runner accepts (schemas/hushspec-evaluator-test.v0.schema.json). 0.2.0 adds
+// per-case controls and tags and the rule_trace / receipt assertions.
+var supportedTestVersions = []string{"0.1.0", "0.2.0"}
+
+// repoRoot is the checkout this package lives in, resolved from this source
+// file's own path so it does not depend on the working directory. It takes no
+// testing handle, so a benchmark can use it too.
+func repoRoot() (string, error) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", errors.New("failed to resolve the test file path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../..")), nil
+}
 
 func fixtureRepoRoot(t *testing.T) string {
 	t.Helper()
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to resolve test file path")
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "../../.."))
+	return root
 }
 
 func fixtureFiles(t *testing.T, repoRoot, subdir string) []string {

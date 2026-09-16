@@ -42,7 +42,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hushspec.builtins import load_builtin
-from hushspec.canonical import CanonicalError, content_hash
+from hushspec.canonical import CanonicalError, content_hash, is_content_hash
+from hushspec.error_codes import ERROR_EXTENDS, ERROR_IO, ErrorMessage, code_of
 from hushspec.merge import merge
 from hushspec.parse import parse
 from hushspec.schema import HushSpec
@@ -102,7 +103,6 @@ DIGEST_PIN_MARKER = "#sha256:"
 # Greedy on the reference so the *last* `#sha256:` wins: a path may legally
 # contain a `#`, but a pin is always the trailing fragment.
 _PIN_RE = re.compile(r"^(?P<ref>.+)#(?P<digest>sha256:[^#]*)$")
-_CONTENT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 #: A digest pin was present and the hop hashed to something else. Always fatal.
 REASON_DIGEST_MISMATCH = "digest_mismatch"
@@ -270,7 +270,14 @@ class ResolveRejected(ValueError):
     ``expect.rejects`` in ``fixtures/core/resolve/*.yaml``. It subclasses
     :class:`ValueError` so the tuple-returning entry points and every existing
     caller keep catching it.
+
+    ``error_code`` is the coarser error-code-registry identifier
+    (``spec/registries/error-codes.yaml``): every resolution refusal is E010,
+    whichever of the specific codes above named it.
     """
+
+    #: The error-code-registry identifier for a resolution refusal.
+    error_code: str = ERROR_EXTENDS
 
     def __init__(self, message: str, *, code: str) -> None:
         super().__init__(message)
@@ -339,12 +346,18 @@ def resolve_or_raise(
 def resolve_file(path: str | Path) -> tuple[bool, HushSpec | str]:
     source = str(Path(path).resolve())
     try:
-        content = Path(source).read_text()
+        content = Path(source).read_text(encoding="utf-8")
     except OSError as exc:
-        return False, f"failed to read HushSpec at {source}: {exc}"
+        # A transport-level failure, not a statement about the document:
+        # nothing was parsed (error-code registry, E000).
+        return False, ErrorMessage(
+            f"failed to read HushSpec at {source}: {exc}", ERROR_IO
+        )
     ok, parsed = parse(content)
     if not ok:
-        return False, f"failed to parse HushSpec at {source}: {parsed}"
+        return False, ErrorMessage(
+            f"failed to parse HushSpec at {source}: {parsed}", code_of(parsed)
+        )
     return resolve(parsed, source=source, loader=_create_composite_loader())
 
 
@@ -365,8 +378,14 @@ def resolve_with_options(
     Use :func:`resolve_with_options_or_raise` when the failure itself matters --
     it raises :class:`PolicyVerificationError`, which names the hop and carries
     the :class:`SignatureStatus` a receipt records.
+
+    Omitting ``options`` still hashes: the defaults ask for no verification,
+    not for a :class:`Resolution` with no content hash. Use :func:`resolve`
+    for the merge-only path.
     """
-    return _resolve_tuple(spec, source=source, loader=loader, options=options)
+    return _resolve_tuple(
+        spec, source=source, loader=loader, options=options or ResolveOptions()
+    )
 
 
 def resolve_with_options_or_raise(
@@ -416,7 +435,7 @@ def _resolve_tuple(
         except SigningUnavailable:
             raise
         except ValueError as exc:
-            return False, str(exc)
+            return False, _resolve_error(exc)
 
     # Merge-only: no hashing, no verification, no chain -- the historical
     # `resolve()` behaviour, kept off the hot path that difftest and the
@@ -427,8 +446,18 @@ def _resolve_tuple(
             spec, source, loader or _create_composite_loader(), stack, prepared=None
         )
     except ValueError as exc:
-        return False, str(exc)
+        return False, _resolve_error(exc)
     return True, Resolution(spec=resolved, content_hash="", chain=chain)
+
+
+def _resolve_error(exc: ValueError) -> ErrorMessage:
+    """A resolution failure as a message that keeps its registry code.
+
+    Every refusal from the walk is an ``extends`` failure (E010). Returning a
+    bare string would leave a caller reading the default parse code off a
+    message that never came from the parser.
+    """
+    return ErrorMessage(str(exc), getattr(exc, "error_code", ERROR_EXTENDS))
 
 
 # --------------------------------------------------------------------------- #
@@ -570,7 +599,7 @@ def _content_hash_or_fail(spec: HushSpec, source: str | None) -> str:
 
 
 def _label(source: str | None) -> str:
-    return source if source is not None else INLINE_SOURCE
+    return source if source is not None else MEMORY_SOURCE
 
 
 def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | None]:
@@ -583,7 +612,7 @@ def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | No
     if DIGEST_PIN_MARKER not in reference:
         return reference, None
     match = _PIN_RE.match(reference)
-    if match is None or not _CONTENT_HASH_RE.match(match.group("digest")):
+    if match is None or not is_content_hash(match.group("digest")):
         raise PolicyVerificationError(
             f"malformed digest pin in 'extends: {reference}' at {_label(source)}: "
             "expected '<reference>#sha256:<64 lowercase hex>'",
@@ -616,8 +645,7 @@ def _verify_hop(
       it is not pinned: ``required = require_signature and not pinned``. A
       matching digest pin is a proof about the exact bytes of the document, so
       it satisfies the hop on its own; the envelope, when there is one, is still
-      verified opportunistically and its outcome recorded. (Same rule as the
-      Rust reference's ``verify_hop``.)
+      verified opportunistically and its outcome recorded.
     """
     label = _label(source)
     if source is not None and source.startswith("builtin:"):
@@ -708,7 +736,7 @@ def default_signature_locator(source: str) -> bytes | None:
     that fetched the policy, and it belongs in a caller-supplied
     :data:`SignatureLocator`.
     """
-    if source.startswith(("builtin:", "http://", "https://")) or source == INLINE_SOURCE:
+    if source.startswith(("builtin:", "http://", "https://")) or source == MEMORY_SOURCE:
         return None
 
     candidates = [Path(f"{source}.sig")]
@@ -759,21 +787,19 @@ def create_builtin_loader() -> Resolver:
 
 
 def create_composite_loader() -> Resolver:
-    """Public alias for the builtin + filesystem loader (mirrors the TS SDK)."""
+    """Public alias for the builtin + filesystem loader."""
     return _create_composite_loader()
 
 
 def _create_composite_loader() -> Resolver:
     """Loader that serves `builtin:<name>` references from the embedded
-    rulesets and everything else from the filesystem (mirrors the Rust/TS
-    resolvers). A bare name with no path separators or dots is tried as a
-    builtin before falling back to the filesystem.
+    rulesets and everything else from the filesystem. A bare name with no path
+    separators or dots is tried as a builtin before falling back to the
+    filesystem.
 
-    `http://`/`https://` references are rejected outright, mirroring Rust's
-    (non-`http`-feature) `create_composite_loader` and TS's synchronous
-    `createCompositeLoader`: this loader has no HTTP client, so silently
-    handing a URL to the filesystem loader would fail with a confusing
-    "no such file or directory" error instead of a clear one.
+    `http://`/`https://` references are rejected outright: this loader has no
+    HTTP client, so silently handing a URL to the filesystem loader would fail
+    with a confusing "no such file or directory" error instead of a clear one.
     """
 
     def _loader(reference: str, source: str | None) -> LoadedSpec:
@@ -804,7 +830,7 @@ def _load_from_filesystem(reference: str, source: str | None) -> LoadedSpec:
     if not path.is_absolute():
         path = Path(source).parent / path if source is not None else path.resolve()
     canonical = path.resolve()
-    content = canonical.read_text()
+    content = canonical.read_text(encoding="utf-8")
     ok, parsed = parse(content)
     if not ok:
         raise ValueError(f"failed to parse HushSpec at {canonical}: {parsed}")

@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D12 (origins 4): a profile overlay that omits default inherits the base default; an overlay block list is unioned with the base"
+description: "A profile overlay that omits default inherits the base default; an overlay block list is unioned with the base (origins spec 4)"
 policy:
   hushspec: "0.1.0"
   rules:

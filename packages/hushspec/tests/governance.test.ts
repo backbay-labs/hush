@@ -3,9 +3,9 @@ import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
 
 /**
- * Governance metadata parity (core spec 2.5). Every warning and error asserted
- * here is produced verbatim by the Rust, Python and Go validators too -- the
- * wording is the contract, not an implementation detail.
+ * Governance metadata (core spec 2.5). Every warning and error asserted here
+ * is produced verbatim by every HushSpec validator -- the wording is part of
+ * the contract, not an implementation detail.
  */
 
 const RULES = 'rules:\n  egress:\n    allow: ["api.example.com"]\n    default: block\n';
@@ -105,7 +105,7 @@ describe('governance metadata', () => {
     expect(result.valid).toBe(false);
     expect(result.valid).toBe(false);
     expect(result.errors.map(e => e.message).join('\n')).toContain(
-      'metadata.changelog[0].date is required',
+      'metadata.changelog[0]: missing field `date`',
     );
   });
 

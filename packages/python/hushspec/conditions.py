@@ -24,22 +24,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
-from typing import Any, Optional
+from enum import Enum
+from functools import lru_cache
+from typing import TYPE_CHECKING, Any, Optional, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from hushspec.generated_contract import (
+    CONDITION_KEYS,
+    RATE_CONDITION_KEYS,
+    TIME_WINDOW_KEYS,
+)
 from hushspec.schema import HushSpec
+
+if TYPE_CHECKING:
+    from hushspec.evaluate import EvaluationResult
 
 #: Maximum allowed nesting depth for compound conditions (core spec 3.13).
 MAX_NESTING_DEPTH = 8
 
 #: Day abbreviations accepted in ``time_window.days``.
 DAY_ABBREVIATIONS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-
-#: Field names accepted inside a ``when`` object.
-CONDITION_KEYS = frozenset(("time_window", "context", "all_of", "any_of", "not"))
-
-#: Field names accepted inside a ``time_window`` object.
-TIME_WINDOW_KEYS = frozenset(("start", "end", "timezone", "days"))
 
 #: Field names accepted inside a per-case ``RuntimeContext``.
 RUNTIME_CONTEXT_KEYS = frozenset(
@@ -51,9 +55,102 @@ RUNTIME_CONTEXT_KEYS = frozenset(
         "session",
         "request",
         "custom",
+        "counters",
         "current_time",
     )
 )
+
+
+class RateComparison(str, Enum):
+    """How a :class:`RateCondition` compares its counter with its threshold."""
+
+    #: True when ``counter >= threshold``.
+    GTE = "gte"
+    #: True when ``counter < threshold``.
+    LT = "lt"
+
+
+@dataclass
+class RateCondition:
+    """An engine-supplied counter compared with a threshold (core spec 3.13).
+
+    HushSpec never stores state: the engine owns the counter and its window
+    and supplies the current value in :attr:`RuntimeContext.counters`; this is
+    a pure comparison of the value supplied for one evaluation.
+    """
+
+    counter: str
+    """Name of the counter in the runtime context's ``counters`` map."""
+
+    threshold: int
+    """Non-negative threshold the counter is compared against."""
+
+    comparison: RateComparison
+    """``gte``: ``counter >= threshold``; ``lt``: ``counter < threshold``."""
+
+    @classmethod
+    def from_dict(cls, data: Any) -> RateCondition:
+        """Decode a ``when.rate`` mapping.
+
+        Shape violations are *parse* errors (core spec 3.13, registry code
+        E001), so every one of them raises rather than being collected as a
+        constraint violation. The wording is part of the contract: a shared
+        fixture's ``message_contains`` must hold in every SDK.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("when.rate: invalid type, expected an object")
+        unknown = sorted(set(data) - RATE_CONDITION_KEYS)
+        if unknown:
+            raise ValueError(f"unknown field `{unknown[0]}` in when.rate")
+        for required in ("counter", "threshold", "comparison"):
+            if required not in data:
+                raise ValueError(f"when.rate: missing field `{required}`")
+
+        counter = data["counter"]
+        if not isinstance(counter, str):
+            raise ValueError(
+                "when.rate.counter: invalid type, expected a string"
+            )
+
+        threshold = data["threshold"]
+        # `bool` is an `int` subclass in Python but is never a threshold; a
+        # boolean and a negative integer are both refused at parse time.
+        if isinstance(threshold, bool) or not isinstance(threshold, int):
+            raise ValueError(
+                f"when.rate.threshold: invalid type: {threshold!r}, "
+                "expected a non-negative integer"
+            )
+        if threshold < 0:
+            raise ValueError(
+                f"when.rate.threshold: invalid type: integer `{threshold}`, "
+                "expected a non-negative integer"
+            )
+
+        comparison = data["comparison"]
+        if (
+            not isinstance(comparison, str)
+            or comparison not in _RATE_COMPARISONS
+        ):
+            raise ValueError(
+                f"when.rate.comparison: unknown variant `{comparison}`, "
+                "expected `gte` or `lt`"
+            )
+
+        return cls(
+            counter=counter,
+            threshold=threshold,
+            comparison=RateComparison(comparison),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "counter": self.counter,
+            "threshold": self.threshold,
+            "comparison": self.comparison.value,
+        }
+
+
+_RATE_COMPARISONS = frozenset(item.value for item in RateComparison)
 
 
 @dataclass
@@ -78,7 +175,7 @@ class TimeWindowCondition:
             raise ValueError("time_window must be an object")
         unknown = sorted(set(data) - TIME_WINDOW_KEYS)
         if unknown:
-            raise ValueError(f"unknown time_window field: {unknown[0]}")
+            raise ValueError(f"unknown field `{unknown[0]}` in when.time_window")
         start = data.get("start")
         end = data.get("end")
         if not isinstance(start, str) or not isinstance(end, str):
@@ -123,6 +220,20 @@ class Condition:
     not_: Optional[Condition] = None
     """The sub-condition must be false (NOT). Serialized as ``not``."""
 
+    capability: Optional[str] = None
+    """The effective posture state must grant this capability.
+
+    Unevaluable -- and therefore held -- when the policy has no posture
+    extension (core spec 3.13).
+    """
+
+    rate: Optional[RateCondition] = None
+    """A runtime counter compared against a threshold.
+
+    Unevaluable -- and therefore held -- when the context carries no such
+    counter.
+    """
+
     @classmethod
     def from_dict(cls, data: dict) -> Condition:
         """Decode a document ``when`` mapping, rejecting unknown keys.
@@ -135,7 +246,7 @@ class Condition:
             raise ValueError("when must be an object")
         unknown = sorted(set(data) - CONDITION_KEYS)
         if unknown:
-            raise ValueError(f"unknown condition field: {unknown[0]}")
+            raise ValueError(f"unknown field `{unknown[0]}` in when")
 
         time_window = (
             TimeWindowCondition.from_dict(data["time_window"])
@@ -155,6 +266,13 @@ class Condition:
                 raise ValueError(f"when.{key} must be an array")
             return [cls.from_dict(item) for item in value]
 
+        capability = data.get("capability")
+        if capability is not None and not isinstance(capability, str):
+            raise ValueError("when.capability: invalid type, expected a string")
+
+        rate_value = data.get("rate")
+        rate = RateCondition.from_dict(rate_value) if rate_value is not None else None
+
         not_value = data.get("not")
         return cls(
             time_window=time_window,
@@ -162,6 +280,8 @@ class Condition:
             all_of=_decode_list("all_of"),
             any_of=_decode_list("any_of"),
             not_=cls.from_dict(not_value) if not_value is not None else None,
+            capability=capability,
+            rate=rate,
         )
 
     def to_dict(self) -> dict:
@@ -176,6 +296,10 @@ class Condition:
             data["any_of"] = [item.to_dict() for item in self.any_of]
         if self.not_ is not None:
             data["not"] = self.not_.to_dict()
+        if self.capability is not None:
+            data["capability"] = self.capability
+        if self.rate is not None:
+            data["rate"] = self.rate.to_dict()
         return data
 
 
@@ -204,6 +328,13 @@ class RuntimeContext:
     custom: dict[str, Any] = field(default_factory=dict)
     """Engine-specific custom fields."""
 
+    counters: dict[str, int] = field(default_factory=dict)
+    """Engine-maintained counters consulted by ``rate`` conditions.
+
+    The engine owns the window (per session, per minute, per agent -- whatever
+    it measures); HushSpec only compares (core spec 3.13).
+    """
+
     current_time: Optional[str] = None
     """Current time override for testing (ISO 8601)."""
 
@@ -222,6 +353,7 @@ class RuntimeContext:
             session=dict(data.get("session") or {}),
             request=dict(data.get("request") or {}),
             custom=dict(data.get("custom") or {}),
+            counters=dict(data.get("counters") or {}),
             current_time=data.get("current_time"),
         )
 
@@ -291,6 +423,24 @@ def _validate_condition_depth(
                     "mon, tue, wed, thu, fri, sat, sun"
                 )
 
+    if condition.capability is not None and not is_capability_identifier(
+        condition.capability
+    ):
+        errors.append(
+            f"{path}.capability: {condition.capability!r} is not a capability "
+            "identifier (lowercase ASCII letters, digits and underscores in "
+            "dot-separated segments that start with a letter)"
+        )
+
+    if condition.rate is not None and not is_capability_identifier(
+        condition.rate.counter
+    ):
+        errors.append(
+            f"{path}.rate.counter: {condition.rate.counter!r} is not a counter "
+            "identifier (lowercase ASCII letters, digits and underscores in "
+            "dot-separated segments that start with a letter)"
+        )
+
     if condition.all_of is not None:
         for index, child in enumerate(condition.all_of):
             _validate_condition_depth(child, f"{path}.all_of[{index}]", depth + 1, errors)
@@ -299,6 +449,26 @@ def _validate_condition_depth(
             _validate_condition_depth(child, f"{path}.any_of[{index}]", depth + 1, errors)
     if condition.not_ is not None:
         _validate_condition_depth(condition.not_, f"{path}.not", depth + 1, errors)
+
+
+def is_capability_identifier(name: str) -> bool:
+    """The identifier grammar shared by capabilities and rate counters.
+
+    Core spec 3.13: one or more dot-separated segments, each a lowercase ASCII
+    letter followed by lowercase ASCII letters, digits, or underscores::
+
+        identifier = segment *("." segment)
+        segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    for segment in name.split("."):
+        if not segment or not ("a" <= segment[0] <= "z"):
+            return False
+        for char in segment[1:]:
+            if not ("a" <= char <= "z" or "0" <= char <= "9" or char == "_"):
+                return False
+    return True
 
 
 def timezone_is_known(tz: str) -> bool:
@@ -312,11 +482,36 @@ def timezone_is_known(tz: str) -> bool:
 
 
 def evaluate_condition(condition: Condition, context: RuntimeContext) -> bool:
-    return _evaluate_condition_depth(condition, context, 0)
+    """Evaluate *condition* with no posture state known.
+
+    A ``capability`` predicate is unevaluable through this entry point and
+    therefore holds; an evaluator that has resolved the effective posture
+    state calls :func:`evaluate_condition_with_capabilities` instead.
+    """
+    return _evaluate_condition_depth(condition, context, None, 0)
+
+
+def evaluate_condition_with_capabilities(
+    condition: Condition,
+    context: RuntimeContext,
+    capabilities: Optional[Sequence[str]],
+) -> bool:
+    """:func:`evaluate_condition` with the capabilities the effective posture
+    state grants.
+
+    *capabilities* is ``None`` when the policy has no posture extension -- a
+    ``capability`` predicate is then unevaluable and holds -- and a (possibly
+    empty) sequence otherwise, so an unknown state grants nothing and the
+    predicate is false.
+    """
+    return _evaluate_condition_depth(condition, context, capabilities, 0)
 
 
 def _evaluate_condition_depth(
-    condition: Condition, context: RuntimeContext, depth: int
+    condition: Condition,
+    context: RuntimeContext,
+    capabilities: Optional[Sequence[str]],
+    depth: int,
 ) -> bool:
     if depth > MAX_NESTING_DEPTH:
         # Validation rejects this at parse time; an out-of-band condition that
@@ -332,23 +527,43 @@ def _evaluate_condition_depth(
         if not _check_context_match(condition.context, context):
             return False
 
+    # `capability`: unevaluable without a posture extension (held); otherwise
+    # the effective state must list the capability.
+    if condition.capability is not None and capabilities is not None:
+        if condition.capability not in capabilities:
+            return False
+
+    # `rate`: unevaluable when the engine supplied no such counter (held).
+    if condition.rate is not None:
+        count = context.counters.get(condition.rate.counter)
+        if count is not None and not _compare_rate(condition.rate, count):
+            return False
+
     if condition.all_of is not None:
         if not all(
-            _evaluate_condition_depth(c, context, depth + 1) for c in condition.all_of
+            _evaluate_condition_depth(c, context, capabilities, depth + 1)
+            for c in condition.all_of
         ):
             return False
 
     if condition.any_of:
         if not any(
-            _evaluate_condition_depth(c, context, depth + 1) for c in condition.any_of
+            _evaluate_condition_depth(c, context, capabilities, depth + 1)
+            for c in condition.any_of
         ):
             return False
 
     if condition.not_ is not None:
-        if _evaluate_condition_depth(condition.not_, context, depth + 1):
+        if _evaluate_condition_depth(condition.not_, context, capabilities, depth + 1):
             return False
 
     return True
+
+
+def _compare_rate(rate: RateCondition, count: int) -> bool:
+    if rate.comparison is RateComparison.GTE:
+        return count >= rate.threshold
+    return count < rate.threshold
 
 
 def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> bool:
@@ -413,9 +628,8 @@ def _parse_strict_uint(s: str) -> Optional[int]:
     """Parse *s* as a base-10 non-negative integer of pure ASCII digits.
 
     Unlike ``int()``, this rejects underscores, surrounding whitespace, and
-    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``),
-    matching Rust's and Go's strict numeric-string parsing
-    (``str::parse::<u8>`` / ``strconv.Atoi``).
+    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``), so
+    a malformed numeric field is refused rather than silently coerced.
     """
     if s == "" or not all("0" <= ch <= "9" for ch in s):
         return None
@@ -481,7 +695,15 @@ _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {
 }
 
 
+@lru_cache(maxsize=256)
 def _resolve_timezone(tz: str) -> Optional[tzinfo]:
+    """The ``tzinfo`` for an IANA name or a fixed ``+HH:MM`` offset.
+
+    Cached: this runs once per conditional rule block per action, and the
+    names zoneinfo cannot resolve (fixed offsets, the short aliases below)
+    each pay a tzpath walk and an exception before reaching the fallback.
+    Both branches return immutable objects, so sharing one is safe.
+    """
     if not isinstance(tz, str):
         return None
     try:
@@ -507,17 +729,23 @@ def _resolve_timezone(tz: str) -> Optional[tzinfo]:
 
 
 def _parse_offset_value(s: str) -> Optional[int]:
+    """Minutes for a ``+HH``/``+HH:MM`` offset body, or ``None``.
+
+    The digits are parsed strictly. A zone that cannot be resolved leaves
+    the rule block active (core spec 3.13), so tolerating whitespace,
+    underscores or non-ASCII digits here would resolve a zone another
+    engine refuses and could switch a control off.
+    """
     if ":" in s:
         hours_str, minutes_str = s.split(":", 1)
     else:
         hours_str = s
         minutes_str = "0"
-    try:
-        hours = int(hours_str)
-        minutes = int(minutes_str)
-    except ValueError:
+    hours = _parse_strict_uint(hours_str)
+    minutes = _parse_strict_uint(minutes_str)
+    if hours is None or minutes is None:
         return None
-    if hours < 0 or hours > 23 or minutes < 0 or minutes > 59:
+    if hours > 23 or minutes > 59:
         return None
     return hours * 60 + minutes
 
@@ -560,14 +788,13 @@ def _resolve_context_value(path: str, context: RuntimeContext) -> Any:
         return None
 
 
-# f64::EPSILON: the exact tolerance Rust's `match_value` uses when comparing
-# a float-shaped `expected` against `actual` (see `_values_equal` below).
+# One double-precision epsilon: the tolerance a float-shaped `expected` is
+# compared against `actual` with (see `_values_equal` below).
 _F64_EPSILON = 2.220446049250313e-16
 
 
 def _values_equal(actual: Any, expected: Any) -> bool:
-    """Leaf-level scalar equality, byte-identical to Rust's `values_equal`
-    (crates/hushspec/src/conditions.rs).
+    """Leaf-level scalar equality for a ``when.context`` predicate.
 
     ``expected`` is always a non-array scalar (str/bool/int/float) here --
     array unwrapping happens one level up, in ``_matches_scalar_or_membership``.
@@ -578,25 +805,22 @@ def _values_equal(actual: Any, expected: Any) -> bool:
         return isinstance(actual, str) and actual == expected
 
     if isinstance(expected, bool):
-        # bool is not numeric: Rust's `Value::Bool` only compares equal to
-        # another `Value::Bool` via `as_bool()`, never to a `Value::Number`.
+        # A boolean is not numeric: it compares equal only to another
+        # boolean, never to a number.
         return isinstance(actual, bool) and actual == expected
 
     if isinstance(expected, int):
-        # Integer-shaped expected, mirroring `serde_json::Number::as_i64`:
-        # actual must also be integer-shaped (not bool, not float) with an
-        # equal value. A float actual (even one with an integral value, e.g.
-        # 5.0) does NOT match, exactly as Rust's `as_i64()` returns `None`
-        # for a float-shaped `serde_json::Number`.
+        # Integer-shaped expected: actual must also be integer-shaped (not
+        # bool, not float) with an equal value. A float actual does not match
+        # even when its value is integral (e.g. 5.0) -- JSON number shape,
+        # not numeric value, decides the comparison.
         if isinstance(actual, bool) or not isinstance(actual, int):
             return False
         return actual == expected
 
     if isinstance(expected, float):
-        # Float-shaped expected, mirroring `serde_json::Number::as_f64`:
-        # actual may be integer- or float-shaped (both convert to f64 via
-        # `as_f64()`), compared with the same `f64::EPSILON` tolerance Rust
-        # uses.
+        # Float-shaped expected: actual may be integer- or float-shaped
+        # (both widen to a double), compared within one epsilon.
         if isinstance(actual, bool) or not isinstance(actual, (int, float)):
             return False
         return abs(float(actual) - float(expected)) < _F64_EPSILON
@@ -605,16 +829,16 @@ def _values_equal(actual: Any, expected: Any) -> bool:
 
 
 def _matches_scalar_or_membership(actual: Any, expected: Any) -> bool:
-    """Byte-identical to Rust's `matches_scalar_or_membership`: if ``actual``
-    is an array, match iff any element equals ``expected``; otherwise compare
-    the two scalars directly."""
+    """Scalar-or-membership comparison: if ``actual`` is an array, match iff
+    any element equals ``expected``; otherwise compare the two scalars
+    directly."""
     if isinstance(actual, list):
         return any(_values_equal(item, expected) for item in actual)
     return _values_equal(actual, expected)
 
 
 def _match_value(actual: Any, expected: Any) -> bool:
-    """Byte-identical to Rust's `match_value`.
+    """Match a ``when.context`` value against the value the rule expects.
 
     Matching rules:
     - Missing context field (``actual is None``) -> fail-closed ``False``.
@@ -641,10 +865,10 @@ def _match_value(actual: Any, expected: Any) -> bool:
 
 def evaluate_with_context(
     spec: HushSpec,
-    action: "Any",
+    action: Any,
     context: RuntimeContext,
     conditions: dict[str, Condition],
-):
+) -> "EvaluationResult":
     """Evaluate with an explicit runtime context and out-of-band conditions.
 
     The explicit *context* replaces ``action.context``; each entry in

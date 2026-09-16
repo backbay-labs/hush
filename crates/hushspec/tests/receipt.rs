@@ -71,7 +71,11 @@ fn fixed_ctx() -> AuditContext {
     }
 }
 
-fn compiled_receipt_schema() -> jsonschema::JSONSchema {
+/// The compiled receipt schema, built once for the whole file.
+static RECEIPT_SCHEMA: std::sync::LazyLock<jsonschema::JSONSchema> =
+    std::sync::LazyLock::new(compile_receipt_schema);
+
+fn compile_receipt_schema() -> jsonschema::JSONSchema {
     let path = repo_root().join("schemas/hushspec-receipt.v0.schema.json");
     let text = std::fs::read_to_string(&path).unwrap();
     let schema: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -83,7 +87,7 @@ fn compiled_receipt_schema() -> jsonschema::JSONSchema {
 
 fn assert_schema_valid(receipt: &DecisionReceipt) {
     let value = serde_json::to_value(receipt).unwrap();
-    if let Err(errors) = compiled_receipt_schema().validate(&value) {
+    if let Err(errors) = RECEIPT_SCHEMA.validate(&value) {
         let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
         panic!("receipt failed schema validation: {messages:?}\n{value:#}");
     }
@@ -391,10 +395,19 @@ extensions:
         &fixed_ctx(),
     );
     let trace = flagged.detection_trace.as_ref().expect("detection ran");
-    assert_eq!(trace.len(), 1);
+    assert_eq!(
+        trace.len(),
+        2,
+        "the regex and the heuristic prompt-injection detectors both ran"
+    );
     assert_eq!(trace[0].detector_id, "regex_injection@1");
     assert!(trace[0].score > 0.0);
     assert!(trace[0].matched);
+    assert_eq!(trace[1].detector_id, "heuristic_injection@1");
+    assert!(
+        trace[1].matched,
+        "instruction_override + exfiltration_coercion scores 75"
+    );
     assert_ne!(flagged.decision, Decision::Allow);
     assert_eq!(flagged.matched_rule.as_deref(), Some("detection"));
     assert_schema_valid(&flagged);
@@ -577,7 +590,7 @@ fn evaluate_audited_spec_is_a_single_link_resolution() {
 
 #[test]
 fn valid_receipt_vectors_parse_and_validate() {
-    let schema = compiled_receipt_schema();
+    let schema = &*RECEIPT_SCHEMA;
     let dir = repo_root().join("fixtures/receipts/valid");
     let mut count = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {
@@ -612,7 +625,7 @@ fn valid_receipt_vectors_parse_and_validate() {
 
 #[test]
 fn invalid_receipt_vectors_are_rejected() {
-    let schema = compiled_receipt_schema();
+    let schema = &*RECEIPT_SCHEMA;
     let dir = repo_root().join("fixtures/receipts/invalid");
     let mut count = 0;
     for entry in std::fs::read_dir(&dir).unwrap() {

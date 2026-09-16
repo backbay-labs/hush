@@ -30,6 +30,7 @@ var canonicalSchemaSources = map[reflect.Type]struct{ file, def string }{
 	reflect.TypeOf(CodeExecutionRule{}):         {"hushspec-core.v0.schema.json", "CodeExecution"},
 	reflect.TypeOf(Condition{}):                 {"hushspec-core.v0.schema.json", "Condition"},
 	reflect.TypeOf(TimeWindowCondition{}):       {"hushspec-core.v0.schema.json", "TimeWindow"},
+	reflect.TypeOf(RateCondition{}):             {"hushspec-core.v0.schema.json", "RateCondition"},
 	reflect.TypeOf(Extensions{}):                {"hushspec-core.v0.schema.json", "Extensions"},
 	reflect.TypeOf(GovernanceMetadata{}):        {"hushspec-core.v0.schema.json", "GovernanceMetadata"},
 	reflect.TypeOf(ControlMapping{}):            {"hushspec-core.v0.schema.json", "ControlMapping"},
@@ -48,10 +49,11 @@ var canonicalSchemaSources = map[reflect.Type]struct{ file, def string }{
 	reflect.TypeOf(BridgePolicy{}):            {"hushspec-origins.v0.schema.json", "BridgePolicy"},
 	reflect.TypeOf(BridgeTarget{}):            {"hushspec-origins.v0.schema.json", "BridgeTarget"},
 
-	reflect.TypeOf(DetectionExtension{}):       {"hushspec-detection.v0.schema.json", ""},
-	reflect.TypeOf(PromptInjectionDetection{}): {"hushspec-detection.v0.schema.json", "PromptInjectionDetection"},
-	reflect.TypeOf(JailbreakDetection{}):       {"hushspec-detection.v0.schema.json", "JailbreakDetection"},
-	reflect.TypeOf(ThreatIntelDetection{}):     {"hushspec-detection.v0.schema.json", "ThreatIntelDetection"},
+	reflect.TypeOf(DetectionExtension{}):        {"hushspec-detection.v0.schema.json", ""},
+	reflect.TypeOf(PromptInjectionDetection{}):  {"hushspec-detection.v0.schema.json", "PromptInjectionDetection"},
+	reflect.TypeOf(PromptInjectionHeuristics{}): {"hushspec-detection.v0.schema.json", "PromptInjectionHeuristics"},
+	reflect.TypeOf(JailbreakDetection{}):        {"hushspec-detection.v0.schema.json", "JailbreakDetection"},
+	reflect.TypeOf(ThreatIntelDetection{}):      {"hushspec-detection.v0.schema.json", "ThreatIntelDetection"},
 }
 
 // TestCanonicalRulesMatchSchemas keeps canonicalSchemaRules honest against the

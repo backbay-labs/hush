@@ -1,0 +1,60 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:9c89d7089c04c532a6c247019611015911d23ad6eae22d0abbba569be711028b"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "chat",
+    "content_hash": "sha256:a2733d03b40ac2e542bc142f1657c973eee810e9d520786c95bc84793462c9d7",
+    "content_size": 63
+  },
+  "decision": "deny",
+  "matched_rule": "detection",
+  "reason": "content flagged by prompt_injection detection",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool is explicitly allowed"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "detection_trace": [
+    {
+      "detector_id": "regex_injection@1",
+      "category": "prompt_injection",
+      "score": 0.0,
+      "level": "none",
+      "matched": false
+    },
+    {
+      "detector_id": "heuristic_injection@1",
+      "category": "prompt_injection",
+      "score": 0.7,
+      "level": "high",
+      "matched": true
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

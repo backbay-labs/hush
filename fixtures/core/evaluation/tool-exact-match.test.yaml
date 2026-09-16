@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D3 (core 3.7): tool names are exact, case-sensitive strings; no prefix or glob matching"
+description: "Tool names are exact, case-sensitive strings; no prefix or glob matching (core spec 3.7)"
 policy:
   hushspec: "0.1.0"
   rules:

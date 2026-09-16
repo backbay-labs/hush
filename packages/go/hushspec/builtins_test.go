@@ -1,6 +1,10 @@
 package hushspec
 
-import "testing"
+import (
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestResolveBuiltinExtends(t *testing.T) {
 	child, err := Parse("hushspec: \"0.1.0\"\nname: child\nextends: \"builtin:strict\"\nrules:\n  egress:\n    default: allow\n")
@@ -50,5 +54,79 @@ func TestLoadBuiltin(t *testing.T) {
 	}
 	if spec, ok := LoadBuiltin("builtin:default"); !ok || spec == nil || spec.Name != "default" {
 		t.Fatalf("expected LoadBuiltin to find default, got ok=%v spec=%v", ok, spec)
+	}
+}
+
+// The vertical library is embedded under `library/<vertical>/<name>`, so a
+// policy can extend it with no file system.
+func TestLoadBuiltinLibrary(t *testing.T) {
+	spec, ok := LoadBuiltin("builtin:library/healthcare/hipaa-base")
+	if !ok || spec == nil {
+		t.Fatal("expected the library to be embedded as a builtin")
+	}
+	// The prefix is a location, not a rename: the document keeps its own name.
+	if spec.Name != "hipaa-base" {
+		t.Errorf("expected name hipaa-base, got %q", spec.Name)
+	}
+	if spec.Extends != "builtin:strict" {
+		t.Errorf("expected the leaf to keep its base, got %q", spec.Extends)
+	}
+
+	child, err := Parse("hushspec: \"0.1.0\"\nname: c\nextends: \"builtin:library/healthcare/hipaa-base\"\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := Resolve(child, "", nil)
+	if err != nil {
+		t.Fatalf("resolve the library builtin: %v", err)
+	}
+	if resolved.Rules == nil || resolved.Rules.SecretPatterns == nil {
+		t.Fatal("expected the resolved document to carry the library's rules")
+	}
+	if !slices.ContainsFunc(resolved.Rules.SecretPatterns.Patterns, func(p SecretPattern) bool {
+		return p.Name == "medical_record_number"
+	}) {
+		t.Error("expected the HIPAA patterns in the resolved document")
+	}
+}
+
+// Every name in the table loads, and the library is in it.
+func TestBuiltinNamesAreAllLoadable(t *testing.T) {
+	if len(BuiltinNames) <= 6 {
+		t.Fatalf("expected the library alongside the presets, got %d names", len(BuiltinNames))
+	}
+	library := 0
+	for _, name := range BuiltinNames {
+		spec, ok := LoadBuiltin(name)
+		if !ok || spec == nil {
+			t.Fatalf("builtin %q does not load", name)
+		}
+		want := name[strings.LastIndex(name, "/")+1:]
+		if spec.Name != want {
+			t.Errorf("builtin %q: expected document name %q, got %q", name, want, spec.Name)
+		}
+		if strings.HasPrefix(name, "library/") {
+			library++
+		}
+	}
+	if library != 8 {
+		t.Errorf("expected the eight library policies, got %d", library)
+	}
+}
+
+// TestBuiltinsPassValidation covers the embedded copies, the library included.
+// TestBuiltInRulesetsPassValidation checks the six presets as they sit on disk;
+// what an `extends: builtin:...` actually resolves to is what is embedded here.
+func TestBuiltinsPassValidation(t *testing.T) {
+	for _, name := range BuiltinNames {
+		t.Run(name, func(t *testing.T) {
+			spec, ok := LoadBuiltin(name)
+			if !ok {
+				t.Fatalf("builtin %q does not load", name)
+			}
+			if result := Validate(spec); !result.IsValid() {
+				t.Errorf("builtin %q does not validate: %+v", name, result.Errors)
+			}
+		})
 	}
 }

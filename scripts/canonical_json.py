@@ -7,7 +7,7 @@ fields removed) followed by RFC 8785 (JCS) serialization and a SHA-256
 content digest.
 
 This script is the reference that generates the vectors under
-fixtures/core/hash/. SDK implementations (P2-02) must reproduce its output
+fixtures/core/hash/. SDK implementations must reproduce its output
 byte-for-byte for every vector.
 
 Usage:
@@ -449,6 +449,9 @@ def main(argv: list[str] | None = None) -> int:
             print(err, file=sys.stderr)
         if errors:
             print(f"{len(errors)} hash vector failure(s)")
+            return 1
+        if count == 0:
+            print(f"no hash vectors found under {args.target}", file=sys.stderr)
             return 1
         print(f"{count}/{count} hash vectors OK")
         return 0

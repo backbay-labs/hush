@@ -1,9 +1,7 @@
 """HushSpec regex profile (``compile_profile_regex``) unit tests.
 
-Mirrors ``crates/hushspec/src/regex_profile.rs``,
-``packages/hushspec/tests/regex-profile.test.ts``, and
-``packages/go/hushspec/regex_profile_test.go``: the same cases must produce the
-same answers in all four SDKs.
+The profile is normative, so these cases are shared across the SDKs: the same
+pattern must produce the same answer in every one of them.
 """
 
 from __future__ import annotations

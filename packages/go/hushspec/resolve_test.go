@@ -158,8 +158,8 @@ func memoryLoader(specs map[string]*HushSpec) ResolveLoader {
 	}
 }
 
-// TestResolveExtendsChainDepthCapErrorsCleanly covers parity fix S2: cycle
-// detection alone does not bound a long ACYCLIC extends chain, which would
+// TestResolveExtendsChainDepthCapErrorsCleanly: cycle detection alone does not
+// bound a long acyclic extends chain, which would
 // otherwise recurse without limit. A chain of 40 distinct specs, each
 // extending the next, must be rejected cleanly (no crash) once the chain
 // exceeds the maximum depth of 32.

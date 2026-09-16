@@ -1,0 +1,8 @@
+description: >-
+  A three-hop extends chain (core spec 2.3 and 4.2): base.yaml <- mid.yaml <-
+  child-three-hop.yaml, each hop pinned by the digest of the one below it.
+  Resolution folds root to leaf, so the expected document is
+  merge(merge(base, mid), child); mid.yaml is not a child-*.yaml and is
+  reached only through the chain. Its own directory because the shared
+  core/merge base is not part of this chain and the pins name these exact
+  documents.

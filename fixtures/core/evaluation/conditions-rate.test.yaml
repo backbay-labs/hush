@@ -1,0 +1,76 @@
+hushspec_test: "0.1.0"
+description: "A when.rate condition compares an engine-supplied counter with a threshold, gte or lt; an absent counter is unevaluable and leaves the block active (core spec 3.13)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    shell_commands:
+      when:
+        rate:
+          counter: shell_commands
+          threshold: 5
+          comparison: gte
+      forbidden_patterns:
+        - "rm[ \\t]+-rf"
+    egress:
+      when:
+        rate:
+          counter: egress_calls
+          threshold: 100
+          comparison: lt
+      default: block
+cases:
+  - description: "gte: the counter is at the threshold, the shell block is active and denies"
+    context:
+      counters:
+        shell_commands: 5
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "gte: the counter is below the threshold, the shell block is inert"
+    context:
+      counters:
+        shell_commands: 2
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: allow
+  - description: "absent counter: the rate predicate is unevaluable and the shell block stays active"
+    context:
+      counters:
+        egress_calls: 1
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "no context at all: still unevaluable, still active"
+    action:
+      type: shell_command
+      target: "rm -rf /tmp/x"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "lt: the counter is below the threshold, the egress block is active and blocks by default"
+    context:
+      counters:
+        egress_calls: 3
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "lt: the counter is at the threshold, the egress block is inert"
+    context:
+      counters:
+        egress_calls: 100
+    action:
+      type: egress
+      target: api.example.com
+    expect:
+      decision: allow

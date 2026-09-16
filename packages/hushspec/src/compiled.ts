@@ -34,8 +34,8 @@
  *    from the first block in evaluation order whose decision equals the
  *    aggregate and which named a rule.
  *
- * This file is a port of `crates/hushspec/src/evaluate.rs`, which is the
- * normative reference implementation; keep the two in lockstep.
+ * The core specification is normative for every decision here, and
+ * `fixtures/core/evaluation/` pins it.
  */
 import type { HushSpec } from './schema.js';
 import type {
@@ -64,7 +64,7 @@ import type {
   PostureTransition,
 } from './extensions.js';
 import type { Condition, RuntimeContext } from './conditions.js';
-import { evaluateCondition } from './conditions.js';
+import { evaluateConditionWithCapabilities } from './conditions.js';
 import { compileProfileRegex } from './regex.js';
 import type {
   Decision,
@@ -100,6 +100,7 @@ import { DEFAULT_AUDIT_CONFIG, receiptFromEvaluation } from './receipt.js';
 import type { Resolution } from './resolve.js';
 import { resolutionFromResolved } from './resolve.js';
 import { contentHash } from './canonical.js';
+import { truncateUtf8 } from './utf8.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -222,7 +223,7 @@ function compileExactSetOrUndefined(entries: string[] | undefined): Set<string> 
 // Compiled rule blocks
 // ---------------------------------------------------------------------------
 
-/** Every block id the reference specification defines, in no particular order. */
+/** Every rule-block id the core specification defines. */
 type BlockId =
   | 'forbidden_paths'
   | 'path_allowlist'
@@ -1095,6 +1096,14 @@ class Evaluation {
     private readonly conditions: Record<string, Condition>,
   ) {}
 
+  /**
+   * The capabilities the effective posture state grants, for `capability`
+   * conditions (core spec 3.13): `undefined` until posture is resolved and
+   * whenever the policy has no posture extension (the predicate is then
+   * unevaluable and holds); an unknown state grants nothing.
+   */
+  private capabilities: ReadonlySet<string> | undefined;
+
   run(): TracedEvaluation {
     if (isPanicActive()) {
       this.record('panic', 'deny', PANIC_RULE, 'emergency panic mode is active', true);
@@ -1122,6 +1131,11 @@ class Evaluation {
 
     // Posture guard.
     const posture = resolvePosture(this.posture, matchedProfile, this.action.posture);
+
+    // `when` conditions see the effective posture state (capability
+    // predicates), so the capability mask is resolved only now.
+    this.capabilities = postureCapabilities(this.posture, posture);
+
     const denied = this.postureCapabilityGuard(posture);
     if (denied != null) {
       this.skipAll(blocks, 'short-circuited by posture deny');
@@ -1216,13 +1230,19 @@ class Evaluation {
     if (!compiled.enabled) {
       return DISABLED;
     }
-    if (compiled.when !== undefined && !evaluateCondition(compiled.when, this.context)) {
+    if (
+      compiled.when !== undefined
+      && !evaluateConditionWithCapabilities(compiled.when, this.context, this.capabilities)
+    ) {
       return CONDITION_FALSE;
     }
     const outOfBand = Object.prototype.hasOwnProperty.call(this.conditions, block)
       ? this.conditions[block]
       : undefined;
-    if (outOfBand != null && !evaluateCondition(outOfBand, this.context)) {
+    if (
+      outOfBand != null
+      && !evaluateConditionWithCapabilities(outOfBand, this.context, this.capabilities)
+    ) {
       return OUT_OF_BAND_FALSE;
     }
     return undefined;
@@ -1638,7 +1658,7 @@ function evaluateComputerUse(rule: CompiledComputerUse, target: string): BlockDe
   if (rule.observe) {
     return blockAllow('rules.computer_use.mode', 'observe mode does not block unlisted actions');
   }
-  // guardrail and fail_closed have identical reference semantics (D9).
+  // `guardrail` and `fail_closed` deny an unlisted action alike (core spec 3.8).
   return blockDeny('rules.computer_use.mode', 'unlisted computer-use action is denied');
 }
 
@@ -1802,18 +1822,6 @@ function evaluateCodeExecution(
   return blockAllow('rules.code_execution', 'code execution is permitted');
 }
 
-/** Truncate `content` to at most `limit` UTF-8 bytes, on a code-point boundary. */
-function truncateUtf8(content: string, limit: number): string {
-  const bytes = new TextEncoder().encode(content);
-  if (bytes.length <= limit) return content;
-  let end = limit;
-  // UTF-8 continuation bytes are 0b10xxxxxx; back off until a lead byte.
-  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) {
-    end -= 1;
-  }
-  return new TextDecoder().decode(bytes.subarray(0, end));
-}
-
 /**
  * Whether `word` occurs in `text` bounded by non-`[A-Za-z0-9_]` characters or
  * the text boundaries (core spec 3.12 step 4).
@@ -1857,18 +1865,39 @@ function resolvePosture(
   return { current, next };
 }
 
+/**
+ * The capabilities the effective posture state grants, for `capability`
+ * conditions (core spec 3.13): `undefined` when the policy has no posture
+ * extension (the predicate is then unevaluable and holds); an unknown state
+ * grants nothing.
+ */
+function postureCapabilities(
+  posture: CompiledPosture | undefined,
+  resolved: PostureResult | undefined,
+): ReadonlySet<string> | undefined {
+  if (posture == null || resolved == null) return undefined;
+  return posture.states.get(resolved.current)?.capabilities ?? EMPTY_CAPABILITIES;
+}
+
+/** The grant of a posture state this document never defined: nothing. */
+const EMPTY_CAPABILITIES: ReadonlySet<string> = new Set<string>();
+
 function nextPostureState(
   posture: CompiledPosture,
   current: string,
   signal: string,
 ): string | undefined {
-  // D18 (pending): first matching transition in document order.
-  for (const transition of posture.transitions) {
-    if (transition.from !== '*' && transition.from !== current) continue;
-    if (transition.on !== signal) continue;
-    return transition.to;
-  }
-  return undefined;
+  // Posture spec 5.3: a transition whose `from` names the current state
+  // outranks one whose `from` is `"*"`; among equals, document order.
+  const matching = (wildcard: boolean): string | undefined => {
+    for (const transition of posture.transitions) {
+      const fromMatches = wildcard ? transition.from === '*' : transition.from === current;
+      if (!fromMatches || transition.on !== signal) continue;
+      return transition.to;
+    }
+    return undefined;
+  };
+  return matching(false) ?? matching(true);
 }
 
 /**
@@ -1954,8 +1983,10 @@ function patchStats(content: string): PatchStats {
 }
 
 /**
- * Mirrors Rust's `str::lines`: split on `\n`, drop a trailing `\r`, and treat a
- * trailing newline as a terminator rather than producing a final empty line.
+ * Split on `\n`, drop a trailing `\r`, and treat a trailing newline as a
+ * terminator rather than a separator that yields a final empty line -- so a
+ * patch's addition and deletion counts do not depend on whether the diff ends
+ * with a newline.
  */
 function splitLines(content: string): string[] {
   if (content.length === 0) return [];

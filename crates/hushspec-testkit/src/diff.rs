@@ -1,6 +1,12 @@
-use crate::bundle::CaseBundle;
+use crate::bundle::{AuditSpec, CaseBundle};
+use chrono::{DateTime, Utc};
 use hushspec::evaluate::{RuleEvaluation, RuleOutcome, evaluate_traced};
-use hushspec::{EvaluationAction, EvaluationResult, HushSpec};
+use hushspec::receipt::{
+    ActionSummary, Actor, AuditConfig, AuditContext, DecisionReceipt, EnforcementMode,
+    EnforcementSummary, RECEIPT_VERSION, TimeSource, deterministic_uuid_v7, evaluate_audited,
+    format_timestamp, policy_summary,
+};
+use hushspec::{Decision, EvaluationAction, EvaluationResult, HushSpec, Resolution};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -54,6 +60,22 @@ pub struct NormalizedResult {
     /// stale harness should produce rather than silently pass.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_trace: Vec<NormalizedRuleEvaluation>,
+    /// `sha256:` over the canonical form (RFC 8785) of the format 0.2 receipt
+    /// the SDK recorded for this case under the bundle's `audit` inputs
+    /// (receipt spec 6) -- the evidence an auditor keeps, not just the answer
+    /// the enforcement point acted on.
+    ///
+    /// Defaulted rather than required so a harness that predates the audited
+    /// protocol still deserializes; its missing hash then compares as `None`
+    /// against the reference's, which is the `Receipt` divergence a stale harness
+    /// should produce rather than a silent pass. `--ignore-receipts` opts out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_hash: Option<String>,
+    /// The whole receipt, reported only when the bundle asked for it
+    /// (`audit.emit_receipts`). Carried so a hash mismatch can be rendered as
+    /// the first differing member instead of two opaque digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<serde_json::Value>,
 }
 
 /// One rule-block consultation, normalized to the shape every SDK's traced
@@ -118,13 +140,9 @@ impl NormalizedResult {
                 next: posture.next,
             }),
             rule_trace: trace.iter().map(NormalizedRuleEvaluation::from).collect(),
+            receipt_hash: None,
+            receipt: None,
         }
-    }
-}
-
-impl From<EvaluationResult> for NormalizedResult {
-    fn from(result: EvaluationResult) -> Self {
-        NormalizedResult::with_trace(result, &[])
     }
 }
 
@@ -139,7 +157,7 @@ pub struct SdkReport {
     ///
     /// Defaulted rather than required so an older harness's report still
     /// deserializes; its empty map then compares as a missing `content_hash`
-    /// against the oracle's populated one, which is exactly the divergence a
+    /// against the reference's populated one, which is exactly the divergence a
     /// stale harness should produce rather than a silent pass.
     #[serde(default)]
     pub groups: BTreeMap<String, GroupReport>,
@@ -149,13 +167,22 @@ pub struct SdkReport {
 /// action evaluated against it.
 ///
 /// **Harness contract.** Alongside `results`, a harness emits
-/// `"groups": {"<group id>": {"content_hash": "sha256:<64 hex>"}}`, one entry
-/// per group in the bundle, in the same pass that evaluates the group. The
+/// `"groups": {"<group id>": {"content_hash": "sha256:<64 hex>",
+/// "receipt_hash": "sha256:<64 hex>"}}`, one entry per group in the bundle, in
+/// the same pass that evaluates the group. The
 /// hash is its SDK's canonical content hash (spec/hushspec-canonical.md
 /// section 5) of the **resolved** policy it evaluated -- computed after
 /// `parse -> resolve`, before evaluation. A group whose policy the SDK
 /// rejected (parse, resolve, or validate) reports `content_hash: null`, or
 /// omits the key, which is the same thing: there is no policy to identify.
+///
+/// Alongside it the harness reports `receipt_hash`: the hash of the
+/// *policy-identity receipt* (see [`policy_identity_receipt`]), which is the
+/// policy summary every receipt in the group embeds, carried in a receipt
+/// skeleton so each SDK hashes it with its own receipt canonicalizer. It
+/// isolates "the SDKs disagree about the policy their receipts name" from
+/// "they disagree about one action", and a group whose policy was rejected
+/// reports none.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GroupReport {
@@ -163,6 +190,10 @@ pub struct GroupReport {
     /// policy, or `None` when the policy never resolved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
+    /// `sha256:<64 lowercase hex>` over the canonical form of this group's
+    /// policy-identity receipt, or `None` when the policy never resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_hash: Option<String>,
 }
 
 pub trait CaseEvaluator {
@@ -170,8 +201,161 @@ pub trait CaseEvaluator {
     fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError>;
 }
 
-/// The Rust reference oracle. Mirrors the testkit runner's fixture ingestion:
-/// YAML re-encode -> parse -> validate -> evaluate.
+/// `receipt_id` of every policy-identity receipt: a fixed UUID v7, so the
+/// hash varies with the policy summary and with nothing else.
+pub const POLICY_IDENTITY_RECEIPT_ID: &str = "00000000-0000-7000-8000-000000000000";
+/// `action.type` of a policy-identity receipt. Reserved, never evaluated: the
+/// receipt is built directly, not by evaluating anything.
+pub const POLICY_IDENTITY_ACTION: &str = "__hushspec_policy_identity__";
+
+/// A receipt that carries a group's policy summary and nothing else that
+/// varies: fixed id, the bundle's clock and time source, a reserved action, a
+/// deny with no rule and an empty trace.
+///
+/// Its hash is the group-level `receipt_hash` of the harness protocol. Every
+/// SDK builds the identical skeleton and hashes it with its own receipt
+/// canonicalizer, so a disagreement means the policy identity their receipts
+/// would record differs -- `name`, `version`, `spec_version`, `content_hash`,
+/// `extends_chain` or `signature` -- independently of any one action.
+#[must_use]
+pub fn policy_identity_receipt(
+    resolution: &Resolution,
+    clock: DateTime<Utc>,
+    time_source: TimeSource,
+    enforcement_mode: EnforcementMode,
+) -> DecisionReceipt {
+    DecisionReceipt {
+        receipt_version: RECEIPT_VERSION.to_string(),
+        receipt_id: POLICY_IDENTITY_RECEIPT_ID.to_string(),
+        timestamp: format_timestamp(clock),
+        time_source,
+        actor: None,
+        policy: policy_summary(resolution),
+        action: ActionSummary {
+            action_type: POLICY_IDENTITY_ACTION.to_string(),
+            target: None,
+            content_hash: None,
+            content_size: None,
+            args_size: None,
+            origin: None,
+            context: None,
+        },
+        decision: Decision::Deny,
+        matched_rule: None,
+        reason: None,
+        rule_trace: Vec::new(),
+        detection_trace: None,
+        enforcement: EnforcementSummary::implied(Decision::Deny, enforcement_mode),
+        origin_profile: None,
+        posture: None,
+        duration_us: None,
+    }
+}
+
+/// The receipt one case of a bundle records: the same audited evaluation the
+/// oracle runs, for a caller that holds the policy and action rather than a
+/// bundle (the fixture emitter).
+///
+/// # Errors
+///
+/// [`DiffError::Config`] when the audit inputs cannot be read or the document
+/// has no canonical form.
+pub fn case_receipt(
+    spec: &HushSpec,
+    action: &EvaluationAction,
+    audit: &AuditSpec,
+    position: u64,
+) -> Result<DecisionReceipt, DiffError> {
+    let inputs = AuditInputs::from_spec(audit)?;
+    let resolution = Resolution::from_resolved(spec, None)
+        .map_err(|error| DiffError::Config(error.to_string()))?;
+    Ok(evaluate_audited(
+        &resolution,
+        action,
+        &inputs.config,
+        &inputs.context(position),
+    ))
+}
+
+/// The bundle's `audit` block, resolved into the typed inputs one audited
+/// evaluation needs. Built once per bundle: parsing the clock or an enum
+/// spelling per case would be both wasteful and a chance to disagree with
+/// itself.
+struct AuditInputs {
+    config: AuditConfig,
+    clock: DateTime<Utc>,
+    clock_millis: u64,
+    time_source: TimeSource,
+    enforcement_mode: EnforcementMode,
+    actor: Actor,
+    index_base: u64,
+    emit_receipts: bool,
+}
+
+impl AuditInputs {
+    /// Fail-closed: an unreadable clock or an enum spelling this receipt
+    /// format does not define is a hard error, never a silent fallback to
+    /// "now" or to the default -- either would make the receipts of a run
+    /// incomparable while still looking like agreement.
+    fn from_spec(audit: &AuditSpec) -> Result<Self, DiffError> {
+        fn enum_value<T: serde::de::DeserializeOwned>(
+            field: &str,
+            spelling: &str,
+        ) -> Result<T, DiffError> {
+            serde_json::from_value(serde_json::Value::String(spelling.to_string()))
+                .map_err(|error| DiffError::Config(format!("audit.{field} {spelling:?}: {error}")))
+        }
+        Ok(Self {
+            config: AuditConfig {
+                enabled: true,
+                include_rule_trace: true,
+                // A receipt whose bytes depend on how fast the machine was is
+                // not comparable across four SDKs.
+                record_duration: false,
+            },
+            clock: audit.clock_datetime().map_err(DiffError::Config)?,
+            clock_millis: audit.clock_millis().map_err(DiffError::Config)?,
+            time_source: enum_value("time_source", &audit.time_source)?,
+            enforcement_mode: enum_value("enforcement_mode", &audit.enforcement_mode)?,
+            actor: audit.actor.clone(),
+            index_base: audit.index_base,
+            emit_receipts: audit.emit_receipts,
+        })
+    }
+
+    /// The audit context for the case at `position` in the bundle.
+    fn context(&self, position: u64) -> AuditContext {
+        AuditContext {
+            actor: Some(self.actor.clone()),
+            enforcement: None,
+            enforcement_mode: self.enforcement_mode,
+            time_source: self.time_source,
+            clock: Some(self.clock),
+            receipt_id: Some(deterministic_uuid_v7(
+                self.clock_millis,
+                self.index_base.saturating_add(position),
+            )),
+            context: None,
+            conditions: std::collections::HashMap::new(),
+        }
+    }
+
+    fn group_receipt_hash(&self, resolution: &Resolution) -> Option<String> {
+        policy_identity_receipt(
+            resolution,
+            self.clock,
+            self.time_source,
+            self.enforcement_mode,
+        )
+        .receipt_hash()
+        .ok()
+    }
+}
+
+/// The reference evaluator: the answer every SDK harness is compared
+/// against. Applies the testkit runner's fixture ingestion:
+/// YAML re-encode -> parse -> validate -> evaluate, and records the receipt of
+/// every case it evaluates.
 pub struct InProcessEvaluator;
 
 impl CaseEvaluator for InProcessEvaluator {
@@ -180,29 +364,47 @@ impl CaseEvaluator for InProcessEvaluator {
     }
 
     fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+        let inputs = AuditInputs::from_spec(&bundle.audit)?;
         let mut results = BTreeMap::new();
         let mut groups = BTreeMap::new();
+        let mut position = 0u64;
         for group in &bundle.groups {
             let parsed = parse_policy(&group.policy);
             // The identity of the policy this group is actually evaluated
             // under: the resolved document, never the unresolved fragment
-            // (canonical spec 2.1). A rejected policy has no identity.
+            // (canonical spec 2.1). A rejected policy has no identity, and a
+            // resolution is what carries that identity into every receipt.
+            let resolution = parsed
+                .as_ref()
+                .ok()
+                .and_then(|spec| Resolution::from_resolved(spec, None).ok());
             groups.insert(
                 group.id.clone(),
                 GroupReport {
-                    content_hash: parsed
+                    content_hash: resolution
                         .as_ref()
-                        .ok()
-                        .and_then(|spec| hushspec::content_hash(spec).ok()),
+                        .map(|resolution| resolution.content_hash.clone()),
+                    receipt_hash: resolution
+                        .as_ref()
+                        .and_then(|resolution| inputs.group_receipt_hash(resolution)),
                 },
             );
             for case in &group.actions {
                 let key = format!("{}/{}", group.id, case.id);
-                let verdict = match &parsed {
-                    Ok(spec) => evaluate_action(spec, &case.action),
-                    Err(rejection) => rejection.clone(),
+                let verdict = match (&parsed, &resolution) {
+                    (Ok(spec), Some(resolution)) => {
+                        evaluate_action(spec, resolution, &case.action, &inputs, position)
+                    }
+                    // Accepted but not canonicalizable: no identity, so no
+                    // receipt either. Reported as an error rather than an
+                    // evaluated verdict so it cannot pass as agreement.
+                    (Ok(_), None) => CaseVerdict::Error {
+                        message: "policy has no canonical form".to_string(),
+                    },
+                    (Err(rejection), _) => rejection.clone(),
                 };
                 results.insert(key, verdict);
+                position += 1;
             }
         }
         Ok(SdkReport {
@@ -257,7 +459,13 @@ fn parse_policy(policy: &serde_json::Value) -> Result<HushSpec, CaseVerdict> {
     Ok(spec)
 }
 
-fn evaluate_action(spec: &HushSpec, action: &serde_json::Value) -> CaseVerdict {
+fn evaluate_action(
+    spec: &HushSpec,
+    resolution: &Resolution,
+    action: &serde_json::Value,
+    inputs: &AuditInputs,
+    position: u64,
+) -> CaseVerdict {
     let action: EvaluationAction = match serde_json::from_value(action.clone()) {
         Ok(action) => action,
         Err(error) => {
@@ -266,16 +474,45 @@ fn evaluate_action(spec: &HushSpec, action: &serde_json::Value) -> CaseVerdict {
             };
         }
     };
-    // Detection-aware result + the base evaluator's trace. `evaluate_with_detection`
-    // recomputes the base evaluation internally and returns no trace, so the
-    // trace is taken from an explicit `evaluate_traced` call over the same
-    // inputs -- the two agree by construction (detection never re-runs rule
-    // blocks) and every harness mirrors this pairing.
+    // The audited path is the one an enforcement point actually runs: it
+    // routes through the detection pipeline and records the evidence. The
+    // verdict compared here is therefore read back *out of the receipt*, so a
+    // receipt that disagrees with its own decision is impossible by
+    // construction rather than by convention.
+    //
+    // The base evaluator's trace comes from an explicit `evaluate_traced` call
+    // over the same inputs: the receipt's own `rule_trace` is the receipt
+    // spelling (engine-stage ids, `rule_path`), while `rule_trace` here is the
+    // evaluator's. Detection never re-runs the rule blocks, so the two agree
+    // by construction, and every harness mirrors this pairing.
     let traced = evaluate_traced(spec, &action, None, &std::collections::HashMap::new());
-    let evaluation = hushspec::evaluate_with_detection(spec, &action).evaluation;
-    CaseVerdict::Ok {
-        result: NormalizedResult::with_trace(evaluation, &traced.trace),
+    let receipt = evaluate_audited(
+        resolution,
+        &action,
+        &inputs.config,
+        &inputs.context(position),
+    );
+    let receipt_hash = match receipt.receipt_hash() {
+        Ok(hash) => hash,
+        Err(error) => {
+            return CaseVerdict::Error {
+                message: format!("receipt has no canonical form: {error}"),
+            };
+        }
+    };
+    let evaluation = EvaluationResult {
+        decision: receipt.decision,
+        matched_rule: receipt.matched_rule.clone(),
+        reason: receipt.reason.clone(),
+        origin_profile: receipt.origin_profile.clone(),
+        posture: receipt.posture.clone(),
+    };
+    let mut result = NormalizedResult::with_trace(evaluation, &traced.trace);
+    result.receipt_hash = Some(receipt_hash);
+    if inputs.emit_receipts {
+        result.receipt = serde_json::to_value(&receipt).ok();
     }
+    CaseVerdict::Ok { result }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -292,9 +529,14 @@ pub enum DivergenceKind {
     /// harness did not report one. Same policy, same identity -- otherwise
     /// receipts and signatures made by different SDKs cannot be compared.
     ContentHash,
+    /// The SDKs recorded different receipts for the same case (or the same
+    /// policy identity, for a group-keyed divergence), or the harness reported
+    /// no receipt hash at all. The decision may well agree: what diverges is
+    /// the evidence, which is what an auditor keeps and a log chains.
+    Receipt,
     MissingCase,
-    /// The harness answered for a case key the oracle (and therefore the
-    /// bundle) never produced. Both the oracle and every SDK evaluate the
+    /// The harness answered for a case key the reference (and therefore the
+    /// bundle) never produced. Both the reference and every SDK evaluate the
     /// identical bundle, so this should be geometrically impossible for a
     /// correct harness -- when it happens it is harness-integrity evidence,
     /// not an ordinary verdict disagreement.
@@ -308,6 +550,67 @@ pub struct Divergence {
     pub kind: DivergenceKind,
     pub oracle: CaseVerdict,
     pub observed: CaseVerdict,
+    /// For a `Receipt` divergence: the first member on which the two receipts
+    /// differ. Absent when the receipts themselves were never fetched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_difference: Option<ReceiptDifference>,
+}
+
+impl Divergence {
+    /// A divergence with no receipt diff attached yet.
+    fn new(
+        case_key: String,
+        sdk: String,
+        kind: DivergenceKind,
+        oracle: CaseVerdict,
+        observed: CaseVerdict,
+    ) -> Self {
+        Self {
+            case_key,
+            sdk,
+            kind,
+            oracle,
+            observed,
+            receipt_difference: None,
+        }
+    }
+}
+
+/// Where two receipts first part company, walking their canonical forms in
+/// RFC 8785 order. A receipt hash says only "not the same"; this says which
+/// member to go and look at.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReceiptDifference {
+    /// JSON Pointer (RFC 6901) of the first differing member, e.g.
+    /// `/detection_trace/0/score`. Empty for two values of different types at
+    /// the root.
+    pub member: String,
+    /// The reference's value there, absent when the member is missing entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oracle: Option<serde_json::Value>,
+    /// The harness's value there, absent when the member is missing entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed: Option<serde_json::Value>,
+}
+
+impl std::fmt::Display for ReceiptDifference {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let render = |value: &Option<serde_json::Value>| match value {
+            Some(value) => value.to_string(),
+            None => "<absent>".to_string(),
+        };
+        write!(
+            formatter,
+            "{}: oracle {} vs {}",
+            if self.member.is_empty() {
+                "<root>"
+            } else {
+                &self.member
+            },
+            render(&self.oracle),
+            render(&self.observed)
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -320,12 +623,16 @@ pub struct CompareOptions {
     /// `content_hash` group key; off by default so a harness that omits it is
     /// a divergence rather than a silent pass.
     pub ignore_content_hash: bool,
+    /// Escape hatch for running against harnesses that predate the audited
+    /// protocol; off by default so a harness that reports no `receipt_hash` is
+    /// a divergence rather than a silent pass.
+    pub ignore_receipts: bool,
 }
 
-/// Compare an SDK report against the Rust oracle. First difference wins per
-/// case; iteration follows the oracle's sorted key order. The comparison is
-/// symmetric in key coverage: a case the oracle has but the harness omits is
-/// `MissingCase`, and a case the harness answers but the oracle (and
+/// Compare an SDK report against the reference evaluator. First difference wins per
+/// case; iteration follows the reference's sorted key order. The comparison is
+/// symmetric in key coverage: a case the reference has but the harness omits is
+/// `MissingCase`, and a case the harness answers but the reference (and
 /// therefore the bundle) never produced is `PhantomCase`. Neither direction
 /// is allowed to pass silently -- a buggy harness that fabricates extra
 /// case keys must be exposed exactly like one that drops cases.
@@ -341,52 +648,149 @@ pub fn compare_reports(
     let mut divergences = Vec::new();
     for (key, oracle_verdict) in &oracle.results {
         let Some(observed_verdict) = observed.results.get(key) else {
-            divergences.push(Divergence {
-                case_key: key.clone(),
-                sdk: observed.sdk.clone(),
-                kind: DivergenceKind::MissingCase,
-                oracle: oracle_verdict.clone(),
-                observed: CaseVerdict::Error {
+            divergences.push(Divergence::new(
+                key.clone(),
+                observed.sdk.clone(),
+                DivergenceKind::MissingCase,
+                oracle_verdict.clone(),
+                CaseVerdict::Error {
                     message: "case missing from harness report".to_string(),
                 },
-            });
+            ));
             continue;
         };
         if let Some(kind) = verdict_divergence(oracle_verdict, observed_verdict, options) {
-            divergences.push(Divergence {
-                case_key: key.clone(),
-                sdk: observed.sdk.clone(),
+            let mut divergence = Divergence::new(
+                key.clone(),
+                observed.sdk.clone(),
                 kind,
-                oracle: oracle_verdict.clone(),
-                observed: observed_verdict.clone(),
-            });
+                oracle_verdict.clone(),
+                observed_verdict.clone(),
+            );
+            if kind == DivergenceKind::Receipt {
+                divergence.receipt_difference =
+                    receipt_difference(oracle_verdict, observed_verdict);
+            }
+            divergences.push(divergence);
         }
     }
     for (key, observed_verdict) in &observed.results {
         if !oracle.results.contains_key(key) {
-            divergences.push(Divergence {
-                case_key: key.clone(),
-                sdk: observed.sdk.clone(),
-                kind: DivergenceKind::PhantomCase,
-                oracle: CaseVerdict::Error {
+            divergences.push(Divergence::new(
+                key.clone(),
+                observed.sdk.clone(),
+                DivergenceKind::PhantomCase,
+                CaseVerdict::Error {
                     message: "case not present in oracle report or bundle".to_string(),
                 },
-                observed: observed_verdict.clone(),
-            });
+                observed_verdict.clone(),
+            ));
         }
     }
-    if !options.ignore_content_hash {
-        divergences.extend(compare_content_hashes(oracle, observed));
-    }
+    divergences.extend(compare_group_reports(oracle, observed, options));
     divergences
 }
 
-/// Every group the oracle or the harness knows about must carry the same
+/// The first differing member of two verdicts' receipts, when both carried
+/// one. A hash-only report yields `None`; the caller then re-runs the case
+/// with `audit.emit_receipts` to get the receipts themselves.
+fn receipt_difference(oracle: &CaseVerdict, observed: &CaseVerdict) -> Option<ReceiptDifference> {
+    let (CaseVerdict::Ok { result: left }, CaseVerdict::Ok { result: right }) = (oracle, observed)
+    else {
+        return None;
+    };
+    first_difference(left.receipt.as_ref()?, right.receipt.as_ref()?, "")
+}
+
+/// Walk two JSON values in RFC 8785 order (object members by key, arrays by
+/// index) and return the first place they differ, as a JSON Pointer.
+///
+/// Object keys are compared in the canonical order -- sorted by UTF-16 code
+/// unit -- so the "first" difference is the first one a reader of the two
+/// canonical forms would reach, not an artifact of insertion order.
+fn first_difference(
+    oracle: &serde_json::Value,
+    observed: &serde_json::Value,
+    pointer: &str,
+) -> Option<ReceiptDifference> {
+    use serde_json::Value;
+    let here = |left: Option<&Value>, right: Option<&Value>| {
+        Some(ReceiptDifference {
+            member: pointer.to_string(),
+            oracle: left.cloned(),
+            observed: right.cloned(),
+        })
+    };
+    match (oracle, observed) {
+        (Value::Object(left), Value::Object(right)) => {
+            let mut keys: Vec<&String> = left.keys().collect();
+            keys.extend(right.keys().filter(|key| !left.contains_key(*key)));
+            keys.sort_by(|a, b| canonical_key_order(a, b));
+            for key in keys {
+                let child = format!("{pointer}/{}", escape_pointer(key));
+                match (left.get(key), right.get(key)) {
+                    (Some(left), Some(right)) => {
+                        if let Some(difference) = first_difference(left, right, &child) {
+                            return Some(difference);
+                        }
+                    }
+                    (left, right) => {
+                        return Some(ReceiptDifference {
+                            member: child,
+                            oracle: left.cloned(),
+                            observed: right.cloned(),
+                        });
+                    }
+                }
+            }
+            None
+        }
+        (Value::Array(left), Value::Array(right)) => {
+            for index in 0..left.len().max(right.len()) {
+                let child = format!("{pointer}/{index}");
+                match (left.get(index), right.get(index)) {
+                    (Some(left), Some(right)) => {
+                        if let Some(difference) = first_difference(left, right, &child) {
+                            return Some(difference);
+                        }
+                    }
+                    (left, right) => {
+                        return Some(ReceiptDifference {
+                            member: child,
+                            oracle: left.cloned(),
+                            observed: right.cloned(),
+                        });
+                    }
+                }
+            }
+            None
+        }
+        (left, right) if left == right => None,
+        (left, right) => here(Some(left), Some(right)),
+    }
+}
+
+/// RFC 8785 member ordering: by UTF-16 code unit, which differs from Rust's
+/// `str` ordering (by code point) only for characters outside the BMP.
+fn canonical_key_order(left: &str, right: &str) -> std::cmp::Ordering {
+    left.encode_utf16().cmp(right.encode_utf16())
+}
+
+/// RFC 6901 escaping: `~` becomes `~0` and `/` becomes `~1`.
+fn escape_pointer(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
+}
+
+/// Every group the reference or the harness knows about must carry the same
 /// policy identity. A group the harness left out of `groups` has no hash,
-/// which diverges against the oracle's -- fail-closed, exactly like a case
+/// which diverges against the reference's -- fail-closed, exactly like a case
 /// missing from `results`. The divergence is keyed by the group id, which has
 /// no `/` and therefore is never mistaken for a case key.
-fn compare_content_hashes(oracle: &SdkReport, observed: &SdkReport) -> Vec<Divergence> {
+fn compare_group_reports(
+    oracle: &SdkReport,
+    observed: &SdkReport,
+    options: &CompareOptions,
+) -> Vec<Divergence> {
     let mut divergences = Vec::new();
     let mut group_ids: Vec<&String> = oracle.groups.keys().collect();
     group_ids.extend(
@@ -396,35 +800,51 @@ fn compare_content_hashes(oracle: &SdkReport, observed: &SdkReport) -> Vec<Diver
             .filter(|id| !oracle.groups.contains_key(*id)),
     );
     for group_id in group_ids {
-        let expected = oracle
-            .groups
-            .get(group_id)
-            .and_then(|g| g.content_hash.as_ref());
-        let actual = observed
-            .groups
-            .get(group_id)
-            .and_then(|g| g.content_hash.as_ref());
-        if expected == actual {
-            continue;
+        let expected = oracle.groups.get(group_id);
+        let actual = observed.groups.get(group_id);
+        fn field(
+            report: Option<&GroupReport>,
+            pick: fn(&GroupReport) -> &Option<String>,
+        ) -> Option<&String> {
+            report.and_then(|report| pick(report).as_ref())
         }
-        divergences.push(Divergence {
-            case_key: group_id.clone(),
-            sdk: observed.sdk.clone(),
-            kind: DivergenceKind::ContentHash,
-            oracle: content_hash_verdict(expected),
-            observed: content_hash_verdict(actual),
-        });
+        if !options.ignore_content_hash {
+            let left = field(expected, |group| &group.content_hash);
+            let right = field(actual, |group| &group.content_hash);
+            if left != right {
+                divergences.push(Divergence::new(
+                    group_id.clone(),
+                    observed.sdk.clone(),
+                    DivergenceKind::ContentHash,
+                    group_hash_verdict("content_hash", left),
+                    group_hash_verdict("content_hash", right),
+                ));
+            }
+        }
+        if !options.ignore_receipts {
+            let left = field(expected, |group| &group.receipt_hash);
+            let right = field(actual, |group| &group.receipt_hash);
+            if left != right {
+                divergences.push(Divergence::new(
+                    group_id.clone(),
+                    observed.sdk.clone(),
+                    DivergenceKind::Receipt,
+                    group_hash_verdict("receipt_hash", left),
+                    group_hash_verdict("receipt_hash", right),
+                ));
+            }
+        }
     }
     divergences
 }
 
 /// A group-level hash rendered into the per-case shape `Divergence` carries,
 /// so the JSON report and the terminal summary need no special case.
-fn content_hash_verdict(hash: Option<&String>) -> CaseVerdict {
+fn group_hash_verdict(field: &str, hash: Option<&String>) -> CaseVerdict {
     CaseVerdict::Error {
         message: match hash {
-            Some(hash) => format!("content_hash {hash}"),
-            None => "no content_hash reported".to_string(),
+            Some(hash) => format!("{field} {hash}"),
+            None => format!("no {field} reported"),
         },
     }
 }
@@ -454,6 +874,11 @@ fn verdict_divergence(
             if !options.ignore_rule_trace && left.rule_trace != right.rule_trace {
                 return Some(DivergenceKind::RuleTrace);
             }
+            // Last, so a receipt difference that is really a decision or trace
+            // difference is reported as the more specific kind.
+            if !options.ignore_receipts && left.receipt_hash != right.receipt_hash {
+                return Some(DivergenceKind::Receipt);
+            }
             None
         }
         (CaseVerdict::Rejected { phase: left, .. }, CaseVerdict::Rejected { phase: right, .. }) => {
@@ -467,6 +892,7 @@ fn verdict_divergence(
 /// Runs an SDK harness as `command... <bundle.json>` and parses its stdout
 /// report. Fail-closed: spawn failures, non-zero exits, and malformed
 /// reports are hard errors, never skipped SDKs.
+#[derive(Clone)]
 pub struct SubprocessEvaluator {
     pub sdk: String,
     pub command: Vec<String>,
@@ -522,7 +948,14 @@ impl CaseEvaluator for SubprocessEvaluator {
     }
 }
 
-/// Harness commands for the three ported SDKs (Tasks 8-10 provide the scripts).
+/// The SDKs a difftest run compares against the Rust implementation.
+///
+/// One list, used by the CLI's `--sdk` value parser, its default, and
+/// [`default_subprocess_evaluators`], so the three cannot drift apart.
+pub const DEFAULT_SDKS: [&str; 3] = ["typescript", "python", "go"];
+
+/// Harness commands for each of [`DEFAULT_SDKS`].
+#[must_use]
 pub fn default_subprocess_evaluators(repo_root: &std::path::Path) -> Vec<SubprocessEvaluator> {
     vec![
         SubprocessEvaluator {
@@ -565,7 +998,7 @@ pub struct DifftestConfig {
     pub actions_per_group: usize,
     pub chunks: usize,
     pub max_seconds: Option<u64>,
-    /// Subset of ["typescript", "python", "go"]; the Rust oracle always runs.
+    /// Subset of [`DEFAULT_SDKS`]; Rust is always the baseline.
     pub sdks: Vec<String>,
     pub minimize: bool,
     pub emit_fixtures_dir: Option<std::path::PathBuf>,
@@ -574,11 +1007,27 @@ pub struct DifftestConfig {
     pub ignore_reason: bool,
     pub ignore_rule_trace: bool,
     pub ignore_content_hash: bool,
+    pub ignore_receipts: bool,
+    /// Ask every harness for the full receipt of every case, not only on the
+    /// second pass that follows a mismatch. Costs report size; buys a readable
+    /// diff for a divergence that will not reproduce.
+    pub emit_receipts: bool,
     pub repo_root: std::path::PathBuf,
     /// Replay an existing bundle instead of generating (single chunk).
     pub bundle_path: Option<std::path::PathBuf>,
     /// Test seam: replaces every selected SDK's command (keeps sdk names).
     pub harness_override: Option<Vec<String>>,
+}
+
+impl DifftestConfig {
+    fn compare_options(&self) -> CompareOptions {
+        CompareOptions {
+            ignore_reason: self.ignore_reason,
+            ignore_rule_trace: self.ignore_rule_trace,
+            ignore_content_hash: self.ignore_content_hash,
+            ignore_receipts: self.ignore_receipts,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -603,14 +1052,17 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
     }
     std::fs::create_dir_all(&config.bundles_dir)?;
 
+    let available = default_subprocess_evaluators(&config.repo_root);
     let mut evaluators: Vec<SubprocessEvaluator> = Vec::new();
     for sdk in &config.sdks {
-        let mut evaluator = default_subprocess_evaluators(&config.repo_root)
-            .into_iter()
+        let mut evaluator = available
+            .iter()
             .find(|candidate| candidate.sdk == *sdk)
+            .cloned()
             .ok_or_else(|| {
                 DiffError::Config(format!(
-                    "unknown sdk '{sdk}' (expected typescript, python, or go)"
+                    "unknown sdk '{sdk}' (expected {})",
+                    DEFAULT_SDKS.join(", ")
                 ))
             })?;
         if let Some(command) = &config.harness_override {
@@ -643,7 +1095,7 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
             break;
         }
         let chunk_seed = config.seed.wrapping_add(chunk as u64);
-        let bundle = match &config.bundle_path {
+        let mut bundle = match &config.bundle_path {
             Some(path) => {
                 CaseBundle::from_json(&std::fs::read_to_string(path)?).map_err(DiffError::Config)?
             }
@@ -655,6 +1107,14 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
                 },
             ),
         };
+        // A replayed bundle keeps the audit inputs it was generated with --
+        // otherwise its receipts would not be the receipts it recorded -- and
+        // only `emit_receipts` is a property of this run rather than of the
+        // bundle.
+        if config.emit_receipts {
+            bundle.audit.emit_receipts = true;
+        }
+        let bundle = bundle;
         let bundle_file = config.bundles_dir.join(format!("bundle-{chunk_seed}.json"));
         std::fs::write(
             &bundle_file,
@@ -668,12 +1128,17 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
 
         for evaluator in &mut evaluators {
             let report = evaluator.evaluate_bundle(&bundle)?;
-            let options = CompareOptions {
-                ignore_reason: config.ignore_reason,
-                ignore_rule_trace: config.ignore_rule_trace,
-                ignore_content_hash: config.ignore_content_hash,
-            };
-            for divergence in compare_reports(&oracle_report, &report, &options) {
+            let options = config.compare_options();
+            for mut divergence in compare_reports(&oracle_report, &report, &options) {
+                // A receipt divergence reported as two hashes says nothing an
+                // auditor can act on. Re-run that one case with the receipts
+                // themselves -- under the same receipt id, so what comes back
+                // is what was hashed -- and record where they first differ.
+                if divergence.kind == DivergenceKind::Receipt
+                    && divergence.receipt_difference.is_none()
+                {
+                    enrich_receipt_divergence(&bundle, &mut divergence, evaluator);
+                }
                 if config.minimize {
                     handle_divergence(
                         config,
@@ -706,6 +1171,62 @@ pub fn run_difftest(config: &DifftestConfig) -> Result<DifftestOutcome, DiffErro
     Ok(outcome)
 }
 
+/// Re-run one diverging case with `audit.emit_receipts`, on both sides, and
+/// record what came back: the two receipts, on the verdicts the report
+/// carries, and the member they first differ on.
+///
+/// Best-effort by design: a harness that fails or answers differently the
+/// second time leaves the divergence reported as the two hashes it already
+/// is. Doing nothing never hides a divergence, it only leaves it terse.
+fn enrich_receipt_divergence(
+    bundle: &CaseBundle,
+    divergence: &mut Divergence,
+    failing: &mut dyn CaseEvaluator,
+) {
+    // Group-keyed receipt divergences (the policy-identity receipt) have no
+    // single action to re-run, and neither does a key this bundle never
+    // produced.
+    let Some((group, case, position)) = bundle.find_case(&divergence.case_key) else {
+        return;
+    };
+    let probe = CaseBundle::single_case_at(
+        group.policy.clone(),
+        case.action.clone(),
+        &bundle.audit,
+        position,
+    );
+    let mut oracle = InProcessEvaluator;
+    let (Ok(oracle_report), Ok(failing_report)) = (
+        oracle.evaluate_bundle(&probe),
+        failing.evaluate_bundle(&probe),
+    ) else {
+        return;
+    };
+    let key = "g0001/a0001";
+    let (Some(oracle_verdict), Some(failing_verdict)) = (
+        oracle_report.results.get(key),
+        failing_report.results.get(key),
+    ) else {
+        return;
+    };
+
+    divergence.receipt_difference = receipt_difference(oracle_verdict, failing_verdict);
+    // Carry the receipts themselves into the report, so the artifact a
+    // nightly run uploads holds the evidence and not only a pointer at it.
+    // Only the receipt is taken from the second pass; every other field stays
+    // as the run observed it.
+    for (target, probe) in [
+        (&mut divergence.oracle, oracle_verdict),
+        (&mut divergence.observed, failing_verdict),
+    ] {
+        if let (CaseVerdict::Ok { result: target }, CaseVerdict::Ok { result: probe }) =
+            (target, probe)
+        {
+            target.receipt = probe.receipt.clone();
+        }
+    }
+}
+
 fn handle_divergence(
     config: &DifftestConfig,
     bundle: &CaseBundle,
@@ -718,12 +1239,7 @@ fn handle_divergence(
     // malformed key from a misbehaving harness) cannot be minimized. Record it
     // as-is rather than aborting the whole run and discarding the real
     // divergences already collected in this chunk.
-    let resolved = divergence.case_key.split_once('/').and_then(|(gid, aid)| {
-        let group = bundle.groups.iter().find(|group| group.id == gid)?;
-        let case = group.actions.iter().find(|case| case.id == aid)?;
-        Some((group, case))
-    });
-    let Some((group, case)) = resolved else {
+    let Some((group, case, _)) = bundle.find_case(&divergence.case_key) else {
         outcome.divergences.push(divergence);
         return Ok(());
     };
@@ -734,11 +1250,7 @@ fn handle_divergence(
         &case.action,
         &mut oracle,
         failing,
-        &CompareOptions {
-            ignore_reason: config.ignore_reason,
-            ignore_rule_trace: config.ignore_rule_trace,
-            ignore_content_hash: config.ignore_content_hash,
-        },
+        &config.compare_options(),
         &crate::minimize::MinimizeConfig::default(),
     ) {
         Ok(minimized) => minimized,
@@ -758,12 +1270,19 @@ fn handle_divergence(
             .values()
             .next()
             .ok_or_else(|| DiffError::Config("empty oracle report".to_string()))?;
-        if let Ok((filename, yaml)) =
-            crate::emit::build_regression_fixture(&minimized, verdict, config.seed)
-            && emitted.insert(filename.clone())
-        {
-            let path = crate::emit::write_regression_fixture(dir, &filename, &yaml)?;
-            outcome.fixtures.push(path);
+        match crate::emit::build_regression_fixture(&minimized, verdict, config.seed) {
+            Ok((filename, yaml)) => {
+                if emitted.insert(filename.clone()) {
+                    let path = crate::emit::write_regression_fixture(dir, &filename, &yaml)?;
+                    outcome.fixtures.push(path);
+                }
+            }
+            // Say so: a caller who passed --emit-fixtures and got none has no
+            // other way to learn the emitter refused this case.
+            Err(error) => eprintln!(
+                "note: no regression fixture for {}: {error}",
+                divergence.case_key
+            ),
         }
     }
 
@@ -774,6 +1293,22 @@ fn handle_divergence(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Serializes the test that arms the process-wide panic latch against the
+    /// ones that call `run_difftest`, which refuses to run while it is armed.
+    /// `hushspec::activate_panic` sets one global flag and this binary runs
+    /// its tests in parallel, so without a latch of our own an unrelated
+    /// difftest can observe the arming and fail.
+    static PANIC_LATCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Hold [`PANIC_LATCH`], ignoring poisoning: a panicking test has already
+    /// reported its own failure, and blocking every later one behind it would
+    /// only hide which test really broke.
+    fn panic_latch() -> std::sync::MutexGuard<'static, ()> {
+        PANIC_LATCH
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
 
     /// `(decision, matched_rule, reason)` plus the `(rule_block, outcome)`
     /// sequence of the trace -- everything the differential comparison looks
@@ -852,9 +1387,10 @@ mod tests {
         );
     }
 
-    /// The oracle must report the trace, not just the verdict: a trace-only
+    /// The reference must report the trace, not just the verdict: a trace-only
     /// disagreement is a real evaluator divergence (it is what a receipt
-    /// records), and before P1-12 it was invisible to the fuzzer.
+    /// records), so the bundle protocol carries the trace and not only the
+    /// decision.
     #[test]
     fn oracle_reports_a_rule_trace_and_trace_only_differences_diverge() {
         let bundle = CaseBundle::single_case(
@@ -872,7 +1408,7 @@ mod tests {
         };
         assert!(
             !result.rule_trace.is_empty(),
-            "the oracle must surface the evaluator's rule trace"
+            "the reference must surface the evaluator's rule trace"
         );
 
         // Same verdict, empty trace: exactly what a harness that forgot to
@@ -901,7 +1437,7 @@ mod tests {
         assert!(compare_reports(&report, &observed, &options).is_empty());
     }
 
-    /// The oracle reports one canonical content hash per group, over the
+    /// The reference reports one canonical content hash per group, over the
     /// *resolved* policy. A harness that reports a different hash -- or none
     /// at all -- is a divergence, because a receipt or signature made by that
     /// SDK would name a policy the others cannot recognize.
@@ -918,7 +1454,7 @@ mod tests {
         let expected = report.groups["g0001"]
             .content_hash
             .clone()
-            .expect("the oracle hashes an accepted policy");
+            .expect("the reference hashes an accepted policy");
         assert!(expected.starts_with("sha256:"), "{expected}");
         let resolved = parse_policy(&bundle.groups[0].policy).expect("policy resolves");
         assert_eq!(expected, hushspec::content_hash(&resolved).expect("hashes"));
@@ -940,10 +1476,19 @@ mod tests {
             groups: BTreeMap::new(),
             ..report.clone()
         };
+        // ...and loses both group-level facts: the policy's identity and the
+        // identity its receipts would record.
         let divergences = compare_reports(&report, &silent, &CompareOptions::default());
-        assert_eq!(divergences.len(), 1);
-        assert_eq!(divergences[0].kind, DivergenceKind::ContentHash);
-        assert_eq!(divergences[0].case_key, "g0001");
+        assert_eq!(
+            divergences
+                .iter()
+                .map(|divergence| (divergence.case_key.as_str(), divergence.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                ("g0001", DivergenceKind::ContentHash),
+                ("g0001", DivergenceKind::Receipt),
+            ]
+        );
 
         // A harness that computes a different identity is the real bug this
         // comparison exists to catch.
@@ -953,6 +1498,7 @@ mod tests {
             "g0001".to_string(),
             GroupReport {
                 content_hash: Some(format!("{}0", &expected[..expected.len() - 1])),
+                receipt_hash: report.groups["g0001"].receipt_hash.clone(),
             },
         );
         let divergences = compare_reports(&report, &wrong, &CompareOptions::default());
@@ -965,10 +1511,235 @@ mod tests {
             ..CompareOptions::default()
         };
         assert!(compare_reports(&report, &wrong, &options).is_empty());
-        assert!(compare_reports(&report, &silent, &options).is_empty());
+        // The silent harness still loses its group-level receipt hash, which
+        // `--ignore-content-hash` has no business suppressing.
+        let both = CompareOptions {
+            ignore_content_hash: true,
+            ignore_receipts: true,
+            ..CompareOptions::default()
+        };
+        assert!(compare_reports(&report, &silent, &both).is_empty());
     }
 
-    /// A policy the oracle rejects has no identity to report, and a harness
+    /// A harness whose receipt differs -- even when its decision, rule trace
+    /// and every other compared field agree -- is a divergence, and the report
+    /// names the member that differs rather than two opaque digests.
+    #[test]
+    fn a_receipt_only_difference_diverges_and_names_the_differing_member() {
+        let mut bundle = CaseBundle::single_case(
+            serde_json::json!({
+                "hushspec": "0.2.0",
+                "rules": {"tool_access": {"allow": ["read_file"], "default": "block"}}
+            }),
+            serde_json::json!({"type": "tool_call", "target": "read_file"}),
+        );
+        bundle.audit.emit_receipts = true;
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        let CaseVerdict::Ok { result } = &report.results["g0001/a0001"] else {
+            panic!("the reference must evaluate this case");
+        };
+        assert!(
+            result.receipt_hash.is_some(),
+            "the reference records a receipt"
+        );
+
+        // Everything the pre-receipt fuzzer compared still agrees; only the
+        // recorded evidence differs -- here, an actor the SDK dropped.
+        let mut stale = result.clone();
+        let mut receipt = result.receipt.clone().expect("receipts were requested");
+        receipt
+            .as_object_mut()
+            .expect("a receipt is an object")
+            .remove("actor");
+        stale.receipt_hash = Some(
+            hushspec::receipt::DecisionReceipt::parse(&receipt.to_string())
+                .expect("receipt round-trips")
+                .receipt_hash()
+                .expect("hashes"),
+        );
+        stale.receipt = Some(receipt);
+        let observed = SdkReport {
+            sdk: "python".to_string(),
+            results: [("g0001/a0001".to_string(), CaseVerdict::Ok { result: stale })]
+                .into_iter()
+                .collect(),
+            groups: report.groups.clone(),
+        };
+
+        let divergences = compare_reports(&report, &observed, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::Receipt);
+        let difference = divergences[0]
+            .receipt_difference
+            .as_ref()
+            .expect("both receipts were reported, so the diff is right there");
+        assert_eq!(difference.member, "/actor");
+        assert!(difference.oracle.is_some());
+        assert!(difference.observed.is_none());
+        assert!(difference.to_string().contains("<absent>"));
+
+        // ...and --ignore-receipts suppresses exactly that.
+        let options = CompareOptions {
+            ignore_receipts: true,
+            ..CompareOptions::default()
+        };
+        assert!(compare_reports(&report, &observed, &options).is_empty());
+    }
+
+    /// A harness that predates the audited protocol reports no receipt hash at
+    /// all. That must fail closed -- it is the difference between "the SDKs
+    /// agree on the evidence" and "one of them was never asked".
+    #[test]
+    fn a_harness_that_reports_no_receipt_hash_diverges() {
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0", "rules": {"tool_access": {"allow": ["x"]}}}),
+            serde_json::json!({"type": "tool_call", "target": "x"}),
+        );
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        let CaseVerdict::Ok { result } = &report.results["g0001/a0001"] else {
+            panic!("the reference must evaluate this case");
+        };
+        let mut silent = result.clone();
+        silent.receipt_hash = None;
+        let observed = SdkReport {
+            sdk: "typescript".to_string(),
+            results: [(
+                "g0001/a0001".to_string(),
+                CaseVerdict::Ok { result: silent },
+            )]
+            .into_iter()
+            .collect(),
+            groups: report.groups.clone(),
+        };
+        let divergences = compare_reports(&report, &observed, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::Receipt);
+        // No receipts were reported, so there is nothing to diff: the run
+        // re-runs the case to fetch them (see `enrich_receipt_divergence`).
+        assert!(divergences[0].receipt_difference.is_none());
+    }
+
+    /// The group-level `receipt_hash` is the policy identity every receipt in
+    /// the group embeds, and it changes with the summary -- not with the
+    /// action, the clock, or the receipt id.
+    #[test]
+    fn the_group_receipt_hash_tracks_the_policy_summary() {
+        let named = serde_json::json!({
+            "hushspec": "0.2.0",
+            "name": "alpha",
+            "rules": {"tool_access": {"allow": ["read_file"]}}
+        });
+        let mut renamed = named.clone();
+        renamed["name"] = serde_json::json!("beta");
+
+        let mut oracle = InProcessEvaluator;
+        let hash_of = |policy: serde_json::Value, oracle: &mut InProcessEvaluator| {
+            let bundle = CaseBundle::single_case(
+                policy,
+                serde_json::json!({"type": "tool_call", "target": "read_file"}),
+            );
+            oracle.evaluate_bundle(&bundle).expect("evaluates").groups["g0001"]
+                .receipt_hash
+                .clone()
+                .expect("an accepted policy has an identity receipt")
+        };
+        let first = hash_of(named.clone(), &mut oracle);
+        assert!(first.starts_with("sha256:"), "{first}");
+        assert_ne!(
+            first,
+            hash_of(renamed, &mut oracle),
+            "a renamed policy is a different identity in every receipt"
+        );
+
+        // A different action against the same policy leaves it untouched.
+        let other_action = CaseBundle::single_case(
+            named,
+            serde_json::json!({"type": "tool_call", "target": "shell_exec"}),
+        );
+        assert_eq!(
+            oracle
+                .evaluate_bundle(&other_action)
+                .expect("evaluates")
+                .groups["g0001"]
+                .receipt_hash,
+            Some(first)
+        );
+    }
+
+    /// The first difference is the first one a reader of the two *canonical*
+    /// forms reaches: members in RFC 8785 order, array entries by index, and
+    /// a JSON Pointer that escapes `/` and `~`.
+    #[test]
+    fn first_difference_walks_canonical_order() {
+        let left = serde_json::json!({"b": 1, "a": {"z": [1, 2, 3]}});
+        let right = serde_json::json!({"b": 2, "a": {"z": [1, 9, 3]}});
+        // "a" sorts before "b", so the nested array difference wins.
+        let difference = first_difference(&left, &right, "").expect("they differ");
+        assert_eq!(difference.member, "/a/z/1");
+        assert_eq!(difference.oracle, Some(serde_json::json!(2)));
+        assert_eq!(difference.observed, Some(serde_json::json!(9)));
+
+        assert!(first_difference(&left, &left, "").is_none());
+
+        // A member only one side has, and pointer escaping.
+        let left = serde_json::json!({"a/b": 1});
+        let right = serde_json::json!({"a/b": 1, "c~d": 2});
+        let difference = first_difference(&left, &right, "").expect("they differ");
+        assert_eq!(difference.member, "/c~0d");
+        assert_eq!(difference.oracle, None);
+
+        // Shorter array: the first missing index is the difference.
+        let left = serde_json::json!([1, 2]);
+        let right = serde_json::json!([1]);
+        assert_eq!(
+            first_difference(&left, &right, "")
+                .expect("they differ")
+                .member,
+            "/1"
+        );
+
+        // Different types at the root have no member to name.
+        let difference =
+            first_difference(&serde_json::json!(1), &serde_json::json!("1"), "").expect("differ");
+        assert_eq!(difference.member, "");
+        assert!(difference.to_string().starts_with("<root>"));
+    }
+
+    /// Audit inputs the receipt format does not define must stop the run, not
+    /// quietly fall back to a default: a bundle nobody can replay produces
+    /// agreement about nothing.
+    #[test]
+    fn unreadable_audit_inputs_fail_closed() {
+        let mut oracle = InProcessEvaluator;
+        for broken in [
+            AuditSpec {
+                clock: "the day before yesterday".to_string(),
+                ..AuditSpec::default()
+            },
+            AuditSpec {
+                time_source: "vibes".to_string(),
+                ..AuditSpec::default()
+            },
+            AuditSpec {
+                enforcement_mode: "advisory".to_string(),
+                ..AuditSpec::default()
+            },
+        ] {
+            let mut bundle = CaseBundle::single_case(
+                serde_json::json!({"hushspec": "0.2.0"}),
+                serde_json::json!({"type": "tool_call", "target": "x"}),
+            );
+            bundle.audit = broken;
+            assert!(
+                matches!(oracle.evaluate_bundle(&bundle), Err(DiffError::Config(_))),
+                "the reference must refuse audit inputs it cannot replay"
+            );
+        }
+    }
+
+    /// A policy the reference rejects has no identity to report, and a harness
     /// that rejects it too must agree by also reporting none.
     #[test]
     fn a_rejected_policy_reports_no_content_hash() {
@@ -1008,13 +1779,13 @@ mod tests {
         );
     }
 
-    /// Generating a Wave 2 rule block is not the same as *reaching* it: a
+    /// Generating a 0.2 rule block is not the same as *reaching* it: a
     /// block that is disabled, gated off by a false `when`, or short-circuited
     /// by the origins/posture guards is traced as `skip` and proves nothing.
-    /// Assert the oracle actually evaluates the new blocks over a generated
+    /// Assert the reference actually evaluates the new blocks over a generated
     /// corpus, and that detection escalates at least one verdict.
     #[test]
-    fn generated_corpus_actually_reaches_the_wave_two_evaluators() {
+    fn generated_corpus_actually_reaches_the_0_2_evaluators() {
         let bundle = crate::r#gen::generate_bundle(
             5,
             &crate::r#gen::GenConfig {
@@ -1064,6 +1835,199 @@ mod tests {
             detection_escalations > 0,
             "no generated case was escalated by the detection extension"
         );
+    }
+
+    /// Detection is only *compared* if it actually runs. Assert that a
+    /// generated corpus produces receipts whose `detection_trace` covers both
+    /// wired categories, every level the receipt spec defines, both values of
+    /// `matched`, and -- the case a byte budget exists for -- scans the policy
+    /// truncated mid-content.
+    ///
+    /// Without this, `detection_trace` could be uniformly empty across all
+    /// four SDKs and the fuzzer would report agreement about nothing.
+    #[test]
+    fn generated_corpus_exercises_the_detection_trace_inside_receipts() {
+        let mut bundle = crate::r#gen::generate_bundle(
+            11,
+            &crate::r#gen::GenConfig {
+                groups: 200,
+                actions_per_group: 4,
+            },
+        );
+        bundle.audit.emit_receipts = true;
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+
+        let mut categories: std::collections::BTreeSet<String> = Default::default();
+        let mut levels: std::collections::BTreeSet<String> = Default::default();
+        let mut matched = std::collections::BTreeSet::new();
+        let mut traces = 0usize;
+        for verdict in report.results.values() {
+            let CaseVerdict::Ok { result } = verdict else {
+                continue;
+            };
+            let receipt = result.receipt.as_ref().expect("receipts were requested");
+            let Some(trace) = receipt.get("detection_trace").and_then(|t| t.as_array()) else {
+                continue;
+            };
+            traces += 1;
+            for entry in trace {
+                categories.insert(entry["category"].as_str().unwrap_or_default().to_string());
+                levels.insert(entry["level"].as_str().unwrap_or_default().to_string());
+                matched.insert(entry["matched"].as_bool().unwrap_or_default());
+            }
+        }
+
+        assert!(traces > 0, "no generated case ran the detection pipeline");
+        assert_eq!(
+            categories,
+            ["jailbreak", "prompt_injection"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        );
+        for level in ["none", "low", "suspicious", "high", "critical"] {
+            assert!(
+                levels.contains(level),
+                "no detector ever scored `{level}` (saw {levels:?})"
+            );
+        }
+        assert_eq!(
+            matched,
+            [false, true].into_iter().collect(),
+            "a detector must both meet and miss the policy's thresholds"
+        );
+        assert!(
+            truncating_detection_cases(&bundle) > 0,
+            "no generated case scanned less content than it carried: the \
+             max_scan_bytes / max_input_bytes edge is never reached"
+        );
+    }
+
+    /// Cases whose policy sets a detection byte budget smaller than the
+    /// content the action carries -- the scans that actually truncate.
+    fn truncating_detection_cases(bundle: &CaseBundle) -> usize {
+        let mut count = 0;
+        for group in &bundle.groups {
+            let Some(detection) = group.policy.pointer("/extensions/detection") else {
+                continue;
+            };
+            let budgets: Vec<u64> = [
+                "/prompt_injection/max_scan_bytes",
+                "/jailbreak/max_input_bytes",
+            ]
+            .into_iter()
+            .filter_map(|path| detection.pointer(path).and_then(serde_json::Value::as_u64))
+            .collect();
+            if budgets.is_empty() {
+                continue;
+            }
+            for case in &group.actions {
+                let Some(content) = case.action.get("content").and_then(|c| c.as_str()) else {
+                    continue;
+                };
+                if budgets.iter().any(|budget| *budget < content.len() as u64) {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// Every case of a generated bundle records a receipt, and its id is the
+    /// one the bundle's audit block dictates: the deterministic UUID v7 for
+    /// that case's position. Four SDKs can only compare receipts if they all
+    /// derive the id the same way from the bundle alone.
+    #[test]
+    fn every_evaluated_case_records_a_receipt_with_the_bundle_s_receipt_id() {
+        let mut bundle = crate::r#gen::generate_bundle(
+            13,
+            &crate::r#gen::GenConfig {
+                groups: 25,
+                actions_per_group: 4,
+            },
+        );
+        bundle.audit.emit_receipts = true;
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+        let millis = bundle.audit.clock_millis().expect("clock parses");
+
+        let mut checked = 0;
+        for (key, verdict) in &report.results {
+            let CaseVerdict::Ok { result } = verdict else {
+                continue;
+            };
+            let receipt = result.receipt.as_ref().expect("receipts were requested");
+            let position = bundle.case_position(key).expect("case is in the bundle");
+            assert_eq!(
+                receipt["receipt_id"].as_str().unwrap_or_default(),
+                deterministic_uuid_v7(millis, bundle.audit.index_base + position),
+                "{key}: receipt id must come from the bundle, not from an RNG"
+            );
+            assert_eq!(receipt["timestamp"], bundle.audit.clock);
+            assert_eq!(receipt["time_source"], "trusted");
+            assert_eq!(receipt["enforcement"]["mode"], "enforce");
+            assert!(
+                receipt.get("duration_us").is_none(),
+                "{key}: a receipt whose bytes depend on the machine is not comparable"
+            );
+            assert_eq!(receipt["decision"], result.decision);
+            assert_eq!(
+                result.receipt_hash.as_deref(),
+                Some(
+                    hushspec::receipt::DecisionReceipt::parse(&receipt.to_string())
+                        .expect("receipt round-trips")
+                        .receipt_hash()
+                        .expect("hashes")
+                        .as_str()
+                ),
+                "{key}: the reported hash must be the hash of the reported receipt"
+            );
+            checked += 1;
+        }
+        assert!(checked > 50, "only {checked} cases evaluated");
+    }
+
+    /// A case carved out of a bundle for a second look must reproduce the very
+    /// receipt that was hashed -- same id, same bytes -- or the "first
+    /// differing member" the report shows would be the carving, not the bug.
+    #[test]
+    fn a_carved_out_case_reproduces_the_receipt_it_was_carved_from() {
+        let mut bundle = crate::r#gen::generate_bundle(
+            17,
+            &crate::r#gen::GenConfig {
+                groups: 5,
+                actions_per_group: 4,
+            },
+        );
+        bundle.audit.emit_receipts = true;
+        let mut oracle = InProcessEvaluator;
+        let report = oracle.evaluate_bundle(&bundle).expect("oracle evaluates");
+
+        let mut compared = 0;
+        for group in &bundle.groups {
+            for case in &group.actions {
+                let key = format!("{}/{}", group.id, case.id);
+                let CaseVerdict::Ok { result } = &report.results[&key] else {
+                    continue;
+                };
+                let position = bundle.case_position(&key).expect("case is in the bundle");
+                let probe = CaseBundle::single_case_at(
+                    group.policy.clone(),
+                    case.action.clone(),
+                    &bundle.audit,
+                    position,
+                );
+                let carved = oracle.evaluate_bundle(&probe).expect("oracle evaluates");
+                let CaseVerdict::Ok { result: carved } = &carved.results["g0001/a0001"] else {
+                    panic!("{key}: the carved case must still evaluate");
+                };
+                assert_eq!(carved.receipt_hash, result.receipt_hash, "{key}");
+                assert_eq!(carved.receipt, result.receipt, "{key}");
+                compared += 1;
+            }
+        }
+        assert_eq!(compared, 20);
     }
 
     /// An unresolvable `extends` is a rejection with its own phase, not a
@@ -1118,6 +2082,8 @@ mod tests {
                 origin_profile: None,
                 posture: None,
                 rule_trace: Vec::new(),
+                receipt_hash: None,
+                receipt: None,
             },
         }
     }
@@ -1218,17 +2184,16 @@ mod tests {
         let oracle = report_of("rust", &[("k", ok_verdict("allow", None, Some("a")))]);
         let observed = report_of("py", &[("k", ok_verdict("allow", None, Some("b")))]);
         let options = CompareOptions {
-            ignore_rule_trace: false,
-            ignore_content_hash: false,
             ignore_reason: true,
+            ..CompareOptions::default()
         };
         assert!(compare_reports(&oracle, &observed, &options).is_empty());
     }
 
     #[test]
     fn compare_reports_flags_a_phantom_case_not_in_the_oracle() {
-        // The oracle-driven loop above only ever walks the oracle's keys, so
-        // a harness that *adds* a case key the oracle (and therefore the
+        // The reference-driven loop above only ever walks the reference's keys, so
+        // a harness that *adds* a case key the reference (and therefore the
         // bundle) never produced would be invisible without a symmetric
         // check in the other direction. This must never be silent: it is
         // harness-integrity evidence, not an ordinary verdict disagreement.
@@ -1374,8 +2339,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_difftest_detects_divergence_from_a_lying_harness() {
+        let _latch = panic_latch();
         // A stub "typescript" harness that always answers allow-with-no-rule,
-        // which must diverge from the oracle on the deny cases the generator
+        // which must diverge from the reference on the deny cases the generator
         // produces (and at minimum differ in matched_rule/reason on others).
         let dir = tempfile::tempdir().expect("tempdir");
         let stub = r#"#!/bin/sh
@@ -1411,6 +2377,8 @@ EOF
             ignore_reason: false,
             ignore_rule_trace: false,
             ignore_content_hash: true,
+            ignore_receipts: true,
+            emit_receipts: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -1434,6 +2402,7 @@ EOF
 
     #[test]
     fn run_difftest_requires_at_least_one_sdk() {
+        let _latch = panic_latch();
         let config = DifftestConfig {
             seed: 1,
             groups_per_chunk: 1,
@@ -1448,6 +2417,8 @@ EOF
             ignore_reason: false,
             ignore_rule_trace: false,
             ignore_content_hash: true,
+            ignore_receipts: true,
+            emit_receipts: false,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,
@@ -1458,9 +2429,10 @@ EOF
     #[test]
     #[cfg(unix)]
     fn run_difftest_never_silently_drops_a_phantom_case_key() {
+        let _latch = panic_latch();
         // A stub harness that answers correctly for every real case AND adds
         // one case key the bundle never produced. Even if every real answer
-        // happened to agree with the oracle, the invented key must still
+        // happened to agree with the reference, the invented key must still
         // surface as a divergence -- proof that run_difftest's comparison is
         // symmetric in key coverage, not just oracle-driven.
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1496,6 +2468,8 @@ EOF
             ignore_reason: false,
             ignore_rule_trace: false,
             ignore_content_hash: true,
+            ignore_receipts: true,
+            emit_receipts: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: None,
             harness_override: Some(vec![
@@ -1521,6 +2495,7 @@ EOF
     #[test]
     #[cfg(unix)]
     fn run_difftest_minimizes_and_emits_a_fixture_via_bundle_replay() {
+        let _latch = panic_latch();
         // Neither of the two tests above ever sets `minimize: true`, so
         // `handle_divergence` (minimize_case + build_regression_fixture +
         // write_regression_fixture wiring) and the `bundle_path` replay
@@ -1530,9 +2505,9 @@ EOF
         // terminates in at most a handful of subprocess spawns.
         //
         // The policy carries an `extends` and the action a runtime `context`
-        // -- the two P1-12 fields the generator now emits and that the fixture
-        // schema cannot express verbatim (no `extends` resolver in the
-        // runners, no `context` on the schema's `Action`). Putting them in the
+        // -- the two generated fields the fixture schema cannot express
+        // verbatim (no `extends` resolver in the runners, no `context` on the
+        // schema's `Action`). Putting them in the
         // input proves the minimize -> emit -> discover -> run_conformance
         // round-trip really does flatten and relocate them, rather than
         // emitting a fixture that is quietly wrong.
@@ -1554,7 +2529,7 @@ EOF
             .expect("write bundle");
 
         // Always answers "allow" for every case actually present in the
-        // bundle it's given -- diverges from the oracle's expected "deny" on
+        // bundle it's given -- diverges from the reference's expected "deny" on
         // the input case, and (unlike a hardcoded single-key stub) still
         // answers correctly during minimization, which probes multi-group
         // candidate bundles, not just the original one-case bundle.
@@ -1593,6 +2568,8 @@ EOF
             ignore_reason: false,
             ignore_rule_trace: false,
             ignore_content_hash: true,
+            ignore_receipts: true,
+            emit_receipts: false,
             repo_root: dir.path().to_path_buf(),
             bundle_path: Some(bundle_path),
             harness_override: Some(vec![
@@ -1645,10 +2622,110 @@ EOF
         );
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn run_difftest_fetches_the_receipts_of_a_receipt_divergence() {
+        // The first pass compares hashes, so a receipt divergence arrives as
+        // two digests and nothing else. Prove the run then goes back for the
+        // receipts themselves -- the stub only emits one when the bundle asks
+        // (`audit.emit_receipts`), which the first pass never does -- and
+        // reports where they first differ.
+        let _latch = panic_latch();
+        let dir = tempfile::tempdir().expect("tempdir");
+        // No rules at all: the reference allows with no matched rule, which the
+        // stub can mirror exactly, so the receipt is the only thing left to
+        // disagree about.
+        let bundle = CaseBundle::single_case(
+            serde_json::json!({"hushspec": "0.2.0"}),
+            serde_json::json!({"type": "tool_call", "target": "x"}),
+        );
+        let bundle_path = dir.path().join("input-bundle.json");
+        std::fs::write(&bundle_path, bundle.to_json().expect("bundle serializes"))
+            .expect("write bundle");
+
+        // Agrees on the decision, disagrees on the evidence.
+        let stub = r#"#!/bin/sh
+python3 - "$1" <<'EOF'
+import json, sys
+bundle = json.load(open(sys.argv[1]))
+emit = bundle.get("audit", {}).get("emit_receipts", False)
+results = {}
+for group in bundle["groups"]:
+    for case in group["actions"]:
+        result = {"decision": "allow", "receipt_hash": "sha256:" + "0" * 64}
+        if emit:
+            result["receipt"] = {"decision": "allow"}
+        results[f"{group['id']}/{case['id']}"] = {"status": "ok", "result": result}
+print(json.dumps({"sdk": "typescript", "results": results}))
+EOF
+"#;
+        std::fs::create_dir_all(dir.path().join("scripts")).expect("mkdir scripts");
+        std::fs::write(dir.path().join("scripts/diffeval_ts.mjs"), stub).expect("write stub");
+
+        let config = DifftestConfig {
+            seed: 4,
+            groups_per_chunk: 0,
+            actions_per_group: 0,
+            chunks: 1,
+            max_seconds: None,
+            sdks: vec!["typescript".to_string()],
+            minimize: false,
+            emit_fixtures_dir: None,
+            report_path: None,
+            bundles_dir: dir.path().join("bundles"),
+            ignore_reason: true,
+            ignore_rule_trace: true,
+            ignore_content_hash: true,
+            ignore_receipts: false,
+            emit_receipts: false,
+            repo_root: dir.path().to_path_buf(),
+            bundle_path: Some(bundle_path),
+            harness_override: Some(vec![
+                "sh".to_string(),
+                dir.path()
+                    .join("scripts/diffeval_ts.mjs")
+                    .display()
+                    .to_string(),
+            ]),
+        };
+        let outcome = run_difftest(&config).expect("difftest runs");
+        let divergence = outcome
+            .divergences
+            .iter()
+            .find(|divergence| divergence.case_key == "g0001/a0001")
+            .expect("the case's receipt must diverge");
+        assert_eq!(divergence.kind, DivergenceKind::Receipt);
+        let difference = divergence
+            .receipt_difference
+            .as_ref()
+            .expect("the second pass must bring the receipts back");
+        // `action` sorts first among the members the reference's receipt has and
+        // the stub's does not.
+        assert_eq!(difference.member, "/action");
+        assert!(difference.observed.is_none());
+
+        // ...and the receipts themselves land on the reported verdicts, so an
+        // uploaded report holds the evidence rather than a pointer at it.
+        let CaseVerdict::Ok { result } = &divergence.oracle else {
+            panic!("the reference evaluated this case");
+        };
+        assert_eq!(
+            result.receipt.as_ref().expect("oracle receipt")["decision"],
+            "allow"
+        );
+        let CaseVerdict::Ok { result } = &divergence.observed else {
+            panic!("the stub answered this case");
+        };
+        assert_eq!(
+            result.receipt.as_ref().expect("harness receipt"),
+            &serde_json::json!({"decision": "allow"})
+        );
+    }
+
     /// `PANIC_ACTIVE` is one global `AtomicBool` in the `hushspec` crate
     /// (see `hushspec::panic`), so any test that activates it risks a
-    /// window where another concurrently-running test's `evaluate()` call
-    /// observes it. `hushspec`'s own test suite accepts the same tradeoff
+    /// window where a test running in parallel observes it from its own
+    /// `evaluate()` call. `hushspec`'s own test suite accepts the same tradeoff
     /// (see the `TEST_LOCK`-guarded tests in `hushspec::panic::tests`) with
     /// no cross-crate synchronization primitive exposed for us to share, so
     /// the best available mitigation here is a `Drop` guard that
@@ -1664,6 +2741,7 @@ EOF
 
     #[test]
     fn run_difftest_rejects_when_panic_mode_is_active() {
+        let _latch = panic_latch();
         hushspec::activate_panic();
         let _guard = PanicModeGuard;
         let config = DifftestConfig {
@@ -1680,6 +2758,8 @@ EOF
             ignore_reason: false,
             ignore_rule_trace: false,
             ignore_content_hash: true,
+            ignore_receipts: true,
+            emit_receipts: false,
             repo_root: std::path::PathBuf::from("."),
             bundle_path: None,
             harness_override: None,

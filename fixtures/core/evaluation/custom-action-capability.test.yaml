@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D1 (core 5, posture 3.3): a custom action is permitted only when the current posture state grants the custom capability"
+description: "A custom action is permitted only when the current posture state grants the custom capability (core spec 5, posture spec 3.3)"
 policy:
   hushspec: "0.1.0"
   extensions:

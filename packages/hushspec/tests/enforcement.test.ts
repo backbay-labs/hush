@@ -25,7 +25,7 @@ describe('receipt enforcement summary', () => {
     );
     expect(receipt.decision).toBe('deny');
     // Required in 0.2, never absent: a warn or deny with no confirmation
-    // channel blocks (core spec D16, receipt spec 4.7).
+    // channel blocks (core spec 6, receipt spec 4.7).
     expect(receipt.enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
   });
 

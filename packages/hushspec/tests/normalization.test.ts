@@ -7,10 +7,9 @@ import {
   punycodeEncode,
 } from '../src/evaluate.js';
 
-// D5/D6 (core spec 3.14.1, 3.14.2). The reference implementation is
-// `normalize_host` / `normalize_path` in crates/hushspec/src/evaluate.rs.
+// Host and path normalization (core spec 3.14.1, 3.14.2).
 
-describe('normalizeHost (D5)', () => {
+describe('normalizeHost', () => {
   it('reduces an egress target to a bare host', () => {
     const cases: Array<[string, string | undefined]> = [
       ['api.example.com', 'api.example.com'],
@@ -45,7 +44,7 @@ describe('normalizeHost (D5)', () => {
   });
 });
 
-describe('hostPatternMatches (D5)', () => {
+describe('hostPatternMatches', () => {
   it('treats `*` as exactly one label and `**` as one or more', () => {
     expect(hostPatternMatches('*.example.org', 'a.example.org')).toBe(true);
     expect(hostPatternMatches('*.example.org', 'a.b.example.org')).toBe(false);
@@ -73,7 +72,7 @@ describe('hostPatternMatches (D5)', () => {
   });
 });
 
-describe('punycodeEncode (D5)', () => {
+describe('punycodeEncode', () => {
   it('matches the RFC 3492 reference encodings', () => {
     expect(punycodeEncode('bücher')).toBe('bcher-kva');
     expect(punycodeEncode('münchen')).toBe('mnchen-3ya');
@@ -83,7 +82,7 @@ describe('punycodeEncode (D5)', () => {
   });
 });
 
-describe('normalizePath (D6)', () => {
+describe('normalizePath', () => {
   it('resolves separators, dot segments and NFC', () => {
     const cases: Array<[string, string]> = [
       ['/proj/../.env', '/.env'],
@@ -103,7 +102,7 @@ describe('normalizePath (D6)', () => {
   });
 });
 
-describe('pathGlobMatches (D6)', () => {
+describe('pathGlobMatches', () => {
   it('never lets `?` or `*` cross a separator', () => {
     expect(pathGlobMatches('/a?b', '/axb')).toBe(true);
     expect(pathGlobMatches('/a?b', '/a/b')).toBe(false);

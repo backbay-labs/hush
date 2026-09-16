@@ -63,7 +63,9 @@ from hushspec.generated_contract import (
     POSTURE_KEYS,
     POSTURE_STATE_KEYS,
     POSTURE_TRANSITION_KEYS,
+    PROMPT_INJECTION_HEURISTICS_KEYS,
     PROMPT_INJECTION_KEYS,
+    RATE_CONDITION_KEYS,
     REMOTE_DESKTOP_KEYS,
     RULE_KEYS,
     SECRET_PATTERN_KEYS,
@@ -75,7 +77,14 @@ from hushspec.generated_contract import (
     TOP_LEVEL_KEYS,
 )
 
-__all__ = ["CanonicalError", "canonical_json", "canonical_json_value", "content_hash"]
+__all__ = [
+    "CanonicalError",
+    "canonical_json",
+    "canonical_json_value",
+    "content_hash",
+    "digest",
+    "is_content_hash",
+]
 
 #: Self-describing prefix of a content hash (spec section 5).
 HASH_PREFIX = "sha256:"
@@ -211,11 +220,15 @@ def _plain(value: Any) -> Any:
 
 _CONDITION = _Obj(CONDITION_KEYS)
 _TIME_WINDOW = _Obj(TIME_WINDOW_KEYS, defaults={"timezone": "UTC"}, required=("start", "end"))
+_RATE_CONDITION = _Obj(
+    RATE_CONDITION_KEYS, required=("counter", "threshold", "comparison")
+)
 _CONDITION.children = {
     "time_window": _TIME_WINDOW,
     "all_of": _ArrayOf(_CONDITION),
     "any_of": _ArrayOf(_CONDITION),
     "not": _CONDITION,
+    "rate": _RATE_CONDITION,
 }
 
 _SECRET_PATTERN = _Obj(SECRET_PATTERN_KEYS, required=("name", "pattern", "severity"))
@@ -370,17 +383,25 @@ _ORIGINS_ROOT.children = {"profiles": _ArrayOf(_ORIGIN_PROFILE)}
 
 # -- detection extension (schemas/hushspec-detection.v0.schema.json) -------- #
 
+_PROMPT_INJECTION = _Obj(
+    PROMPT_INJECTION_KEYS,
+    defaults={
+        "enabled": True,
+        "warn_at_or_above": "suspicious",
+        "block_at_or_above": "high",
+        "max_scan_bytes": 200000,
+    },
+)
+_PROMPT_INJECTION.children = {
+    "heuristics": _Obj(
+        PROMPT_INJECTION_HEURISTICS_KEYS,
+        defaults={"enabled": True, "min_score": 0},
+    ),
+}
+
 _DETECTION_ROOT = _Obj(DETECTION_KEYS)
 _DETECTION_ROOT.children = {
-    "prompt_injection": _Obj(
-        PROMPT_INJECTION_KEYS,
-        defaults={
-            "enabled": True,
-            "warn_at_or_above": "suspicious",
-            "block_at_or_above": "high",
-            "max_scan_bytes": 200000,
-        },
-    ),
+    "prompt_injection": _PROMPT_INJECTION,
     "jailbreak": _Obj(
         JAILBREAK_KEYS,
         defaults={
@@ -606,11 +627,32 @@ def canonical_json_value(value: Any) -> str:
     return _jcs(_plain(value))
 
 
+def digest(canonical: str) -> str:
+    """``sha256:`` + 64 lowercase hex over the UTF-8 bytes of *canonical*.
+
+    The one place a content hash is computed: a receipt hash, a log entry
+    hash, a bundle subject digest and a policy hash are all this function over
+    different canonical text.
+    """
+    return HASH_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def is_content_hash(value: Any) -> bool:
+    """Whether *value* is a wire content hash: ``sha256:`` + 64 lowercase hex.
+
+    The spelling is normative (spec section 5), so an upper-case or
+    wrong-length digest is not one.
+    """
+    if not isinstance(value, str) or not value.startswith(HASH_PREFIX):
+        return False
+    hex_part = value[len(HASH_PREFIX):]
+    return len(hex_part) == 64 and all(c in "0123456789abcdef" for c in hex_part)
+
+
 def content_hash(spec: Any) -> str:
     """Return ``sha256:<64 lowercase hex>`` over the canonical form (spec section 5).
 
     The prefix is part of the wire value everywhere a content hash appears, so a
     verifier can reject an algorithm it does not implement instead of guessing.
     """
-    digest = hashlib.sha256(canonical_json(spec).encode("utf-8")).hexdigest()
-    return HASH_PREFIX + digest
+    return digest(canonical_json(spec))

@@ -295,7 +295,7 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctxWithTime('2026-01-17T03:00:00Z'))).toBe(true);
     });
 
-    it('keeps the block active when the timezone cannot be resolved (D15)', () => {
+    it('keeps the block active when the timezone cannot be resolved', () => {
       // Core spec 3.13: a window the engine cannot evaluate must not switch a
       // control off, so an unresolvable zone leaves the rule block ACTIVE.
       const cond: Condition = {
@@ -417,7 +417,7 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition({}, {})).toBe(true);
     });
 
-    it('keeps the block active past the nesting cap (D15)', () => {
+    it('keeps the block active past the nesting cap', () => {
       // Validation rejects this at parse time; at evaluation time a condition
       // the engine cannot evaluate must leave the block ACTIVE (core spec 3.13).
       let cond: Condition = { context: { environment: 'nowhere' } };
@@ -540,7 +540,7 @@ describe('evaluateWithContext', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Parse-time validation (D15, core spec 3.13)
+// Parse-time validation (core spec 3.13)
 // ---------------------------------------------------------------------------
 
 describe('validateCondition', () => {

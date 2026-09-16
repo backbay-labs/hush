@@ -40,7 +40,7 @@ An implementation conforms as a **signer** if every envelope it produces validat
 
 An implementation conforms as a **verifier** if, for every case in `fixtures/signing/vectors.yaml`, it returns the expected outcome: `valid`, or invalid with the expected reason code (Section 6.4).
 
-An engine conforms at **Level 5, Attested** (RFC 09 P4-03) if it is a conforming verifier, performs verification on load (Section 6.5), and records the outcome in every receipt's `policy.signature`.
+An engine conforms at **Level 5, Attested** (Core Section 8) if it is a conforming verifier, performs verification on load (Section 6.5), and records the outcome in every receipt's `policy.signature`.
 
 ---
 
@@ -261,7 +261,7 @@ Signatures were produced with the reference canonicalizer for the signing input 
 | `retired-key` | `key_retired` |
 | `revoked-key` | `key_revoked` |
 
-No SDK runner walks `fixtures/signing/` until RFC 09 P2-07 ports signing to all four SDKs.
+Every SDK runs these vectors; a divergence between engines is a conformance failure.
 
 ---
 

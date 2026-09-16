@@ -8,10 +8,13 @@ policy-in-effect event (log spec section 6); only a log does anything with one.
 
 from __future__ import annotations
 
+import enum
 import json
 import sys
+import threading
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Callable, Optional
 
 from hushspec.receipt import DecisionReceipt, receipt_to_dict
 
@@ -33,14 +36,23 @@ class ReceiptSink(ABC):
 
 
 class FileReceiptSink(ReceiptSink):
+    """Appends each receipt to a file as one JSON line.
+
+    The file is opened per receipt, so nothing is buffered across calls and a
+    crash loses only a receipt that was mid-write. Writes are serialized on an
+    instance lock: ``O_APPEND`` alone is atomic for a small record on a local
+    filesystem, but not for one larger than the buffer size, and not on NFS.
+    """
 
     def __init__(self, path: str) -> None:
         self._path = path
+        self._lock = threading.Lock()
 
     def send(self, receipt: DecisionReceipt) -> None:
         line = json.dumps(receipt_to_dict(receipt), default=_json_default)
-        with open(self._path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        with self._lock:
+            with open(self._path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
 
 class StderrReceiptSink(ReceiptSink):
@@ -51,10 +63,21 @@ class StderrReceiptSink(ReceiptSink):
 
 
 class FilteredSink(ReceiptSink):
+    """Passes on only the receipts whose decision is in *decisions*."""
 
-    def __init__(self, inner: ReceiptSink, decisions: list[str]) -> None:
+    def __init__(self, inner: ReceiptSink, decisions: Iterable[str]) -> None:
+        if isinstance(decisions, (str, bytes)) or not isinstance(
+            decisions, Iterable
+        ):
+            raise TypeError(
+                "FilteredSink(decisions=...) takes a collection of decision "
+                'names, e.g. ["deny", "warn"]; see FilteredSink.deny_only'
+            )
         self._inner = inner
-        self._decisions = decisions
+        self._decisions = frozenset(
+            value.value if isinstance(value, enum.Enum) else str(value)
+            for value in decisions
+        )
 
     @classmethod
     def deny_only(cls, sink: ReceiptSink) -> "FilteredSink":
@@ -77,23 +100,46 @@ class FilteredSink(ReceiptSink):
 
 
 class MultiSink(ReceiptSink):
+    """Fans a receipt out to several sinks.
 
-    def __init__(self, sinks: list[ReceiptSink]) -> None:
+    One sink failing must not stop the others, or the enforcement point, so a
+    failure is counted in :attr:`dropped` and passed to *on_error* rather than
+    raised. Without a handler the loss is silent, which is why the counter is
+    there.
+    """
+
+    def __init__(
+        self,
+        sinks: list[ReceiptSink],
+        on_error: Optional[Callable[[ReceiptSink, Exception], None]] = None,
+    ) -> None:
         self._sinks = list(sinks)
+        self._on_error = on_error
+        #: Records a downstream sink refused, across every sink.
+        self.dropped = 0
 
     def send(self, receipt: DecisionReceipt) -> None:
         for sink in self._sinks:
             try:
                 sink.send(receipt)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                self._failed(sink, exc)
 
     def record_policy_event(self, event: "PolicyEvent") -> None:
         for sink in self._sinks:
             try:
                 sink.record_policy_event(event)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                self._failed(sink, exc)
+
+    def _failed(self, sink: ReceiptSink, exc: Exception) -> None:
+        self.dropped += 1
+        if self._on_error is None:
+            return
+        try:
+            self._on_error(sink, exc)
+        except Exception:  # noqa: BLE001 - a broken handler is not fatal
+            pass
 
 
 class CallbackSink(ReceiptSink):
@@ -112,8 +158,6 @@ class NullSink(ReceiptSink):
 
 
 def _json_default(obj: object) -> object:
-    import enum
-
     if isinstance(obj, enum.Enum):
         return obj.value
     raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")

@@ -270,10 +270,10 @@ rules:
     expect(result.reason).toContain('RE2 subset');
   });
 
-  // D3 (core 3.7): tool names are exact strings. Glob metacharacters in an
-  // allow/block entry are literal, so wildcard behavior is exercised through
-  // the path globs of `forbidden_paths`, which is where it still lives.
-  describe('tool names are matched exactly (D3)', () => {
+  // Core spec 3.7: tool names are exact strings. Glob metacharacters in an
+  // allow/block entry are literal, so wildcard behaviour is exercised through
+  // the path globs of `forbidden_paths`, which is where it lives.
+  describe('tool names are matched exactly', () => {
     const toolSpec = (entry: string): HushSpec => ({
       hushspec: '0.1.0',
       name: 'tool-exact',
@@ -300,11 +300,9 @@ rules:
     });
   });
 
-  // Spec item C for TS (wave-3): the glob translator's compiled RegExp was
-  // missing the 'u' flag, so `?` matched a single UTF-16 code unit instead of
-  // a full Unicode code point. An astral character like an emoji is TWO UTF-16
-  // code units (a surrogate pair), so without 'u' a single `?` only ever
-  // consumed half of it and the glob failed to match.
+  // Core spec 3.14.1: `?` matches one *code point*. An astral character such
+  // as an emoji is two UTF-16 code units, so the compiled RegExp carries the
+  // `u` flag -- without it a single `?` would consume only half of one.
   describe('path glob `?` wildcard is code-point-aware', () => {
     const globSpec = (pattern: string): HushSpec => ({
       hushspec: '0.1.0',
@@ -327,19 +325,16 @@ rules:
       expect(evaluate(spec, { type: 'file_read', target: 'ab' }).decision).toBe('allow');
     });
 
-    it('`?` never crosses a separator (D6)', () => {
+    it('`?` never crosses a separator', () => {
       expect(evaluate(globSpec('/a?b'), { type: 'file_read', target: '/a/b' }).decision)
         .toBe('allow');
     });
   });
 
-  // CRITICAL parity fix (v3, item CR/LS/PS): the glob translator emitted `.`
-  // for `?`/`**`, but JavaScript `.` -- even under the `u` flag -- excludes
-  // every line terminator (`\n \r` U+2028 U+2029), whereas the Rust/Python/Go
-  // reference `.` excludes only `\n`. A target with an interior `\r` therefore
-  // slipped past a `**`/`?` glob in TS ONLY, letting `forbidden_paths.patterns`
-  // / `tool_access.block` be bypassed. The translator now emits `[^\n]`, which
-  // excludes only `\n`, matching the reference engines exactly.
+  // Core spec 3.14.1: a glob wildcard excludes only `\n`. JavaScript's `.` --
+  // even under the `u` flag -- also excludes `\r`, U+2028 and U+2029, so the
+  // translator emits `[^\n]` instead. Emitting `.` would let a target with an
+  // interior CR slip past a `**`/`?` glob and bypass `forbidden_paths`.
   describe('glob wildcards match targets with interior line terminators', () => {
     it('`**` matches a target with an interior CR (forbidden path is NOT bypassed)', () => {
       const spec: HushSpec = {

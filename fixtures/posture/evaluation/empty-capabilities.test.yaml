@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D11 (posture 3): a state with an empty capabilities list denies every capability-requiring action; ungated action types are unaffected"
+description: "A state with an empty capabilities list denies every capability-requiring action; ungated action types are unaffected (posture spec 3)"
 policy:
   hushspec: "0.1.0"
   rules:

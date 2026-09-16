@@ -1,0 +1,19 @@
+# Hop 1 of 3 (the root). Sets the organisation-wide floor.
+hushspec: "0.2.0"
+name: org-root
+description: organisation baseline
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+      - "**/.aws/**"
+  egress:
+    allow:
+      - "a.example.com"
+    default: block
+  tool_access:
+    allow: []
+    block:
+      - shell_exec
+    require_confirmation: []
+    default: allow

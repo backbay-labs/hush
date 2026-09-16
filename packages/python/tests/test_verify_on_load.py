@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from hushspec.canonical import content_hash
-from hushspec.evaluate import Decision, EvaluationAction
+from hushspec.evaluate import Decision
 from hushspec.middleware import (
     UNVERIFIED_POLICY_HASH,
     POLICY_SIGNATURE_RULE,

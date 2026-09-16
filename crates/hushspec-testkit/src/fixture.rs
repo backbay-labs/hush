@@ -54,36 +54,77 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
         ("detection/invalid", FixtureCategory::DetectionInvalid),
     ];
 
+    // The vertical-library suites (`fixtures/library/<vertical>/*.test.yaml`)
+    // are evaluator fixtures like any other, one directory deeper.
+    let mut categories: Vec<(String, FixtureCategory)> = categories
+        .iter()
+        .map(|(subdir, category)| ((*subdir).to_string(), *category))
+        .collect();
+    if let Ok(entries) = std::fs::read_dir(fixtures_dir.join("library")) {
+        let mut verticals: Vec<String> = entries
+            .flatten()
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| format!("library/{}", entry.file_name().to_string_lossy()))
+            .collect();
+        verticals.sort();
+        categories.extend(
+            verticals
+                .into_iter()
+                .map(|subdir| (subdir, FixtureCategory::Evaluation)),
+        );
+    }
+
     for (subdir, category) in &categories {
         let dir = fixtures_dir.join(subdir);
         if !dir.exists() {
             continue;
         }
 
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "yaml" || e == "yml") {
-                    let content = std::fs::read_to_string(&path).unwrap_or_default();
-                    let mut cat = *category;
+        // Merge vectors nest: a case that needs its own base -- a digest pin
+        // names one exact document -- gets a subdirectory rather than
+        // colliding with the shared base.yaml. The three SDK runners already
+        // walk for those, so this walks too.
+        let files = if *category == FixtureCategory::MergeBase {
+            crate::manifest::walk(&dir)
+        } else {
+            let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .collect();
+            files.sort();
+            files
+        };
 
-                    // Categorize merge fixtures more specifically.
-                    if *category == FixtureCategory::MergeBase {
-                        let filename = path.file_stem().unwrap_or_default().to_string_lossy();
-                        if filename.starts_with("child-") {
-                            cat = FixtureCategory::MergeChild;
-                        } else if filename.starts_with("expected-") {
-                            cat = FixtureCategory::MergeExpected;
-                        }
-                    }
+        for path in files {
+            if path.extension().is_none_or(|e| e != "yaml" && e != "yml") {
+                continue;
+            }
+            // Expected-error sidecars describe the vector beside them; they
+            // are not vectors themselves.
+            if crate::expect::is_sidecar(&path) {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let mut cat = *category;
 
-                    fixtures.push(TestFixture {
-                        path,
-                        category: cat,
-                        content,
-                    });
+            // Categorize merge fixtures more specifically.
+            if *category == FixtureCategory::MergeBase {
+                let filename = path.file_stem().unwrap_or_default().to_string_lossy();
+                if filename.starts_with("child-") {
+                    cat = FixtureCategory::MergeChild;
+                } else if filename.starts_with("expected-") {
+                    cat = FixtureCategory::MergeExpected;
                 }
             }
+
+            fixtures.push(TestFixture {
+                path,
+                category: cat,
+                content,
+            });
         }
     }
 

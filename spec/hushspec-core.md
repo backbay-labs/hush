@@ -3,7 +3,7 @@
 **Version:** 0.2.0 (Draft)
 **Status:** Draft
 **Date:** 2026-09-14
-**Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of ratified changes.
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of changes.
 
 ---
 
@@ -17,7 +17,7 @@ The specification defines a YAML-based document format that any conformant engin
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119.
 
-**Test vector.** A fixture file under `fixtures/` in the reference repository that exercises a requirement. Where a requirement names a test vector, a conformant engine MUST produce the decisions that vector expects. Vectors marked *staged* (`fixtures/staged/`) encode requirements ratified in this version that the reference implementation has not yet shipped; they become normative for conformance when promoted into `fixtures/`.
+**Test vector.** A fixture file under `fixtures/` in the reference repository that exercises a requirement. Where a requirement names a test vector, a conformant engine MUST produce the decisions that vector expects.
 
 ### 1.2 Design Principles
 
@@ -456,6 +456,8 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `all_of`      | array of Condition      | Every sub-condition must be true.                                                           |
 | `any_of`      | array of Condition      | At least one sub-condition must be true. An empty array is treated as absent.               |
 | `not`         | Condition               | The sub-condition must be false.                                                            |
+| `capability`  | string                  | The effective posture state MUST grant this capability. Unevaluable when the policy has no posture extension. |
+| `rate`        | object                  | An engine-supplied counter compared with a threshold. See below.                          |
 
 **Time window object.**
 
@@ -466,25 +468,47 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 | `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset `+HH:MM`/`-HH:MM`. |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
 
+**Rate condition object.**
+
+| Field        | Type    | Required | Description                                                                                  |
+|--------------|---------|----------|----------------------------------------------------------------------------------------------|
+| `counter`    | string  | REQUIRED | Name of a counter in the runtime context's `counters` map (identifier grammar below).       |
+| `threshold`  | integer | REQUIRED | Non-negative.                                                                                |
+| `comparison` | string  | REQUIRED | `gte` (true when `counter >= threshold`) or `lt` (true when `counter < threshold`).          |
+
+The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation.
+
+**Capability condition.** `capability` names a posture capability (posture spec Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
+
+**Identifier grammar.** Capability names and counter names are one or more dot-separated segments, each a lowercase ASCII letter followed by lowercase ASCII letters, digits, or underscores:
+
+```abnf
+identifier = segment *("." segment)
+segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+```
+
 The window is half-open: it contains the current local time `t` when `start <= t < end`. When `start > end` the window wraps midnight and contains `t` when `t >= start` or `t < end`; for wrapped windows, a time before `end` counts toward the *previous* calendar day when `days` is checked. When `start == end` the window is the whole day. The current time is the engine's clock converted to `timezone`, or the runtime context's `current_time` when supplied.
 
-**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
+**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
 - has a `time_window` whose `start` or `end` is not `HH:MM` with `00 <= HH <= 23` and `00 <= MM <= 59`;
 - has a `timezone` that is neither an IANA identifier known to the engine nor a fixed offset;
 - lists a `days` entry outside the seven abbreviations;
-- nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep.
+- has a `capability` or a `rate.counter` that does not match the identifier grammar;
+- has a `rate` object missing `counter`, `threshold`, or `comparison`, a negative `threshold`, or a `comparison` other than `gte` / `lt`;
+- nests condition objects (`all_of`, `any_of`, `not`) more than 8 levels deep. `capability` and `rate` are leaf predicates and do not add nesting.
 
 **Evaluation (fail-closed toward enforcement).**
 - A `context` key that is absent from the runtime context makes the condition `false`.
 - An engine that cannot resolve the `timezone` at evaluation time (for example because its time-zone database lacks the identifier) MUST treat the block as **active**, not inert: an unresolvable condition MUST NOT switch a security control off.
-- Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation.
+- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are **unevaluable** and MUST be treated as held: the block stays active. An unevaluable condition MUST NOT switch a security control off.
+- Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation. Because `capability` depends on the effective posture state, engines resolve posture (and the origins profile it may come from) before evaluating conditions.
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`.
 
 ### 3.14 Pattern Matching
 
@@ -688,7 +712,10 @@ Test vectors: `fixtures/core/invalid/`.
 
 ## 8. Conformance Levels
 
-Implementations of HushSpec declare conformance at one of four levels. Each level subsumes all requirements of the levels below it.
+Implementations of HushSpec declare conformance at one of six levels. Each level subsumes all requirements of the levels below it: an implementation claiming Level N MUST satisfy every requirement of Levels 0 through N.
+
+A conformance claim is made against a specific corpus. The vectors under `fixtures/` in the reference repository are inventoried by `fixtures/MANIFEST.json`, which records for every file its SHA-256, its category, and the level at which it becomes REQUIRED. A claim MUST name the corpus by the SHA-256 of that manifest. The machine-readable form of a claim is a document conforming to `schemas/hushspec-conformance-report.v0.schema.json`; a level reported as `not_attempted` is not a pass.
+
 
 ### Level 0: Parser
 
@@ -703,6 +730,7 @@ A Level 1 implementation additionally:
 - Validates all field types and constraints as specified in Section 7.
 - Rejects documents with unknown fields at any nesting level.
 - Validates enum values, uniqueness constraints, numeric constraints, the regex profile, and conditions.
+- Rejects every vector under `fixtures/<module>/invalid/`. An implementation that reports error codes MUST report, for each such vector, the code named in its `<name>.expect.yaml` sidecar and MUST include any `message_contains` substring the sidecar names. Codes are registered in `spec/registries/error-codes.yaml` and the sidecar format is `schemas/hushspec-error-codes.v0.schema.json`. An implementation that reports no codes at all still conforms at this level; one that reports codes from the registry MUST report the registered one.
 
 ### Level 2: Merger
 
@@ -717,7 +745,34 @@ A Level 3 implementation additionally:
 - Accepts an action (type + inputs) and a resolved HushSpec document.
 - Produces a correct `allow`, `warn`, or `deny` decision per the semantics defined in Sections 3, 5, and 6, including the normalization and matching algorithms of Section 3.14.
 - Implements aggregation and precedence as defined in Section 6.1 and denies unknown action types per Section 5.
-- Passes the HushSpec conformance test vectors under `fixtures/` in the reference repository.
+- Passes every vector under `fixtures/<module>/evaluation/`: for each case, the decision, and each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `schemas/hushspec-evaluator-test.v0.schema.json`.
+
+### Level 4: Auditor
+
+Level 3 says an engine reaches the right decision. Level 4 says it can prove which document it reached it under, and why, to someone who was not there.
+
+A Level 4 implementation additionally:
+- Emits decision receipts at format version 0.2 that validate against `schemas/hushspec-receipt.v0.schema.json`, per the Receipt specification Section 2.
+- Computes `policy.content_hash` as the canonical content hash of the **resolved** document, per the Canonical Form specification. Passes every vector under `fixtures/core/hash/`: for each, the canonical text byte for byte and the resulting digest.
+- **Records** `rule_trace` during evaluation rather than reconstructing it afterwards, satisfying Receipt specification Section 4.3. Every applicable rule block MUST appear in evaluation order, with the closed `rule_block` identifiers of the receipt schema.
+- Produces, for every case of every evaluation vector, a receipt byte-identical after RFC 8785 canonicalization to the committed vector under `fixtures/receipts/expected/<module>/<fixture stem>/<case index>.json`, under the fixed inputs that directory's README states.
+- Accepts every vector under `fixtures/receipts/valid/` and rejects every vector under `fixtures/receipts/invalid/`.
+- Resolves `extends` with chain provenance: passes every vector under `fixtures/core/resolve/`, producing the expected resolved `content_hash` and the expected chain of `{source, content_hash}` links, or the expected rejection reason. This includes `#sha256:` digest pinning (Section 2.3).
+
+A Level 4 engine's output is audit evidence: given a receipt and the policy it names, a third party can recompute the hash, replay the trace, and get the same answer.
+
+### Level 5: Attested
+
+Level 4 evidence is only as trustworthy as the document it was produced under. Level 5 adds provenance: which policy was in force, who signed it, and whether the record has been tampered with since.
+
+A Level 5 implementation additionally:
+- Is a conforming **verifier** under the Signing specification Section 2: for every case in `fixtures/signing/vectors.yaml` it returns `valid`, or invalid with the exact reason code of Signing specification Section 6.4.
+- Performs **verification on load** (Signing specification Section 6.5): every hop of an `extends` chain is verified against the trusted keyring or its digest pin, the load fails closed when a signature is required and absent or invalid, and the outcome is recorded in every receipt's `policy.signature`.
+- Verifies a hash-linked log: passes every vector under `fixtures/log/valid/`, including the rotated pair as one chain, and rejects every vector under `fixtures/log/invalid/` **at the line the file name names**. Detecting that a log is broken is not enough; an implementation MUST identify where.
+- Signs and verifies receipts: passes every vector under `fixtures/receipts/signed/valid/` and rejects every vector under `fixtures/receipts/signed/invalid/`.
+- Verifies policy bundles: for every case in `fixtures/bundle/vectors.yaml` it returns `valid` or the exact reason code of the Bundle specification Section 5.4.
+
+An implementation MAY conform at Level 5 for verification only. Producing signatures, logs and bundles is described by the same specifications, but a verifier is what a conformance claim at this level asserts, because verification is what a relying party depends on.
 
 ---
 
@@ -852,25 +907,28 @@ rules:
 
 ## Appendix D. Changes from 0.1.0
 
-Each entry names the decision ID from RFC 09 (`docs/plans/09-compliance-as-code-plan.md`).
+Each entry names the section of this specification it changed. Changes to the
+extension specifications are listed in their own appendices.
 
-| ID  | Section        | Change                                                                                                   |
-|-----|----------------|----------------------------------------------------------------------------------------------------------|
-| D1  | 5              | Unknown and `custom` action types deny (`__unknown_action_type__`) instead of allow.                     |
-| D2  | 6.1, 5         | Every applicable block is evaluated and aggregated; allowlist and exception matches no longer short-circuit. Normative applicable-block table added. |
-| D3  | 3.7            | Tool names are exact strings; glob matching of tool names is forbidden.                                   |
-| D4  | 3.7            | Allowlist mode denies unlisted tools; `default` is consulted only when `allow` is empty.                   |
-| D5  | 3.3, 3.14.2    | Host normalization algorithm (scheme, userinfo, port, path, case, trailing dot, IDNA); `*` is one label, `**` one or more; IP literals match exactly. |
-| D6  | 3.1, 3.14.1    | Path normalization algorithm (NFC, separators, `.`/`..`, trailing slash); `?` and `*` never cross `/`; brackets and braces literal. |
-| D7  | 3.14.3         | "PCRE2-compatible" replaced by the HushSpec regex profile with ASCII class semantics; compile failure at evaluation denies. |
-| D8  | 3.4            | Severity-to-decision table; worst severity wins; scanned action types enumerated.                         |
-| D9  | 3.8            | `guardrail` denies unlisted actions; heuristic leniency withdrawn; `fail_closed` is an alias.             |
-| D10 | 3.5            | `require_balance` with a zero side denies; counting rule made explicit.                                    |
-| D11 | posture 3      | Empty `capabilities` denies all (see posture spec Appendix C).                                             |
-| D12 | origins 2, 3, 4| `default_behavior` enforced; priority by `space_id` then field count; tri-state profile overlays; absent `match` never matches (see origins spec Appendix B). |
-| D13 | 3.11, 3.12, 5  | `browser_automation` and `code_execution` documented; `browser_action` and `code_exec` action types added; twelve rule blocks. |
-| D14 | 2.2, 10.1      | Engines accept every patch version of a supported minor version.                                          |
-| D15 | 3.0, 3.13, 7   | `when` conditional rule blocks specified as a document field with parse-time validation.                 |
-| D16 | 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
-| D17 | 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
-| --  | 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
+| Section        | Change                                                                                                   |
+|----------------|----------------------------------------------------------------------------------------------------------|
+| 2.2, 10.1      | Engines accept every patch version of a supported minor version.                                          |
+| 2.3, 2.5, 4    | `metadata` documented; resolved documents exclude `extends` and `merge_strategy`; engines evaluate only resolved documents. |
+| 2.4            | YAML 1.2 Core profile; duplicate keys, anchors, aliases, merge keys rejected; resource limits.             |
+| 3.0, 3.13, 7   | `when` conditional rule blocks specified as a document field with parse-time validation.                   |
+| 3.1, 3.14.1    | Path normalization algorithm (NFC, separators, `.`/`..`, trailing slash); `?` and `*` never cross `/`; brackets and braces literal. |
+| 3.3, 3.14.2    | Host normalization algorithm (scheme, userinfo, port, path, case, trailing dot, IDNA); `*` is one label, `**` one or more; IP literals match exactly. |
+| 3.4            | Severity-to-decision table; worst severity wins; scanned action types enumerated.                         |
+| 3.5            | `require_balance` with a zero side denies; counting rule made explicit.                                    |
+| 3.7            | Tool names are exact strings; glob matching of tool names is forbidden. Allowlist mode denies unlisted tools; `default` is consulted only when `allow` is empty. |
+| 3.8            | `guardrail` denies unlisted actions; heuristic leniency withdrawn; `fail_closed` is an alias.             |
+| 3.11, 3.12, 5  | `browser_automation` and `code_execution` documented; `browser_action` and `code_exec` action types added; twelve rule blocks. |
+| 3.13           | `when` gains the `capability` and `rate` leaf predicates; the runtime context gains `counters`; identifier grammar for capability and counter names. |
+| 3.14.3         | "PCRE2-compatible" replaced by the HushSpec regex profile with ASCII class semantics; compile failure at evaluation denies. |
+| 5              | Unknown and `custom` action types deny (`__unknown_action_type__`) instead of allow.                       |
+| 6              | `warn` without a confirmation channel MUST be treated as `deny`.                                           |
+| 6.1, 5         | Every applicable block is evaluated and aggregated; allowlist and exception matches no longer short-circuit. Normative applicable-block table added. |
+| posture 3      | Empty `capabilities` denies all (see posture spec Appendix C).                                             |
+| posture 5.3    | Named `from` outranks `"*"` for the same trigger (see posture spec Appendix C).                             |
+| origins 2, 3, 4| `default_behavior` enforced; priority by `space_id` then field count; tri-state profile overlays; absent `match` never matches (see origins spec Appendix B). |
+| detection 3.5  | The normative `heuristic_injection@1` detector: integer scoring over a fixed signal table, reproduced exactly by every engine. |

@@ -1,0 +1,18 @@
+# Hop 2 of 3. Replaces the root's egress block and adds a secret_patterns
+# block; the root's forbidden_paths and tool_access are untouched and must
+# survive into the leaf. Not a `child-*.yaml`, so no runner treats it as a
+# vector of its own -- it is reached only by resolving the leaf's chain.
+hushspec: "0.2.0"
+name: team-mid
+extends: "base.yaml#sha256:69ae80eaa6f6ddb46354215c36fc399036c883c021277ed8e5f9818d42e12b17"
+rules:
+  egress:
+    allow:
+      - "a.example.com"
+      - "b.example.com"
+    default: block
+  secret_patterns:
+    patterns:
+      - name: team_token
+        pattern: "TEAMTOKEN[0-9]+"
+        severity: error

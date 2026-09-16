@@ -918,23 +918,7 @@ fn is_content_hash(value: &str) -> bool {
 }
 
 /// `YYYY-MM-DDTHH:MM:SS.sssZ`, the one timestamp form 0.2 accepts.
-fn is_millisecond_timestamp(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 24 || bytes[23] != b'Z' {
-        return false;
-    }
-    let shape = b"####-##-##T##:##:##.###Z";
-    for (byte, expected) in bytes.iter().zip(shape) {
-        let ok = match expected {
-            b'#' => byte.is_ascii_digit(),
-            other => byte == other,
-        };
-        if !ok {
-            return false;
-        }
-    }
-    DateTime::parse_from_rfc3339(value).is_ok()
-}
+use crate::receipt::is_millisecond_timestamp;
 
 #[cfg(test)]
 mod tests {

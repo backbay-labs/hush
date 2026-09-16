@@ -12,7 +12,7 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-posture.v0.schema.json` | Posture extension schema (v0.x) |
 | `hushspec-origins.v0.schema.json` | Origins extension schema (v0.x) |
 | `hushspec-detection.v0.schema.json` | Detection extension schema (v0.x) |
-| `hushspec-evaluator-test.v0.schema.json` | Evaluation test fixture format used by `h2h test`, the testkit, and every SDK's shared-fixture runner |
+| `hushspec-evaluator-test.v0.schema.json` | Evaluation test fixture format used by `h2h test`, the testkit, and every SDK's shared-fixture runner. Format `0.2.0` adds per-case `controls` and `tags` and the `expect.rule_trace` / `expect.receipt` assertions; `0.1.0` fixtures stay valid |
 | `hushspec-hash-vector.v0.schema.json` | Canonical-form test vector format ([`fixtures/core/hash/`](https://github.com/backbay-labs/hush/tree/main/fixtures/core/hash)); see the [canonical form spec](../canonical-spec.md) |
 | `hushspec-receipt.v0.schema.json` | Decision receipt format 0.2; see the [receipt spec](../receipt-spec.md) |
 | `hushspec-log-entry.v0.schema.json` | Hash-linked log entry (receipts and policy events) written by chained sinks and checked by `h2h log verify` |
@@ -20,6 +20,9 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-keyring.v0.schema.json` | Trusted keyring consumed by verify-on-load and `h2h verify --keyring` |
 | `hushspec-bundle.v0.schema.json` | Policy bundle attestation (DSSE envelope with an in-toto statement) produced by `h2h bundle create` |
 | `hushspec-framework-registry.v0.schema.json` | Schema for [`spec/registries/frameworks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/frameworks.yaml), the compliance frameworks `metadata.controls[].framework` may name |
+| `hushspec-error-codes.v0.schema.json` | Schema for [`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml) and for the `<name>.expect.yaml` sidecars that pin the code each `invalid/` vector is rejected with |
+| `hushspec-merge-vector.v0.schema.json` | The merge-vector directory convention under `fixtures/*/merge/` (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, optional `fixture.yaml`) |
+| `hushspec-conformance-report.v0.schema.json` | Conformance report emitted by `hushspec-testkit --report`; see [Conformance Levels](conformance.md) |
 
 Every schema is embedded in the `h2h` binary; `h2h schema --list` prints the names and `h2h schema <name>` prints one to stdout.
 

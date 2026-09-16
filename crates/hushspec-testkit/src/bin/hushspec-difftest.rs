@@ -33,8 +33,8 @@ struct Cli {
     #[arg(long)]
     max_seconds: Option<u64>,
 
-    /// SDKs to compare against the Rust oracle (repeatable; default: all three)
-    #[arg(long = "sdk", value_parser = ["typescript", "python", "go"])]
+    /// SDKs to compare against the reference (repeatable; default: all three)
+    #[arg(long = "sdk", value_parser = hushspec_testkit::diff::DEFAULT_SDKS)]
     sdks: Vec<String>,
 
     /// Minimize each divergence before reporting
@@ -65,6 +65,15 @@ struct Cli {
     #[arg(long)]
     ignore_content_hash: bool,
 
+    /// Compare everything except the format 0.2 decision receipts
+    #[arg(long)]
+    ignore_receipts: bool,
+
+    /// Report the full receipt of every case, not only of the ones that
+    /// diverge (a diverging case is always re-run for its receipts)
+    #[arg(long)]
+    emit_receipts: bool,
+
     /// Replay an existing bundle instead of generating
     #[arg(long)]
     bundle: Option<PathBuf>,
@@ -78,11 +87,10 @@ fn main() {
         (None, None) => random_seed(),
     };
     let sdks = if cli.sdks.is_empty() {
-        vec![
-            "typescript".to_string(),
-            "python".to_string(),
-            "go".to_string(),
-        ]
+        hushspec_testkit::diff::DEFAULT_SDKS
+            .iter()
+            .map(|sdk| (*sdk).to_string())
+            .collect()
     } else {
         cli.sdks.clone()
     };
@@ -102,6 +110,8 @@ fn main() {
         ignore_reason: cli.ignore_reason,
         ignore_rule_trace: cli.ignore_rule_trace,
         ignore_content_hash: cli.ignore_content_hash,
+        ignore_receipts: cli.ignore_receipts,
+        emit_receipts: cli.emit_receipts,
         repo_root: repo_root(),
         bundle_path: cli.bundle,
         harness_override: None,
@@ -120,6 +130,9 @@ fn main() {
                     "  DIVERGE [{}] {} ({:?})",
                     divergence.sdk, divergence.case_key, divergence.kind
                 );
+                if let Some(difference) = &divergence.receipt_difference {
+                    println!("    first differing receipt member {difference}");
+                }
             }
             for fixture in &outcome.fixtures {
                 println!("  fixture candidate: {}", fixture.display());

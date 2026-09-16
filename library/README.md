@@ -6,16 +6,20 @@ Curated, compliance-mapped HushSpec policies for regulated industries and common
 
 ## Policies
 
-| Policy | File | Frameworks (registry id) | Description |
-|--------|------|--------------------------|-------------|
-| HIPAA Base | `healthcare/hipaa-base.yaml` | `hipaa-2013` | PHI protection, restricted egress to health endpoints, clinical data pattern detection |
-| SOC2 Base | `finance/soc2-base.yaml` | `soc2-tsc-2017` | Access controls, change management, transmission security for SOC2-audited environments |
-| PCI-DSS | `finance/pci-dss.yaml` | `pci-dss-4.0` | Card number detection (Visa, MC, Amex, Discover), CVV/track data blocking, CDE path protection |
-| FedRAMP Base | `government/fedramp-base.yaml` | `nist-800-53-r5` | .gov/.mil egress default, CUI path protection, minimal tool access |
-| FERPA Student | `education/ferpa-student.yaml` | `ferpa` | Student PII detection, education record path protection, approved LMS egress |
-| CI/CD Hardened | `devops/cicd-hardened.yaml` | `owasp-llm-top10-2025`, `iso-27001-2022` | Pipeline-safe egress (registries only), CI token detection, build/test tools only |
-| Air-Gapped | `general/air-gapped.yaml` | `iso-27001-2022`, `owasp-llm-top10-2025` | Zero egress, zero shell, read-only tools |
-| Recommended | `general/recommended.yaml` | `owasp-llm-top10-2025`, `nist-ai-rmf-1.0` | Sensible defaults with broad secret detection and patch limits |
+| Policy | Builtin reference | Frameworks (registry id) | Description |
+|--------|-------------------|--------------------------|-------------|
+| HIPAA Base | `builtin:library/healthcare/hipaa-base` | `hipaa-2013` | PHI protection, restricted egress to health endpoints, clinical data pattern detection |
+| SOC2 Base | `builtin:library/finance/soc2-base` | `soc2-tsc-2017` | Access controls, change management, transmission security for SOC2-audited environments |
+| PCI-DSS | `builtin:library/finance/pci-dss` | `pci-dss-4.0` | Card number detection (Visa, MC, Amex, Discover), CVV/track data blocking, CDE path protection |
+| FedRAMP Base | `builtin:library/government/fedramp-base` | `nist-800-53-r5` | .gov/.mil egress default, CUI path protection, minimal tool access |
+| FERPA Student | `builtin:library/education/ferpa-student` | `ferpa` | Student PII detection, education record path protection, approved LMS egress |
+| CI/CD Hardened | `builtin:library/devops/cicd-hardened` | `owasp-llm-top10-2025`, `iso-27001-2022` | Pipeline-safe egress (registries only), CI token detection, build/test tools only |
+| Air-Gapped | `builtin:library/general/air-gapped` | `iso-27001-2022`, `owasp-llm-top10-2025` | Zero egress, zero shell, read-only tools |
+| Recommended | `builtin:library/general/recommended` | `owasp-llm-top10-2025`, `nist-ai-rmf-1.0` | Sensible defaults with broad secret detection and patch limits |
+
+Each policy's file is `<vertical>/<name>.yaml` under this directory, and its
+builtin reference is `builtin:library/<vertical>/<name>` -- the same string in
+every SDK.
 
 ## Structured Control Mappings
 
@@ -60,12 +64,14 @@ h2h audit --controls --format json --strict library/finance/pci-dss.yaml
 
 ### Direct use
 
-Reference a library policy directly in your HushSpec document:
+Every library policy is **embedded in all four SDKs** as
+`builtin:library/<vertical>/<name>`, so `extends` resolves it with no file
+system, no network, and no checkout of this repository:
 
 ```yaml
 hushspec: "0.1.0"
 name: my-org-policy
-extends: "library/healthcare/hipaa-base.yaml"
+extends: "builtin:library/healthcare/hipaa-base"
 merge_strategy: deep_merge
 
 rules:
@@ -76,6 +82,30 @@ rules:
       - "*.my-org.com"
     default: block
 ```
+
+The same reference works from each SDK's loader:
+
+```rust
+let yaml = hushspec::load_builtin("builtin:library/healthcare/hipaa-base").unwrap();
+```
+
+```typescript
+import { loadBuiltin } from '@hushspec/core';
+const spec = loadBuiltin('builtin:library/healthcare/hipaa-base');
+```
+
+```python
+from hushspec.builtins import load_builtin
+spec = load_builtin("builtin:library/healthcare/hipaa-base")
+```
+
+```go
+spec, ok := hushspec.LoadBuiltin("builtin:library/healthcare/hipaa-base")
+```
+
+A relative file reference (`extends: "library/healthcare/hipaa-base.yaml"`)
+still works when this repository is on disk; the builtin reference is the
+portable form.
 
 ### As a starting point
 
@@ -116,6 +146,40 @@ library/
   README.md                   # This file
 ```
 
+## Test Suites
+
+Every policy has a control-tagged evaluation suite at
+`fixtures/library/<vertical>/<name>.test.yaml`. Each case declares the control
+it proves, in the same `framework` / `control_id` vocabulary as
+`metadata.controls`, so a passing run is evidence for a specific control
+rather than a green tick:
+
+```yaml
+- description: "PHI directories are unreachable"
+  controls:
+    - framework: hipaa-2013
+      control_id: "164.312(a)(1)"
+  tags: ["deny", "forbidden-paths"]
+  action:
+    type: file_read
+    target: "/srv/app/patient-records/2026.csv"
+  expect:
+    decision: deny
+    matched_rule: rules.forbidden_paths.patterns
+```
+
+The suites cover every rule block and every named secret pattern of each
+resolved policy, and CI gates that:
+
+```bash
+# Every case, with 100% rule coverage required.
+h2h test --fixtures fixtures/library --fail-on-uncovered
+
+# One policy, as a JUnit report.
+h2h test fixtures/library/finance/pci-dss.test.yaml \
+  --format junit --report-file target/pci-dss.xml
+```
+
 ## Contribution Guidelines
 
 When adding a new policy to the library:
@@ -133,7 +197,23 @@ When adding a new policy to the library:
 4. **Extends.** Use `extends: "builtin:default"` or `extends: "builtin:strict"` as the base unless the policy requires standalone operation.
 5. **Realistic patterns.** Use practical, tested regex patterns. Avoid placeholders or overly broad patterns that produce excessive false positives.
 6. **Focused scope.** Keep policies auditable. A single policy should address one compliance framework or deployment scenario, not try to cover everything.
-7. **Test.** Run `cargo run -p hushspec-cli -- validate <your-file>` before submitting.
+7. **Embed it.** The generators discover `library/*/*.yaml`, so regenerate the
+   four embedded tables and commit them:
+
+   ```bash
+   python3 scripts/generate_rust_builtins.py
+   python3 scripts/generate_ts_builtins.py
+   python3 scripts/generate_python_builtins.py
+   python3 scripts/generate_go_builtins.py
+   ```
+
+8. **Test.** Add `fixtures/library/<vertical>/<name>.test.yaml` with a case per
+   control, covering every rule block and every named secret pattern, and run:
+
+   ```bash
+   cargo run -p hushspec-cli -- validate <your-file>
+   cargo run -p hushspec-cli -- test --fixtures fixtures/library --fail-on-uncovered
+   ```
 
 ## Compliance Control Matrix
 

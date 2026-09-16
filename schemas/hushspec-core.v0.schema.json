@@ -596,6 +596,37 @@
         "not": {
           "$ref": "#/$defs/Condition",
           "description": "The sub-condition must not hold."
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "The effective posture state must grant this capability. Unevaluable (the block stays active) when the policy has no posture extension."
+        },
+        "rate": {
+          "$ref": "#/$defs/RateCondition"
+        }
+      }
+    },
+    "RateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counter", "threshold", "comparison"],
+      "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
+      "properties": {
+        "counter": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "Counter name in the runtime context's `counters` map."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Non-negative threshold."
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["gte", "lt"],
+          "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
     },

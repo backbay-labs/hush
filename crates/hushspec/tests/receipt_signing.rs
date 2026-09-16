@@ -1,6 +1,6 @@
 #![cfg(feature = "signing")]
 
-//! Receipt signing (RFC 09 P2-06): a 0.2 envelope over the receipt hash,
+//! Receipt signing (receipt spec 6): a 0.2 envelope over the receipt hash,
 //! and the vectors under `fixtures/receipts/signed/` (regenerate with
 //! `HUSHSPEC_UPDATE_SIGNED_RECEIPTS=1`).
 
@@ -85,7 +85,7 @@ fn signing_is_deterministic() {
 
 #[test]
 fn signed_receipt_vectors_are_current_and_behave() {
-    let update = std::env::var("HUSHSPEC_UPDATE_SIGNED_RECEIPTS").is_ok();
+    let update = update_requested("HUSHSPEC_UPDATE_SIGNED_RECEIPTS");
     let receipt = source_receipt();
     let signed = sign_receipt(&receipt, &test_key(), &sign_options()).unwrap();
 
@@ -152,4 +152,12 @@ fn signed_receipt_vectors_are_current_and_behave() {
         .reason,
         ReasonCode::UnknownKeyId
     );
+}
+
+/// Whether the caller asked for the committed vectors to be regenerated.
+///
+/// Only `1` and `true` count: `is_ok()` would make `VAR=0` regenerate, which
+/// silently turns a verifying run into a rubber stamp.
+fn update_requested(var: &str) -> bool {
+    matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
 }

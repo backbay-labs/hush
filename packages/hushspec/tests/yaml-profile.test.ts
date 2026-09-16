@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse, yamlProfileViolation, MAX_DOCUMENT_BYTES } from '../src/parse.js';
 
-// D17 (core spec 2.4): the HushSpec YAML profile.
+// The HushSpec YAML profile (core spec 2.4).
 
 const VALID = `hushspec: "0.2.0"
 name: profile
@@ -10,7 +10,7 @@ rules:
     default: block
 `;
 
-describe('YAML profile (D17)', () => {
+describe('YAML profile', () => {
   it('accepts a plain single-document policy', () => {
     const result = parse(VALID);
     expect(result.ok).toBe(true);
@@ -63,7 +63,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('must be a boolean');
+    expect(result.error).toContain('expected a boolean');
   });
 
   it('rejects duplicate mapping keys', () => {
@@ -73,7 +73,7 @@ name: second
 `);
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toContain('unique');
+    expect(result.error).toContain('duplicate entry with key "name"');
   });
 
   it('rejects tabs used as indentation', () => {

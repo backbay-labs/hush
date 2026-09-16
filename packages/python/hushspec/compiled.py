@@ -38,10 +38,11 @@ from hushspec.conditions import (
     Condition,
     RuntimeContext,
     decode_condition,
-    evaluate_condition,
+    evaluate_condition_with_capabilities,
 )
 from hushspec.detection import (
     DETECTOR_ID_VERSION,
+    HEURISTIC_DETECTOR_NAME,
     DetectionCategory,
     DetectionResult,
     DetectorEvaluation,
@@ -55,8 +56,8 @@ from hushspec.detection import (
     _DEFAULT_PROMPT_INJECTION_BLOCK_AT,
     _DEFAULT_PROMPT_INJECTION_WARN_AT,
     _LEVEL_FLOORS,
-    _jailbreak_detector,
-    _injection_detector,
+    default_detector_registry,
+    heuristic_integer,
     _truncate_to_bytes,
 )
 from hushspec.evaluate import (
@@ -182,12 +183,6 @@ _OUTCOME_OF: dict[Decision, RuleOutcome] = {
     Decision.DENY: RuleOutcome.DENY,
 }
 
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 1,
-    Decision.WARN: 2,
-    Decision.DENY: 3,
-}
-
 _SEVERITY_RANK: dict[Severity, int] = {
     Severity.WARN: 1,
     Severity.ERROR: 2,
@@ -309,7 +304,14 @@ _BUILTIN_CREDENTIAL_SEARCHES = _compile_builtin_credentials()
 class _Eval:
     """Everything a compiled step needs from the action being evaluated."""
 
-    __slots__ = ("action", "context", "conditions", "profile", "normalized_path")
+    __slots__ = (
+        "action",
+        "context",
+        "conditions",
+        "profile",
+        "normalized_path",
+        "capabilities",
+    )
 
     def __init__(
         self,
@@ -322,6 +324,10 @@ class _Eval:
         self.conditions = conditions
         self.profile: Optional[OriginProfile] = None
         self.normalized_path: str = ""
+        #: What the effective posture state grants, for `capability`
+        #: predicates (core spec 3.13): ``None`` when the policy has no
+        #: posture extension, so the predicate is unevaluable and holds.
+        self.capabilities: Optional[list[str]] = None
 
 
 #: Shared empty runtime context. Evaluation only ever reads a context, so the
@@ -354,13 +360,15 @@ class _Step:
         if not self.enabled:
             return _INACTIVE_DISABLED
         condition = self.condition
-        if condition is not None and not evaluate_condition(condition, ev.context):
+        if condition is not None and not evaluate_condition_with_capabilities(
+            condition, ev.context, ev.capabilities
+        ):
             return _INACTIVE_WHEN
         conditions = ev.conditions
         if conditions:
             out_of_band = conditions.get(self.block)
-            if out_of_band is not None and not evaluate_condition(
-                out_of_band, ev.context
+            if out_of_band is not None and not evaluate_condition_with_capabilities(
+                out_of_band, ev.context, ev.capabilities
             ):
                 return _INACTIVE_OUT_OF_BAND
         return None
@@ -1013,7 +1021,8 @@ class _ComputerUseStep(_Step):
             if rule.mode == ComputerUseMode.OBSERVE
             else None
         )
-        # guardrail and fail_closed have identical reference semantics (D9).
+        # `guardrail` and its alias `fail_closed` both deny an unlisted
+        # computer-use action (core spec 3.8).
         self._deny = _deny(
             "rules.computer_use.mode", "unlisted computer-use action is denied"
         )
@@ -1306,6 +1315,7 @@ class _CompiledDetection:
         self.jailbreak = None
         config = detection.prompt_injection
         if config is not None and config.enabled is not False:
+            heuristics = config.heuristics
             self.prompt_injection = (
                 config.max_scan_bytes
                 if config.max_scan_bytes is not None
@@ -1320,6 +1330,11 @@ class _CompiledDetection:
                     if config.warn_at_or_above is not None
                     else _DEFAULT_PROMPT_INJECTION_WARN_AT
                 ],
+                # heuristics.enabled defaults to true (detection spec 3.5.1).
+                heuristics is None or heuristics.enabled is not False,
+                heuristics.min_score
+                if heuristics is not None and heuristics.min_score is not None
+                else 0,
             )
         config = detection.jailbreak
         if config is not None and config.enabled is not False:
@@ -1624,13 +1639,20 @@ class CompiledPolicy:
             signal = posture.signal
 
         if signal is not None:
-            # D18 (pending): first matching transition in document order.
-            for transition in posture_ext.transitions:
-                if transition.from_state != "*" and transition.from_state != current:
-                    continue
-                if _trigger_name(transition.on) != signal:
-                    continue
-                return PostureResult(current=current, next=transition.to)
+            # Posture spec 5.3: a transition whose `from` names the
+            # current state outranks one whose `from` is `"*"`; among equals,
+            # document order. Two passes rather than one scan with a
+            # best-so-far, so the named pass short-circuits on its first hit.
+            for wildcard in (False, True):
+                for transition in posture_ext.transitions:
+                    source = transition.from_state
+                    if (source == "*") is not wildcard:
+                        continue
+                    if not wildcard and source != current:
+                        continue
+                    if _trigger_name(transition.on) != signal:
+                        continue
+                    return PostureResult(current=current, next=transition.to)
 
         return PostureResult(current=current, next=current)
 
@@ -1781,6 +1803,9 @@ class CompiledPolicy:
         # Block evaluation and aggregation (core spec 6.1).
         ev = _Eval(action, context, conditions)
         ev.profile = matched_profile
+        # `when` conditions read the effective posture state (core spec 3.13),
+        # which the posture guard above has already resolved.
+        ev.capabilities = self._posture_capabilities(posture)
         if plan.needs_path:
             target = action.target
             ev.normalized_path = normalize_path(target) if target is not None else ""
@@ -1832,6 +1857,21 @@ class CompiledPolicy:
             origin_profile=origin_profile_id,
             posture=posture,
         )
+
+    def _posture_capabilities(
+        self, posture: Optional[PostureResult]
+    ) -> Optional[list[str]]:
+        """What the effective posture state grants, for ``capability``
+        conditions (core spec 3.13).
+
+        ``None`` when the policy has no posture extension -- the predicate is
+        then unevaluable and holds; an unknown state grants nothing.
+        """
+        posture_extension = self._posture
+        if posture_extension is None or posture is None:
+            return None
+        state = posture_extension.states.get(posture.current)
+        return list(state.capabilities) if state is not None else []
 
     def _posture_capability_guard(
         self,
@@ -1922,33 +1962,64 @@ class CompiledPolicy:
 
         config = detection.prompt_injection
         if config is not None:
-            max_bytes, block_floor, warn_floor = config
-            result = _injection_detector.detect(
-                _truncate_to_bytes(content, max_bytes)
-            )
-            score = result.score
-            contribution: Optional[Decision] = None
-            if score >= block_floor:
-                contribution = Decision.DENY
-            elif score >= warn_floor:
-                contribution = Decision.WARN
-            detections.append(result)
-            if contribution is not None:
-                contributions.append((contribution, "prompt_injection"))
-            detector_trace.append(
-                DetectorEvaluation(
-                    detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
-                    category=DetectionCategory.PROMPT_INJECTION,
-                    score=score,
-                    level=DetectorLevel.from_score(score),
-                    matched=contribution is not None,
+            (
+                max_bytes,
+                block_floor,
+                warn_floor,
+                heuristics_enabled,
+                min_score,
+            ) = config
+            scan = _truncate_to_bytes(content, max_bytes)
+            # Every prompt-injection detector runs -- the regex detector and
+            # the normative heuristic one (detection spec 3.5) -- each scored
+            # against the same byte budget and level floors, each recording
+            # its own trace entry.
+            registry = default_detector_registry()
+            for detector in registry.detectors_for(
+                DetectionCategory.PROMPT_INJECTION
+            ):
+                is_heuristic = detector.name == HEURISTIC_DETECTOR_NAME
+                if is_heuristic and not heuristics_enabled:
+                    continue
+                result = detector.detect(scan)
+                if is_heuristic and heuristic_integer(result.score) < min_score:
+                    # Below the policy's floor the heuristic reports no signal
+                    # (detection spec 3.5.4).
+                    result = DetectionResult(
+                        detector_name=result.detector_name,
+                        category=result.category,
+                        score=0.0,
+                    )
+                score = result.score
+                contribution: Optional[Decision] = None
+                if score >= block_floor:
+                    contribution = Decision.DENY
+                elif score >= warn_floor:
+                    contribution = Decision.WARN
+                detections.append(result)
+                if contribution is not None:
+                    contributions.append((contribution, "prompt_injection"))
+                detector_trace.append(
+                    DetectorEvaluation(
+                        detector_id=f"{result.detector_name}{DETECTOR_ID_VERSION}",
+                        category=DetectionCategory.PROMPT_INJECTION,
+                        score=score,
+                        level=DetectorLevel.from_score(score),
+                        matched=contribution is not None,
+                    )
                 )
-            )
 
         config = detection.jailbreak
         if config is not None:
             max_bytes, block_threshold, warn_threshold = config
-            result = _jailbreak_detector.detect(_truncate_to_bytes(content, max_bytes))
+            detector = default_detector_registry().detector_for(
+                DetectionCategory.JAILBREAK
+            )
+            if detector is None:
+                raise CompileError(
+                    "the built-in detector registry has no jailbreak detector"
+                )
+            result = detector.detect(_truncate_to_bytes(content, max_bytes))
             score = result.score
             percent = score * 100.0
             contribution = None

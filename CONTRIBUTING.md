@@ -17,6 +17,10 @@ fuzzer (`hushspec-difftest`) run against. A behavior change without a fixture ca
 verified as consistent across languages and will not be merged. See
 [`GOVERNANCE.md`](./GOVERNANCE.md) for the full spec-first / fixture-first process.
 
+When a spec change lands before every SDK implements it, keep its vectors out of the
+directories the conformance runners walk and say so in the fixture README for that area:
+a format no engine emits yet must never read as a passing conformance claim.
+
 ## Build and Test Commands
 
 ### Rust
@@ -109,11 +113,10 @@ tests can exercise the built packages, matching what `.github/workflows/ci.yml` 
 - **Property testing.** Use `proptest` for serialization round-trip and schema
   validation code in Rust.
 - **Edition 2024** for all Rust crates.
-- **Cross-language parity.** Rust is the oracle: when porting a behavior to
-  TypeScript, Python, or Go, match the Rust reference implementation's semantics exactly,
-  including its known quirks, unless an RFC has ratified a change to the normative spec
-  (in which case update the fixture and all four SDKs together -- see "The One Rule"
-  above).
+- **Cross-language parity.** Rust sets the baseline: when porting a behavior to
+  TypeScript, Python, or Go, match the Rust implementation's semantics exactly, quirks
+  included, unless the normative spec has changed to say otherwise (in which case update
+  the fixture and all four SDKs together -- see "The One Rule" above).
 
 ## Adding a Library Policy
 
@@ -136,8 +139,8 @@ for the full list and directory layout). To add a new one:
 6. **Focused scope.** One policy should address one compliance framework or deployment
    scenario, not try to cover everything.
 7. **Test.** Run the validator before submitting. Note that library policies do not yet
-   have per-policy evaluation test suites in `fixtures/library/` -- adding those is
-   tracked as RFC 09 package P3-03; contributions toward that are welcome.
+   have per-policy evaluation test suites in `fixtures/library/` -- adding those is on
+   the roadmap, and contributions toward that are welcome.
 
 ## Reporting Bugs and Security Issues
 

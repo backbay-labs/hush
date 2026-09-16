@@ -8,9 +8,9 @@ import { parseReceipt, receiptHash } from '../src/receipt.js';
 import type { DecisionReceipt } from '../src/receipt.js';
 
 /**
- * Receipt signing (RFC 09 P2-06): a 0.2 signature envelope over the receipt
- * hash (receipt spec 6), so the signature covers every field of the receipt
- * without the envelope having to restate any of them.
+ * Receipt signing: a 0.2 signature envelope over the receipt hash (receipt
+ * spec 6), so the signature covers every field of the receipt without the
+ * envelope having to restate any of them.
  *
  * Vectors: `fixtures/receipts/signed/`.
  */

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -22,13 +23,135 @@ type evaluatorTestFixtureCase struct {
 	Description string          `yaml:"description"`
 	Action      map[string]any  `yaml:"action"`
 	Context     *RuntimeContext `yaml:"context,omitempty"`
-	Expect      struct {
+	// Controls is the evidence this case carries (evaluator-test 0.2). It is
+	// reporting metadata: a conformance verdict does not depend on it.
+	Controls []map[string]string `yaml:"controls,omitempty"`
+	// Tags are free-form labels (evaluator-test 0.2).
+	Tags   []string `yaml:"tags,omitempty"`
+	Expect struct {
 		Decision      string         `yaml:"decision"`
 		MatchedRule   string         `yaml:"matched_rule,omitempty"`
 		Reason        string         `yaml:"reason,omitempty"`
 		OriginProfile string         `yaml:"origin_profile,omitempty"`
 		Posture       *PostureResult `yaml:"posture,omitempty"`
+		// RuleTrace is asserted in order and in full (evaluator-test 0.2).
+		RuleTrace []ruleTraceExpectation `yaml:"rule_trace,omitempty"`
+		// Receipt is a partial format 0.2 receipt (evaluator-test 0.2).
+		Receipt map[string]any `yaml:"receipt,omitempty"`
 	} `yaml:"expect"`
+}
+
+// ruleTraceExpectation is one expected `rule_trace` entry; `rule_path` is
+// compared only where the fixture spells it.
+type ruleTraceExpectation struct {
+	RuleBlock string `yaml:"rule_block"`
+	Outcome   string `yaml:"outcome"`
+	RulePath  string `yaml:"rule_path,omitempty"`
+}
+
+// receiptIgnoredMembers are receipt members that are inputs rather than
+// outcomes, and are never compared even when a fixture spells them.
+var receiptIgnoredMembers = map[string]bool{
+	"actor": true, "timestamp": true, "receipt_id": true,
+}
+
+// renderTraceEntry is `rule_block:outcome[@rule_path]`, the spelling a trace
+// mismatch reports.
+func renderTraceEntry(ruleBlock, outcome, rulePath string) string {
+	if rulePath != "" {
+		return fmt.Sprintf("%s:%s@%s", ruleBlock, outcome, rulePath)
+	}
+	return fmt.Sprintf("%s:%s", ruleBlock, outcome)
+}
+
+// assertRuleTrace compares expect.rule_trace with the recorded trace (receipt
+// spec 4.3): in order, in full, and member by member.
+func assertRuleTrace(t *testing.T, expected []ruleTraceExpectation, actual []RuleTraceEntry) {
+	t.Helper()
+	rendered := make([]string, 0, len(actual))
+	for _, entry := range actual {
+		rendered = append(rendered, renderTraceEntry(entry.RuleBlock, string(entry.Outcome), entry.RulePath))
+	}
+	if len(expected) != len(actual) {
+		t.Errorf("rule_trace: expected %d entries, got %d [%s]",
+			len(expected), len(actual), strings.Join(rendered, ", "))
+		return
+	}
+	for index, want := range expected {
+		got := actual[index]
+		matches := want.RuleBlock == got.RuleBlock &&
+			want.Outcome == string(got.Outcome) &&
+			(want.RulePath == "" || want.RulePath == got.RulePath)
+		if !matches {
+			t.Errorf("rule_trace[%d]: expected %s, got %s", index,
+				renderTraceEntry(want.RuleBlock, want.Outcome, want.RulePath), rendered[index])
+		}
+	}
+}
+
+// assertReceiptMembers compares a partial expect.receipt with the receipt
+// produced under the fixed inputs: nested objects member-wise, everything
+// else exactly. Both sides go through JSON first so a YAML integer and a JSON
+// number are the same value.
+func assertReceiptMembers(t *testing.T, expected map[string]any, receipt DecisionReceipt) {
+	t.Helper()
+	want, err := normalizeJSON(expected)
+	if err != nil {
+		t.Fatalf("expect.receipt is not JSON-encodable: %v", err)
+	}
+	got, err := normalizeJSON(receipt)
+	if err != nil {
+		t.Fatalf("the produced receipt is not JSON-encodable: %v", err)
+	}
+	wantMap, _ := want.(map[string]any)
+	gotMap, _ := got.(map[string]any)
+	for key, value := range wantMap {
+		if receiptIgnoredMembers[key] {
+			continue
+		}
+		compareReceiptMember(t, key, value, gotMap[key], gotMap != nil && hasKey(gotMap, key))
+	}
+}
+
+func hasKey(object map[string]any, key string) bool {
+	_, ok := object[key]
+	return ok
+}
+
+func compareReceiptMember(t *testing.T, path string, want, got any, present bool) {
+	t.Helper()
+	if wantObject, ok := want.(map[string]any); ok {
+		gotObject, ok := got.(map[string]any)
+		if !ok {
+			t.Errorf("receipt.%s: expected an object, got %#v", path, got)
+			return
+		}
+		for key, value := range wantObject {
+			compareReceiptMember(t, path+"."+key, value, gotObject[key], hasKey(gotObject, key))
+		}
+		return
+	}
+	if !present {
+		t.Errorf("receipt.%s: expected %#v, got (absent)", path, want)
+		return
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Errorf("receipt.%s: expected %#v, got %#v", path, want, got)
+	}
+}
+
+// normalizeJSON round-trips a value through JSON so both sides of a receipt
+// comparison use the same representation (numbers as float64, no typed nils).
+func normalizeJSON(value any) (any, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var out any
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func TestEvaluationFixtures(t *testing.T) {
@@ -86,6 +209,15 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 	if err != nil {
 		t.Fatalf("embedded policy failed to parse: %v", err)
 	}
+	// A fixture whose embedded policy extends is resolved before it runs: a
+	// bare leaf would drop every block its base declares.
+	if spec.Extends != "" {
+		resolved, err := Resolve(spec, fixturePath, createCompositeLoader())
+		if err != nil {
+			t.Fatalf("embedded policy failed to resolve: %v", err)
+		}
+		spec = resolved
+	}
 
 	for i, tc := range fixture.Cases {
 		t.Run(fmt.Sprintf("case_%d_%s", i, tc.Description), func(t *testing.T) {
@@ -133,11 +265,30 @@ func runEvaluationFixture(t *testing.T, fixturePath, source string) {
 					}
 				}
 			}
+
+			// rule_trace and receipt are asserted through the audited path,
+			// because a receipt is where both are published (receipt spec
+			// 4.3), under the fixed inputs of
+			// fixtures/receipts/expected/README.md.
+			if len(tc.Expect.RuleTrace) > 0 || len(tc.Expect.Receipt) > 0 {
+				resolution, err := NewResolutionFromResolved(spec, "")
+				if err != nil {
+					t.Fatalf("expect.rule_trace/receipt needs a resolvable policy: %v", err)
+				}
+				receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+					expectedReceiptContext(i))
+				if len(tc.Expect.RuleTrace) > 0 {
+					assertRuleTrace(t, tc.Expect.RuleTrace, receipt.RuleTrace)
+				}
+				if len(tc.Expect.Receipt) > 0 {
+					assertReceiptMembers(t, tc.Expect.Receipt, receipt)
+				}
+			}
 		})
 	}
 }
 
-// TestEvaluateUnknownActionType locks in D1 (core 5): an action type the
+// TestEvaluateUnknownActionType locks in core spec 5: an action type the
 // specification does not define denies, it does not fall through to allow.
 func TestEvaluateUnknownActionType(t *testing.T) {
 	spec := &HushSpec{
@@ -156,8 +307,9 @@ func TestEvaluateUnknownActionType(t *testing.T) {
 	}
 }
 
-// TestEvaluateCustomActionRequiresPostureCapability locks in D1: `custom` is
-// permitted only when the current posture state grants the `custom` capability.
+// TestEvaluateCustomActionRequiresPostureCapability locks in core spec 5:
+// `custom` is permitted only when the current posture state grants the `custom`
+// capability.
 func TestEvaluateCustomActionRequiresPostureCapability(t *testing.T) {
 	withoutPosture := &HushSpec{HushSpecVersion: "0.2.0"}
 	result := Evaluate(withoutPosture, &EvaluationAction{Type: "custom", Target: "anything"})
@@ -201,7 +353,7 @@ extensions:
 	}
 }
 
-func TestGlobMatches(t *testing.T) {
+func TestPathGlobMatchesNormalizedTargets(t *testing.T) {
 	tests := []struct {
 		pattern string
 		target  string
@@ -219,31 +371,9 @@ func TestGlobMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s_vs_%s", tt.pattern, tt.target), func(t *testing.T) {
-			got := globMatches(tt.pattern, tt.target)
+			got := PathGlobMatches(tt.pattern, NormalizePath(tt.target))
 			if got != tt.match {
-				t.Errorf("globMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
-			}
-		})
-	}
-}
-
-func TestImbalanceRatio(t *testing.T) {
-	tests := []struct {
-		add, del int
-		expected float64
-	}{
-		{0, 0, 0.0},
-		{0, 5, 5.0},
-		{5, 0, 5.0},
-		{10, 2, 5.0},
-		{2, 10, 5.0},
-		{4, 4, 1.0},
-	}
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%d_%d", tt.add, tt.del), func(t *testing.T) {
-			got := imbalanceRatio(tt.add, tt.del)
-			if got != tt.expected {
-				t.Errorf("imbalanceRatio(%d, %d) = %f, want %f", tt.add, tt.del, got, tt.expected)
+				t.Errorf("PathGlobMatches(%q, %q) = %v, want %v", tt.pattern, tt.target, got, tt.match)
 			}
 		})
 	}
@@ -386,7 +516,7 @@ extensions:
 	}
 }
 
-// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in D12: an overlay
+// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in origins spec 4: an overlay
 // `default: allow` cannot relax a base `default: block` -- the stricter of the
 // two wins -- and the reported rule is the base's, since the base's `block` is
 // what determined the effective value.

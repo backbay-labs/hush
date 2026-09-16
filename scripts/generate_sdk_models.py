@@ -398,6 +398,14 @@ STRUCTS = [
             field("warn_at_or_above", "DetectionLevel", go_pointer=True),
             field("block_at_or_above", "DetectionLevel", go_pointer=True),
             field("max_scan_bytes", "count", go_pointer=True),
+            field("heuristics", "PromptInjectionHeuristics"),
+        ],
+    },
+    {
+        "name": "PromptInjectionHeuristics",
+        "fields": [
+            field("enabled", "bool", go_pointer=True),
+            field("min_score", "count", go_pointer=True),
         ],
     },
     {

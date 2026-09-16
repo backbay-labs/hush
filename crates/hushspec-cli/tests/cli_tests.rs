@@ -220,7 +220,192 @@ fn test_json_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"passed\":"))
-        .stdout(predicate::str::contains("\"failed\":"));
+        .stdout(predicate::str::contains("\"failed\":"))
+        .stdout(predicate::str::contains("\"coverage\":"));
+}
+
+/// A 0.2 fixture's `controls` and `tags` reach the JUnit report as
+/// `<property>` entries, which is what makes a run evidence for a control
+/// rather than a pass/fail line.
+#[test]
+fn test_junit_output_carries_controls_and_tags() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("controls.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "a control-tagged case"
+policy:
+  hushspec: "0.1.0"
+  name: controls
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "transmission security allows the approved endpoint"
+    controls:
+      - framework: hipaa-2013
+        control_id: "164.312(e)(1)"
+    tags: ["allow", "egress"]
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("junit")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<testsuites name=\"h2h test\""))
+        .stdout(predicate::str::contains(
+            "<property name=\"control\" value=\"hipaa-2013:164.312(e)(1)\"/>",
+        ))
+        .stdout(predicate::str::contains(
+            "<property name=\"tag\" value=\"egress\"/>",
+        ))
+        .stdout(predicate::str::contains(
+            "<testsuite name=\"rule coverage\"",
+        ));
+}
+
+/// `--report-file` puts the machine-readable report on disk and leaves the
+/// readable summary on stdout, so a CI log stays legible while the artifact
+/// is uploaded.
+#[test]
+fn test_report_file_writes_the_report_and_keeps_the_summary() {
+    let tmp = TempDir::new().unwrap();
+    let report = tmp.path().join("nested/report.xml");
+
+    h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("junit")
+        .arg("--report-file")
+        .arg(report.to_str().unwrap())
+        .arg("fixtures/core/evaluation/egress.test.yaml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5 passed, 0 failed"))
+        .stdout(predicate::str::contains("Rule coverage:"));
+
+    let xml = fs::read_to_string(&report).unwrap();
+    assert!(
+        xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<testcase name=\"allow listed domain\""),
+        "{xml}"
+    );
+}
+
+/// The gate the library suites run under: a policy with a rule path no case
+/// ever hits fails the run, and the uncovered path is named.
+#[test]
+fn test_fail_on_uncovered_reports_the_unhit_path() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("partial.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "one block is never exercised"
+policy:
+  hushspec: "0.1.0"
+  name: partial
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+cases:
+  - description: "an allowed domain"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg("--fail-on-uncovered")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "uncovered: rules.secret_patterns.patterns.aws",
+        ));
+
+    // Without the flag the same run is green: coverage is reported, not gated.
+    h2h()
+        .arg("test")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+/// The 0.2 assertions are enforced, not merely parsed.
+#[test]
+fn test_rule_trace_and_receipt_assertions_are_checked() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("wrong.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "a trace and a receipt that do not hold"
+policy:
+  hushspec: "0.1.0"
+  name: wrong
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "the trace names the wrong outcome"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      rule_trace:
+        - rule_block: egress
+          outcome: deny
+        - rule_block: secret_patterns
+          outcome: skip
+  - description: "the receipt names the wrong enforcement outcome"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      receipt:
+        enforcement:
+          outcome: blocked
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("rule_trace[0]"))
+        .stdout(predicate::str::contains("receipt.enforcement.outcome"));
 }
 
 #[test]

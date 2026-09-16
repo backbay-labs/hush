@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
+import pytest
+
 from hushspec import (
     Decision,
     EvaluationAction,
@@ -11,6 +13,7 @@ from hushspec import (
 from hushspec.canonical import content_hash
 from hushspec.receipt import (
     RECEIPT_VERSION,
+    ReceiptError,
     Actor,
     AuditConfig,
     AuditContext,
@@ -184,7 +187,9 @@ class TestEvaluateAudited:
     def test_duration_is_recorded_only_when_asked(self):
         spec = _spec_with_tool_access()
         action = EvaluationAction(type="tool_call", target="read_file")
-        assert evaluate_audited(spec, action, _enabled_config()).duration_us >= 0
+        assert isinstance(
+            evaluate_audited(spec, action, _enabled_config()).duration_us, int
+        )
         off = AuditConfig(enabled=True, include_rule_trace=True, record_duration=False)
         assert evaluate_audited(spec, action, off).duration_us is None
 
@@ -295,8 +300,11 @@ class TestComputePolicyHash:
         assert CONTENT_HASH_RE.match(compute_policy_hash(spec))
 
     def test_is_deterministic(self):
-        spec = _minimal_spec()
-        assert compute_policy_hash(spec) == compute_policy_hash(spec)
+        # Two independently built equal specs, not one object twice: hashing
+        # the same object would also pass with an identity-keyed cache.
+        assert compute_policy_hash(_minimal_spec()) == compute_policy_hash(
+            _minimal_spec()
+        )
 
     def test_differs_for_different_specs(self):
         spec1 = _minimal_spec()
@@ -323,7 +331,8 @@ class TestReceiptToDict:
         # A minimal spec with no rules, no posture extension, and no origin
         # produces an ALLOW decision where matched_rule, reason, origin_profile
         # and posture are all None -- and the tool_access rule_trace entry also
-        # carries a None rule_path. None should survive as an explicit null.
+        # carries a None rule_path. An absent value is an omitted key, never an
+        # explicit null (receipt spec section 3).
         spec = _minimal_spec()
         action = EvaluationAction(type="tool_call", target="anything")
         receipt = evaluate_audited(spec, action, _enabled_config())
@@ -440,7 +449,7 @@ class TestRuleTraceActionTypes:
         assert tool_trace[0].outcome == "skip"
 
     def test_handles_unknown_action_type(self):
-        # D1 (core 5): an action type unknown to the specification denies, and
+        # Core spec 5: an action type unknown to the specification denies, and
         # the recorded trace carries the sentinel rule. Receipt spec 4.3 item 5
         # spells the engine stage `unknown_action_type`, not `default`.
         spec = HushSpec(hushspec="0.1.0")
@@ -466,3 +475,51 @@ class TestDecisionReceiptMethods:
         assert receipt.to_dict() == receipt_to_dict(receipt)
         assert receipt.canonical_json() == canonical_json(receipt)
         assert receipt.receipt_hash() == receipt_hash(receipt)
+
+
+class TestParseReceiptRefusals:
+    """Every refusal is a :class:`ReceiptError`, whatever the input looks like."""
+
+    def _receipt(self, **overrides):
+        body = {
+            "receipt_version": RECEIPT_VERSION,
+            "receipt_id": "01994b7e-2c1a-7c3e-8f4a-0123456789ab",
+            "timestamp": "2026-03-15T00:00:00.000Z",
+            "time_source": "system",
+            "policy": {
+                "name": "p",
+                "spec_version": "0.2.0",
+                "content_hash": "sha256:" + "ab" * 32,
+            },
+            "action": {"type": "tool_call", "target": "t"},
+            "decision": "allow",
+            "enforcement": {"mode": "enforce", "outcome": "allowed"},
+            "rule_trace": [],
+        }
+        body.update(overrides)
+        return body
+
+    def test_the_baseline_parses(self):
+        assert parse_receipt(self._receipt()).decision.value == "allow"
+
+    @pytest.mark.parametrize(
+        "member", ["receipt_id", "timestamp", "time_source", "decision"]
+    )
+    def test_a_missing_required_member_is_a_receipt_error(self, member):
+        body = self._receipt()
+        del body[member]
+        with pytest.raises(ReceiptError, match=f"missing {member!r}"):
+            parse_receipt(body)
+
+    def test_an_unknown_decision_is_a_receipt_error(self):
+        with pytest.raises(ReceiptError, match="receipt.decision"):
+            parse_receipt(self._receipt(decision="bogus"))
+
+    def test_an_unknown_rule_trace_outcome_is_a_receipt_error(self):
+        body = self._receipt(
+            rule_trace=[
+                {"rule_block": "egress", "outcome": "nope", "evaluated": True}
+            ]
+        )
+        with pytest.raises(ReceiptError, match="rule_trace.outcome"):
+            parse_receipt(body)

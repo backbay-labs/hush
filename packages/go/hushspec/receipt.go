@@ -212,7 +212,7 @@ type EnforcementSummary struct {
 
 // ImpliedEnforcement is the disposition implied by a decision when there is no
 // enforcement point to say otherwise: an allow proceeds; a warn with no
-// confirmation channel is a deny (core spec D16); under monitor mode a warn or
+// confirmation channel is a deny (core spec 6); under monitor mode a warn or
 // deny proceeds and is recorded as would_block.
 func ImpliedEnforcement(decision Decision, mode EnforcementMode) EnforcementSummary {
 	if mode == "" {

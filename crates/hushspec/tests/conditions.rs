@@ -149,16 +149,21 @@ fn evaluate_with_context_no_conditions_behaves_like_evaluate() {
     let result_conditional = evaluate_with_context(&spec, &action, &ctx, &conditions);
     let result_plain = evaluate(&spec, &action);
 
-    assert_eq!(result_conditional.decision, result_plain.decision);
+    // The whole result, not just the decision: an empty condition map must not
+    // change the matched rule or the reason either.
+    assert_eq!(result_conditional, result_plain);
 }
 
+/// A `time_window` gates the whole `tool_access` block: inside the window the
+/// block runs and its `block` list denies, outside it the block is inactive
+/// and nothing covers the action.
 #[test]
-fn evaluate_with_context_tool_access_conditional() {
+fn time_window_condition_gates_the_tool_access_block() {
     let spec = make_spec_with_tool_access();
 
     let action = EvaluationAction {
         action_type: "tool_call".into(),
-        target: Some("deploy".into()),
+        target: Some("danger_tool".into()),
         ..Default::default()
     };
 
@@ -177,26 +182,30 @@ fn evaluate_with_context_tool_access_conditional() {
         },
     );
 
-    // 10:00 UTC -- inside business hours
+    // 10:00 UTC -- inside business hours, so the block is active and denies.
     let ctx_inside = RuntimeContext {
         current_time: Some("2026-01-14T10:00:00Z".to_string()),
         ..Default::default()
     };
     let result = evaluate_with_context(&spec, &action, &ctx_inside, &conditions);
-    assert_eq!(result.decision, hushspec::Decision::Allow);
+    assert_eq!(result.decision, hushspec::Decision::Deny);
 
-    // 20:00 UTC -- outside business hours, tool_access rule disabled
-    // Without the rule, default behavior is allow (no rule covers it).
+    // 20:00 UTC -- outside business hours, so the block is inactive and no
+    // rule covers the action.
     let ctx_outside = RuntimeContext {
         current_time: Some("2026-01-14T20:00:00Z".to_string()),
         ..Default::default()
     };
     let result = evaluate_with_context(&spec, &action, &ctx_outside, &conditions);
     assert_eq!(result.decision, hushspec::Decision::Allow);
+    assert_eq!(result.matched_rule, None);
 }
 
+/// A `when` whose context predicate is unsatisfiable disables its rule block
+/// (core spec 3.13), so no rule covers the action and it is allowed. The
+/// block is gated off, not evaluated and passed.
 #[test]
-fn evaluate_with_context_missing_context_fails_closed() {
+fn unsatisfiable_context_condition_disables_the_rule_block() {
     let spec = make_spec_with_egress_block();
     let action = EvaluationAction {
         action_type: "egress".into(),
@@ -218,10 +227,12 @@ fn evaluate_with_context_missing_context_fails_closed() {
         },
     );
 
-    // Rule is disabled (condition fails), so action is allowed even though
-    // the rule would normally deny unmatched domains.
     let result = evaluate_with_context(&spec, &action, &ctx, &conditions);
     assert_eq!(result.decision, hushspec::Decision::Allow);
+    assert_eq!(
+        result.matched_rule, None,
+        "a gated-off block must match nothing, not match and allow"
+    );
 }
 
 #[test]

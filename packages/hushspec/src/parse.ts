@@ -1,10 +1,21 @@
-import YAML from 'yaml';
+import YAML, { isScalar } from 'yaml';
 import type { HushSpec } from './schema.js';
-import { validateForParse } from './validate.js';
+import { validateForParse, type ErrorCode } from './validate.js';
+import { utf8ByteLength } from './utf8.js';
 
 export type ParseResult =
   | { ok: true; value: HushSpec }
-  | { ok: false; error: string };
+  | {
+    ok: false;
+    error: string;
+    /**
+     * The registered code for this refusal
+     * (`spec/registries/error-codes.yaml`). Every shape, type, profile and
+     * syntax failure is `E001`; a document whose `hushspec` names a version
+     * this engine does not accept is `E002`.
+     */
+    code: ErrorCode;
+  };
 
 /** Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default). */
 export const MAX_DOCUMENT_BYTES = 1024 * 1024;
@@ -14,7 +25,7 @@ export const MAX_DOCUMENT_DEPTH = 32;
 export const MAX_NODE_COUNT = 100_000;
 
 /**
- * Parse a HushSpec document under the YAML profile of core spec 2.4 (D17).
+ * Parse a HushSpec document under the YAML profile of core spec 2.4.
  *
  * The `yaml` package is configured for the YAML 1.2 Core schema (so `yes`/`no`
  * are strings, not booleans), rejects duplicate mapping keys, rejects tab
@@ -23,55 +34,54 @@ export const MAX_NODE_COUNT = 100_000;
  * depth and node count; those checks live here.
  */
 export function parse(yaml: string): ParseResult {
-  if (byteLength(yaml) > MAX_DOCUMENT_BYTES) {
-    return {
-      ok: false,
-      error: `YAML parse error: document exceeds the maximum size of ${MAX_DOCUMENT_BYTES} bytes`,
-    };
+  if (utf8ByteLength(yaml) > MAX_DOCUMENT_BYTES) {
+    return parseError(`document exceeds the maximum size of ${MAX_DOCUMENT_BYTES} bytes`);
   }
 
   const violation = yamlProfileViolation(yaml);
   if (violation != null) {
-    return { ok: false, error: `YAML parse error: ${violation}` };
+    return parseError(violation);
   }
 
   let doc: unknown;
+  // A duplicate mapping key is reported by the `yaml` package without naming
+  // the key; this records it so the diagnostic can say which one.
+  let duplicateKey: string | undefined;
   try {
     doc = YAML.parse(yaml, {
       version: '1.2',
       schema: 'core',
-      uniqueKeys: true,
+      uniqueKeys: (a, b) => {
+        const equal = a === b || (isScalar(a) && isScalar(b) && a.value === b.value);
+        if (equal && duplicateKey === undefined) {
+          duplicateKey = isScalar(a) ? String(a.value) : String(a);
+        }
+        return equal;
+      },
       // Anchors and aliases are rejected by the pre-scan above; refuse to
       // expand any that slip past it rather than silently duplicating nodes.
       maxAliasCount: 0,
       merge: false,
     });
   } catch (error) {
-    return {
-      ok: false,
-      error: `YAML parse error: ${error instanceof Error ? error.message : String(error)}`,
-    };
+    return parseError(describeYamlError(error, duplicateKey));
   }
 
   const measured = measure(doc, 1);
   if (measured.depth > MAX_DOCUMENT_DEPTH) {
-    return {
-      ok: false,
-      error: `YAML parse error: document nesting exceeds the maximum depth of ${MAX_DOCUMENT_DEPTH}`,
-    };
+    return parseError(`document nesting exceeds the maximum depth of ${MAX_DOCUMENT_DEPTH}`);
   }
   if (measured.nodes > MAX_NODE_COUNT) {
-    return {
-      ok: false,
-      error: `YAML parse error: document exceeds the maximum node count of ${MAX_NODE_COUNT}`,
-    };
+    return parseError(`document exceeds the maximum node count of ${MAX_NODE_COUNT}`);
   }
 
   const result = validateForParse(doc);
   if (!result.valid) {
+    const first = result.errors[0];
     return {
       ok: false,
-      error: result.errors[0]?.message ?? 'invalid HushSpec document',
+      error: first?.message ?? 'invalid HushSpec document',
+      code: first?.code ?? 'E001',
     };
   }
 
@@ -87,8 +97,22 @@ export function parseOrThrow(yaml: string): HushSpec {
   return result.value;
 }
 
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
+/** A refusal at the YAML layer: always E001 (error-code registry). */
+function parseError(detail: string): ParseResult {
+  return { ok: false, error: `YAML parse error: ${detail}`, code: 'E001' };
+}
+
+/**
+ * The `yaml` package's diagnostic, with a duplicate-key failure respelled to
+ * name the key -- `Map keys must be unique` says which line but not which key,
+ * and the key is what an author needs.
+ */
+function describeYamlError(error: unknown, duplicateKey: string | undefined): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (duplicateKey === undefined) return message;
+  const position = /at line (\d+), column (\d+)/.exec(message);
+  const where = position == null ? '' : ` at line ${position[1]} column ${position[2]}`;
+  return `duplicate entry with key ${JSON.stringify(duplicateKey)}${where}`;
 }
 
 interface Measured {
@@ -111,8 +135,8 @@ function measure(value: unknown, depth: number): Measured {
     let maxDepth = depth;
     let nodes = 1;
     for (const [, item] of Object.entries(value as Record<string, unknown>)) {
-      // The key is a scalar node one level down, matching the reference
-      // engine's traversal of YAML mappings.
+      // A mapping key is itself a scalar node one level down, so it counts
+      // toward both the depth and the node budget (core spec 2.4).
       if (depth + 1 > maxDepth) maxDepth = depth + 1;
       nodes += 1;
       const child = measure(item, depth + 1);
@@ -131,8 +155,7 @@ function measure(value: unknown, depth: number): Measured {
  * The scanner tracks comments, quoted scalars, and block scalars so that a `*`
  * or `&` inside them is not mistaken for an indicator. In YAML a plain scalar
  * cannot begin with `&` or `*`, so an indicator at a node-start position is
- * always an anchor or alias. Port of `yaml_profile_violation` in
- * `crates/hushspec/src/schema.rs`.
+ * always an anchor or alias.
  */
 export function yamlProfileViolation(yaml: string): string | undefined {
   let blockScalarIndent: number | undefined;

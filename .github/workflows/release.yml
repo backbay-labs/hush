@@ -136,6 +136,36 @@ jobs:
           path: dist/bundles/*.bundle.json
           retention-days: 3
 
+      # The conformance bundle: prose, schemas, vectors and the manifest that
+      # pins them, so a third party can claim a level from the download alone
+      # (spec/hushspec-core.md section 8). Built here rather than in the
+      # release job because that job deliberately has no checkout -- every file
+      # in its workspace ships, and anything outside subject-path would ship
+      # unattested.
+      - name: Build the conformance bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --release --locked -p hushspec-testkit --bin hushspec-testkit -- \
+            bundle --root . --out dist/hushspec-conformance.tar.gz
+          # Name the artifact for the corpus version the manifest declares, so
+          # the release asset says which spec version it tests.
+          version="$(python3 -c "import json;print(json.load(open('fixtures/MANIFEST.json'))['fixtures_version'])")"
+          mv dist/hushspec-conformance.tar.gz "dist/hushspec-conformance-${version}.tar.gz"
+          # The bundle is reproducible: the same tree must give the same bytes,
+          # so a second build is a standing check of that promise.
+          cargo run --release --locked -p hushspec-testkit --bin hushspec-testkit -- \
+            bundle --root . --out dist/second.tar.gz
+          cmp "dist/hushspec-conformance-${version}.tar.gz" dist/second.tar.gz
+          rm dist/second.tar.gz
+          ls -l "dist/hushspec-conformance-${version}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-bundle
+          path: dist/hushspec-conformance-*.tar.gz
+          retention-days: 3
+
   release:
     needs: [build, bundles]
     runs-on: ubuntu-latest
@@ -166,7 +196,7 @@ jobs:
           # to the release (no checkout happens here), so anything present but
           # outside the attestation's subject-path would ship unattested.
           shopt -s nullglob
-          attested=(h2h-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json)
+          attested=(h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json)
           echo "attested subjects (${#attested[@]}):"
           printf '  %s\n' "${attested[@]}"
           status=0
@@ -179,14 +209,16 @@ jobs:
           done < <(find . -type f)
           exit "$status"
       # Attest every file the "Upload to release" step publishes -- the platform
-      # tarballs, SHA256SUMS, *and* the policy bundles. Attesting only the
-      # tarballs would leave the checksum file, which is what installers
-      # (Homebrew, scripted installs) actually trust, unverifiable; leaving the
-      # bundles out would ship compliance evidence with no provenance of its own.
+      # tarballs, the conformance bundle, SHA256SUMS, *and* the policy bundles.
+      # Attesting only the tarballs would leave the checksum file, which is what
+      # installers (Homebrew, scripted installs) actually trust, unverifiable;
+      # leaving the bundles out would ship compliance evidence with no
+      # provenance of its own.
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             h2h-*.tar.gz
+            hushspec-conformance-*.tar.gz
             SHA256SUMS
             dist/bundles/*.bundle.json
       - name: Ensure release exists
@@ -198,7 +230,7 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" h2h-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$TAG" h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json --repo "$GITHUB_REPOSITORY" --clobber
 
   homebrew:
     needs: release
@@ -250,3 +282,34 @@ jobs:
         run: |
           for d in out/cli-*; do (cd "$d" && npm publish --access public --provenance); done
           (cd out/cli && npm publish --access public --provenance)
+
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: true
+          tags: |
+            ghcr.io/backbay-labs/h2h:${{ env.TAG }}
+            ghcr.io/backbay-labs/h2h:latest

@@ -21,6 +21,9 @@ const MaxNestingDepth = 8
 // DayAbbreviations are the day names accepted in time_window.days.
 var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
+// TimeWindowCondition holds a rule block active only inside a daily window,
+// optionally restricted to named days (core spec 3.13). A window the engine
+// cannot evaluate leaves the block active.
 type TimeWindowCondition struct {
 	Start    string   `yaml:"start" json:"start"`                           // HH:MM (24-hour)
 	End      string   `yaml:"end" json:"end"`                               // HH:MM (24-hour)
@@ -28,35 +31,123 @@ type TimeWindowCondition struct {
 	Days     []string `yaml:"days,omitempty" json:"days,omitempty"`         // mon..sun
 }
 
+// RateComparison is how a [RateCondition] compares its counter with its
+// threshold (core spec 3.13).
+type RateComparison string
+
+const (
+	// RateComparisonGte is true when counter >= threshold.
+	RateComparisonGte RateComparison = "gte"
+	// RateComparisonLt is true when counter < threshold.
+	RateComparisonLt RateComparison = "lt"
+)
+
+// RateComparisons is the closed set of `rate.comparison` values.
+var RateComparisons = map[RateComparison]struct{}{
+	RateComparisonGte: {},
+	RateComparisonLt:  {},
+}
+
+// RateCondition compares an engine-supplied counter with a threshold (core
+// spec 3.13).
+//
+// HushSpec never stores state and never increments anything: the engine owns
+// the counter and its window and supplies the current value for this
+// evaluation in [RuntimeContext.Counters]. A counter the engine did not supply
+// makes the predicate unevaluable, which leaves the block active.
+type RateCondition struct {
+	// Counter names a key of RuntimeContext.Counters. Identifier grammar.
+	Counter string `yaml:"counter" json:"counter"`
+	// Threshold is the non-negative value the counter is compared against.
+	Threshold uint64 `yaml:"threshold" json:"threshold"`
+	// Comparison is "gte" or "lt".
+	Comparison RateComparison `yaml:"comparison" json:"comparison"`
+}
+
 // Condition gates whether a rule block is active. All present fields are
 // combined with AND semantics. Fail-closed: missing context fields evaluate
 // to false.
 type Condition struct {
-	TimeWindow *TimeWindowCondition   `yaml:"time_window,omitempty" json:"time_window,omitempty"`
-	Context    map[string]interface{} `yaml:"context,omitempty" json:"context,omitempty"`
-	AllOf      []Condition            `yaml:"all_of,omitempty" json:"all_of,omitempty"`
-	AnyOf      []Condition            `yaml:"any_of,omitempty" json:"any_of,omitempty"`
-	Not        *Condition             `yaml:"not,omitempty" json:"not,omitempty"`
+	TimeWindow *TimeWindowCondition `yaml:"time_window,omitempty" json:"time_window,omitempty"`
+	Context    map[string]any       `yaml:"context,omitempty" json:"context,omitempty"`
+	AllOf      []Condition          `yaml:"all_of,omitempty" json:"all_of,omitempty"`
+	AnyOf      []Condition          `yaml:"any_of,omitempty" json:"any_of,omitempty"`
+	Not        *Condition           `yaml:"not,omitempty" json:"not,omitempty"`
+	// Capability is true when the effective posture state -- the state the
+	// posture guard uses, after origins profile selection and the action's
+	// posture input -- grants it. Unevaluable, and therefore held, when the
+	// policy has no posture extension (core spec 3.13).
+	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	// Rate compares an engine-supplied counter with a threshold. Unevaluable,
+	// and therefore held, when the context carries no such counter.
+	Rate *RateCondition `yaml:"rate,omitempty" json:"rate,omitempty"`
 }
 
 // RuntimeContext is the runtime context provided by the enforcement engine.
 type RuntimeContext struct {
-	User        map[string]interface{} `yaml:"user,omitempty" json:"user,omitempty"`
-	Environment string                 `yaml:"environment,omitempty" json:"environment,omitempty"`
-	Deployment  map[string]interface{} `yaml:"deployment,omitempty" json:"deployment,omitempty"`
-	Agent       map[string]interface{} `yaml:"agent,omitempty" json:"agent,omitempty"`
-	Session     map[string]interface{} `yaml:"session,omitempty" json:"session,omitempty"`
-	Request     map[string]interface{} `yaml:"request,omitempty" json:"request,omitempty"`
-	Custom      map[string]interface{} `yaml:"custom,omitempty" json:"custom,omitempty"`
-	CurrentTime string                 `yaml:"current_time,omitempty" json:"current_time,omitempty"` // RFC3339; defaults to system time
+	User        map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
+	Environment string         `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Deployment  map[string]any `yaml:"deployment,omitempty" json:"deployment,omitempty"`
+	Agent       map[string]any `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Session     map[string]any `yaml:"session,omitempty" json:"session,omitempty"`
+	Request     map[string]any `yaml:"request,omitempty" json:"request,omitempty"`
+	Custom      map[string]any `yaml:"custom,omitempty" json:"custom,omitempty"`
+	// Counters are the engine-maintained counters `rate` conditions consult
+	// (core spec 3.13). The engine owns the window; HushSpec only compares.
+	Counters    map[string]uint64 `yaml:"counters,omitempty" json:"counters,omitempty"`
+	CurrentTime string            `yaml:"current_time,omitempty" json:"current_time,omitempty"` // RFC3339; defaults to system time
+}
+
+// grantedCapabilities is what the effective posture state grants, for the
+// `capability` predicate of core spec 3.13. `known` is false when the policy
+// has no posture extension, which makes the predicate unevaluable (and so
+// held); a known-but-unlisted capability is false, and an unknown state grants
+// nothing.
+type grantedCapabilities struct {
+	known bool
+	list  []string
+}
+
+func (g grantedCapabilities) grants(name string) bool {
+	for _, granted := range g.list {
+		if granted == name {
+			return true
+		}
+	}
+	return false
 }
 
 // EvaluateCondition returns true if the condition is satisfied by the context.
+//
+// A `capability` predicate is unevaluable through this entry point -- no
+// posture state is known here -- and therefore holds. An evaluator that has
+// resolved the effective posture state calls
+// [EvaluateConditionWithCapabilities] instead.
 func EvaluateCondition(condition *Condition, context *RuntimeContext) bool {
-	return evaluateConditionDepth(condition, context, 0)
+	return evaluateConditionDepth(condition, context, grantedCapabilities{}, 0)
 }
 
-func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth int) bool {
+// EvaluateConditionWithCapabilities is [EvaluateCondition] with the
+// capabilities the effective posture state grants. Pass hasPosture=false when
+// the policy has no posture extension: a `capability` predicate is then
+// unevaluable and holds. With hasPosture=true an unknown state grants nothing,
+// so the predicate is false.
+func EvaluateConditionWithCapabilities(
+	condition *Condition,
+	context *RuntimeContext,
+	capabilities []string,
+	hasPosture bool,
+) bool {
+	return evaluateConditionDepth(condition, context,
+		grantedCapabilities{known: hasPosture, list: capabilities}, 0)
+}
+
+func evaluateConditionDepth(
+	condition *Condition,
+	context *RuntimeContext,
+	capabilities grantedCapabilities,
+	depth int,
+) bool {
 	if depth > MaxNestingDepth {
 		// Validation rejects this at parse time; an out-of-band condition that
 		// exceeds the depth cannot be evaluated, and an unevaluable condition
@@ -76,16 +167,35 @@ func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth
 		}
 	}
 
-	for _, c := range condition.AllOf {
-		if !evaluateConditionDepth(&c, context, depth+1) {
+	// `capability`: unevaluable without a posture extension (held); otherwise
+	// the effective state must list the capability.
+	if condition.Capability != "" && capabilities.known && !capabilities.grants(condition.Capability) {
+		return false
+	}
+
+	// `rate`: unevaluable when the engine supplied no such counter (held).
+	if rate := condition.Rate; rate != nil {
+		if count, ok := context.Counters[rate.Counter]; ok {
+			satisfied := count >= rate.Threshold
+			if rate.Comparison == RateComparisonLt {
+				satisfied = count < rate.Threshold
+			}
+			if !satisfied {
+				return false
+			}
+		}
+	}
+
+	for index := range condition.AllOf {
+		if !evaluateConditionDepth(&condition.AllOf[index], context, capabilities, depth+1) {
 			return false
 		}
 	}
 
 	if len(condition.AnyOf) > 0 {
 		found := false
-		for _, c := range condition.AnyOf {
-			if evaluateConditionDepth(&c, context, depth+1) {
+		for index := range condition.AnyOf {
+			if evaluateConditionDepth(&condition.AnyOf[index], context, capabilities, depth+1) {
 				found = true
 				break
 			}
@@ -96,7 +206,7 @@ func evaluateConditionDepth(condition *Condition, context *RuntimeContext, depth
 	}
 
 	if condition.Not != nil {
-		if evaluateConditionDepth(condition.Not, context, depth+1) {
+		if evaluateConditionDepth(condition.Not, context, capabilities, depth+1) {
 			return false
 		}
 	}
@@ -161,10 +271,10 @@ func parseHHMM(s string) (int, int, bool) {
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
-	// Require pure ASCII digits in each component. strconv.Atoi otherwise
-	// accepts a leading sign (e.g. "+9"), which TS (^\d+$) and Python
-	// (strict-uint) reject -- so a "+"-prefixed token must fail to parse and
-	// leave the window inert, matching the other SDKs (fail-closed).
+	// Require pure ASCII digits in each component. strconv.Atoi would
+	// otherwise accept a leading sign (e.g. "+9"), which is not an HH:MM
+	// field, so a sign-prefixed token must fail to parse and leave the window
+	// inert (fail-closed).
 	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
 		return 0, 0, false
 	}
@@ -187,76 +297,73 @@ func dayAbbreviationCond(day int) string {
 }
 
 // ValidateConditions performs the parse-time validation of every rule block's
-// `when` condition (D15, core spec 3.13 and 7.10). Unknown keys are rejected by
+// `when` condition (core spec 3.13 and 7). Unknown keys are rejected by
 // the decoder; this checks the HH:MM fields, the timezone, the day
 // abbreviations, and the nesting depth. It returns one message per violation,
 // each prefixed with the rule path (for example `rules.egress.when`).
 func ValidateConditions(rules *Rules) []string {
+	var errs []string
+	for _, block := range ruleConditions(rules) {
+		errs = append(errs, ValidateCondition(block.when, "rules."+block.name+".when")...)
+	}
+	return errs
+}
+
+// conditionBlock pairs a rule block's name with the `when` it declared.
+type conditionBlock struct {
+	name string
+	when *Condition
+}
+
+// ruleConditions lists every rule block that declared a `when`, in the block
+// order of core spec 5 -- the order a document's violations are reported in.
+func ruleConditions(rules *Rules) []conditionBlock {
 	if rules == nil {
 		return nil
 	}
-	blocks := []struct {
-		name string
-		when *Condition
-	}{
-		{"forbidden_paths", nil},
-		{"path_allowlist", nil},
-		{"egress", nil},
-		{"secret_patterns", nil},
-		{"patch_integrity", nil},
-		{"shell_commands", nil},
-		{"tool_access", nil},
-		{"computer_use", nil},
-		{"remote_desktop_channels", nil},
-		{"input_injection", nil},
-		{"browser_automation", nil},
-		{"code_execution", nil},
-	}
-	if rules.ForbiddenPaths != nil {
-		blocks[0].when = rules.ForbiddenPaths.When
-	}
-	if rules.PathAllowlist != nil {
-		blocks[1].when = rules.PathAllowlist.When
-	}
-	if rules.Egress != nil {
-		blocks[2].when = rules.Egress.When
-	}
-	if rules.SecretPatterns != nil {
-		blocks[3].when = rules.SecretPatterns.When
-	}
-	if rules.PatchIntegrity != nil {
-		blocks[4].when = rules.PatchIntegrity.When
-	}
-	if rules.ShellCommands != nil {
-		blocks[5].when = rules.ShellCommands.When
-	}
-	if rules.ToolAccess != nil {
-		blocks[6].when = rules.ToolAccess.When
-	}
-	if rules.ComputerUse != nil {
-		blocks[7].when = rules.ComputerUse.When
-	}
-	if rules.RemoteDesktopChannels != nil {
-		blocks[8].when = rules.RemoteDesktopChannels.When
-	}
-	if rules.InputInjection != nil {
-		blocks[9].when = rules.InputInjection.When
-	}
-	if rules.BrowserAutomation != nil {
-		blocks[10].when = rules.BrowserAutomation.When
-	}
-	if rules.CodeExecution != nil {
-		blocks[11].when = rules.CodeExecution.When
-	}
-
-	var errs []string
-	for _, block := range blocks {
-		if block.when == nil {
-			continue
+	blocks := make([]conditionBlock, 0, blockCount)
+	add := func(name string, when *Condition) {
+		if when != nil {
+			blocks = append(blocks, conditionBlock{name: name, when: when})
 		}
-		errs = append(errs, ValidateCondition(block.when, fmt.Sprintf("rules.%s.when", block.name))...)
 	}
-	return errs
+	if rule := rules.ForbiddenPaths; rule != nil {
+		add("forbidden_paths", rule.When)
+	}
+	if rule := rules.PathAllowlist; rule != nil {
+		add("path_allowlist", rule.When)
+	}
+	if rule := rules.Egress; rule != nil {
+		add("egress", rule.When)
+	}
+	if rule := rules.SecretPatterns; rule != nil {
+		add("secret_patterns", rule.When)
+	}
+	if rule := rules.PatchIntegrity; rule != nil {
+		add("patch_integrity", rule.When)
+	}
+	if rule := rules.ShellCommands; rule != nil {
+		add("shell_commands", rule.When)
+	}
+	if rule := rules.ToolAccess; rule != nil {
+		add("tool_access", rule.When)
+	}
+	if rule := rules.ComputerUse; rule != nil {
+		add("computer_use", rule.When)
+	}
+	if rule := rules.RemoteDesktopChannels; rule != nil {
+		add("remote_desktop_channels", rule.When)
+	}
+	if rule := rules.InputInjection; rule != nil {
+		add("input_injection", rule.When)
+	}
+	if rule := rules.BrowserAutomation; rule != nil {
+		add("browser_automation", rule.When)
+	}
+	if rule := rules.CodeExecution; rule != nil {
+		add("code_execution", rule.When)
+	}
+	return blocks
 }
 
 // ValidateCondition validates one condition subtree rooted at path.
@@ -300,6 +407,16 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			}
 		}
 	}
+	if name := condition.Capability; name != "" && !IsCapabilityIdentifier(name) {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s.capability: %q is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+			path, name))
+	}
+	if rate := condition.Rate; rate != nil && !IsCapabilityIdentifier(rate.Counter) {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s.rate.counter: %q is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+			path, rate.Counter))
+	}
 	for index := range condition.AllOf {
 		validateConditionDepth(&condition.AllOf[index], fmt.Sprintf("%s.all_of[%d]", path, index), depth+1, errs)
 	}
@@ -309,6 +426,34 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 	if condition.Not != nil {
 		validateConditionDepth(condition.Not, path+".not", depth+1, errs)
 	}
+}
+
+// IsCapabilityIdentifier reports whether name matches the identifier grammar
+// shared by posture capabilities and rate counters (core spec 3.13): one or
+// more dot-separated segments, each a lowercase ASCII letter followed by
+// lowercase ASCII letters, digits or underscores.
+//
+//	identifier = segment *("." segment)
+//	segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
+func IsCapabilityIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, segment := range strings.Split(name, ".") {
+		if segment == "" {
+			return false
+		}
+		for index := 0; index < len(segment); index++ {
+			c := segment[index]
+			switch {
+			case c >= 'a' && c <= 'z':
+			case index > 0 && (c >= '0' && c <= '9' || c == '_'):
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // TimezoneIsKnown reports whether tz is an IANA identifier known to this
@@ -395,14 +540,14 @@ func resolveConditionLocation(tz string) *time.Location {
 	}
 
 	if strings.HasPrefix(tz, "+") {
-		offset, ok := parseTimezoneOffsetGo(tz[1:])
+		offset, ok := parseTimezoneOffset(tz[1:])
 		if !ok {
 			return nil
 		}
 		return time.FixedZone(tz, offset*60)
 	}
 	if strings.HasPrefix(tz, "-") {
-		offset, ok := parseTimezoneOffsetGo(tz[1:])
+		offset, ok := parseTimezoneOffset(tz[1:])
 		if !ok {
 			return nil
 		}
@@ -412,7 +557,7 @@ func resolveConditionLocation(tz string) *time.Location {
 	return nil
 }
 
-func parseTimezoneOffsetGo(s string) (int, bool) {
+func parseTimezoneOffset(s string) (int, bool) {
 	if idx := strings.Index(s, ":"); idx >= 0 {
 		hours, err := strconv.Atoi(s[:idx])
 		if err != nil {
@@ -431,17 +576,17 @@ func parseTimezoneOffsetGo(s string) (int, bool) {
 	return hours * 60, true
 }
 
-func checkContextMatch(expected map[string]interface{}, context *RuntimeContext) bool {
+func checkContextMatch(expected map[string]any, context *RuntimeContext) bool {
 	for key, expectedValue := range expected {
-		actual := resolveContextValueGo(key, context)
-		if !matchValueGo(actual, expectedValue) {
+		actual := resolveContextValue(key, context)
+		if !matchValue(actual, expectedValue) {
 			return false
 		}
 	}
 	return true
 }
 
-func resolveContextValueGo(path string, context *RuntimeContext) interface{} {
+func resolveContextValue(path string, context *RuntimeContext) any {
 	dotIdx := strings.Index(path, ".")
 	var topLevel, rest string
 	if dotIdx >= 0 {
@@ -493,21 +638,20 @@ func resolveContextValueGo(path string, context *RuntimeContext) interface{} {
 	}
 }
 
-func mapGet(m map[string]interface{}, key string) interface{} {
+func mapGet(m map[string]any, key string) any {
 	if m == nil {
 		return nil
 	}
 	return m[key]
 }
 
-// valuesEqual mirrors Rust's values_equal: scalar-to-scalar equality only.
-// String is exact, bool is exact (bool is NOT numeric), and numbers preserve
-// the int-vs-float distinction Rust draws through serde_json::Number (as_i64 /
-// as_f64): an integer-shaped expected value matches ONLY an integer-typed
-// actual, while a float-shaped expected value matches an integer or float
-// actual by numeric value. Any other actual shape, or a type mismatch, is not
-// equal.
-func valuesEqual(actual, expected interface{}) bool {
+// valuesEqual compares two scalars, and only scalars. String is exact, bool is
+// exact (a bool is never numeric), and numbers keep the int-vs-float
+// distinction the JSON value model draws: an integer-shaped expected value
+// matches ONLY an integer-typed actual, while a float-shaped expected value
+// matches an integer or float actual by numeric value. Any other actual shape,
+// or a type mismatch, is not equal.
+func valuesEqual(actual, expected any) bool {
 	switch ev := expected.(type) {
 	case string:
 		av, ok := actual.(string)
@@ -526,11 +670,11 @@ func valuesEqual(actual, expected interface{}) bool {
 	}
 }
 
-// matchesScalarOrMembership mirrors Rust's matches_scalar_or_membership: when
-// the actual value is an array, the expected scalar must equal one of its
-// elements (membership); otherwise it is a plain scalar comparison.
-func matchesScalarOrMembership(actual, expected interface{}) bool {
-	if arr, ok := actual.([]interface{}); ok {
+// matchesScalarOrMembership compares an expected scalar with an actual value:
+// when the actual value is an array, the scalar must equal one of its elements
+// (membership); otherwise it is a plain scalar comparison.
+func matchesScalarOrMembership(actual, expected any) bool {
+	if arr, ok := actual.([]any); ok {
 		for _, item := range arr {
 			if valuesEqual(item, expected) {
 				return true
@@ -541,13 +685,13 @@ func matchesScalarOrMembership(actual, expected interface{}) bool {
 	return valuesEqual(actual, expected)
 }
 
-// matchValueGo mirrors Rust's match_value. A missing context field (nil actual)
-// fails closed. A scalar expected value matches a scalar or is a member of an
+// matchValue compares one `when.context` entry. A missing context field (nil
+// actual) fails closed. A scalar expected value matches a scalar or is a member of an
 // actual array. An expected array matches when ANY of its candidates matches
 // the actual value, so expected-array vs actual-array succeeds on a non-empty
 // intersection and expected-array vs actual-scalar succeeds on membership --
 // for string, number, and bool candidates alike.
-func matchValueGo(actual, expected interface{}) bool {
+func matchValue(actual, expected any) bool {
 	if actual == nil {
 		return false
 	}
@@ -555,7 +699,7 @@ func matchValueGo(actual, expected interface{}) bool {
 	switch ev := expected.(type) {
 	case string, bool, int, int64, float64:
 		return matchesScalarOrMembership(actual, expected)
-	case []interface{}:
+	case []any:
 		for _, candidate := range ev {
 			if matchesScalarOrMembership(actual, candidate) {
 				return true
@@ -567,11 +711,10 @@ func matchValueGo(actual, expected interface{}) bool {
 	}
 }
 
-// matchIntNumber compares an integer-shaped expected value. Mirrors Rust's
-// values_equal via serde_json::Number::as_i64: an integer expected matches
-// ONLY an integer-typed actual (int/int64) with an equal value -- a float64
-// actual such as 5.0 does NOT match, even when numerically equal.
-func matchIntNumber(actual interface{}, expected int64) bool {
+// matchIntNumber compares an integer-shaped expected value: it matches ONLY an
+// integer-typed actual (int/int64) with an equal value -- a float64 actual such
+// as 5.0 does NOT match, even when numerically equal.
+func matchIntNumber(actual any, expected int64) bool {
 	switch av := actual.(type) {
 	case int:
 		return int64(av) == expected
@@ -582,10 +725,9 @@ func matchIntNumber(actual interface{}, expected int64) bool {
 	}
 }
 
-// matchFloatNumber compares a float-shaped expected value. Mirrors Rust's
-// values_equal via serde_json::Number::as_f64: a float expected matches an
+// matchFloatNumber compares a float-shaped expected value: it matches an
 // int/int64/float64 actual whose numeric value is equal.
-func matchFloatNumber(actual interface{}, expected float64) bool {
+func matchFloatNumber(actual any, expected float64) bool {
 	switch av := actual.(type) {
 	case int:
 		return float64(av) == expected

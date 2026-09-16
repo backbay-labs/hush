@@ -3,8 +3,9 @@
 //! The signature covers the content hash of the **resolved** policy, so the
 //! policy's `extends` chain is resolved and validated before anything is
 //! signed: a signer that cannot resolve the chain must refuse to sign
-//! (signing spec 3). The lifecycle gate from RFC 09 P2-11 runs first, because
-//! a signature is a durable attestation that this document was approved.
+//! (signing spec 3). The `metadata.lifecycle_state` gate (core spec 2.5) runs
+//! first, because a signature is a durable attestation that this document was
+//! approved.
 
 use colored::Colorize;
 use hushspec::signing::{Envelope, SignOptions, SigningError};
@@ -155,16 +156,19 @@ fn describe(error: &SigningError) -> String {
 fn parse_duration(value: &str) -> Result<chrono::Duration, String> {
     let invalid =
         || format!("--expires-in {value:?} is not a duration; use <number><s|m|h|d>, e.g. 30d");
-    let (digits, unit) = value.split_at(value.len().checked_sub(1).ok_or_else(invalid)?);
+    // Split off the last *character*: a byte split panics when the caller
+    // passes a multi-byte suffix.
+    let unit = value.chars().next_back().ok_or_else(invalid)?;
+    let digits = &value[..value.len() - unit.len_utf8()];
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return Err(invalid());
     }
     let amount: i64 = digits.parse().map_err(|_| invalid())?;
     let seconds = match unit {
-        "s" => amount,
-        "m" => amount.checked_mul(60).ok_or_else(invalid)?,
-        "h" => amount.checked_mul(3600).ok_or_else(invalid)?,
-        "d" => amount.checked_mul(86_400).ok_or_else(invalid)?,
+        's' => amount,
+        'm' => amount.checked_mul(60).ok_or_else(invalid)?,
+        'h' => amount.checked_mul(3600).ok_or_else(invalid)?,
+        'd' => amount.checked_mul(86_400).ok_or_else(invalid)?,
         _ => return Err(invalid()),
     };
     if seconds == 0 {

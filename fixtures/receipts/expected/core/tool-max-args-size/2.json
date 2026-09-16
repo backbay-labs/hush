@@ -1,0 +1,44 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "tool-args-ceiling",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:df43529bb658ebb98141b095c50c4bbcfb7a1a34430f16957f10eb43ba094c3e"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "read_file",
+    "args_size": 1025
+  },
+  "decision": "deny",
+  "matched_rule": "rules.tool_access.max_args_size",
+  "reason": "tool arguments exceeded max_args_size",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.max_args_size",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "tool arguments exceeded max_args_size"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

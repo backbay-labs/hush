@@ -1,5 +1,5 @@
 //! `h2h receipts verify`: check decision receipts against the receipt
-//! schema, the policy they name, and their signatures (RFC 09 P2-06).
+//! schema, the policy they name, and their signatures (receipt spec 6).
 
 use clap::{Subcommand, ValueEnum};
 use colored::Colorize;

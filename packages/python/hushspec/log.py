@@ -57,6 +57,7 @@ __all__ = [
     "LogVerifyReport",
     "ChainedFileSink",
     "compute_entry_hash",
+    "policy_event_to_dict",
     "verify_log",
     "verify_logs",
     "verify_log_files",
@@ -254,7 +255,7 @@ class LogEntry:
                 else receipt_to_dict(self.receipt)
             )
         if self.policy_event is not None:
-            data["policy_event"] = _plain(self.policy_event)
+            data["policy_event"] = policy_event_to_dict(self.policy_event)
         if self.log_started is not None:
             data["log_started"] = _plain(self.log_started)
         if self.entry_hash:
@@ -270,6 +271,16 @@ class LogEntry:
     def payload_matches_type(self) -> bool:
         """Whether exactly the payload named by ``entry_type`` is present."""
         return _payload_matches_type(self.to_dict())
+
+
+def policy_event_to_dict(event: PolicyEvent) -> dict[str, Any]:
+    """The JSON object a log entry's ``policy_event`` member carries.
+
+    The one spelling of a policy event: a log entry embeds it, and a telemetry
+    sink exports exactly these bytes, so both say the same thing about the same
+    load.
+    """
+    return _plain(event)
 
 
 def compute_entry_hash(entry: dict[str, Any]) -> str:
@@ -339,11 +350,14 @@ class ChainedFileSink:
     """Appends hash-linked entries to a JSON Lines file, fsyncing each one.
 
     Opening an existing file continues its chain from the last entry. Appends
-    are serialized in-process by a lock and across processes by an exclusive
-    ``flock`` on the file itself where the platform has one; every line is
-    flushed and ``os.fsync``'d before the entry is reported as written (log
-    spec section 3). Rotation (:meth:`rotate`) carries the chain into the new
-    file through a ``log_started`` entry.
+    are serialized in-process by a lock, each line is written under an
+    exclusive ``flock`` where the platform has one, and every line is flushed
+    and ``os.fsync``'d before the entry is reported as written (log spec
+    section 3). The chain head -- ``seq`` and ``prev_hash`` -- is read once
+    when the sink opens, so one sink object must be the only writer of a given
+    log: two processes appending to the same file each extend it from their
+    own head and fork the chain. Rotation (:meth:`rotate`) carries the chain
+    into the new file through a ``log_started`` entry.
 
     It satisfies :class:`~hushspec.sinks.ReceiptSink`, so a guard can write its
     receipts straight into a log.
@@ -353,14 +367,14 @@ class ChainedFileSink:
         self._path = Path(path)
         self._lock = threading.Lock()
         self._clock: Optional[datetime] = None
-        self._signer: Optional[str] = None
+        self._signer: Optional[Union[str, bytes]] = None
         self._signer_options: dict[str, Any] = {}
         last = _last_entry(self._path)
         if last is None:
             self._seq, self._prev_hash = 0, GENESIS_HASH
         else:
-            self._seq = int(last["seq"])
-            self._prev_hash = str(last["entry_hash"])
+            self._seq = last["seq"]
+            self._prev_hash = last["entry_hash"]
 
     @classmethod
     def open(cls, path: Union[str, Path]) -> "ChainedFileSink":
@@ -486,8 +500,9 @@ def _append_line(path: Path, line: str) -> None:
 
     The file is opened for append (so the write is atomic against other
     appenders on POSIX), locked exclusively where the platform supports it, and
-    ``fsync``'d before the entry is reported as written. A lock we cannot
-    acquire fails the append rather than being bypassed (log spec section 9).
+    ``fsync``'d before the entry is reported as written. The lock is waited
+    for; one the OS refuses outright fails the append rather than being
+    bypassed (log spec section 9).
     """
     if path.parent and not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -523,6 +538,16 @@ def _last_entry(path: Path) -> Optional[dict[str, Any]]:
         raise SinkError(f"last line of {path} is not a log entry: {exc}") from exc
     if not isinstance(entry, dict) or "seq" not in entry or "entry_hash" not in entry:
         raise SinkError(f"last line of {path} is not a log entry")
+    seq, entry_hash = entry["seq"], entry["entry_hash"]
+    # Coercing here would seed the chain from a malformed tail: `int("x")`
+    # raises the wrong exception type, and `str(5)` would quietly make "5" the
+    # next entry's prev_hash, breaking the chain for every later verifier.
+    if not isinstance(seq, int) or isinstance(seq, bool):
+        raise SinkError(f"last line of {path} has a non-integer seq {seq!r}")
+    if not isinstance(entry_hash, str):
+        raise SinkError(
+            f"last line of {path} has a non-string entry_hash {entry_hash!r}"
+        )
     return entry
 
 
@@ -618,9 +643,20 @@ def verify_logs(
                     f"unsupported log_version {entry.get('log_version')!r}, "
                     f"expected {LOG_VERSION!r}"
                 )
-            if entry.get("seq") != expected_seq:
+            # An entry's hash covers whatever JSON the line held, so a
+            # hash-consistent line can still carry a member of the wrong shape.
+            # Check the shapes before reading into them: a malformed log is a
+            # verification failure, never an exception out of the verifier.
+            for member in ("receipt", "policy_event", "log_started", "signature"):
+                value = entry.get(member)
+                if value is not None and not isinstance(value, dict):
+                    raise fail(f"{member} is not a JSON object")
+            seq = entry.get("seq")
+            if not isinstance(seq, int) or isinstance(seq, bool):
+                raise fail(f"seq {seq!r} is not an integer")
+            if seq != expected_seq:
                 raise fail(
-                    f"sequence gap: expected seq {expected_seq}, found {entry.get('seq')}"
+                    f"sequence gap: expected seq {expected_seq}, found {seq}"
                 )
             if not _payload_matches_type(entry):
                 raise fail(

@@ -19,8 +19,7 @@ import {
  * every SDK resolves it from its own embedded rulesets with no filesystem.
  * The expectation is either the resolved content hash plus the chain links
  * (root first, the leaf recorded as `memory`) or a rejection reason code.
- * The Rust reference generates these; TypeScript must agree with them
- * exactly.
+ * The vectors are shared by every SDK, which must agree on them exactly.
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');

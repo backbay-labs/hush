@@ -1,4 +1,4 @@
-use crate::bundle::{BUNDLE_FORMAT_VERSION, CaseAction, CaseBundle, CaseGroup};
+use crate::bundle::{AuditSpec, BUNDLE_FORMAT_VERSION, CaseAction, CaseBundle, CaseGroup};
 use crate::diff::{CaseEvaluator, CompareOptions, DiffError, DivergenceKind, compare_reports};
 use serde_json::Value;
 
@@ -61,7 +61,7 @@ pub fn minimize_case(
         let divergences = compare_reports(&oracle_report, &failing_report, options);
 
         // Phantom divergences are harness-fabricated case keys that were
-        // never part of the bundle this round evaluated. The oracle always
+        // never part of the bundle this round evaluated. The reference always
         // answers exactly the candidate keys `candidates_bundle` generated
         // (one per entry in `candidates`), so a key it never produced isn't
         // a shrinkable candidate at all: `candidate_index` applied to an
@@ -110,8 +110,12 @@ fn case_divergence(
     let bundle = CaseBundle::single_case(policy.clone(), action.clone());
     let oracle_report = oracle.evaluate_bundle(&bundle)?;
     let failing_report = failing.evaluate_bundle(&bundle)?;
+    // Skip phantom keys for the same reason the shrink loop does: a key the
+    // reference never produced describes the harness, not the case under test,
+    // and must not be reported as a reproducible divergence.
     Ok(compare_reports(&oracle_report, &failing_report, options)
-        .first()
+        .iter()
+        .find(|divergence| divergence.kind != DivergenceKind::PhantomCase)
         .map(|divergence| divergence.kind))
 }
 
@@ -120,6 +124,11 @@ fn candidates_bundle(candidates: &[(Value, Value)]) -> CaseBundle {
         hushspec_diff: BUNDLE_FORMAT_VERSION.to_string(),
         seed: 0,
         generated_by: "hushspec-minimize".to_string(),
+        // The shrink probes carry the default audit inputs, and so does the
+        // single-case bundle `case_divergence` starts from: both sides of every
+        // probe replay the same clock, actor and receipt ids, so a receipt
+        // divergence stays reproducible all the way down to the minimized case.
+        audit: AuditSpec::default(),
         groups: candidates
             .iter()
             .enumerate()
@@ -141,9 +150,9 @@ fn candidate_index(case_key: &str) -> Option<usize> {
     number.checked_sub(1)
 }
 
-/// Whether the Rust oracle would evaluate this candidate rather than reject
-/// it. Mirrors `diff::parse_policy` exactly -- parse, resolve `extends`,
-/// validate -- so a candidate that survives here is one the oracle can
+/// Whether the reference would evaluate this candidate rather than reject it.
+/// Applies `diff::parse_policy`'s exact sequence -- parse, resolve `extends`,
+/// validate -- so a candidate that survives here is one the reference can
 /// actually answer for, and shrinking never wanders into a bundle where every
 /// SDK merely agrees on "rejected".
 fn rust_accepts(policy: &Value) -> bool {
@@ -228,15 +237,17 @@ fn shrink_candidates(policy: &Value, action: &Value) -> Vec<(Value, Value)> {
                 }
                 for variant in variants {
                     let mut candidate = policy.clone();
-                    set_path(&mut candidate, &path, Value::Array(variant));
-                    candidates.push((candidate, action.clone()));
+                    if set_path(&mut candidate, &path, Value::Array(variant)) {
+                        candidates.push((candidate, action.clone()));
+                    }
                 }
             }
             Value::String(text) if text.chars().count() > 8 => {
                 let half: String = text.chars().take(text.chars().count() / 2).collect();
                 let mut candidate = policy.clone();
-                set_path(&mut candidate, &path, Value::String(half));
-                candidates.push((candidate, action.clone()));
+                if set_path(&mut candidate, &path, Value::String(half)) {
+                    candidates.push((candidate, action.clone()));
+                }
             }
             _ => {}
         }
@@ -319,36 +330,56 @@ fn walk(value: &Value, path: &mut JsonPath, out: &mut Vec<(JsonPath, Value)>) {
     }
 }
 
-fn set_path(root: &mut Value, path: &[String], new_value: Value) {
+/// Replace the value at `path`, reporting whether the path resolved.
+///
+/// Paths come from `collect_paths` over the same document, so they resolve in
+/// practice; returning `false` rather than panicking keeps a generator bug
+/// from taking down a whole fuzz run.
+fn set_path(root: &mut Value, path: &[String], new_value: Value) -> bool {
+    let Some((last, parents)) = path.split_last() else {
+        return false;
+    };
     let mut cursor = root;
-    for segment in &path[..path.len() - 1] {
+    for segment in parents {
         cursor = match cursor {
-            Value::Object(map) => map.get_mut(segment).expect("path segment exists"),
-            Value::Array(items) => {
-                let index: usize = segment.parse().expect("numeric path segment");
-                &mut items[index]
-            }
-            _ => unreachable!("paths only traverse containers"),
+            Value::Object(map) => match map.get_mut(segment) {
+                Some(child) => child,
+                None => return false,
+            },
+            Value::Array(items) => match segment
+                .parse::<usize>()
+                .ok()
+                .and_then(|index| items.get_mut(index))
+            {
+                Some(child) => child,
+                None => return false,
+            },
+            _ => return false,
         };
     }
-    let last = path.last().expect("non-empty path");
     match cursor {
         Value::Object(map) => {
             map.insert(last.clone(), new_value);
+            true
         }
-        Value::Array(items) => {
-            let index: usize = last.parse().expect("numeric path segment");
-            items[index] = new_value;
-        }
-        _ => unreachable!("paths only traverse containers"),
+        Value::Array(items) => match last
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| items.get_mut(index))
+        {
+            Some(slot) => {
+                *slot = new_value;
+                true
+            }
+            None => false,
+        },
+        _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Test-only imports live here so the non-test build stays warning-free
-    // (clippy runs with -D warnings).
     use crate::diff::{CaseVerdict, NormalizedResult, SdkReport};
     use std::collections::BTreeMap;
 
@@ -388,6 +419,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -458,6 +491,98 @@ mod tests {
         assert!(minimized.rounds >= 1);
     }
 
+    /// A receipt-only divergence must shrink like any other: the probes the
+    /// minimizer builds carry the same audit inputs on both sides, so the
+    /// receipts it compares along the way are the receipts the run compared.
+    ///
+    /// The stub agrees on every field the pre-receipt fuzzer looked at and
+    /// disagrees only on the recorded evidence, exactly as an SDK with a
+    /// receipt bug would.
+    #[test]
+    fn minimizer_shrinks_a_receipt_only_divergence() {
+        struct ReceiptStub {
+            sdk: &'static str,
+            tamper: bool,
+        }
+
+        impl CaseEvaluator for ReceiptStub {
+            fn sdk_name(&self) -> &str {
+                self.sdk
+            }
+
+            fn evaluate_bundle(&mut self, bundle: &CaseBundle) -> Result<SdkReport, DiffError> {
+                let mut report = crate::diff::InProcessEvaluator.evaluate_bundle(bundle)?;
+                report.sdk = self.sdk.to_string();
+                if !self.tamper {
+                    return Ok(report);
+                }
+                // Only policies that still carry the marker record a wrong
+                // receipt, so shrinking has something to home in on.
+                let tampered: std::collections::BTreeSet<String> = bundle
+                    .groups
+                    .iter()
+                    .filter(|group| group.policy.pointer("/rules/shell_commands").is_some())
+                    .flat_map(|group| {
+                        group
+                            .actions
+                            .iter()
+                            .map(move |case| format!("{}/{}", group.id, case.id))
+                    })
+                    .collect();
+                for (key, verdict) in &mut report.results {
+                    if let CaseVerdict::Ok { result } = verdict
+                        && tampered.contains(key)
+                    {
+                        result.receipt_hash = Some(format!("sha256:{}", "0".repeat(64)));
+                    }
+                }
+                Ok(report)
+            }
+        }
+
+        let policy = serde_json::json!({
+            "hushspec": "0.2.0",
+            "name": "big_policy",
+            "description": "lots of irrelevant stuff to strip away",
+            "rules": {
+                "shell_commands": { "forbidden_patterns": ["rm"] },
+                "tool_access": { "allow": ["read_file", "search"], "block": ["shell_exec"] },
+                "forbidden_paths": { "patterns": ["**/.ssh/**", "/etc/passwd"] }
+            }
+        });
+        let action = serde_json::json!({"type": "shell_command", "target": "ls -la"});
+
+        let mut oracle = ReceiptStub {
+            sdk: "rust",
+            tamper: false,
+        };
+        let mut failing = ReceiptStub {
+            sdk: "go",
+            tamper: true,
+        };
+        let minimized = minimize_case(
+            &policy,
+            &action,
+            &mut oracle,
+            &mut failing,
+            &CompareOptions::default(),
+            &MinimizeConfig::default(),
+        )
+        .expect("minimizes");
+
+        assert_eq!(minimized.kind, DivergenceKind::Receipt);
+        assert!(
+            minimized.policy.pointer("/rules/shell_commands").is_some(),
+            "the block the receipt bug needs must survive: {}",
+            minimized.policy
+        );
+        assert!(
+            minimized.policy.get("description").is_none(),
+            "irrelevant structure must still be stripped: {}",
+            minimized.policy
+        );
+    }
+
     #[test]
     fn minimizer_refuses_non_diverging_cases() {
         let policy = serde_json::json!({"hushspec": "0.1.0"});
@@ -508,6 +633,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -551,6 +678,8 @@ mod tests {
                                 origin_profile: None,
                                 posture: None,
                                 rule_trace: Vec::new(),
+                                receipt_hash: None,
+                                receipt: None,
                             },
                         },
                     );
@@ -566,6 +695,8 @@ mod tests {
                         origin_profile: None,
                         posture: None,
                         rule_trace: Vec::new(),
+                        receipt_hash: None,
+                        receipt: None,
                     },
                 },
             );
@@ -578,13 +709,11 @@ mod tests {
     }
 
     /// A harness that fabricates an out-of-range case key must never crash
-    /// the minimizer. Before the fix, the only divergence `compare_reports`
-    /// found each round was the phantom "g9999/a9999" key (every real key
-    /// agrees with the oracle), so the old `divergences.first()` +
-    /// `candidates[index]` selection would parse "g9999" into index 9998
-    /// and index-out-of-bounds panic against a candidates vec with only a
-    /// handful of entries. This test completing at all (whether Ok or Err)
-    /// proves the panic is gone.
+    /// the minimizer. When every real key agrees with the reference, the only
+    /// divergence left each round is the phantom "g9999/a9999" key; selecting
+    /// the candidate by parsing that group number yields index 9998 against a
+    /// candidates vector holding a handful of entries. The minimizer must
+    /// discard the key instead of indexing with it.
     #[test]
     fn minimizer_survives_a_phantom_case_key_without_panicking() {
         let policy = serde_json::json!({

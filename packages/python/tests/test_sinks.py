@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+
+import pytest
+
 from hushspec.evaluate import Decision
 from hushspec.log import PolicyEvent
 from hushspec.receipt import (
@@ -105,11 +108,21 @@ class TestFileReceiptSink:
 
 
 class TestStderrReceiptSink:
-    def test_does_not_crash(self):
+    def test_writes_one_json_object_per_receipt_to_stderr(self, capsys):
         sink = StderrReceiptSink()
-        # Should not raise.
         sink.send(_make_receipt(Decision.ALLOW))
         sink.send(_make_receipt(Decision.DENY))
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        written = captured.err
+        assert written.count("[hushspec] ") == 2
+        decisions = [
+            json.loads(block)["decision"]
+            for block in written.split("[hushspec] ")
+            if block.strip()
+        ]
+        assert decisions == ["allow", "deny"]
 
 
 
@@ -209,12 +222,16 @@ class TestCallbackSink:
 
 
 class TestNullSink:
-    def test_does_not_crash(self):
+    def test_discards_every_receipt_and_writes_nothing(self, capsys):
         sink = NullSink()
-        # Should not raise.
-        sink.send(_make_receipt(Decision.ALLOW))
-        sink.send(_make_receipt(Decision.DENY))
-        sink.send(_make_receipt(Decision.WARN))
+        for decision in (Decision.ALLOW, Decision.DENY, Decision.WARN):
+            sink.send(_make_receipt(decision))
+        sink.record_policy_event(
+            PolicyEvent.loaded(_policy_summary(), "enforce")
+        )
+
+        captured = capsys.readouterr()
+        assert (captured.out, captured.err) == ("", "")
 
 
 
@@ -248,3 +265,50 @@ class TestPolicyEvents:
         # a log that drops it cannot map its receipts back to a policy at all.
         FilteredSink.deny_only(Recording()).record_policy_event(event)
         assert len(seen) == 3
+
+
+class TestFilteredSinkConstruction:
+    def test_a_predicate_is_refused_rather_than_silently_matching_nothing(self):
+        # A callable is not a collection of decision names: accepting one would
+        # make the sink drop every receipt without saying so.
+        with pytest.raises(TypeError, match="collection of decision names"):
+            FilteredSink(NullSink(), lambda receipt: True)
+
+    def test_a_bare_string_is_refused(self):
+        with pytest.raises(TypeError, match="collection of decision names"):
+            FilteredSink(NullSink(), "deny")
+
+    def test_any_collection_of_names_is_accepted(self):
+        sink = FilteredSink(NullSink(), ("deny", "warn"))
+        assert sink._decisions == frozenset({"deny", "warn"})
+
+
+class TestMultiSinkFailureReporting:
+    class _Exploding(ReceiptSink):
+        def send(self, receipt):
+            raise RuntimeError("sink is down")
+
+    def test_a_failing_sink_is_counted_and_reported(self):
+        seen = []
+        multi = MultiSink(
+            [self._Exploding(), NullSink()],
+            on_error=lambda sink, exc: seen.append((type(sink).__name__, str(exc))),
+        )
+        multi.send(_make_receipt())
+        assert multi.dropped == 1
+        assert seen == [("_Exploding", "sink is down")]
+
+    def test_a_failing_sink_does_not_stop_the_others(self):
+        recorded = []
+        multi = MultiSink([self._Exploding(), CallbackSink(recorded.append)])
+        multi.send(_make_receipt())
+        assert len(recorded) == 1
+        assert multi.dropped == 1
+
+    def test_a_broken_handler_is_not_fatal(self):
+        def explode(sink, exc):
+            raise RuntimeError("handler is down too")
+
+        multi = MultiSink([self._Exploding()], on_error=explode)
+        multi.send(_make_receipt())
+        assert multi.dropped == 1

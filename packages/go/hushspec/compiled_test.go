@@ -70,7 +70,7 @@ func compiledParityActions() []*EvaluationAction {
 	}
 }
 
-// TestCompiledPolicyMatchesFreeFunctions pins the refactor's whole contract:
+// TestCompiledPolicyMatchesFreeFunctions pins the contract compilation makes:
 // compiling a policy changes nothing an enforcement point can observe.
 func TestCompiledPolicyMatchesFreeFunctions(t *testing.T) {
 	spec, err := Parse(compiledParitySpec)

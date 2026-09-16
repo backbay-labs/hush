@@ -51,11 +51,17 @@ jobs:
         run: python3 scripts/generate_canonical_schemas.py --check
       - name: Check generated CLI frameworks
         run: python3 scripts/generate_cli_frameworks.py --check
+      - name: Check generated testkit schemas
+        run: python3 scripts/generate_testkit_schemas.py --check
+      - name: Check the fixture manifest
+        run: python3 scripts/generate_fixture_manifest.py --check
       # Re-derives the three hand-built bundle vectors from the committed
       # valid one, signing with OpenSSL: a standing cross-check of the Rust
       # signer as well as a staleness guard.
       - name: Check derived bundle vectors
         run: python3 scripts/generate_bundle_vectors.py --check
+      - name: Comment hygiene
+        run: python3 scripts/check_comment_hygiene.py --check
 
   rust:
     name: Rust
@@ -338,6 +344,12 @@ jobs:
   policy-lint:
     name: Policy Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Needed only by the SARIF upload below. A pull request from a fork is
+      # granted read-only tokens whatever this says, which is why that step is
+      # both conditioned on the head repo and continue-on-error.
+      security-events: write
     steps:
       - uses: actions/checkout@v4
 
@@ -371,11 +383,88 @@ jobs:
         run: |
           # The permissive preset exists to allow everything during local
           # development, so L004 ("allow: [\"*\"] makes the rule ineffective")
-          # and L005 ("default: allow with an empty block list") restate its
+          # and L017 ("egress.default: allow permits every host") restate its
           # purpose rather than reporting a defect. It is still gated on lint
           # *errors*; only those two by-design warnings are tolerated, and no
           # warning is suppressed -- both still print in the job log.
           ./target/debug/h2h lint rulesets/permissive.yaml
+
+      # Re-lint everything into SARIF so findings land on the pull request as
+      # code-scanning annotations instead of only in this log. Runs even when a
+      # gate above failed -- that is exactly when the annotations are wanted --
+      # and never changes the job's own verdict.
+      - name: Lint to SARIF
+        if: always()
+        run: |
+          mapfile -t all < <(
+            ls rulesets/*.yaml
+            find library -type f \( -name '*.yaml' -o -name '*.yml' \) | sort
+          )
+          ./target/debug/h2h lint --format sarif --out h2h-lint.sarif "${all[@]}" || true
+
+      - name: Upload SARIF to code scanning
+        # Forks cannot be granted `security-events: write`, so the upload is
+        # skipped there rather than failing the job. continue-on-error covers
+        # the rest (a repo with code scanning disabled, an API hiccup).
+        if: >-
+          always() &&
+          (github.event_name != 'pull_request' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: h2h-lint.sarif
+          category: h2h-policy-lint
+  # ── The vertical library's control-tagged suites ───────────────────
+  library-suites:
+    name: Library Suites
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build h2h
+        run: cargo build -p hushspec-cli
+
+      # Every rule block and every named secret pattern of each library policy
+      # must be hit by at least one case: --fail-on-uncovered is the gate, and
+      # the JUnit report is what a reviewer reads.
+      - name: Run the library suites
+        run: |
+          set -o pipefail
+          ./target/debug/h2h test \
+            --fixtures fixtures/library \
+            --fail-on-uncovered \
+            --format junit \
+            --report-file target/library-suites.xml \
+            | tee target/library-suites.txt
+
+      # The run's own summary (results + the rule-coverage table) is the
+      # summary: it needs no third-party action and cannot drift from what the
+      # gate actually checked.
+      - name: Publish the run summary
+        if: always()
+        run: |
+          {
+            echo '## Library suites'
+            echo
+            echo '```'
+            cat target/library-suites.txt || echo '(the suites did not run)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Uploaded as an artifact so a JUnit consumer (a test-report action, a
+      # dashboard) can read the per-case controls and tags.
+      - name: Upload the JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-suites-junit
+          path: target/library-suites.xml
+          if-no-files-found: error
 
   # ── Dependency audits ──────────────────────────────────────────────
   cargo-deny:
@@ -573,3 +662,53 @@ jobs:
           path: coverage-out/
           if-no-files-found: error
           retention-days: 14
+
+  # ── action.yml smoke test ──────────────────────────────────────────
+  # No release with binaries exists yet, so this exercises the action via
+  # `version: source` (build crates/hushspec-cli from this checkout) --
+  # once tagged releases ship binaries, add a second invocation pinned to
+  # a real tag to cover the download/verify/cache path too.
+  action-smoke:
+    name: Action Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Validate rulesets/default.yaml via the HushSpec action
+        id: hushspec
+        uses: ./
+        with:
+          command: validate
+          paths: rulesets/default.yaml
+          version: source
+
+      - name: Check action outputs
+        run: |
+          [ "${{ steps.hushspec.outputs.exit-code }}" = "0" ] || { echo "::error::expected exit-code 0, got '${{ steps.hushspec.outputs.exit-code }}'"; exit 1; }
+          [ -s "${{ steps.hushspec.outputs.report-path }}" ] || { echo "::error::report file '${{ steps.hushspec.outputs.report-path }}' is missing or empty"; exit 1; }
+
+  # ── Container image ──────────────────────────────────────────────────
+  docker-build:
+    name: Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: h2h:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run h2h version inside the built image
+        run: docker run --rm h2h:ci version

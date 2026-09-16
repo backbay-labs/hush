@@ -336,6 +336,8 @@ Any rule block may carry a `when` condition. When it evaluates to false the bloc
 | `time_window` | `{start: "HH:MM", end: "HH:MM", timezone: "IANA or +HH:MM", days: [mon, ...]}`; half-open, wraps midnight when `start > end` |
 | `context` | Map of dot-delimited runtime-context paths to required values (`user.role: admin`, `environment: production`) |
 | `all_of` / `any_of` / `not` | Boolean composition of conditions |
+| `capability` | The effective posture state must grant this capability (`capability: shell`); unevaluable without a posture extension, so the block stays active |
+| `rate` | `{counter: "shell_commands", threshold: 5, comparison: gte}` compared against the engine-supplied `counters` map in the runtime context; unevaluable when the counter is absent |
 
 Invalid times, time zones, day names, unknown keys, or excessive nesting are parse errors. A time zone the engine cannot resolve at evaluation time leaves the block active.
 

@@ -17,7 +17,7 @@ use crate::compiled::{
     CompiledBrowserAutomation, CompiledEgress, CompiledForbiddenPaths, CompiledMatchers,
     CompiledPathAllowlist, CompiledRegex, CompiledSecretPatterns,
 };
-use crate::conditions::{Condition, RuntimeContext, evaluate_condition};
+use crate::conditions::{Condition, RuntimeContext, evaluate_condition_with_capabilities};
 use crate::extensions::{
     OriginEgressOverlay, OriginProfile, OriginToolAccessOverlay, PostureExtension,
     TransitionTrigger,
@@ -392,8 +392,6 @@ impl Evaluator<'_> {
             );
         };
 
-        self.active = self.active_mask(blocks);
-
         // Origins guard: select a profile or apply default_behavior.
         let origins = self
             .spec
@@ -429,6 +427,12 @@ impl Evaluator<'_> {
 
         // Posture guard.
         let posture = resolve_posture(self.spec, matched_profile, self.action.posture.as_ref());
+
+        // `when` conditions see the effective posture state (capability
+        // predicates), so the active-block mask is computed only now.
+        let capabilities = posture_capabilities(self.spec, posture.as_ref());
+        self.active = self.active_mask(blocks, capabilities.as_deref());
+
         if let Some(denied) = self.posture_capability_guard(&posture) {
             self.skip_all(blocks, "short-circuited by posture deny");
             return self.finish(
@@ -574,7 +578,7 @@ impl Evaluator<'_> {
     /// blocks the runtime context leaves active. Returns an empty mask -- read
     /// as "every block active" -- when no applicable block carries a condition,
     /// so a policy without `when` pays nothing.
-    fn active_mask(&self, blocks: &[&str]) -> Vec<BlockActivity> {
+    fn active_mask(&self, blocks: &[&str], capabilities: Option<&[String]>) -> Vec<BlockActivity> {
         let any_condition = !self.conditions.is_empty()
             || blocks.iter().any(|block| self.block_when(block).is_some());
         if !any_condition {
@@ -583,13 +587,12 @@ impl Evaluator<'_> {
         blocks
             .iter()
             .map(|block| BlockActivity {
-                when_false: self
-                    .block_when(block)
-                    .is_some_and(|condition| !evaluate_condition(condition, self.context)),
-                oob_false: self
-                    .conditions
-                    .get(*block)
-                    .is_some_and(|condition| !evaluate_condition(condition, self.context)),
+                when_false: self.block_when(block).is_some_and(|condition| {
+                    !evaluate_condition_with_capabilities(condition, self.context, capabilities)
+                }),
+                oob_false: self.conditions.get(*block).is_some_and(|condition| {
+                    !evaluate_condition_with_capabilities(condition, self.context, capabilities)
+                }),
             })
             .collect()
     }
@@ -1294,7 +1297,8 @@ fn evaluate_computer_use(rule: &ComputerUseRule, target: &str) -> BlockDecision 
             Some("rules.computer_use.mode"),
             Some("observe mode does not block unlisted actions"),
         ),
-        // guardrail and fail_closed have identical reference semantics (D9).
+        // `fail_closed` is an alias of `guardrail`; both deny unlisted
+        // actions (core spec 3.8).
         ComputerUseMode::Guardrail | ComputerUseMode::FailClosed => BlockDecision::deny(
             "rules.computer_use.mode",
             "unlisted computer-use action is denied",
@@ -1574,16 +1578,41 @@ fn resolve_posture(
 }
 
 fn next_posture_state(posture: &PostureExtension, current: &str, signal: &str) -> Option<String> {
-    // D18 (pending): first matching transition in document order.
-    posture.transitions.iter().find_map(|transition| {
-        if transition.from != "*" && transition.from != current {
-            return None;
-        }
-        if trigger_name(&transition.on) != signal {
-            return None;
-        }
-        Some(transition.to.clone())
-    })
+    // Posture spec 5.3: a transition whose `from` names the current state
+    // outranks one whose `from` is `"*"`; among equals, document order wins.
+    let matching = |wildcard: bool| {
+        posture.transitions.iter().find_map(|transition| {
+            let from_matches = if wildcard {
+                transition.from == "*"
+            } else {
+                transition.from == current
+            };
+            if !from_matches || trigger_name(&transition.on) != signal {
+                return None;
+            }
+            Some(transition.to.clone())
+        })
+    };
+    matching(false).or_else(|| matching(true))
+}
+
+/// The capabilities the effective posture state grants, for `capability`
+/// conditions (core spec 3.13): `None` when the policy has no posture
+/// extension (the predicate is then unevaluable and holds); an unknown state
+/// grants nothing.
+fn posture_capabilities(spec: &HushSpec, posture: Option<&PostureResult>) -> Option<Vec<String>> {
+    let extension = spec
+        .extensions
+        .as_ref()
+        .and_then(|extensions| extensions.posture.as_ref())?;
+    let current = posture.map(|posture| posture.current.as_str())?;
+    Some(
+        extension
+            .states
+            .get(current)
+            .map(|state| state.capabilities.clone())
+            .unwrap_or_default(),
+    )
 }
 
 /// Origin profile selection (origins spec Section 3): candidates are profiles

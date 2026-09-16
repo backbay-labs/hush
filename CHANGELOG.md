@@ -8,12 +8,127 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
 
 ## [Unreleased]
 
-### Added (RFC 09 Wave 4, Rust)
+### Added
 
-- Receipt format 0.2 in the Rust SDK: `evaluate_audited` now takes a `Resolution` and an
-  `AuditContext`, records actor, canonical `policy.content_hash`, `extends_chain`, signature
-  status, recorded rule and detection traces, and the enforcement disposition; UUID v7 ids and
-  millisecond timestamps. The staged receipt schema is promoted.
+**Spec**
+
+- **Conformance levels 4 and 5** are normative in `spec/hushspec-core.md` section 8, closing the
+  forward references the receipt and signing specifications already made. **Level 4 (Auditor)**:
+  receipt format 0.2, a canonical `policy.content_hash` over the resolved document, a `rule_trace`
+  recorded rather than reconstructed, the committed receipt for every evaluation case reproduced
+  after RFC 8785 canonicalization, and the canonical-form and resolution vectors. **Level 5
+  (Attested)**: a conforming signature verifier, verification on load recorded in
+  `receipt.policy.signature`, a hash-linked log rejected at the line its file name names, receipt
+  signing, and bundle verification. Section 8 also states that a claim is made against a corpus
+  pinned by digest, and that `not_attempted` is never a pass.
+- `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
+  materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
+  standard-library reference canonicalizer (`scripts/canonical_json.py`), the
+  `hushspec-hash-vector` schema, and 14 normative vectors under `fixtures/core/hash/`.
+- `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
+  millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
+  `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
+  hash for chaining), with 12 valid and 14 invalid vectors under `fixtures/receipts/`.
+  `schemas/hushspec-receipt.v0.schema.json` is the 0.2 schema.
+- `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
+  (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
+  expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
+  with a published test-only key.
+- `spec/hushspec-log.md` and `spec/hushspec-bundle.md`: the hash-linked receipt log and the
+  policy bundle attestation format, with their schemas and vectors.
+- **`when.capability` and `when.rate`** (core spec 3.13): a rule block can be gated on the
+  effective posture state granting a capability, or on an engine-supplied counter in the new
+  runtime-context `counters` map crossing a threshold; both are unevaluable-means-active.
+- **`heuristic_injection@1`** (detection spec 3.5): a normative, integer-scored prompt-injection
+  detector with a fixed signal table that every engine must reproduce exactly, configured by
+  `prompt_injection.heuristics`, and registered beside `regex_injection@1`.
+- **Transition priority** (posture spec 5.3): for the same trigger, a transition whose `from`
+  names the current state outranks one whose `from` is `"*"`; among equals, document order wins.
+  Every SDK implements it, against the shared vector
+  `fixtures/posture/evaluation/transition-priority.test.yaml`.
+- Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,
+  `changelog[]` and `supersedes`; the four `metadata` date fields plus each changelog entry's
+  `date` must now be an ISO 8601 calendar date (`YYYY-MM-DD`), checked in all four SDKs
+  (`E011` from `h2h validate`). New governance checks with stable codes -- separation of
+  duties (`GOV_SOD_VIOLATION`), `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`,
+  `GOV_CHANGELOG_ORDER`, and the error-severity `GOV_SELF_SUPERSEDES`. `h2h audit` lists every
+  finding with its code, severity and path; `--strict` makes warnings fatal. `h2h sign` refuses
+  a policy that is not `approved` or `deployed` unless `--allow-unapproved` is passed.
+- Machine-readable control mappings: `metadata.controls[]` (`framework`, `control_id`,
+  `rule_paths`, `notes`) in the core schema, spec 2.5, and all four SDKs; a framework registry
+  at `spec/registries/frameworks.yaml` with its own schema; lint `L011` (unmapped rule block),
+  `L012` (rule path resolves to nothing) and `L013` (unregistered framework or non-conforming
+  control id); `h2h audit --controls` (text and JSON) with a rule-block coverage line and a
+  `--strict` exit code; and all eight `library/` policies migrated from comment-only mappings
+  to structured ones.
+
+**Schemas**
+
+- **Expected error codes on every `invalid/` vector.** `spec/registries/error-codes.yaml`
+  registers the codes the validator emits (`E000`-`E005`, `E010`, `E011`), validated by
+  `schemas/hushspec-error-codes.v0.schema.json`, whose `$defs/ExpectedError` is the shape of the
+  new `fixtures/<module>/invalid/<name>.expect.yaml` sidecars. All four SDK fixture runners
+  assert the registered code and any `message_contains` substring.
+- **`schemas/hushspec-merge-vector.v0.schema.json`** writes down the merge vector directory
+  convention (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, the digest-pin path through the
+  resolver, and the two refusal markings all four runners honour), validated against every merge
+  directory in the corpus by a testkit test.
+- **`schemas/hushspec-conformance-report.v0.schema.json`**: the shape of a conformance report.
+- Evaluator-test fixtures format **0.2.0** (`schemas/hushspec-evaluator-test.v0.schema.json`,
+  same file name): a case may declare `controls: [{framework, control_id}]` -- the controls it
+  is evidence for -- and free-form `tags`, and its `expect` may assert `rule_trace` (the
+  recorded trace of receipt spec 4.3, compared in order and in full, with `rule_path` compared
+  only where it is spelled) and `receipt` (a partial format 0.2 receipt whose members must equal
+  the receipt produced under the fixed inputs of `fixtures/receipts/expected/README.md`;
+  `actor`, `timestamp` and `receipt_id` are ignored, nested objects are compared member-wise).
+  `hushspec_test` now accepts `0.1.0` and `0.2.0`, so every existing fixture stays valid.
+
+**Rust**
+
+- `hushspec::guard` -- `HushGuard`, the Rust enforcement point, at parity with the
+  TypeScript SDK's. Built from a `Policy`, a `Resolution` or a `CompiledPolicy`; carries the
+  enforcement mode (with per-rule-path overrides, longest prefix wins), an `on_warn`
+  confirmation channel (absent, a `warn` denies -- core spec 6), a `ReceiptSink`, observers,
+  the acting `Actor`, and the `TimeSource`. `check()` returns a `GuardDecision` (result,
+  receipt, `enforced`, `enforcement`, `duration_us`); `evaluate()` records without enforcing;
+  `swap_policy()` hot-swaps atomically and keeps the last good policy when the new one will
+  not validate or compile. A policy that fails verification under `require_signature` puts the
+  guard in the refused state -- every action denied with `__hushspec_policy_unverified__` and an
+  unverified-policy receipt -- rather than failing to build. Panic mode and a refusal always
+  enforce; monitor mode is refused without a sink or an observer. `Send + Sync`, `&self`
+  everywhere, policy behind an `RwLock<Arc<..>>`.
+- `hushspec::observer` -- `EvaluationObserver` (`on_policy_loaded` / `on_evaluation` /
+  `on_error`, all defaulted), `ObservableEvaluator`, `JsonLineObserver`, `StderrObserver`,
+  `MetricsCollector` (counters by decision, action type and rule block, a latency histogram,
+  `snapshot()`, and `render_prometheus()` emitting the documented `hushspec_evaluate_total`,
+  `hushspec_evaluate_duration_us`, `hushspec_rule_match_total` and `hushspec_policy_load_total`
+  series), plus `WebhookObserver` behind `http`. Action `content` is stripped before any
+  observer sees it.
+- `hushspec::provider` -- `PolicyProvider` (`load()` -> `Resolution`, `source()`),
+  `FileProvider`, `HttpProvider` (behind `http`, ETag-aware through the existing HTTPS loader),
+  and two reload drivers: `PolicyWatcher` (stats one file per tick) and `PolicyPoller`
+  (interval reload through any provider, delivering only on a `content_hash` change). Both swap
+  into a `HushGuard`, keep the last good policy on any failure, report through `on_error`, and
+  can check a panic sentinel on the same tick. `PolicyHandle` exposes `current()`,
+  `generation()`, `errors()` and `last_error()`; dropping it stops the thread.
+- `hushspec::otlp` (new `otlp` feature, implies `http`) -- `OtlpSink` exports receipts and
+  policy events as OTLP/HTTP JSON logs to `<endpoint>/v1/logs`: one `logRecord` per entry,
+  `timeUnixNano` from the entry's own timestamp, `INFO`/`WARN`/`ERROR` by decision,
+  `body.stringValue` the canonical JSON of the receipt, and `hushspec.*` attributes for entry
+  type, receipt version, decision, action type, matched rule, policy content hash, receipt hash
+  and enforcement mode/outcome, under `service.name` / `hushspec.sdk` (`hushspec-rust`) /
+  `hushspec.sdk.version` / `hushspec.spec_version` resource attributes. The mapping is written
+  out in the module docs so every SDK agrees. Background thread and bounded queue, so
+  export never blocks an evaluation; overflow drops with a counter and a `sink.error` observer
+  event; `5xx` retried with backoff, `4xx` not; drop flushes.
+- `cargo run --example guarded_agent --features otlp` -- a complete tool boundary: policy ->
+  guard -> `check` -> `ChainedFileSink` + `OtlpSink`, with metrics, a monitored rule block and
+  hot reload. New guide `docs/src/guides/runtime-integration.md`.
+- `Policy::panic_state()` reads the kill switch a policy will compile with.
+- Receipt format 0.2: `evaluate_audited` now takes a `Resolution` and an `AuditContext`,
+  records actor, canonical `policy.content_hash`, `extends_chain`, signature status, recorded
+  rule and detection traces, and the enforcement disposition; UUID v7 ids and millisecond
+  timestamps.
 - Verify-on-load and digest pinning: `resolve_with_options` / `resolve_path_with_options`
   return a `Resolution` with per-hop chain links and verification outcomes;
   `extends: "<ref>#sha256:<hex>"` pins a base document.
@@ -30,33 +145,19 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   with the same Ed25519 keys and `key_id` convention as policies, and are readable by generic DSSE
   and in-toto tooling. Eight vectors under `fixtures/bundle/`; every release now attaches a bundle
   for each `library/` and `rulesets/` policy, covered by `actions/attest-build-provenance`.
-- The Python SDK ports the evidence chain: receipt format 0.2 (`evaluate_audited` takes a
-  `Resolution` and an `AuditContext`; `receipt_hash`, `deterministic_uuid_v7`,
-  `unverified_policy_receipt`; `compute_policy_hash` now returns the canonical `sha256:`
-  hash), the hash-linked log (`hushspec.log`: `ChainedFileSink`, `PolicyEvent`,
-  `verify_log` / `verify_logs` / `verify_log_files`), receipt signing
-  (`sign_receipt` / `verify_receipt` / `SignedReceipt`), and `HushGuard(actor=...)` with
-  `policy_loaded` / `policy_swapped` records. `SignatureStatus.signed_at` is renamed
-  `verified_at`, an in-memory leaf resolves as `memory`, and a matching digest pin now
-  satisfies `require_signature` for that hop.
+- Signing format 0.2: `hushspec::signing` now signs the content hash of the *resolved* policy
+  over an RFC 8785 envelope, so reformatting a signed policy keeps its signature valid and a
+  changed base policy invalidates it. Keys are PEM PKCS#8 / SPKI with `key_id` recomputed from
+  the SPKI digest, trust is a `Keyring` with retirement and revocation, and `verify_policy`
+  reports the closed reason-code set of signing spec 6.4 (`malformed_envelope`,
+  `unsupported_format_version`, `unsupported_algorithm`, `unknown_key_id`, `key_revoked`,
+  `key_retired`, `signed_at_in_future`, `expired`, `signature_mismatch`,
+  `content_hash_mismatch`, `policy_version_rollback`). All 16 vectors under `fixtures/signing/`
+  pass.
+- `when.capability` and `when.rate` support: `RateCondition`, `RateComparison`,
+  `evaluate_condition_with_capabilities` and `is_capability_identifier` are exported.
 
-### Added (RFC 09 Wave 4, Go)
-
-- The evidence chain in the Go SDK, matching the Rust reference byte for byte. Receipt format
-  0.2: `EvaluateAudited(resolution, action, config, ctx)` (and `EvaluateAuditedSpec`) records
-  the actor, the canonical `policy.content_hash`, `extends_chain`, the signature outcome, the
-  evaluator's recorded rule trace under the schema's closed `rule_block` ids, the detection
-  trace, and the required enforcement disposition, with UUID v7 ids and millisecond
-  timestamps; `ParseReceipt` accepts exactly what the 0.2 schema accepts, and
-  `ComputePolicyHash` now returns the canonical `sha256:` hash. Hash-linked log:
-  `ChainedFileSink` (fsync and an exclusive `flock` per append, rotation carrying `prev_hash`
-  through a `log_started` entry, optional per-entry signatures), `PolicyEvent` records through
-  the new `PolicyEventSink` interface, and `VerifyLog` / `VerifyLogs` / `VerifyLogFiles`
-  reporting the first break by file and line. Receipt signing: `SignReceipt`, `VerifyReceipt`,
-  `SignedReceipt`. `SignatureStatus.SignedAt` is renamed `VerifiedAt` (`verified_at`) to match
-  the schema, and an in-memory leaf is recorded in the chain as `memory`.
-
-### Added (RFC 09 Wave 4, TypeScript)
+**TypeScript**
 
 - Receipt format 0.2 in `@hushspec/core`: `evaluateAudited(resolution, action, config, context)`
   (plus `evaluateAuditedSpec`) records `receipt_version`, a UUID v7 `receipt_id`, a
@@ -79,7 +180,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   accepts `actor` and `timeSource` options.
 - Vector runners for `fixtures/core/resolve/`, `fixtures/receipts/{expected,valid,invalid}`,
   `fixtures/log/{valid,invalid}` and `fixtures/receipts/signed/`.
-- `CompiledPolicy` (P6-01): `compilePolicy(spec)` / `compileResolution(resolution)` build every
+- `CompiledPolicy`: `compilePolicy(spec)` / `compileResolution(resolution)` build every
   policy regex, path glob, host pattern, tool set, parsed `when` condition, severity table and
   detector configuration once, and `evaluate` / `evaluateTraced` / `evaluateWithContext` /
   `evaluateWithDetection` / `evaluateAudited` run against that form; `contentHash` is computed on
@@ -87,8 +188,247 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   raises `CompileError` for a pattern outside the regex profile instead of deferring it to an
   evaluation-time deny (`{ strict: false }` keeps the deny). `HushGuard` compiles once at
   construction and on `swapPolicy()`, and exposes `guard.compiled`.
+- `OtlpReceiptSink`: exports decision receipts and
+  `policy_loaded` / `policy_swapped` events to an OpenTelemetry collector as OTLP/HTTP JSON
+  logs (`POST <endpoint>/v1/logs`), over `node:http` / `node:https` with no new dependency.
+  One `logRecord` per entry: `timeUnixNano` from the entry's own timestamp, `severityText`
+  `INFO`/`WARN`/`ERROR` for allow/warn/deny (`INFO` for a policy event), `body.stringValue`
+  the entry's RFC 8785 canonical JSON, and the `hushspec.*` attributes (`entry_type`,
+  `receipt_version`, `decision`, `action_type`, `matched_rule`, `policy.content_hash`,
+  `receipt_hash`, `enforcement.mode`, `enforcement.outcome`) plus the `service.name` /
+  `hushspec.sdk` / `hushspec.sdk.version` / `hushspec.spec_version` resource attributes --
+  the same wire mapping in every SDK. `send()` never blocks or throws: a bounded queue,
+  batching by size or timer, retries with exponential backoff on 5xx/429/network errors,
+  `flush()` and `close()`, and overflow that drops, counts (`sink.dropped`) and reports
+  through `onError` rather than silently losing evidence.
+- Vercel AI SDK adapter: `mapVercelToolCall()` (AI SDK 4 `args` and 5 `input` shapes) and
+  `createVercelGuard(guard).wrapTools(tools)`, which gates each tool's `execute` -- deny
+  throws `HushSpecDenied` before the tool body runs, warn goes to the guard's `onWarn`.
+- LangChain.js adapter: `wrapLangChainTool()` (a proxy, so the tool keeps its prototype,
+  fields and `instanceof`, with `invoke`, `call` and a `DynamicTool`'s `func` gated) and
+  `createLangChainCallbackHandler()`, which gates every tool an executor starts.
+  Both adapters are structurally typed: neither imports the framework it adapts.
 
-### Changed (RFC 09 Wave 4, TypeScript)
+**Python**
+
+- `hushspec.provider`: a `PolicyProvider` protocol (`load() -> Resolution`, `source`)
+  with `FileProvider` (carrying its `ResolveOptions`, so `require_signature` applies to every
+  reload), `CallbackProvider`, and hot reload through `PolicyWatcher` (mtime + content hash) and
+  `PolicyPoller` (any provider) -- daemon threads, context managers, an explicit `check_once()`
+  tick, and optional panic-sentinel checking per tick. `HushGuard.from_provider(...)` builds a
+  guard from a provider and can attach either loop; `HushGuard.swap_resolution()` swaps in an
+  already-resolved policy without re-resolving it. A reload that cannot be read, parsed,
+  resolved, verified or compiled leaves the policy in force untouched and is reported through
+  `on_error`, then retried.
+- `hushspec.otlp.OtlpReceiptSink`: exports receipts and policy events to an OTLP/HTTP
+  collector as log records (`POST <endpoint>/v1/logs`) over `urllib` alone -- canonical JSON
+  body, `INFO`/`WARN`/`ERROR` severity by decision, and the `hushspec.*` attributes and resource
+  attributes shared with the Rust, TypeScript and Go sinks. Background thread, bounded queue
+  (drop + counter + `on_error` on overflow), batching, retry with backoff on `429`/`5xx`/network
+  errors, `flush()` and `close()`; `send()` never blocks on I/O.
+- `hushspec.adapters.anthropic`: `map_claude_tool_to_action()` maps a Claude `tool_use`
+  block onto the action a policy evaluates (`bash` -> `shell_command`, text editor -> `file_read`
+  / `file_write` with content, `computer` -> `computer_use`, `web_fetch` -> `egress` on the host,
+  `mcp__server__tool` -> the inner tool name, date-suffixed tool versions included), and
+  `create_secure_tool_handler()` enforces before the tool runs. No `anthropic` import: blocks are
+  read structurally.
+- `hushspec.log.policy_event_to_dict()`: the one spelling of a policy event, shared by log
+  entries and the OTLP sink.
+- The evidence chain: receipt format 0.2 (`evaluate_audited` takes a
+  `Resolution` and an `AuditContext`; `receipt_hash`, `deterministic_uuid_v7`,
+  `unverified_policy_receipt`; `compute_policy_hash` now returns the canonical `sha256:`
+  hash), the hash-linked log (`hushspec.log`: `ChainedFileSink`, `PolicyEvent`,
+  `verify_log` / `verify_logs` / `verify_log_files`), receipt signing
+  (`sign_receipt` / `verify_receipt` / `SignedReceipt`), and `HushGuard(actor=...)` with
+  `policy_loaded` / `policy_swapped` records. `SignatureStatus.signed_at` is renamed
+  `verified_at`, an in-memory leaf resolves as `memory`, and a matching digest pin now
+  satisfies `require_signature` for that hop.
+
+**Go**
+
+- Parity for the runtime-integration surface. `Guard` (`hushspec.NewGuard`,
+  `NewGuardFromFile`, `NewGuardFromProvider`) is the enforcement point: compiled policy,
+  enforce/monitor mode with longest-prefix `RuleOverrides`, warn confirmation through `OnWarn`
+  (nil denies), receipts and `policy_loaded` / `policy_swapped` records through a sink,
+  `SwapPolicy` that keeps the last good policy on failure, and a refused state that denies every
+  action with `__hushspec_policy_unverified__` and an unverified-policy receipt when
+  `RequireSignature` cannot be satisfied. Observers (`EvaluationObserver`, `ObservableEvaluator`,
+  `JSONLineObserver`, `StderrObserver`, `MetricsCollector` with Prometheus exposition,
+  `WebhookObserver`) see every decision and can change none. `PolicyProvider` / `FileProvider`
+  with `PolicyWatcher` (mtime + content hash) and `PolicyPoller` hot-swap a policy into a guard,
+  checking the panic sentinel every tick. Adapters map Anthropic, OpenAI and MCP tool calls onto
+  actions, with `GuardedToolHandler` wrappers that check before the tool runs. `OTLPReceiptSink`
+  exports receipts and policy events as OTLP/HTTP JSON logs, batched and retried on a background
+  goroutine, with the same wire mapping as the other SDKs.
+- The evidence chain, byte for byte identical to the other SDKs. Receipt format
+  0.2: `EvaluateAudited(resolution, action, config, ctx)` (and `EvaluateAuditedSpec`) records
+  the actor, the canonical `policy.content_hash`, `extends_chain`, the signature outcome, the
+  evaluator's recorded rule trace under the schema's closed `rule_block` ids, the detection
+  trace, and the required enforcement disposition, with UUID v7 ids and millisecond
+  timestamps; `ParseReceipt` accepts exactly what the 0.2 schema accepts, and
+  `ComputePolicyHash` now returns the canonical `sha256:` hash. Hash-linked log:
+  `ChainedFileSink` (fsync and an exclusive `flock` per append, rotation carrying `prev_hash`
+  through a `log_started` entry, optional per-entry signatures), `PolicyEvent` records through
+  the new `PolicyEventSink` interface, and `VerifyLog` / `VerifyLogs` / `VerifyLogFiles`
+  reporting the first break by file and line. Receipt signing: `SignReceipt`, `VerifyReceipt`,
+  `SignedReceipt`. `SignatureStatus.SignedAt` is renamed `VerifiedAt` (`verified_at`) to match
+  the schema, and an in-memory leaf is recorded in the chain as `memory`.
+
+**CLI**
+
+- `h2h report <log.jsonl|receipts.jsonl>...`: compliance evidence over a window of receipts.
+  Reads a hash-linked log or a plain receipt JSONL (classified line by line, signed receipts
+  included), verifies the chain before counting anything and refuses to report on a broken one
+  without `--unverified`, and refuses a line that does not parse without `--lenient`. Aggregates
+  totals by decision, enforcement mode and disposition; per rule block (evaluated, skipped, fired,
+  deny/warn, top `rule_path`s); per action type; per policy `content_hash` with the
+  `policy_loaded` / `policy_swapped` timeline; per actor; policy-signature outcomes by reason; and
+  detections by detector and level. With `--policy`, joins `metadata.controls` into a per-control
+  evidence table (evaluated / fired / denied / last seen, plus the rule blocks that fired with no
+  control behind them). `--format json` is validated by the new
+  `schemas/hushspec-report.v0.schema.json` (`h2h schema report`), `--format csv` writes one table
+  per file into `--out` (or the `--by` table to stdout), and `--format oscal` behind
+  `--experimental-oscal` emits a minimal OSCAL 1.1.2 assessment-results skeleton. The aggregation
+  itself is the new `hushspec::report` module. Vectors: `fixtures/report/` -- a synthetic 24-hour
+  log and the exact report it must produce, both drift-checked.
+- **Lint source spans.** Every finding is now located at the key or list entry it is about
+  rather than at the file. Positions come from a second pass over the same bytes with a
+  real YAML event parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
+  sequences and comments between entries aligned where a line scanner does not. Text
+  output prints `file:line:column` with the document path beneath it; JSON findings gain
+  `path` and a `span` object (`file`, `line`, `column`, `end_line`, `end_column`). Lint
+  reports the resolved document, so a finding about an inherited block names the base that
+  declares it -- `builtin:permissive:9:9`, not the leaf.
+- **SARIF 2.1.0 output**: `h2h lint --format sarif`, with `--out <PATH>` to write the
+  report to a file. One run, a `tool.driver` for `h2h` carrying the full rule catalog
+  (`shortDescription`, `fullDescription`, `defaultConfiguration.level`, `helpUri`), and one
+  `result` per finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
+  `logicalLocations` entry naming the document path, and a `fixes` deletion for fixable
+  findings. The SARIF 2.1.0 JSON Schema is vendored at
+  `crates/hushspec-cli/schemas/sarif-2.1.0.schema.json` and every emitted document is
+  validated against it offline in `tests/lint_span_tests.rs`. The `Policy Lint` CI job
+  uploads the file with `github/codeql-action/upload-sarif`, guarded so a repository fork --
+  which cannot hold `security-events: write` -- still passes.
+- **Eight new lint rules**, each documented with its rationale in
+  `docs/src/reference/cli.md`:
+  - `L014` (warning/info) credential locations a filesystem denylist misses (`.env`,
+    `.ssh`, `.aws`, `.gnupg`, `.kube`, `id_rsa`), naming the ones it does not reach;
+    silent when the policy runs a `path_allowlist`, informational when it declares neither.
+  - `L015` (warning) a secret pattern that detects a well-known credential class (AWS
+    `AKIA`/`ASIA`, GitHub `gh[opsur]_`, a PEM private key header, OpenAI `sk-`) but is
+    graded below `critical`.
+  - `L016` (warning/info) a forbidden shell or patch pattern that matches every input
+    (`.*`, `.+`, a bare single character, or anything matching the empty string): a warning
+    beside other patterns, which it renders dead; information as the only entry in its
+    list, which is the one way the block can express a deny-all.
+  - `L017` (warning) a permissive default -- `egress.default: allow`, or
+    `tool_access.default: allow` with empty `block` and `require_confirmation`.
+  - `L018` (warning/info) a capability block enabled with an empty allowlist: information
+    for a coherent total deny (the spec's only spelling of one, since `enabled: false`
+    permits), a warning where the document contradicts itself or the block does nothing.
+  - `L019` (error) extension configuration nothing can reach: an unreachable posture state,
+    a transition naming an undefined state, an origin profile with no `match` or one that
+    repeats an earlier profile's, and an overlay `allow` entry the base never allows.
+  - `L020` (info) a `when` clause that narrows nothing -- `start == end`, all seven days,
+    or an empty `all_of`/`any_of`.
+  - `L021` (warning) a `when.capability` naming a capability no posture state grants.
+- `h2h test --format junit` writes a JUnit XML report -- one `<testsuite>` per fixture file,
+  one `<testcase>` per case, each case's `controls` and `tags` as `<property>` entries, and each
+  failure as a `<failure>` carrying the expected and the actual value -- and `--report-file`
+  writes the report to a path while stdout keeps the readable summary.
+- Rule coverage in `h2h test`: every run compares the rule paths a policy declares (every rule
+  block of the resolved document, plus every named secret pattern) with the paths its cases hit
+  through `matched_rule` and through each `rule_trace` entry, prints the table, and reports the
+  numbers in the JSON report's new `coverage` member and in a `rule coverage` JUnit suite.
+  `--fail-on-uncovered` exits non-zero when a declared path was never hit.
+- `h2h keygen` writes `<name>.key.pem` / `<name>.pub.pem` and prints the key id (`--convert`
+  upgrades a 0.1 key file); `h2h sign` gains `--expires-in`, `--policy-version` and `--out`;
+  `h2h verify` gains `--keyring`, `--now`, `--max-skew`, `--last-seen-version` and
+  `--format json`, and names a 0.1 signature rather than rejecting it as corrupt.
+
+**Testkit**
+
+- **`fixtures/MANIFEST.json`**, generated and checked by
+  `scripts/generate_fixture_manifest.py --check` in CI: every file under `fixtures/`
+  with its SHA-256, category, module, and the level at which it becomes required. A
+  conformance claim cites the corpus by this file's digest.
+- `hushspec-testkit --fixtures fixtures --report report.json`, which runs the evidence-chain
+  vectors as well as the document corpus, computes the highest fully passing level, validates
+  the report against `schemas/hushspec-conformance-report.v0.schema.json`, and writes it.
+- **`hushspec-testkit bundle`** packages `spec/`, `schemas/` and `fixtures/` with
+  a README on running them. Reproducible byte for byte; `release.yml` builds it, checks
+  reproducibility with a second build, and adds it to the release assets and the attestation
+  `subject-path`.
+- **Vectors for eleven previously unvectored requirements**: `enabled: false` on all twelve rule
+  blocks, `tool_access.max_args_size` at and over the limit, deny-over-warn precedence with both
+  outcomes real at once, all three secret severities, the inert `threat_intel` detector, an extends
+  cycle, a three-hop chain (merge and evaluation), the missing merge strategy in every module
+  (`merge` for core, `replace` for the three extensions), and `metadata` merge behaviour. The
+  coverage table in `docs/src/reference/conformance.md` now has no empty cells.
+- **`hushspec-testkit` is publishable**: crates.io metadata, a rewritten README, a publish step in
+  `publish.yml` after `hushspec`, and `scripts/generate_testkit_schemas.py` embedding the schemas
+  the runner validates against, without which `cargo package` cannot reach them.
+
+**Library**
+
+- The eight `library/` policies are embedded as built-ins in all four SDKs under
+  `builtin:library/<vertical>/<name>`, so `extends: "builtin:library/finance/pci-dss"`
+  resolves with no file system and no checkout. The four builtin generators now walk
+  `library/` alongside `rulesets/`; the existing `rulesets/` names are unchanged, and the
+  Go SDK gains an exported `BuiltinNames`. A library policy keeps its own document `name`
+  (`pci-dss`): the prefix is a location, not a rename.
+- A control-tagged evaluation suite for each of the eight library policies under
+  `fixtures/library/<vertical>/<name>.test.yaml` (198 cases): every case declares the control
+  it proves, and between them the cases hit every rule block and every named secret pattern of
+  the resolved policy. CI runs them with `--fail-on-uncovered` and uploads the JUnit report.
+  The conformance testkit discovers them too.
+
+**CI**
+
+- GitHub composite Action (`action.yml`, `backbay-labs/hush@<ref>`): installs `h2h` --
+  downloading, `SHA256SUMS`- and provenance-attestation-verifying, and caching the prebuilt
+  release tarball for the runner's platform, or building `crates/hushspec-cli` from source via
+  `version: source` before any release with binaries exists -- and runs `validate`, `lint`,
+  `test`, `audit` or `bundle-verify` over glob-matched paths with `text`/`json`/`sarif`/`junit`
+  output, exposing `exit-code` and `report-path`. `.pre-commit-hooks.yaml` adds
+  `hushspec-validate`, `hushspec-lint`, `hushspec-lint-strict` and `hushspec-fmt-check`. A
+  multi-stage `Dockerfile` builds an `h2h` image, published to `ghcr.io/backbay-labs/h2h` on
+  every tagged release. New guide: `docs/src/guides/ci.md`.
+- A **Library Suites** job: it runs the library suites with `--fail-on-uncovered`, writes the
+  run's results and rule-coverage table to the GitHub step summary, and uploads the JUnit
+  report as an artifact for any JUnit consumer.
+
+**Docs**
+
+- `docs/src/reference/sdk-api.md`: the cross-SDK API contract. Eighteen capability
+  areas -- parse/validate, merge/resolve with verify-on-load and digest pins, compiled
+  policies, the four evaluation entry points, conditions (`capability` and `rate`),
+  detection (`heuristic_injection@1`), canonical form and content hash, receipts 0.2 and
+  the receipt hash, the log chain, signing and keyrings, bundle verification, the guard
+  with its enforcement modes and refused state, observers and metrics, providers and hot
+  reload, sinks including OTLP, adapters, panic mode, version constants and error codes --
+  each a table giving the exact entry point every SDK publishes today, the shared semantic
+  contract, and the deliberate language-idiom differences (Rust `Result`, TypeScript
+  `{ok, value}` unions, Python `(ok, value)` tuples with `_or_raise` variants, Go
+  `(T, error)`). Plus the cross-SDK invariants and the check that enforces each: identical
+  decisions, identical canonical bytes and `content_hash`, byte-identical receipts after
+  JCS under the fixed inputs, identical reason and error codes, and identical public names.
+  Every name in the page is verified against the source.
+- `docs/src/reference/conformance-statement.md`: the template a third party fills in to publish
+  a conformance claim, with the procedure for producing the evidence and the rules for an honest
+  statement.
+- `CHANGELOG.md`, `SECURITY.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` at the repository root.
+
+### Changed
+
+**SDKs**
+
+- **All four SDKs are Level 5 (Attested)**, not Rust alone: TypeScript, Python and Go now run
+  the bundle vectors, which were the last Level 5 gap, and all four fixture runners assert the
+  `.expect.yaml` sidecar's registered error code and `message_contains` substring, closing the
+  Level 1 error-code gap.
+
+**TypeScript**
 
 - Evaluation no longer compiles patterns per call: the free `evaluate()` functions compile the
   document on first use and cache the compilation against the document object (a `WeakMap`), so
@@ -101,14 +441,14 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   recordDuration }` -- `redact_content` is gone, because a 0.2 receipt never carries content.
 - **Breaking.** `SignatureStatus.signed_at` is now `verified_at` and holds the verifier's
   clock rather than the envelope's signing time.
-- **Breaking.** The chain identity of an in-memory document is `memory`, matching the Rust
-  reference and `fixtures/core/resolve/`. `INLINE_POLICY_SOURCE` is kept as a deprecated alias
-  of the new `MEMORY_SOURCE`.
+- **Breaking.** The chain identity of an in-memory document is `memory`, as in every other SDK
+  and in `fixtures/core/resolve/`.
 - Resolution failures throw a `ResolveError` carrying a machine-readable `reason`
   (`invalid_pin`, `not_found`, `cycle`, `max_depth`, ...) instead of a bare `Error`.
-### Changed (RFC 09 P6-01, Python)
 
-- Compiled policies in the Python SDK: `compile_policy(spec)` returns a `CompiledPolicy` that
+**Python**
+
+- Compiled policies: `compile_policy(spec)` returns a `CompiledPolicy` that
   prepares everything independent of the action -- every regex through the profile, every path
   glob and host pattern, the tool-name sets, the decoded `when` conditions, the per-action-type
   rule-block plan, the origin overlays folded into `tool_access` / `egress` per profile, and the
@@ -123,45 +463,7 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   set of `packages/python/bench/evaluate.py` against `rulesets/default.yaml` goes from 127 us to
   9.0 us per action.
 
-### Added
-
-- Governance hardening (core spec 2.5): `metadata.owner`, `reviewers[]`, `next_review_date`,
-  `changelog[]` and `supersedes`; the four `metadata` date fields plus each changelog entry's
-  `date` must now be an ISO 8601 calendar date (`YYYY-MM-DD`), checked in all four SDKs
-  (`E011` from `h2h validate`). New governance checks with stable codes -- separation of
-  duties (`GOV_SOD_VIOLATION`), `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`,
-  `GOV_CHANGELOG_ORDER`, and the error-severity `GOV_SELF_SUPERSEDES`. `h2h audit` lists every
-  finding with its code, severity and path; `--strict` makes warnings fatal. `h2h sign` refuses
-  a policy that is not `approved` or `deployed` unless `--allow-unapproved` is passed.
-- `spec/hushspec-canonical.md`: the canonical form of a resolved policy (schema defaults
-  materialized, RFC 8785 serialization) and the `sha256:`-prefixed content hash, with a
-  standard-library reference canonicalizer (`scripts/canonical_json.py`), the
-  `hushspec-hash-vector` schema, and 14 normative vectors under `fixtures/core/hash/`.
-- `spec/hushspec-receipt.md`: decision receipt format 0.2 (`receipt_version`, UUID v7 ids,
-  millisecond timestamps with `time_source`, `actor`, `policy.extends_chain` and
-  `policy.signature`, recorded rule and detection traces, required `enforcement`, a receipt
-  hash for chaining). Schema staged at `schemas/staged/0.2.0/`; 12 valid and 14 invalid
-  vectors under `fixtures/receipts/`. SDKs still emit format 0.1 until RFC 09 P2-04.
-- `spec/hushspec-signing.md`: policy signature envelope 0.2 over the canonical content hash
-  (not file bytes), PKCS#8/SPKI PEM keys, `key_id` from the SPKI digest, keyring format,
-  expiry, rollback protection, and 16 verification vectors under `fixtures/signing/` signed
-  with a published test-only key.
-- Signing format 0.2 in the Rust SDK and `h2h` (RFC 09 P2-07): `hushspec::signing` now signs
-  the content hash of the *resolved* policy over an RFC 8785 envelope, so reformatting a
-  signed policy keeps its signature valid and a changed base policy invalidates it. Keys are
-  PEM PKCS#8 / SPKI with `key_id` recomputed from the SPKI digest, trust is a `Keyring` with
-  retirement and revocation, and `verify_policy` reports the closed reason-code set of signing
-  spec 6.4 (`malformed_envelope`, `unsupported_format_version`, `unsupported_algorithm`,
-  `unknown_key_id`, `key_revoked`, `key_retired`, `signed_at_in_future`, `expired`,
-  `signature_mismatch`, `content_hash_mismatch`, `policy_version_rollback`). All 16 vectors
-  under `fixtures/signing/` pass. `h2h keygen` writes `<name>.key.pem` / `<name>.pub.pem` and
-  prints the key id (`--convert` upgrades a 0.1 key file); `h2h sign` gains `--expires-in`,
-  `--policy-version` and `--out`; `h2h verify` gains `--keyring`, `--now`, `--max-skew`,
-  `--last-seen-version` and `--format json`, and names a 0.1 signature rather than rejecting
-  it as corrupt. The signature and keyring schemas are promoted out of
-  `schemas/staged/0.2.0/`; TypeScript, Python and Go follow in the same work package.
-
-### Changed
+**CLI**
 
 - **Breaking (signing).** Signature format 0.1 is superseded and cannot be verified by 0.2:
   it signed raw file bytes with bespoke 32-byte key files. Convert a key with
@@ -169,33 +471,61 @@ until 1.0.0 the specification and SDKs are an unstable `0.x` series.
   `h2h.key.pem` / `h2h.pub.pem` rather than `h2h.key` / `h2h.pub`, and `h2h sign` drops
   `--key-id` (the id is the SPKI digest and is never chosen by the signer). The Rust
   `hushspec::signing` API is rewritten around `Envelope`, `Keyring` and `ReasonCode`.
+- `h2h test --format json` now prints an object (`passed`, `failed`, `fixtures[]`, `coverage`)
+  rather than a bare array of per-file results; the per-file objects are unchanged and now also
+  carry each case's `controls` and `tags`.
+- `L007`'s twelve-block list and `L020`'s `when` walk are both checked against the published
+  core schema, so a thirteenth rule block cannot be added without both noticing.
+- Exit `2` now also covers `--out` combined with `--format text`.
+
+**Docs**
+
+- **The README capability matrix and the conformance pages are rewritten from the code**, and
+  the claims that were no longer true are corrected: `HushGuard`, observers, hot reload, policy
+  signing, receipt signing and the OTLP sink are in all four SDKs, not two; `content_hash` *is*
+  byte-identical across the SDKs (`hushspec-difftest` compares it, and the receipt hash, on 500
+  generated policy groups per commit); there are twelve rule blocks, not ten; the CLI has 22
+  subcommands, not ten. Newly documented limits: Python and Go ship no HTTP client and reject an
+  `https:` `extends` reference outright, bundle *creation* is Rust and `h2h` only, Rust ships no
+  framework adapters, Rust signing needs the `signing` feature and Python's needs the `signing`
+  extra, and Go spells the guard `Guard`. `docs/src/reference/sdk-conformance.md` is written from
+  the vectors each SDK's tests actually walk, citing the test file for every vector family, and
+  Levels 0, 1 and 3 in `docs/src/reference/conformance.md` are aligned word for word with core
+  spec section 8, with no known-gap note left.
+- The roadmap records which of the section 8 criteria are now met -- `when` conditions specified
+  and schema-defined, all four SDKs past Level 3, `HushGuard` in every SDK, Ed25519 signing in
+  every SDK, panic mode in every SDK, separation of duties enforceable (`GOV_SOD_VIOLATION`,
+  `h2h sign --allow-unapproved`), compliance mappings on every library policy, and evaluation
+  suites for all eight -- and which are not: the 1.0 freeze, package-registry publication and
+  prebuilt binaries (no `v0.x` tag cut yet), a cloud-storage policy loader, and published
+  Prometheus recording rules and alert examples.
 - Repositioned the project around "agentic compliance as code": updated the tagline and
   introductory copy across `README.md`, `docs/src/introduction.md`, package manifests, and
   package READMEs.
-- Corrected `docs/plans/ROADMAP.md` and the SDK conformance docs to match a 2026-09-14
-  code review: unchecked or re-labeled claims that were not actually implemented (e.g.
-  byte-compatible receipt hashes, cloud-storage loaders, signed `extends` verification,
-  separation-of-duties enforcement, "all SDKs" scoping on HushGuard/signing/hot reload/OTLP).
-- Fixed the README "SDK Conformance" table and `docs/src/reference/sdk-conformance.md` to
-  agree with each other and with the CI fixture matrix (all four SDKs at Level 3).
 
-### Added
+### Deprecated
 
-- `CHANGELOG.md`, `SECURITY.md`, `GOVERNANCE.md`, `CONTRIBUTING.md` at the repository root.
-- Machine-readable control mappings (RFC 09 P2-09): `metadata.controls[]`
-  (`framework`, `control_id`, `rule_paths`, `notes`) in the core schema, spec 2.5, and all
-  four SDKs; a framework registry at `spec/registries/frameworks.yaml` with its own schema;
-  lint `L011` (unmapped rule block), `L012` (rule path resolves to nothing) and `L013`
-  (unregistered framework or non-conforming control id); `h2h audit --controls` (text and
-  JSON) with a rule-block coverage line and a `--strict` exit code; and all eight
-  `library/` policies migrated from comment-only mappings to structured ones.
+**TypeScript**
 
-### Planned
+- `INLINE_POLICY_SOURCE` is a deprecated alias of `MEMORY_SOURCE`.
 
-- RFC 09 (`docs/plans/09-compliance-as-code-plan.md`) tracks the work needed to make the
-  corrected roadmap claims true: fail-closed correctness fixes (M1), canonical cross-SDK
-  receipt hashing and policy/receipt signing everywhere (M2), a published conformance
-  program (M3), and the spec 1.0 freeze (M4).
+### Removed
+
+**CLI**
+
+- **Lint rule `L005` is retired.** It reported a permissive default as information and only when
+  the allow list was non-empty; `L017` reports every occurrence as a warning. The identifier
+  will not be reused. `rulesets/permissive.yaml` stays gated on lint *errors* only and now
+  reports `L004` and `L017` by design.
+
+### Fixed
+
+**Library**
+
+- `library/devops/cicd-hardened.yaml` listed `github_actions_token` (`ghs_...`) after the
+  general `github_token` (`gh[opsur]_...`) that subsumes it, so an Actions token was always
+  reported as a personal access token and the specific rule could never fire. The specific
+  pattern now comes first; the set of matched content is unchanged.
 
 ## [0.1.1] - 2026-09-14
 
@@ -235,7 +565,7 @@ continued under the same `0.1.1` version afterward. Highlights across the full r
 
 ## [0.1.0] - 2026-03-15
 
-Initial public release of the HushSpec specification and Rust reference implementation.
+Initial public release of the HushSpec specification and its Rust implementation.
 
 ### Added
 
@@ -244,7 +574,7 @@ Initial public release of the HushSpec specification and Rust reference implemen
   `patch_integrity`, `shell_commands`, `tool_access`, `computer_use`,
   `remote_desktop_channels`, `input_injection`.
 - 3 extension modules: `posture`, `origins`, `detection`.
-- Rust reference implementation (`crates/hushspec`) with parsing, validation, and merging.
+- Rust implementation (`crates/hushspec`) with parsing, validation, and merging.
 
 [Unreleased]: https://github.com/backbay-labs/hush/compare/v0.1.1-alpha...HEAD
 [0.1.1]: https://github.com/backbay-labs/hush/compare/98727b8...v0.1.1-alpha

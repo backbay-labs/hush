@@ -609,6 +609,37 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
         "not": {
           "$ref": "#/$defs/Condition",
           "description": "The sub-condition must not hold."
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "The effective posture state must grant this capability. Unevaluable (the block stays active) when the policy has no posture extension."
+        },
+        "rate": {
+          "$ref": "#/$defs/RateCondition"
+        }
+      }
+    },
+    "RateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counter", "threshold", "comparison"],
+      "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
+      "properties": {
+        "counter": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "Counter name in the runtime context's `counters` map."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Non-negative threshold."
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["gte", "lt"],
+          "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
     },
@@ -854,6 +885,28 @@ pub(crate) const DETECTION_SCHEMA: &str = r##"{
           "minimum": 1,
           "default": 200000,
           "description": "Maximum input size to scan, in bytes."
+        },
+        "heuristics": {
+          "$ref": "#/$defs/PromptInjectionHeuristics"
+        }
+      }
+    },
+    "PromptInjectionHeuristics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration of the normative heuristic_injection@1 detector (detection spec 3.5).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the heuristic detector runs alongside the regex detector."
+        },
+        "min_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Integer scores below this floor are reported as 0 (no signal)."
         }
       }
     },

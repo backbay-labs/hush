@@ -107,9 +107,9 @@ name: parent
     }
   });
 
-  // Parity fix (v3, item S2): a long *acyclic* extends chain used to recurse
-  // unbounded (cycle detection only catches exact repeats). The resolver now
-  // caps the chain at depth 32 and fails closed with a clean error.
+  // Cycle detection only catches exact repeats, so a long *acyclic* chain
+  // would recurse unbounded. The resolver caps it at depth 32 and fails
+  // closed with a clean error.
   it('errors cleanly on an extends chain deeper than the cap (40 levels)', () => {
     const depth = 40;
     const load = (reference: string) => {
@@ -148,12 +148,29 @@ name: parent
   });
 });
 
+/**
+ * A `rulesets/` preset is named for its file (`strict`); a library policy is
+ * embedded under `library/<vertical>/<name>` and names itself with the last
+ * segment (`hipaa-base`), because the prefix is a location, not a rename.
+ */
+function builtinDocumentName(builtin: string): string {
+  return builtin.slice(builtin.lastIndexOf('/') + 1);
+}
+
+/** The canonical file a builtin name was generated from. */
+function builtinSourcePath(builtin: string): string {
+  return builtin.startsWith('library/')
+    ? `../../../${builtin}.yaml`
+    : `../../../rulesets/${builtin}.yaml`;
+}
+
 describe('builtin loader', () => {
-  it('resolves all 6 built-in rulesets', () => {
+  it('resolves every embedded policy', () => {
+    expect(BUILTIN_NAMES.length).toBeGreaterThan(6);
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(name);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
       expect(spec!.hushspec).toBe('0.1.0');
     }
   });
@@ -162,8 +179,17 @@ describe('builtin loader', () => {
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(`builtin:${name}`);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
     }
+  });
+
+  it('embeds the vertical library under its library/ prefix', () => {
+    const spec = loadBuiltin('builtin:library/healthcare/hipaa-base');
+    expect(spec).not.toBeNull();
+    expect(spec!.name).toBe('hipaa-base');
+    // The embedded leaf still declares its own base; resolving is what
+    // materializes the full document.
+    expect(spec!.extends).toBe('builtin:strict');
   });
 
   it('returns null for unknown builtins', () => {
@@ -189,7 +215,7 @@ describe('builtin loader', () => {
   it('matches the canonical built-in ruleset YAML', () => {
     for (const name of BUILTIN_NAMES) {
       const expected = YAML.parse(
-        readFileSync(new URL(`../../../rulesets/${name}.yaml`, import.meta.url), 'utf8'),
+        readFileSync(new URL(builtinSourcePath(name), import.meta.url), 'utf8'),
       );
       expect(loadBuiltin(name)).toEqual(expected);
     }
@@ -291,10 +317,8 @@ describe('resolved documents validate', () => {
   // `merge()` clears the fields it consumes by setting them to `undefined`
   // rather than deleting them, so a resolved document reaches `validate()` as
   // `{ ..., extends: undefined }`. `key in obj` counts that as present, which
-  // made `validate(resolve(spec))` fail with "extends must be a string" in
-  // TypeScript while Rust, Python and Go all accepted the same document --
-  // found by the cross-SDK differential fuzzer once it started generating
-  // `extends: builtin:*` (P1-12).
+  // would make `validate(resolve(spec))` fail with "extends must be a
+  // string" for a document every other SDK accepts.
   it('accepts a document whose extends chain has just been flattened', () => {
     const spec = parseOrThrow('hushspec: "0.2.0"\nextends: "builtin:default"\n');
     const resolved = resolve(spec);

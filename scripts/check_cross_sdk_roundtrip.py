@@ -69,11 +69,13 @@ def collect_corpus() -> list[Path]:
         ROOT / "fixtures" / "detection" / "merge",
     ]:
         if not subdir.exists():
-            continue
+            raise SystemExit(f"missing corpus directory {subdir.relative_to(ROOT)}")
         for path in sorted(subdir.glob("*.yaml")):
             if path.name.startswith("child-") or path.name == "base.yaml":
                 continue
             corpus.append(path)
+    if not corpus:
+        raise SystemExit("the cross-SDK corpus is empty; nothing was compared")
     return corpus
 
 

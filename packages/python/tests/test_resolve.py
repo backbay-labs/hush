@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hushspec import LoadedSpec, parse_or_raise, resolve, resolve_file
+from hushspec import (
+    ERROR_EXTENDS,
+    LoadedSpec,
+    create_composite_loader,
+    parse_or_raise,
+    resolve,
+    resolve_file,
+    resolve_with_options,
+)
 
 
 class TestResolve:
@@ -141,7 +149,7 @@ name: parent
 
 class TestExtendsDepthCap:
     def test_long_acyclic_chain_errors_at_depth_cap(self):
-        # S2: an acyclic `extends` chain longer than the cap (32) must fail
+        # An acyclic `extends` chain longer than the cap (32) must fail
         # closed with a clean error rather than recurse until a stack overflow.
         # 40 distinct specs, each extending the next; the 40th is terminal.
         total = 40
@@ -196,3 +204,68 @@ class TestExtendsDepthCap:
         assert resolved.rules is not None
         assert resolved.rules.tool_access is not None
         assert resolved.rules.tool_access.default.value == "block"
+
+
+class TestLibraryBuiltins:
+    """The vertical library ships as built-ins under `library/<vertical>/<name>`.
+
+    The prefix is a location, not a rename: each document keeps its own
+    ``name``. A policy can therefore extend a library policy with no file
+    system, which is what the library test suites do.
+    """
+
+    def test_every_builtin_name_loads(self):
+        from hushspec.builtins import BUILTIN_NAMES, load_builtin
+
+        assert len(BUILTIN_NAMES) > 6
+        library = [name for name in BUILTIN_NAMES if name.startswith("library/")]
+        assert len(library) == 8, library
+        for name in BUILTIN_NAMES:
+            spec = load_builtin(name)
+            assert spec is not None, name
+            assert spec.name == name.rsplit("/", 1)[-1], name
+
+    def test_a_library_policy_resolves_through_extends(self):
+        from hushspec.builtins import load_builtin
+        from hushspec.resolve import create_composite_loader, resolve
+
+        leaf = load_builtin("builtin:library/healthcare/hipaa-base")
+        assert leaf is not None
+        assert leaf.extends == "builtin:strict"
+
+        parsed = parse_or_raise(
+            'hushspec: "0.1.0"\n'
+            "name: leaf\n"
+            'extends: "builtin:library/healthcare/hipaa-base"\n'
+        )
+        ok, resolved = resolve(parsed, loader=create_composite_loader())
+        assert ok, resolved
+        names = {
+            pattern.name for pattern in resolved.rules.secret_patterns.patterns
+        }
+        assert "medical_record_number" in names
+
+
+class TestResolveWithOptionsDefaults:
+    def test_omitting_options_still_produces_a_content_hash(self):
+        # A Resolution with no content hash would put a policy.content_hash of
+        # "" into every receipt built from it -- evidence naming no policy.
+        spec = parse_or_raise('hushspec: "0.1.0"\nname: leaf\n')
+        ok, resolution = resolve_with_options(spec)
+        assert ok is True
+        assert resolution.content_hash.startswith("sha256:")
+        assert resolution.chain
+
+
+class TestResolveFailureCodes:
+    def test_a_refusal_keeps_the_extends_registry_code(self):
+        spec = parse_or_raise('hushspec: "0.1.0"\nextends: "builtin:nope"\n')
+        ok, err = resolve_with_options(spec, loader=create_composite_loader())
+        assert ok is False
+        assert err.code == ERROR_EXTENDS
+
+    def test_the_merge_only_path_keeps_it_too(self):
+        spec = parse_or_raise('hushspec: "0.1.0"\nextends: "builtin:nope"\n')
+        ok, err = resolve(spec, loader=create_composite_loader())
+        assert ok is False
+        assert err.code == ERROR_EXTENDS

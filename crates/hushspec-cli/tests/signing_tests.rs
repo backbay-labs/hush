@@ -1081,7 +1081,7 @@ fn verify_rejects_a_bad_now() {
         .stderr(predicate::str::contains("not an RFC 3339 timestamp"));
 }
 
-// ------------------------------------------------ the lifecycle gate (P2-11)
+// -------------------------------------------------------- the lifecycle gate
 
 #[test]
 fn sign_refuses_a_policy_that_is_not_approved() {

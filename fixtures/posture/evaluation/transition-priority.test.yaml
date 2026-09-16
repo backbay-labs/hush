@@ -1,0 +1,51 @@
+hushspec_test: "0.1.0"
+description: "For the same trigger, a transition whose from names the current state outranks one whose from is the wildcard, regardless of document order; the wildcard still applies to states with no named transition (posture spec 5.3)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+        restricted:
+          capabilities: [tool_call]
+        locked:
+          capabilities: []
+      transitions:
+        - from: "*"
+          to: locked
+          on: critical_violation
+        - from: standard
+          to: restricted
+          on: critical_violation
+cases:
+  - description: "the named-from transition wins over the wildcard listed before it"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: standard
+        signal: critical_violation
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.default
+      posture:
+        current: standard
+        next: restricted
+  - description: "the wildcard applies to states with no named transition"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: restricted
+        signal: critical_violation
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.default
+      posture:
+        current: restricted
+        next: locked

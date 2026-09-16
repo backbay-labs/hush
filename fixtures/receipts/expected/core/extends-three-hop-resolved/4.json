@@ -1,0 +1,43 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7004-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "project-leaf",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:aea053ba9f4994f212245c45e996a71f99d0cc6a2ff252dd0cc5d0f4bb2eba5d"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "shell_exec"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.tool_access.allow",
+  "reason": "tool is not in the allowlist",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.allow",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "tool is not in the allowlist"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

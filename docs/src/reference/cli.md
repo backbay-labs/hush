@@ -135,11 +135,14 @@ policy file was not found.
 ## `h2h lint`
 
 Static analysis for policies: empty rule blocks, overlapping patterns, shadowed
-exceptions, over-broad egress, regex complexity, disabled rules, duplicates.
+exceptions, over-broad allow lists, regex complexity, disabled rules,
+duplicates, control mappings, credential coverage, permissive defaults and
+unreachable extension configuration.
 
 ```bash
 h2h lint policy.yaml
 h2h lint --format json --fail-on-warnings policy.yaml
+h2h lint --format sarif --out lint.sarif policy.yaml
 h2h lint policy.yaml --fix
 h2h lint policy.yaml --dry-run
 ```
@@ -147,20 +150,101 @@ h2h lint policy.yaml --dry-run
 | Flag | Description |
 |---|---|
 | `<FILES>...` | One or more policy files; `-` reads stdin. |
-| `-f, --format <text\|json>` | Output format (default `text`). |
+| `-f, --format <text\|json\|sarif>` | Output format (default `text`). |
+| `--out <PATH>` | Write the report to a file instead of stdout (`json` and `sarif` only). |
 | `--fail-on-warnings` | Exit `1` on warnings, not just errors. |
 | `--fix` | Apply decision-neutral auto-fixes in place. Refused for `-`. |
 | `--dry-run` | Show what `--fix` would change without writing. |
 
-JSON findings carry `code`, `severity`, `message`, `location` and `fixable`;
-each file also reports the `fixed` codes that `--fix` actually applied.
-
-Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, or
-`--fix` was pointed at stdin.
+Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, `--out`
+was combined with `--format text`, or `--fix` was pointed at stdin.
 
 > `--fix` rewrites the file through the canonical formatter, which does not
 > preserve comments. Run it on documents whose comments you can afford to lose,
 > or review the `--dry-run` diff first.
+
+### Source positions
+
+Every finding is located at the **key or list entry it is about**, not at the
+file. Text output prints `file:line:column` followed by the document path:
+
+```
+warning[L008]: rules.egress.allow[1]: duplicate pattern "api.example.com"
+  --> rulesets/example.yaml:8:9
+   | rules.egress.allow[1]
+```
+
+Positions come from a second pass over the same bytes with a real YAML event
+parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
+sequences and comments between entries correctly aligned — a line scanner does
+not. Lint reports the **resolved** document, so a finding about a block a policy
+inherits names the base that declares it:
+
+```
+warning[L004]: rules.egress.allow[0] contains wildcard pattern "*" ...
+  --> builtin:permissive:9:9
+   | rules.egress.allow[0]
+```
+
+JSON findings carry `code`, `severity`, `message`, `location`, `fixable`, the
+document `path`, and a `span` object (`file`, `line`, `column`, `end_line`,
+`end_column`; 1-based, with `end_column` pointing at the character after the
+region). Each file also reports the `fixed` codes that `--fix` actually applied.
+A finding whose key could not be located — an inherited default no document
+writes, or a base fetched over HTTP — omits `span` and still carries `location`.
+
+### SARIF
+
+`--format sarif` emits a SARIF 2.1.0 document: one run, a `tool.driver` for
+`h2h` carrying the full rule catalog below (each with `shortDescription`,
+`fullDescription` and a `defaultConfiguration.level`), and one `result` per
+finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
+`logicalLocations` entry naming the document path, and — for fixable findings —
+a `fixes` entry describing the deletion `--fix` would perform. Severities map
+`error → error`, `warning → warning`, `info → note`.
+
+```bash
+h2h lint --format sarif --out lint.sarif rulesets/*.yaml
+```
+
+Upload the file with `github/codeql-action/upload-sarif` and findings appear as
+code-scanning annotations on the pull request that introduced them. This repo's
+own `Policy Lint` job does exactly that.
+
+### Lint rules
+
+Severity is a function of provability. `error` means the document contains
+configuration that can never take effect under the spec's own rules; `warning`
+means a construct defeats something else the same document declares; `info`
+means the construct is coherent but easy to arrive at by accident. Two codes
+(`L016`, `L018`) report at two severities for exactly that reason — see their
+rows.
+
+| Code | Level | Rule | Why it fires |
+|---|---|---|---|
+| `E000` | error | file-unreadable | The path does not exist, or the file is not readable UTF-8. Nothing was linted. |
+| `E001` | error | parse-error | YAML parsing or deserialization failed. HushSpec rejects unknown keys, so a typo in a field name lands here rather than being silently ignored. |
+| `E002` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
+| `L001` | warning | empty-rule-block | The block is enabled but declares nothing to allow or deny, so it makes no decision. A block that looks like enforcement and is not is worse than an absent one. |
+| `L002` | warning | overlapping-patterns | Sampled synthetic targets matched two patterns in the same list. Overlap is not itself a defect, but a redundant pair is dead weight. |
+| `L003` | warning | shadowed-exception | A `forbidden_paths` exception re-permits a path that nothing denies, so it has no effect. |
+| `L004` | warning | overly-broad-allow | `allow: ["*"]` permits every target, which makes the rest of the list decorative. |
+| `L006` | warning | regex-complexity | Nested quantifiers are a ReDoS risk; very long or heavily alternated patterns are hard to review. |
+| `L007` | info | disabled-rule | `enabled: false` makes a block inert, which **permits** what it would otherwise govern. Reported for all twelve rule blocks, so a disabled control is never invisible. |
+| `L008` | warning | duplicate-pattern | A byte-identical repeat of an earlier entry contributes nothing. The one finding whose removal is provably decision-neutral, so `--fix` always applies it. |
+| `L009` | info | missing-secret-patterns | Without secret detection, a `file_write` carrying a credential is indistinguishable from any other write. |
+| `L010` | warning | unreachable-allow | Block takes precedence over allow, so an entry in both can never decide anything. |
+| `L011` | warning | unmapped-rule-block | Once a policy maps controls, an unmapped block is enforcement with no stated reason. Policies that map nothing are silent. |
+| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing — a false compliance claim. |
+| `L013` | warning | unregistered-control | The framework is not in `spec/registries/frameworks.yaml`, or the control id does not match that framework's pattern. The registry is advisory, so this is an unverifiable claim, not an invalid document. |
+| `L014` | warning / info | credential-paths-uncovered | `.env`, `.ssh`, `.aws`, `.gnupg`, `.kube` and `id_rsa` are where agent credentials actually live, and the message names the ones a denylist does not reach. A policy running a `path_allowlist` is silent (everything outside it is already denied). A policy with **neither** block reports `info`: a capability-scoped document meant to be composed onto a base legitimately says nothing about the filesystem. |
+| `L015` | warning | under-graded-credential-pattern | Severity drives what an engine does with a match, so a pattern that recognizes an AWS key id (`AKIA`/`ASIA`), a GitHub token (`gh[opsur]_`, `github_pat_`), a PEM private key header or an OpenAI `sk-` key and grades it below `critical` has downgraded a credential leak to a note. |
+| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect — they become dead — and reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
+| `L017` | warning | permissive-default | `egress.default: allow` permits every host outside `block`, making the allow list decorative; `tool_access.default: allow` with empty `block` and `require_confirmation` permits every tool. Supersedes `L005`, which reported the same shape as `info` and only when the allow list was non-empty; `L005` is retired and will not be reused. |
+| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
+| `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
+| `L021` | warning | ungranted-capability | A `when.capability` naming a capability no posture state grants can never be true while the policy has a posture extension, so the block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported. |
+| `L020` | info | inert-condition | The engine reads `start == end` as an always-open 24-hour window and an empty `days` as every day, so a window written that way reads like a restriction and is not one. Listing all seven days is likewise the default. An `all_of`/`any_of` with no members is always true. (There is no "never true" window to report: core spec 3.13 keeps a block active when a window cannot be evaluated.) |
 
 ## `h2h fmt`
 
@@ -285,6 +369,8 @@ Run evaluation test suites (`*.test.yaml` fixtures).
 h2h test --fixtures fixtures/core/evaluation
 h2h test policy.test.yaml --format tap
 h2h test --policy policy.yaml --fixtures ./tests
+h2h test --fixtures fixtures/library --fail-on-uncovered \
+  --format junit --report-file target/library-suites.xml
 ```
 
 | Flag | Description |
@@ -293,10 +379,41 @@ h2h test --policy policy.yaml --fixtures ./tests
 | `--fixtures <PATH>` | Directory (or file) of fixtures to collect. |
 | `-p, --policy <PATH>` | Policy that overrides the one embedded in fixtures. |
 | `--sentinel <PATH>` | Panic sentinel to consult before evaluating. |
-| `-f, --format <text\|tap\|json>` | Output format (default `text`). |
+| `-f, --format <text\|tap\|json\|junit>` | Output format (default `text`). |
+| `--report-file <PATH>` | Write the report in `--format` here; stdout then carries the readable summary. |
+| `--fail-on-uncovered` | Exit non-zero when a declared rule path was never hit. |
 
-Exit: `0` all cases passed · `1` a case failed · `2` no fixture files were
-found or the policy could not be read.
+Fixtures are validated against
+[`hushspec-evaluator-test.v0`](./json-schema.md) before any case runs, and both
+fixture-format versions are accepted: `0.1.0`, and `0.2.0` with its per-case
+`controls` / `tags` and its `expect.rule_trace` / `expect.receipt` assertions.
+A case that declares either assertion is checked against the receipt the
+document produces under the fixed inputs of
+`fixtures/receipts/expected/README.md`.
+
+**Rule coverage.** Every run compares the rule paths each policy under test
+*declares* -- every rule block of the resolved document, plus every named
+secret pattern -- with the paths any case *hit*, through `matched_rule` and
+through each `rule_trace` entry's `rule_path`. A path inside a block credits
+the block, so `rules.egress.allow` covers `rules.egress` and
+`rules.secret_patterns.patterns.ssn` covers both the block and that pattern.
+The table prints after the run; `--fail-on-uncovered` turns a gap into a
+non-zero exit, which is how the library suites are gated in CI.
+
+**JUnit.** `--format junit` emits one `<testsuite>` per fixture file and one
+`<testcase>` per case, carrying each case's controls and tags as
+`<property name="control">` / `<property name="tag">` and each failure as a
+`<failure>` with the expected and actual values. A final `rule coverage`
+suite reports the declared/covered counts per policy, and fails there too
+under `--fail-on-uncovered`.
+
+**JSON.** `--format json` prints an object: `passed`, `failed`, `fixtures[]`
+(per file, with each case's `controls` and `tags`), and `coverage` with the
+per-policy `declared`, `covered` and `uncovered` paths.
+
+Exit: `0` all cases passed · `1` a case failed, or a declared rule path was
+never hit under `--fail-on-uncovered` · `2` no fixture files were found, a
+fixture did not match the schema, or the policy could not be read.
 
 ## `h2h audit`
 
@@ -493,7 +610,7 @@ h2h --version          # clap's short form, CLI version only
 
 Exit: always `0`.
 
-## Evidence chain (RFC 09 Wave 4)
+## Evidence chain
 
 ### Verify-on-load flags (`eval`, `explain`, `resolve`)
 
@@ -536,6 +653,57 @@ Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
 ### `h2h hash --own`
 
 Prints the document's own content hash with `extends` and `merge_strategy` stripped and no resolution: the value a digest pin names and a receipt records for a chain link.
+
+## `h2h report <files...>`
+
+Turns a window of receipts into a compliance evidence report: what the policy decided, which controls ran, how often they fired, which policy was in force while they did, and -- with `--policy` -- which compliance controls that adds up to.
+
+```bash
+h2h report audit.jsonl                                     # the whole log, as tables
+h2h report audit.jsonl --since 2026-09-01T00:00:00Z --until 2026-09-30T23:59:59Z
+h2h report audit.jsonl --policy library/healthcare/hipaa-base.yaml --by control
+h2h report audit.jsonl --format json > report.json         # validates against the report schema
+h2h report audit.jsonl --format csv --out ./evidence/      # one CSV per table
+```
+
+Input is a hash-linked log (`policy_loaded` / `policy_swapped` events plus `receipt` entries), a plain receipt JSONL, or signed receipts (`{receipt, signature}`) -- classified line by line, so a mixed file works. A line that is neither is refused with its file and line number (exit 2); `--lenient` skips it instead and records the count as `totals.skipped_lines`. A receipt whose `timestamp` is not RFC 3339 counts as malformed: a record that will not place itself in time cannot be placed in a window.
+
+When the input is a log, its chain is verified before anything is counted (the same checks as `h2h log verify`, each file on its own -- checking the link *between* rotated files is `h2h log verify`'s job, and it takes them oldest first). A chain that does not verify refuses to report (exit 1) unless `--unverified` is passed, and the report is then stamped `chain_verified: false`.
+
+| Flag | Meaning |
+|---|---|
+| `--since` / `--until <TIMESTAMP>` | RFC 3339 bounds on receipts and policy events. Both inclusive. The window narrows what is *counted*, never what is *verified*. |
+| `--policy <PATH>` | Join `metadata.controls` (core spec 2.5.1) against the receipts. Without it, a policy named by a log's `extends_chain` is resolved when it still resolves from here. |
+| `--format text\|json\|csv\|oscal` | Default `text`. |
+| `--by control\|rule\|decision\|policy` | Report on one table only; also picks the table `--format csv` writes to stdout. |
+| `--out <PATH>` | A directory for `--format csv` (one CSV per table), a file for every other format. |
+| `--lenient` | Skip unparsable lines instead of refusing. |
+| `--unverified` | Report on a log whose chain did not verify. |
+| `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). |
+| `--top-paths <N>` | How many `rule_path`s each rule-block row lists (default 5). |
+| `--experimental-oscal` | Required by `--format oscal`. |
+
+### What it aggregates
+
+- **Totals** by decision (`allow`/`warn`/`deny`), by enforcement mode (`enforce`/`monitor`), and by disposition (`allowed`/`confirmed`/`blocked`/`would_block`).
+- **Per rule block**: evaluated and skipped trace entries, `fired` (an evaluated entry whose outcome was not `allow`, so exactly warn + deny), the deny and warn split, and the most frequent `rule_path`s.
+- **Per action type**, **per policy `content_hash`** with first and last seen, and the **`policy_loaded` / `policy_swapped` timeline**.
+- **Per actor** (`agent_id` / `session_id` / `principal`).
+- **Signature status** as each receipt recorded it at load time, with failures grouped by reason.
+- **Detections** by `detector_id`, with the level histogram and how many findings met a threshold.
+- **Control evidence**, with `--policy`: for each framework and control, the `rule_paths` it maps to, the rule blocks those were observed under, and the receipts / evaluations / fired / denied counts with a last-seen timestamp -- plus `unmapped_fired_rule_blocks`, the blocks that fired with no control behind them (lint L011's static gap, observed dynamically).
+
+A mapping that names a rule block (`rules.egress`) is evidenced by everything that block recorded. A deeper mapping (`rules.egress.block`) is only evidenced by an evaluation whose recorded `rule_path` is at or under it, so a control is never credited with an evaluation that matched the allowlist instead. Only receipts naming the policy's own content hash count toward its controls; the report says how many did (`receipts_matching_policy`).
+
+### Formats
+
+`--format json` emits one document validated by [`schemas/hushspec-report.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v0.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
+
+`--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
+
+Exit 0 when the report was produced, 1 for a broken chain without `--unverified`, 2 for unusable inputs or flags.
+
+Vectors: [`fixtures/report/`](https://github.com/backbay-labs/hush/tree/main/fixtures/report) -- a synthetic 24-hour log and the exact report it must produce.
 
 ## `h2h bundle`
 

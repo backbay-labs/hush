@@ -313,10 +313,16 @@ type DetectionExtension struct {
 }
 
 type PromptInjectionDetection struct {
-	Enabled        *bool           `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	WarnAtOrAbove  *DetectionLevel `yaml:"warn_at_or_above,omitempty" json:"warn_at_or_above,omitempty"`
-	BlockAtOrAbove *DetectionLevel `yaml:"block_at_or_above,omitempty" json:"block_at_or_above,omitempty"`
-	MaxScanBytes   *int            `yaml:"max_scan_bytes,omitempty" json:"max_scan_bytes,omitempty"`
+	Enabled        *bool                      `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	WarnAtOrAbove  *DetectionLevel            `yaml:"warn_at_or_above,omitempty" json:"warn_at_or_above,omitempty"`
+	BlockAtOrAbove *DetectionLevel            `yaml:"block_at_or_above,omitempty" json:"block_at_or_above,omitempty"`
+	MaxScanBytes   *int                       `yaml:"max_scan_bytes,omitempty" json:"max_scan_bytes,omitempty"`
+	Heuristics     *PromptInjectionHeuristics `yaml:"heuristics,omitempty" json:"heuristics,omitempty"`
+}
+
+type PromptInjectionHeuristics struct {
+	Enabled  *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	MinScore *int  `yaml:"min_score,omitempty" json:"min_score,omitempty"`
 }
 
 type JailbreakDetection struct {

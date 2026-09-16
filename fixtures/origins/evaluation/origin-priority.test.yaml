@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D12 (origins 3): a space_id match beats any field count; otherwise the greater matched-field count wins with no per-field weighting"
+description: "A space_id match beats any field count; otherwise the greater matched-field count wins with no per-field weighting (origins spec 3)"
 policy:
   hushspec: "0.1.0"
   rules:

@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D13 (core 3.11): browser_automation evaluation for browser_action"
+description: "browser_automation evaluation for browser_action (core spec 3.11)"
 policy:
   hushspec: "0.1.0"
   rules:

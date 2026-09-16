@@ -116,6 +116,15 @@ const TIME_WINDOW = object(
 // `Condition` refers to itself through `all_of` / `any_of` / `not`.
 const CONDITION_REF: SchemaNode = { kind: 'lazy', get: () => CONDITION };
 
+const RATE_CONDITION = object(
+  {
+    counter: { schema: LEAF },
+    threshold: { schema: LEAF },
+    comparison: { schema: LEAF },
+  },
+  ['counter', 'threshold', 'comparison'],
+);
+
 const CONDITION = object({
   time_window: { schema: TIME_WINDOW },
   // `additionalProperties: true` -- arbitrary values, kept exactly as written.
@@ -123,6 +132,8 @@ const CONDITION = object({
   all_of: { schema: array(CONDITION_REF) },
   any_of: { schema: array(CONDITION_REF) },
   not: { schema: CONDITION_REF },
+  capability: { schema: LEAF },
+  rate: { schema: RATE_CONDITION },
 });
 
 const WHEN: PropertySchema = { schema: CONDITION };
@@ -328,7 +339,7 @@ const ORIGINS = object({
         {
           id: { schema: LEAF },
           // `match: {}` is the explicit catch-all profile; an absent `match`
-          // never matches (spec section 3.3, origins D12).
+          // never matches (spec section 3.3, origins spec 3).
           match: {
             presenceSignificant: true,
             schema: object({
@@ -409,6 +420,12 @@ const DETECTION = object({
       warn_at_or_above: { schema: LEAF, default: 'suspicious' },
       block_at_or_above: { schema: LEAF, default: 'high' },
       max_scan_bytes: { schema: LEAF, default: 200000 },
+      heuristics: {
+        schema: object({
+          enabled: { schema: LEAF, default: true },
+          min_score: { schema: LEAF, default: 0 },
+        }),
+      },
     }),
   },
   jailbreak: {

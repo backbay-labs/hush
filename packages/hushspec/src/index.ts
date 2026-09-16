@@ -36,6 +36,7 @@ export type {
   BridgeTarget,
   DetectionExtension,
   PromptInjectionDetection,
+  PromptInjectionHeuristics,
   DetectionLevel,
   JailbreakDetection,
   ThreatIntelDetection,
@@ -49,7 +50,13 @@ export {
   MAX_NODE_COUNT,
   type ParseResult,
 } from './parse.js';
-export { validate, isSafeRegex, type ValidationResult, type ValidationError } from './validate.js';
+export {
+  validate,
+  isSafeRegex,
+  type ValidationResult,
+  type ValidationError,
+  type ErrorCode,
+} from './validate.js';
 export { merge } from './merge.js';
 export {
   canonicalJson,
@@ -123,6 +130,31 @@ export {
   type LoadReasonCode,
   type ResolveReasonCode,
 } from './resolve.js';
+export {
+  verifyBundle,
+  parseBundle,
+  bundleStatement,
+  pae,
+  BundleError,
+  BUNDLE_REASONS,
+  BUNDLE_VERSION,
+  BUNDLE_PAYLOAD_TYPE,
+  BUNDLE_STATEMENT_TYPE,
+  BUNDLE_PREDICATE_TYPE,
+  type DsseEnvelope,
+  type DsseSignature,
+  type BundleStatement,
+  type BundleSubject,
+  type SubjectDigest,
+  type BundleResolver,
+  type BundlePolicyIdentity,
+  type PolicyBundlePredicate,
+  type BundleReason,
+  type BundleVerified,
+  type BundleVerificationFailure,
+  type BundleVerificationOutcome,
+  type VerifyBundleOptions,
+} from './bundle.js';
 export { loadBuiltin, BUILTIN_NAMES, type BuiltinName } from './builtin.js';
 export {
   createHttpLoader,
@@ -163,14 +195,20 @@ export {
 } from './evaluate.js';
 export {
   evaluateCondition,
+  evaluateConditionWithCapabilities,
+  isCapabilityIdentifier,
   validateCondition,
   validateConditions,
   timezoneIsKnown,
   MAX_NESTING_DEPTH,
   DAY_ABBREVIATIONS,
+  RATE_COMPARISONS,
   CONDITION_RULE_BLOCKS,
   type Condition,
   type TimeWindowCondition,
+  type RateCondition,
+  type RateComparison,
+  type GrantedCapabilities,
   type RuntimeContext,
 } from './conditions.js';
 export {
@@ -190,10 +228,27 @@ export { mapClaudeToolToAction, createSecureToolHandler } from './adapters/anthr
 export { mapOpenAIToolCall, createOpenAIGuard } from './adapters/openai.js';
 export { mapMCPToolCall, extractDomain, createMCPGuard } from './adapters/mcp.js';
 export {
+  mapVercelToolCall,
+  createVercelGuard,
+  type VercelToolCall,
+  type VercelTool,
+  type VercelGuard,
+} from './adapters/vercel.js';
+export {
+  mapLangChainToolCall,
+  wrapLangChainTool,
+  createLangChainCallbackHandler,
+  createLangChainGuard,
+  type LangChainToolLike,
+  type LangChainSerializedTool,
+  type LangChainCallbackHandler,
+} from './adapters/langchain.js';
+export {
   HUSHSPEC_VERSION,
   SDK_NAME,
   SDK_VERSION,
   HUSHSPEC_SUPPORTED_MINORS,
+  HUSHSPEC_SUPPORTED_VERSIONS,
   SUPPORTED_VERSIONS,
   isSupported,
   supportedMinor,
@@ -265,11 +320,27 @@ export {
   type ReceiptSink,
   FileReceiptSink,
   ConsoleReceiptSink,
+  StderrReceiptSink,
   FilteredSink,
   MultiSink,
   CallbackSink,
   NullSink,
 } from './sinks.js';
+export {
+  OtlpReceiptSink,
+  OtlpQueueOverflowError,
+  OtlpExportError,
+  otlpLogsPayload,
+  receiptLogRecord,
+  policyEventLogRecord,
+  logsEndpoint,
+  type OtlpReceiptSinkOptions,
+  type OtlpLogsPayload,
+  type OtlpLogRecord,
+  type OtlpAttribute,
+  type OtlpStringValue,
+  type OtlpEntry,
+} from './otlp.js';
 export {
   evaluateWithDetection,
   evaluateWithDetectionTraced,
@@ -278,6 +349,12 @@ export {
   RegexInjectionDetector,
   RegexJailbreakDetector,
   RegexExfiltrationDetector,
+  HeuristicInjectionDetector,
+  HEURISTIC_DETECTOR_NAME,
+  HEURISTIC_FAMILIES,
+  HEURISTIC_UPPERCASE_WEIGHT,
+  HEURISTIC_UPPERCASE_MIN_LETTERS,
+  HEURISTIC_UPPERCASE_MIN_PERCENT,
   type DetectionCategory,
   type DetectionResult,
   type MatchedPattern,

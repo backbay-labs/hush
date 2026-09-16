@@ -1,0 +1,63 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+hushspec_test: "0.1.0"
+description: "core 6.1: with a warn and a deny both produced for one action, the aggregate is deny and the receipt attributes it to the denying rule -- the warn never wins and never masks the deny. Each case makes both outcomes real at once rather than testing them apart."
+policy:
+  hushspec: "0.2.0"
+  name: deny-beats-warn
+  rules:
+    tool_access:
+      allow: []
+      block: []
+      require_confirmation:
+        - upload_report
+      default: allow
+      max_args_size: 64
+    secret_patterns:
+      patterns:
+        - name: soft_marker
+          pattern: "SOFTMARK[0-9]+"
+          severity: warn
+        - name: hard_marker
+          pattern: "HARDMARK[0-9]+"
+          severity: critical
+cases:
+  - description: "a confirmation-gated tool alone warns"
+    action:
+      type: tool_call
+      target: upload_report
+      content: "nothing interesting"
+    expect:
+      decision: warn
+      matched_rule: rules.tool_access.require_confirmation
+  - description: "a warn-severity secret alone warns"
+    action:
+      type: tool_call
+      target: publish
+      content: "SOFTMARK1"
+    expect:
+      decision: warn
+      matched_rule: rules.secret_patterns.patterns.soft_marker
+  - description: "warn from tool_access and deny from secret_patterns together deny, attributed to the denying rule"
+    action:
+      type: tool_call
+      target: upload_report
+      content: "HARDMARK1"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.hard_marker
+  - description: "warn and deny from the same block: the size ceiling denies while the tool is confirmation-gated"
+    action:
+      type: tool_call
+      target: upload_report
+      args_size: 65
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.max_args_size
+  - description: "a warn-severity and a critical-severity secret in one payload deny"
+    action:
+      type: tool_call
+      target: publish
+      content: "SOFTMARK1 and HARDMARK2"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.hard_marker

@@ -6,24 +6,33 @@
 /// Short schema names accepted by `h2h schema`, in canonical order.
 pub const SCHEMA_NAMES: &[&str] = &[
     "bundle",
+    "conformance-report",
     "core",
     "detection",
+    "error-codes",
     "evaluator-test",
     "framework-registry",
     "hash-vector",
     "keyring",
     "log-entry",
+    "merge-vector",
     "origins",
     "posture",
     "receipt",
+    "report",
     "signature",
 ];
 
 /// Published file name for each short schema name.
 pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("bundle", "hushspec-bundle.v0.schema.json"),
+    (
+        "conformance-report",
+        "hushspec-conformance-report.v0.schema.json",
+    ),
     ("core", "hushspec-core.v0.schema.json"),
     ("detection", "hushspec-detection.v0.schema.json"),
+    ("error-codes", "hushspec-error-codes.v0.schema.json"),
     ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
     (
         "framework-registry",
@@ -32,9 +41,11 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("hash-vector", "hushspec-hash-vector.v0.schema.json"),
     ("keyring", "hushspec-keyring.v0.schema.json"),
     ("log-entry", "hushspec-log-entry.v0.schema.json"),
+    ("merge-vector", "hushspec-merge-vector.v0.schema.json"),
     ("origins", "hushspec-origins.v0.schema.json"),
     ("posture", "hushspec-posture.v0.schema.json"),
     ("receipt", "hushspec-receipt.v0.schema.json"),
+    ("report", "hushspec-report.v0.schema.json"),
     ("signature", "hushspec-signature.v0.schema.json"),
 ];
 
@@ -301,6 +312,157 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "string",
           "minLength": 1,
           "description": "A signing spec 6.4 reason code, or one of the load-time conditions missing_signature, no_keyring, signing_unavailable."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "conformance-report",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v0.schema.json",
+  "title": "HushSpec Conformance Report v0",
+  "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
+  "type": "object",
+  "required": [
+    "implementation",
+    "fixtures_version",
+    "manifest_sha256",
+    "levels",
+    "results",
+    "generated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "implementation": {
+      "$ref": "#/$defs/Implementation",
+      "description": "The implementation under test."
+    },
+    "fixtures_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "The specification version the corpus tracks, copied from fixtures/MANIFEST.json."
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Lowercase hex SHA-256 of the fixtures/MANIFEST.json bytes the run used. This is what makes a report citable: it pins the exact corpus, not just its version."
+    },
+    "levels": {
+      "type": "object",
+      "required": ["0", "1", "2", "3", "4", "5"],
+      "additionalProperties": false,
+      "description": "One outcome per conformance level. Levels subsume, so a report whose highest passing level is N MUST report \"pass\" for every level below N.",
+      "properties": {
+        "0": { "$ref": "#/$defs/LevelResult" },
+        "1": { "$ref": "#/$defs/LevelResult" },
+        "2": { "$ref": "#/$defs/LevelResult" },
+        "3": { "$ref": "#/$defs/LevelResult" },
+        "4": { "$ref": "#/$defs/LevelResult" },
+        "5": { "$ref": "#/$defs/LevelResult" }
+      }
+    },
+    "highest_level": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "maximum": 5,
+      "description": "The highest level that passed with every level below it also passing; null when even Level 0 did not pass. Derived from `levels`, and repeated here so a consumer need not re-derive it."
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/VectorResult" },
+      "description": "Every vector the run attempted, in corpus order."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
+      "description": "When the report was produced, RFC 3339 UTC with second precision."
+    }
+  },
+  "$defs": {
+    "Implementation": {
+      "type": "object",
+      "required": ["name", "version", "language"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Product or library name, as it is distributed."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of the implementation under test."
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Implementation language (\"rust\", \"typescript\", \"python\", \"go\", ...). Free text: the corpus is not limited to the four reference SDKs."
+        }
+      }
+    },
+    "Status": {
+      "enum": ["pass", "fail", "not_attempted"],
+      "description": "pass: every vector the level requires was run and passed. fail: at least one required vector ran and did not pass. not_attempted: the runner did not exercise this level -- never a synonym for pass."
+    },
+    "LevelResult": {
+      "type": "object",
+      "required": ["status", "passed", "failed", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/Status" },
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that passed."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level that failed."
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Vectors at this level the runner declined to attempt. A level with any skipped vector MUST NOT report \"pass\"."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why the level is not \"pass\", when the counts alone would not say (a missing optional feature, a deliberately unsupported module)."
+        }
+      }
+    },
+    "VectorResult": {
+      "type": "object",
+      "required": ["path", "category", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-relative path of the vector, POSIX separators, matching a fixtures/MANIFEST.json entry. A vector whose unit is a case inside a file appends \"#<index>\"."
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The vector's manifest category (valid, invalid, merge, evaluation, canonical, resolve, receipt, receipt-expected, receipt-signed, log, signing, bundle)."
+        },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "The conformance level the vector belongs to."
+        },
+        "status": { "$ref": "#/$defs/Status" },
+        "message": {
+          "type": "string",
+          "description": "Diagnostic for a failure, or a short note for a pass."
         }
       }
     }
@@ -908,6 +1070,37 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "not": {
           "$ref": "#/$defs/Condition",
           "description": "The sub-condition must not hold."
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "The effective posture state must grant this capability. Unevaluable (the block stays active) when the policy has no posture extension."
+        },
+        "rate": {
+          "$ref": "#/$defs/RateCondition"
+        }
+      }
+    },
+    "RateCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counter", "threshold", "comparison"],
+      "description": "Compares an engine-supplied counter (runtime context `counters`) with a threshold. Unevaluable (the block stays active) when the counter is absent; HushSpec never stores state.",
+      "properties": {
+        "counter": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$",
+          "description": "Counter name in the runtime context's `counters` map."
+        },
+        "threshold": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Non-negative threshold."
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["gte", "lt"],
+          "description": "`gte`: counter >= threshold; `lt`: counter < threshold."
         }
       }
     },
@@ -1151,6 +1344,28 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "minimum": 1,
           "default": 200000,
           "description": "Maximum input size to scan, in bytes."
+        },
+        "heuristics": {
+          "$ref": "#/$defs/PromptInjectionHeuristics"
+        }
+      }
+    },
+    "PromptInjectionHeuristics": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration of the normative heuristic_injection@1 detector (detection spec 3.5).",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the heuristic detector runs alongside the regex detector."
+        },
+        "min_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 0,
+          "description": "Integer scores below this floor are reported as 0 (no signal)."
         }
       }
     },
@@ -1220,6 +1435,94 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
 "##,
     ),
     (
+        "error-codes",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v0.schema.json",
+  "title": "HushSpec Error Code Registry v0",
+  "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
+  "type": "object",
+  "required": ["registry_version", "codes"],
+  "additionalProperties": false,
+  "properties": {
+    "registry_version": {
+      "type": "string",
+      "pattern": "^0\\.\\d+\\.\\d+$",
+      "description": "Registry format version."
+    },
+    "codes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/ErrorCode" },
+      "description": "Registered error codes, ordered by code."
+    }
+  },
+  "$defs": {
+    "Code": {
+      "type": "string",
+      "pattern": "^E[0-9]{3}$",
+      "description": "Error code identifier: the letter E followed by three digits. Once registered, a code's meaning never changes and the code is never reused for a different condition."
+    },
+    "ErrorCode": {
+      "type": "object",
+      "required": ["code", "summary", "description", "phase"],
+      "additionalProperties": false,
+      "description": "One registered error code.",
+      "properties": {
+        "code": { "$ref": "#/$defs/Code" },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "One-line description, suitable for a table."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the code means and which specification requirement it enforces."
+        },
+        "phase": {
+          "enum": ["io", "parse", "validate", "resolve"],
+          "description": "Where in load -> parse -> validate -> resolve the refusal happens. A code from an earlier phase pre-empts later ones: a document that fails to parse is never validated."
+        },
+        "emitted_by": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Reference-implementation commands that report this code today. Informative."
+        },
+        "superseded_by": {
+          "$ref": "#/$defs/Code",
+          "description": "Set when a code is retired: the code that replaces it. A retired code is never reused."
+        }
+      }
+    },
+    "ExpectedError": {
+      "type": "object",
+      "required": ["reject", "code"],
+      "additionalProperties": false,
+      "description": "A fixtures/<module>/invalid/<name>.expect.yaml sidecar: the outcome the vector beside it MUST produce. Level 1 requires the rejection; naming the code is required of implementations that emit registry codes (core spec Section 8, Level 1).",
+      "properties": {
+        "reject": {
+          "const": true,
+          "description": "Always true. The sidecar exists only to describe a refusal; an accepted document has no sidecar."
+        },
+        "code": {
+          "$ref": "#/$defs/Code",
+          "description": "The registered code the refusal carries."
+        },
+        "message_contains": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional substring the diagnostic must contain, for vectors where the code alone would not distinguish the requirement being tested. Compared literally and case-sensitively."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
         "evaluator-test",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1232,8 +1535,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
   "properties": {
     "hushspec_test": {
       "type": "string",
-      "pattern": "^0\\.\\d+\\.\\d+$",
-      "description": "Fixture format version."
+      "enum": ["0.1.0", "0.2.0"],
+      "description": "Fixture format version. 0.2.0 adds per-case `controls` and `tags` and the `expect.rule_trace` / `expect.receipt` assertions; a fixture that uses any of them declares 0.2.0."
     },
     "description": {
       "type": "string",
@@ -1269,6 +1572,16 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "context": {
           "$ref": "#/$defs/RuntimeContext"
         },
+        "controls": {
+          "type": "array",
+          "description": "The controls this case proves (test-as-evidence). Reported by `h2h test --format junit` as `<property>` entries and by `--format json` per case.",
+          "items": { "$ref": "#/$defs/ControlRef" }
+        },
+        "tags": {
+          "type": "array",
+          "description": "Free-form labels for selecting or grouping cases (for example `deny`, `phi`, `smoke`).",
+          "items": { "type": "string", "minLength": 1 }
+        },
         "expect": {
           "$ref": "#/$defs/ExpectedResult"
         }
@@ -1289,6 +1602,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "current_time": {
           "type": "string",
           "description": "RFC 3339 timestamp used instead of the engine clock (deterministic testing)."
+        },
+        "counters": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "description": "Engine-maintained counters consulted by `rate` conditions (core spec 3.13)."
         }
       }
     },
@@ -1379,7 +1697,42 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "posture": {
           "$ref": "#/$defs/PostureResult"
+        },
+        "rule_trace": {
+          "type": "array",
+          "description": "The recorded rule trace (receipt spec 4.3), compared in order and in full: the actual trace must have exactly this many entries, and each entry must match the members declared here.",
+          "items": { "$ref": "#/$defs/RuleTraceExpectation" }
+        },
+        "receipt": {
+          "type": "object",
+          "description": "A partial format 0.2 receipt. Every member present here must equal the corresponding member of the receipt produced under the fixed inputs of fixtures/receipts/expected/README.md; members absent here are not compared. Nested objects are compared member-wise (a partial nested object matches); arrays are compared in full. `actor`, `timestamp` and `receipt_id` are ignored even when present, because they are inputs rather than outcomes.",
+          "minProperties": 1,
+          "additionalProperties": true
         }
+      }
+    },
+    "ControlRef": {
+      "type": "object",
+      "description": "A control this case is evidence for. `framework` is an id from spec/registries/frameworks.yaml.",
+      "required": ["framework", "control_id"],
+      "additionalProperties": false,
+      "properties": {
+        "framework": { "type": "string", "minLength": 1 },
+        "control_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "RuleTraceExpectation": {
+      "type": "object",
+      "description": "One expected rule-trace entry. `rule_block` uses the closed ids of the receipt schema; `rule_path` is compared only when present.",
+      "required": ["rule_block", "outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "rule_block": { "type": "string", "minLength": 1 },
+        "outcome": {
+          "type": "string",
+          "enum": ["allow", "warn", "deny", "skip"]
+        },
+        "rule_path": { "type": "string", "minLength": 1 }
       }
     },
     "PostureResult": {
@@ -1824,6 +2177,104 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             },
             "reason": {
               "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "merge-vector",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-merge-vector.v0.schema.json",
+  "title": "HushSpec Merge Vector v0",
+  "description": "The shape of a merge vector directory under fixtures/ (core spec Section 4, Merge Semantics; Section 8 Level 2). Merge vectors are a directory convention rather than a single file, so this schema describes the *descriptor* a conformance runner builds for one directory -- which is what the four SDK runners already reconstruct from the filenames -- and, under $defs/FixtureManifest, the optional fixture.yaml that sits in the directory.\n\nDiscovery. A merge vector directory is any directory under fixtures/ that holds a base.yaml beside at least one child-<name>.yaml. Runners walk fixtures/<module>/merge/ and its subdirectories; a vector that needs its own base -- a digest pin names one exact document, so a pin-match and a pin-mismatch case cannot share one -- gets a subdirectory instead of colliding with the shared base.\n\nFiles. base.yaml is the parent document. child-<name>.yaml is the overlay; its merge_strategy selects the strategy under test. expected-<name>.yaml is the document the merge MUST produce, matched to its child by replacing the leading 'child-' with 'expected-'. Any other *.yaml in the directory (an intermediate hop of a multi-hop chain, say) is inert: runners only iterate the child-*.yaml files.\n\nComposition. A child whose extends carries a '#sha256:' pin is resolved (core Section 2.3) with a loader scoped to the vector directory, which also accepts the bare references 'base' and 'base.yaml'; the pin is then actually checked. Every other child is composed with a direct merge(base, child), which is what the vectors are testing.\n\nRefusal. A vector that must be refused rather than merged carries no expected-<name>.yaml and is marked instead. Only two markings are honoured by all four SDK runners, so only these two are normative: an 'expect-reject' file in the directory, or 'reject: true' in the directory's fixture.yaml. Both are directory-wide; a refusal case therefore lives in its own subdirectory with its own base.yaml. The per-child spellings some runners additionally accept (a '<stem>.expect-reject' marker, a 'reject' name list, per-child entries under 'cases') are tolerated aliases, not portable.",
+  "type": "object",
+  "required": ["directory", "base", "children"],
+  "additionalProperties": false,
+  "properties": {
+    "directory": {
+      "type": "string",
+      "pattern": "^fixtures/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "description": "Repository-relative path of the vector directory, POSIX separators."
+    },
+    "base": {
+      "const": "base.yaml",
+      "description": "The parent document. Always named base.yaml: discovery in all four runners keys on that exact name."
+    },
+    "children": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/Child" },
+      "description": "Every child-<name>.yaml in the directory, sorted by file name."
+    },
+    "manifest": {
+      "$ref": "#/$defs/FixtureManifest",
+      "description": "The parsed fixture.yaml, when the directory has one."
+    },
+    "reject_marker": {
+      "type": "string",
+      "enum": ["expect-reject", "fixture.yaml"],
+      "description": "How the directory declares that its vectors are refusals. Present only for a refusal directory; absent for a merging one."
+    }
+  },
+  "$defs": {
+    "Child": {
+      "type": "object",
+      "required": ["file", "expected", "pinned"],
+      "additionalProperties": false,
+      "description": "One overlay document and what the runner must do with it.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^child-[A-Za-z0-9._-]+\\.ya?ml$",
+          "description": "File name of the overlay, which MUST start with 'child-'."
+        },
+        "expected": {
+          "type": ["string", "null"],
+          "pattern": "^expected-[A-Za-z0-9._-]+\\.ya?ml$",
+          "description": "File name of the expected merged document: the child's name with 'child-' replaced by 'expected-'. Null exactly when the directory is marked as a refusal, since a refused vector produces no document to compare."
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the child's extends carries a '#sha256:' digest pin, which sends the vector through the resolver instead of a direct merge."
+        },
+        "merge_strategy": {
+          "enum": ["deep_merge", "merge", "replace"],
+          "description": "The strategy the child declares (core Section 4). Absent when the child relies on the default, deep_merge."
+        }
+      }
+    },
+    "FixtureManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "fixture.yaml: optional per-directory metadata. Its only portable key is the directory-wide 'reject'. 'description' is informative and ignored by runners.",
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the directory's vectors exercise, and the specification section they come from."
+        },
+        "reject": {
+          "const": true,
+          "description": "Every child in this directory MUST be refused rather than merged. Only the literal true is portable across the four runners; a list of child names is an alias one runner accepts and the others ignore, so it MUST NOT be used."
+        },
+        "cases": {
+          "type": "object",
+          "description": "Per-child overrides. Honoured by the Python and Go runners only, so a directory that relies on this is not portable; kept in the schema because the corpus may still carry one.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reject": {
+                "type": "boolean",
+                "description": "Whether this one child is refused."
+              }
             }
           }
         }
@@ -2592,6 +3043,514 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "string",
           "minLength": 1,
           "description": "Posture state after any signal-triggered transition; equals current when none occurred."
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "report",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-report.v0.schema.json",
+  "title": "HushSpec Evidence Report v0.1",
+  "description": "An aggregation over decision receipts and policy-in-effect events for one window (`h2h report --format json`). A report is derived evidence: every number is counted from recorded receipts (spec/hushspec-receipt.md) and never re-evaluated, so a report cannot disagree with the receipts it summarizes. When the inputs were hash-linked logs (spec/hushspec-log.md), `chain_verified` says whether the chain verified; a report over a broken chain is only produced when the operator asked for one, and is stamped false.",
+  "type": "object",
+  "required": [
+    "report_version",
+    "sources",
+    "window",
+    "totals",
+    "rule_blocks",
+    "action_types",
+    "policies",
+    "policy_timeline",
+    "actors",
+    "signatures",
+    "detections"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "report_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "Report document format version. Consumers MUST reject an unknown value."
+    },
+    "generated_at": {
+      "$ref": "#/$defs/Timestamp",
+      "description": "When the report was produced. Absent when the producer was asked for a byte-stable document (a test vector)."
+    },
+    "sources": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "The inputs, as the caller named them, in the order they were read."
+    },
+    "chain_verified": {
+      "type": "boolean",
+      "description": "Whether every input log's hash chain verified. Absent when the inputs were plain receipt JSONL, which has no chain to verify."
+    },
+    "chain": {
+      "$ref": "#/$defs/ChainSummary"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "totals": {
+      "$ref": "#/$defs/Totals"
+    },
+    "rule_blocks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/RuleBlockRow" },
+      "description": "One row per rule block or engine stage named by any receipt's trace, ordered by block id."
+    },
+    "action_types": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ActionTypeRow" },
+      "description": "One row per evaluated action type, ordered by type."
+    },
+    "policies": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PolicyRow" },
+      "description": "One row per policy content hash the receipts named, ordered by hash."
+    },
+    "policy_timeline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/PolicyTimelineRow" },
+      "description": "The policy_loaded and policy_swapped records in the window, in log order: what was in force, and when it changed."
+    },
+    "actors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/ActorRow" },
+      "description": "One row per distinct (agent_id, session_id, principal) triple, ordered by that triple."
+    },
+    "signatures": {
+      "$ref": "#/$defs/SignatureSummary"
+    },
+    "detections": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/DetectorRow" },
+      "description": "One row per detector that ran, ordered by detector id."
+    },
+    "controls": {
+      "$ref": "#/$defs/ControlsEvidence"
+    }
+  },
+  "$defs": {
+    "ContentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A content hash in the wire form defined by spec/hushspec-canonical.md section 5."
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "description": "RFC 3339 UTC with exactly millisecond precision, as receipts spell it."
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "DecisionTotals": {
+      "type": "object",
+      "required": ["allow", "warn", "deny"],
+      "additionalProperties": false,
+      "description": "Receipts by evaluated policy decision (core spec section 6), independent of what the enforcement point did.",
+      "properties": {
+        "allow": { "$ref": "#/$defs/Count" },
+        "warn": { "$ref": "#/$defs/Count" },
+        "deny": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "ModeTotals": {
+      "type": "object",
+      "required": ["enforce", "monitor"],
+      "additionalProperties": false,
+      "description": "Receipts by the effective enforcement mode (receipt spec section 4.7).",
+      "properties": {
+        "enforce": { "$ref": "#/$defs/Count" },
+        "monitor": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "OutcomeTotals": {
+      "type": "object",
+      "required": ["allowed", "confirmed", "blocked", "would_block"],
+      "additionalProperties": false,
+      "description": "Receipts by what the enforcement point did (receipt spec section 4.7).",
+      "properties": {
+        "allowed": { "$ref": "#/$defs/Count" },
+        "confirmed": { "$ref": "#/$defs/Count" },
+        "blocked": { "$ref": "#/$defs/Count" },
+        "would_block": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "LevelTotals": {
+      "type": "object",
+      "required": ["none", "low", "suspicious", "high", "critical"],
+      "additionalProperties": false,
+      "description": "Detector evaluations by the level their score mapped to under the policy's thresholds.",
+      "properties": {
+        "none": { "$ref": "#/$defs/Count" },
+        "low": { "$ref": "#/$defs/Count" },
+        "suspicious": { "$ref": "#/$defs/Count" },
+        "high": { "$ref": "#/$defs/Count" },
+        "critical": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "Window": {
+      "type": "object",
+      "required": [],
+      "additionalProperties": false,
+      "description": "The window the report covers: the bounds asked for, and the bounds observed. Both bounds are inclusive; a record whose timestamp is not RFC 3339 is outside any bounded window.",
+      "properties": {
+        "since": { "$ref": "#/$defs/Timestamp" },
+        "until": { "$ref": "#/$defs/Timestamp" },
+        "first_receipt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Timestamp of the earliest receipt counted."
+        },
+        "last_receipt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Timestamp of the latest receipt counted."
+        }
+      }
+    },
+    "ChainSummary": {
+      "type": "object",
+      "required": [
+        "verified",
+        "files",
+        "entries",
+        "receipts",
+        "policy_events",
+        "signed_entries",
+        "last_seq"
+      ],
+      "additionalProperties": false,
+      "description": "What the log verifier said about the inputs, summed across files. Each input file is verified on its own; the link between rotated files is `h2h log verify`'s job.",
+      "properties": {
+        "verified": { "type": "boolean" },
+        "files": { "$ref": "#/$defs/Count" },
+        "entries": { "$ref": "#/$defs/Count" },
+        "receipts": { "$ref": "#/$defs/Count" },
+        "policy_events": { "$ref": "#/$defs/Count" },
+        "signed_entries": { "$ref": "#/$defs/Count" },
+        "last_seq": { "$ref": "#/$defs/Count" },
+        "last_entry_hash": { "$ref": "#/$defs/ContentHash" },
+        "reason": {
+          "type": "string",
+          "description": "Why verification failed, as file:line: message. Present only when verified is false."
+        }
+      }
+    },
+    "Totals": {
+      "type": "object",
+      "required": [
+        "receipts",
+        "policy_events",
+        "skipped_lines",
+        "by_decision",
+        "by_mode",
+        "by_outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "receipts": { "$ref": "#/$defs/Count" },
+        "policy_events": { "$ref": "#/$defs/Count" },
+        "skipped_lines": {
+          "$ref": "#/$defs/Count",
+          "description": "Input lines that did not parse and were skipped under --lenient. Zero in a fail-closed run, which refuses to report at all when a line does not parse."
+        },
+        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
+        "by_mode": { "$ref": "#/$defs/ModeTotals" },
+        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+      }
+    },
+    "RulePathCount": {
+      "type": "object",
+      "required": ["rule_path", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "rule_path": { "type": "string", "minLength": 1 },
+        "count": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "RuleBlockRow": {
+      "type": "object",
+      "required": [
+        "rule_block",
+        "receipts",
+        "evaluated",
+        "skipped",
+        "fired",
+        "warn",
+        "deny",
+        "top_rule_paths"
+      ],
+      "additionalProperties": false,
+      "description": "One rule block or engine stage across the window. `fired` is the subset of `evaluated` whose outcome was not allow, which is exactly warn + deny because an evaluated entry has no other outcome.",
+      "properties": {
+        "rule_block": {
+          "type": "string",
+          "enum": [
+            "forbidden_paths",
+            "path_allowlist",
+            "egress",
+            "secret_patterns",
+            "patch_integrity",
+            "shell_commands",
+            "tool_access",
+            "computer_use",
+            "remote_desktop_channels",
+            "input_injection",
+            "browser_automation",
+            "code_execution",
+            "posture_capability",
+            "origin_profile",
+            "panic",
+            "unknown_action_type",
+            "default"
+          ],
+          "description": "The same closed set the receipt schema uses for rule_trace[].rule_block."
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count",
+          "description": "Receipts whose trace named this block."
+        },
+        "evaluated": {
+          "$ref": "#/$defs/Count",
+          "description": "Trace entries whose matching logic ran."
+        },
+        "skipped": {
+          "$ref": "#/$defs/Count",
+          "description": "Trace entries recorded as applicable but inert (absent, disabled, or a false `when`)."
+        },
+        "fired": { "$ref": "#/$defs/Count" },
+        "warn": { "$ref": "#/$defs/Count" },
+        "deny": { "$ref": "#/$defs/Count" },
+        "top_rule_paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RulePathCount" },
+          "description": "The most frequently recorded rule paths for this block, most frequent first, ties broken by path."
+        }
+      }
+    },
+    "ActionTypeRow": {
+      "type": "object",
+      "required": ["action_type", "receipts", "by_decision", "by_outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "action_type": { "type": "string", "minLength": 1 },
+        "receipts": { "$ref": "#/$defs/Count" },
+        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
+        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+      }
+    },
+    "PolicyRow": {
+      "type": "object",
+      "required": [
+        "content_hash",
+        "spec_version",
+        "receipts",
+        "first_seen",
+        "last_seen",
+        "by_decision"
+      ],
+      "additionalProperties": false,
+      "description": "One policy, identified the way a receipt identifies it: by the content hash of the resolved document.",
+      "properties": {
+        "content_hash": { "$ref": "#/$defs/ContentHash" },
+        "name": { "type": "string" },
+        "version": { "$ref": "#/$defs/Count" },
+        "spec_version": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+        },
+        "receipts": { "$ref": "#/$defs/Count" },
+        "first_seen": { "$ref": "#/$defs/Timestamp" },
+        "last_seen": { "$ref": "#/$defs/Timestamp" },
+        "by_decision": { "$ref": "#/$defs/DecisionTotals" }
+      }
+    },
+    "PolicyTimelineRow": {
+      "type": "object",
+      "required": [
+        "event",
+        "timestamp",
+        "content_hash",
+        "enforcement_mode",
+        "sdk"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": ["loaded", "swapped"]
+        },
+        "timestamp": { "$ref": "#/$defs/Timestamp" },
+        "content_hash": { "$ref": "#/$defs/ContentHash" },
+        "name": { "type": "string" },
+        "previous_content_hash": { "$ref": "#/$defs/ContentHash" },
+        "enforcement_mode": {
+          "type": "string",
+          "enum": ["enforce", "monitor"]
+        },
+        "sdk": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The writing SDK as name/version."
+        }
+      }
+    },
+    "ActorRow": {
+      "type": "object",
+      "required": ["receipts", "by_decision", "by_outcome"],
+      "additionalProperties": false,
+      "description": "One actor across the window. A row with no identity fields counts the receipts that named no actor at all.",
+      "properties": {
+        "agent_id": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "principal": { "type": "string", "minLength": 1 },
+        "receipts": { "$ref": "#/$defs/Count" },
+        "by_decision": { "$ref": "#/$defs/DecisionTotals" },
+        "by_outcome": { "$ref": "#/$defs/OutcomeTotals" }
+      }
+    },
+    "ReasonCount": {
+      "type": "object",
+      "required": ["reason", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": { "type": "string" },
+        "count": { "$ref": "#/$defs/Count" }
+      }
+    },
+    "SignatureSummary": {
+      "type": "object",
+      "required": ["verified", "unverified", "absent", "reasons"],
+      "additionalProperties": false,
+      "description": "Policy-signature status as each receipt recorded it at load time (signing spec section 6). `absent` counts receipts whose runtime did not attempt verification at all.",
+      "properties": {
+        "verified": { "$ref": "#/$defs/Count" },
+        "unverified": { "$ref": "#/$defs/Count" },
+        "absent": { "$ref": "#/$defs/Count" },
+        "reasons": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ReasonCount" },
+          "description": "Why verification failed, by reason code, ordered by reason."
+        }
+      }
+    },
+    "DetectorRow": {
+      "type": "object",
+      "required": ["detector_id", "category", "evaluated", "matched", "by_level"],
+      "additionalProperties": false,
+      "properties": {
+        "detector_id": { "type": "string", "minLength": 1 },
+        "category": {
+          "type": "string",
+          "enum": [
+            "prompt_injection",
+            "jailbreak",
+            "data_exfiltration",
+            "threat_intel"
+          ]
+        },
+        "evaluated": { "$ref": "#/$defs/Count" },
+        "matched": {
+          "$ref": "#/$defs/Count",
+          "description": "Evaluations that met a policy threshold and contributed to a decision."
+        },
+        "by_level": { "$ref": "#/$defs/LevelTotals" }
+      }
+    },
+    "ControlEvidenceRow": {
+      "type": "object",
+      "required": [
+        "control_id",
+        "rule_paths",
+        "rule_blocks",
+        "receipts",
+        "evaluated",
+        "fired",
+        "denied"
+      ],
+      "additionalProperties": false,
+      "description": "One control's evidence: what the policy says implements it, and what the receipts recorded against those paths.",
+      "properties": {
+        "control_id": { "type": "string", "minLength": 1 },
+        "rule_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "metadata.controls[].rule_paths, verbatim (core spec section 2.5.1)."
+        },
+        "rule_blocks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "The rule blocks those paths were observed under in the receipts."
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count",
+          "description": "Receipts in which at least one mapped path was consulted."
+        },
+        "evaluated": { "$ref": "#/$defs/Count" },
+        "fired": { "$ref": "#/$defs/Count" },
+        "denied": { "$ref": "#/$defs/Count" },
+        "last_seen": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+    "FrameworkEvidence": {
+      "type": "object",
+      "required": ["framework", "registered", "controls"],
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "registered": {
+          "type": "boolean",
+          "description": "Whether the framework id is in spec/registries/frameworks.yaml. Registration is advisory (core spec section 2.5.1)."
+        },
+        "controls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ControlEvidenceRow" },
+          "description": "In the order the policy declared the mappings."
+        }
+      }
+    },
+    "ControlsEvidence": {
+      "type": "object",
+      "required": [
+        "policy_source",
+        "policy_content_hash",
+        "receipts_matching_policy",
+        "frameworks",
+        "unmapped_fired_rule_blocks"
+      ],
+      "additionalProperties": false,
+      "description": "The metadata.controls join, present when a policy was supplied or one could be resolved from the log's policy events.",
+      "properties": {
+        "policy_source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The policy the mappings were read from, as the caller named it."
+        },
+        "policy_content_hash": { "$ref": "#/$defs/ContentHash" },
+        "receipts_matching_policy": {
+          "$ref": "#/$defs/Count",
+          "description": "Receipts in the window that name policy_content_hash. Evidence for a control is only as strong as this number: a receipt evaluated under a different policy proves nothing about these mappings."
+        },
+        "frameworks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FrameworkEvidence" }
+        },
+        "unmapped_fired_rule_blocks": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Rule blocks that fired in the window with no control mapping behind them: the coverage gap lint L011 flags statically, observed dynamically."
         }
       }
     }

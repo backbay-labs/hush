@@ -1,0 +1,1483 @@
+//! `h2h report`: turn a window of receipts into an evidence report.
+//!
+//! The input is either a hash-linked log (`spec/hushspec-log.md`) or a plain
+//! receipt JSONL; each line is classified on its own. A log's chain is
+//! verified before anything is counted, because a report over a chain that
+//! does not verify is not evidence -- it is a summary of whatever the last
+//! writer left behind. Reporting on a broken chain therefore takes an
+//! explicit `--unverified`, and stamps the document `chain_verified: false`.
+//!
+//! The aggregation itself is [`hushspec::report`]. What lives here is the
+//! reading (auto-detection, the window, fail-closed line handling), the
+//! `metadata.controls` join -- which needs the resolved policy and the
+//! framework registry, so it belongs to the CLI the way `h2h audit --controls`
+//! does -- and the four renderings.
+
+use clap::ValueEnum;
+use colored::Colorize;
+use hushspec::log::{LogEntry, LogVerifyOptions, PolicyEvent, verify_log};
+use hushspec::report::{
+    ChainSummary, ControlEvidenceRow, ControlsEvidence, FrameworkEvidence, Report, ReportOptions,
+    build_report, in_window,
+};
+use hushspec::signing::SignedReceipt;
+use hushspec::{DecisionReceipt, HushSpec, ResolveOptions, RuleTraceEntry};
+use std::collections::BTreeSet;
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use chrono::{DateTime, Utc};
+
+#[derive(clap::Args)]
+pub struct ReportArgs {
+    /// Hash-linked logs (`.jsonl`) or plain receipt JSONL files
+    #[arg(required = true)]
+    files: Vec<PathBuf>,
+
+    /// Only count records at or after this RFC 3339 timestamp
+    #[arg(long, value_name = "TIMESTAMP")]
+    since: Option<String>,
+
+    /// Only count records at or before this RFC 3339 timestamp
+    #[arg(long, value_name = "TIMESTAMP")]
+    until: Option<String>,
+
+    /// Policy whose `metadata.controls` the report joins the receipts against
+    #[arg(long, value_name = "PATH")]
+    policy: Option<PathBuf>,
+
+    /// Output format
+    #[arg(short, long, default_value = "text")]
+    format: OutputFormat,
+
+    /// Report on one table only (and, for CSV on stdout, which one)
+    #[arg(long, value_name = "TABLE")]
+    by: Option<By>,
+
+    /// Write here: a directory for `--format csv`, a file for every other
+    /// format (default: stdout)
+    #[arg(long, value_name = "PATH")]
+    out: Option<PathBuf>,
+
+    /// Skip input lines that do not parse instead of refusing to report
+    #[arg(long)]
+    lenient: bool,
+
+    /// Report even though an input log's hash chain did not verify
+    #[arg(long)]
+    unverified: bool,
+
+    /// Stamp the report with this RFC 3339 time instead of the wall clock
+    #[arg(long, value_name = "TIMESTAMP")]
+    now: Option<String>,
+
+    /// Enable the experimental OSCAL exporter (`--format oscal`)
+    #[arg(long)]
+    experimental_oscal: bool,
+
+    /// How many `rule_path`s each rule-block row lists
+    #[arg(long, default_value_t = 5, value_name = "N")]
+    top_paths: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
+    Csv,
+    /// OSCAL assessment-results skeleton; needs `--experimental-oscal`
+    Oscal,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum By {
+    Control,
+    Rule,
+    Decision,
+    Policy,
+}
+
+impl By {
+    fn table(self) -> &'static str {
+        match self {
+            By::Control => "controls",
+            By::Rule => "rule_blocks",
+            By::Decision => "totals",
+            By::Policy => "policies",
+        }
+    }
+}
+
+/// Everything read from the inputs before aggregation.
+#[derive(Default)]
+struct Loaded {
+    receipts: Vec<DecisionReceipt>,
+    events: Vec<PolicyEvent>,
+    chain: Option<ChainSummary>,
+    skipped: u64,
+    /// `file:line: reason` for every line that did not parse.
+    malformed: Vec<String>,
+}
+
+pub fn run(args: ReportArgs) -> i32 {
+    if args.format == OutputFormat::Oscal && !args.experimental_oscal {
+        eprintln!(
+            "{} --format oscal is experimental; pass --experimental-oscal to enable it",
+            "error:".red()
+        );
+        return 2;
+    }
+
+    let since = match parse_bound(args.since.as_deref(), "--since") {
+        Ok(bound) => bound,
+        Err(code) => return code,
+    };
+    let until = match parse_bound(args.until.as_deref(), "--until") {
+        Ok(bound) => bound,
+        Err(code) => return code,
+    };
+    if let (Some(since), Some(until)) = (since, until)
+        && since > until
+    {
+        eprintln!("{} --since is after --until", "error:".red());
+        return 2;
+    }
+    let generated_at = match args.now.as_deref() {
+        None => Some(Utc::now()),
+        Some(text) => match parse_bound(Some(text), "--now") {
+            Ok(value) => value,
+            Err(code) => return code,
+        },
+    };
+
+    let mut loaded = Loaded::default();
+    for path in &args.files {
+        if let Err(code) = read_file(path, &mut loaded) {
+            return code;
+        }
+    }
+    if !loaded.malformed.is_empty() {
+        if args.lenient {
+            loaded.skipped = loaded.malformed.len() as u64;
+        } else {
+            eprintln!(
+                "{} {} input line(s) are neither a log entry nor a receipt; \
+                 pass --lenient to skip them:",
+                "error:".red(),
+                loaded.malformed.len()
+            );
+            for message in &loaded.malformed {
+                eprintln!("  {message}");
+            }
+            return 2;
+        }
+    }
+    if let Some(chain) = &loaded.chain
+        && !chain.verified
+        && !args.unverified
+    {
+        eprintln!(
+            "{} {}",
+            "BROKEN".red().bold(),
+            chain
+                .reason
+                .as_deref()
+                .unwrap_or("the log chain did not verify")
+        );
+        eprintln!(
+            "       pass --unverified to report anyway (the report is stamped chain_verified: false)"
+        );
+        return 1;
+    }
+
+    let options = ReportOptions {
+        sources: args
+            .files
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        since,
+        until,
+        generated_at,
+        chain: loaded.chain.clone(),
+        skipped_lines: loaded.skipped,
+        top_rule_paths: args.top_paths,
+    };
+    let mut report = build_report(&loaded.receipts, &loaded.events, &options);
+
+    let in_window_receipts: Vec<&DecisionReceipt> = loaded
+        .receipts
+        .iter()
+        .filter(|receipt| in_window(&receipt.timestamp, since, until))
+        .collect();
+    match control_evidence(
+        args.policy.as_deref(),
+        &loaded,
+        &in_window_receipts,
+        &report,
+    ) {
+        Ok(controls) => report.controls = controls,
+        Err(code) => return code,
+    }
+
+    if args.by == Some(By::Control) && report.controls.is_none() {
+        eprintln!(
+            "{} --by control needs control mappings: pass --policy <file> whose \
+             metadata.controls names the controls to report on",
+            "error:".red()
+        );
+        return 2;
+    }
+    if args.format == OutputFormat::Oscal && report.controls.is_none() {
+        eprintln!(
+            "{} --format oscal needs control mappings: pass --policy <file>",
+            "error:".red()
+        );
+        return 2;
+    }
+
+    emit(&report, &args)
+}
+
+// ---------------------------------------------------------------------- input
+
+fn parse_bound(text: Option<&str>, flag: &str) -> Result<Option<DateTime<Utc>>, i32> {
+    let Some(text) = text else {
+        return Ok(None);
+    };
+    match DateTime::parse_from_rfc3339(text) {
+        Ok(parsed) => Ok(Some(parsed.with_timezone(&Utc))),
+        Err(error) => {
+            eprintln!(
+                "{} {flag} is not an RFC 3339 timestamp: {error}",
+                "error:".red()
+            );
+            Err(2)
+        }
+    }
+}
+
+/// One classified line.
+enum Line {
+    Entry(Box<LogEntry>),
+    Receipt(Box<DecisionReceipt>),
+}
+
+/// Classify a line as a log entry or a receipt. A log entry is tried first:
+/// both types reject unknown fields and require a version field of their own,
+/// so no line can be read as both.
+fn classify(line: &str) -> Result<Line, String> {
+    if let Ok(entry) = serde_json::from_str::<LogEntry>(line) {
+        return Ok(Line::Entry(Box::new(entry)));
+    }
+    if let Ok(signed) = serde_json::from_str::<SignedReceipt>(line) {
+        return Ok(Line::Receipt(Box::new(signed.receipt)));
+    }
+    match DecisionReceipt::parse(line) {
+        Ok(receipt) => Ok(Line::Receipt(Box::new(receipt))),
+        Err(error) => Err(format!("neither a log entry nor a receipt: {error}")),
+    }
+}
+
+/// A record whose timestamp is not RFC 3339 cannot be placed in a window, so
+/// it is malformed rather than silently counted or silently dropped.
+fn check_timestamp(timestamp: &str) -> Result<(), String> {
+    DateTime::parse_from_rfc3339(timestamp)
+        .map(|_| ())
+        .map_err(|error| format!("timestamp {timestamp:?} is not RFC 3339: {error}"))
+}
+
+fn read_file(path: &Path, loaded: &mut Loaded) -> Result<(), i32> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("{} cannot read {}: {error}", "error:".red(), path.display());
+            return Err(2);
+        }
+    };
+    let name = path.display().to_string();
+
+    let mut classified: Vec<(usize, Line)> = Vec::new();
+    let mut is_log = false;
+    for (index, line) in text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match classify(line) {
+            Ok(parsed) => {
+                if classified.is_empty() {
+                    is_log = matches!(parsed, Line::Entry(_));
+                }
+                classified.push((index + 1, parsed));
+            }
+            Err(message) => loaded
+                .malformed
+                .push(format!("{name}:{}: {message}", index + 1)),
+        }
+    }
+
+    // A log's chain is verified before its receipts are counted (log spec 8).
+    // Each file is verified on its own, which is exactly right for a
+    // standalone log and for a rotated continuation (whose `log_started`
+    // carries the previous file's hash); checking the link *between* two
+    // rotated files is `h2h log verify`'s job, and it takes them in order.
+    if is_log {
+        let summary = match verify_log(&name, &text, &LogVerifyOptions::default()) {
+            Ok(report) => ChainSummary {
+                verified: true,
+                files: 1,
+                entries: report.entries as u64,
+                receipts: report.receipts as u64,
+                policy_events: report.policy_events as u64,
+                signed_entries: report.signed as u64,
+                last_seq: report.last_seq,
+                last_entry_hash: Some(report.last_entry_hash),
+                reason: None,
+            },
+            // A break is not reported from here: a line that does not parse
+            // at all is the more specific diagnosis, and `run` reports that
+            // first. The refusal to report on a broken chain follows.
+            Err(error) => ChainSummary {
+                verified: false,
+                files: 1,
+                reason: Some(error.to_string()),
+                ..ChainSummary::default()
+            },
+        };
+        loaded.chain = Some(match loaded.chain.take() {
+            None => summary,
+            Some(previous) => merge_chain(previous, summary),
+        });
+    }
+
+    for (line_no, parsed) in classified {
+        match parsed {
+            Line::Entry(entry) => {
+                if let Some(receipt) = entry.receipt {
+                    if let Err(message) = check_timestamp(&receipt.timestamp) {
+                        loaded
+                            .malformed
+                            .push(format!("{name}:{line_no}: {message}"));
+                    } else {
+                        loaded.receipts.push(receipt);
+                    }
+                }
+                if let Some(event) = entry.policy_event {
+                    if let Err(message) = check_timestamp(&event.timestamp) {
+                        loaded
+                            .malformed
+                            .push(format!("{name}:{line_no}: {message}"));
+                    } else {
+                        loaded.events.push(event);
+                    }
+                }
+            }
+            Line::Receipt(receipt) => {
+                if let Err(message) = check_timestamp(&receipt.timestamp) {
+                    loaded
+                        .malformed
+                        .push(format!("{name}:{line_no}: {message}"));
+                } else {
+                    loaded.receipts.push(*receipt);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Sum two files' chain summaries; a single broken file makes the whole
+/// report's chain unverified, and its reason is the one reported.
+fn merge_chain(previous: ChainSummary, next: ChainSummary) -> ChainSummary {
+    ChainSummary {
+        verified: previous.verified && next.verified,
+        files: previous.files + next.files,
+        entries: previous.entries + next.entries,
+        receipts: previous.receipts + next.receipts,
+        policy_events: previous.policy_events + next.policy_events,
+        signed_entries: previous.signed_entries + next.signed_entries,
+        last_seq: next.last_seq,
+        last_entry_hash: next.last_entry_hash.or(previous.last_entry_hash),
+        reason: previous.reason.or(next.reason),
+    }
+}
+
+// ------------------------------------------------------------------- controls
+
+/// Does a control mapping's `rule_paths` entry cover this trace entry?
+///
+/// A mapping that names a rule block (`rules`, `rules.egress`) covers every
+/// entry that block recorded, exactly as `h2h lint` counts coverage. A deeper
+/// mapping (`rules.egress.block`) is only evidenced by an entry whose recorded
+/// `rule_path` is at or under it -- otherwise a report would credit
+/// `rules.egress.block` for an evaluation that matched the allowlist.
+fn mapping_covers(rule_path: &str, entry: &RuleTraceEntry) -> bool {
+    let depth = rule_path.split('.').count();
+    if rule_path.starts_with("rules") && depth <= 2 && !rule_path.contains('[') {
+        return crate::controls::path_covers_block(
+            rule_path,
+            &format!("rules.{}", entry.rule_block),
+        );
+    }
+    entry
+        .rule_path
+        .as_deref()
+        .is_some_and(|recorded| path_at_or_under(recorded, rule_path))
+}
+
+fn path_at_or_under(recorded: &str, prefix: &str) -> bool {
+    recorded == prefix
+        || (recorded.len() > prefix.len()
+            && recorded.starts_with(prefix)
+            && matches!(recorded.as_bytes()[prefix.len()], b'.' | b'['))
+}
+
+/// Resolve the policy the control mappings come from: `--policy` when given,
+/// otherwise a source named by a `policy_loaded` / `policy_swapped` event that
+/// still resolves from here (a builtin, or a path that exists).
+fn control_policy(
+    explicit: Option<&Path>,
+    loaded: &Loaded,
+) -> Result<Option<(String, HushSpec, String)>, i32> {
+    if let Some(path) = explicit {
+        return match hushspec::resolve_path_with_options(path, &ResolveOptions::default()) {
+            Ok(resolution) => Ok(Some((
+                path.display().to_string(),
+                resolution.spec,
+                resolution.content_hash,
+            ))),
+            Err(error) => {
+                eprintln!(
+                    "{} failed to resolve {}: {error}",
+                    "error:".red(),
+                    path.display()
+                );
+                Err(2)
+            }
+        };
+    }
+
+    // Best effort: the leaf of an `extends_chain` is the document the writer
+    // loaded. A source that no longer resolves here is not an error -- the
+    // report simply carries no control evidence.
+    for event in &loaded.events {
+        let Some(chain) = &event.policy.extends_chain else {
+            continue;
+        };
+        let Some(link) = chain.last() else {
+            continue;
+        };
+        let resolved = if link.source.starts_with("builtin:") {
+            hushspec::load_builtin(link.source.trim_start_matches("builtin:"))
+                .and_then(|text| HushSpec::parse(text).ok())
+                .and_then(|spec| {
+                    hushspec::Resolution::from_resolved(&spec, Some(&link.source)).ok()
+                })
+        } else if Path::new(&link.source).exists() {
+            hushspec::resolve_path_with_options(&link.source, &ResolveOptions::default()).ok()
+        } else {
+            None
+        };
+        if let Some(resolution) = resolved
+            && resolution.content_hash == event.policy.content_hash
+        {
+            return Ok(Some((
+                link.source.clone(),
+                resolution.spec,
+                resolution.content_hash,
+            )));
+        }
+    }
+    Ok(None)
+}
+
+fn control_evidence(
+    explicit: Option<&Path>,
+    loaded: &Loaded,
+    receipts: &[&DecisionReceipt],
+    report: &Report,
+) -> Result<Option<ControlsEvidence>, i32> {
+    let Some((source, spec, content_hash)) = control_policy(explicit, loaded)? else {
+        return Ok(None);
+    };
+
+    let mappings = spec
+        .metadata
+        .as_ref()
+        .map(|metadata| metadata.controls.as_slice())
+        .unwrap_or_default();
+
+    // Only receipts evaluated under this exact policy can evidence its
+    // mappings; anything else would credit a control with an evaluation that
+    // ran under different rules.
+    let matching: Vec<&&DecisionReceipt> = receipts
+        .iter()
+        .filter(|receipt| receipt.policy.content_hash == content_hash)
+        .collect();
+    if matching.len() < receipts.len() && explicit.is_some() {
+        eprintln!(
+            "{} {} of {} receipt(s) in the window name another policy; control \
+             evidence counts only the {} that name {source}",
+            "warning:".yellow(),
+            receipts.len() - matching.len(),
+            receipts.len(),
+            matching.len()
+        );
+    }
+
+    let mut frameworks: Vec<FrameworkEvidence> = Vec::new();
+    let mut mapped_blocks: BTreeSet<String> = BTreeSet::new();
+    for mapping in mappings {
+        let mut row = ControlEvidenceRow {
+            control_id: mapping.control_id.clone(),
+            rule_paths: mapping.rule_paths.clone(),
+            rule_blocks: Vec::new(),
+            receipts: 0,
+            evaluated: 0,
+            fired: 0,
+            denied: 0,
+            last_seen: None,
+        };
+        let mut blocks: BTreeSet<String> = BTreeSet::new();
+        for receipt in &matching {
+            let mut touched = false;
+            for entry in &receipt.rule_trace {
+                if !mapping
+                    .rule_paths
+                    .iter()
+                    .any(|path| mapping_covers(path, entry))
+                {
+                    continue;
+                }
+                touched = true;
+                blocks.insert(entry.rule_block.clone());
+                if entry.evaluated {
+                    row.evaluated += 1;
+                }
+                match entry.outcome {
+                    hushspec::receipt::RuleOutcome::Deny => {
+                        row.fired += 1;
+                        row.denied += 1;
+                    }
+                    hushspec::receipt::RuleOutcome::Warn => row.fired += 1,
+                    _ => {}
+                }
+            }
+            if touched {
+                row.receipts += 1;
+                if row
+                    .last_seen
+                    .as_ref()
+                    .is_none_or(|seen| receipt.timestamp > *seen)
+                {
+                    row.last_seen = Some(receipt.timestamp.clone());
+                }
+            }
+        }
+        mapped_blocks.extend(blocks.iter().cloned());
+        row.rule_blocks = blocks.into_iter().collect();
+
+        match frameworks
+            .iter_mut()
+            .find(|group| group.framework == mapping.framework)
+        {
+            Some(group) => group.controls.push(row),
+            None => frameworks.push(FrameworkEvidence {
+                framework: mapping.framework.clone(),
+                registered: crate::generated_frameworks::framework(&mapping.framework).is_some(),
+                controls: vec![row],
+            }),
+        }
+    }
+
+    let unmapped_fired_rule_blocks: Vec<String> = report
+        .rule_blocks
+        .iter()
+        .filter(|row| row.fired > 0 && !mapped_blocks.contains(&row.rule_block))
+        .map(|row| row.rule_block.clone())
+        .collect();
+
+    Ok(Some(ControlsEvidence {
+        policy_source: source,
+        policy_content_hash: content_hash,
+        receipts_matching_policy: matching.len() as u64,
+        frameworks,
+        unmapped_fired_rule_blocks,
+    }))
+}
+
+// -------------------------------------------------------------------- output
+
+fn emit(report: &Report, args: &ReportArgs) -> i32 {
+    match args.format {
+        OutputFormat::Text => write_out(args.out.as_deref(), &render_text(report, args.by)),
+        OutputFormat::Json => match serde_json::to_string_pretty(report) {
+            Ok(mut json) => {
+                json.push('\n');
+                write_out(args.out.as_deref(), &json)
+            }
+            Err(error) => {
+                eprintln!("{} cannot serialize the report: {error}", "error:".red());
+                2
+            }
+        },
+        OutputFormat::Oscal => match serde_json::to_string_pretty(&oscal(report)) {
+            Ok(mut json) => {
+                json.push('\n');
+                write_out(args.out.as_deref(), &json)
+            }
+            Err(error) => {
+                eprintln!("{} cannot serialize the report: {error}", "error:".red());
+                2
+            }
+        },
+        OutputFormat::Csv => write_csv(report, args),
+    }
+}
+
+fn write_out(out: Option<&Path>, text: &str) -> i32 {
+    match out {
+        None => {
+            print!("{text}");
+            0
+        }
+        Some(path) => match std::fs::write(path, text) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!(
+                    "{} cannot write {}: {error}",
+                    "error:".red(),
+                    path.display()
+                );
+                2
+            }
+        },
+    }
+}
+
+// ---------------------------------------------------------------------- text
+
+fn render_text(report: &Report, by: Option<By>) -> String {
+    let mut out = String::new();
+    let window = format!(
+        "{} .. {}",
+        report
+            .window
+            .first_receipt
+            .as_deref()
+            .or(report.window.since.as_deref())
+            .unwrap_or("-"),
+        report
+            .window
+            .last_receipt
+            .as_deref()
+            .or(report.window.until.as_deref())
+            .unwrap_or("-")
+    );
+    let _ = writeln!(out, "{}  {}", "Window:".bold(), window);
+    let _ = writeln!(out, "{}  {}", "Sources:".bold(), report.sources.join(", "));
+    match report.chain_verified {
+        Some(true) => {
+            let _ = writeln!(out, "{}  {}", "Chain:".bold(), "verified".green());
+        }
+        Some(false) => {
+            let _ = writeln!(
+                out,
+                "{}  {} ({})",
+                "Chain:".bold(),
+                "NOT VERIFIED".red().bold(),
+                report
+                    .chain
+                    .as_ref()
+                    .and_then(|chain| chain.reason.as_deref())
+                    .unwrap_or("reported under --unverified")
+            );
+        }
+        None => {}
+    }
+    if report.totals.skipped_lines > 0 {
+        let _ = writeln!(
+            out,
+            "{}  {} line(s) skipped under --lenient",
+            "Skipped:".bold(),
+            report.totals.skipped_lines
+        );
+    }
+
+    if by.is_none() || by == Some(By::Decision) {
+        let totals = &report.totals;
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Decisions:".bold());
+        let _ = writeln!(
+            out,
+            "  {} receipts: {} allow, {} warn, {} deny",
+            totals.receipts,
+            totals.by_decision.allow,
+            totals.by_decision.warn,
+            totals.by_decision.deny
+        );
+        let _ = writeln!(
+            out,
+            "  enforcement: {} allowed, {} confirmed, {} blocked, {} would_block \
+             ({} enforce, {} monitor)",
+            totals.by_outcome.allowed,
+            totals.by_outcome.confirmed,
+            totals.by_outcome.blocked,
+            totals.by_outcome.would_block,
+            totals.by_mode.enforce,
+            totals.by_mode.monitor
+        );
+        let _ = writeln!(
+            out,
+            "  signatures: {} verified, {} unverified, {} not checked",
+            report.signatures.verified, report.signatures.unverified, report.signatures.absent
+        );
+        for reason in &report.signatures.reasons {
+            let _ = writeln!(out, "    {} x{}", reason.reason, reason.count);
+        }
+    }
+
+    if by.is_none() || by == Some(By::Rule) {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Rule blocks:".bold());
+        let width = column_width(
+            report.rule_blocks.iter().map(|row| row.rule_block.as_str()),
+            "RULE BLOCK",
+        );
+        let _ = writeln!(
+            out,
+            "  {:<width$}  {:>9}  {:>5}  {:>4}  {:>4}  TOP RULE PATH",
+            "RULE BLOCK", "EVALUATED", "FIRED", "DENY", "WARN"
+        );
+        for row in &report.rule_blocks {
+            let top = row
+                .top_rule_paths
+                .first()
+                .map(|path| format!("{} (x{})", path.rule_path, path.count))
+                .unwrap_or_default();
+            let line = format!(
+                "  {:<width$}  {:>9}  {:>5}  {:>4}  {:>4}  {top}",
+                row.rule_block, row.evaluated, row.fired, row.deny, row.warn
+            );
+            let _ = writeln!(out, "{}", line.trim_end());
+        }
+        if report.rule_blocks.is_empty() {
+            let _ = writeln!(out, "  (none)");
+        }
+
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Action types:".bold());
+        let width = column_width(
+            report
+                .action_types
+                .iter()
+                .map(|row| row.action_type.as_str()),
+            "ACTION TYPE",
+        );
+        let _ = writeln!(
+            out,
+            "  {:<width$}  {:>8}  {:>5}  {:>4}  {:>4}",
+            "ACTION TYPE", "RECEIPTS", "ALLOW", "WARN", "DENY"
+        );
+        for row in &report.action_types {
+            let _ = writeln!(
+                out,
+                "  {:<width$}  {:>8}  {:>5}  {:>4}  {:>4}",
+                row.action_type,
+                row.receipts,
+                row.by_decision.allow,
+                row.by_decision.warn,
+                row.by_decision.deny
+            );
+        }
+        if report.action_types.is_empty() {
+            let _ = writeln!(out, "  (none)");
+        }
+    }
+
+    if by.is_none() || by == Some(By::Policy) {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Policies in force:".bold());
+        for row in &report.policies {
+            let _ = writeln!(
+                out,
+                "  {}  {}  {} receipts  {} .. {}",
+                short_hash(&row.content_hash),
+                row.name.as_deref().unwrap_or("(unnamed)"),
+                row.receipts,
+                row.first_seen,
+                row.last_seen
+            );
+        }
+        if report.policies.is_empty() {
+            let _ = writeln!(out, "  (none)");
+        }
+        if !report.policy_timeline.is_empty() {
+            let _ = writeln!(out);
+            let _ = writeln!(out, "{}", "Policy timeline:".bold());
+            for row in &report.policy_timeline {
+                let event = match row.event {
+                    hushspec::log::PolicyEventKind::Loaded => "loaded ",
+                    hushspec::log::PolicyEventKind::Swapped => "swapped",
+                };
+                let previous = row
+                    .previous_content_hash
+                    .as_deref()
+                    .map(|hash| format!(" (was {})", short_hash(hash)))
+                    .unwrap_or_default();
+                let _ = writeln!(
+                    out,
+                    "  {}  {event}  {}  {}{previous}",
+                    row.timestamp,
+                    short_hash(&row.content_hash),
+                    row.name.as_deref().unwrap_or("(unnamed)")
+                );
+            }
+        }
+
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Actors:".bold());
+        for row in &report.actors {
+            let _ = writeln!(
+                out,
+                "  {} / {} / {}  {} receipts, {} denied",
+                row.agent_id.as_deref().unwrap_or("-"),
+                row.session_id.as_deref().unwrap_or("-"),
+                row.principal.as_deref().unwrap_or("-"),
+                row.receipts,
+                row.by_decision.deny
+            );
+        }
+        if report.actors.is_empty() {
+            let _ = writeln!(out, "  (none)");
+        }
+    }
+
+    if (by.is_none() || by == Some(By::Rule)) && !report.detections.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", "Detections:".bold());
+        for row in &report.detections {
+            let _ = writeln!(
+                out,
+                "  {}  {} evaluated, {} matched (critical {}, high {}, suspicious {})",
+                row.detector_id,
+                row.evaluated,
+                row.matched,
+                row.by_level.critical,
+                row.by_level.high,
+                row.by_level.suspicious
+            );
+        }
+    }
+
+    if let Some(controls) = &report.controls
+        && (by.is_none() || by == Some(By::Control))
+    {
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "{}  {} ({} receipt(s) evaluated under it)",
+            "Control evidence:".bold(),
+            controls.policy_source,
+            controls.receipts_matching_policy
+        );
+        for framework in &controls.frameworks {
+            let _ = writeln!(out);
+            let mark = if framework.registered {
+                ""
+            } else {
+                " \u{26a0}"
+            };
+            let _ = writeln!(out, "  {}{mark}", framework.framework.bold());
+            let width = column_width(
+                framework.controls.iter().map(|row| row.control_id.as_str()),
+                "CONTROL",
+            );
+            let _ = writeln!(
+                out,
+                "    {:<width$}  {:>9}  {:>5}  {:>6}  LAST SEEN",
+                "CONTROL", "EVALUATED", "FIRED", "DENIED"
+            );
+            for row in &framework.controls {
+                let _ = writeln!(
+                    out,
+                    "    {:<width$}  {:>9}  {:>5}  {:>6}  {}",
+                    row.control_id,
+                    row.evaluated,
+                    row.fired,
+                    row.denied,
+                    row.last_seen.as_deref().unwrap_or("-")
+                );
+            }
+        }
+        if !controls.unmapped_fired_rule_blocks.is_empty() {
+            let _ = writeln!(out);
+            for block in &controls.unmapped_fired_rule_blocks {
+                let _ = writeln!(
+                    out,
+                    "  {} {block} fired with no control mapping",
+                    "\u{2717}".red()
+                );
+            }
+        }
+    }
+    out
+}
+
+/// Padded columns are written without color: a `ColoredString` pads to the
+/// width of its escape sequences, not of its visible text.
+fn column_width<'a>(values: impl Iterator<Item = &'a str>, heading: &str) -> usize {
+    values
+        .map(|value| value.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(heading.len())
+}
+
+/// The first 12 characters of a digest, for the text report's fixed columns.
+///
+/// Receipts are parsed before their `content_hash` is format-checked, so the
+/// digest may be any string: truncate by character, never by byte.
+fn short_hash(hash: &str) -> String {
+    let hex = hash.strip_prefix("sha256:").unwrap_or(hash);
+    let head: String = hex.chars().take(12).collect();
+    format!("sha256:{head}")
+}
+
+// ----------------------------------------------------------------------- csv
+
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn csv_row(fields: &[String]) -> String {
+    let cells: Vec<String> = fields.iter().map(|field| csv_field(field)).collect();
+    format!("{}\n", cells.join(","))
+}
+
+fn table(report: &Report, name: &str) -> String {
+    let mut out = String::new();
+    match name {
+        "totals" => {
+            out.push_str(&csv_row(&s(&["category", "key", "count"])));
+            let t = &report.totals;
+            for (key, count) in [
+                ("allow", t.by_decision.allow),
+                ("warn", t.by_decision.warn),
+                ("deny", t.by_decision.deny),
+            ] {
+                out.push_str(&csv_row(&s(&["decision", key, &count.to_string()])));
+            }
+            for (key, count) in [
+                ("enforce", t.by_mode.enforce),
+                ("monitor", t.by_mode.monitor),
+            ] {
+                out.push_str(&csv_row(&s(&["mode", key, &count.to_string()])));
+            }
+            for (key, count) in [
+                ("allowed", t.by_outcome.allowed),
+                ("confirmed", t.by_outcome.confirmed),
+                ("blocked", t.by_outcome.blocked),
+                ("would_block", t.by_outcome.would_block),
+            ] {
+                out.push_str(&csv_row(&s(&["outcome", key, &count.to_string()])));
+            }
+            for (key, count) in [
+                ("receipts", t.receipts),
+                ("policy_events", t.policy_events),
+                ("skipped_lines", t.skipped_lines),
+            ] {
+                out.push_str(&csv_row(&s(&["total", key, &count.to_string()])));
+            }
+        }
+        "rule_blocks" => {
+            out.push_str(&csv_row(&s(&[
+                "rule_block",
+                "receipts",
+                "evaluated",
+                "skipped",
+                "fired",
+                "warn",
+                "deny",
+                "top_rule_paths",
+            ])));
+            for row in &report.rule_blocks {
+                let paths: Vec<String> = row
+                    .top_rule_paths
+                    .iter()
+                    .map(|path| format!("{}={}", path.rule_path, path.count))
+                    .collect();
+                out.push_str(&csv_row(&s(&[
+                    &row.rule_block,
+                    &row.receipts.to_string(),
+                    &row.evaluated.to_string(),
+                    &row.skipped.to_string(),
+                    &row.fired.to_string(),
+                    &row.warn.to_string(),
+                    &row.deny.to_string(),
+                    &paths.join(" "),
+                ])));
+            }
+        }
+        "action_types" => {
+            out.push_str(&csv_row(&s(&[
+                "action_type",
+                "receipts",
+                "allow",
+                "warn",
+                "deny",
+                "allowed",
+                "confirmed",
+                "blocked",
+                "would_block",
+            ])));
+            for row in &report.action_types {
+                out.push_str(&csv_row(&s(&[
+                    &row.action_type,
+                    &row.receipts.to_string(),
+                    &row.by_decision.allow.to_string(),
+                    &row.by_decision.warn.to_string(),
+                    &row.by_decision.deny.to_string(),
+                    &row.by_outcome.allowed.to_string(),
+                    &row.by_outcome.confirmed.to_string(),
+                    &row.by_outcome.blocked.to_string(),
+                    &row.by_outcome.would_block.to_string(),
+                ])));
+            }
+        }
+        "policies" => {
+            out.push_str(&csv_row(&s(&[
+                "content_hash",
+                "name",
+                "version",
+                "spec_version",
+                "receipts",
+                "first_seen",
+                "last_seen",
+                "allow",
+                "warn",
+                "deny",
+            ])));
+            for row in &report.policies {
+                out.push_str(&csv_row(&s(&[
+                    &row.content_hash,
+                    row.name.as_deref().unwrap_or(""),
+                    &row.version.map(|v| v.to_string()).unwrap_or_default(),
+                    &row.spec_version,
+                    &row.receipts.to_string(),
+                    &row.first_seen,
+                    &row.last_seen,
+                    &row.by_decision.allow.to_string(),
+                    &row.by_decision.warn.to_string(),
+                    &row.by_decision.deny.to_string(),
+                ])));
+            }
+        }
+        "policy_timeline" => {
+            out.push_str(&csv_row(&s(&[
+                "timestamp",
+                "event",
+                "content_hash",
+                "name",
+                "previous_content_hash",
+                "enforcement_mode",
+                "sdk",
+            ])));
+            for row in &report.policy_timeline {
+                let event = match row.event {
+                    hushspec::log::PolicyEventKind::Loaded => "loaded",
+                    hushspec::log::PolicyEventKind::Swapped => "swapped",
+                };
+                let mode = match row.enforcement_mode {
+                    hushspec::EnforcementMode::Enforce => "enforce",
+                    hushspec::EnforcementMode::Monitor => "monitor",
+                };
+                out.push_str(&csv_row(&s(&[
+                    &row.timestamp,
+                    event,
+                    &row.content_hash,
+                    row.name.as_deref().unwrap_or(""),
+                    row.previous_content_hash.as_deref().unwrap_or(""),
+                    mode,
+                    &row.sdk,
+                ])));
+            }
+        }
+        "actors" => {
+            out.push_str(&csv_row(&s(&[
+                "agent_id",
+                "session_id",
+                "principal",
+                "receipts",
+                "allow",
+                "warn",
+                "deny",
+                "blocked",
+                "would_block",
+            ])));
+            for row in &report.actors {
+                out.push_str(&csv_row(&s(&[
+                    row.agent_id.as_deref().unwrap_or(""),
+                    row.session_id.as_deref().unwrap_or(""),
+                    row.principal.as_deref().unwrap_or(""),
+                    &row.receipts.to_string(),
+                    &row.by_decision.allow.to_string(),
+                    &row.by_decision.warn.to_string(),
+                    &row.by_decision.deny.to_string(),
+                    &row.by_outcome.blocked.to_string(),
+                    &row.by_outcome.would_block.to_string(),
+                ])));
+            }
+        }
+        "signatures" => {
+            out.push_str(&csv_row(&s(&["status", "reason", "count"])));
+            out.push_str(&csv_row(&s(&[
+                "verified",
+                "",
+                &report.signatures.verified.to_string(),
+            ])));
+            out.push_str(&csv_row(&s(&[
+                "absent",
+                "",
+                &report.signatures.absent.to_string(),
+            ])));
+            for reason in &report.signatures.reasons {
+                out.push_str(&csv_row(&s(&[
+                    "unverified",
+                    &reason.reason,
+                    &reason.count.to_string(),
+                ])));
+            }
+        }
+        "detections" => {
+            out.push_str(&csv_row(&s(&[
+                "detector_id",
+                "category",
+                "evaluated",
+                "matched",
+                "none",
+                "low",
+                "suspicious",
+                "high",
+                "critical",
+            ])));
+            for row in &report.detections {
+                let category = serde_json::to_value(&row.category)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_string))
+                    .unwrap_or_default();
+                out.push_str(&csv_row(&s(&[
+                    &row.detector_id,
+                    &category,
+                    &row.evaluated.to_string(),
+                    &row.matched.to_string(),
+                    &row.by_level.none.to_string(),
+                    &row.by_level.low.to_string(),
+                    &row.by_level.suspicious.to_string(),
+                    &row.by_level.high.to_string(),
+                    &row.by_level.critical.to_string(),
+                ])));
+            }
+        }
+        "controls" => {
+            out.push_str(&csv_row(&s(&[
+                "framework",
+                "control_id",
+                "rule_paths",
+                "rule_blocks",
+                "receipts",
+                "evaluated",
+                "fired",
+                "denied",
+                "last_seen",
+            ])));
+            for framework in report
+                .controls
+                .iter()
+                .flat_map(|controls| &controls.frameworks)
+            {
+                for row in &framework.controls {
+                    out.push_str(&csv_row(&s(&[
+                        &framework.framework,
+                        &row.control_id,
+                        &row.rule_paths.join(" "),
+                        &row.rule_blocks.join(" "),
+                        &row.receipts.to_string(),
+                        &row.evaluated.to_string(),
+                        &row.fired.to_string(),
+                        &row.denied.to_string(),
+                        row.last_seen.as_deref().unwrap_or(""),
+                    ])));
+                }
+            }
+        }
+        "unmapped_rule_blocks" => {
+            out.push_str(&csv_row(&s(&["rule_block", "fired"])));
+            for block in report
+                .controls
+                .iter()
+                .flat_map(|controls| &controls.unmapped_fired_rule_blocks)
+            {
+                let fired = report
+                    .rule_blocks
+                    .iter()
+                    .find(|row| row.rule_block == *block)
+                    .map(|row| row.fired)
+                    .unwrap_or(0);
+                out.push_str(&csv_row(&s(&[block, &fired.to_string()])));
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// `["a", "b"]` as owned fields; keeps the table writers readable.
+fn s(fields: &[&str]) -> Vec<String> {
+    fields.iter().map(|field| (*field).to_string()).collect()
+}
+
+const CSV_TABLES: &[&str] = &[
+    "totals",
+    "rule_blocks",
+    "action_types",
+    "policies",
+    "policy_timeline",
+    "actors",
+    "signatures",
+    "detections",
+];
+
+fn write_csv(report: &Report, args: &ReportArgs) -> i32 {
+    let Some(dir) = args.out.as_deref() else {
+        // One flattened table on stdout: the one --by names (rule blocks by
+        // default, the table an operator wants most often).
+        let name = args.by.map_or("rule_blocks", By::table);
+        print!("{}", table(report, name));
+        return 0;
+    };
+    if let Err(error) = std::fs::create_dir_all(dir) {
+        eprintln!(
+            "{} cannot create {}: {error}",
+            "error:".red(),
+            dir.display()
+        );
+        return 2;
+    }
+    let mut names: Vec<&str> = CSV_TABLES.to_vec();
+    if report.controls.is_some() {
+        names.push("controls");
+        names.push("unmapped_rule_blocks");
+    }
+    let written = names.len();
+    for name in names {
+        let path = dir.join(format!("{name}.csv"));
+        if let Err(error) = std::fs::write(&path, table(report, name)) {
+            eprintln!(
+                "{} cannot write {}: {error}",
+                "error:".red(),
+                path.display()
+            );
+            return 2;
+        }
+    }
+    println!("wrote {written} table(s) to {}", dir.display());
+    0
+}
+
+// --------------------------------------------------------------------- oscal
+
+/// A UUID derived from `key`, so an exported document is byte-stable for the
+/// same report. OSCAL wants UUIDs; it does not want fresh ones on every run.
+fn stable_uuid(key: &str) -> String {
+    let digest = hushspec::canonical::digest(key);
+    let hex: String = digest
+        .trim_start_matches("sha256:")
+        .chars()
+        .take(32)
+        .collect();
+    let version = format!("4{}", &hex[13..16]);
+    let variant = format!(
+        "{:x}{}",
+        (u8::from_str_radix(&hex[16..17], 16).unwrap_or(0) & 0x3) | 0x8,
+        &hex[17..20]
+    );
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        version,
+        variant,
+        &hex[20..32]
+    )
+}
+
+/// A minimal OSCAL 1.1.2 assessment-results document: one result whose
+/// findings are the per-control rows and whose observations hold the counts.
+///
+/// Experimental. It is deliberately the smallest document an OSCAL consumer
+/// will accept: there is no assessment plan to import, no system security
+/// plan, and no subject inventory, because HushSpec receipts describe a tool
+/// boundary rather than an assessed system.
+fn oscal(report: &Report) -> serde_json::Value {
+    let controls = report.controls.as_ref();
+    let start = report
+        .window
+        .first_receipt
+        .clone()
+        .or_else(|| report.window.since.clone())
+        .or_else(|| report.generated_at.clone())
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
+    let end = report
+        .window
+        .last_receipt
+        .clone()
+        .or_else(|| report.window.until.clone())
+        .unwrap_or_else(|| start.clone());
+
+    let mut observations = Vec::new();
+    let mut findings = Vec::new();
+    let mut selected = Vec::new();
+    for framework in controls.iter().flat_map(|controls| &controls.frameworks) {
+        for row in &framework.controls {
+            let id = format!("{}/{}", framework.framework, row.control_id);
+            selected.push(serde_json::json!({ "control-id": row.control_id }));
+            observations.push(serde_json::json!({
+                "uuid": stable_uuid(&format!("observation:{id}")),
+                "title": format!("{id}: recorded evaluations"),
+                "description": format!(
+                    "{} receipt(s) consulted {}; {} evaluation(s), {} fired, {} denied.",
+                    row.receipts,
+                    row.rule_paths.join(", "),
+                    row.evaluated,
+                    row.fired,
+                    row.denied
+                ),
+                "methods": ["TEST"],
+                "collected": row.last_seen.clone().unwrap_or_else(|| end.clone()),
+            }));
+            findings.push(serde_json::json!({
+                "uuid": stable_uuid(&format!("finding:{id}")),
+                "title": format!("{id}"),
+                "description": format!(
+                    "HushSpec rule paths {} were exercised {} time(s) in this window.",
+                    row.rule_paths.join(", "),
+                    row.evaluated
+                ),
+                "target": {
+                    "type": "objective-id",
+                    "target-id": row.control_id,
+                    "status": {
+                        "state": if row.evaluated > 0 { "satisfied" } else { "not-satisfied" },
+                    },
+                },
+                "related-observations": [
+                    { "observation-uuid": stable_uuid(&format!("observation:{id}")) },
+                ],
+            }));
+        }
+    }
+
+    serde_json::json!({
+        "assessment-results": {
+            "uuid": stable_uuid(&format!("assessment:{}:{start}:{end}", report.sources.join(","))),
+            "metadata": {
+                "title": "HushSpec control evidence",
+                "last-modified": report.generated_at.clone().unwrap_or_else(|| end.clone()),
+                "version": report.report_version,
+                "oscal-version": "1.1.2",
+            },
+            "import-ap": { "href": "#" },
+            "results": [{
+                "uuid": stable_uuid(&format!("result:{start}:{end}")),
+                "title": "HushSpec receipt window",
+                "description": format!(
+                    "{} receipt(s) from {}; {} allow, {} warn, {} deny.",
+                    report.totals.receipts,
+                    report.sources.join(", "),
+                    report.totals.by_decision.allow,
+                    report.totals.by_decision.warn,
+                    report.totals.by_decision.deny
+                ),
+                "start": start,
+                "end": end,
+                "reviewed-controls": {
+                    "control-selections": [{ "include-controls": selected }],
+                },
+                "observations": observations,
+                "findings": findings,
+            }],
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hushspec::receipt::RuleOutcome;
+
+    fn entry(block: &str, rule_path: Option<&str>) -> RuleTraceEntry {
+        RuleTraceEntry {
+            rule_block: block.to_string(),
+            rule_path: rule_path.map(str::to_string),
+            outcome: RuleOutcome::Deny,
+            evaluated: true,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn a_block_mapping_covers_every_entry_of_that_block() {
+        let egress = entry("egress", Some("rules.egress.allow"));
+        assert!(mapping_covers("rules", &egress));
+        assert!(mapping_covers("rules.egress", &egress));
+        assert!(!mapping_covers("rules.tool_access", &egress));
+    }
+
+    #[test]
+    fn a_deep_mapping_needs_the_recorded_path_under_it() {
+        let blocked = entry("egress", Some("rules.egress.block"));
+        let allowed = entry("egress", Some("rules.egress.allow"));
+        assert!(mapping_covers("rules.egress.block", &blocked));
+        assert!(!mapping_covers("rules.egress.block", &allowed));
+        // A block that recorded no path evidences nothing deeper than itself.
+        assert!(!mapping_covers(
+            "rules.egress.block",
+            &entry("egress", None)
+        ));
+        // Segment boundaries: `rules.egress.blocklist` is not under `.block`.
+        assert!(!mapping_covers(
+            "rules.egress.block",
+            &entry("egress", Some("rules.egress.blocklist"))
+        ));
+        assert!(mapping_covers(
+            "rules.forbidden_paths.patterns",
+            &entry("forbidden_paths", Some("rules.forbidden_paths.patterns"))
+        ));
+    }
+
+    #[test]
+    fn stable_uuids_are_stable_and_well_formed() {
+        let id = stable_uuid("finding:hipaa-2013/164.312(e)(1)");
+        assert_eq!(id, stable_uuid("finding:hipaa-2013/164.312(e)(1)"));
+        assert_ne!(id, stable_uuid("finding:other"));
+        let parts: Vec<&str> = id.split('-').collect();
+        assert_eq!(
+            parts.iter().map(|part| part.len()).collect::<Vec<_>>(),
+            vec![8, 4, 4, 4, 12]
+        );
+        assert!(parts[2].starts_with('4'));
+        assert!(["8", "9", "a", "b"].contains(&&parts[3][0..1]));
+    }
+
+    #[test]
+    fn csv_fields_are_quoted_when_they_must_be() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+    }
+}

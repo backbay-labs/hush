@@ -676,7 +676,7 @@ rules:
 "#,
         );
         // A scoped latch: the panic tests arm the process-wide one, and the
-        // lib test binary runs them concurrently with this.
+        // lib test binary runs them in parallel with this.
         let policy = CompiledPolicy::compile(&doc)
             .expect("compiles")
             .with_panic_state(PanicState::new());

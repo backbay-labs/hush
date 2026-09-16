@@ -4,7 +4,7 @@
 **Status:** Draft
 **Date:** 2026-09-14
 **Companion to:** HushSpec Core v0.2.0
-**Supersedes:** 0.1.0 (2026-03-15). See Appendix C for the list of ratified changes.
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix C for the list of changes.
 
 ---
 
@@ -72,7 +72,7 @@ The `transitions` field is REQUIRED and MUST be an array of transition objects. 
 
 ## 3. Capabilities
 
-Capabilities declare what categories of action an agent may perform in a given state. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
+Capabilities declare what categories of action an agent may perform in a given state. A rule block's `when.capability` condition (core Section 3.13) tests whether the effective state grants a capability, so a block can be gated on posture without being a capability guard itself. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
 
 An action whose `posture.current` names a state absent from `states` MUST be denied with `matched_rule` `extensions.posture.states.<state>` (fail-closed).
 
@@ -171,6 +171,8 @@ Transitions define how the state machine moves between states. Each transition f
 ### 5.3 Transition Priority
 
 When multiple transitions match the same trigger from the same source state, the engine MUST select the most specific `from` match. A named state takes priority over `"*"`. If two transitions have equal specificity, the first transition in document order wins.
+
+Test vector: `fixtures/posture/evaluation/transition-priority.test.yaml`.
 
 ---
 
@@ -277,10 +279,9 @@ extensions:
 
 ## Appendix C. Changes from 0.1.0
 
-| ID  | Section | Change                                                                                                     |
-|-----|---------|------------------------------------------------------------------------------------------------------------|
-| D11 | 3       | An absent or empty `capabilities` list denies every capability-requiring action. Version 0.1.0 said "no capability restriction is applied", which contradicted Appendix B's `locked` state and the reference implementation; the fail-closed reading is ratified. |
-| D1  | 3.3     | Required-capability table added; `custom` actions require the `custom` capability.                         |
-| --  | 3       | Unknown posture state and guard ordering made explicit.                                                    |
-
-Open item: Section 5.3 says a named `from` takes priority over `"*"`; the reference implementation selects the first matching transition in document order. This is tracked as a pending decision (see `fixtures/staged/README.md`, D18) and Section 5.3 is unchanged in this version.
+| Section | Change                                                                                                     |
+|---------|------------------------------------------------------------------------------------------------------------|
+| 3       | An absent or empty `capabilities` list denies every capability-requiring action. Version 0.1.0 said "no capability restriction is applied", which contradicted Appendix B's `locked` state and the implementations; the fail-closed reading is now normative. |
+| 3       | Unknown posture state and guard ordering made explicit.                                                     |
+| 3.3     | Required-capability table added; `custom` actions require the `custom` capability.                           |
+| 5.3     | For the same trigger, a transition whose `from` names the current state outranks one whose `from` is `"*"`; among equals, document order wins. Implementations previously took the first match in document order. Test vector: `fixtures/posture/evaluation/transition-priority.test.yaml`. |

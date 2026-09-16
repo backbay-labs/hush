@@ -219,7 +219,7 @@ fn generate() -> Vec<(String, Vector)> {
 
 #[test]
 fn resolve_vectors_are_current_and_pass() {
-    let update = std::env::var("HUSHSPEC_UPDATE_RESOLVE_VECTORS").is_ok();
+    let update = update_requested("HUSHSPEC_UPDATE_RESOLVE_VECTORS");
     let generated = generate();
     if update {
         fs::create_dir_all(vectors_dir()).unwrap();
@@ -287,4 +287,12 @@ fn pins_satisfy_a_signature_requirement_for_that_hop() {
         matches!(&error, ResolveError::SignatureRequired { document, .. } if document == "memory"),
         "{error}"
     );
+}
+
+/// Whether the caller asked for the committed vectors to be regenerated.
+///
+/// Only `1` and `true` count: `is_ok()` would make `VAR=0` regenerate, which
+/// silently turns a verifying run into a rubber stamp.
+fn update_requested(var: &str) -> bool {
+    matches!(std::env::var(var).as_deref(), Ok("1") | Ok("true"))
 }

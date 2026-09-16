@@ -1,11 +1,22 @@
 use crate::fixture::{FixtureCategory, TestFixture};
+use hushspec::receipt::{RuleOutcome, RuleTraceEntry};
 use hushspec::{
-    Decision, EvaluationAction, HushSpec, PostureResult, evaluate_with_detection, merge,
+    Decision, EvaluationAction, HushSpec, PostureResult, Resolution, evaluate_with_detection_traced,
 };
 use jsonschema::JSONSchema;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
+
+/// Fixture format versions this runner accepts (evaluator-test schema).
+const SUPPORTED_TEST_VERSIONS: &[&str] = &["0.1.0", "0.2.0"];
+
+/// Fixed evaluation time for `expect.receipt`: 2026-09-15T12:00:00.000Z, the
+/// clock `fixtures/receipts/expected/README.md` pins.
+use crate::bundle::AUDIT_CLOCK_MILLIS as RECEIPT_CLOCK_MILLIS;
+
+/// Receipt members that are inputs rather than outcomes, never compared.
+const RECEIPT_IGNORED_MEMBERS: [&str; 3] = ["actor", "timestamp", "receipt_id"];
 
 #[derive(Debug, Clone)]
 pub struct TestResult {
@@ -78,37 +89,64 @@ fn test_valid_fixture(fixture: &TestFixture) -> TestResult {
             fixture_path: path,
             category: fixture.category,
             passed: false,
-            message: format!("Parse failed: {e}"),
+            message: format!("{PARSE_FAILURE_PREFIX}{e}"),
         },
     }
 }
 
+/// Prefix of the message a Level 1 result carries when the document did not
+/// parse at all.
+///
+/// `report::build` scores Level 0 (parsing) off this prefix, so the two must
+/// agree; it lives here, next to the only `format!` that writes it.
+pub const PARSE_FAILURE_PREFIX: &str = "Parse failed: ";
+
 fn test_invalid_fixture(fixture: &TestFixture) -> TestResult {
     let path = fixture.path.display().to_string();
-    match HushSpec::parse(&fixture.content) {
+    let result = |passed: bool, message: String| TestResult {
+        fixture_path: path.clone(),
+        category: fixture.category,
+        passed,
+        message,
+    };
+
+    // The refusal, as a registered error code plus its diagnostic
+    // (spec/registries/error-codes.yaml).
+    let refusal: Option<(&str, String)> = match HushSpec::parse(&fixture.content) {
+        Err(error) => Some((crate::expect::parse_error_code(), error.to_string())),
         Ok(spec) => {
             let validation = hushspec::validate(&spec);
-            if validation.is_valid() {
-                TestResult {
-                    fixture_path: path,
-                    category: fixture.category,
-                    passed: false,
-                    message: "Expected rejection but document was accepted".to_string(),
-                }
-            } else {
-                TestResult {
-                    fixture_path: path,
-                    category: fixture.category,
-                    passed: true,
-                    message: format!("Correctly rejected: {}", validation.errors[0]),
-                }
-            }
+            validation.errors.first().map(|error| {
+                (
+                    crate::expect::validation_error_code(error),
+                    error.to_string(),
+                )
+            })
         }
-        Err(_) => TestResult {
-            fixture_path: path,
-            category: fixture.category,
-            passed: true,
-            message: "Correctly rejected at parse time".to_string(),
+    };
+
+    let Some((code, message)) = refusal else {
+        return result(
+            false,
+            "Expected rejection but document was accepted".to_string(),
+        );
+    };
+
+    // Every invalid vector names the code its rejection must carry, so a
+    // vector cannot pass by being refused for an unrelated reason.
+    match crate::expect::load(&fixture.path) {
+        Err(error) => result(false, error),
+        Ok(None) => result(
+            false,
+            format!(
+                "no {} sidecar: every invalid vector must name the error code it is rejected \
+                 with (spec/registries/error-codes.yaml)",
+                crate::expect::SIDECAR_SUFFIX
+            ),
+        ),
+        Ok(Some(expected)) => match crate::expect::check(&expected, code, &message) {
+            Some(problem) => result(false, problem),
+            None => result(true, format!("Correctly rejected [{code}]: {message}")),
         },
     }
 }
@@ -148,14 +186,15 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
         }
     };
 
-    if doc.hushspec_test != "0.1.0" {
+    if !SUPPORTED_TEST_VERSIONS.contains(&doc.hushspec_test.as_str()) {
         return TestResult {
             fixture_path: path,
             category: fixture.category,
             passed: false,
             message: format!(
-                "Unsupported hushspec_test version in evaluator fixture: {}",
-                doc.hushspec_test
+                "Unsupported hushspec_test version in evaluator fixture: {} (supported: {})",
+                doc.hushspec_test,
+                SUPPORTED_TEST_VERSIONS.join(", ")
             ),
         };
     }
@@ -171,48 +210,224 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
             };
         }
     };
-    match HushSpec::parse(&policy_yaml) {
-        Ok(spec) => {
-            let validation = hushspec::validate(&spec);
-            if !validation.is_valid() {
-                let errors: Vec<String> = validation.errors.iter().map(|e| e.to_string()).collect();
+    let parsed = match HushSpec::parse(&policy_yaml) {
+        Ok(spec) => spec,
+        Err(error) => {
+            return TestResult {
+                fixture_path: path,
+                category: fixture.category,
+                passed: false,
+                message: format!("Embedded policy failed to parse: {error}"),
+            };
+        }
+    };
+
+    // An embedded policy that extends is resolved before it runs -- the
+    // library suites (`fixtures/library/`) are a leaf naming
+    // `builtin:library/<vertical>/<name>` -- because a bare leaf would drop
+    // every block its base declares and pass for the wrong reason.
+    let spec = if parsed.extends.is_none() {
+        parsed
+    } else {
+        let loader = hushspec::create_composite_loader();
+        match hushspec::resolve_with_loader(&parsed, Some(&path), &loader) {
+            Ok(resolved) => resolved,
+            Err(error) => {
                 return TestResult {
                     fixture_path: path,
                     category: fixture.category,
                     passed: false,
-                    message: format!("Embedded policy failed validation: {}", errors.join(", ")),
+                    message: format!("Embedded policy failed to resolve: {error}"),
                 };
             }
-
-            for (index, case) in doc.cases.iter().enumerate() {
-                let mut action = case.action.clone();
-                if action.context.is_none() {
-                    action.context = case.context.clone();
-                }
-                let actual = evaluate_with_detection(&spec, &action).evaluation;
-                if let Some(message) = compare_expected(&case.expect, &actual) {
-                    return TestResult {
-                        fixture_path: path,
-                        category: fixture.category,
-                        passed: false,
-                        message: format!("cases[{index}] {}: {message}", case.description),
-                    };
-                }
-            }
-
-            TestResult {
-                fixture_path: path,
-                category: fixture.category,
-                passed: true,
-                message: format!("OK ({} evaluated cases)", doc.cases.len()),
-            }
         }
-        Err(error) => TestResult {
+    };
+
+    let validation = hushspec::validate(&spec);
+    if !validation.is_valid() {
+        let errors: Vec<String> = validation.errors.iter().map(|e| e.to_string()).collect();
+        return TestResult {
             fixture_path: path,
             category: fixture.category,
             passed: false,
-            message: format!("Embedded policy failed to parse: {error}"),
-        },
+            message: format!("Embedded policy failed validation: {}", errors.join(", ")),
+        };
+    }
+
+    let resolution = Resolution::from_resolved(&spec, None);
+
+    for (index, case) in doc.cases.iter().enumerate() {
+        let mut action = case.action.clone();
+        if action.context.is_none() {
+            action.context = case.context.clone();
+        }
+        let traced = evaluate_with_detection_traced(&spec, &action, None, &HashMap::new());
+        let trace: Vec<RuleTraceEntry> = traced
+            .traced
+            .trace
+            .iter()
+            .map(RuleTraceEntry::from)
+            .collect();
+
+        let mut message = compare_expected(&case.expect, &traced.evaluation);
+        if message.is_none()
+            && let Some(expected_trace) = &case.expect.rule_trace
+        {
+            message = compare_rule_trace(expected_trace, &trace);
+        }
+        if message.is_none()
+            && let Some(expected_receipt) = &case.expect.receipt
+        {
+            message = match &resolution {
+                Ok(resolution) => compare_receipt(
+                    expected_receipt,
+                    resolution,
+                    &action,
+                    case.context.as_ref(),
+                    index,
+                ),
+                Err(error) => Some(format!("expect.receipt needs a resolvable policy: {error}")),
+            };
+        }
+
+        if let Some(message) = message {
+            return TestResult {
+                fixture_path: path,
+                category: fixture.category,
+                passed: false,
+                message: format!("cases[{index}] {}: {message}", case.description),
+            };
+        }
+    }
+
+    TestResult {
+        fixture_path: path,
+        category: fixture.category,
+        passed: true,
+        message: format!("OK ({} evaluated cases)", doc.cases.len()),
+    }
+}
+
+/// Render one recorded trace entry the way a mismatch reports it.
+fn render_trace_entry(
+    rule_block: &str,
+    outcome: RuleOutcome,
+    rule_path: Option<&String>,
+) -> String {
+    match rule_path {
+        Some(rule_path) => format!("{rule_block}:{outcome:?}@{rule_path}"),
+        None => format!("{rule_block}:{outcome:?}"),
+    }
+}
+
+/// Compare a fixture's `expect.rule_trace` with the recorded trace (receipt
+/// spec 4.3): in order, in full, and member by member -- `rule_path` only
+/// where the fixture spells it.
+fn compare_rule_trace(
+    expected: &[RuleTraceExpectation],
+    actual: &[RuleTraceEntry],
+) -> Option<String> {
+    let rendered_actual: Vec<String> = actual
+        .iter()
+        .map(|entry| render_trace_entry(&entry.rule_block, entry.outcome, entry.rule_path.as_ref()))
+        .collect();
+
+    if expected.len() != actual.len() {
+        return Some(format!(
+            "expected {} rule_trace entries, got {} [{}]",
+            expected.len(),
+            actual.len(),
+            rendered_actual.join(", ")
+        ));
+    }
+
+    for (index, (want, got)) in expected.iter().zip(actual).enumerate() {
+        let matches = want.rule_block == got.rule_block
+            && want.outcome == got.outcome
+            && want
+                .rule_path
+                .as_ref()
+                .is_none_or(|rule_path| got.rule_path.as_ref() == Some(rule_path));
+        if !matches {
+            return Some(format!(
+                "rule_trace[{index}]: expected {}, got {}",
+                render_trace_entry(&want.rule_block, want.outcome, want.rule_path.as_ref()),
+                rendered_actual[index]
+            ));
+        }
+    }
+    None
+}
+
+/// Build the receipt for one case under the fixed inputs of
+/// `fixtures/receipts/expected/README.md` and compare the members the fixture
+/// spelled. Nested objects are compared member-wise; everything else exactly.
+fn compare_receipt(
+    expected: &serde_json::Value,
+    resolution: &Resolution,
+    action: &EvaluationAction,
+    context: Option<&hushspec::RuntimeContext>,
+    case_index: usize,
+) -> Option<String> {
+    let config = hushspec::AuditConfig {
+        enabled: true,
+        include_rule_trace: true,
+        record_duration: false,
+    };
+    let ctx = hushspec::AuditContext {
+        actor: Some(hushspec::Actor {
+            agent_id: Some("fixture-agent".to_string()),
+            session_id: Some("fixture-session".to_string()),
+            principal: Some("fixture@hushspec.dev".to_string()),
+            runtime: Some("hushspec-conformance/0.2".to_string()),
+        }),
+        enforcement: None,
+        enforcement_mode: hushspec::EnforcementMode::Enforce,
+        time_source: hushspec::TimeSource::Trusted,
+        clock: chrono::DateTime::from_timestamp_millis(RECEIPT_CLOCK_MILLIS as i64),
+        receipt_id: Some(hushspec::deterministic_uuid_v7(
+            RECEIPT_CLOCK_MILLIS,
+            case_index as u64,
+        )),
+        context: context.cloned(),
+        conditions: HashMap::new(),
+    };
+    let receipt = hushspec::evaluate_audited(resolution, action, &config, &ctx);
+    let actual = match serde_json::to_value(&receipt) {
+        Ok(actual) => actual,
+        Err(error) => return Some(format!("could not serialize the produced receipt: {error}")),
+    };
+
+    let Some(expected_members) = expected.as_object() else {
+        return Some("expect.receipt must be an object".to_string());
+    };
+    for (key, want) in expected_members {
+        if RECEIPT_IGNORED_MEMBERS.contains(&key.as_str()) {
+            continue;
+        }
+        if let Some(message) = receipt_member_mismatch(key, want, actual.get(key)) {
+            return Some(message);
+        }
+    }
+    None
+}
+
+fn receipt_member_mismatch(
+    path: &str,
+    expected: &serde_json::Value,
+    actual: Option<&serde_json::Value>,
+) -> Option<String> {
+    match (expected, actual) {
+        (serde_json::Value::Object(want), Some(serde_json::Value::Object(got))) => {
+            want.iter().find_map(|(key, value)| {
+                receipt_member_mismatch(&format!("{path}.{key}"), value, got.get(key))
+            })
+        }
+        (_, Some(got)) if got == expected => None,
+        (_, got) => Some(format!(
+            "receipt.{path}: expected {expected}, got {}",
+            got.map_or_else(|| "(absent)".to_string(), ToString::to_string)
+        )),
     }
 }
 
@@ -482,6 +697,30 @@ fn test_merge_case(
         .and_then(|stem| stem.to_str())
         .unwrap_or_default();
     let expected_name = child_name.replacen("child-", "expected-", 1);
+    let dir = child_fixture
+        .path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+
+    // A vector marked as a refusal (an `expect-reject` file, or `reject: true`
+    // in the directory's fixture.yaml) has no expected document: the failure
+    // is the assertion.
+    if crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+        return match crate::merge_vector::compose(base, &child_fixture.path) {
+            Ok(_) => TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: "Expected the vector to be refused, but it composed".to_string(),
+            },
+            Err(error) => TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: true,
+                message: format!("Correctly refused: {error}"),
+            },
+        };
+    }
 
     let Some(expected_fixture) = fixtures.iter().find(|fixture| {
         fixture.category == FixtureCategory::MergeExpected
@@ -500,17 +739,6 @@ fn test_merge_case(
         };
     };
 
-    let child_spec = match HushSpec::parse(&child_fixture.content) {
-        Ok(spec) => spec,
-        Err(error) => {
-            return TestResult {
-                fixture_path: path,
-                category: FixtureCategory::MergeChild,
-                passed: false,
-                message: format!("Failed to parse merge child: {error}"),
-            };
-        }
-    };
     let expected_spec = match HushSpec::parse(&expected_fixture.content) {
         Ok(spec) => spec,
         Err(error) => {
@@ -523,7 +751,20 @@ fn test_merge_case(
         }
     };
 
-    let merged = merge(base, &child_spec);
+    // A child that pins its base by digest is resolved rather than merged, so
+    // the pin is actually checked; every other child keeps the direct
+    // merge(base, child) the corpus has always been checked with.
+    let merged = match crate::merge_vector::compose(base, &child_fixture.path) {
+        Ok(merged) => merged,
+        Err(error) => {
+            return TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: format!("Failed to compose merge vector: {error}"),
+            };
+        }
+    };
     if merged == expected_spec {
         TestResult {
             fixture_path: path,
@@ -576,6 +817,15 @@ struct EvaluationCase {
     /// action before evaluation.
     #[serde(default)]
     context: Option<hushspec::RuntimeContext>,
+    /// The controls this case is evidence for (evaluator-test 0.2). Carried by
+    /// the fixture for reporting; a conformance verdict does not depend on it.
+    #[serde(default)]
+    #[allow(dead_code)]
+    controls: Vec<serde_json::Value>,
+    /// Free-form labels (evaluator-test 0.2).
+    #[serde(default)]
+    #[allow(dead_code)]
+    tags: Vec<String>,
     expect: ExpectedEvaluation,
 }
 
@@ -590,6 +840,22 @@ struct ExpectedEvaluation {
     origin_profile: Option<String>,
     #[serde(default)]
     posture: Option<PostureResult>,
+    /// The recorded rule trace, asserted in order and in full when present
+    /// (evaluator-test 0.2).
+    #[serde(default)]
+    rule_trace: Option<Vec<RuleTraceExpectation>>,
+    /// A partial format 0.2 receipt, asserted member-wise when present
+    /// (evaluator-test 0.2).
+    #[serde(default)]
+    receipt: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuleTraceExpectation {
+    rule_block: String,
+    outcome: RuleOutcome,
+    #[serde(default)]
+    rule_path: Option<String>,
 }
 
 /// Validate a value against the evaluator-test fixture schema.
@@ -614,9 +880,13 @@ pub(crate) fn validate_evaluator_schema(value: &serde_json::Value) -> Result<(),
 fn evaluator_schema() -> &'static JSONSchema {
     static SCHEMA: OnceLock<JSONSchema> = OnceLock::new();
     SCHEMA.get_or_init(|| {
-        let schema_json: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../schemas/hushspec-evaluator-test.v0.schema.json"
-        ))
+        // Embedded via the generated module rather than `include_str!`: the
+        // schemas live outside the crate directory and would not survive
+        // `cargo package` (see scripts/generate_testkit_schemas.py).
+        let schema_json: serde_json::Value = serde_json::from_str(
+            crate::generated_schemas::schema_body("evaluator-test")
+                .expect("the evaluator-test schema is embedded"),
+        )
         .expect("evaluator schema should be valid JSON");
         // The evaluator fixture schema has no `format` keyword today, but formats
         // are asserted deliberately (rather than left at the draft's default) so

@@ -195,6 +195,15 @@ impl Policy {
         self
     }
 
+    /// The kill switch this policy will compile with: the process-wide latch
+    /// unless [`Policy::with_panic_state`] replaced it. A
+    /// [`HushGuard`](crate::HushGuard) adopts it so arming the guard and
+    /// arming the policy are the same act.
+    #[must_use]
+    pub fn panic_state(&self) -> &PanicState {
+        &self.panic
+    }
+
     /// Resolve with `options`. Without this call, resolution runs with
     /// [`ResolveOptions::default`]: builtins and files, no verification.
     #[must_use]
@@ -298,7 +307,7 @@ rules:
         )
         .expect("parses")
         // A scoped latch: the panic tests arm the process-wide one, and the
-        // lib test binary runs them concurrently with this.
+        // lib test binary runs them in parallel with this.
         .with_panic_state(PanicState::new())
         .compile()
         .expect("compiles");

@@ -12,14 +12,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Expected receipts (RFC 09 P2-04).
+// Expected receipts.
 //
 // For every case of every shared evaluation fixture, fixtures/receipts/expected
 // holds the format 0.2 receipt a conformant SDK MUST produce under the fixed
-// inputs its README describes. Rust generates them; this runner rebuilds each
-// one with the Go SDK and compares byte for byte after RFC 8785
-// canonicalization, so pretty-printing and key order in the files do not
-// matter and every field value does.
+// inputs its README describes. This runner rebuilds each one and compares it
+// byte for byte after RFC 8785 canonicalization, so pretty-printing and key
+// order in the files do not matter and every field value does.
 
 // expectedReceiptClockMillis is the fixed evaluation time of every expected
 // receipt: 2026-09-15T12:00:00.000Z.

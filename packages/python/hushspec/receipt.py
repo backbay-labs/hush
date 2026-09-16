@@ -14,7 +14,6 @@ reconstructed from the decision afterwards.
 
 from __future__ import annotations
 
-import hashlib
 import time
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -22,7 +21,12 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, Union
 
-from hushspec.canonical import canonical_json_value, content_hash
+from hushspec.canonical import canonical_json_value, content_hash, digest
+
+# Re-exported: a receipt timestamp and an envelope timestamp are the same
+# format (receipt spec section 4.1, signing spec section 4), so there is one
+# renderer for both.
+from hushspec.signing import format_timestamp
 from hushspec.conditions import Condition, RuntimeContext
 from hushspec.detection import DetectorEvaluation, DetectorLevel
 from hushspec.evaluate import (
@@ -32,8 +36,8 @@ from hushspec.evaluate import (
     PostureResult,
 )
 
-# Re-exported: the rule trace is produced by the evaluator itself, so its types
-# live there (mirroring the Rust crate's `pub use crate::evaluate::{...}`).
+# Re-exported: the rule trace is produced by the evaluator itself, so its
+# types live there.
 from hushspec.evaluate import RuleEvaluation, RuleOutcome  # noqa: F401
 from hushspec.resolve import ChainLink, Resolution, SignatureStatus
 from hushspec.schema import HushSpec
@@ -85,9 +89,6 @@ ORIGIN_PROFILE_BLOCK = "origin_profile"
 #: ``matched_rule`` of a receipt for an action refused because the policy did
 #: not verify (receipt spec 4.5).
 POLICY_UNVERIFIED_RULE = "__hushspec_policy_unverified__"
-
-_HASH_PREFIX = "sha256:"
-
 
 # --------------------------------------------------------------------------- #
 # Wire types
@@ -224,9 +225,9 @@ class EnforcementSummary:
     ) -> "EnforcementSummary":
         """The disposition implied by a decision with no enforcement point.
 
-        An allow proceeds; a warn with no confirmation channel is a deny (core
-        spec D16); under monitor mode a warn or deny proceeds and is recorded
-        as ``would_block``.
+        An allow proceeds; a warn with no confirmation channel is a deny
+        (core spec 6); under monitor mode a warn or deny proceeds and is
+        recorded as ``would_block``.
         """
         mode_value = mode.value if isinstance(mode, Enum) else str(mode)
         if decision == Decision.ALLOW:
@@ -242,9 +243,8 @@ class EnforcementSummary:
 class DecisionReceipt:
     """A decision receipt, format 0.2.
 
-    Field order mirrors the Rust reference's struct so the JSON Lines a sink
-    writes reads the same in every SDK; the *hash* is order-independent
-    (RFC 8785 sorts keys).
+    Field order is fixed across the SDKs so the JSON Lines a sink writes read
+    the same everywhere; the *hash* is order-independent (RFC 8785 sorts keys).
     """
 
     receipt_id: str
@@ -416,11 +416,6 @@ def receipt_hash(receipt: Union[DecisionReceipt, dict[str, Any]]) -> str:
     return digest(canonical_json(receipt))
 
 
-def digest(canonical: str) -> str:
-    """SHA-256 of already-canonical text, in the ``sha256:`` wire form."""
-    return _HASH_PREFIX + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
 def parse_receipt(data: Union[str, bytes, dict[str, Any]]) -> DecisionReceipt:
     """Parse a receipt object, rejecting a version this module does not implement.
 
@@ -496,7 +491,10 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
         for entry in data.get("rule_trace", [])
     ]
     for entry in trace:
-        entry.outcome = RuleOutcome(entry.outcome)
+        try:
+            entry.outcome = RuleOutcome(entry.outcome)
+        except ValueError as exc:
+            raise ReceiptError(f"rule_trace.outcome: {exc}") from exc
     detection = data.get("detection_trace")
     if detection is not None:
         detection = [
@@ -504,6 +502,13 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
             for entry in detection
         ]
     posture = _typed(data.get("posture"), PostureResult, label="posture")
+    for required in ("receipt_id", "timestamp", "time_source", "decision"):
+        if required not in data:
+            raise ReceiptError(f"receipt is missing {required!r}")
+    try:
+        decision = Decision(data["decision"])
+    except ValueError as exc:
+        raise ReceiptError(f"receipt.decision: {exc}") from exc
     return DecisionReceipt(
         receipt_version=data["receipt_version"],
         receipt_id=data["receipt_id"],
@@ -512,7 +517,7 @@ def _receipt_from_dict(data: dict[str, Any]) -> DecisionReceipt:
         actor=_typed(data.get("actor"), Actor, label="actor"),
         policy=policy,
         action=action,
-        decision=Decision(data["decision"]),
+        decision=decision,
         matched_rule=data.get("matched_rule"),
         reason=data.get("reason"),
         rule_trace=trace,
@@ -591,19 +596,6 @@ class AuditContext:
     context: Optional[RuntimeContext] = None
     #: Out-of-band conditions keyed by rule-block name.
     conditions: dict[str, Condition] = field(default_factory=dict)
-
-
-def format_timestamp(instant: datetime) -> str:
-    """Format an instant the way receipts and envelopes spell it.
-
-    RFC 3339 UTC, exactly three fractional digits, ``Z`` suffix. Truncating
-    (never rounding) keeps the stamp from naming an instant later than the one
-    it describes.
-    """
-    if instant.tzinfo is None:
-        instant = instant.replace(tzinfo=timezone.utc)
-    moment = instant.astimezone(timezone.utc)
-    return f"{moment.strftime('%Y-%m-%dT%H:%M:%S')}.{moment.microsecond // 1000:03d}Z"
 
 
 def deterministic_uuid_v7(unix_millis: int, seed: int) -> str:
@@ -843,7 +835,7 @@ def _value(value: Any) -> Any:
 
 
 def _uuid7_now() -> str:
-    """A fresh UUID v7 (RFC 9562) with 74 random bits."""
+    """A fresh UUIDv7 with 74 random bits of entropy."""
     import secrets
 
     millis = int(time.time() * 1000)

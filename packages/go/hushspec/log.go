@@ -337,13 +337,20 @@ func (s *ChainedFileSink) now() time.Time {
 
 // Append writes one entry, linked to the previous one, and returns it.
 func (s *ChainedFileSink) Append(payload LogPayload) (*LogEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendLocked(payload)
+}
+
+// appendLocked is [ChainedFileSink.Append] with mu already held, so a caller
+// that has more to do under the same lock -- [ChainedFileSink.Rotate], which
+// must make its `log_started` record the first entry of the new file -- can
+// append without releasing it.
+func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 	entryType, err := payload.entryType()
 	if err != nil {
 		return nil, fmt.Errorf("log: %w", err)
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	entry := &LogEntry{
 		LogVersion:  LogVersion,
@@ -405,7 +412,12 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 		return nil, fmt.Errorf("log: cannot rotate into %s: %w", newPath, err)
 	}
 
+	// The switch and the `log_started` entry happen under one lock: a
+	// concurrent Send must not slip a receipt into the new file ahead of the
+	// record that links it to the old one (log spec 5).
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// Only the file name: logs are moved between hosts, and a path would leak
 	// the writer's layout for no verification benefit.
 	previousFile := filepath.Base(s.path)
@@ -418,9 +430,8 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	if previousHash != GenesisHash {
 		started.PreviousEntryHash = previousHash
 	}
-	s.mu.Unlock()
 
-	return s.Append(LogPayload{LogStarted: started})
+	return s.appendLocked(LogPayload{LogStarted: started})
 }
 
 // lastLogEntry reads the last non-empty line of path as an entry, or nil for a

@@ -310,8 +310,8 @@ def _default_rule_path(
 
 
 def _scan_prefix(content: str, max_scan_bytes: Optional[int]) -> str:
-    """The leading ``max_scan_bytes`` UTF-8 bytes of *content*, truncated to a
-    character boundary (mirrors Rust's byte slice with boundary back-off)."""
+    """The leading ``max_scan_bytes`` UTF-8 bytes of *content*, backed off to
+    the nearest character boundary so the prefix stays valid UTF-8."""
     if max_scan_bytes is None:
         return content
     encoded = content.encode("utf-8")
@@ -512,8 +512,8 @@ def _path_glob_regex(pattern: str) -> Optional[re.Pattern[str]]:
     regex = "".join(parts)
     # \Z (not $): Python's `$` also matches just before a trailing "\n", so a
     # glob like "internal.corp" would wrongly match "internal.corp\n". \Z is a
-    # true end-of-string anchor with no newline exception, matching Rust
-    # `regex`/Go RE2/JS non-multiline `$` end-of-text semantics.
+    # true end-of-text anchor with no newline exception, which is the
+    # end-of-text semantic the glob grammar calls for.
     regex += r"\Z"
     try:
         return re.compile(regex)
@@ -781,12 +781,10 @@ def punycode_encode(text: str) -> Optional[str]:
 def patch_stats(content: str) -> _PatchStats:
     additions = 0
     deletions = 0
-    # `str.splitlines()` also splits on \r, \v, \f, and the Unicode NEL/LS/PS
-    # line separators, but Rust's `.lines()` and the TS/Go SDKs only split on
-    # \n. A bare \r (no \n) inside patch content would otherwise be treated
-    # as a line break here but not in the other three SDKs, double-counting
-    # additions/deletions. Splitting on "\n" alone keeps the count identical
-    # across all four SDKs.
+    # A patch line boundary is "\n" and nothing else. `str.splitlines()`
+    # also splits on \r, \v, \f and the Unicode NEL/LS/PS separators, so a
+    # bare \r inside patch content would start a line here and double-count
+    # additions and deletions.
     for line in content.split("\n"):
         if line.startswith("+++") or line.startswith("---"):
             continue
@@ -844,9 +842,9 @@ def check_panic_sentinel(path: str) -> bool:
     cannot be determined (a permission or other I/O error from ``os.stat``),
     the sentinel is treated as present and panic mode is activated. Only a
     definitive "not found" (``FileNotFoundError`` / ``NotADirectoryError``)
-    counts as absent. This mirrors Rust's ``try_exists().unwrap_or(true)`` --
-    ``os.path.isfile`` was wrong here because it silently returns ``False`` on
-    any stat error, letting the kill switch fail OPEN.
+    counts as absent. (``os.path.isfile`` is unusable here: it silently
+    returns ``False`` on any stat error, which would let the kill switch fail
+    open.)
     """
     import os
 

@@ -54,7 +54,7 @@ export interface OriginProfile {
 }
 
 /**
- * Tri-state tool-access overlay for an origin profile (origins spec 4, D12).
+ * Tri-state tool-access overlay for an origin profile (origins spec 4).
  *
  * An overlay is not a rule block: it has no `enabled` and no `when`, and
  * `default` / `max_args_size` are genuinely absent when omitted rather than
@@ -68,7 +68,7 @@ export interface OriginToolAccessOverlay {
   max_args_size?: number;
 }
 
-/** Tri-state egress overlay for an origin profile (origins spec 4, D12). */
+/** Tri-state egress overlay for an origin profile (origins spec 4). */
 export interface OriginEgressOverlay {
   allow?: string[];
   block?: string[];
@@ -123,6 +123,19 @@ export interface PromptInjectionDetection {
   warn_at_or_above?: DetectionLevel;
   block_at_or_above?: DetectionLevel;
   max_scan_bytes?: number;
+  /** The normative heuristic detector's configuration (detection spec 3.5.1). */
+  heuristics?: PromptInjectionHeuristics;
+}
+
+/**
+ * Configuration of `heuristic_injection@1` (detection spec 3.5.1).
+ *
+ * `enabled` defaults to `true`; `min_score` (default `0`) is a floor below
+ * which an integer score is reported as `0` with no contributing families.
+ */
+export interface PromptInjectionHeuristics {
+  enabled?: boolean;
+  min_score?: number;
 }
 
 export type DetectionLevel = DetectionLevelValue;

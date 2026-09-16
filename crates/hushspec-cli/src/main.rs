@@ -11,6 +11,7 @@ mod cmd_lint;
 mod cmd_log;
 mod cmd_panic;
 mod cmd_receipts;
+mod cmd_report;
 mod cmd_resolve;
 mod cmd_schema;
 mod cmd_sign;
@@ -83,6 +84,8 @@ enum Commands {
     Log(cmd_log::LogArgs),
     /// Verify decision receipts against a policy and a keyring
     Receipts(cmd_receipts::ReceiptsArgs),
+    /// Aggregate receipts into a compliance evidence report
+    Report(cmd_report::ReportArgs),
 }
 
 fn main() {
@@ -110,6 +113,7 @@ fn main() {
         Commands::Version(args) => cmd_version::run(args),
         Commands::Log(args) => cmd_log::run(args),
         Commands::Receipts(args) => cmd_receipts::run(args),
+        Commands::Report(args) => cmd_report::run(args),
     };
 
     std::process::exit(exit_code);

@@ -1,0 +1,331 @@
+# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json
+#
+# Control-tagged suite for library/general/recommended.yaml.
+# Every case names the control it is evidence for, and between them the
+# cases hit every rule block and every named secret pattern of the
+# resolved policy -- `h2h test --fail-on-uncovered` is the gate.
+#
+# The suite extends the embedded copy of the policy, so it runs against
+# exactly the bytes the SDKs ship; `scripts/generate_*_builtins.py
+# --check` is what keeps that copy equal to the file.
+hushspec_test: "0.2.0"
+description: "recommended: control-tagged evaluation suite for the vertical library policy"
+policy:
+  hushspec: "0.1.0"
+  name: recommended-suite
+  extends: "builtin:library/general/recommended"
+cases:
+  - description: "an approved destination is allowed (api.github.com)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM03"
+    tags: ["allow", "egress"]
+    action:
+      type: "egress"
+      target: "api.github.com"
+    expect:
+      decision: allow
+      matched_rule: "rules.egress.allow"
+  - description: "an unlisted destination is denied by default"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM03"
+    tags: ["deny", "egress", "fail-closed"]
+    action:
+      type: "egress"
+      target: "paste.example.com"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.default"
+  - description: "credential stores are unreachable"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "paths"]
+    action:
+      type: "file_read"
+      target: "/home/agent/.aws/credentials"
+    expect:
+      decision: deny
+      matched_rule: "rules.forbidden_paths.patterns"
+  - description: "a forbidden shell command is denied (dd if=/dev/zero of=/dev/sda)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "shell"]
+    action:
+      type: "shell_command"
+      target: "dd if=/dev/zero of=/dev/sda"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[4]"
+  - description: "an ordinary build command is allowed (npm run build)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["allow", "shell"]
+    action:
+      type: "shell_command"
+      target: "npm run build"
+    expect:
+      decision: allow
+  - description: "a patch larger than max_additions (1000) is denied"
+    controls:
+      - framework: nist-ai-rmf-1.0
+        control_id: "MANAGE 2.2"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+line 0\n+line 1\n+line 2\n+line 3\n+line 4\n+line 5\n+line 6\n+line 7\n+line 8\n+line 9\n+line 10\n+line 11\n+line 12\n+line 13\n+line 14\n+line 15\n+line 16\n+line 17\n+line 18\n+line 19\n+line 20\n+line 21\n+line 22\n+line 23\n+line 24\n+line 25\n+line 26\n+line 27\n+line 28\n+line 29\n+line 30\n+line 31\n+line 32\n+line 33\n+line 34\n+line 35\n+line 36\n+line 37\n+line 38\n+line 39\n+line 40\n+line 41\n+line 42\n+line 43\n+line 44\n+line 45\n+line 46\n+line 47\n+line 48\n+line 49\n+line 50\n+line 51\n+line 52\n+line 53\n+line 54\n+line 55\n+line 56\n+line 57\n+line 58\n+line 59\n+line 60\n+line 61\n+line 62\n+line 63\n+line 64\n+line 65\n+line 66\n+line 67\n+line 68\n+line 69\n+line 70\n+line 71\n+line 72\n+line 73\n+line 74\n+line 75\n+line 76\n+line 77\n+line 78\n+line 79\n+line 80\n+line 81\n+line 82\n+line 83\n+line 84\n+line 85\n+line 86\n+line 87\n+line 88\n+line 89\n+line 90\n+line 91\n+line 92\n+line 93\n+line 94\n+line 95\n+line 96\n+line 97\n+line 98\n+line 99\n+line 100\n+line 101\n+line 102\n+line 103\n+line 104\n+line 105\n+line 106\n+line 107\n+line 108\n+line 109\n+line 110\n+line 111\n+line 112\n+line 113\n+line 114\n+line 115\n+line 116\n+line 117\n+line 118\n+line 119\n+line 120\n+line 121\n+line 122\n+line 123\n+line 124\n+line 125\n+line 126\n+line 127\n+line 128\n+line 129\n+line 130\n+line 131\n+line 132\n+line 133\n+line 134\n+line 135\n+line 136\n+line 137\n+line 138\n+line 139\n+line 140\n+line 141\n+line 142\n+line 143\n+line 144\n+line 145\n+line 146\n+line 147\n+line 148\n+line 149\n+line 150\n+line 151\n+line 152\n+line 153\n+line 154\n+line 155\n+line 156\n+line 157\n+line 158\n+line 159\n+line 160\n+line 161\n+line 162\n+line 163\n+line 164\n+line 165\n+line 166\n+line 167\n+line 168\n+line 169\n+line 170\n+line 171\n+line 172\n+line 173\n+line 174\n+line 175\n+line 176\n+line 177\n+line 178\n+line 179\n+line 180\n+line 181\n+line 182\n+line 183\n+line 184\n+line 185\n+line 186\n+line 187\n+line 188\n+line 189\n+line 190\n+line 191\n+line 192\n+line 193\n+line 194\n+line 195\n+line 196\n+line 197\n+line 198\n+line 199\n+line 200\n+line 201\n+line 202\n+line 203\n+line 204\n+line 205\n+line 206\n+line 207\n+line 208\n+line 209\n+line 210\n+line 211\n+line 212\n+line 213\n+line 214\n+line 215\n+line 216\n+line 217\n+line 218\n+line 219\n+line 220\n+line 221\n+line 222\n+line 223\n+line 224\n+line 225\n+line 226\n+line 227\n+line 228\n+line 229\n+line 230\n+line 231\n+line 232\n+line 233\n+line 234\n+line 235\n+line 236\n+line 237\n+line 238\n+line 239\n+line 240\n+line 241\n+line 242\n+line 243\n+line 244\n+line 245\n+line 246\n+line 247\n+line 248\n+line 249\n+line 250\n+line 251\n+line 252\n+line 253\n+line 254\n+line 255\n+line 256\n+line 257\n+line 258\n+line 259\n+line 260\n+line 261\n+line 262\n+line 263\n+line 264\n+line 265\n+line 266\n+line 267\n+line 268\n+line 269\n+line 270\n+line 271\n+line 272\n+line 273\n+line 274\n+line 275\n+line 276\n+line 277\n+line 278\n+line 279\n+line 280\n+line 281\n+line 282\n+line 283\n+line 284\n+line 285\n+line 286\n+line 287\n+line 288\n+line 289\n+line 290\n+line 291\n+line 292\n+line 293\n+line 294\n+line 295\n+line 296\n+line 297\n+line 298\n+line 299\n+line 300\n+line 301\n+line 302\n+line 303\n+line 304\n+line 305\n+line 306\n+line 307\n+line 308\n+line 309\n+line 310\n+line 311\n+line 312\n+line 313\n+line 314\n+line 315\n+line 316\n+line 317\n+line 318\n+line 319\n+line 320\n+line 321\n+line 322\n+line 323\n+line 324\n+line 325\n+line 326\n+line 327\n+line 328\n+line 329\n+line 330\n+line 331\n+line 332\n+line 333\n+line 334\n+line 335\n+line 336\n+line 337\n+line 338\n+line 339\n+line 340\n+line 341\n+line 342\n+line 343\n+line 344\n+line 345\n+line 346\n+line 347\n+line 348\n+line 349\n+line 350\n+line 351\n+line 352\n+line 353\n+line 354\n+line 355\n+line 356\n+line 357\n+line 358\n+line 359\n+line 360\n+line 361\n+line 362\n+line 363\n+line 364\n+line 365\n+line 366\n+line 367\n+line 368\n+line 369\n+line 370\n+line 371\n+line 372\n+line 373\n+line 374\n+line 375\n+line 376\n+line 377\n+line 378\n+line 379\n+line 380\n+line 381\n+line 382\n+line 383\n+line 384\n+line 385\n+line 386\n+line 387\n+line 388\n+line 389\n+line 390\n+line 391\n+line 392\n+line 393\n+line 394\n+line 395\n+line 396\n+line 397\n+line 398\n+line 399\n+line 400\n+line 401\n+line 402\n+line 403\n+line 404\n+line 405\n+line 406\n+line 407\n+line 408\n+line 409\n+line 410\n+line 411\n+line 412\n+line 413\n+line 414\n+line 415\n+line 416\n+line 417\n+line 418\n+line 419\n+line 420\n+line 421\n+line 422\n+line 423\n+line 424\n+line 425\n+line 426\n+line 427\n+line 428\n+line 429\n+line 430\n+line 431\n+line 432\n+line 433\n+line 434\n+line 435\n+line 436\n+line 437\n+line 438\n+line 439\n+line 440\n+line 441\n+line 442\n+line 443\n+line 444\n+line 445\n+line 446\n+line 447\n+line 448\n+line 449\n+line 450\n+line 451\n+line 452\n+line 453\n+line 454\n+line 455\n+line 456\n+line 457\n+line 458\n+line 459\n+line 460\n+line 461\n+line 462\n+line 463\n+line 464\n+line 465\n+line 466\n+line 467\n+line 468\n+line 469\n+line 470\n+line 471\n+line 472\n+line 473\n+line 474\n+line 475\n+line 476\n+line 477\n+line 478\n+line 479\n+line 480\n+line 481\n+line 482\n+line 483\n+line 484\n+line 485\n+line 486\n+line 487\n+line 488\n+line 489\n+line 490\n+line 491\n+line 492\n+line 493\n+line 494\n+line 495\n+line 496\n+line 497\n+line 498\n+line 499\n+line 500\n+line 501\n+line 502\n+line 503\n+line 504\n+line 505\n+line 506\n+line 507\n+line 508\n+line 509\n+line 510\n+line 511\n+line 512\n+line 513\n+line 514\n+line 515\n+line 516\n+line 517\n+line 518\n+line 519\n+line 520\n+line 521\n+line 522\n+line 523\n+line 524\n+line 525\n+line 526\n+line 527\n+line 528\n+line 529\n+line 530\n+line 531\n+line 532\n+line 533\n+line 534\n+line 535\n+line 536\n+line 537\n+line 538\n+line 539\n+line 540\n+line 541\n+line 542\n+line 543\n+line 544\n+line 545\n+line 546\n+line 547\n+line 548\n+line 549\n+line 550\n+line 551\n+line 552\n+line 553\n+line 554\n+line 555\n+line 556\n+line 557\n+line 558\n+line 559\n+line 560\n+line 561\n+line 562\n+line 563\n+line 564\n+line 565\n+line 566\n+line 567\n+line 568\n+line 569\n+line 570\n+line 571\n+line 572\n+line 573\n+line 574\n+line 575\n+line 576\n+line 577\n+line 578\n+line 579\n+line 580\n+line 581\n+line 582\n+line 583\n+line 584\n+line 585\n+line 586\n+line 587\n+line 588\n+line 589\n+line 590\n+line 591\n+line 592\n+line 593\n+line 594\n+line 595\n+line 596\n+line 597\n+line 598\n+line 599\n+line 600\n+line 601\n+line 602\n+line 603\n+line 604\n+line 605\n+line 606\n+line 607\n+line 608\n+line 609\n+line 610\n+line 611\n+line 612\n+line 613\n+line 614\n+line 615\n+line 616\n+line 617\n+line 618\n+line 619\n+line 620\n+line 621\n+line 622\n+line 623\n+line 624\n+line 625\n+line 626\n+line 627\n+line 628\n+line 629\n+line 630\n+line 631\n+line 632\n+line 633\n+line 634\n+line 635\n+line 636\n+line 637\n+line 638\n+line 639\n+line 640\n+line 641\n+line 642\n+line 643\n+line 644\n+line 645\n+line 646\n+line 647\n+line 648\n+line 649\n+line 650\n+line 651\n+line 652\n+line 653\n+line 654\n+line 655\n+line 656\n+line 657\n+line 658\n+line 659\n+line 660\n+line 661\n+line 662\n+line 663\n+line 664\n+line 665\n+line 666\n+line 667\n+line 668\n+line 669\n+line 670\n+line 671\n+line 672\n+line 673\n+line 674\n+line 675\n+line 676\n+line 677\n+line 678\n+line 679\n+line 680\n+line 681\n+line 682\n+line 683\n+line 684\n+line 685\n+line 686\n+line 687\n+line 688\n+line 689\n+line 690\n+line 691\n+line 692\n+line 693\n+line 694\n+line 695\n+line 696\n+line 697\n+line 698\n+line 699\n+line 700\n+line 701\n+line 702\n+line 703\n+line 704\n+line 705\n+line 706\n+line 707\n+line 708\n+line 709\n+line 710\n+line 711\n+line 712\n+line 713\n+line 714\n+line 715\n+line 716\n+line 717\n+line 718\n+line 719\n+line 720\n+line 721\n+line 722\n+line 723\n+line 724\n+line 725\n+line 726\n+line 727\n+line 728\n+line 729\n+line 730\n+line 731\n+line 732\n+line 733\n+line 734\n+line 735\n+line 736\n+line 737\n+line 738\n+line 739\n+line 740\n+line 741\n+line 742\n+line 743\n+line 744\n+line 745\n+line 746\n+line 747\n+line 748\n+line 749\n+line 750\n+line 751\n+line 752\n+line 753\n+line 754\n+line 755\n+line 756\n+line 757\n+line 758\n+line 759\n+line 760\n+line 761\n+line 762\n+line 763\n+line 764\n+line 765\n+line 766\n+line 767\n+line 768\n+line 769\n+line 770\n+line 771\n+line 772\n+line 773\n+line 774\n+line 775\n+line 776\n+line 777\n+line 778\n+line 779\n+line 780\n+line 781\n+line 782\n+line 783\n+line 784\n+line 785\n+line 786\n+line 787\n+line 788\n+line 789\n+line 790\n+line 791\n+line 792\n+line 793\n+line 794\n+line 795\n+line 796\n+line 797\n+line 798\n+line 799\n+line 800\n+line 801\n+line 802\n+line 803\n+line 804\n+line 805\n+line 806\n+line 807\n+line 808\n+line 809\n+line 810\n+line 811\n+line 812\n+line 813\n+line 814\n+line 815\n+line 816\n+line 817\n+line 818\n+line 819\n+line 820\n+line 821\n+line 822\n+line 823\n+line 824\n+line 825\n+line 826\n+line 827\n+line 828\n+line 829\n+line 830\n+line 831\n+line 832\n+line 833\n+line 834\n+line 835\n+line 836\n+line 837\n+line 838\n+line 839\n+line 840\n+line 841\n+line 842\n+line 843\n+line 844\n+line 845\n+line 846\n+line 847\n+line 848\n+line 849\n+line 850\n+line 851\n+line 852\n+line 853\n+line 854\n+line 855\n+line 856\n+line 857\n+line 858\n+line 859\n+line 860\n+line 861\n+line 862\n+line 863\n+line 864\n+line 865\n+line 866\n+line 867\n+line 868\n+line 869\n+line 870\n+line 871\n+line 872\n+line 873\n+line 874\n+line 875\n+line 876\n+line 877\n+line 878\n+line 879\n+line 880\n+line 881\n+line 882\n+line 883\n+line 884\n+line 885\n+line 886\n+line 887\n+line 888\n+line 889\n+line 890\n+line 891\n+line 892\n+line 893\n+line 894\n+line 895\n+line 896\n+line 897\n+line 898\n+line 899\n+line 900\n+line 901\n+line 902\n+line 903\n+line 904\n+line 905\n+line 906\n+line 907\n+line 908\n+line 909\n+line 910\n+line 911\n+line 912\n+line 913\n+line 914\n+line 915\n+line 916\n+line 917\n+line 918\n+line 919\n+line 920\n+line 921\n+line 922\n+line 923\n+line 924\n+line 925\n+line 926\n+line 927\n+line 928\n+line 929\n+line 930\n+line 931\n+line 932\n+line 933\n+line 934\n+line 935\n+line 936\n+line 937\n+line 938\n+line 939\n+line 940\n+line 941\n+line 942\n+line 943\n+line 944\n+line 945\n+line 946\n+line 947\n+line 948\n+line 949\n+line 950\n+line 951\n+line 952\n+line 953\n+line 954\n+line 955\n+line 956\n+line 957\n+line 958\n+line 959\n+line 960\n+line 961\n+line 962\n+line 963\n+line 964\n+line 965\n+line 966\n+line 967\n+line 968\n+line 969\n+line 970\n+line 971\n+line 972\n+line 973\n+line 974\n+line 975\n+line 976\n+line 977\n+line 978\n+line 979\n+line 980\n+line 981\n+line 982\n+line 983\n+line 984\n+line 985\n+line 986\n+line 987\n+line 988\n+line 989\n+line 990\n+line 991\n+line 992\n+line 993\n+line 994\n+line 995\n+line 996\n+line 997\n+line 998\n+line 999\n+line 1000\n+line 1001\n+line 1002\n+line 1003\n+line 1004\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.max_additions"
+  - description: "a patch that weakens a control is denied"
+    controls:
+      - framework: nist-ai-rmf-1.0
+        control_id: "MANAGE 2.2"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+eval(user_input)\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.forbidden_patterns[4]"
+  - description: "a small balanced patch is allowed"
+    controls:
+      - framework: nist-ai-rmf-1.0
+        control_id: "MANAGE 2.2"
+    tags: ["allow", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+added one\n+added two\n-removed one\n"
+    expect:
+      decision: allow
+  - description: "a blocked tool is denied (raw_file_delete)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "raw_file_delete"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.block"
+  - description: "a tool requiring confirmation warns (file_delete)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["warn", "tools"]
+    action:
+      type: "tool_call"
+      target: "file_delete"
+    expect:
+      decision: warn
+      matched_rule: "rules.tool_access.require_confirmation"
+  - description: "an unlisted tool matches the default (allow)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["allow", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+    expect:
+      decision: allow
+      matched_rule: "rules.tool_access.default"
+  - description: "tool arguments above max_args_size (1048576) are denied"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "read_file"
+      args_size: 1048577
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.max_args_size"
+  - description: "the scanner denies aws_access_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "aws_access_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_access_key"
+  - description: "the scanner denies aws_secret_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "aws_secret_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "aws_secret_access_key = wJalrXUtnFEMIbK7MDENGbbPxRfiCYEXAMPLEKEYA"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_secret_key"
+  - description: "the scanner denies github_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "github_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_token"
+  - description: "the scanner denies github_fine_grained_pat in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "github_fine_grained_pat"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "github_pat_11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789abcdefghij"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_fine_grained_pat"
+  - description: "the scanner denies openai_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "openai_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "sk-A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8U9v0W1x2Y3z4"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.openai_key"
+  - description: "the scanner denies openai_project_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "openai_project_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "sk-proj-A1b2C3d4E5f6G7h8J9k0L1m2"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.openai_project_key"
+  - description: "the scanner denies anthropic_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "anthropic_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "sk-ant-A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6S7t8U9v0W1x2Y3z4A5b6C7d8E9f0G1h2J3k4L5m6N7p8Q9r0S1t2U3v4W5x6Y7z8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.anthropic_key"
+  - description: "the scanner denies private_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "private_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "-----BEGIN RSA PRIVATE KEY-----"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.private_key"
+  - description: "the scanner denies npm_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "npm_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.npm_token"
+  - description: "the scanner denies slack_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "slack_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "xoxb-1234567890123-\
+        1234567890123-AbCdEfGhIjKlMnOpQrSt"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.slack_token"
+  - description: "the scanner denies generic_api_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "generic_api_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "api_key: A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.generic_api_key"
+  - description: "the scanner denies connection_string in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "connection_string"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "postgres://svc:pw@app.internal/app"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.connection_string"
+  - description: "the scanner denies jwt_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "jwt_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZ2VudCJ9.7Hs_signature"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.jwt_token"
+  - description: "the scanner denies ssn in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "ssn"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "customer ssn: 123-45-6789"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.ssn"
+  - description: "a secret under a skip path is not scanned"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["allow", "secrets"]
+    action:
+      type: "file_write"
+      target: "/srv/app/test/srv/app/fixture_keys.py"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: allow
