@@ -8,22 +8,27 @@
 //! parse time rather than leaving the refusal to canonicalization -- an engine
 //! that never hashes a policy must reject it too.
 //!
+//! The same rule holds wherever else the schema types a value. A null element
+//! of a string array decodes into `""` -- `allow: [null]` becomes an egress
+//! allowlist with one empty entry -- and a null value in a schema map decodes
+//! into that entry's zero value, neither of which the author wrote.
+//!
 //! The walk is driven by the same embedded schemas the canonical projection
-//! uses, so the two can never disagree about which properties a document
-//! declares. A value the schema does not describe -- a `when.context` entry --
-//! is a leaf: the null there is a value to compare against the runtime
-//! context, not a property of the document format.
+//! uses, so the two can never disagree about which values a document declares.
+//! A value the schema does not describe -- a `when.context` entry -- is a leaf:
+//! the null there is a value to compare against the runtime context, not a
+//! property of the document format.
 
 use crate::canonical::{SchemaSet, resolve_ref, schemas};
 use serde_json::Value as Schema;
 use serde_yaml::Value as Yaml;
 
-/// Refuse a `null` written for any property the schemas declare, naming the
-/// first one found in document order.
+/// Refuse a `null` written for any value the schemas type, naming the first
+/// one found in document order.
 ///
 /// # Errors
 ///
-/// The diagnostic for the offending property, or for an embedded schema that
+/// The diagnostic for the offending value, or for an embedded schema that
 /// cannot be read.
 pub(crate) fn reject_null_properties(document: &Yaml) -> Result<(), String> {
     let Some(document) = document.as_mapping() else {
@@ -50,7 +55,8 @@ pub(crate) fn reject_null_properties(document: &Yaml) -> Result<(), String> {
     Ok(())
 }
 
-/// Check one declared property, then descend into it.
+/// Check one value the schema types -- a declared property, an array element,
+/// a schema-map entry -- then descend into it.
 fn check_property(value: &Yaml, schema: &Schema, root: &Schema, path: &str) -> Result<(), String> {
     if value.is_null() {
         let (resolved, _) = resolve_ref(root, schema, 0).map_err(|error| error.to_string())?;
@@ -86,9 +92,10 @@ fn check_extensions(value: &Yaml, schemas: &SchemaSet) -> Result<(), String> {
     Ok(())
 }
 
-/// Descend a value that the schema describes, checking every declared property
-/// below it. A value whose schema declares none -- a scalar, or a free-form
-/// object -- ends the walk.
+/// Descend a value that the schema describes, checking every value it types
+/// below: declared properties, array elements, and schema-map entries. A value
+/// whose schema types nothing below it -- a scalar, or a free-form object --
+/// ends the walk.
 fn walk(value: &Yaml, schema: &Schema, root: &Schema, path: &str) -> Result<(), String> {
     let (schema, _) = resolve_ref(root, schema, 0).map_err(|error| error.to_string())?;
 
@@ -111,7 +118,7 @@ fn walk(value: &Yaml, schema: &Schema, root: &Schema, path: &str) -> Result<(), 
         {
             for (key, entry) in mapping {
                 let Some(key) = key.as_str() else { continue };
-                walk(entry, entry_schema, root, &format!("{path}.{key}"))?;
+                check_property(entry, entry_schema, root, &format!("{path}.{key}"))?;
             }
         }
         return Ok(());
@@ -122,14 +129,14 @@ fn walk(value: &Yaml, schema: &Schema, root: &Schema, path: &str) -> Result<(), 
         && let Some(item_schema) = schema.get("items").filter(|item| item.is_object())
     {
         for (index, item) in items.iter().enumerate() {
-            walk(item, item_schema, root, &format!("{path}[{index}]"))?;
+            check_property(item, item_schema, root, &format!("{path}[{index}]"))?;
         }
     }
     Ok(())
 }
 
-/// Name a declared property's type the way a decoder does in an "invalid type"
-/// diagnostic.
+/// Name a typed value's expected type the way a decoder does in an "invalid
+/// type" diagnostic.
 fn describe(schema: &Schema) -> &'static str {
     match schema.get("type").and_then(Schema::as_str) {
         Some("object") => "an object",
@@ -194,6 +201,44 @@ mod tests {
             )
             .contains(
                 "extensions.posture.states.standard.description: invalid type: null, expected a string"
+            )
+        );
+    }
+
+    #[test]
+    fn a_null_array_element_is_refused() {
+        assert!(
+            refusal("hushspec: \"1.0.0\"\nrules:\n  egress:\n    allow: [null]\n")
+                .contains("rules.egress.allow[0]: invalid type: null, expected a string")
+        );
+        assert!(
+            refusal(
+                "hushspec: \"1.0.0\"\nrules:\n  secret_patterns:\n    patterns:\n      - null\n"
+            )
+            .contains("rules.secret_patterns.patterns[0]: invalid type: null, expected an object")
+        );
+        assert!(
+            refusal(
+                "hushspec: \"1.0.0\"\nrules:\n  egress:\n    when:\n      all_of:\n        - null\n"
+            )
+            .contains("rules.egress.when.all_of[0]: invalid type: null, expected an object")
+        );
+    }
+
+    #[test]
+    fn a_null_schema_map_entry_is_refused() {
+        assert!(
+            refusal(
+                "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n    transitions: []\n    states:\n      standard: null\n"
+            )
+            .contains("extensions.posture.states.standard: invalid type: null, expected an object")
+        );
+        assert!(
+            refusal(
+                "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n    transitions: []\n    states:\n      standard:\n        budgets:\n          file_writes: null\n"
+            )
+            .contains(
+                "extensions.posture.states.standard.budgets.file_writes: invalid type: null, expected an integer"
             )
         );
     }
