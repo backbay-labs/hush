@@ -239,6 +239,11 @@ class TestExtractDomain:
     def test_returns_empty_string_for_empty_input(self):
         assert extract_domain("") == ""
 
+    def test_reduces_the_authority_as_a_browser_would(self):
+        assert extract_domain("http://blocked.example\\@allowed.example/x") == "blocked.example"
+        assert extract_domain("https://user:pw@Host.Example:8443/") == "host.example"
+        assert extract_domain("http://[::1]:8080/health") == "[::1]"
+
 
 class TestCreateMCPGuard:
     def test_evaluates_file_read_through_guard(self):

@@ -1,6 +1,6 @@
 import type { EvaluationAction, EvaluationResult } from '../evaluate.js';
 import type { HushGuard } from '../middleware.js';
-import { argsSize } from './tool-mapping.js';
+import { argsSize, hostOf } from './tool-mapping.js';
 
 export function mapMCPToolCall(
   toolName: string,
@@ -52,11 +52,7 @@ export function mapMCPToolCall(
 }
 
 export function extractDomain(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
+  return hostOf(url);
 }
 
 export function createMCPGuard(

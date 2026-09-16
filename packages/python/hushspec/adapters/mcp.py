@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
 
-from hushspec.evaluate import EvaluationAction, EvaluationResult, args_size_of
+from hushspec.evaluate import EvaluationAction, EvaluationResult, args_size_of, normalize_host
 from hushspec.middleware import HushGuard
 
 
 def extract_domain(url: str) -> str:
-    """The host a URL names, or the raw value when it names none.
+    """The host a URL names, reduced as the evaluator reduces an egress target
+    (core spec 3.14.2), or the raw value when it names none.
 
-    Falling back to the raw string keeps the action evaluable: a policy's
-    egress rules see *something* to match, so an unparseable destination is
-    denied by a default-deny rule rather than quietly skipped.
+    Reducing here with the same algorithm the evaluator applies keeps a URL a
+    browser would read one way from being read another way by a URL parser
+    with different delimiter rules. Falling back to the raw string keeps the
+    action evaluable: a policy's egress rules see *something* to match, so an
+    unparseable destination is denied by a default-deny rule rather than
+    quietly skipped.
     """
     if not isinstance(url, str):
         return str(url)
-    try:
-        return urlparse(url).hostname or url
-    except ValueError:
-        return url
+    return normalize_host(url) or url
 
 
 def _path_action(action_type: str) -> Callable[[dict], EvaluationAction]:

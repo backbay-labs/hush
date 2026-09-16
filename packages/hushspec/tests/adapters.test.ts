@@ -221,6 +221,12 @@ describe('extractDomain', () => {
     );
   });
 
+  it('reduces the authority as a browser would', () => {
+    expect(extractDomain('http://blocked.example\\@allowed.example/x')).toBe('blocked.example');
+    expect(extractDomain('https://user:pw@Host.Example:8443/')).toBe('host.example');
+    expect(extractDomain('http://[::1]:8080/health')).toBe('[::1]');
+  });
+
   it('returns bare string for invalid URLs', () => {
     expect(extractDomain('not-a-url')).toBe('not-a-url');
     expect(extractDomain('')).toBe('');

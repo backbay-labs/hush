@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import re
 from typing import Any, Callable
-from urllib.parse import urlparse
+
+from hushspec.adapters.mcp import extract_domain
 
 from hushspec.evaluate import EvaluationAction, args_size_of
 from hushspec.middleware import HushGuard
@@ -56,16 +57,9 @@ def _text(value: Any) -> str:
 
 
 def _host(url: str) -> str:
-    """The host a fetch would reach, or the raw value when there is none.
-
-    Falling back to the raw string keeps the action evaluable: a policy's egress
-    rules see *something* to match, and an unparseable destination is denied by
-    a default-deny egress rule rather than quietly skipped.
-    """
-    try:
-        return urlparse(url).hostname or url
-    except ValueError:
-        return url
+    """The host a fetch would reach, reduced as the evaluator reduces an egress
+    target, or the raw value when there is none."""
+    return extract_domain(url)
 
 
 def map_claude_tool_to_action(tool_use_block: Any) -> EvaluationAction:

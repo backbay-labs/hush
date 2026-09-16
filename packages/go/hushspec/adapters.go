@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"regexp"
 	"strings"
 )
@@ -127,15 +126,17 @@ func MapMCPToolCall(name string, arguments map[string]any) EvaluationAction {
 	return action
 }
 
-// ExtractDomain is the host of a URL, or the string unchanged when it is not
-// one. `egress` rules match hosts, and a malformed URL must not silently
-// become a host that matches an allowlist pattern.
+// ExtractDomain is the host a URL names, reduced as the evaluator reduces an
+// egress target (core spec 3.14.2), or the string unchanged when it names no
+// host. Reducing here with the evaluator's own algorithm keeps a URL a browser
+// would read one way from being read another way by a URL parser with
+// different delimiter rules, and the raw fallback keeps a malformed URL from
+// silently becoming a host that matches an allowlist pattern.
 func ExtractDomain(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Hostname() == "" {
-		return rawURL
+	if host := NormalizeHost(rawURL); host != nil {
+		return *host
 	}
-	return parsed.Hostname()
+	return rawURL
 }
 
 // decodeToolArguments decodes a tool input object and measures its canonical

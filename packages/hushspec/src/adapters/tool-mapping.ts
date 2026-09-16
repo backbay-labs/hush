@@ -1,5 +1,6 @@
 import { canonicalizeValue, type JsonValue } from '../canonical.js';
 import type { EvaluationAction } from '../evaluate.js';
+import { normalizeHost } from '../evaluate.js';
 import { utf8ByteLength } from '../utf8.js';
 
 /**
@@ -104,13 +105,17 @@ export function argsSize(raw: unknown): number | undefined {
   }
 }
 
-/** The hostname of a URL, or the string itself when it does not parse. */
+/**
+ * The host a URL names, reduced as the evaluator reduces an egress target
+ * (core spec 3.14.2), or the string itself when it names no host.
+ *
+ * Reducing here with the evaluator's own algorithm keeps a URL a browser would
+ * read one way from being read another way by a URL parser with different
+ * delimiter rules; the raw fallback keeps an unparseable destination
+ * evaluable, so a default-deny rule denies it rather than skipping it.
+ */
 export function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
+  return normalizeHost(url) ?? url;
 }
 
 /**

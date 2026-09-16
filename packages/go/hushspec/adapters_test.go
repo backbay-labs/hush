@@ -253,11 +253,13 @@ func TestMapMCPToolCall(t *testing.T) {
 
 func TestExtractDomain(t *testing.T) {
 	cases := map[string]string{
-		"https://api.github.com/x":  "api.github.com",
-		"http://[::1]:8080/health":  "::1",
-		"api.github.com":            "api.github.com",
-		"":                          "",
-		"https://user:pw@host.tld/": "host.tld",
+		"https://api.github.com/x":           "api.github.com",
+		"http://[::1]:8080/health":           "[::1]",
+		"api.github.com":                     "api.github.com",
+		"":                                   "",
+		"https://user:pw@host.tld/":          "host.tld",
+		"https://user:pw@Host.Example:8443/": "host.example",
+		"http://blocked.example\\@allowed.example/x": "blocked.example",
 	}
 	for input, want := range cases {
 		if got := ExtractDomain(input); got != want {
