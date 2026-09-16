@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
-  "title": "HushSpec Posture Extension v0",
+  "title": "HushSpec Posture Extension v1",
   "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
   "type": "object",
   "required": [

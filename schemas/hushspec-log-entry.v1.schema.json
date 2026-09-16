@@ -39,7 +39,7 @@
     },
     "receipt": {
       "type": "object",
-      "description": "A format 0.2 decision receipt (entry_type receipt). Kept opaque here so this schema is self-contained; a verifier validates the member against schemas/hushspec-receipt.v0.schema.json separately."
+      "description": "A format 0.2 decision receipt (entry_type receipt). Kept opaque here so this schema is self-contained; a verifier validates the member against schemas/hushspec-receipt.v1.schema.json separately."
     },
     "policy_event": {
       "$ref": "#/$defs/PolicyEvent"
@@ -204,7 +204,7 @@
         "content_hash"
       ],
       "additionalProperties": false,
-      "description": "Identity of the policy in effect: the same shape as a receipt's policy member (schemas/hushspec-receipt.v0.schema.json $defs.PolicySummary), duplicated so this schema is self-contained.",
+      "description": "Identity of the policy in effect: the same shape as a receipt's policy member (schemas/hushspec-receipt.v1.schema.json $defs.PolicySummary), duplicated so this schema is self-contained.",
       "properties": {
         "name": {
           "type": "string"

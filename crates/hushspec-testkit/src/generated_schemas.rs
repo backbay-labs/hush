@@ -25,7 +25,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v1.schema.json",
-  "title": "HushSpec Conformance Report v0",
+  "title": "HushSpec Conformance Report v1",
   "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
   "type": "object",
   "required": [
@@ -221,7 +221,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v1.schema.json",
-  "title": "HushSpec Error Code Registry v0",
+  "title": "HushSpec Error Code Registry v1",
   "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
   "type": "object",
   "required": [
@@ -332,7 +332,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json",
-  "title": "HushSpec Evaluator Fixture v0",
+  "title": "HushSpec Evaluator Fixture v1",
   "description": "Schema for versioned evaluator fixtures used by the HushSpec reference evaluator and conformance testkit.",
   "type": "object",
   "required": [
@@ -662,7 +662,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-merge-vector.v1.schema.json",
-  "title": "HushSpec Merge Vector v0",
+  "title": "HushSpec Merge Vector v1",
   "description": "The shape of a merge vector directory under fixtures/ (core spec Section 4, Merge Semantics; Section 8 Level 2). Merge vectors are a directory convention rather than a single file, so this schema describes the *descriptor* a conformance runner builds for one directory -- which is what the four SDK runners already reconstruct from the filenames -- and, under $defs/FixtureManifest, the optional fixture.yaml that sits in the directory.\n\nDiscovery. A merge vector directory is any directory under fixtures/ that holds a base.yaml beside at least one child-<name>.yaml. Runners walk fixtures/<module>/merge/ and its subdirectories; a vector that needs its own base -- a digest pin names one exact document, so a pin-match and a pin-mismatch case cannot share one -- gets a subdirectory instead of colliding with the shared base.\n\nFiles. base.yaml is the parent document. child-<name>.yaml is the overlay; its merge_strategy selects the strategy under test. expected-<name>.yaml is the document the merge MUST produce, matched to its child by replacing the leading 'child-' with 'expected-'. Any other *.yaml in the directory (an intermediate hop of a multi-hop chain, say) is inert: runners only iterate the child-*.yaml files.\n\nComposition. A child whose extends carries a '#sha256:' pin is resolved (core Section 2.3) with a loader scoped to the vector directory, which also accepts the bare references 'base' and 'base.yaml'; the pin is then actually checked. Every other child is composed with a direct merge(base, child), which is what the vectors are testing.\n\nRefusal. A vector that must be refused rather than merged carries no expected-<name>.yaml and is marked instead. Only two markings are honoured by all four SDK runners, so only these two are normative: an 'expect-reject' file in the directory, or 'reject: true' in the directory's fixture.yaml. Both are directory-wide; a refusal case therefore lives in its own subdirectory with its own base.yaml. The per-child spellings some runners additionally accept (a '<stem>.expect-reject' marker, a 'reject' name list, per-child entries under 'cases') are tolerated aliases, not portable.",
   "type": "object",
   "required": [

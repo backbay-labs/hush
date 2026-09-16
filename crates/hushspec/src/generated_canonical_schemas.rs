@@ -14,8 +14,8 @@ pub(crate) const CORE_SCHEMA_NAME: &str = "hushspec-core.v1.schema.json";
 pub(crate) const CORE_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-core.v1.schema.json",
-  "title": "HushSpec Core v0",
-  "description": "Schema for HushSpec Core v0.x documents. Validates portable, engine-neutral AI agent security rules.",
+  "title": "HushSpec Core v1",
+  "description": "Schema for HushSpec Core 1.x documents, which also accepts the frozen 0.x lineage (core spec 2.2). Validates portable, engine-neutral AI agent security rules.",
   "type": "object",
   "required": [
     "hushspec"
@@ -900,7 +900,7 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "PostureExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
-      "title": "HushSpec Posture Extension v0",
+      "title": "HushSpec Posture Extension v1",
       "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
       "type": "object",
       "required": [
@@ -1020,7 +1020,7 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "OriginsExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
-      "title": "HushSpec Origins Extension v0",
+      "title": "HushSpec Origins Extension v1",
       "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
       "type": "object",
       "additionalProperties": false,
@@ -1329,7 +1329,7 @@ pub(crate) const CORE_SCHEMA: &str = r##"{
     "DetectionExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
-      "title": "HushSpec Detection Extension v0",
+      "title": "HushSpec Detection Extension v1",
       "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
       "type": "object",
       "additionalProperties": false,
@@ -1479,7 +1479,7 @@ pub(crate) const DETECTION_SCHEMA_NAME: &str = "hushspec-detection.v1.schema.jso
 pub(crate) const DETECTION_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
-  "title": "HushSpec Detection Extension v0",
+  "title": "HushSpec Detection Extension v1",
   "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
   "type": "object",
   "additionalProperties": false,
@@ -1627,7 +1627,7 @@ pub(crate) const ORIGINS_SCHEMA_NAME: &str = "hushspec-origins.v1.schema.json";
 pub(crate) const ORIGINS_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
-  "title": "HushSpec Origins Extension v0",
+  "title": "HushSpec Origins Extension v1",
   "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
   "type": "object",
   "additionalProperties": false,
@@ -1942,7 +1942,7 @@ pub(crate) const POSTURE_SCHEMA_NAME: &str = "hushspec-posture.v1.schema.json";
 pub(crate) const POSTURE_SCHEMA: &str = r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
-  "title": "HushSpec Posture Extension v0",
+  "title": "HushSpec Posture Extension v1",
   "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
   "type": "object",
   "required": [

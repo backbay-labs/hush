@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-framework-registry.v1.schema.json",
-  "title": "HushSpec Framework Registry v0",
+  "title": "HushSpec Framework Registry v1",
   "description": "Schema for spec/registries/frameworks.yaml, the registry of compliance frameworks that metadata.controls[].framework may name.",
   "type": "object",
   "required": [

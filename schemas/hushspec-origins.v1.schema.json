@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
-  "title": "HushSpec Origins Extension v0",
+  "title": "HushSpec Origins Extension v1",
   "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
   "type": "object",
   "additionalProperties": false,

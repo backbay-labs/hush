@@ -155,7 +155,7 @@
         },
         "resolved": {
           "type": "object",
-          "description": "The canonical projection of the resolved document (canonical spec 3), as a JSON object. Re-serializing it with RFC 8785 reproduces the canonical form the subject digest names. Kept opaque here so this schema is self-contained; validate it against schemas/hushspec-core.v0.schema.json separately."
+          "description": "The canonical projection of the resolved document (canonical spec 3), as a JSON object. Re-serializing it with RFC 8785 reproduces the canonical form the subject digest names. Kept opaque here so this schema is self-contained; validate it against schemas/hushspec-core.v1.schema.json separately."
         },
         "resolver": {
           "$ref": "#/$defs/Resolver"

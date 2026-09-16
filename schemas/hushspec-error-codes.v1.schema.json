@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v1.schema.json",
-  "title": "HushSpec Error Code Registry v0",
+  "title": "HushSpec Error Code Registry v1",
   "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
   "type": "object",
   "required": [
