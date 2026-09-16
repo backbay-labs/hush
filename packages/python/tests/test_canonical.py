@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 import hushspec.canonical as canonical
 from hushspec import CanonicalError, canonical_json, content_hash
 from hushspec.canonical import _ArrayOf, _MapOf, _Obj
+from hushspec.parse import CoreSafeLoader
 from hushspec.schema import HushSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -76,6 +78,45 @@ def test_integer_and_whole_float_are_indistinguishable() -> None:
 def test_unsafe_integer_is_refused() -> None:
     with pytest.raises(CanonicalError, match="safe range"):
         _numbers(max_additions=2**53)
+
+
+def _context_policy(literal: str) -> Any:
+    """A document whose only free-form value is ``literal``, read as YAML."""
+    return yaml.load(
+        "hushspec: \"0.1.0\"\n"
+        "rules:\n"
+        "  egress:\n"
+        "    when:\n"
+        "      context:\n"
+        f"        budget: {literal}\n",
+        Loader=CoreSafeLoader,
+    )
+
+
+@pytest.mark.parametrize("literal", ["9007199254740993", "18446744073709551617"])
+def test_integer_literal_beyond_the_safe_range_is_refused(literal: str) -> None:
+    with pytest.raises(CanonicalError, match=f"integer {literal} exceeds the safe range"):
+        canonical_json(_context_policy(literal))
+
+
+def test_float_syntax_is_unbounded() -> None:
+    """Spec section 4.3: only integer syntax carries the safe-integer bound."""
+    document = yaml.load(
+        "hushspec: \"0.1.0\"\n"
+        "rules:\n"
+        "  egress:\n"
+        "    when:\n"
+        "      context:\n"
+        "        a: 1.0e+16\n"
+        "        b: 1.0e+21\n"
+        "        c: 1.5e+300\n"
+        "        d: -0.0\n",
+        Loader=CoreSafeLoader,
+    )
+    assert (
+        '"context":{"a":10000000000000000,"b":1e+21,"c":1.5e+300,"d":0}'
+        in canonical_json(document)
+    )
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -170,6 +211,28 @@ def test_unknown_field_is_refused() -> None:
 def test_unknown_extension_is_refused() -> None:
     with pytest.raises(CanonicalError, match="unknown extension"):
         canonical_json({"hushspec": "0.1.0", "extensions": {"nope": {}}})
+
+
+def test_extensions_must_be_an_object() -> None:
+    with pytest.raises(CanonicalError, match=r"\$\.extensions must be an object"):
+        canonical_json({"hushspec": "0.1.0", "extensions": "nope"})
+    with pytest.raises(CanonicalError, match=r"\$\.extensions must be an object"):
+        canonical_json({"hushspec": "0.1.0", "extensions": None})
+
+
+def test_null_written_for_a_declared_property_is_refused() -> None:
+    """Spec section 2.2: no HushSpec property is nullable."""
+    with pytest.raises(CanonicalError, match=r"\$\.rules\.egress is null"):
+        canonical_json({"hushspec": "0.1.0", "rules": {"egress": None}})
+    with pytest.raises(CanonicalError, match=r"\$\.name is null"):
+        canonical_json({"hushspec": "0.1.0", "name": None})
+
+
+def test_null_inside_a_free_form_value_is_an_ordinary_leaf() -> None:
+    text = canonical_json(
+        {"hushspec": "0.1.0", "rules": {"egress": {"when": {"context": {"a": None}}}}}
+    )
+    assert '"context":{"a":null}' in text
 
 
 def test_absent_rule_block_is_not_invented() -> None:

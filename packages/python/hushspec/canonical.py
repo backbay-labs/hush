@@ -100,6 +100,10 @@ _RESOLUTION_FIELDS = ("extends", "merge_strategy")
 #: (spec section 3.1, signing spec section 7).
 _INLINE_SIGNATURE_FIELD = "signature"
 
+#: Sentinel for a key the document does not carry, so that a key written with
+#: a ``null`` value is told apart from an absent one.
+_ABSENT = object()
+
 
 class CanonicalError(ValueError):
     """The document cannot be canonicalized."""
@@ -142,9 +146,15 @@ class _Obj:
         if not isinstance(value, Mapping):
             # Type errors belong to validation (spec section 2.3); pass through.
             return _plain(value)
-        for key in value:
+        for key, raw in value.items():
             if key not in self.keys:
                 raise CanonicalError(f"unknown field {path}.{key}")
+            # Spec section 2.2: no HushSpec property is nullable, so a ``null``
+            # written for one is a validation error with no canonical form. A
+            # ``null`` inside a free-form value is an ordinary leaf and never
+            # reaches here.
+            if raw is None:
+                raise CanonicalError(f"{path}.{key} is null; no property is nullable")
         out: dict[str, Any] = {}
         for key, raw in value.items():
             child = self.children.get(key)
@@ -445,12 +455,12 @@ def project(spec: Any) -> dict[str, Any]:
             if key != _INLINE_SIGNATURE_FIELD
         }
 
-    extensions = doc.pop("extensions", None)
+    extensions = doc.pop("extensions", _ABSENT)
     out = _CORE_ROOT.project(doc, "$")
 
-    if extensions is not None:
+    if extensions is not _ABSENT:
         if not isinstance(extensions, Mapping):
-            raise CanonicalError("$.extensions must be a mapping")
+            raise CanonicalError("$.extensions must be an object")
         projected: dict[str, Any] = {}
         for name, block in extensions.items():
             if name not in EXTENSION_KEYS:
