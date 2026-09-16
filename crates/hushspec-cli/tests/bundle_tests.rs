@@ -99,6 +99,19 @@ fn verify_reports_a_policy_mismatch_against_a_different_policy() {
         .stderr(predicate::str::contains("policy_mismatch"));
 }
 
+/// Bundle spec 5.2 check 4: a policy that does not resolve is
+/// `policy_mismatch` too, because there is nothing to compare.
+#[test]
+fn verify_reports_a_policy_mismatch_for_a_policy_that_does_not_resolve() {
+    h2h()
+        .args(["bundle", "verify", VALID])
+        .args(["--keyring", KEYRING])
+        .args(["--policy", "definitely-not-a-policy.yaml"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("policy_mismatch"));
+}
+
 #[test]
 fn verify_without_a_trust_anchor_is_a_usage_error() {
     h2h()

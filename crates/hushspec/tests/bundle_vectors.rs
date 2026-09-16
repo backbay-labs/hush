@@ -174,7 +174,11 @@ fn every_vector_returns_its_expected_outcome() {
         "bundle vectors failed:\n  {}",
         failures.join("\n  ")
     );
-    assert_eq!(manifest.cases.len(), 10, "bundle spec 7 publishes 10 vectors");
+    assert_eq!(
+        manifest.cases.len(),
+        10,
+        "bundle spec 7 publishes 10 vectors"
+    );
 }
 
 /// Every reason code a vector names is one this implementation can produce,
