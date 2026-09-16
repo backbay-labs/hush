@@ -1,5 +1,53 @@
 use std::fs;
 
+/// The three extension schemas the core schema composes, as
+/// `(extensions key, embedded $defs name, published file name)`.
+const EMBEDDED_EXTENSIONS: [(&str, &str, &str); 3] = [
+    (
+        "posture",
+        "PostureExtension",
+        "hushspec-posture.v0.schema.json",
+    ),
+    (
+        "origins",
+        "OriginsExtension",
+        "hushspec-origins.v0.schema.json",
+    ),
+    (
+        "detection",
+        "DetectionExtension",
+        "hushspec-detection.v0.schema.json",
+    ),
+];
+
+/// Vectors the YAML profile refuses before there is a document to validate:
+/// anchors and aliases, merge keys, duplicate keys, and multi-document
+/// streams are properties of the YAML *text* (core spec 2.4), and a JSON
+/// Schema only ever sees the loaded document. The parser rejects them; this
+/// file makes no claim about them.
+const PROFILE_ONLY_VECTORS: [&str; 4] = [
+    "yaml-alias.yaml",
+    "yaml-duplicate-key.yaml",
+    "yaml-merge-key.yaml",
+    "yaml-multi-doc.yaml",
+];
+
+/// Vectors whose refusal no JSON Schema can express, each for a reason the
+/// vocabulary has no keyword for: referential integrity between two members
+/// of a document, uniqueness by a field of a list entry, a lookup in the IANA
+/// time zone database, the HushSpec regex profile, and a recursion depth
+/// bound. They are validated by the SDKs after parsing; here they are
+/// asserted to *pass*, so that a schema change which does become able to
+/// express one fails this test until the name is removed.
+const BEYOND_SCHEMA_VECTORS: [&str; 6] = [
+    "bad-initial.yaml",
+    "duplicate-ids.yaml",
+    "duplicate-pattern-names.yaml",
+    "regex-mid-pattern-flag.yaml",
+    "when-bad-timezone.yaml",
+    "when-too-deep.yaml",
+];
+
 #[test]
 fn every_schema_meta_validates_and_id_matches_filename() {
     let schema_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas");
@@ -210,4 +258,160 @@ fn decode_base64(text: &str) -> Vec<u8> {
         }
     }
     out
+}
+
+/// The core schema is a compound schema document: each `extensions` key is a
+/// `$ref` to its companion schema's own `$id`, and the companion documents
+/// are carried verbatim in `$defs` so those references resolve with no
+/// network access. A copy that drifts from the published file would validate
+/// policies against a schema nobody publishes, so it is compared here.
+#[test]
+fn the_core_schema_embeds_the_companion_schemas_verbatim() {
+    let core = core_schema();
+    let extensions = &core["$defs"]["Extensions"];
+
+    for (key, def_name, file_name) in EMBEDDED_EXTENSIONS {
+        let published = read_schema(file_name);
+        let expected_id = format!("https://hushspec.dev/schemas/{file_name}");
+
+        assert_eq!(
+            extensions["properties"][key]["$ref"].as_str(),
+            Some(expected_id.as_str()),
+            "extensions.{key} must reference the {key} schema by its $id"
+        );
+        assert_eq!(
+            extensions["properties"][key]["unevaluatedProperties"],
+            serde_json::Value::Bool(false),
+            "extensions.{key} must stay closed to unevaluated keys"
+        );
+        assert_eq!(
+            core["$defs"][def_name], published,
+            "$defs/{def_name} has drifted from schemas/{file_name}; \
+             copy the published file back over it"
+        );
+        assert_eq!(
+            published["$id"].as_str(),
+            Some(expected_id.as_str()),
+            "{file_name} does not declare the $id the core schema references"
+        );
+    }
+
+    // The keys the composition covers are exactly the keys `extensions`
+    // accepts, so no extension can be declared without being validated.
+    let mut declared: Vec<&str> = extensions["properties"]
+        .as_object()
+        .expect("Extensions declares properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    declared.sort_unstable();
+    let mut composed = EMBEDDED_EXTENSIONS.map(|(key, _, _)| key).to_vec();
+    composed.sort_unstable();
+    assert_eq!(
+        declared, composed,
+        "every extension key must be composed from a companion schema"
+    );
+}
+
+/// The published policy vectors, validated against the composed core schema.
+///
+/// Composition is what makes this meaningful for the extension vectors:
+/// while `extensions.posture` was a bare `type: object`, every one of them
+/// satisfied the schema regardless of content.
+#[test]
+fn the_core_schema_accepts_the_valid_vectors_and_refuses_the_invalid_ones() {
+    let root = repo_root();
+    let schema = compile(&core_schema());
+
+    let mut accepted = 0;
+    let mut refused = 0;
+    let mut tolerated: Vec<String> = Vec::new();
+
+    for family in ["core", "posture", "origins", "detection"] {
+        for (kind, expect_valid) in [("valid", true), ("invalid", false)] {
+            let dir = format!("{root}/fixtures/{family}/{kind}");
+            for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{dir} is readable: {e}")) {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if !name.ends_with(".yaml") || name.ends_with(".expect.yaml") {
+                    continue;
+                }
+                if PROFILE_ONLY_VECTORS.contains(&name.as_str()) {
+                    continue;
+                }
+
+                let text = fs::read_to_string(&path).unwrap();
+                let document: serde_json::Value = serde_yaml::from_str(&text)
+                    .unwrap_or_else(|e| panic!("{} is not YAML: {e}", path.display()));
+                let valid = schema.is_valid(&document);
+
+                if expect_valid {
+                    if let Err(errors) = schema.validate(&document) {
+                        let messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+                        panic!("{} must satisfy the schema: {messages:?}", path.display());
+                    }
+                    accepted += 1;
+                } else if BEYOND_SCHEMA_VECTORS.contains(&name.as_str()) {
+                    assert!(
+                        valid,
+                        "{} is listed as beyond JSON Schema but the schema now refuses it; \
+                         drop it from the list",
+                        path.display()
+                    );
+                    tolerated.push(name);
+                } else {
+                    assert!(!valid, "{} must be refused by the schema", path.display());
+                    refused += 1;
+                }
+            }
+        }
+    }
+
+    assert!(accepted > 0 && refused > 0, "no vectors were checked");
+    tolerated.sort();
+    assert_eq!(
+        tolerated,
+        BEYOND_SCHEMA_VECTORS.to_vec(),
+        "every listed name must still be a published vector"
+    );
+}
+
+/// What the composition exists for: an unknown key inside an extension block
+/// is a rejection, not an annotation (core spec 2.1 and 9.5).
+#[test]
+fn an_unknown_key_inside_an_extension_block_is_refused() {
+    let schema = compile(&core_schema());
+
+    for (key, ..) in EMBEDDED_EXTENSIONS {
+        let document = serde_json::json!({
+            "hushspec": "0.1.0",
+            "extensions": { key: { "bogus": 1 } },
+        });
+        assert!(
+            !schema.is_valid(&document),
+            "extensions.{key}.bogus must be refused"
+        );
+    }
+}
+
+fn repo_root() -> &'static str {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../..")
+}
+
+fn read_schema(file_name: &str) -> serde_json::Value {
+    let root = repo_root();
+    let raw = fs::read_to_string(format!("{root}/schemas/{file_name}"))
+        .unwrap_or_else(|e| panic!("{file_name} is readable: {e}"));
+    serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{file_name} is JSON: {e}"))
+}
+
+fn core_schema() -> serde_json::Value {
+    read_schema("hushspec-core.v0.schema.json")
+}
+
+fn compile(document: &serde_json::Value) -> jsonschema::JSONSchema {
+    jsonschema::JSONSchema::options()
+        .should_validate_formats(true)
+        .compile(document)
+        .expect("the core schema compiles")
 }

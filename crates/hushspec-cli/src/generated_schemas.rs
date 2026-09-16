@@ -1139,18 +1139,25 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "type": "object",
       "additionalProperties": false,
       "description": "Extension modules for optional capabilities beyond core rules.",
+      "$comment": "Each extension key is validated by its companion schema, referenced by that schema's own $id. The three companion documents are embedded verbatim at the end of $defs, so every reference resolves with no network access and an unknown key inside an extension block is rejected here exactly as it is by the companion schema on its own. `unevaluatedProperties` keeps that closed even if a companion root ever stops setting `additionalProperties: false`.",
       "properties": {
         "posture": {
           "type": "object",
-          "description": "Stateful capability and budget management. Schema defined in companion specification."
+          "$ref": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+          "unevaluatedProperties": false,
+          "description": "Stateful capability and budget management, as defined by the posture companion schema."
         },
         "origins": {
           "type": "object",
-          "description": "Origin-aware policy profiles. Schema defined in companion specification."
+          "$ref": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+          "unevaluatedProperties": false,
+          "description": "Origin-aware policy profiles, as defined by the origins companion schema."
         },
         "detection": {
           "type": "object",
-          "description": "Detection engine thresholds and configuration. Schema defined in companion specification."
+          "$ref": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+          "unevaluatedProperties": false,
+          "description": "Detection engine thresholds and configuration, as defined by the detection companion schema."
         }
       }
     },
@@ -1286,6 +1293,546 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "author": {
           "type": "string",
           "description": "Identity that made the revision."
+        }
+      }
+    },
+    "PostureExtension": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://hushspec.dev/schemas/hushspec-posture.v0.schema.json",
+      "title": "HushSpec Posture Extension v0",
+      "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
+      "type": "object",
+      "required": ["initial", "states", "transitions"],
+      "additionalProperties": false,
+      "properties": {
+        "initial": {
+          "type": "string",
+          "description": "Initial state name. Must reference a key in states."
+        },
+        "states": {
+          "type": "object",
+          "description": "Named states in the posture state machine.",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/PostureState"
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "description": "Transitions between states, triggered by events.",
+          "items": {
+            "$ref": "#/$defs/PostureTransition"
+          }
+        }
+      },
+      "$defs": {
+        "PostureState": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A named state in the posture state machine.",
+          "properties": {
+            "description": {
+              "type": "string"
+            },
+            "capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Capability identifiers available in this state. Standard values: file_access, file_write, egress, shell, tool_call, patch, custom."
+            },
+            "budgets": {
+              "type": "object",
+              "description": "Budget limits keyed by budget key. Standard keys: file_writes, egress_calls, shell_commands, tool_calls, patches, custom_calls.",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "PostureTransition": {
+          "type": "object",
+          "required": ["from", "to", "on"],
+          "additionalProperties": false,
+          "description": "A transition between posture states.",
+          "properties": {
+            "from": {
+              "type": "string",
+              "description": "Source state name, or \"*\" to match any state."
+            },
+            "to": {
+              "type": "string",
+              "not": {
+                "const": "*"
+              },
+              "description": "Target state name. Must not be \"*\"."
+            },
+            "on": {
+              "type": "string",
+              "enum": [
+                "user_approval",
+                "user_denial",
+                "critical_violation",
+                "any_violation",
+                "timeout",
+                "budget_exhausted",
+                "pattern_match"
+              ],
+              "description": "Trigger that causes this transition."
+            },
+            "after": {
+              "type": "string",
+              "pattern": "^\\d+[smhd]$",
+              "description": "Duration string. Required when trigger is \"timeout\". Format: <number><unit> where unit is s, m, h, or d."
+            }
+          },
+          "if": {
+            "properties": {
+              "on": {
+                "const": "timeout"
+              }
+            },
+            "required": ["on"]
+          },
+          "then": {
+            "required": ["from", "to", "on", "after"]
+          }
+        }
+      }
+    },
+    "OriginsExtension": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://hushspec.dev/schemas/hushspec-origins.v0.schema.json",
+      "title": "HushSpec Origins Extension v0",
+      "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_behavior": {
+          "type": "string",
+          "enum": ["deny", "minimal_profile"],
+          "default": "deny",
+          "description": "Behavior when no profile matches. \"deny\" blocks unmatched origins; \"minimal_profile\" proceeds under base policy."
+        },
+        "profiles": {
+          "type": "array",
+          "description": "Origin profiles, each with match criteria and policy overrides.",
+          "items": {
+            "$ref": "#/$defs/OriginProfile"
+          }
+        }
+      },
+      "$defs": {
+        "OriginProfile": {
+          "type": "object",
+          "required": ["id"],
+          "additionalProperties": false,
+          "description": "An origin profile that narrows the base policy for matching requests.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this profile."
+            },
+            "match": {
+              "$ref": "#/$defs/OriginMatch"
+            },
+            "posture": {
+              "type": "string",
+              "description": "Initial posture state for this origin. Must reference a state in extensions.posture.states."
+            },
+            "tool_access": {
+              "$ref": "#/$defs/ToolAccessRule"
+            },
+            "egress": {
+              "$ref": "#/$defs/EgressRule"
+            },
+            "data": {
+              "$ref": "#/$defs/DataPolicy"
+            },
+            "budgets": {
+              "$ref": "#/$defs/OriginBudgets"
+            },
+            "bridge": {
+              "$ref": "#/$defs/BridgePolicy"
+            },
+            "explanation": {
+              "type": "string"
+            }
+          }
+        },
+        "OriginMatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Criteria for matching an incoming request to this profile.",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Source provider. Standard values: slack, teams, github, jira, email, discord, webhook, custom."
+            },
+            "tenant_id": {
+              "type": "string",
+              "description": "Tenant or workspace identifier."
+            },
+            "space_id": {
+              "type": "string",
+              "description": "Channel, room, or repository identifier. Highest priority match field."
+            },
+            "space_type": {
+              "type": "string",
+              "enum": [
+                "channel",
+                "group",
+                "dm",
+                "thread",
+                "issue",
+                "ticket",
+                "pull_request",
+                "email_thread"
+              ],
+              "description": "Type of space the request originated from."
+            },
+            "visibility": {
+              "type": "string",
+              "enum": [
+                "private",
+                "internal",
+                "public",
+                "external_shared"
+              ],
+              "description": "Visibility level of the source space."
+            },
+            "external_participants": {
+              "type": "boolean",
+              "description": "Whether external participants are present in the source space."
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tags that must ALL be present on the source (AND semantics)."
+            },
+            "sensitivity": {
+              "type": "string",
+              "description": "Sensitivity classification of the source context."
+            },
+            "actor_role": {
+              "type": "string",
+              "description": "Role of the requesting actor (e.g., admin, member, guest)."
+            }
+          }
+        },
+        "ToolAccessRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tool access overrides for this origin. Composes with base rules.tool_access via intersection (allow) and union (block).",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tool name allowlist. Intersected with base allowlist."
+            },
+            "block": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tool name blocklist. Unioned with base blocklist."
+            },
+            "require_confirmation": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Tools requiring user/operator approval. Unioned with base list."
+            },
+            "default": {
+              "type": "string",
+              "enum": ["allow", "block"],
+              "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
+            },
+            "max_args_size": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum argument payload size in bytes. The smaller of base and origin applies."
+            }
+          }
+        },
+        "EgressRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Egress overrides for this origin. Composes with base rules.egress via intersection (allow) and union (block).",
+          "properties": {
+            "allow": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Domain allowlist. Intersected with base allowlist."
+            },
+            "block": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Domain blocklist. Unioned with base blocklist."
+            },
+            "default": {
+              "type": "string",
+              "enum": ["allow", "block"],
+              "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
+            }
+          }
+        },
+        "DataPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Data handling controls for this origin context.",
+          "properties": {
+            "allow_external_sharing": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether content may be shared outside the origin context."
+            },
+            "redact_before_send": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether sensitive content must be redacted before output."
+            },
+            "block_sensitive_outputs": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether outputs containing sensitive patterns are blocked."
+            }
+          }
+        },
+        "OriginBudgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Budget overrides for this origin. The smaller of base and origin values applies.",
+          "properties": {
+            "tool_calls": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum number of tool/MCP invocations."
+            },
+            "egress_calls": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum number of outbound network requests."
+            },
+            "shell_commands": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum number of shell command executions."
+            }
+          }
+        },
+        "BridgePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Controls for cross-origin data flow.",
+          "properties": {
+            "allow_cross_origin": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether cross-origin data flow is permitted."
+            },
+            "allowed_targets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/BridgeTarget"
+              },
+              "description": "Specific destinations permitted for cross-origin data flow."
+            },
+            "require_approval": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether cross-origin flows require user/operator approval."
+            }
+          }
+        },
+        "BridgeTarget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A permitted destination for cross-origin data flow.",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Target provider."
+            },
+            "space_type": {
+              "type": "string",
+              "enum": [
+                "channel",
+                "group",
+                "dm",
+                "thread",
+                "issue",
+                "ticket",
+                "pull_request",
+                "email_thread"
+              ],
+              "description": "Target space type."
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Required tags on the target (AND semantics)."
+            },
+            "visibility": {
+              "type": "string",
+              "enum": [
+                "private",
+                "internal",
+                "public",
+                "external_shared"
+              ],
+              "description": "Required visibility level of the target."
+            }
+          }
+        }
+      }
+    },
+    "DetectionExtension": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://hushspec.dev/schemas/hushspec-detection.v0.schema.json",
+      "title": "HushSpec Detection Extension v0",
+      "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt_injection": {
+          "$ref": "#/$defs/PromptInjectionDetection"
+        },
+        "jailbreak": {
+          "$ref": "#/$defs/JailbreakDetection"
+        },
+        "threat_intel": {
+          "$ref": "#/$defs/ThreatIntelDetection"
+        }
+      },
+      "$defs": {
+        "Level": {
+          "type": "string",
+          "enum": ["safe", "suspicious", "high", "critical"],
+          "description": "Detection severity level, ordered: safe < suspicious < high < critical."
+        },
+        "PromptInjectionDetection": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Configuration for prompt injection detection.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether prompt injection detection is active."
+            },
+            "warn_at_or_above": {
+              "$ref": "#/$defs/Level",
+              "default": "suspicious",
+              "description": "Minimum detection level that produces a warning."
+            },
+            "block_at_or_above": {
+              "$ref": "#/$defs/Level",
+              "default": "high",
+              "description": "Minimum detection level that produces a denial."
+            },
+            "max_scan_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 200000,
+              "description": "Maximum input size to scan, in bytes."
+            },
+            "heuristics": {
+              "$ref": "#/$defs/PromptInjectionHeuristics"
+            }
+          }
+        },
+        "PromptInjectionHeuristics": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Configuration of the normative heuristic_injection@1 detector (detection spec 3.5).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether the heuristic detector runs alongside the regex detector."
+            },
+            "min_score": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 0,
+              "description": "Integer scores below this floor are reported as 0 (no signal)."
+            }
+          }
+        },
+        "JailbreakDetection": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Configuration for jailbreak detection.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true,
+              "description": "Whether jailbreak detection is active."
+            },
+            "block_threshold": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 80,
+              "description": "Risk score (0-100) at or above which input is denied."
+            },
+            "warn_threshold": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 50,
+              "description": "Risk score (0-100) at or above which a warning is produced."
+            },
+            "max_input_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 200000,
+              "description": "Maximum input size to scan, in bytes."
+            }
+          }
+        },
+        "ThreatIntelDetection": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Configuration for threat intelligence screening.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether threat intelligence screening is active."
+            },
+            "pattern_db": {
+              "type": "string",
+              "description": "Path to pattern database file or \"builtin:<name>\" for engine-bundled databases."
+            },
+            "similarity_threshold": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "default": 0.7,
+              "description": "Minimum similarity score (0.0-1.0) for a pattern match to be considered a finding."
+            },
+            "top_k": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5,
+              "description": "Number of top matches to include in evaluation evidence."
+            }
+          }
         }
       }
     }
