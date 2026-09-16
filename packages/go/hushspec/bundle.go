@@ -424,18 +424,7 @@ func BuildBundleStatement(resolution *Resolution, opts CreateBundleOptions) (*Bu
 	}
 
 	spec := resolution.Spec
-	// The first label the bundler has, taken as written: an explicit override,
-	// then the policy's own name, then the leaf source's file name, then a
-	// constant. A policy that declares `name: ""` has a name, so the fallbacks
-	// below it never run for one.
-	name := opts.SubjectName
-	if name == "" {
-		if spec.Name != nil {
-			name = *spec.Name
-		} else if name = bundleLeafFileName(chain); name == "" {
-			name = "policy"
-		}
-	}
+	name := bundleSubjectName(opts.SubjectName, spec, chain)
 
 	tool := opts.Tool
 	if tool == "" {
@@ -608,6 +597,23 @@ func bundleRelativeSource(source, base string) string {
 	}
 	// A bundle is JSON read on every platform, so the separator is `/`.
 	return filepath.ToSlash(relative)
+}
+
+// bundleSubjectName is the subject's informational label: the first of an
+// explicit override, the policy's own name, the leaf source's file name, and a
+// constant. A policy that declares `name: ""` has a name, so the fallbacks
+// below it never run for one.
+func bundleSubjectName(override string, spec *HushSpec, chain []ChainLink) string {
+	if override != "" {
+		return override
+	}
+	if spec.Name != nil {
+		return *spec.Name
+	}
+	if leaf := bundleLeafFileName(chain); leaf != "" {
+		return leaf
+	}
+	return "policy"
 }
 
 // bundleLeafFileName is the leaf's file name, for a policy with no `name`.

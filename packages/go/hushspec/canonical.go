@@ -345,9 +345,10 @@ func canonicalProjectStruct(v reflect.Value) (map[string]any, error) {
 //
 //   - Pointers, slices and maps model presence directly: nil is absent, and a
 //     non-nil empty slice, map or string is a present-but-empty value, which
-//     section 3.3 (and its exception table) then judges. Every optional free
-//     text property is a *string for exactly this reason, so a `description:
-//     ""` survives into the canonical form as it does in the other SDKs.
+//     section 3.3 (and its exception table) then judges. Every optional
+//     free-text property is a *string for exactly this reason, so one written
+//     as the empty string reaches the canonical form as it does in the other
+//     SDKs.
 //   - A bare string is either a required property or an enum, and "" is not a
 //     value of either: the empty enum sentinel is absence, and
 //     validateRawDocument refuses a document that writes one.
