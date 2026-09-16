@@ -47,9 +47,11 @@ H2H=target/debug/h2h
   --out fixtures/bundle/bundles/unsigned.bundle.json
 ```
 
-The remaining three cannot come from the CLI: they are bundles *correctly signed* over a statement
-that is wrong, which `h2h bundle create` will not produce. They are derived from `valid.bundle.json`
-by a script that signs with `openssl pkeyutl -sign -rawin`, independently of the Rust signer:
+The remaining three cannot come from the CLI. `tampered-payload` carries the valid bundle's
+signature over an edited payload; the other two are *correctly signed* over a statement that is
+wrong, which `h2h bundle create` will not produce. All three are derived from
+`valid.bundle.json` by a script that signs with `openssl pkeyutl -sign -rawin`, independently of
+the Rust signer:
 
 ```bash
 python3 scripts/generate_bundle_vectors.py          # rewrite
