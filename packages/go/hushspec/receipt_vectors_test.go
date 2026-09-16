@@ -251,7 +251,7 @@ func TestSignReceiptRoundTrip(t *testing.T) {
 	}
 	// A receipt already names its policy, so the envelope leaves the policy
 	// claims unset unless the caller asks for them.
-	if signed.Signature.PolicyName != "" || signed.Signature.PolicyVersion != nil {
+	if signed.Signature.PolicyName != nil || signed.Signature.PolicyVersion != nil {
 		t.Errorf("expected no policy claims on a receipt envelope, got %+v", signed.Signature)
 	}
 

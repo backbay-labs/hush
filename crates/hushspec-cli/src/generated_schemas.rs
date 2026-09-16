@@ -3025,13 +3025,15 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "minimum": 0
         },
         "policy_name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "content_hash": {
           "$ref": "#/$defs/ContentHash"
         },
         "signer": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "signature": {
           "type": "string",
