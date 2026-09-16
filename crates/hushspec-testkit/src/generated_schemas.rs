@@ -103,8 +103,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "generated_at": {
       "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\dZ$",
       "format": "date-time",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
       "description": "When the report was produced, RFC 3339 UTC with second precision."
     }
   },
@@ -808,7 +808,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
       "description": "Evaluation time, RFC 3339 in UTC with exactly millisecond precision and a Z suffix (e.g. 2026-09-15T08:30:00.123Z). Fixed precision so the same instant has one canonical spelling in every SDK."
     },
     "time_source": {
@@ -987,7 +988,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "verified_at": {
           "type": "string",
-          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+          "format": "date-time",
           "description": "When verification ran, same format as `timestamp`."
         },
         "reason": {

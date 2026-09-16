@@ -183,6 +183,39 @@ fn reopening_continues_the_chain() {
 }
 
 #[test]
+fn two_sinks_on_one_file_extend_one_chain() {
+    let dir = temp_dir("two-sinks");
+    let path = dir.join("log.jsonl");
+    let resolution = resolution();
+    let first = ChainedFileSink::open(&path).unwrap().with_clock(clock());
+    let second = ChainedFileSink::open(&path).unwrap().with_clock(clock());
+
+    first
+        .record_policy_event(&loaded_event(&resolution))
+        .unwrap();
+    for (index, action) in actions().iter().enumerate() {
+        let receipt = evaluate_audited(&resolution, action, &config(), &ctx(index as u64));
+        let sink = if index % 2 == 0 { &second } else { &first };
+        sink.send(&receipt).unwrap();
+    }
+
+    let text = fs::read_to_string(&path).unwrap();
+    let entries: Vec<LogEntry> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        entries.iter().map(|entry| entry.seq).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    let report = verify_log("log.jsonl", &text, &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.entries, 4);
+    assert_eq!(report.last_seq, 4);
+    assert_eq!(report.last_entry_hash, entries[3].entry_hash);
+    assert_eq!(second.head(), (4, entries[3].entry_hash.clone()));
+}
+
+#[test]
 fn signed_entries_verify_with_the_keyring_and_fail_without() {
     let dir = temp_dir("signed");
     let path = dir.join("log.jsonl");
@@ -392,6 +425,33 @@ fn generate_vectors() -> Vec<(String, String)> {
         "invalid/bad-prev-hash-line-2.jsonl".to_string(),
         [lines[0], &bad_prev.to_string(), lines[2], lines[3]].join("\n") + "\n",
     ));
+    // A receipt payload that is not a 0.2 receipt, with the rest of the chain
+    // relinked so line 2 is the first break (log spec 8, step 8) rather than
+    // the hash check that a stale `prev_hash` would trip first.
+    let mut relinked: Vec<serde_json::Value> = lines[1..]
+        .iter()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    relinked[0]["receipt"] = serde_json::json!({"receipt_version": "0.2"});
+    for index in 0..relinked.len() {
+        if index > 0 {
+            let previous = relinked[index - 1]["entry_hash"].clone();
+            relinked[index]["prev_hash"] = previous;
+        }
+        let hash = value_entry_hash(&relinked[index]);
+        relinked[index]["entry_hash"] = serde_json::json!(hash);
+    }
+    let mut malformed_receipt = lines[0].to_string();
+    for value in &relinked {
+        malformed_receipt.push('\n');
+        malformed_receipt.push_str(&value.to_string());
+    }
+    malformed_receipt.push('\n');
+    files.push((
+        "invalid/malformed-receipt-line-2.jsonl".to_string(),
+        malformed_receipt,
+    ));
+
     let signed_lines: Vec<&str> = signed_text.lines().collect();
     let mut bad_sig: serde_json::Value = serde_json::from_str(signed_lines[3]).unwrap();
     let sig = bad_sig["signature"]["signature"]
@@ -416,6 +476,17 @@ fn generate_vectors() -> Vec<(String, String)> {
     ));
     let _ = fs::remove_dir_all(&dir);
     files
+}
+
+/// The `entry_hash` an entry held as raw JSON should carry: the digest of its
+/// canonical form with `entry_hash` and `signature` removed (log spec 4).
+fn value_entry_hash(entry: &serde_json::Value) -> String {
+    let mut stripped = entry.clone();
+    if let Some(object) = stripped.as_object_mut() {
+        object.remove("entry_hash");
+        object.remove("signature");
+    }
+    hushspec::canonical::digest(&hushspec::canonical::serialize_jcs(&stripped).unwrap())
 }
 
 fn expected_break_line(name: &str) -> usize {
@@ -482,8 +553,8 @@ fn log_vectors_are_current_and_behave() {
         count += 1;
     }
     assert!(
-        count >= 5,
-        "expected at least 5 invalid vectors, found {count}"
+        count >= 6,
+        "expected at least 6 invalid vectors, found {count}"
     );
 }
 

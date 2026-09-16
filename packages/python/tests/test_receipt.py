@@ -593,7 +593,7 @@ class TestParseReceiptRefusals:
             parse_receipt(body)
 
     def test_an_unknown_decision_is_a_receipt_error(self):
-        with pytest.raises(ReceiptError, match="receipt.decision"):
+        with pytest.raises(ReceiptError, match="decision .* closed enum"):
             parse_receipt(self._receipt(decision="bogus"))
 
     def test_an_unknown_rule_trace_outcome_is_a_receipt_error(self):
@@ -602,5 +602,5 @@ class TestParseReceiptRefusals:
                 {"rule_block": "egress", "outcome": "nope", "evaluated": True}
             ]
         )
-        with pytest.raises(ReceiptError, match="rule_trace.outcome"):
+        with pytest.raises(ReceiptError, match=r"rule_trace\[0\].outcome"):
             parse_receipt(body)

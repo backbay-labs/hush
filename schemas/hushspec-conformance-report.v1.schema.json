@@ -79,8 +79,8 @@
     },
     "generated_at": {
       "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\dZ$",
       "format": "date-time",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
       "description": "When the report was produced, RFC 3339 UTC with second precision."
     }
   },

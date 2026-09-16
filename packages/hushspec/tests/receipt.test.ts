@@ -618,7 +618,7 @@ describe('parseReceipt', () => {
       enabledConfig(),
     );
     const withExtra = { ...receipt, hushspec_version: '0.1.0' };
-    expect(() => parseReceipt(JSON.stringify(withExtra))).toThrow(/unknown receipt field/);
+    expect(() => parseReceipt(JSON.stringify(withExtra))).toThrow(/unknown field/);
   });
 
   it('rejects text that is not JSON', () => {

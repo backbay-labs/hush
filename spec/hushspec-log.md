@@ -37,6 +37,8 @@ A log is a JSON Lines file: one entry per line, UTF-8, `\n`-terminated. Blank li
 
 Because `prev_hash` is inside the hashed content, every entry's hash commits to the entire history before it. Editing any earlier line changes its `entry_hash` and breaks the link the next line declares.
 
+A writer MUST derive `seq` and `prev_hash` from the file's current last entry while it holds the write lock, not from a head cached when it opened the file, so that two writers of the same log never build entries from the same predecessor and fork the chain.
+
 ## 5. Rotation
 
 A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.

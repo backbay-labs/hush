@@ -428,6 +428,53 @@ func TestChainedSinkContinuesAnExistingChain(t *testing.T) {
 	}
 }
 
+// TestTwoSinksOnOneFileExtendOneChain locks in log spec 4: a writer derives
+// `seq` and `prev_hash` from the file's current last entry while it holds the
+// write lock, so two sinks open on one log extend a single chain instead of
+// appending the same sequence number twice.
+func TestTwoSinksOnOneFileExtendOneChain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	clock := logVectorClock(t)
+	first, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	second, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log twice: %v", err)
+	}
+	first.WithClock(func() time.Time { return clock })
+	second.WithClock(func() time.Time { return clock })
+
+	resolution := vectorResolution(t)
+	if err := first.RecordPolicyEvent(vectorPolicyEvent(t, resolution)); err != nil {
+		t.Fatalf("cannot record the policy event: %v", err)
+	}
+	for index, action := range vectorActions() {
+		sink := first
+		if index%2 == 0 {
+			sink = second
+		}
+		receipt := EvaluateAudited(resolution, action, expectedReceiptConfig(),
+			expectedReceiptContext(index))
+		if err := sink.Send(&receipt); err != nil {
+			t.Fatalf("cannot append receipt %d: %v", index, err)
+		}
+	}
+
+	report, err := VerifyLogFiles([]string{path}, nil)
+	if err != nil {
+		t.Fatalf("the shared chain must verify: %v", err)
+	}
+	if report.Entries != 4 || report.LastSeq != 4 {
+		t.Fatalf("expected four consecutive entries, got %+v", report)
+	}
+	hashes := entryHashes(t, path)
+	if seq, head := second.Head(); seq != 4 || head != hashes[3] {
+		t.Errorf("the last writer must hold the file head, got (%d, %s)", seq, head)
+	}
+}
+
 // TestVerifierRequiresSignaturesWhenAsked locks in log spec 7: a verifier
 // configured to require signatures rejects an unsigned entry with
 // entry_unsigned rather than passing it.

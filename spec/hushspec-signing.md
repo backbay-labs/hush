@@ -153,7 +153,7 @@ A verifier receives: the policy (unresolved, as loaded), the envelope, a keyring
 
 Verifiers MUST perform these checks in this order and stop at the first failure, reporting its reason code:
 
-1. **Envelope shape.** The envelope validates against the schema. Else `malformed_envelope`.
+1. **Envelope shape.** The envelope validates against the schema, with the `format_version` and `algorithm` value constraints deferred to checks 2 and 3 so that those reason codes remain reachable. Else `malformed_envelope`.
 2. **Format.** `format_version` is `"0.2"`. Else `unsupported_format_version`.
 3. **Algorithm.** `algorithm` is `"ed25519"`. Else `unsupported_algorithm`.
 4. **Key lookup.** A keyring entry has `key_id` equal to the envelope's, and its recomputed id matches. Else `unknown_key_id`.

@@ -189,6 +189,32 @@ describe('ChainedFileSink', () => {
     expect(report.entries).toBe(5);
   });
 
+  it('extends one chain when two sinks share a file', () => {
+    const file = path.join(dir, 'log.jsonl');
+    const resolved = resolution();
+    const first = ChainedFileSink.open(file).withClock(clock());
+    const second = ChainedFileSink.open(file).withClock(clock());
+
+    first.recordPolicyEvent(fixtureLoadedEvent());
+    actions().forEach((action, index) => {
+      const sink = index % 2 === 0 ? second : first;
+      sink.send(evaluateAudited(resolved, action, CONFIG, ctx(index)));
+    });
+
+    const text = readFileSync(file, 'utf8');
+    const entries = text
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => JSON.parse(line) as LogEntry);
+    expect(entries.map((entry) => entry.seq)).toEqual([1, 2, 3, 4]);
+
+    const report = verifyLog('log.jsonl', text);
+    expect(report.ok).toBe(true);
+    expect(report.entries).toBe(4);
+    expect(report.last_seq).toBe(4);
+    expect(second.head()).toEqual({ seq: 4, entry_hash: entries[3].entry_hash });
+  });
+
   it('creates the log directory on demand', () => {
     const file = path.join(dir, 'nested', 'deeper', 'log.jsonl');
     ChainedFileSink.open(file).withClock(clock()).recordPolicyEvent(fixtureLoadedEvent());

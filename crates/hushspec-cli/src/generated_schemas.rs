@@ -175,7 +175,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "Timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time"
     },
     "Signature": {
       "type": "object",
@@ -478,8 +479,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "generated_at": {
       "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01]\\d|2[0-3]):[0-5]\\d:[0-5]\\dZ$",
       "format": "date-time",
-      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$",
       "description": "When the report was produced, RFC 3339 UTC with second precision."
     }
   },
@@ -2822,7 +2823,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "not_after": {
           "type": "string",
-          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+          "format": "date-time",
           "description": "Signatures whose signed_at is at or after this instant MUST be rejected for this key. Lets a key be retired without invalidating signatures made before retirement."
         },
         "revoked": {
@@ -2902,7 +2904,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "Timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time"
     },
     "PolicyEvent": {
       "type": "object",
@@ -3695,7 +3698,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
       "description": "Evaluation time, RFC 3339 in UTC with exactly millisecond precision and a Z suffix (e.g. 2026-09-15T08:30:00.123Z). Fixed precision so the same instant has one canonical spelling in every SDK."
     },
     "time_source": {
@@ -3874,7 +3878,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "verified_at": {
           "type": "string",
-          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+          "format": "date-time",
           "description": "When verification ran, same format as `timestamp`."
         },
         "reason": {
@@ -4193,7 +4198,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "Timestamp": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
       "description": "RFC 3339 UTC with exactly millisecond precision, as receipts spell it."
     },
     "Count": {
@@ -4843,12 +4849,12 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     "format_version": {
       "type": "string",
       "const": "0.2",
-      "description": "Envelope format version. Verifiers MUST reject any other value."
+      "description": "Envelope format version. Verifiers MUST reject any other value, reporting it as unsupported_format_version rather than malformed_envelope (spec/hushspec-signing.md section 6.2)."
     },
     "algorithm": {
       "type": "string",
       "const": "ed25519",
-      "description": "Signature algorithm. Only ed25519 (RFC 8032, pure, no pre-hash) is defined in 0.2. Verifiers MUST reject any other value."
+      "description": "Signature algorithm. Only ed25519 (RFC 8032, pure, no pre-hash) is defined in 0.2. Verifiers MUST reject any other value, reporting it as unsupported_algorithm rather than malformed_envelope (spec/hushspec-signing.md section 6.2)."
     },
     "key_id": {
       "type": "string",
@@ -4857,12 +4863,14 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "signed_at": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
       "description": "When the signature was made, RFC 3339 UTC with millisecond precision and Z suffix."
     },
     "expires_at": {
       "type": "string",
-      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
       "description": "Optional expiry. A verifier whose current time is at or after this instant MUST treat the signature as invalid."
     },
     "policy_version": {
