@@ -76,8 +76,10 @@ type Condition struct {
 	// Capability is true when the effective posture state -- the state the
 	// posture guard uses, after origins profile selection and the action's
 	// posture input -- grants it. Unevaluable, and therefore held, when the
-	// policy has no posture extension (core spec 3.13).
-	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	// policy has no posture extension (core spec 3.13). It is a pointer so a
+	// present but empty name stays distinguishable from an absent one and is
+	// refused as a malformed identifier.
+	Capability *string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	// Rate compares an engine-supplied counter with a threshold. Unevaluable,
 	// and therefore held, when the context carries no such counter.
 	Rate *RateCondition `yaml:"rate,omitempty" json:"rate,omitempty"`
@@ -227,9 +229,9 @@ func evaluateConditionDepth(
 
 	// `capability`: unevaluable without a posture extension; otherwise the
 	// effective state must list the capability.
-	if condition.Capability != "" {
+	if condition.Capability != nil {
 		if capabilities.known {
-			verdict = verdict.and(verdictOf(capabilities.grants(condition.Capability)))
+			verdict = verdict.and(verdictOf(capabilities.grants(*condition.Capability)))
 		} else {
 			verdict = verdict.and(verdictUnevaluable)
 		}
@@ -476,10 +478,10 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			}
 		}
 	}
-	if name := condition.Capability; name != "" && !IsCapabilityIdentifier(name) {
+	if condition.Capability != nil && !IsCapabilityIdentifier(*condition.Capability) {
 		*errs = append(*errs, fmt.Sprintf(
 			"%s.capability: %q is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
-			path, name))
+			path, *condition.Capability))
 	}
 	if rate := condition.Rate; rate != nil && !IsCapabilityIdentifier(rate.Counter) {
 		*errs = append(*errs, fmt.Sprintf(
