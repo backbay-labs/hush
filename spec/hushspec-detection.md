@@ -103,7 +103,7 @@ Section 7 allows an engine to bring its own prompt-injection model. This section
 2. Normalize the text to Unicode NFC.
 3. Measure the `structural_uppercase` signal on the NFC text (before case folding): let `letters` be the number of ASCII letters and `upper` the number of ASCII uppercase letters; the signal is present when `letters >= 40` and `upper * 100 >= letters * 60`. Every ASCII letter counts, including letters inside encoded runs, so an uppercase-heavy base64 payload contributes both `encoded_payload` and `structural_uppercase`.
 4. Fold ASCII letters to lowercase (only `A-Z`; no Unicode case folding).
-5. Match every family's patterns against the folded text with unanchored search under the HushSpec regex profile (core Section 3.14.3). The patterns below are the normative table, verbatim.
+5. Match every family's patterns against the folded text with unanchored search under the HushSpec regex profile (Core Section 3.14.3). The patterns below are the normative table, verbatim.
 
 #### 3.5.3 Signal Families
 
@@ -290,7 +290,7 @@ Every detector reports a normalized score in the closed interval [0, 1]: the reg
 | `high` | at least 0.5 and below 0.75 |
 | `critical` | at least 0.75 |
 
-The prompt-injection threshold levels of Section 3.2 map onto the same floors: `suspicious` is 0.25, `high` is 0.5, and `critical` is 0.75.
+The prompt-injection threshold levels of Section 3.2 map onto the same floors: `suspicious` is 0.25, `high` is 0.5, and `critical` is 0.75. The threshold vocabulary is coarser than the trace scale: a score whose trace level is `none` or `low` is `safe` for threshold purposes, and the other three names coincide.
 
 ### 9.4 Thresholds and Decisions
 

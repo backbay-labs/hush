@@ -2,11 +2,13 @@
 //! validates against its published schema, and the closed ones are checked
 //! against the code and schemas they describe so that the two cannot drift.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::PathBuf;
 
-use hushspec::{DetectionCategory, DetectorRegistry, EvaluationAction, HushSpec, evaluate};
+use hushspec::{
+    CompiledPolicy, DetectionCategory, DetectorRegistry, EvaluationAction, HushSpec, evaluate,
+};
 use jsonschema::{Draft, JSONSchema};
 use serde_json::Value;
 
@@ -272,4 +274,47 @@ fn capabilities_match_the_posture_specification() {
         })
         .collect();
     assert_eq!(ids(&registry("capabilities"), "entries"), listed);
+}
+
+#[test]
+fn action_types_list_the_blocks_the_evaluator_consults() {
+    let spec = HushSpec::parse(
+        "hushspec: \"0.2.0\"\nrules:\n  forbidden_paths:\n    patterns: [\"/never/**\"]\n  path_allowlist:\n    enabled: true\n    read: [\"/**\"]\n    write: [\"/**\"]\n    patch: [\"/**\"]\n  egress:\n    allow: [\"example.com\"]\n    default: block\n  secret_patterns:\n    patterns:\n      - name: marker\n        pattern: \"zzz\"\n        severity: warn\n  patch_integrity:\n    max_additions: 10\n  shell_commands:\n    forbidden_patterns: [\"never\"]\n  tool_access:\n    default: allow\n  computer_use:\n    enabled: true\n    allowed_actions: [\"click\"]\n  remote_desktop_channels:\n    enabled: true\n    clipboard: true\n    file_transfer: true\n    audio: true\n    drive_mapping: true\n  input_injection:\n    enabled: true\n    allowed_types: [\"keyboard\"]\n  browser_automation:\n    enabled: true\n    allowed_domains: [\"example.com\"]\n  code_execution:\n    enabled: true\n    language_allowlist: [\"python\"]\n",
+    )
+    .expect("every rule block present");
+    let policy = CompiledPolicy::compile(&spec).expect("policy compiles");
+    let engine_stages = [
+        "origin_profile",
+        "posture_capability",
+        "panic",
+        "unknown_action_type",
+        "default",
+    ];
+    let document = registry("action-types");
+    for entry in document["entries"].as_array().unwrap() {
+        let action_type = entry["id"].as_str().unwrap();
+        let registered: Vec<String> = entry["rule_blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        let action = EvaluationAction {
+            action_type: action_type.to_string(),
+            target: Some("/tmp/example".to_string()),
+            content: Some("hello".to_string()),
+            ..Default::default()
+        };
+        let traced = policy.evaluate_traced(&action, None, &HashMap::new());
+        let consulted: Vec<String> = traced
+            .trace
+            .iter()
+            .map(|entry| entry.rule_block.clone())
+            .filter(|block| !engine_stages.contains(&block.as_str()))
+            .collect();
+        assert_eq!(
+            consulted, registered,
+            "{action_type}: the evaluator consulted {consulted:?} but the registry lists {registered:?}"
+        );
+    }
 }

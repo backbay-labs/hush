@@ -72,11 +72,11 @@ The `transitions` field is REQUIRED and MUST be an array of transition objects. 
 
 ## 3. Capabilities
 
-Capabilities declare what categories of action an agent may perform in a given state. A rule block's `when.capability` condition (core Section 3.13) tests whether the effective state grants a capability, so a block can be gated on posture without being a capability guard itself. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
+Capabilities declare what categories of action an agent may perform in a given state. A rule block's `when.capability` condition (Core Section 3.13) tests whether the effective state grants a capability, so a block can be gated on posture without being a capability guard itself. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
 
 An action whose `posture.current` names a state absent from `states` MUST be denied with `matched_rule` `extensions.posture.states.<state>` (fail-closed).
 
-The posture guard runs before core rule blocks (core Section 6.1); a deny from it is final.
+The posture guard runs before core rule blocks (Core Section 6.1); a deny from it is final.
 
 Test vectors: `fixtures/posture/evaluation/posture-transitions.test.yaml`, `fixtures/posture/evaluation/empty-capabilities.test.yaml`, `fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml`.
 
@@ -100,7 +100,7 @@ Engines MAY support additional capability identifiers beyond the standard set. C
 
 ### 3.3 Required Capability by Action Type
 
-The posture guard maps each core action type (core Section 5) to the capability it requires:
+The posture guard maps each core action type (Core Section 5) to the capability it requires:
 
 | Action type      | Required capability |
 |------------------|---------------------|
@@ -113,7 +113,7 @@ The posture guard maps each core action type (core Section 5) to the capability 
 | `custom`         | `custom`            |
 | `computer_use`, `input_inject`, `browser_action`, `code_exec` | none (not gated by posture) |
 
-Action types not in this table are unknown and are denied by the core evaluator before the posture guard runs (core Section 5).
+Action types not in this table are unknown and are denied by the core evaluator before the posture guard runs (Core Section 5).
 
 ---
 

@@ -193,7 +193,7 @@ The source recorded for a document in receipts and resolution results is the ref
 A resolver walks the chain from the leaf to the root, loading each reference, then merges from the root back down (Section 4.2). It MUST:
 
 1. Detect a cycle (a reference naming a document already on the chain) and reject the resolution, reporting the cycle.
-2. Reject a chain longer than 32 documents.
+2. Reject a chain of more than 32 `extends` hops: a leaf with 32 base documents is the longest chain that resolves.
 3. Check every digest pin and reject on mismatch, whether or not signatures are required.
 4. Verify signatures when required (Signing specification, Section 6.5) and refuse to produce a resolved document for a chain that fails verification.
 5. Fail closed on any loader error: an unreadable file, a network failure, an unparseable document, or an unknown built-in name MUST refuse the resolution. A resolver MUST NOT fall back to evaluating the leaf alone.
@@ -407,7 +407,7 @@ Control tool and MCP (Model Context Protocol) invocations.
 **Tool name matching.** Tool names MUST be compared as exact, case-sensitive strings after Unicode NFC normalization of both sides. Glob and regex metacharacters (`*`, `?`, `[`, `{`) have no special meaning in tool names: the entry `danger_*` matches only a tool literally named `danger_*`. Engines MUST NOT apply glob matching to tool names.
 
 **Semantics:** For a given tool invocation:
-1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps. `args_size` is the byte length of the arguments serialized as JSON in the canonical form of the Canonical Form specification, Section 4 (RFC 8785). An enforcement point that receives arguments already serialized MAY measure the bytes it received; it MUST NOT measure a pretty-printed or re-encoded form. The measured value is what a receipt records as `action.args_size`.
+1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps. `args_size` is supplied by the enforcement point; the evaluator never sees the arguments themselves. It MUST be the length in bytes of the UTF-8 encoding of the arguments serialized as JSON in the canonical form of the Canonical Form specification, Section 4 (RFC 8785). An enforcement point that receives arguments already serialized as compact JSON MAY measure the bytes it received; it MUST NOT measure a pretty-printed or re-encoded form, and MUST NOT report a count of UTF-16 code units or of escaped characters. The supplied value is what the decision uses and what a receipt records as `action.args_size`.
 2. If the tool name equals any entry in `block`, the decision is **deny** (`rules.tool_access.block`). Block takes precedence.
 3. If the tool name equals any entry in `require_confirmation`, the decision is **warn** (`rules.tool_access.require_confirmation`). Confirmation semantics are engine-specific; see Section 6.
 4. If `allow` is non-empty and the tool name equals an entry, the decision is **allow** (`rules.tool_access.allow`).
@@ -553,7 +553,7 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 
 The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation.
 
-**Capability condition.** `capability` names a posture capability (posture spec Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
+**Capability condition.** `capability` names a posture capability (Posture specification, Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
 
 **Identifier grammar.** Capability names and counter names are one or more dot-separated segments, each a lowercase ASCII letter followed by lowercase ASCII letters, digits, or underscores:
 
@@ -759,7 +759,7 @@ A policy decision is what the evaluator computed; enforcement is what the enforc
 
 **Modes.** An enforcement point runs in one of two modes: `enforce`, in which `deny` blocks the action and `warn` requires confirmation, and `monitor`, in which every decision is computed and recorded but the action proceeds. Mode is engine configuration, never a property of the HushSpec document.
 
-**Per-rule overrides.** An enforcement point MAY override the mode for a rule-path prefix (`rules.egress`, `rules.secret_patterns.patterns`, `extensions.detection`). An override applies to a decision whose `matched_rule` equals the prefix or continues past it at a segment boundary (`.` or `[`); the longest matching prefix wins over the mode. A prefix under `rules.` MUST name a rule block of this specification; other prefixes MUST be rejected at configuration time.
+**Per-rule overrides.** An enforcement point MAY override the mode for a rule-path prefix (`rules.egress`, `rules.secret_patterns.patterns`, `extensions.detection`). An override applies to a decision whose `matched_rule` equals the prefix or continues past it at a segment boundary (`.` or `[`); the longest matching prefix wins over the mode. A prefix MUST begin with `rules.` and name a rule block of this specification, or begin with `extensions.` and name an extension module (Section 9); any other prefix MUST be rejected at configuration time. For override matching, the `matched_rule` value `detection` that the detection pipeline reports is treated as `extensions.detection`.
 
 **Monitor mode fails closed.** An enforcement point configured so that monitor mode is reachable, as the mode or through an override, MUST refuse that configuration unless a receipt sink or an observer is attached: a shadow decision nobody records is indistinguishable from no policy.
 
@@ -773,7 +773,7 @@ A policy decision is what the evaluator computed; enforcement is what the enforc
 | `deny` | `enforce` | `blocked` |
 | `warn` or `deny` | `monitor` | `would_block` |
 
-An enforcement point with no confirmation channel MUST treat `warn` as `deny` (Section 6). Whatever the configured mode, three decisions MUST always be enforced: a deny produced by panic mode (Section 6.3), a deny produced because the enforcement point refused its policy after signature verification failed (`__hushspec_policy_unverified__`, Signing specification Section 6.5), and a deny produced by the unknown-action rule (`__unknown_action_type__`). The refused-policy state persists until a policy that verifies replaces it; every action in that state is denied and recorded.
+An enforcement point with no confirmation channel MUST treat `warn` as `deny` (Section 6). Whatever the configured mode, two decisions MUST always be enforced, and no override reaches them: a deny produced by panic mode (Section 6.3), and a deny produced because the enforcement point refused its policy after signature verification failed (`__hushspec_policy_unverified__`, Signing specification Section 6.5). The refused-policy state persists until a policy that verifies replaces it; every action in that state is denied and recorded.
 
 Test vectors: `fixtures/receipts/expected/` (the `enforcement` member of every expected receipt).
 
@@ -927,7 +927,7 @@ The v0.x series was the development series. Breaking changes (field removals, se
 
 ### 10.2 v1.0 and Later
 
-This document is a release candidate for 1.0.0. The 1.0.0 release is declared by a versioning decision recorded in `versioning.md` and `CHANGELOG.md`; until then, engines treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them.
+This document is a release candidate for 1.0.0. The 1.0.0 release is declared by a versioning decision recorded in `versioning.md` and `CHANGELOG.md`. Until it is declared, an engine is not required to accept `1.0.Z` documents, and the reference implementation accepts `0.1.Z` and `0.2.Z` only. From the declaration on, an engine that supports 1.0 MUST treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them.
 
 From 1.0.0, within a major version:
 - Minor versions MAY add new optional fields, rule blocks, and open-registry entries. Existing valid documents remain valid, keep their semantics, and keep their canonical content hash (Canonical Form specification, Section 3.2).
