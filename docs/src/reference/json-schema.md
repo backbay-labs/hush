@@ -23,8 +23,18 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-error-codes.v0.schema.json` | Schema for [`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml) and for the `<name>.expect.yaml` sidecars that pin the code each `invalid/` vector is rejected with |
 | `hushspec-merge-vector.v0.schema.json` | The merge-vector directory convention under `fixtures/*/merge/` (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, optional `fixture.yaml`) |
 | `hushspec-conformance-report.v0.schema.json` | Conformance report emitted by `hushspec-testkit --report`; see [Conformance Levels](conformance.md) |
+| `hushspec-report.v0.schema.json` | Evidence report 0.1: an aggregation over receipts and policy-in-effect events for one window, emitted by `h2h report --format json` |
+| `hushspec-registry-action-types.v0.schema.json` | Shape of [`spec/registries/action-types.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/action-types.yaml), the action types an evaluator dispatches on |
+| `hushspec-registry-capabilities.v0.schema.json` | Shape of [`spec/registries/capabilities.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/capabilities.yaml), the capabilities a posture state may grant |
+| `hushspec-registry-condition-types.v0.schema.json` | Shape of [`spec/registries/condition-types.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/condition-types.yaml), the `when` condition keys |
+| `hushspec-registry-detectors.v0.schema.json` | Shape of [`spec/registries/detectors.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/detectors.yaml), the reference detectors the detection extension names |
+| `hushspec-registry-media-types.v0.schema.json` | Shape of [`spec/registries/media-types.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/media-types.yaml), the media types registered for HushSpec documents |
+| `hushspec-registry-rule-blocks.v0.schema.json` | Shape of [`spec/registries/rule-blocks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/rule-blocks.yaml), the rule blocks `rules` may carry |
+| `hushspec-registry-rule-paths.v0.schema.json` | Shape of [`spec/registries/rule-paths.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/rule-paths.yaml), the rule paths a receipt may cite |
 
-Every schema is embedded in the `h2h` binary; `h2h schema --list` prints the names and `h2h schema <name>` prints one to stdout.
+The table is the whole of `schemas/`, and a test keeps it that way. Every
+schema is also embedded in the `h2h` binary; `h2h schema --list` prints the
+names and `h2h schema <name>` prints one to stdout.
 
 ## Where the schemas are served
 
@@ -35,16 +45,20 @@ at:
 https://hushspec.dev/schemas/<file>
 ```
 
-The docs deployment (`.github/workflows/docs.yml`) copies `schemas/` into the
-built site at `schemas/`, so the host serves exactly the directory this
+The docs deployment (`.github/workflows/docs.yml`) copies `schemas/*.json`
+into the built site at `schemas/`, so the host serves exactly the schemas this
 repository ships. Alongside them it publishes:
 
-- `https://hushspec.dev/schemas/index.json` -- every schema with its title,
-  description, and `$id`, built from the directory at deploy time, so it can
-  never name a schema the site does not serve.
-- `https://hushspec.dev/registries/<file>` -- the spec registries
-  (`frameworks.yaml`, `error-codes.yaml`) the schemas and lint rules
-  reference.
+- `https://hushspec.dev/schemas/index.json` -- one entry per schema, carrying
+  its file name, `$id`, title and description, under a `host` field and the
+  `commit` the deploy was built from. It is built from the directory being
+  copied at deploy time, so it can never name a schema the site does not
+  serve.
+- `https://hushspec.dev/registries/<file>` -- every registry under
+  [`spec/registries/`](https://github.com/backbay-labs/hush/tree/main/spec/registries),
+  published so the normative lists are readable at a stable URL. Nothing
+  resolves these over the network: the schemas above pin the registries by
+  shape, and the SDKs embed them.
 
 `hushspec.dev` resolving depends on one maintainer-side step outside the
 workflow: pointing the domain's DNS at GitHub Pages and setting it as the
@@ -57,8 +71,10 @@ and tracks `main` directly:
 https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
 ```
 
-The two URLs serve the same bytes. Only the canonical one is what a schema's
-`$id` declares, so prefer it once it resolves.
+Both URLs serve the same file. They can differ for as long as it takes a
+deploy to run -- raw GitHub tracks `main` directly, while the canonical host
+serves the last successful docs deploy. Only the canonical one is what a
+schema's `$id` declares, so prefer it once it resolves.
 
 ## Usage
 
