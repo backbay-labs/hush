@@ -122,7 +122,8 @@ describe('the test JSON Schema validator', () => {
     });
 
     it('treats false as accepting nothing', () => {
-      // Previously a raw TypeError out of the `'const' in schema` test.
+      // A boolean `false` is a schema, not an object, so it must not be
+      // probed with `in`.
       expect(errors({ type: 'object', properties: { a: false } }, { a: 1 })).toEqual([
         '$.a: the false schema accepts nothing',
       ]);

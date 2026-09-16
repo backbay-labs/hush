@@ -55,8 +55,7 @@ pub(crate) struct LintFinding {
     /// that can't point at a single list entry fall back to the file path.
     ///
     /// This is deliberately *not* the span lookup key: `fix::parse_location`
-    /// parses this grammar and must keep seeing exactly what it saw before
-    /// spans existed.
+    /// parses this grammar and must keep seeing exactly it.
     location: String,
     /// Document path of the offending key or list entry, used to look up a
     /// source span. `None` only for findings about the document as a whole.

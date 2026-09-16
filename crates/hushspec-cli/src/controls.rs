@@ -52,7 +52,7 @@ fn parse_path(rule_path: &str) -> Option<ParsedPath<'_>> {
 }
 
 /// The rule blocks the document declares, as dot paths (`rules.egress`), in
-/// document order. Drives the L011 coverage check and the audit coverage line.
+/// name order. Drives the L011 coverage check and the audit coverage line.
 #[must_use]
 pub fn rule_block_paths(doc: &Value) -> Vec<String> {
     doc.get("rules")

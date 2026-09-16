@@ -1,10 +1,8 @@
 //! Property-based round-trip tests for `crates/hushspec`.
 //!
-//! CLAUDE.md lists "property testing with proptest for serialization
-//! round-trip and schema validation code" as a repo-wide convention, but
-//! prior to this file the only proptest usage in the workspace lived in
-//! `crates/hushspec-testkit/src/gen.rs`. This file exercises the same idea
-//! directly against the core crate's own public API.
+//! Serialization round-trip and schema validation code is property-tested
+//! with proptest across the workspace. This file exercises that directly
+//! against the core crate's own public API.
 //!
 //! Deliberately does NOT depend on `hushspec-testkit`: that crate depends on
 //! `hushspec`, so depending on it back here would be a cycle. Strategies

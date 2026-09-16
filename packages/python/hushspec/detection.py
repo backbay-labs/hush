@@ -107,8 +107,10 @@ class DetectorRegistry:
 def default_detector_registry() -> "DetectorRegistry":
     """The built-in detectors, in the order their trace entries are recorded.
 
-    The shared singleton behind every detection-aware evaluation; the
-    detectors are stateless, so one registry serves the whole process.
+    The shared singleton behind every detection-aware evaluation. The
+    detectors are stateless -- ``detect()`` is a pure function of its input
+    string -- so one registry serves the whole process and no evaluation
+    recompiles their patterns.
     """
     global _default_registry
     if _default_registry is None:
@@ -708,10 +710,6 @@ _DEFAULT_PROMPT_INJECTION_BLOCK_AT = DetectionLevel.HIGH
 _DEFAULT_JAILBREAK_WARN_THRESHOLD = 50
 _DEFAULT_JAILBREAK_BLOCK_THRESHOLD = 80
 
-# The detectors themselves are stateless -- detect() is a pure function of its
-# input string -- so `default_detector_registry()` builds them once for the
-# process and every evaluation reads them from there rather than recompiling
-# their patterns.
 
 def _truncate_to_bytes(content: str, max_bytes: int) -> str:
     """Truncate *content* to at most *max_bytes* UTF-8 bytes.

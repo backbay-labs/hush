@@ -77,10 +77,10 @@ fn lint_reports_l009_when_no_base_supplies_secret_patterns() {
 }
 
 #[test]
-fn lint_no_longer_reports_l009_on_the_extends_fixture() {
+fn lint_reports_an_unresolvable_extends_instead_of_l009() {
     // fixtures/core/valid/extends-basic.yaml carries `extends:
     // "hushspec:default"`, a reference form no loader in this repo resolves,
-    // so linting it now reports the resolution failure instead of inventing
+    // so linting it reports the resolution failure rather than inventing
     // findings about blocks its base would have supplied.
     h2h()
         .arg("lint")

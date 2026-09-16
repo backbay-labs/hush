@@ -45,11 +45,11 @@ export type AsyncLoader = (reference: string, from?: string) => LoadedSpec | Pro
  * references are loaded, and (in `options`) what must be true of its
  * signatures before it may be used.
  *
- * `source` does double duty, exactly as it always has: it anchors relative
- * `extends` references *and* it is the identity the leaf carries into
- * {@link Resolution.chain} and into the signature locator. A caller that has a
- * real file path should pass it; a caller holding only a YAML string should
- * not invent one, and the leaf is then reported as {@link MEMORY_SOURCE}.
+ * `source` does double duty: it anchors relative `extends` references *and* it
+ * is the identity the leaf carries into {@link Resolution.chain} and into the
+ * signature locator. A caller that has a real file path should pass it; a
+ * caller holding only a YAML string should not invent one, and the leaf is then
+ * reported as {@link MEMORY_SOURCE}.
  */
 export interface ResolveInput {
   source?: string;

@@ -127,10 +127,6 @@ pub fn run(args: BundleArgs) -> i32 {
     }
 }
 
-// --------------------------------------------------------------------------
-// create
-// --------------------------------------------------------------------------
-
 fn create(args: CreateArgs) -> i32 {
     // The verify-on-load flags `eval`, `explain`, and `resolve` share, minus
     // `--key`: on `create` that names the *private* key the bundle is signed
@@ -310,10 +306,6 @@ fn report_create(statement: &Statement, envelope: &DsseEnvelope, out: &Path, for
     }
 }
 
-// --------------------------------------------------------------------------
-// verify
-// --------------------------------------------------------------------------
-
 fn verify(args: VerifyArgs) -> i32 {
     if !args.bundle.exists() {
         eprintln!(
@@ -492,10 +484,6 @@ fn report_failure(error: &BundleVerifyError, format: OutputFormat) {
     );
     eprintln!("  {}", error.detail);
 }
-
-// --------------------------------------------------------------------------
-// inspect
-// --------------------------------------------------------------------------
 
 fn inspect(args: InspectArgs) -> i32 {
     let text = match std::fs::read_to_string(&args.bundle) {

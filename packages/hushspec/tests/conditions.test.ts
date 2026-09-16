@@ -109,11 +109,8 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctx)).toBe(true);
     });
 
-    // Cross-SDK parity fix (spec item S1): array expected vs array actual
-    // matches iff the sets intersect (Rust computes a non-empty membership
-    // overlap, not strict equality) -- mirrors
-    // crates/hushspec/src/conditions.rs `context_condition_array_or_match`
-    // combined with the array-actual path of `matches_scalar_or_membership`.
+    // An array expected value against an array actual value matches when the
+    // sets intersect, not when they are equal (core spec 3.13).
     it('array expected vs array actual matches when the sets intersect', () => {
       const ctx: RuntimeContext = {
         user: { groups: ['engineering', 'ml-team'] },
@@ -134,12 +131,9 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctx)).toBe(false);
     });
 
-    // Cross-SDK parity fix (spec item S1): expected array vs actual scalar
-    // matches iff the scalar is a member of the expected array, for number
-    // and bool actual values too (previously TS only handled string
-    // membership here). Mirrors crates/hushspec/src/conditions.rs
-    // `context_condition_array_or_match_numbers` /
-    // `context_condition_array_or_match_booleans`.
+    // An array expected value against a scalar actual value matches when the
+    // scalar is a member of the array, for numbers and booleans as well as
+    // strings (core spec 3.13).
     it('array of expected numbers matches a scalar actual number (membership)', () => {
       const ctx: RuntimeContext = {
         session: { action_count: 2 },
