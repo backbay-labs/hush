@@ -12,7 +12,7 @@ from hushspec.observer import (
 )
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
-from hushspec.sinks import ReceiptSink
+from hushspec.sinks import MultiSink, ReceiptSink
 
 
 
@@ -399,6 +399,29 @@ class TestHushGuardObserverIntegration:
         assert len(errors) == 1
         assert errors[0]["error"] == "no space left on device"
         assert errors[0]["source"] == "FailingSink"
+
+    def test_a_sink_that_refuses_behind_a_multi_sink_names_the_child(self):
+        recorded: list[object] = []
+
+        class Recording(ReceiptSink):
+            def send(self, receipt):
+                recorded.append(receipt)
+
+        observer = EventCollector()
+        guard = HushGuard.from_yaml(
+            DENY_POLICY,
+            observer=observer,
+            sink=MultiSink([FailingSink(), Recording()]),
+        )
+        observer.events.clear()
+
+        assert guard.check(EvaluationAction(type="tool_call", target="dangerous_tool")) is False
+        assert len(recorded) == 1
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 1
+        assert errors[0]["error"] == "sink FailingSink: no space left on device"
+        assert errors[0]["source"] == "MultiSink"
 
 
 

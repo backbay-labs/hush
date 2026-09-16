@@ -21,6 +21,8 @@ from hushspec.otlp import (
     OtlpExportError,
     OtlpQueueFullError,
     OtlpReceiptSink,
+    _policy_event_record,
+    _receipt_record,
 )
 from hushspec.receipt import (
     ActionSummary,
@@ -251,15 +253,15 @@ class TestWireFormat:
         assert "hushspec.matched_rule" not in _attributes(collector.records[0])
 
     @pytest.mark.parametrize(
-        ("decision", "severity"),
+        ("decision", "severity", "number"),
         [
-            (Decision.ALLOW, "INFO"),
-            (Decision.WARN, "WARN"),
-            (Decision.DENY, "ERROR"),
+            (Decision.ALLOW, "INFO", 9),
+            (Decision.WARN, "WARN", 13),
+            (Decision.DENY, "ERROR", 17),
         ],
     )
     def test_severity_follows_the_decision(
-        self, collector: _Collector, decision: Decision, severity: str
+        self, collector: _Collector, decision: Decision, severity: str, number: int
     ):
         sink = _sink(collector)
         sink.send(_receipt(decision, outcome="blocked"))
@@ -267,6 +269,26 @@ class TestWireFormat:
         sink.close()
 
         assert collector.records[0]["severityText"] == severity
+        assert collector.records[0]["severityNumber"] == number
+
+    def test_a_receipt_and_a_policy_event_carry_the_same_record_members(self):
+        # The wire mapping every HushSpec SDK's exporter emits, so one
+        # collector pipeline and one set of dashboard queries read all four.
+        members = {
+            "timeUnixNano",
+            "observedTimeUnixNano",
+            "severityNumber",
+            "severityText",
+            "body",
+            "attributes",
+        }
+        receipt_record = _receipt_record(_receipt(Decision.DENY, outcome="blocked"))
+        event_record = _policy_event_record(
+            PolicyEvent.loaded(_policy_summary(), "enforce")
+        )
+
+        assert set(receipt_record) == members
+        assert set(event_record) == members
 
     def test_policy_events_are_exported(self, collector: _Collector):
         event = PolicyEvent.loaded(_policy_summary(), "monitor")

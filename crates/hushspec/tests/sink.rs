@@ -321,10 +321,9 @@ fn multi_sink_preserves_receipt_order() {
 
 #[test]
 fn multi_sink_reports_errors_from_every_failing_inner_sink() {
-    // MultiSink's doc comment promises: "Returns the first error but invokes
-    // all sinks." Verify both halves: the returned error is sink1's (the
-    // first failure), and every sink -- including sink2, which also fails,
-    // and sink3, which comes after two failures -- still runs.
+    // The returned error is the first failure, and every sink -- including
+    // sink2, which also fails, and sink3, which comes after two failures --
+    // still runs.
     let attempts = Arc::new(Mutex::new(Vec::new()));
     let a1 = Arc::clone(&attempts);
     let a2 = Arc::clone(&attempts);
@@ -350,6 +349,10 @@ fn multi_sink_reports_errors_from_every_failing_inner_sink() {
     assert!(
         err.to_string().contains("sink1 failed"),
         "expected the first inner sink's error, got: {err}"
+    );
+    assert!(
+        matches!(err, SinkError::Fanout { sink, .. } if sink == "CallbackSink"),
+        "the failure names the sink that refused, got: {err}"
     );
 
     assert_eq!(

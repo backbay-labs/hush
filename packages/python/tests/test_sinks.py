@@ -21,6 +21,7 @@ from hushspec.sinks import (
     MultiSink,
     NullSink,
     ReceiptSink,
+    SinkFanoutError,
     StderrReceiptSink,
 )
 
@@ -183,7 +184,7 @@ class TestMultiSink:
         assert count1[0] == 2
         assert count2[0] == 2
 
-    def test_continues_after_error(self):
+    def test_continues_after_error_then_reports_the_first_failure(self):
         count = [0]
 
         def failing(_r):
@@ -193,9 +194,12 @@ class TestMultiSink:
             count[0] += 1
 
         multi = MultiSink([CallbackSink(failing), CallbackSink(counting)])
-        # Should not raise even though first sink fails.
-        multi.send(_make_receipt())
+        with pytest.raises(SinkFanoutError) as raised:
+            multi.send(_make_receipt())
+
         assert count[0] == 1
+        assert raised.value.sink == "CallbackSink"
+        assert "test error" in str(raised.value)
 
 
 
@@ -294,14 +298,16 @@ class TestMultiSinkFailureReporting:
             [self._Exploding(), NullSink()],
             on_error=lambda sink, exc: seen.append((type(sink).__name__, str(exc))),
         )
-        multi.send(_make_receipt())
+        with pytest.raises(SinkFanoutError):
+            multi.send(_make_receipt())
         assert multi.dropped == 1
         assert seen == [("_Exploding", "sink is down")]
 
     def test_a_failing_sink_does_not_stop_the_others(self):
         recorded = []
         multi = MultiSink([self._Exploding(), CallbackSink(recorded.append)])
-        multi.send(_make_receipt())
+        with pytest.raises(SinkFanoutError):
+            multi.send(_make_receipt())
         assert len(recorded) == 1
         assert multi.dropped == 1
 
@@ -310,5 +316,43 @@ class TestMultiSinkFailureReporting:
             raise RuntimeError("handler is down too")
 
         multi = MultiSink([self._Exploding()], on_error=explode)
-        multi.send(_make_receipt())
+        with pytest.raises(SinkFanoutError):
+            multi.send(_make_receipt())
         assert multi.dropped == 1
+
+    def test_only_the_first_failure_is_raised(self):
+        class _AlsoExploding(ReceiptSink):
+            def send(self, receipt):
+                raise RuntimeError("the second sink is down too")
+
+        multi = MultiSink([self._Exploding(), _AlsoExploding()])
+        with pytest.raises(SinkFanoutError) as raised:
+            multi.send(_make_receipt())
+
+        assert raised.value.sink == "_Exploding"
+        assert multi.dropped == 2
+
+    def test_a_failing_policy_event_is_reported_the_same_way(self):
+        class _ExplodingEvents(ReceiptSink):
+            def send(self, receipt):
+                pass
+
+            def record_policy_event(self, event):
+                raise RuntimeError("no space left on device")
+
+        recorded = []
+
+        class _Recording(ReceiptSink):
+            def send(self, receipt):
+                pass
+
+            def record_policy_event(self, event):
+                recorded.append(event)
+
+        multi = MultiSink([_ExplodingEvents(), _Recording()])
+        with pytest.raises(SinkFanoutError) as raised:
+            multi.record_policy_event(PolicyEvent.loaded(_policy_summary(), "enforce"))
+
+        assert len(recorded) == 1
+        assert raised.value.sink == "_ExplodingEvents"
+        assert "no space left on device" in str(raised.value)

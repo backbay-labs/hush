@@ -589,12 +589,19 @@ func (m *MetricsCollector) OnEvaluation(
 	}
 }
 
-// OnError counts a failure the guard absorbed, and a policy load that failed.
+// OnError counts a failure the guard absorbed. A policy that would not load
+// is counted as a failed load as well; a sink that refused a receipt is not,
+// since the policy in force is unaffected by it.
 func (m *MetricsCollector) OnError(err error) {
+	var loadErr *PolicyLoadError
+	loadFailed := errors.As(err, &loadErr)
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errors++
-	m.policyLoads["failure"]++
+	if loadFailed {
+		m.policyLoads["failure"]++
+	}
 }
 
 // Snapshot copies every counter.

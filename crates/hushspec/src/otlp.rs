@@ -27,7 +27,7 @@
 //! | Log record field | Value |
 //! |---|---|
 //! | `timeUnixNano` | The receipt's (or policy event's) `timestamp`, as nanoseconds since the epoch, decimal string |
-//! | `observedTimeUnixNano` | When the batch was assembled |
+//! | `observedTimeUnixNano` | When the sink took the entry |
 //! | `severityText` / `severityNumber` | `INFO` / 9 for `allow`, `WARN` / 13 for `warn`, `ERROR` / 17 for `deny`; a policy event is `INFO` |
 //! | `body.stringValue` | The canonical JSON (RFC 8785) of the receipt, or of the policy event |
 //!
@@ -166,9 +166,24 @@ impl OtlpConfig {
     }
 }
 
-/// One thing to export.
+/// One thing to export, stamped with the moment the sink took it.
 #[derive(Clone, Debug)]
-enum Entry {
+struct Entry {
+    observed: u64,
+    payload: Payload,
+}
+
+impl Entry {
+    fn new(payload: Payload) -> Self {
+        Self {
+            observed: nanos_now(),
+            payload,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum Payload {
     Receipt(Box<DecisionReceipt>),
     Policy(Box<PolicyEvent>),
 }
@@ -285,7 +300,8 @@ impl OtlpSink {
         done.recv().is_ok()
     }
 
-    fn enqueue(&self, entry: Entry) -> Result<(), SinkError> {
+    fn enqueue(&self, payload: Payload) -> Result<(), SinkError> {
+        let entry = Entry::new(payload);
         let Some(sender) = self.sender.as_ref() else {
             return Err(SinkError::Io(std::io::Error::other(
                 "OTLP sink is shut down",
@@ -313,11 +329,11 @@ impl OtlpSink {
 
 impl ReceiptSink for OtlpSink {
     fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
-        self.enqueue(Entry::Receipt(Box::new(receipt.clone())))
+        self.enqueue(Payload::Receipt(Box::new(receipt.clone())))
     }
 
     fn record_policy_event(&self, event: &PolicyEvent) -> Result<(), SinkError> {
-        self.enqueue(Entry::Policy(Box::new(event.clone())))
+        self.enqueue(Payload::Policy(Box::new(event.clone())))
     }
 }
 
@@ -434,11 +450,7 @@ fn export(
 
 /// The OTLP/HTTP JSON `ExportLogsServiceRequest` for `batch`.
 fn request_body(batch: &[Entry], config: &OtlpConfig) -> Value {
-    let observed = nanos_now();
-    let records: Vec<Value> = batch
-        .iter()
-        .map(|entry| log_record(entry, observed))
-        .collect();
+    let records: Vec<Value> = batch.iter().map(log_record).collect();
 
     json!({
         "resourceLogs": [{
@@ -458,10 +470,11 @@ fn request_body(batch: &[Entry], config: &OtlpConfig) -> Value {
     })
 }
 
-fn log_record(entry: &Entry, observed: u64) -> Value {
+fn log_record(entry: &Entry) -> Value {
+    let observed = entry.observed;
     let mut attributes = Vec::new();
-    let (timestamp, severity_text, severity_number, body) = match entry {
-        Entry::Receipt(receipt) => {
+    let (timestamp, severity_text, severity_number, body) = match &entry.payload {
+        Payload::Receipt(receipt) => {
             attributes.push(attribute("hushspec.entry_type", "receipt"));
             attributes.push(attribute(
                 "hushspec.receipt_version",
@@ -501,7 +514,7 @@ fn log_record(entry: &Entry, observed: u64) -> Value {
                 receipt.canonical_json().unwrap_or_default(),
             )
         }
-        Entry::Policy(event) => {
+        Payload::Policy(event) => {
             attributes.push(attribute(
                 "hushspec.entry_type",
                 match event.event {
@@ -839,6 +852,41 @@ rules:
         assert_eq!(attributes["hushspec.enforcement.mode"], "enforce");
         assert_eq!(attributes["hushspec.enforcement.outcome"], "blocked");
         assert_eq!(sink.exported(), 1);
+    }
+
+    /// The `logRecord` members every HushSpec SDK's exporter emits, so one
+    /// collector pipeline reads all four (see the module's wire mapping).
+    const LOG_RECORD_MEMBERS: [&str; 6] = [
+        "timeUnixNano",
+        "observedTimeUnixNano",
+        "severityNumber",
+        "severityText",
+        "body",
+        "attributes",
+    ];
+
+    #[test]
+    fn a_receipt_and_a_policy_event_carry_the_same_record_members() {
+        let receipt = receipt("evil.test");
+        let event = PolicyEvent::loaded(receipt.policy.clone(), EnforcementMode::Enforce);
+        let entries = [
+            Entry::new(Payload::Receipt(Box::new(receipt))),
+            Entry::new(Payload::Policy(Box::new(event))),
+        ];
+        let mut expected = LOG_RECORD_MEMBERS.to_vec();
+        expected.sort_unstable();
+
+        for entry in &entries {
+            let record = log_record(entry);
+            let mut members: Vec<&str> = record
+                .as_object()
+                .expect("a record is an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            members.sort_unstable();
+            assert_eq!(members, expected);
+        }
     }
 
     #[test]

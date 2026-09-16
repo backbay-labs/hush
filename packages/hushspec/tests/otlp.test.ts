@@ -10,6 +10,9 @@ import {
   OtlpQueueOverflowError,
   OtlpReceiptSink,
   logsEndpoint,
+  nowUnixNano,
+  policyEventLogRecord,
+  receiptLogRecord,
   type OtlpAttribute,
   type OtlpLogRecord,
   type OtlpLogsPayload,
@@ -195,6 +198,25 @@ describe('OtlpReceiptSink wire format', () => {
 
     await sink.close();
     await collector.close();
+  });
+
+  it('gives a receipt and a policy event the same record members', () => {
+    // The wire mapping every HushSpec SDK's exporter emits, so one collector
+    // pipeline and one set of dashboard queries read all four.
+    const members = [
+      'attributes',
+      'body',
+      'observedTimeUnixNano',
+      'severityNumber',
+      'severityText',
+      'timeUnixNano',
+    ];
+    const observed = nowUnixNano(Date.parse('2026-03-15T00:00:02.000Z'));
+
+    expect(Object.keys(receiptLogRecord(makeReceipt('deny'), observed)).sort()).toEqual(members);
+    expect(Object.keys(policyEventLogRecord(makePolicyEvent('loaded'), observed)).sort()).toEqual(
+      members,
+    );
   });
 
   it('maps decisions onto severities', async () => {

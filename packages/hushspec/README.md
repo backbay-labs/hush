@@ -269,8 +269,9 @@ One `logRecord` per entry, with the wire mapping every HushSpec SDK emits:
 
 | OTLP field | Value |
 |---|---|
-| `timeUnixNano` | The receipt's or event's own `timestamp` (`observedTimeUnixNano` is the export time) |
-| `severityText` | `INFO` for `allow`, `WARN` for `warn`, `ERROR` for `deny`; `INFO` for a policy event |
+| `timeUnixNano` | The receipt's or event's own `timestamp` |
+| `observedTimeUnixNano` | When the sink took the entry |
+| `severityText` / `severityNumber` | `INFO`/9 for `allow`, `WARN`/13 for `warn`, `ERROR`/17 for `deny`; a policy event is `INFO`/9 |
 | `body.stringValue` | The entry's RFC 8785 canonical JSON -- byte for byte the form its hash covers |
 | attributes | `hushspec.entry_type` (`receipt`, `policy_loaded`, `policy_swapped`), `hushspec.receipt_version`, `hushspec.decision`, `hushspec.action_type`, `hushspec.matched_rule`, `hushspec.policy.content_hash`, `hushspec.receipt_hash`, `hushspec.enforcement.mode`, `hushspec.enforcement.outcome` |
 | resource attributes | `service.name` (default `hushspec`), `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |
