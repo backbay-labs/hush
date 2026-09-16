@@ -66,7 +66,7 @@ JSON Schema files are named `hushspec-<name>.v<major>.schema.json` and carry an 
 
 ## 10. Declaring 1.0.0
 
-The 1.0.0 release is declared when every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle for `1.0.0` is published, and every reference SDK accepts `1.0.z` documents. Until then, the family is a release candidate: engines treat a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 semantics without changing them.
+The 1.0.0 release is declared when every specification in the family carries the version `1.0.0` with status Stable, the conformance bundle for `1.0.0` is published, and every reference SDK accepts `1.0.z` documents. Until then, the family is a release candidate: engines are not required to accept `1.0.z` documents, and the reference implementation accepts `0.1.z` and `0.2.z` only. From the declaration on, an engine that supports 1.0 treats a `1.0.z` document exactly as a `0.2.z` document, because 1.0 freezes the 0.2 semantics without changing them.
 
 ## 11. Conformance Across Versions
 

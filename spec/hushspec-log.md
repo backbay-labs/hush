@@ -32,8 +32,8 @@ A log is a JSON Lines file: one entry per line, UTF-8, `\n`-terminated. Blank li
 | `receipt` | when `receipt` | A format 0.2 decision receipt, verbatim. |
 | `policy_event` | when `policy_loaded` / `policy_swapped` | Section 6. |
 | `log_started` | when `log_started` | Section 5. |
-| `entry_hash` | yes | `sha256:` over the RFC 8785 canonical form (Canonical Form spec, Section 4; no projection) of the entry with `entry_hash` and `signature` removed. |
-| `signature` | no | A policy-signature envelope (Signing spec, Section 4) whose `content_hash` is this entry's `entry_hash`. |
+| `entry_hash` | yes | `sha256:` over the RFC 8785 canonical form (Canonical Form specification, Section 4; no projection) of the entry with `entry_hash` and `signature` removed. |
+| `signature` | no | A policy-signature envelope (Signing specification, Section 4) whose `content_hash` is this entry's `entry_hash`. |
 
 Because `prev_hash` is inside the hashed content, every entry's hash commits to the entire history before it. Editing any earlier line changes its `entry_hash` and breaks the link the next line declares.
 
@@ -43,11 +43,11 @@ A writer MAY start a new file at any time. The new file's first entry MUST be a 
 
 ## 6. Policy-in-effect records
 
-An enforcement point MUST write a `policy_loaded` entry when it starts enforcing a policy and a `policy_swapped` entry when it replaces one (hot reload, panic policy), before any receipt evaluated under the new policy. The `policy_event` carries the same `policy` identity a receipt does (Receipt spec, Section 4.2: content hash, `extends_chain`, `signature` outcome), the `enforcement_mode` in force, the SDK name and version, and the HushSpec version the engine implements. `policy_swapped` also names the `previous_content_hash`. A reader can therefore map every receipt to the exact policy in force by walking back to the nearest policy event.
+An enforcement point MUST write a `policy_loaded` entry when it starts enforcing a policy and a `policy_swapped` entry when it replaces one (hot reload, panic policy), before any receipt evaluated under the new policy. The `policy_event` carries the same `policy` identity a receipt does (Receipt specification, Section 4.2: content hash, `extends_chain`, `signature` outcome), the `enforcement_mode` in force, the SDK name and version, and the HushSpec version the engine implements. `policy_swapped` also names the `previous_content_hash`. A reader can therefore map every receipt to the exact policy in force by walking back to the nearest policy event.
 
 ## 7. Signing
 
-When a writer holds a signing key it SHOULD sign every entry: `signature` is the 0.2 envelope produced over the entry hash exactly as a policy signature is produced over a policy hash (Signing spec, Section 4.2), with `content_hash` set to `entry_hash`. A verifier with a keyring MUST verify every signed entry with the ordered checks of Signing spec Section 6.2 and MUST report a signed entry it cannot verify as a break. A verifier configured to require signatures MUST reject an unsigned entry (reason `entry_unsigned`).
+When a writer holds a signing key it SHOULD sign every entry: `signature` is the 0.2 envelope produced over the entry hash exactly as a policy signature is produced over a policy hash (Signing specification, Section 4.2), with `content_hash` set to `entry_hash`. A verifier with a keyring MUST verify every signed entry with the ordered checks of Signing specification, Section 6.2 and MUST report a signed entry it cannot verify as a break. A verifier configured to require signatures MUST reject an unsigned entry (reason `entry_unsigned`).
 
 ## 8. Verification algorithm
 

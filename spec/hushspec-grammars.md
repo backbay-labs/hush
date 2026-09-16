@@ -21,9 +21,9 @@ Conformant implementations are not required to implement these grammars as parse
 lower       = %x61-7A                 ; a-z
 identifier  = lower *( lower / DIGIT / "_" )
 dotted-id   = identifier *( "." identifier )
-scalar      = %x00-10FFFF             ; any Unicode scalar value
-non-slash   = %x00-2E / %x30-10FFFF   ; any scalar value except "/"
-non-dot     = %x00-2D / %x2F-10FFFF   ; any scalar value except "."
+scalar      = %x00-D7FF / %xE000-10FFFF             ; any Unicode scalar value
+non-slash   = %x00-2E / %x30-D7FF / %xE000-10FFFF   ; any scalar value except "/"
+non-dot     = %x00-2D / %x2F-D7FF / %xE000-10FFFF   ; any scalar value except "."
 ```
 
 `dotted-id` is the identifier grammar of Core Section 3.13 for capability names and counter names.
@@ -55,15 +55,14 @@ A normalized path contains no `\`, no empty segment, no `.` segment, no `..` seg
 ### 2.2 Patterns
 
 ```abnf
-path-glob    = [ "/" ] [ globstar-lead ] glob-segments
-globstar-lead = "**/" *( "**/" )
+path-glob     = [ "/" ] glob-segments
 glob-segments = glob-segment *( "/" glob-segment )
 glob-segment  = "**" / 1*glob-atom
 glob-atom     = "*" / "?" / glob-literal
 glob-literal  = non-slash              ; "*" and "?" excluded by the alternatives above
 ```
 
-`*` matches zero or more `non-slash`; `?` matches exactly one `non-slash`; `**/` at the start of a pattern or after `/` matches zero or more complete leading segments; `**` elsewhere matches any sequence of scalar values including `/`. Every other character is literal, including `[`, `{`, `(`, `.`, `+`, `^`, `$`, `|`, and `\`. Patterns are anchored at both ends.
+`*` matches zero or more `non-slash`; `?` matches exactly one `non-slash`; `**` as a whole segment matches zero or more complete segments, so `a/**/b` matches `a/b`, `a/x/b`, and `a/x/y/b`; `**` inside a segment matches any sequence of scalar values including `/`. Every other character is literal, including `[`, `{`, `(`, `.`, `+`, `^`, `$`, `|`, and `\`. Patterns are anchored at both ends.
 
 - `+ **/.env` matches `.env`, `a/.env`, `a/b/.env`
 - `+ /home/**` matches `/home/x` and `/home/x/y`; `- /home/**` does not match `/home`
@@ -115,14 +114,13 @@ Fixture: `fixtures/core/evaluation/egress-host-normalization.test.yaml`.
 ## 4. Tool Identifiers (Core Section 3.7)
 
 ```abnf
-tool-id = 1*tool-char
-tool-char = %x21-10FFFF                 ; any scalar value except controls and space
+tool-id = *scalar
 ```
 
-Tool names are compared for equality after NFC normalization of both sides. There is no wildcard form; `*` in a tool list is the literal name `*`.
+A tool identifier is any string; the specification constrains neither its characters nor its length, and an empty entry matches only an action whose tool name is empty. Tool names are compared for equality after NFC normalization of both sides. There is no wildcard form; `*` in a tool list is the literal name `*`.
 
-- `+ read_file`, `+ mcp__github__create_issue`, `+ Deploy`
-- `- read file` (space), `- ""` (empty)
+- `+ read_file`, `+ mcp__github__create_issue`, `+ Deploy`, `+ read file`
+- `- Read_File` does not match `read_file` (case), `- read_*` does not match `read_file` (no wildcards)
 
 Fixture: `fixtures/core/evaluation/tool-glob-literal.test.yaml`, `fixtures/core/evaluation/tool-allowlist-deny.test.yaml`.
 
@@ -134,31 +132,35 @@ Rule paths name a rule block, a field within it, or one entry of a named list. T
 
 ```abnf
 rule-path      = block-path / extension-path / engine-rule
-block-path     = "rules" [ "." block-name [ "." field-path ] ]
+block-path     = "rules" [ "." block-name *( "." segment ) ]
 block-name     = "forbidden_paths" / "path_allowlist" / "egress" / "secret_patterns"
                / "patch_integrity" / "shell_commands" / "tool_access" / "computer_use"
                / "remote_desktop_channels" / "input_injection" / "browser_automation"
                / "code_execution"
-field-path     = identifier [ selector ] *( "." identifier [ selector ] )
-selector       = "[" selector-key "]"
-selector-key   = 1*DIGIT / 1*( scalar-no-bracket )
-scalar-no-bracket = %x21-5A / %x5C / %x5E-10FFFF   ; no "[" or "]"
-extension-path = "extensions" [ "." extension-name [ "." field-path ] ]
+extension-path = "extensions" [ "." extension-name *( "." segment ) ]
 extension-name = "posture" / "origins" / "detection"
+segment        = name [ index ]
+name           = 1*name-char
+name-char      = %x00-2D / %x2F-5A / %x5C-D7FF / %xE000-10FFFF   ; any scalar value except "." and "["
+index          = "[" 1*DIGIT "]"
 engine-rule    = "__hushspec_panic__" / "__unknown_action_type__"
                / "__hushspec_policy_unverified__" / "detection"
 ```
 
-A numeric selector names a list position (0-based); a non-numeric selector names the list entry whose `name` (secret patterns) or `id` (origins profiles) equals it. The four `engine-rule` values are reserved: three name engine stages that precede rule evaluation, and `detection` is the `matched_rule` of a decision the detection pipeline produced. The closed set of `rule_block` identifiers a receipt's trace may carry is the registry `spec/registries/rule-paths.yaml`.
+A path descends from a rule block or an extension module one segment at a time. A segment is a schema field name (`rules.egress.default`) or the `name` or `id` of a named entry written verbatim (`rules.secret_patterns.patterns.aws_access_key`, `extensions.origins.profiles.ci.egress.block`, `extensions.posture.states.locked.capabilities`). A list of unnamed entries is addressed by a zero-based `index` on the field that holds it (`rules.shell_commands.forbidden_patterns[0]`). Because entry names are verbatim, a name that contains `.` or `[` yields a path that cannot be split unambiguously; authors SHOULD avoid such names. Control mappings address named entries with a bracketed selector instead (Section 6).
 
-- `+ rules.egress`, `+ rules.secret_patterns.patterns[aws_access_key]`, `+ rules.tool_access.block[2]`, `+ extensions.origins.profiles[ci].egress`, `+ __hushspec_panic__`
-- `- rules.Egress` (case), `- rules.egress.allow[` (unterminated selector), `- rule.egress` (prefix)
+The four `engine-rule` values are reserved: three name engine stages that precede rule evaluation, and `detection` is the `matched_rule` of a decision the detection pipeline produced. The closed set of `rule_block` identifiers a receipt's trace may carry is the registry `spec/registries/rule-paths.yaml`.
+
+- `+ rules.egress`, `+ rules.egress.allow`, `+ rules.secret_patterns.patterns.aws_access_key`, `+ rules.tool_access.max_args_size`, `+ rules.patch_integrity.forbidden_patterns[2]`, `+ extensions.origins.profiles.ci.tool_access.allow`, `+ extensions.posture.states.locked.capabilities`, `+ __hushspec_panic__`
+- `- rules.Egress` (case), `- rules.egress.allow[` (unterminated index), `- rule.egress` (prefix)
+
+Fixture: `fixtures/receipts/expected/` (every `matched_rule` and `rule_path` in the expected receipts).
 
 ---
 
 ## 6. Control Mapping Paths (Core Section 2.5.1)
 
-A control mapping's `rule_paths` entries use `block-path` and `extension-path` from Section 5 without the `engine-rule` alternative. `rules` alone maps a control to every rule block; `extensions.posture` maps it to the whole extension.
+A control mapping's `rule_paths` entries use the grammar of Core Section 2.5.1: the `block-path` and `extension-path` shapes of Section 5 without the `engine-rule` alternative, except that a named entry is addressed by a bracketed selector holding its `name` or `id` (`rules.secret_patterns.patterns[ssn]`) rather than by a verbatim segment. `rules` alone maps a control to every rule block; `extensions.posture` maps it to the whole extension.
 
 - `+ rules`, `+ rules.egress`, `+ rules.secret_patterns.patterns[ssn]`, `+ extensions.posture`
 - `- __hushspec_panic__` (not a document path), `- rules.egress.allow[*]` (no wildcards)
@@ -220,10 +222,10 @@ group          = "(" [ "?:" ] alternation ")"
 bracket        = "[" [ "^" ] 1*bracket-item "]"
 bracket-item   = class-escape / bracket-range / bracket-atom
 bracket-range  = bracket-atom "-" bracket-atom
-bracket-atom   = escape / %x20-5B / %x5E-10FFFF   ; any scalar value except "]" and "\"
+bracket-atom   = escape / %x20-5B / %x5E-D7FF / %xE000-10FFFF   ; any scalar value except "]" and "\"
 ```
 
-Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences, possessive quantifiers, atomic groups, conditionals, named groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or flag groups after the first character; a quantified group whose body is itself unbounded is rejected; a pattern is at most 2048 bytes.
+Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences, possessive quantifiers, atomic groups, conditionals, named groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or flag groups after the first character; a quantified group whose body is itself unbounded is rejected. The specification sets no length limit on a pattern.
 
 - `+ (?i)ignore (all )?previous instructions`, `+ [0-9]{3}-[0-9]{2}-[0-9]{4}`, `+ \bsecret\b`
 - `- (?=rm)` (lookahead), `- (a+)+` (nested unbounded), `- foo(?i)bar` (mid-pattern flag), `- \p{L}` (property class)
