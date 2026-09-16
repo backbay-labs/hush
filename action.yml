@@ -78,16 +78,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        case "${{ runner.os }}" in
+        case "$RUNNER_OS" in
           Linux) os=linux ;;
           macOS) os=darwin ;;
           Windows) os=windows ;;
-          *) echo "::error::unsupported runner.os '${{ runner.os }}'"; exit 1 ;;
+          *) echo "::error::unsupported runner.os '${RUNNER_OS}'"; exit 1 ;;
         esac
-        case "${{ runner.arch }}" in
+        case "$RUNNER_ARCH" in
           X64) arch=x64 ;;
           ARM64) arch=arm64 ;;
-          *) echo "::error::unsupported runner.arch '${{ runner.arch }}' (h2h publishes linux/macOS x64+arm64 and windows x64)"; exit 1 ;;
+          *) echo "::error::unsupported runner.arch '${RUNNER_ARCH}' (h2h publishes linux/macOS x64+arm64 and windows x64)"; exit 1 ;;
         esac
         # Keep this table in lockstep with release.yml's build matrix and
         # scripts/gen_npm_cli.mjs's PLATFORMS -- all three enumerate the same
@@ -113,18 +113,20 @@ runs:
     - name: Build h2h from source
       if: inputs.version == 'source'
       shell: bash
+      env:
+        H2H_BINDIR: ${{ steps.platform.outputs.bindir }}
+        H2H_ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        bindir="${{ steps.platform.outputs.bindir }}"
-        mkdir -p "$bindir"
-        # github.action_path is this action's own checkout -- the full hush
+        mkdir -p "$H2H_BINDIR"
+        # H2H_ACTION_PATH is this action's own checkout -- the full hush
         # repository at the pinned ref, whether it was referenced locally
         # (uses: ./) or remotely (uses: backbay-labs/hush@<ref>) -- so
         # crates/hushspec-cli exists there regardless of what the caller's
         # own checkout looks like.
-        cargo install --path "${{ github.action_path }}/crates/hushspec-cli" \
+        cargo install --path "${H2H_ACTION_PATH}/crates/hushspec-cli" \
           --locked --root "${RUNNER_TEMP}/hushspec-action" --force
-        echo "$bindir" >> "$GITHUB_PATH"
+        echo "$H2H_BINDIR" >> "$GITHUB_PATH"
 
     - name: Cache h2h binary
       if: inputs.version != 'source'
@@ -139,10 +141,14 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_VERSION: ${{ inputs.version }}
+        H2H_TARGET: ${{ steps.platform.outputs.target }}
+        H2H_BIN: ${{ steps.platform.outputs.bin }}
+        H2H_BINDIR: ${{ steps.platform.outputs.bindir }}
       run: |
         set -euo pipefail
         repo=backbay-labs/hush
-        tag="${{ inputs.version }}"
+        tag="$INPUT_VERSION"
         if [ "$tag" = latest ]; then
           tag="$(gh release view --repo "$repo" --json tagName -q .tagName)" || {
             echo "::error::could not resolve the latest release for $repo (no releases published yet? pass version: source to build crates/hushspec-cli from this checkout instead)"
@@ -150,9 +156,9 @@ runs:
           }
         fi
 
-        target="${{ steps.platform.outputs.target }}"
-        bin="${{ steps.platform.outputs.bin }}"
-        bindir="${{ steps.platform.outputs.bindir }}"
+        target="$H2H_TARGET"
+        bin="$H2H_BIN"
+        bindir="$H2H_BINDIR"
         asset="h2h-${tag}-${target}.tar.gz"
         work="${RUNNER_TEMP}/hushspec-action/dl"
         mkdir -p "$work" "$bindir"
@@ -191,19 +197,30 @@ runs:
     - name: Add h2h to PATH
       if: inputs.version != 'source'
       shell: bash
-      run: echo "${{ steps.platform.outputs.bindir }}" >> "$GITHUB_PATH"
+      env:
+        H2H_BINDIR: ${{ steps.platform.outputs.bindir }}
+      run: echo "$H2H_BINDIR" >> "$GITHUB_PATH"
 
     - name: Run h2h
       id: run
       shell: bash
+      # Every input reaches the script through the environment: interpolating
+      # one into the script text would let its contents be parsed as shell.
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_FORMAT: ${{ inputs.format }}
+        INPUT_FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        INPUT_KEYRING: ${{ inputs.keyring }}
+        INPUT_REPORT_FILE: ${{ inputs.report-file }}
+        INPUT_PATHS: ${{ inputs.paths }}
       run: |
         set -euo pipefail
-        command="${{ inputs.command }}"
-        format="${{ inputs.format }}"
-        fail_on_warnings="${{ inputs.fail-on-warnings }}"
-        keyring="${{ inputs.keyring }}"
-        report_file="${{ inputs.report-file }}"
-        paths_input="${{ inputs.paths }}"
+        command="$INPUT_COMMAND"
+        format="$INPUT_FORMAT"
+        fail_on_warnings="$INPUT_FAIL_ON_WARNINGS"
+        keyring="$INPUT_KEYRING"
+        report_file="$INPUT_REPORT_FILE"
+        paths_input="$INPUT_PATHS"
 
         case "$format" in
           text) ext=txt ;;
