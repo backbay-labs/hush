@@ -613,6 +613,9 @@ pub mod http {
         (IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0)), 8), // multicast
     ];
 
+    /// Default number of cached URLs: two maximum-depth chains.
+    pub const DEFAULT_CACHE_MAX_ENTRIES: usize = 64;
+
     /// How the HTTPS loader behaves. The defaults are the safe ones.
     #[derive(Clone, Debug)]
     pub struct HttpLoaderConfig {
@@ -637,6 +640,10 @@ pub mod http {
         pub allowed_hosts: Option<Vec<String>>,
         /// Where `ETag` revalidation state lives. `None` disables it.
         pub cache_dir: Option<PathBuf>,
+        /// How many URLs the cache keeps. The oldest entries are evicted
+        /// first once the cap is reached, so a chain of documents cannot
+        /// grow the cache without bound.
+        pub cache_max_entries: usize,
     }
 
     impl Default for HttpLoaderConfig {
@@ -649,6 +656,7 @@ pub mod http {
                 auth_header: None,
                 allowed_hosts: None,
                 cache_dir: None,
+                cache_max_entries: DEFAULT_CACHE_MAX_ENTRIES,
             }
         }
     }
@@ -1048,6 +1056,7 @@ pub mod http {
         url: &str,
         etag: &str,
         body: &str,
+        max_entries: usize,
     ) -> Result<(), std::io::Error> {
         fs::create_dir_all(cache_dir)?;
         let key = cache_key(url);
@@ -1060,6 +1069,42 @@ pub mod http {
             serde_json::to_string(&entry).unwrap_or_default(),
         )?;
         fs::write(cache_dir.join(format!("{key}.yaml")), body)?;
+        evict_oldest(cache_dir, max_entries)
+    }
+
+    /// Keep at most `max_entries` cached URLs, dropping the oldest metadata
+    /// files and their bodies first.
+    fn evict_oldest(cache_dir: &Path, max_entries: usize) -> Result<(), std::io::Error> {
+        let mut entries: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(cache_dir)?
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let path = entry.path();
+                let is_meta = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.ends_with(".meta.json"));
+                if !is_meta {
+                    return None;
+                }
+                let modified = entry.metadata().and_then(|meta| meta.modified()).ok()?;
+                Some((modified, path))
+            })
+            .collect();
+        if entries.len() <= max_entries {
+            return Ok(());
+        }
+        entries.sort();
+        for (_, meta_path) in entries.iter().take(entries.len() - max_entries) {
+            let body_path = meta_path.with_file_name(
+                meta_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.replace(".meta.json", ".yaml"))
+                    .unwrap_or_default(),
+            );
+            let _ = fs::remove_file(meta_path);
+            let _ = fs::remove_file(body_path);
+        }
         Ok(())
     }
 
@@ -1111,7 +1156,13 @@ pub mod http {
             }
         } else {
             if let (Some(etag), Some(cache_dir)) = (&result.etag, &config.cache_dir) {
-                let _ = write_cache(cache_dir, url_str, etag, &result.body);
+                let _ = write_cache(
+                    cache_dir,
+                    url_str,
+                    etag,
+                    &result.body,
+                    config.cache_max_entries,
+                );
             }
             result.body
         };
@@ -1481,13 +1532,49 @@ pub mod http {
             let etag = "\"abc123\"";
             let body = "hushspec: \"0.1.0\"\nname: cached\n";
 
-            write_cache(&dir, url, etag, body).expect("cache write should succeed");
+            write_cache(&dir, url, etag, body, DEFAULT_CACHE_MAX_ENTRIES)
+                .expect("cache write should succeed");
 
             let (cached_etag, cached_body) = read_cache(&dir, url).expect("cache read should hit");
             assert_eq!(cached_etag, etag);
             assert_eq!(cached_body, body);
 
             assert!(read_cache(&dir, "https://other.com/policy.yaml").is_none());
+
+            fs::remove_dir_all(&dir).expect("cache directory should be removable");
+        }
+
+        #[test]
+        fn evicts_the_oldest_entries_past_the_cap() {
+            let dir = std::env::temp_dir().join(format!(
+                "hushspec-cache-evict-{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock should be after the epoch")
+                    .as_nanos()
+            ));
+            let urls: Vec<String> = (0..4)
+                .map(|i| format!("https://example.com/policy-{i}.yaml"))
+                .collect();
+            for (i, url) in urls.iter().enumerate() {
+                write_cache(&dir, url, "\"etag\"", "hushspec: \"0.1.0\"\n", usize::MAX)
+                    .expect("cache write should succeed");
+                let written =
+                    std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000 + i as u64);
+                fs::OpenOptions::new()
+                    .write(true)
+                    .open(dir.join(format!("{}.meta.json", cache_key(url))))
+                    .and_then(|file| file.set_modified(written))
+                    .expect("modification time should be settable");
+            }
+
+            evict_oldest(&dir, 2).expect("eviction should succeed");
+
+            assert!(read_cache(&dir, &urls[0]).is_none());
+            assert!(read_cache(&dir, &urls[1]).is_none());
+            assert!(read_cache(&dir, &urls[2]).is_some());
+            assert!(read_cache(&dir, &urls[3]).is_some());
+            assert!(!dir.join(format!("{}.yaml", cache_key(&urls[0]))).exists());
 
             fs::remove_dir_all(&dir).expect("cache directory should be removable");
         }
