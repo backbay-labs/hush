@@ -21,7 +21,9 @@ import (
 //     optional enum-ish strings (match.visibility, metadata.classification, ...)
 //     as plain strings, so a present-but-empty "" is indistinguishable from an
 //     absent field in the typed struct; the schema treats "" (and any other
-//     out-of-set value) as a real, invalid value.
+//     out-of-set value) as a real, invalid value. The top-level `name` is the
+//     same shape: it is optional, but present it MUST be non-empty (core spec
+//     2; `minLength: 1` in the v1 core schema).
 //   - A posture extension missing its required `transitions` key, which the
 //     schema requires and supplies no default for.
 //
@@ -37,6 +39,7 @@ func validateRawDocument(yamlStr string) []ValidationError {
 	}
 
 	var errs rawIssues
+	validateRawName(root, &errs)
 	checkRawVariant(root, "merge_strategy", "merge_strategy", MergeStrategies, &errs)
 	validateRawRules(rawObject(root, "rules"), &errs)
 	validateRawExtensions(rawObject(root, "extensions"), &errs)
@@ -64,6 +67,21 @@ func (r *rawIssues) addConstraint(path, message string) {
 	r.items = append(r.items, ValidationError{
 		Code: ErrorCodeConstraint, Kind: "INVALID_VALUE", Path: path, Message: message,
 	})
+}
+
+// validateRawName refuses a present but empty top-level `name` (core spec 2).
+// A bundle's subject and a receipt's policy summary both name the policy, and
+// an empty name names nothing. Only the raw document separates `name: ""` from
+// an absent `name`, which the typed model spells the same way; `name: null` is
+// an absent name, as it is to every other SDK.
+func validateRawName(root map[string]any, errs *rawIssues) {
+	value, present := root["name"]
+	if !present {
+		return
+	}
+	if name, isString := value.(string); isString && name == "" {
+		errs.addConstraint("name", "name: must not be empty when present")
+	}
 }
 
 // rawConditionBlocks are the rule blocks whose `when` the raw validator walks.

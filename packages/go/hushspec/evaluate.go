@@ -375,10 +375,13 @@ func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile)
 		if !present {
 			return inactiveAbsentBlocks[block]
 		}
-		// egress and tool_call are scanned only when they carry content.
+		// egress and tool_call are scanned only when they carry content. The
+		// block is configured, so the trace says the scan was not consulted
+		// rather than that no scan exists -- checked before `enabled` and the
+		// conditions, as the reference implementation checks it.
 		pathBearing := e.action.Type == "file_write" || e.action.Type == "patch_apply"
 		if !pathBearing && !e.action.HasContent() {
-			return inactiveAbsentBlocks[block]
+			return inactiveContentNotSupplied[block]
 		}
 		return e.activity(block)
 
@@ -410,9 +413,10 @@ func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile)
 		if reason := e.activity(block); reason != nil {
 			return reason
 		}
-		// A target that names no channel leaves the block unevaluated.
+		// A target that names no channel leaves the configured block
+		// unevaluated, which the trace distinguishes from an absent block.
 		if remoteDesktopChannel(e.action.Target) == "" {
-			return inactiveAbsentBlocks[block]
+			return inactiveTargetNotAChannel[block]
 		}
 		return nil
 

@@ -77,23 +77,32 @@ var blockNames = [blockCount]string{
 // The applicable-block lists of core spec Section 5, allocated once instead of
 // per evaluation. They are read-only.
 var (
-	blocksFileRead       = []blockID{blockForbiddenPaths, blockPathAllowlist}
-	blocksFileWrite      = []blockID{blockForbiddenPaths, blockPathAllowlist, blockSecretPatterns}
-	blocksPatchApply     = []blockID{blockForbiddenPaths, blockPathAllowlist, blockPatchIntegrity, blockSecretPatterns}
-	blocksShellCommand   = []blockID{blockShellCommands}
-	blocksEgress         = []blockID{blockEgress, blockSecretPatterns}
-	blocksToolCall       = []blockID{blockToolAccess, blockSecretPatterns}
-	blocksComputerUse    = []blockID{blockComputerUse, blockRemoteDesktopChannels}
-	blocksInputInject    = []blockID{blockInputInjection}
-	blocksBrowserAction  = []blockID{blockBrowserAutomation}
-	blocksCodeExec       = []blockID{blockCodeExecution}
-	inactiveAbsentBlocks = newInactiveAbsentBlocks()
+	blocksFileRead             = []blockID{blockForbiddenPaths, blockPathAllowlist}
+	blocksFileWrite            = []blockID{blockForbiddenPaths, blockPathAllowlist, blockSecretPatterns}
+	blocksPatchApply           = []blockID{blockForbiddenPaths, blockPathAllowlist, blockPatchIntegrity, blockSecretPatterns}
+	blocksShellCommand         = []blockID{blockShellCommands}
+	blocksEgress               = []blockID{blockEgress, blockSecretPatterns}
+	blocksToolCall             = []blockID{blockToolAccess, blockSecretPatterns}
+	blocksComputerUse          = []blockID{blockComputerUse, blockRemoteDesktopChannels}
+	blocksInputInject          = []blockID{blockInputInjection}
+	blocksBrowserAction        = []blockID{blockBrowserAutomation}
+	blocksCodeExec             = []blockID{blockCodeExecution}
+	inactiveAbsentBlocks       = newInactiveBlocks("no %s rule configured")
+	inactiveContentNotSupplied = newInactiveBlocks(
+		"content not supplied; %s not consulted")
+	inactiveTargetNotAChannel = newInactiveBlocks(
+		"target is not a remote desktop channel; %s not consulted")
 )
 
-func newInactiveAbsentBlocks() [blockCount]*inactive {
+// newInactiveBlocks builds the per-block reason a trace records when a block
+// is skipped for one cause, with format naming the block. A skipped block says
+// which of the causes of receipt spec 4.3 applied -- "not configured" and
+// "configured but not consulted for this action" are different facts about the
+// policy, and an auditor reading the trace must be able to tell them apart.
+func newInactiveBlocks(format string) [blockCount]*inactive {
 	var out [blockCount]*inactive
 	for id := blockID(0); id < blockCount; id++ {
-		out[id] = &inactive{reason: fmt.Sprintf("no %s rule configured", blockNames[id])}
+		out[id] = &inactive{reason: fmt.Sprintf(format, blockNames[id])}
 	}
 	return out
 }

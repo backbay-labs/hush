@@ -9,18 +9,20 @@ import "strings"
 // which is the *specification* version the engine implements.
 
 // Version is the HushSpec version this engine writes by default.
-const Version = "0.2.0"
+const Version = "1.0.0"
 
 // SupportedMinors lists the minor versions this engine accepts, as "X.Y"
 // strings. Version acceptance follows core spec 2.2: an engine that supports a
 // minor version X.Y accepts every X.Y.Z document, because patch versions carry
-// only clarifications and errata.
-var SupportedMinors = []string{"0.1", "0.2"}
+// only clarifications and errata. This engine implements the 1.0.0 semantics,
+// which are identical to 0.2.0 -- a 1.0.Z document is treated exactly as a
+// 0.2.Z document (core spec 10.2) -- and also accepts 0.1.x documents.
+var SupportedMinors = []string{"0.1", "0.2", "1.0"}
 
 // SupportedVersions lists one representative full version per supported minor.
 // It is for display only -- use [IsSupported] for acceptance, which accepts
 // every patch level of a supported minor.
-var SupportedVersions = []string{"0.1.0", "0.2.0"}
+var SupportedVersions = []string{"0.1.0", "0.2.0", "1.0.0"}
 
 // IsSupported reports whether version is a well-formed "X.Y.Z" string whose
 // minor version this engine supports. Any patch level of a supported minor is

@@ -53,7 +53,7 @@ var (
 const expectedErrorSidecarSuffix = ".expect.yaml"
 
 // expectedError is a `<name>.expect.yaml` sidecar
-// (schemas/hushspec-error-codes.v0.schema.json#/$defs/ExpectedError).
+// (schemas/hushspec-error-codes.v1.schema.json#/$defs/ExpectedError).
 type expectedError struct {
 	// Reject is always true: a sidecar describes a refusal and nothing else.
 	Reject bool `yaml:"reject"`
@@ -440,7 +440,7 @@ func mergeFixtureManifestRejects(t *testing.T, path, name, stem string) (bool, b
 }
 
 // supportedTestVersions are the `hushspec_test` fixture-format versions this
-// runner accepts (schemas/hushspec-evaluator-test.v0.schema.json). 0.2.0 adds
+// runner accepts (schemas/hushspec-evaluator-test.v1.schema.json). 0.2.0 adds
 // per-case controls and tags and the rule_trace / receipt assertions.
 var supportedTestVersions = []string{"0.1.0", "0.2.0"}
 

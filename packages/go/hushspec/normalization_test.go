@@ -141,23 +141,69 @@ func TestPunycodeMatchesRFCExamples(t *testing.T) {
 }
 
 // TestEveryPatchOfASupportedMinorIsAccepted covers core spec 2.2: an engine
-// declaring support for minor X.Y accepts every X.Y.Z document.
+// declaring support for minor X.Y accepts every X.Y.Z document. The engine
+// declares 0.1, 0.2 and 1.0 (core spec 10.2), and 1.7 is the unsupported
+// minor the invalid vector pins.
 func TestEveryPatchOfASupportedMinorIsAccepted(t *testing.T) {
-	for _, version := range []string{"0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7"} {
+	for _, version := range []string{"0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7", "1.0.0", "1.0.3"} {
 		if !IsSupported(version) {
 			t.Errorf("expected %q to be supported", version)
 		}
 	}
-	for _, version := range []string{"0.3.0", "1.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", "", "0.1.-1"} {
+	for _, version := range []string{"0.3.0", "1.1.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", "", "0.1.-1"} {
 		if IsSupported(version) {
 			t.Errorf("expected %q to be rejected", version)
 		}
 	}
-	if Version != "0.2.0" {
-		t.Errorf("expected engine version 0.2.0, got %q", Version)
+	if Version != "1.0.0" {
+		t.Errorf("expected engine version 1.0.0, got %q", Version)
 	}
-	if SupportedMinor("0.1.7") != "0.1" || SupportedMinor("0.2.7") != "0.2" {
+	if SupportedMinor("0.1.7") != "0.1" || SupportedMinor("0.2.7") != "0.2" ||
+		SupportedMinor("1.0.7") != "1.0" {
 		t.Error("expected SupportedMinor to report the X.Y minor of a supported version")
+	}
+}
+
+// TestAOnePointZeroDocumentIsEvaluatedAsAZeroPointTwoDocument covers core spec
+// 10.2: 1.0 freezes the 0.2 semantics without changing them, so one document
+// declared under either version validates alike and reaches the same decision
+// by the same rule.
+func TestAOnePointZeroDocumentIsEvaluatedAsAZeroPointTwoDocument(t *testing.T) {
+	const document = `hushspec: "%s"
+name: version-equivalence
+rules:
+  egress:
+    allow:
+      - api.example.com
+    default: block
+`
+	action := &EvaluationAction{Type: "egress", Target: "blocked.example.com"}
+
+	var hashes []string
+	for _, version := range []string{"0.2.0", "1.0.0"} {
+		spec, err := Parse(fmt.Sprintf(document, version))
+		if err != nil {
+			t.Fatalf("parse the %s document: %v", version, err)
+		}
+		if result := Validate(spec); !result.IsValid() {
+			t.Fatalf("%s did not validate: %+v", version, result.Errors)
+		}
+		decision := Evaluate(spec, action)
+		if decision.Decision != DecisionDeny || decision.MatchedRule != "rules.egress.default" {
+			t.Errorf("%s: got %s from %s, want deny from rules.egress.default",
+				version, decision.Decision, decision.MatchedRule)
+		}
+		hash, err := ContentHash(spec)
+		if err != nil {
+			t.Fatalf("hash the %s document: %v", version, err)
+		}
+		hashes = append(hashes, hash)
+	}
+
+	// The `hushspec` field is part of the canonical form, so the two hashes
+	// differ; what must not differ is that each is stable and well formed.
+	if hashes[0] == hashes[1] {
+		t.Error("two documents declaring different versions hashed the same")
 	}
 }
 

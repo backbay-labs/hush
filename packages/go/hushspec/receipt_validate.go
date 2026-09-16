@@ -8,7 +8,7 @@ import (
 )
 
 // Structural validation of a decision receipt against
-// schemas/hushspec-receipt.v0.schema.json.
+// schemas/hushspec-receipt.v1.schema.json.
 //
 // Parsing already enforces the schema's types and `additionalProperties:
 // false` (unknown members are a parse error). What a typed model cannot say is
@@ -30,8 +30,10 @@ var (
 	// fractional digits and a Z suffix.
 	receiptTimestampPattern = regexp.MustCompile(
 		`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$`)
-	// receiptSpecVersionPattern is $defs.PolicySummary.spec_version.
-	receiptSpecVersionPattern = regexp.MustCompile(`^0\.[0-9]+\.[0-9]+$`)
+	// receiptSpecVersionPattern is $defs.PolicySummary.spec_version. The v1
+	// schema widened it to the 1.x lineage, so a receipt for a 1.0.z policy
+	// validates (core spec 10.2).
+	receiptSpecVersionPattern = regexp.MustCompile(`^(0|1)\.[0-9]+\.[0-9]+$`)
 )
 
 // receiptTimeSources is $.time_source (receipt spec 3.3).

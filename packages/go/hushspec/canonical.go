@@ -119,7 +119,7 @@ func emptyArrayDefault() any { return []any{} }
 
 // canonicalSchemaRules mirrors, per generated model type, the `default` and
 // `required` declarations of schemas/hushspec-{core,posture,origins,detection}
-// .v0.schema.json plus the presence-significant exceptions listed in
+// .v1.schema.json plus the presence-significant exceptions listed in
 // spec/hushspec-canonical.md section 3.3. A type absent from this map, or a
 // property absent from its entry, has no default, is not required, and is not
 // presence-significant.

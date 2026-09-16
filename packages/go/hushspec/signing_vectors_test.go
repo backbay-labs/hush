@@ -616,8 +616,8 @@ func loadSignatureSchema(t *testing.T) jsonSchemaShape {
 	t.Helper()
 	root := fixtureRepoRoot(t)
 	candidates := []string{
-		filepath.Join(root, "schemas", "staged", "0.2.0", "hushspec-signature.v0.schema.json"),
-		filepath.Join(root, "schemas", "hushspec-signature.v0.schema.json"),
+		filepath.Join(root, "schemas", "staged", "0.2.0", "hushspec-signature.v1.schema.json"),
+		filepath.Join(root, "schemas", "hushspec-signature.v1.schema.json"),
 	}
 
 	for _, path := range candidates {

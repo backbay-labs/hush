@@ -107,8 +107,8 @@ const (
 	ReasonPolicyVersionRollback = "policy_version_rollback"
 )
 
-// Patterns from schemas/hushspec-signature.v0.schema.json and
-// hushspec-keyring.v0.schema.json (0.2). Shape validation (check 1) is the
+// Patterns from schemas/hushspec-signature.v1.schema.json and
+// hushspec-keyring.v1.schema.json (0.2). Shape validation (check 1) is the
 // schema, so these are transcribed rather than approximated.
 var (
 	signingDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -690,7 +690,7 @@ func (e *Envelope) ExpiresAtTime() (*time.Time, error) {
 }
 
 // validateShape is check 1 of spec section 6.2: the envelope against
-// schemas/hushspec-signature.v0.schema.json.
+// schemas/hushspec-signature.v1.schema.json.
 //
 // The two `const` members are deliberately excluded. The schema pins
 // `format_version` to "0.2" and `algorithm` to "ed25519", but section 6.2

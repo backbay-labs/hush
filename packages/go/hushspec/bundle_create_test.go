@@ -59,12 +59,14 @@ func readBundleVector(t *testing.T, name string) *DSSEEnvelope {
 }
 
 // bundleVectorResolver is the reference CLI's resolver, read back from the
-// vector it produced rather than hardcoded a second time.
-func bundleVectorResolver(t *testing.T) BundleResolver {
+// vector it produced rather than hardcoded a second time. It is read per
+// vector: the corpus was not all cut by the same release of the CLI, so the
+// `h2h` version a vector records is the one that vector must be rebuilt with.
+func bundleVectorResolver(t *testing.T, vector string) BundleResolver {
 	t.Helper()
-	statement, err := readBundleVector(t, "valid.bundle.json").Statement()
+	statement, err := readBundleVector(t, vector).Statement()
 	if err != nil {
-		t.Fatalf("decode the valid vector: %v", err)
+		t.Fatalf("decode %s: %v", vector, err)
 	}
 	return statement.Predicate.Resolver
 }
@@ -79,9 +81,19 @@ func bundleVectorResolution(t *testing.T) *Resolution {
 	return resolution
 }
 
+// bundleVectorOptions builds the options that reproduce the signed vector,
+// which is the corpus's representative bundle.
 func bundleVectorOptions(t *testing.T, key string) CreateBundleOptions {
 	t.Helper()
-	resolver := bundleVectorResolver(t)
+	return bundleVectorOptionsFor(t, key, "valid.bundle.json")
+}
+
+// bundleVectorOptionsFor builds the options that reproduce one named vector,
+// pinning `resolver` to what that vector records so the rebuild is byte for
+// byte the vector rather than merely an equivalent bundle.
+func bundleVectorOptionsFor(t *testing.T, key, vector string) CreateBundleOptions {
+	t.Helper()
+	resolver := bundleVectorResolver(t, vector)
 	created, err := time.Parse(time.RFC3339, bundleVectorCreatedAt)
 	if err != nil {
 		t.Fatalf("parse the pinned created_at: %v", err)
@@ -150,7 +162,8 @@ func TestCreateBundleReproducesTheSignedVector(t *testing.T) {
 
 func TestCreateBundleReproducesTheUnsignedVector(t *testing.T) {
 	expected := readBundleVector(t, "unsigned.bundle.json")
-	built, err := CreateBundle(bundleVectorResolution(t), bundleVectorOptions(t, ""))
+	built, err := CreateBundle(bundleVectorResolution(t),
+		bundleVectorOptionsFor(t, "", "unsigned.bundle.json"))
 	if err != nil {
 		t.Fatalf("CreateBundle: %v", err)
 	}
@@ -164,7 +177,8 @@ func TestCreateBundleReproducesTheUnsignedVector(t *testing.T) {
 
 func TestCreateBundleReproducesTheUntrustedKeyVector(t *testing.T) {
 	expected := readBundleVector(t, "wrong-key.bundle.json")
-	built, err := CreateBundle(bundleVectorResolution(t), bundleVectorOptions(t, "test-untrusted.key.pem"))
+	built, err := CreateBundle(bundleVectorResolution(t),
+		bundleVectorOptionsFor(t, "test-untrusted.key.pem", "wrong-key.bundle.json"))
 	if err != nil {
 		t.Fatalf("CreateBundle: %v", err)
 	}

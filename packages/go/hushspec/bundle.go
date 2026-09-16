@@ -87,7 +87,7 @@ var BundleReasons = []string{
 	BundleReasonPolicyMismatch,
 }
 
-// Patterns transcribed from schemas/hushspec-bundle.v0.schema.json, so shape
+// Patterns transcribed from schemas/hushspec-bundle.v1.schema.json, so shape
 // validation is the schema rather than an approximation of it.
 var (
 	bundleHexDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)

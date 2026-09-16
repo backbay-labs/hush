@@ -196,7 +196,7 @@ func TestBundleVectorsUseTheClosedReasonSet(t *testing.T) {
 }
 
 // TestBundlesValidateAgainstTheSchema checks every published bundle against
-// schemas/hushspec-bundle.v0.schema.json: the envelope against the root, and
+// schemas/hushspec-bundle.v1.schema.json: the envelope against the root, and
 // the decoded payload against $defs/Statement. This SDK carries no JSON Schema
 // engine, so the constraints the schema states for the members it reads are
 // asserted directly -- the three `const` members are read out of the schema
@@ -204,7 +204,7 @@ func TestBundleVectorsUseTheClosedReasonSet(t *testing.T) {
 // apart unnoticed.
 func TestBundlesValidateAgainstTheSchema(t *testing.T) {
 	root, manifest := loadBundleVectors(t)
-	schemaPath := filepath.Join(fixtureRepoRoot(t), "schemas", "hushspec-bundle.v0.schema.json")
+	schemaPath := filepath.Join(fixtureRepoRoot(t), "schemas", "hushspec-bundle.v1.schema.json")
 	schemaJSON, err := os.ReadFile(schemaPath)
 	if err != nil {
 		t.Fatalf("the bundle schema is not published: %v", err)
