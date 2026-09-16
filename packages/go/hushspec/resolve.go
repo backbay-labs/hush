@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -394,18 +395,26 @@ func ResolveWithOptions(spec *HushSpec, source string, loader ResolveLoader, opt
 // 0.1-compatible `<stem>.sig` (so `policy.yaml` is matched by both
 // `policy.yaml.sig` and `policy.sig`, preferring the former).
 //
-// `builtin:` sources have no sidecar and report not-found. So do `https:` and
-// `http:` sources: their conventional location is `<url>.sig`, but this SDK
-// ships no network loader, so a caller that resolves over the network supplies
-// its own locator. Not-found is not silently permissive -- under
-// [ResolveOptions.RequireSignature] an unpinned hop with no envelope fails.
+// `builtin:` sources have no sidecar and report not-found. A URL source is
+// `<url>.sig`, fetched by whatever [RegisterSchemeLoader] installed for its
+// scheme -- fetching a signature over the network must happen under the same
+// rules as fetching the policy did, so it belongs to the transport rather than
+// here. With no transport registered a URL source reports not-found, exactly as
+// a reference to one would be refused. Not-found is not silently permissive --
+// under [ResolveOptions.RequireSignature] an unpinned hop with no envelope
+// fails.
 func DefaultSignatureLocator(source string) ([]byte, bool, error) {
 	switch {
 	case source == "",
 		source == MemorySource,
-		strings.HasPrefix(source, "builtin:"),
-		strings.HasPrefix(source, "https://"),
-		strings.HasPrefix(source, "http://"):
+		strings.HasPrefix(source, "builtin:"):
+		return nil, false, nil
+	}
+
+	if locator, ok := locatorForScheme(source); ok {
+		return locator(source)
+	}
+	if strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") {
 		return nil, false, nil
 	}
 
@@ -432,6 +441,83 @@ func signatureSidecarPaths(path string) []string {
 	return []string{appended, stem}
 }
 
+// schemeLoaders holds the loaders registered for URL schemes, and the
+// signature locators that go with them. A transport lives outside this file --
+// http_loader.go is the one this SDK ships -- and registers itself here, so the
+// built-in loaders gain a scheme without this file growing a network client.
+// Empty until something registers, which is why a URL reference is refused by
+// default.
+var schemeLoaders = struct {
+	sync.RWMutex
+	loaders  map[string]ResolveLoader
+	locators map[string]SignatureLocator
+}{
+	loaders:  map[string]ResolveLoader{},
+	locators: map[string]SignatureLocator{},
+}
+
+// RegisterSchemeLoader serves `<scheme>://` references through loader in the
+// loaders [ResolveFile] and [NewFileProvider] use by default.
+//
+// Registering a scheme is a deployment decision, never a document's: a policy
+// that names an `https:` base is refused until the process loading it has said
+// that fetching over the network is acceptable.
+//
+// locator, when non-nil, is consulted by [DefaultSignatureLocator] for sources
+// with this scheme, so a transport that can fetch a policy can also fetch the
+// `<source>.sig` beside it (signing spec 7.1).
+func RegisterSchemeLoader(scheme string, loader ResolveLoader, locator SignatureLocator) {
+	schemeLoaders.Lock()
+	defer schemeLoaders.Unlock()
+	schemeLoaders.loaders[scheme] = loader
+	if locator != nil {
+		schemeLoaders.locators[scheme] = locator
+	} else {
+		delete(schemeLoaders.locators, scheme)
+	}
+}
+
+// UnregisterSchemeLoader undoes [RegisterSchemeLoader], restoring the refusal.
+func UnregisterSchemeLoader(scheme string) {
+	schemeLoaders.Lock()
+	defer schemeLoaders.Unlock()
+	delete(schemeLoaders.loaders, scheme)
+	delete(schemeLoaders.locators, scheme)
+}
+
+// referenceScheme is the URL scheme of a reference, or "" when it is not a URL.
+func referenceScheme(reference string) string {
+	scheme, _, found := strings.Cut(reference, "://")
+	if !found || scheme == "" {
+		return ""
+	}
+	return scheme
+}
+
+// loaderForScheme is the loader registered for a reference's scheme, if any.
+func loaderForScheme(reference string) (ResolveLoader, bool) {
+	scheme := referenceScheme(reference)
+	if scheme == "" {
+		return nil, false
+	}
+	schemeLoaders.RLock()
+	defer schemeLoaders.RUnlock()
+	loader, ok := schemeLoaders.loaders[scheme]
+	return loader, ok
+}
+
+// locatorForScheme is the signature locator registered for a source's scheme.
+func locatorForScheme(source string) (SignatureLocator, bool) {
+	scheme := referenceScheme(source)
+	if scheme == "" {
+		return nil, false
+	}
+	schemeLoaders.RLock()
+	defer schemeLoaders.RUnlock()
+	locator, ok := schemeLoaders.locators[scheme]
+	return locator, ok
+}
+
 // createCompositeLoader serves `builtin:<name>` references from the embedded
 // rulesets and everything else from the filesystem. A bare name with no path
 // separators or dots is tried as a builtin before falling back to the
@@ -449,12 +535,18 @@ func createCompositeLoader() ResolveLoader {
 			return &LoadedSpec{Source: reference, Spec: spec}, nil
 		}
 
+		if loader, ok := loaderForScheme(reference); ok {
+			return loader(reference, from)
+		}
+
 		// Reject HTTP(S) references explicitly rather than letting them fall
 		// through to the filesystem loader, which would try to open a file
-		// literally named "https://...". The composite loader has no network
-		// support, so say so plainly.
+		// literally named "https://...". No transport is registered, so say so
+		// plainly.
 		if strings.HasPrefix(reference, "https://") || strings.HasPrefix(reference, "http://") {
-			return nil, fmt.Errorf("HTTP-based policy loading is not supported by the composite loader: %q", reference)
+			return nil, fmt.Errorf(
+				"HTTP-based policy loading is not supported by the composite loader "+
+					"until InstallHTTPSLoader is called: %q", reference)
 		}
 
 		if !strings.ContainsAny(reference, `/\.`) {
