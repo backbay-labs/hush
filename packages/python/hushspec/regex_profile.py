@@ -85,7 +85,7 @@ NESTED_QUANTIFIER_MESSAGE = (
 )
 
 #: Shared rejection message for an over-long pattern.
-PATTERN_TOO_LONG_MESSAGE = (
+_PATTERN_TOO_LONG_MESSAGE = (
     "pattern exceeds the HushSpec regex profile limit of 2048 bytes"
 )
 
@@ -142,7 +142,7 @@ def compile_profile_regex(pattern: str) -> Pattern[str]:
     profile -- the evaluator turns that into a deny.
     """
     if len(pattern.encode("utf-8")) > _MAX_PATTERN_BYTES:
-        raise ValueError(PATTERN_TOO_LONG_MESSAGE)
+        raise ValueError(_PATTERN_TOO_LONG_MESSAGE)
 
     # Local import: hushspec.validate imports this module at module level, so
     # the dependency has to run the other way at call time. These are the shared
