@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,7 @@ import { parse } from '../src/parse.js';
 import { createCompositeLoader, resolveWithOptions, type Resolution } from '../src/resolve.js';
 import { loadKeyring } from '../src/signing.js';
 import { SDK_NAME, SDK_VERSION } from '../src/version.js';
+import { schemaErrors, type SchemaDocument } from './helpers/json-schema.js';
 
 /**
  * Bundle creation (bundle spec 4).
@@ -117,6 +118,10 @@ describe('createBundle', () => {
       ...vectorResolver(),
     });
 
+    // Assert the vector is the unsigned one before comparing against it, so
+    // this cannot pass by reading a signed vector whose payload happens to
+    // match.
+    expect(expected.signatures).toEqual([]);
     expect(built.signatures).toEqual([]);
     expect(built.payload).toBe(expected.payload);
   });
@@ -175,12 +180,16 @@ describe('createBundle', () => {
       createdAt: vectorCreatedAt,
     });
     expect(statement.predicate.resolver).toEqual({ tool: SDK_NAME, version: SDK_VERSION });
-    expect(BUNDLE_RESOLVER_TOOL).toBe('h2h');
+    // Not `BUNDLE_RESOLVER_TOOL`: that names the reference CLI, and the
+    // default is deliberately this SDK rather than a tool that did not
+    // produce the bundle.
+    expect(statement.predicate.resolver.tool).not.toBe(BUNDLE_RESOLVER_TOOL);
   });
 });
 
 describe('buildBundleStatement', () => {
   it('names the constants of bundle spec 3 and 4', () => {
+    expect(BUNDLE_RESOLVER_TOOL).toBe('h2h');
     const statement = buildBundleStatement(resolveVectorPolicy(), {
       createdAt: vectorCreatedAt,
       baseDir: repoRoot,
@@ -264,6 +273,14 @@ describe('buildBundleStatement', () => {
     expect(statement.predicate.created_at).toBe('2026-09-15T12:00:00.500Z');
   });
 
+  it('refuses a date whose year created_at cannot express', () => {
+    // `toISOString` widens the year field past 9999, which a fixed-width
+    // slice turns into a malformed timestamp rather than an error.
+    expect(() =>
+      buildBundleStatement(resolveVectorPolicy(), { createdAt: new Date(8.64e15) }),
+    ).toThrow(BundleError);
+  });
+
   it('rejects a document that still declares extends', () => {
     const parsed = parse(readFileSync(vectorPolicy, 'utf8'));
     expect(parsed.ok).toBe(true);
@@ -293,10 +310,58 @@ describe('bundleStatementBytes', () => {
 });
 
 describe('createBundle key handling', () => {
-  it('refuses a key that is not Ed25519', () => {
+  it('refuses a key it cannot read at all', () => {
     expect(() =>
       createBundle(resolveVectorPolicy(), { privateKeyPem: 'not a pem' }),
     ).toThrow(BundleError);
+  });
+
+  it('refuses a well-formed key of the wrong algorithm', () => {
+    // The case above never reaches the algorithm check -- it fails while
+    // parsing the PEM -- so the branch that makes DSSE Ed25519-only was
+    // untested. A real P-256 key is well-formed and still has to be refused.
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+
+    expect(() => createBundle(resolveVectorPolicy(), { privateKeyPem: pem })).toThrow(
+      /not Ed25519/,
+    );
+  });
+});
+
+/**
+ * Every other SDK validates the bundles it produces against the published
+ * schema (`crates/hushspec/tests/bundle_vectors.rs`,
+ * `packages/go/hushspec/bundle_vectors_test.go`,
+ * `packages/python/tests/test_bundle_vectors.py`). Reproducing the vector
+ * bytes proves agreement with the reference CLI, but not that either of them
+ * agrees with the schema a consumer validates against -- so check it here too.
+ */
+describe('createBundle output against the published schema', () => {
+  const bundleSchema = JSON.parse(
+    readFileSync(path.join(repoRoot, 'schemas', 'hushspec-bundle.v0.schema.json'), 'utf8'),
+  ) as SchemaDocument;
+
+  it.each([
+    ['signed', 'test-signing.key.pem'],
+    ['unsigned', undefined],
+  ])('a %s bundle satisfies the envelope and statement schemas', (_kind, key) => {
+    const bundle = createBundle(resolveVectorPolicy(), {
+      ...(key === undefined ? {} : { privateKeyPem: readKey(key) }),
+      createdAt: vectorCreatedAt,
+      baseDir: repoRoot,
+    });
+
+    expect(schemaErrors(bundleSchema, JSON.parse(bundleToJson(bundle)))).toEqual([]);
+
+    // The payload is base64, so the statement it decodes to is described by
+    // `$defs/Statement` and has to be validated separately (bundle spec 5.2).
+    const statement = JSON.parse(Buffer.from(bundle.payload, 'base64').toString('utf8'));
+    const statementSchema = {
+      ...(bundleSchema['$defs'] as Record<string, SchemaDocument>)['Statement'],
+      $defs: bundleSchema['$defs'],
+    } as SchemaDocument;
+    expect(schemaErrors(statementSchema, statement)).toEqual([]);
   });
 });
 

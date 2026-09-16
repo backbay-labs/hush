@@ -104,15 +104,32 @@ describe('composed core schema', () => {
     );
   });
 
+  it('reads every published vector family', () => {
+    // `policyVectors` is directory-derived, so an emptied or renamed fixture
+    // family would take its coverage with it and every case below would still
+    // report green -- there would simply be no cases. Floors, well under the
+    // current counts, so that adding a vector never fails this.
+    expect(policyVectors('valid').length).toBeGreaterThanOrEqual(15);
+    expect(policyVectors('invalid').length).toBeGreaterThanOrEqual(25);
+    for (const family of FAMILIES) {
+      expect(readdirSync(path.join(fixturesRoot, family, 'valid')).length).toBeGreaterThan(0);
+    }
+  });
+
   it.each(policyVectors('valid'))('accepts $name', ({ file }) => {
     expect(schemaErrors(coreSchema, loadDocument(file))).toEqual([]);
   });
 
-  it.each(policyVectors('invalid'))('refuses $name', ({ name, file }) => {
-    if (PROFILE_ONLY_VECTORS.has(name)) return;
-    const valid = schemaValid(coreSchema, loadDocument(file));
-    expect(valid).toBe(BEYOND_SCHEMA_VECTORS.has(name));
-  });
+  // The YAML-profile vectors are filtered out of the table rather than
+  // returned from inside the case: a case that returns early still reports as
+  // a pass, so the suite would claim four assertions it never made.
+  it.each(policyVectors('invalid').filter(({ name }) => !PROFILE_ONLY_VECTORS.has(name)))(
+    'refuses $name',
+    ({ name, file }) => {
+      const valid = schemaValid(coreSchema, loadDocument(file));
+      expect(valid).toBe(BEYOND_SCHEMA_VECTORS.has(name));
+    },
+  );
 
   it('names only vectors that are still published', () => {
     const names = new Set(policyVectors('invalid').map(({ name }) => name));
@@ -121,11 +138,47 @@ describe('composed core schema', () => {
     }
   });
 
+  // A minimally valid body for each extension, so that adding one stray key
+  // is the only thing wrong with the document. `{ bogus: 1 }` on its own also
+  // fails `required` for posture, and would keep passing this test with
+  // unknown-key handling entirely removed.
+  const MINIMAL_EXTENSIONS: Record<string, Record<string, unknown>> = {
+    posture: { initial: 'idle', states: { idle: {} }, transitions: [] },
+    origins: { profiles: [] },
+    detection: {},
+  };
+
   it.each(EMBEDDED_EXTENSIONS.map(([key]) => key))(
     'refuses an unknown key inside extensions.%s',
     (key) => {
-      const document = { hushspec: '0.1.0', extensions: { [key]: { bogus: 1 } } };
-      expect(schemaValid(coreSchema, document)).toBe(false);
+      const body = MINIMAL_EXTENSIONS[key];
+      expect(schemaErrors(coreSchema, { hushspec: '0.1.0', extensions: { [key]: body } })).toEqual(
+        [],
+      );
+
+      const errors = schemaErrors(coreSchema, {
+        hushspec: '0.1.0',
+        extensions: { [key]: { ...body, bogus: 1 } },
+      });
+      expect(errors).toEqual([`$.extensions.${key}: unknown property bogus`]);
+    },
+  );
+
+  it.each(EMBEDDED_EXTENSIONS.map(([key]) => key))(
+    'validates the body of extensions.%s, not just its keys',
+    (key) => {
+      // A key the companion schema declares, carrying the wrong type. Nothing
+      // about the key is unknown, so only a schema that actually walks the
+      // block can refuse this.
+      const wrongType: Record<string, unknown> = {
+        posture: { ...MINIMAL_EXTENSIONS['posture'], initial: 5 },
+        origins: { default_behavior: 'allow' },
+        detection: { prompt_injection: 'yes' },
+      }[key] as Record<string, unknown>;
+
+      expect(
+        schemaValid(coreSchema, { hushspec: '0.1.0', extensions: { [key]: wrongType } }),
+      ).toBe(false);
     },
   );
 });
