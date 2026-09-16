@@ -830,14 +830,17 @@ def _validate_detection_heuristics(
 ) -> None:
     """``prompt_injection.heuristics`` (detection spec 3.5.1).
 
-    ``min_score`` is a non-negative integer. The schema's upper bound of 100
-    is not enforced here: a floor above the clamp is harmless (nothing ever
-    reaches it), and refusing a document other engines accept would itself be
-    a conformance divergence.
+    ``min_score`` is a floor on the normalized 0-100 score, so a value outside
+    that range names no score the detector can produce and is rejected
+    (detection spec 9).
     """
     _reject_unknown_keys(obj, PROMPT_INJECTION_HEURISTICS_KEYS, errors, path)
     _validate_optional_bool(obj, "enabled", errors, f"{path}.enabled")
-    _validate_optional_int(obj, "min_score", errors, f"{path}.min_score", min_value=0)
+    min_score = _validate_optional_int(
+        obj, "min_score", errors, f"{path}.min_score", min_value=0
+    )
+    if min_score is not None and min_score > 100:
+        errors.append(_constraint(f"{path}.min_score must be between 0 and 100"))
 
 
 def _validate_detection_jailbreak(obj: dict[str, Any], errors: list[str], path: str) -> None:

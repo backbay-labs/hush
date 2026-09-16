@@ -23,7 +23,7 @@ import (
 // revision, so the suffix is stripped before the name is matched.
 var datedToolSuffix = regexp.MustCompile(`_20[0-9]{6}$`)
 
-// MapAnthropicToolUse maps a Claude `tool_use` block onto an action.
+// MapClaudeToolToAction maps a Claude `tool_use` block onto an action.
 //
 // Recognized: `bash` and `terminal` (shell_command), the text editor tools
 // (file_read for `view`, file_write otherwise), `computer` (computer_use), and
@@ -31,7 +31,7 @@ var datedToolSuffix = regexp.MustCompile(`_20[0-9]{6}$`)
 // `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
 // policy names the tool rather than the transport. Everything else is a
 // `tool_call` carrying the serialized size of its input.
-func MapAnthropicToolUse(name string, input json.RawMessage) EvaluationAction {
+func MapClaudeToolToAction(name string, input json.RawMessage) EvaluationAction {
 	fields, argsSize := decodeToolArguments(input)
 
 	switch datedToolSuffix.ReplaceAllString(name, "") {
@@ -283,13 +283,14 @@ func GuardedToolHandler[T any](
 	}
 }
 
-// GuardedAnthropicToolHandler guards a Claude tool handler with
-// [MapAnthropicToolUse].
-func GuardedAnthropicToolHandler(
+// CreateSecureToolHandler guards a Claude tool handler with
+// [MapClaudeToolToAction]. The name is the one the other SDKs publish for the
+// same thing.
+func CreateSecureToolHandler(
 	guard *Guard,
 	next ToolHandler[json.RawMessage],
 ) ToolHandler[json.RawMessage] {
-	return GuardedToolHandler(guard, MapAnthropicToolUse, next)
+	return GuardedToolHandler(guard, MapClaudeToolToAction, next)
 }
 
 // GuardedOpenAIToolHandler guards an OpenAI function handler with

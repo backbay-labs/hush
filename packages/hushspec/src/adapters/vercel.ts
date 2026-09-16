@@ -32,7 +32,8 @@ export interface VercelTool {
 export interface VercelGuard {
   /**
    * A copy of `tools` whose every executable tool is gated. The tool set keeps
-   * its own type: only `execute` is replaced, by a function of the same shape.
+   * its own type: only `execute` is intercepted, by a function of the same
+   * shape.
    */
   wrapTools<T extends object>(tools: T): T;
   /** One gated tool, for a tool set assembled by hand. */
@@ -71,16 +72,30 @@ function executeOf(tool: object): ((...args: never[]) => unknown) | undefined {
  * instead of a side effect. Tools without an `execute` (provider-executed, or
  * resolved on the client) are returned untouched: there is no call for this
  * adapter to intercept.
+ *
+ * Each wrapped tool is a proxy, so it keeps its prototype, its non-enumerable
+ * members and its `instanceof`, and every call still runs against the original
+ * instance -- a spread copy would drop all three and hand the AI SDK a plain
+ * object where it was given a tool.
  */
 export function createVercelGuard(guard: HushGuard): VercelGuard {
   function wrapTool<T extends object>(toolName: string, tool: T): T {
-    const execute = executeOf(tool);
-    if (execute === undefined) return tool;
-    const gated = async (...args: never[]): Promise<unknown> => {
-      guard.enforce(mapVercelToolCall({ toolName, args: args[0] }));
-      return await (execute.apply(tool, args) as Promise<unknown>);
-    };
-    return { ...tool, execute: gated };
+    if (executeOf(tool) === undefined) return tool;
+    let gated: ((...args: never[]) => Promise<unknown>) | undefined;
+
+    return new Proxy(tool, {
+      get(target, property, receiver): unknown {
+        if (property !== 'execute') return Reflect.get(target, property, receiver);
+        const execute = executeOf(target);
+        if (execute === undefined) return Reflect.get(target, property, receiver);
+
+        gated ??= async (...args: never[]): Promise<unknown> => {
+          guard.enforce(mapVercelToolCall({ toolName, args: args[0] }));
+          return await (Reflect.apply(execute, target, args) as Promise<unknown>);
+        };
+        return gated;
+      },
+    });
   }
 
   return {

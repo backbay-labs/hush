@@ -141,6 +141,12 @@ func normalizeDecoderMessage(message string) string {
 	return message
 }
 
+// defaultMaxImbalanceRatio is the schema default for
+// `rules.patch_integrity.max_imbalance_ratio`. [applyParseDefaults]
+// materializes it, so a parsed document always carries a limit and evaluation
+// never has to invent one.
+const defaultMaxImbalanceRatio = 10.0
+
 func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 	if spec.Rules != nil && spec.Rules.ForbiddenPaths != nil {
 		if presence.Rules == nil || presence.Rules.ForbiddenPaths == nil || presence.Rules.ForbiddenPaths.Enabled == nil {
@@ -171,7 +177,7 @@ func applyParseDefaults(spec *HushSpec, presence *parsePresenceSpec) {
 			spec.Rules.PatchIntegrity.MaxDeletions = 500
 		}
 		if presence.Rules == nil || presence.Rules.PatchIntegrity == nil || presence.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
-			ratio := 10.0
+			ratio := defaultMaxImbalanceRatio
 			spec.Rules.PatchIntegrity.MaxImbalanceRatio = &ratio
 		}
 	}

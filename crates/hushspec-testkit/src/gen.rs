@@ -108,6 +108,14 @@ const CONTEXT_VALUE_POOL: &[&str] = &[
     "agent-1",
 ];
 
+/// Fractional expected values for `context` predicates. Numbers compare by
+/// exact value (core spec 3.13), so the pool holds two adjacent doubles: an
+/// engine that compares within a tolerance accepts one for the other. Every
+/// value is non-integral, because the bundle's JSON numbers reach the Go
+/// harness as doubles and an integral one would re-encode as an integer there
+/// and change shape on the way in.
+const CONTEXT_FLOAT_POOL: &[f64] = &[0.3, 0.300_000_000_000_000_04, 1.5, 12.25];
+
 /// RFC 3339 instants covering weekdays, a weekend, both sides of midnight and
 /// non-UTC offsets. Every generated action carries one so `time_window`
 /// conditions never consult the wall clock -- a wall-clock read would make the
@@ -459,6 +467,11 @@ fn context_match_strategy() -> impl Strategy<Value = HashMap<String, serde_json:
             .prop_map(|text| serde_json::Value::String(text.to_string())),
         1 => any::<bool>().prop_map(serde_json::Value::Bool),
         1 => (0i64..5).prop_map(|number| serde_json::Value::Number(number.into())),
+        1 => prop::sample::select(CONTEXT_FLOAT_POOL).prop_map(|number| {
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(number).expect("the pool holds finite doubles"),
+            )
+        }),
         1 => prop::collection::vec(prop::sample::select(CONTEXT_VALUE_POOL), 1..3).prop_map(
             |values| serde_json::Value::Array(
                 values

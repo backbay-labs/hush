@@ -290,6 +290,58 @@ describe('PolicyPoller', () => {
     expect(loadCount).toBeGreaterThan(1);
   });
 
+  it('reports a throwing onChange through onError and keeps polling', async () => {
+    const errors: Error[] = [];
+    let loadCount = 0;
+
+    poller = new PolicyPoller({
+      loader: async () => {
+        loadCount++;
+        return loadCount === 1 ? VALID_POLICY : UPDATED_POLICY;
+      },
+      intervalMs: 50,
+      onChange: () => {
+        throw new Error('subscriber blew up');
+      },
+      onError: (error) => {
+        errors.push(error);
+      },
+    });
+
+    await poller.start();
+    await new Promise((r) => setTimeout(r, 300));
+    poller.stop();
+
+    expect(errors.map((error) => error.message)).toContain('subscriber blew up');
+    expect(loadCount).toBeGreaterThan(1);
+  });
+
+  it('survives an onError handler that throws', async () => {
+    let loadCount = 0;
+
+    poller = new PolicyPoller({
+      loader: async () => {
+        loadCount++;
+        if (loadCount > 1) {
+          throw new Error('network down');
+        }
+        return VALID_POLICY;
+      },
+      intervalMs: 50,
+      onChange: () => {},
+      onError: () => {
+        throw new Error('handler blew up');
+      },
+    });
+
+    await poller.start();
+    await new Promise((r) => setTimeout(r, 300));
+    poller.stop();
+
+    expect(loadCount).toBeGreaterThan(2);
+    expect(poller.current()?.name).toBe('test-policy');
+  });
+
   it('handles loader errors gracefully', async () => {
     let loadCount = 0;
     const errors: Error[] = [];

@@ -40,7 +40,7 @@ pub fn major_version(version: &str) -> Option<u32> {
         return None;
     }
     let is_digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-    if !is_digits(minor) || !is_digits(patch) {
+    if !is_digits(major) || !is_digits(minor) || !is_digits(patch) {
         return None;
     }
     major.parse().ok()
@@ -79,6 +79,18 @@ mod tests {
         assert!(is_supported("0.2.7"));
         assert!(is_supported("1.0.0"));
         assert!(is_supported("1.0.3"));
+    }
+
+    #[test]
+    fn major_version_requires_three_numeric_components() {
+        assert_eq!(major_version("1.0.0"), Some(1));
+        assert_eq!(major_version("0.2.7"), Some(0));
+        assert_eq!(major_version("+1.0.0"), None);
+        assert_eq!(major_version("v1.0.0"), None);
+        assert_eq!(major_version("1.0"), None);
+        assert_eq!(major_version("1.0.0.0"), None);
+        assert_eq!(major_version("1.x.0"), None);
+        assert_eq!(major_version(""), None);
     }
 
     #[test]

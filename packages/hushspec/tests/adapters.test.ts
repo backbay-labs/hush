@@ -208,6 +208,18 @@ describe('mapMCPToolCall', () => {
     expect(action.type).toBe('shell_command');
     expect(action.target).toBe('');
   });
+
+  it('recognizes the shared table\'s spellings, so readFile is a file read here too', () => {
+    const action = mapMCPToolCall('readFile', { path: '/etc/hosts' });
+    expect(action.type).toBe('file_read');
+    expect(action.target).toBe('/etc/hosts');
+  });
+
+  it('measures the arguments of a recognized tool', () => {
+    const args = { path: '/etc/hosts' };
+    const action = mapMCPToolCall('read_file', args);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue(args)));
+  });
 });
 
 describe('extractDomain', () => {

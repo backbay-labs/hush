@@ -26,7 +26,7 @@ func actionsEqual(a, b EvaluationAction) bool {
 	return true
 }
 
-func TestMapAnthropicToolUse(t *testing.T) {
+func TestMapClaudeToolToAction(t *testing.T) {
 	cases := []struct {
 		name  string
 		tool  string
@@ -124,7 +124,7 @@ func TestMapAnthropicToolUse(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := MapAnthropicToolUse(c.tool, json.RawMessage(c.input))
+			got := MapClaudeToolToAction(c.tool, json.RawMessage(c.input))
 			if !actionsEqual(got, c.want) {
 				t.Fatalf("got %+v, want %+v", got, c.want)
 			}
@@ -314,7 +314,7 @@ func TestGuardedToolHandlers(t *testing.T) {
 	})
 
 	t.Run("anthropic deny", func(t *testing.T) {
-		handler := GuardedAnthropicToolHandler(guard, func(
+		handler := CreateSecureToolHandler(guard, func(
 			ctx context.Context, name string, input json.RawMessage,
 		) (any, error) {
 			t.Fatal("a denied tool must never run")
@@ -445,9 +445,9 @@ func TestArgsSizeIsCanonicalJSONBytes(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			anthropic := MapAnthropicToolUse("search", json.RawMessage(c.json))
+			anthropic := MapClaudeToolToAction("search", json.RawMessage(c.json))
 			if anthropic.ArgsSize == nil || *anthropic.ArgsSize != c.want {
-				t.Errorf("MapAnthropicToolUse measured %v, want %d",
+				t.Errorf("MapClaudeToolToAction measured %v, want %d",
 					sizeOrNil(anthropic.ArgsSize), c.want)
 			}
 
@@ -501,9 +501,9 @@ func TestArgsSizeFallsBackToTheBytesReceived(t *testing.T) {
 		t.Errorf("MapOpenAIToolCall measured %v, want %d",
 			sizeOrNil(action.ArgsSize), len(malformed))
 	}
-	if action := MapAnthropicToolUse("search", json.RawMessage(malformed)); action.ArgsSize == nil ||
+	if action := MapClaudeToolToAction("search", json.RawMessage(malformed)); action.ArgsSize == nil ||
 		*action.ArgsSize != len(malformed) {
-		t.Errorf("MapAnthropicToolUse measured %v, want %d",
+		t.Errorf("MapClaudeToolToAction measured %v, want %d",
 			sizeOrNil(action.ArgsSize), len(malformed))
 	}
 }

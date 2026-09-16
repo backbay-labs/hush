@@ -347,9 +347,10 @@ func parseHHMM(s string) (int, int, bool) {
 		return 0, 0, false
 	}
 	// Require pure ASCII digits in each component. strconv.Atoi would
-	// otherwise accept a leading sign (e.g. "+9"), which is not an HH:MM
-	// field, so a sign-prefixed token must fail to parse and leave the window
-	// inert (fail-closed).
+	// otherwise accept a leading sign (e.g. "+9:00"), which the other engines
+	// reject; the same token would then be a live window here and unevaluable
+	// there. A non-digit component fails to parse, and the window is
+	// unevaluable in every engine.
 	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
 		return 0, 0, false
 	}
@@ -803,7 +804,8 @@ func matchIntNumber(actual any, expected int64) bool {
 }
 
 // matchFloatNumber compares a float-shaped expected value: it matches an
-// int/int64/float64 actual whose numeric value is equal.
+// int/int64/float64 actual whose numeric value is exactly equal. There is no
+// tolerance, so 0.3 does not match 0.30000000000000004 (core spec 3.13).
 func matchFloatNumber(actual any, expected float64) bool {
 	switch av := actual.(type) {
 	case int:

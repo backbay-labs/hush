@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T19:17:26Z",
+  "generated_at": "2026-09-16T19:18:32Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -90,6 +90,13 @@
     {
       "path": "fixtures/core/evaluation/conditions-capability.test.yaml",
       "sha256": "244aa62c527d5174ecdf7819b198dca059dab1fdd9d1993e2a745bac3cd855a4",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-context-match.test.yaml",
+      "sha256": "1a91eee9b7c5563713ddaa797acedb3de8b58e51b2bb88c3ee1c1437cde7c533",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1362,6 +1369,20 @@
       "level": 1
     },
     {
+      "path": "fixtures/detection/invalid/heuristics-min-score-out-of-range.expect.yaml",
+      "sha256": "c2747b9f47969fbc64308affe8c75d7315a10082ae29464903ec4073f0cca14a",
+      "category": "expect",
+      "module": "detection",
+      "level": 1
+    },
+    {
+      "path": "fixtures/detection/invalid/heuristics-min-score-out-of-range.yaml",
+      "sha256": "7c4bef78ca02ad532fd6138da8dd51c445106847129a753b39d94c43f229aff7",
+      "category": "invalid",
+      "module": "detection",
+      "level": 1
+    },
+    {
       "path": "fixtures/detection/merge/base.yaml",
       "sha256": "cf0c8d00ee5349a9bb5a51c2c7ba01bf4d093e1a3184d4f274efc3a0a8efe469",
       "category": "merge",
@@ -1945,6 +1966,55 @@
     {
       "path": "fixtures/receipts/expected/core/conditions-capability/2.json",
       "sha256": "ef4dd29bc87db41406b08a0cee67a9fb5a523714d853800bf41fbd3c3d2d06d0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/0.json",
+      "sha256": "313f1b85d86175d6e9aaac607b9d99958fc009ed43032b04fe6b78d8bce45cb1",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/1.json",
+      "sha256": "4ff83bf5ed6091e45a069c5ef95dd6e4c32766b6e3168a8e88e3d51393611157",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/2.json",
+      "sha256": "69213eaa63232a34f349036f0e7ca4b2f86f10c4b11f90c6cdefce74f0d81b59",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/3.json",
+      "sha256": "6764ac1e51d4e8bc14c8a732c2e2def9a0b7bc75fe036f41abe7ecd9c12ca9ab",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/4.json",
+      "sha256": "8dde6892e3c57d31442a98a2bf5e8861d878058589d11078efa143e405cd3d48",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/5.json",
+      "sha256": "7a0eba18ae5b5a0979a403bf99c195b132ad1176c4beff7e5a908c3f279012a7",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-match/6.json",
+      "sha256": "774f877077e09a327a61fa8e3a26e64a078614855a5318a499fdb23ce191b0c6",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

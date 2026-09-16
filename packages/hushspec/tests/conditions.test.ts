@@ -173,6 +173,14 @@ describe('evaluateCondition', () => {
       };
       expect(evaluateCondition(cond, ctx)).toBe(false);
     });
+
+    it('numbers compare exactly, with no tolerance', () => {
+      const cond: Condition = {
+        context: { 'custom.ratio': 0.3 },
+      };
+      expect(evaluateCondition(cond, { custom: { ratio: 0.3 } })).toBe(true);
+      expect(evaluateCondition(cond, { custom: { ratio: 0.30000000000000004 } })).toBe(false);
+    });
   });
 
   // -----------------------------------------------------------------------

@@ -93,6 +93,24 @@ func TestRatePredicate(t *testing.T) {
 	}
 }
 
+func TestValidateConditionRejectsAPresentEmptyCapability(t *testing.T) {
+	// An empty name is a present predicate that names no capability, so it is
+	// a malformed identifier rather than an absent field.
+	errs := ValidateCondition(&Condition{Capability: strPtr("")}, "rules.egress.when")
+	if len(errs) != 1 || !strings.Contains(errs[0], "is not a capability identifier") {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+
+	spec, err := Parse("hushspec: \"0.1.0\"\nrules:\n  egress:\n    when:\n      capability: \"\"\n")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	result := Validate(spec)
+	if len(result.Errors) != 1 || result.Errors[0].Code != ErrorCodeConstraint {
+		t.Fatalf("expected one E004 error, got %v", result.Errors)
+	}
+}
+
 func TestValidateConditionRejectsBadIdentifiers(t *testing.T) {
 	errs := ValidateCondition(&Condition{Capability: strPtr("Shell-Access")}, "rules.egress.when")
 	if len(errs) != 1 || !strings.Contains(errs[0], "is not a capability identifier") {

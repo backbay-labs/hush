@@ -482,6 +482,15 @@ fn validate_detection(
                 ));
             }
 
+            if let Some(heuristics) = &prompt_injection.heuristics
+                && matches!(heuristics.min_score, Some(value) if value > 100)
+            {
+                errors.push(ValidationError::Custom(
+                    "detection.prompt_injection.heuristics.min_score must be between 0 and 100"
+                        .to_string(),
+                ));
+            }
+
             let warn_level = prompt_injection
                 .warn_at_or_above
                 .unwrap_or(crate::extensions::DetectionLevel::Suspicious);
@@ -934,4 +943,45 @@ fn is_valid_duration(value: &str) -> bool {
     ) && value[..value.len() - 1]
         .bytes()
         .all(|byte| byte.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::generated_contract::RULE_KEYS;
+
+    /// Every key of `rules` has its `when` validated. A block missing from the
+    /// table in `validate_conditions` would let a malformed condition through
+    /// on that block alone, which is the kind of gap a hand-maintained list
+    /// grows silently.
+    #[test]
+    fn validate_conditions_walks_every_rule_key() {
+        let mut yaml = String::new();
+        for key in RULE_KEYS {
+            yaml.push_str(&format!(
+                "{key}:\n  when:\n    time_window:\n      start: \"99:00\"\n      end: \"17:00\"\n"
+            ));
+        }
+        let rules: crate::rules::Rules =
+            serde_yaml::from_str(&yaml).expect("every rule block accepts a bare `when`");
+
+        let mut errors = Vec::new();
+        validate_conditions(&rules, &mut errors);
+
+        let reported: Vec<String> = errors
+            .iter()
+            .map(|error| match error {
+                ValidationError::Custom(message) => message.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(reported.len(), RULE_KEYS.len(), "{reported:?}");
+        for key in RULE_KEYS {
+            let path = format!("rules.{key}.when");
+            assert!(
+                reported.iter().any(|message| message.starts_with(&path)),
+                "no violation reported for {path}: {reported:?}"
+            );
+        }
+    }
 }

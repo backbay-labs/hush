@@ -564,7 +564,18 @@ segment    = %x61-7A *(%x61-7A / %x30-39 / "_")
 
 The window is half-open: it contains the current local time `t` when `start <= t < end`. When `start > end` the window wraps midnight and contains `t` when `t >= start` or `t < end`; for wrapped windows, a time before `end` counts toward the *previous* calendar day when `days` is checked. When `start == end` the window is the whole day. The current time is the engine's clock converted to `timezone`, or the runtime context's `current_time` when supplied.
 
-**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string. Comparison is by JSON equality (type-sensitive: the number `1` does not equal the string `"1"`).
+**Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string.
+
+**Context comparison.** Only strings, booleans and numbers compare equal; an expected object or `null` never matches. Comparison is type-sensitive -- the number `1` equals neither the string `"1"` nor the boolean `true` -- and numbers compare by exact value with no tolerance, so `0.3` does not match `0.30000000000000004`. Either side MAY be an array:
+
+| Expected | Context value | Matches when                                        |
+|----------|---------------|-----------------------------------------------------|
+| scalar   | scalar        | the two are equal                                   |
+| scalar   | array         | the array contains the expected scalar              |
+| array    | scalar        | the expected array contains the context scalar      |
+| array    | array         | the two arrays share at least one element           |
+
+Equivalently: an expected array matches when at least one of its elements matches the context value under the two scalar rows.
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
@@ -584,7 +595,7 @@ The window is half-open: it contains the current local time `t` when `start <= t
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
 
 ### 3.14 Pattern Matching
 

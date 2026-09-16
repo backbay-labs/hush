@@ -103,6 +103,19 @@ func TestContextConditionScalarVsArrayMembership(t *testing.T) {
 	}
 }
 
+func TestContextNumbersCompareExactly(t *testing.T) {
+	cond := &Condition{
+		Context: map[string]any{"custom.ratio": 0.3},
+	}
+	if !EvaluateCondition(cond, &RuntimeContext{Custom: map[string]any{"ratio": 0.3}}) {
+		t.Error("expected an equal double to match")
+	}
+	near := &RuntimeContext{Custom: map[string]any{"ratio": 0.30000000000000004}}
+	if EvaluateCondition(cond, near) {
+		t.Error("expected the nearest double above 0.3 to not match")
+	}
+}
+
 func TestTimeWindowMatchesDuringBusinessHours(t *testing.T) {
 	ctx := ctxWithTimeStr("2026-01-14T10:30:00Z")
 	cond := &Condition{

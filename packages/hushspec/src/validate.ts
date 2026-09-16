@@ -1056,12 +1056,14 @@ function validateDetectionExtension(obj: UnknownRecord, ctx: ValidationContext, 
     validateOptionalRuleObject(section, 'heuristics', sectionCtx, (heuristics, heuristicsCtx, heuristicsPath) => {
       rejectUnknownKeys(heuristics, PROMPT_INJECTION_HEURISTICS_KEYS_SET, heuristicsCtx, heuristicsPath);
       validateOptionalBoolean(heuristics, 'enabled', heuristicsCtx, `${heuristicsPath}.enabled`);
-      // An unsigned floor: a negative value is a type error, and the upper
-      // bound is left to the detector (a floor above 100 simply silences it).
+      // A floor on the normalized 0-100 score, so a value outside that range
+      // names no score the detector can produce (detection spec 9).
       if (hasValue(heuristics, 'min_score')) {
         const minScore = heuristics.min_score;
         if (typeof minScore !== 'number' || !Number.isInteger(minScore) || minScore < 0) {
           addError(heuristicsCtx, 'E001', `${heuristicsPath}.min_score must be a non-negative integer`);
+        } else if (minScore > 100) {
+          addError(heuristicsCtx, 'E004', `${heuristicsPath}.min_score must be between 0 and 100`);
         }
       }
     }, sectionPath);

@@ -224,4 +224,30 @@ describe('createVercelGuard', () => {
       HushSpecDenied,
     );
   });
+
+  it("keeps the tool's identity, prototype members and other methods", async () => {
+    class FakeVercelTool {
+      readonly description = 'a class-based tool';
+      calls: unknown[] = [];
+      describeSelf(): string {
+        return this.description;
+      }
+      async execute(input: unknown): Promise<string> {
+        this.calls.push(input);
+        return 'ran';
+      }
+    }
+    const tool = new FakeVercelTool();
+    const wrapped = createVercelGuard(guard()).wrapTool('safe_tool', tool);
+
+    expect(wrapped).toBeInstanceOf(FakeVercelTool);
+    expect(wrapped.describeSelf()).toBe('a class-based tool');
+    expect(await wrapped.execute({ query: 'hi' })).toBe('ran');
+    expect(tool.calls).toEqual([{ query: 'hi' }]);
+  });
+
+  it('returns a stable gated execute', () => {
+    const wrapped = createVercelGuard(guard()).wrapTool('bash', fakeTool());
+    expect(wrapped.execute).toBe(wrapped.execute);
+  });
 });
