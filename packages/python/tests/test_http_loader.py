@@ -7,19 +7,29 @@ opens a socket is exercised directly, with no server involved. That is where
 the SSRF surface actually lives -- the loopback, private, link-local, CGNAT,
 multicast, unspecified and IPv4-in-IPv6 forms, the scheme check, the allowlist.
 
-The fetch, revalidation and size-cap paths need a server, and
-:mod:`http.server` over TLS needs a certificate authority a test client trusts.
-Rather than mint one, these tests use the loader's documented test-only
-``allow_insecure_loopback`` escape hatch against ``http://127.0.0.1``. That the
-escape hatch is *needed* -- that the loader refuses plain ``http`` and loopback
-without it -- is itself asserted below.
+The fetch, revalidation and size-cap paths need a server, and they run against
+``http://127.0.0.1`` through the loader's documented test-only
+``allow_insecure_loopback`` escape hatch -- which keeps them free of a
+certificate authority. That the escape hatch is *needed* -- that the loader
+refuses plain ``http`` and loopback without it -- is itself asserted below.
+
+The TLS half cannot be skipped that way, because the pinned connection's
+``server_hostname`` is the one line in the module where a mistake is a real
+vulnerability: dial the vetted address but present (or check) the wrong name
+and the certificate stops meaning anything. Those tests mint a certificate,
+serve it on loopback, and point the loader at a *hostname* that resolves there,
+so a wrong ``server_hostname`` fails the handshake rather than passing quietly.
 """
 
 from __future__ import annotations
 
 import http.server
+import socket
 import socketserver
+import ssl
 import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Iterator, Optional
 
 import pytest
@@ -559,3 +569,202 @@ def test_a_mismatched_digest_pin_is_fatal(server: _Server, config: HttpLoaderCon
             loader=create_http_loader(config),
         )
     assert excinfo.value.code == "digest_mismatch"
+
+
+# --------------------------------------------------------------------------- #
+# The ETag cache
+# --------------------------------------------------------------------------- #
+
+
+def test_the_etag_cache_is_bounded() -> None:
+    # A URL comes out of a document and a body may be a megabyte, so an
+    # unbounded map keyed on one is a memory-exhaustion primitive. Past the
+    # bound the oldest entry goes, which costs a body on the next fetch of that
+    # URL and nothing else.
+    cache = EtagCache(max_entries=3)
+    for index in range(5):
+        cache.put(f"https://policies.example/{index}.yaml", f'"v{index}"', POLICY)
+    assert cache.get("https://policies.example/0.yaml") is None
+    assert cache.get("https://policies.example/1.yaml") is None
+    assert cache.get("https://policies.example/4.yaml") == ('"v4"', POLICY)
+
+
+def test_rewriting_a_cached_url_does_not_count_against_the_bound() -> None:
+    cache = EtagCache(max_entries=2)
+    cache.put("https://policies.example/a.yaml", '"v1"', POLICY)
+    cache.put("https://policies.example/b.yaml", '"v1"', POLICY)
+    for revision in range(5):
+        cache.put("https://policies.example/b.yaml", f'"v{revision}"', POLICY)
+    assert cache.get("https://policies.example/a.yaml") == ('"v1"', POLICY)
+    assert cache.get("https://policies.example/b.yaml") == ('"v4"', POLICY)
+
+
+def test_a_cache_must_hold_at_least_one_entry() -> None:
+    with pytest.raises(ValueError, match="at least 1"):
+        EtagCache(max_entries=0)
+
+
+# --------------------------------------------------------------------------- #
+# The pinned TLS connection
+# --------------------------------------------------------------------------- #
+#
+# The loader dials the address it vetted while validating the certificate for
+# the *hostname* the policy named. Getting that pair wrong is the difference
+# between a checked connection and an unchecked one, so it is asserted against
+# a real handshake: the server listens on loopback, the URL names
+# `policies.test`, and only a certificate issued for `policies.test` is
+# accepted. A `server_hostname` of the dialled address would fail against it.
+
+TLS_HOST = "policies.test"
+
+
+def _self_signed(common_name: str) -> tuple[bytes, bytes]:
+    """A certificate for *common_name* and the key that signed it."""
+    pytest.importorskip("cryptography")
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    now = datetime.now(timezone.utc)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        # The SAN is what a modern client checks; the common name is ignored.
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(common_name)]), False)
+        .sign(key, hashes.SHA256())
+    )
+    return (
+        certificate.public_bytes(serialization.Encoding.PEM),
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ),
+    )
+
+
+class _TlsServer:
+    """A loopback HTTPS server serving one policy under a minted certificate."""
+
+    def __init__(self, certificate: bytes, key: bytes, directory: Path) -> None:
+        chain = directory / "chain.pem"
+        chain.write_bytes(certificate + key)
+        self.certificate_path = directory / "cert.pem"
+        self.certificate_path.write_bytes(certificate)
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args: object) -> None:  # noqa: D102
+                pass
+
+            def do_GET(self) -> None:  # noqa: N802
+                body = POLICY.encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(chain)
+        self.httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.httpd.socket = context.wrap_socket(self.httpd.socket, server_side=True)
+        self.port = self.httpd.server_address[1]
+        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self.thread.start()
+
+    def client_config(self, trusted: Optional[Path] = None) -> HttpLoaderConfig:
+        context = ssl.create_default_context(
+            cafile=str(trusted or self.certificate_path)
+        )
+        return HttpLoaderConfig(
+            # Loopback is where the test server listens; the scheme stays
+            # `https`, so the whole TLS path is the one under test.
+            allow_insecure_loopback=True,
+            ssl_context=context,
+        )
+
+    def url(self, host: str = TLS_HOST) -> str:
+        return f"https://{host}:{self.port}/base.yaml"
+
+    def stop(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+        self.thread.join(timeout=5)
+
+
+@pytest.fixture
+def resolves_to_loopback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``policies.test`` resolve to loopback, and nothing else change."""
+    real = socket.getaddrinfo
+
+    def fake(host, port, *args, **kwargs):  # noqa: ANN001, ANN202
+        if host == TLS_HOST:
+            host = "127.0.0.1"
+        return real(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake)
+
+
+@pytest.fixture
+def tls_server(tmp_path: Path) -> Iterator[_TlsServer]:
+    certificate, key = _self_signed(TLS_HOST)
+    running = _TlsServer(certificate, key, tmp_path)
+    try:
+        yield running
+    finally:
+        running.stop()
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
+def test_the_pinned_connection_validates_the_certificate_for_the_hostname(
+    tls_server: _TlsServer,
+) -> None:
+    # The socket goes to 127.0.0.1 -- the address `validate_url` vetted -- while
+    # the handshake names `policies.test`. Only a certificate issued for that
+    # name can satisfy it, which is exactly what a correct `server_hostname`
+    # buys and what a wrong one loses.
+    target = validate_url(tls_server.url(), tls_server.client_config())
+    assert target.host == TLS_HOST
+    assert target.address == "127.0.0.1"
+
+    loaded = create_http_loader(tls_server.client_config())(tls_server.url())
+    assert loaded.spec.name == "remote-base"
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
+def test_a_certificate_for_another_name_is_refused(tmp_path: Path) -> None:
+    # Same address, same trusted issuer, wrong name: the handshake has to fail.
+    # If it did not, `server_hostname` would be carrying the dialled address
+    # (or nothing) and the certificate would be decorative.
+    certificate, key = _self_signed("elsewhere.test")
+    server = _TlsServer(certificate, key, tmp_path)
+    try:
+        with pytest.raises(HttpLoadError, match="failed"):
+            create_http_loader(server.client_config())(server.url())
+    finally:
+        server.stop()
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
+def test_an_untrusted_certificate_is_refused(
+    tls_server: _TlsServer, tmp_path: Path
+) -> None:
+    # Verification is on by default: a certificate for the right name signed by
+    # an issuer the client does not trust is still refused.
+    other_certificate, _ = _self_signed(TLS_HOST)
+    untrusted = tmp_path / "untrusted.pem"
+    untrusted.write_bytes(other_certificate)
+    with pytest.raises(HttpLoadError, match="failed"):
+        create_http_loader(tls_server.client_config(trusted=untrusted))(
+            tls_server.url()
+        )
