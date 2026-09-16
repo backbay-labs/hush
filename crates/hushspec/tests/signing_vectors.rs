@@ -169,8 +169,8 @@ fn every_vector_returns_its_expected_outcome() {
     );
     assert_eq!(
         manifest.cases.len(),
-        16,
-        "signing spec 9 publishes 16 vectors"
+        17,
+        "signing spec 9 publishes 17 vectors"
     );
 }
 

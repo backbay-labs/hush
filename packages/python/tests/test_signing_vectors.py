@@ -126,7 +126,7 @@ def _expected(case: dict[str, Any]) -> tuple[bool, str | None]:
 
 
 def test_vector_manifest_is_populated() -> None:
-    assert len(CASES) == 16, f"expected the 16 normative signing vectors, found {len(CASES)}"
+    assert len(CASES) == 17, f"expected the 17 normative signing vectors, found {len(CASES)}"
     names = [case["name"] for case in CASES]
     assert len(set(names)) == len(names), "vector names must be unique"
 
@@ -171,22 +171,27 @@ def test_signing_vector(case: dict[str, Any]) -> None:
     assert bool(result) is result.valid
 
 
+#: Vectors whose envelope is deliberately not a well-formed 0.2 envelope,
+#: mapped to the reason parsing it must carry. ``bad-algorithm`` and
+#: ``bad-format-version`` pin values the schema closes with ``const``, which is
+#: exactly why spec section 6.2 gives each its own check rather than folding it
+#: into check 1; ``impossible-signed-at-date`` fails check 1 itself.
+_UNPARSEABLE_VECTORS = {
+    "bad-algorithm": "unsupported_algorithm",
+    "bad-format-version": "unsupported_format_version",
+    "impossible-signed-at-date": "malformed_envelope",
+}
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case["name"])
 def test_vector_envelopes_match_the_signature_schema(case: dict[str, Any]) -> None:
-    """Even the negative vectors are structurally well-formed 0.2 envelopes.
-
-    ``bad-algorithm`` and ``bad-format-version`` are the exceptions: they pin
-    values the schema closes with ``const``, which is exactly why spec section
-    6.2 gives each its own check rather than folding it into check 1.
-    """
+    """Every other negative vector is a structurally well-formed 0.2 envelope."""
     envelope = json.loads((VECTOR_DIR / case["signature"]).read_text(encoding="utf-8"))
-    if case["name"] in {"bad-algorithm", "bad-format-version"}:
+    expected_reason = _UNPARSEABLE_VECTORS.get(case["name"])
+    if expected_reason is not None:
         with pytest.raises(MalformedEnvelope) as caught:
             parse_envelope(envelope)
-        assert caught.value.reason in {
-            "unsupported_algorithm",
-            "unsupported_format_version",
-        }
+        assert caught.value.reason == expected_reason
         return
     _assert_matches_signature_schema(envelope)
     parsed = parse_envelope(envelope)

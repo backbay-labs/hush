@@ -9,7 +9,7 @@ import {
 } from 'node:crypto';
 import { canonicalizeValue, contentHash, type JsonValue } from './canonical.js';
 import type { DecisionReceipt } from './receipt.js';
-import { receiptHash } from './receipt.js';
+import { isMillisecondTimestamp, receiptHash } from './receipt.js';
 import type { HushSpec } from './schema.js';
 import { validate } from './validate.js';
 
@@ -64,9 +64,6 @@ export const DEFAULT_MAX_CLOCK_SKEW_SECONDS = 300;
 
 /** `sha256:` + 64 lowercase hex digits -- key ids and content hashes alike. */
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
-
-/** RFC 3339 UTC, millisecond precision, `Z` suffix (spec section 4). */
-const TIMESTAMP_PATTERN = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/;
 
 /** base64url without padding over 64 signature bytes (RFC 4648 section 5). */
 const SIGNATURE_PATTERN = /^[A-Za-z0-9_-]{86}$/;
@@ -500,7 +497,7 @@ function loadTrustedKey(value: unknown, where: string): TrustedKey {
     throw new SigningError(`${where}.name must be a string`);
   }
   const notAfter = entry['not_after'];
-  if (notAfter !== undefined && (typeof notAfter !== 'string' || !isTimestamp(notAfter))) {
+  if (notAfter !== undefined && (typeof notAfter !== 'string' || !isMillisecondTimestamp(notAfter))) {
     throw new SigningError(`${where}.not_after must be an RFC 3339 UTC timestamp with milliseconds`);
   }
   const revoked = entry['revoked'];
@@ -564,10 +561,6 @@ const REQUIRED_ENVELOPE_KEYS = [
   'signature',
 ] as const;
 
-function isTimestamp(value: string): boolean {
-  return TIMESTAMP_PATTERN.test(value) && !Number.isNaN(Date.parse(value));
-}
-
 /**
  * Structural validation of an envelope: spec section 6.2 check 1, whose
  * failure is `malformed_envelope`.
@@ -600,7 +593,7 @@ function envelopeShapeError(value: unknown): string | undefined {
   if (!SHA256_PATTERN.test(envelope['content_hash'] as string)) {
     return 'content_hash must be "sha256:" + 64 lowercase hex digits';
   }
-  if (!isTimestamp(envelope['signed_at'] as string)) {
+  if (!isMillisecondTimestamp(envelope['signed_at'] as string)) {
     return 'signed_at must be an RFC 3339 UTC instant with milliseconds and a Z suffix';
   }
   if (!SIGNATURE_PATTERN.test(envelope['signature'] as string)) {
@@ -608,7 +601,7 @@ function envelopeShapeError(value: unknown): string | undefined {
   }
 
   const expiresAt = envelope['expires_at'];
-  if (expiresAt !== undefined && (typeof expiresAt !== 'string' || !isTimestamp(expiresAt))) {
+  if (expiresAt !== undefined && (typeof expiresAt !== 'string' || !isMillisecondTimestamp(expiresAt))) {
     return 'expires_at must be an RFC 3339 UTC instant with milliseconds and a Z suffix';
   }
   const policyVersion = envelope['policy_version'];
@@ -700,7 +693,7 @@ function timestamp(value: Date | string, field: string): string {
     throw new SigningError(`${field} is not a valid instant`);
   }
   const text = date.toISOString();
-  if (!TIMESTAMP_PATTERN.test(text)) {
+  if (!isMillisecondTimestamp(text)) {
     // Years outside 0000-9999 render in the extended form the schema rejects.
     throw new SigningError(`${field} (${text}) is outside the representable range`);
   }

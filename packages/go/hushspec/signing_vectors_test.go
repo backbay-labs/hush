@@ -27,7 +27,7 @@ const signingVectorsVersion = "0.1.0"
 // signingVectorCaseCount is the number of cases the specification's table
 // enumerates. Pinning it means a vector added upstream cannot be silently
 // skipped by a runner that only iterates what it finds.
-const signingVectorCaseCount = 16
+const signingVectorCaseCount = 17
 
 // signingReasonCodes is the closed set from spec section 6.4. A vector that
 // expects a code outside it is a manifest this SDK does not understand, which

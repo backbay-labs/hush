@@ -15,6 +15,7 @@ import {
   publicKeyPemFromPrivateKey,
   type KeyringDocument,
 } from './signing.js';
+import { isMillisecondTimestamp } from './receipt.js';
 import { resolutionFromResolved, type ChainLink, type Resolution, type SignatureStatus } from './resolve.js';
 import type { HushSpec } from './schema.js';
 import { SDK_NAME, SDK_VERSION } from './version.js';
@@ -75,9 +76,6 @@ const PAE_PREFIX = 'DSSEv1';
 
 const HEX_DIGEST = /^[0-9a-f]{64}$/;
 const CONTENT_HASH = /^sha256:[0-9a-f]{64}$/;
-/** `YYYY-MM-DDTHH:MM:SS.sssZ`, the one timestamp form 0.2 accepts. */
-const MILLISECOND_TIMESTAMP = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/;
-
 const ED25519_SIGNATURE_BYTES = 64;
 
 // --------------------------------------------------------------------------
@@ -893,8 +891,7 @@ function checkStatement(value: unknown): StatementRead {
     return bad('policy.policy_version must be an integer');
   }
   if (typeof predicate.created_at !== 'string'
-    || !MILLISECOND_TIMESTAMP.test(predicate.created_at)
-    || Number.isNaN(Date.parse(predicate.created_at))) {
+    || !isMillisecondTimestamp(predicate.created_at)) {
     return bad(
       `created_at ${JSON.stringify(predicate.created_at)} is not RFC 3339 UTC with millisecond `
       + 'precision',
@@ -993,7 +990,7 @@ function timestamp(value: Date | string): string {
   // so the fixed slice would silently produce a malformed `created_at`. Refuse
   // it here, where the caller still has the input, rather than at read time.
   const formatted = `${date.toISOString().slice(0, 23)}Z`;
-  if (!MILLISECOND_TIMESTAMP.test(formatted)) {
+  if (!isMillisecondTimestamp(formatted)) {
     throw new BundleError(
       `${JSON.stringify(String(value))} is outside the range created_at can express`,
     );
