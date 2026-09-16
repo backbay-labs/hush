@@ -20,8 +20,9 @@ use uuid::Uuid;
 
 use crate::canonical::{self, CanonicalError};
 use crate::conditions::{Condition, RuntimeContext};
-use crate::detection::evaluate_with_detection_traced;
-use crate::evaluate::{Decision, EvaluationAction, PostureResult, UNKNOWN_ACTION_TYPE_RULE};
+use crate::evaluate::{
+    Decision, EvaluationAction, PostureResult, Recording, UNKNOWN_ACTION_TYPE_RULE,
+};
 use crate::resolve::{ChainLink, Resolution, ResolveError, SignatureStatus};
 use crate::schema::HushSpec;
 
@@ -433,16 +434,18 @@ pub fn evaluate_audited(
     config: &AuditConfig,
     ctx: &AuditContext,
 ) -> DecisionReceipt {
-    let start = (config.enabled && config.record_duration).then(Instant::now);
+    let plan = AuditPlan::new(config);
+    let start = plan.timed.then(Instant::now);
 
-    let detected = evaluate_with_detection_traced(
+    let detected = crate::detection::run_with_detection(
         &resolution.spec,
         action,
         ctx.context.as_ref(),
         &ctx.conditions,
+        plan.recording,
     );
     let duration_us = start.map(|s| s.elapsed().as_micros() as u64);
-    finish_receipt(resolution, action, config, ctx, detected, duration_us)
+    finish_receipt(resolution, action, &plan, ctx, detected, duration_us)
 }
 
 /// [`CompiledPolicy::evaluate_audited`], routed here so the compiled and the
@@ -456,24 +459,58 @@ pub(crate) fn record_receipt(
     config: &AuditConfig,
     ctx: &AuditContext,
 ) -> DecisionReceipt {
-    let start = (config.enabled && config.record_duration).then(Instant::now);
-    let detected =
-        policy.evaluate_with_detection_traced(action, ctx.context.as_ref(), &ctx.conditions);
+    let plan = AuditPlan::new(config);
+    let start = plan.timed.then(Instant::now);
+    let detected = policy.run_with_detection(
+        action,
+        ctx.context.as_ref(),
+        &ctx.conditions,
+        plan.recording,
+    );
     let duration_us = start.map(|s| s.elapsed().as_micros() as u64);
-    finish_receipt(resolution, action, config, ctx, detected, duration_us)
+    finish_receipt(resolution, action, &plan, ctx, detected, duration_us)
+}
+
+/// What an [`AuditConfig`] asks an evaluation to do, read once so the compiled
+/// and the compile-on-the-fly paths cannot answer it differently.
+struct AuditPlan {
+    /// Whether the evaluation records a rule trace.
+    recording: Recording,
+    /// Whether the receipt carries that trace.
+    keep_trace: bool,
+    /// Whether the evaluation is timed.
+    timed: bool,
+}
+
+impl AuditPlan {
+    fn new(config: &AuditConfig) -> Self {
+        let keep_trace = config.enabled && config.include_rule_trace;
+        let timed = config.enabled && config.record_duration;
+        Self {
+            // A trace nobody keeps is not recorded. A timed evaluation records
+            // one regardless, so `duration_us` always covers the same work.
+            recording: if keep_trace || timed {
+                Recording::On
+            } else {
+                Recording::Off
+            },
+            keep_trace,
+            timed,
+        }
+    }
 }
 
 fn finish_receipt(
     resolution: &Resolution,
     action: &EvaluationAction,
-    config: &AuditConfig,
+    plan: &AuditPlan,
     ctx: &AuditContext,
     detected: crate::detection::TracedEvaluationWithDetection,
     duration_us: Option<u64>,
 ) -> DecisionReceipt {
     let result = detected.evaluation;
 
-    let rule_trace = if config.enabled && config.include_rule_trace {
+    let rule_trace = if plan.keep_trace {
         build_trace(&detected.traced.trace, result.origin_profile.as_deref())
     } else {
         Vec::new()
