@@ -1889,16 +1889,21 @@ class CompiledPolicy:
         capability: Optional[str],
         trace: Optional[list[RuleEvaluation]],
     ) -> Optional[tuple[str, str]]:
-        if posture is None or capability is None:
+        if posture is None:
             return None
         posture_extension = self._posture
         if posture_extension is None:
             return None
 
+        # The state is looked up before the capability table is consulted, so
+        # an unknown state denies even the action types the table does not
+        # gate (posture spec 3.3).
         current_state = posture_extension.states.get(posture.current)
         if current_state is None:
             rule = f"extensions.posture.states.{posture.current}"
             reason = f"unknown posture state '{posture.current}'"
+        elif capability is None:
+            return None
         elif capability in current_state.capabilities:
             if trace is not None:
                 trace.append(

@@ -6,6 +6,10 @@ policy:
     tool_access:
       allow: [read_file]
       default: block
+    computer_use:
+      enabled: true
+      mode: guardrail
+      allowed_actions: [remote.session.connect]
   extensions:
     posture:
       initial: standard
@@ -28,6 +32,26 @@ cases:
     action:
       type: tool_call
       target: read_file
+      posture:
+        current: ghost
+        signal: none
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.ghost
+  - description: "known state: an action type the capability table does not gate gets its block's own decision"
+    action:
+      type: computer_use
+      target: remote.session.connect
+      posture:
+        current: standard
+        signal: none
+    expect:
+      decision: allow
+      matched_rule: rules.computer_use.allowed_actions
+  - description: "unknown posture state denies an action type the capability table does not gate"
+    action:
+      type: computer_use
+      target: remote.session.connect
       posture:
         current: ghost
         signal: none

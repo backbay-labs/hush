@@ -1,6 +1,6 @@
 {
   "receipt_version": "0.2",
-  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
   "timestamp": "2026-09-15T12:00:00.000Z",
   "time_source": "trusted",
   "actor": {
@@ -14,39 +14,39 @@
     "content_hash": "sha256:8dffe4d46f164eadc65d7b1d91ac2241443ff1bc67c9186ab9bb6a3f28b0ec80"
   },
   "action": {
-    "type": "tool_call",
-    "target": "read_file"
+    "type": "computer_use",
+    "target": "remote.session.connect"
   },
-  "decision": "allow",
-  "matched_rule": "rules.tool_access.allow",
-  "reason": "tool is explicitly allowed",
+  "decision": "deny",
+  "matched_rule": "extensions.posture.states.ghost",
+  "reason": "unknown posture state 'ghost'",
   "rule_trace": [
     {
       "rule_block": "posture_capability",
-      "outcome": "allow",
+      "rule_path": "extensions.posture.states.ghost",
+      "outcome": "deny",
       "evaluated": true,
-      "reason": "posture capabilities satisfied"
+      "reason": "unknown posture state 'ghost'"
     },
     {
-      "rule_block": "tool_access",
-      "rule_path": "rules.tool_access.allow",
-      "outcome": "allow",
-      "evaluated": true,
-      "reason": "tool is explicitly allowed"
-    },
-    {
-      "rule_block": "secret_patterns",
+      "rule_block": "computer_use",
       "outcome": "skip",
       "evaluated": false,
-      "reason": "no secret_patterns rule configured"
+      "reason": "short-circuited by posture deny"
+    },
+    {
+      "rule_block": "remote_desktop_channels",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "short-circuited by posture deny"
     }
   ],
   "enforcement": {
     "mode": "enforce",
-    "outcome": "allowed"
+    "outcome": "blocked"
   },
   "posture": {
-    "current": "standard",
-    "next": "standard"
+    "current": "ghost",
+    "next": "ghost"
   }
 }

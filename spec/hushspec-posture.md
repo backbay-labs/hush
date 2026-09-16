@@ -115,6 +115,8 @@ The posture guard maps each core action type (Core Section 5) to the capability 
 
 Action types not in this table are unknown and are denied by the core evaluator before the posture guard runs (Core Section 5).
 
+The guard looks the current state up before it consults this table: an action whose `posture.current` names a state absent from `states` is denied (Section 3) whatever its action type, including the types this table does not gate.
+
 ---
 
 ## 4. Budget Keys

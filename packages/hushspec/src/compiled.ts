@@ -1385,9 +1385,6 @@ class Evaluation {
     if (posture == null) return undefined;
     const compiled = this.posture;
     if (compiled == null) return undefined;
-    const capability = REQUIRED_CAPABILITY.get(this.action.type);
-    if (capability == null) return undefined;
-
     const currentState = compiled.states.get(posture.current);
     if (currentState == null) {
       const rule = `extensions.posture.states.${posture.current}`;
@@ -1395,6 +1392,11 @@ class Evaluation {
       this.record('posture_capability', 'deny', rule, reason, true);
       return blockDeny(rule, reason);
     }
+    // The state is looked up before the capability table is consulted, so an
+    // unknown state denies even the action types the table does not gate
+    // (posture spec 3.3).
+    const capability = REQUIRED_CAPABILITY.get(this.action.type);
+    if (capability == null) return undefined;
 
     if (currentState.capabilities.has(capability)) {
       this.record('posture_capability', 'allow', undefined, 'posture capabilities satisfied', true);

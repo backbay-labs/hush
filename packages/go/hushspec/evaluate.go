@@ -521,17 +521,14 @@ func (e *evaluator) evaluateBlock(
 	}
 }
 
-// postureCapabilityGuard denies when the current posture state lacks the
-// capability required by the action type.
+// postureCapabilityGuard denies when the current posture state is not
+// declared, or lacks the capability the action type requires. The state is
+// looked up first, so an unknown state denies even the action types the
+// capability table does not gate (posture spec 3.3).
 func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecision {
 	if posture == nil || e.policy.posture == nil {
 		return nil
 	}
-	capability := requiredCapability(e.action.Type)
-	if capability == "" {
-		return nil
-	}
-
 	currentState, ok := e.policy.posture.States[posture.Current]
 	if !ok {
 		rule := fmt.Sprintf("extensions.posture.states.%s", posture.Current)
@@ -539,6 +536,11 @@ func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecisio
 		e.record("posture_capability", RuleOutcomeDeny, rule, reason, true)
 		denied := denyDecision(rule, reason)
 		return &denied
+	}
+
+	capability := requiredCapability(e.action.Type)
+	if capability == "" {
+		return nil
 	}
 
 	for _, granted := range currentState.Capabilities {

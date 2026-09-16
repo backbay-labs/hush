@@ -809,7 +809,6 @@ impl Evaluator<'_> {
             .extensions
             .as_ref()
             .and_then(|extensions| extensions.posture.as_ref())?;
-        let capability = required_capability(self.action.action_type.as_str())?;
         let Some(current_state) = posture_extension.states.get(&posture_result.current) else {
             let rule = format!("extensions.posture.states.{}", posture_result.current);
             let reason = format!("unknown posture state '{}'", posture_result.current);
@@ -822,6 +821,10 @@ impl Evaluator<'_> {
             );
             return Some(BlockDecision::deny(&rule, &reason));
         };
+        // The state is looked up before the capability table is consulted, so
+        // an unknown state denies even the action types the table does not
+        // gate (posture spec 3.3).
+        let capability = required_capability(self.action.action_type.as_str())?;
 
         if current_state
             .capabilities
