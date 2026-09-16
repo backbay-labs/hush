@@ -53,6 +53,7 @@ _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 #: name the receipt carries -- one spelling per fact.
 POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
 
+
 @dataclass
 class EnforcementConfig:
     mode: str = "enforce"                                     # 'enforce' | 'monitor'
@@ -235,9 +236,6 @@ class _GuardState:
     #: section 6.5), which is why it is kept apart from :attr:`resolution`.
     refused: Optional[Resolution]
     policy_hash: Optional[str]
-    #: What the caller asked for, which a refused load still names.
-    requested_name: Optional[str]
-    requested_version: str
 
 
 class HushSpecDenied(Exception):
@@ -289,7 +287,6 @@ class HushGuard:
             verify=verify,
         )
         self._watcher: Any = None
-        requested = policy.spec if isinstance(policy, Resolution) else policy
         resolution: Optional[Resolution] = None
         refused: Optional[Resolution] = None
         refusal: Optional[SignatureStatus] = None
@@ -333,8 +330,6 @@ class HushGuard:
             policy_hash=(
                 resolution.content_hash if resolution is not None else None
             ),
-            requested_name=requested.name,
-            requested_version=requested.hushspec,
         )
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
@@ -858,12 +853,7 @@ class HushGuard:
         # rejected here rather than swapped in, leaving the policy in force. A
         # failed swap therefore raises and changes nothing -- including a guard
         # that is already refusing, which keeps refusing.
-        resolution = self._resolve(new_policy)
-        self._swap(
-            resolution,
-            requested_name=new_policy.name,
-            requested_version=new_policy.hushspec,
-        )
+        self._swap(self._resolve(new_policy))
 
     def swap_resolution(self, resolution: Resolution) -> None:
         """Swap in a policy a provider already resolved (the hot-reload path).
@@ -875,20 +865,9 @@ class HushGuard:
         resolution this guard will not accept is rejected here, leaving the
         policy in force untouched.
         """
-        adopted = self._adopt_resolution(resolution)
-        self._swap(
-            adopted,
-            requested_name=adopted.spec.name,
-            requested_version=adopted.spec.hushspec,
-        )
+        self._swap(self._adopt_resolution(resolution))
 
-    def _swap(
-        self,
-        resolution: Resolution,
-        *,
-        requested_name: Optional[str],
-        requested_version: str,
-    ) -> None:
+    def _swap(self, resolution: Resolution) -> None:
         resolved = resolution.spec
         # Compile before anything is swapped in: the guard never holds a
         # policy it has not prepared.
@@ -904,8 +883,6 @@ class HushGuard:
             refusal=None,
             refused=None,
             policy_hash=resolution.content_hash,
-            requested_name=requested_name,
-            requested_version=requested_version,
         )
         if self._observable_evaluator is not None:
             self._observable_evaluator.notify_policy_reloaded(
