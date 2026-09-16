@@ -182,7 +182,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   reports the closed reason-code set of signing spec 6.4 (`malformed_envelope`,
   `unsupported_format_version`, `unsupported_algorithm`, `unknown_key_id`, `key_revoked`,
   `key_retired`, `signed_at_in_future`, `expired`, `signature_mismatch`,
-  `content_hash_mismatch`, `policy_version_rollback`). All 16 vectors under `fixtures/signing/`
+  `content_hash_mismatch`, `policy_version_rollback`). All 17 vectors under `fixtures/signing/`
   pass.
 - `when.capability` and `when.rate` support: `RateCondition`, `RateComparison`,
   `evaluate_condition_with_capabilities` and `is_capability_identifier` are exported.
