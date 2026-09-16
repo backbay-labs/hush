@@ -402,11 +402,15 @@ func (o *StderrObserver) printf(format string, args ...any) {
 
 // OnPolicyLoaded reports the policy now in force.
 func (o *StderrObserver) OnPolicyLoaded(load PolicyLoadObservation) {
+	name := "<unnamed>"
+	if load.Name != nil {
+		name = *load.Name
+	}
 	if load.IsSwap() {
-		o.printf("policy swapped: %s %s (was %s)", load.Name, load.ContentHash, load.PreviousContentHash)
+		o.printf("policy swapped: %s %s (was %s)", name, load.ContentHash, load.PreviousContentHash)
 		return
 	}
-	o.printf("policy loaded: %s %s", load.Name, load.ContentHash)
+	o.printf("policy loaded: %s %s", name, load.ContentHash)
 }
 
 // OnEvaluation reports one decision.
