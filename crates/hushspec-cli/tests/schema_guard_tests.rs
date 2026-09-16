@@ -415,3 +415,93 @@ fn compile(document: &serde_json::Value) -> jsonschema::JSONSchema {
         .compile(document)
         .expect("the core schema compiles")
 }
+
+/// The prepared SchemaStore catalog entries must satisfy the shape
+/// `src/api/json/catalog.json` accepts, and must point at schemas this
+/// repository actually publishes.
+///
+/// A catalog entry carries a `name`, a `description`, an HTTPS `url`, and
+/// either a `fileMatch` list or a `versions` map; the array is sorted by
+/// `name` and rejects any other key. An entry that drifts from that is a
+/// submission that bounces, and an entry whose `url` names a schema the site
+/// does not serve is a 404 in every editor that consults the catalog.
+#[test]
+fn the_schemastore_entries_match_the_catalog_entry_shape() {
+    let root = repo_root();
+    let raw = fs::read_to_string(format!("{root}/docs/schemastore-entry.json"))
+        .expect("the prepared entry is readable");
+    let document: serde_json::Value = serde_json::from_str(&raw).expect("it is JSON");
+
+    let entries = document["schemas"]
+        .as_array()
+        .expect("the file wraps the entries in a `schemas` array");
+    assert!(
+        !entries.is_empty(),
+        "at least the core schema must be listed"
+    );
+
+    let published: Vec<String> = fs::read_dir(format!("{root}/schemas"))
+        .unwrap()
+        .filter_map(|entry| {
+            let path = entry.unwrap().path();
+            (path.extension()? == "json").then(|| {
+                format!(
+                    "https://hushspec.dev/schemas/{}",
+                    path.file_name().unwrap().to_string_lossy()
+                )
+            })
+        })
+        .collect();
+
+    let mut names: Vec<&str> = Vec::new();
+    for entry in entries {
+        let object = entry.as_object().expect("an entry is an object");
+        for key in object.keys() {
+            assert!(
+                matches!(key.as_str(), "name" | "description" | "fileMatch" | "url"),
+                "{key} is not a catalog entry key"
+            );
+        }
+
+        let name = object["name"].as_str().expect("name is a string");
+        assert!(!name.is_empty(), "an entry needs a name");
+        assert!(
+            object["description"]
+                .as_str()
+                .is_some_and(|text| !text.is_empty()),
+            "{name} needs a description"
+        );
+
+        let url = object["url"].as_str().expect("url is a string");
+        assert!(url.starts_with("https://"), "{name}: {url} must be HTTPS");
+        assert!(
+            published.contains(&url.to_string()),
+            "{name}: {url} is not a schema this repository publishes"
+        );
+
+        let patterns = object["fileMatch"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name} needs a fileMatch list"));
+        assert!(!patterns.is_empty(), "{name}: fileMatch must not be empty");
+        let mut seen: Vec<&str> = patterns
+            .iter()
+            .map(|pattern| pattern.as_str().expect("a pattern is a string"))
+            .collect();
+        let count = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), count, "{name}: fileMatch has a duplicate");
+
+        names.push(name);
+    }
+
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted, "the catalog array is sorted by name");
+
+    // The policy schema is the entry the whole submission exists for.
+    assert!(
+        names.contains(&"HushSpec"),
+        "the core policy schema must be listed"
+    );
+}
