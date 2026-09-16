@@ -26,6 +26,8 @@ from hushspec.bundle import (
     PREDICATE_TYPE,
     STATEMENT_TYPE,
     REASON_DSSE_SIGNATURE_MISMATCH,
+    REASON_KEY_RETIRED,
+    REASON_KEY_REVOKED,
     DsseEnvelope,
     build_statement,
     bundle_to_json,
@@ -195,6 +197,41 @@ def test_a_created_bundle_verifies() -> None:
     assert result.valid, result.detail
     assert result.content_hash == resolution.content_hash
     assert result.policy_checked
+
+
+def test_retirement_is_graceful_and_revocation_is_not() -> None:
+    # Spec section 5.2 check 2: a bundle produced while the key was current
+    # keeps verifying after the key is retired; one produced at or after
+    # `not_after` does not, and a revoked key attests nothing at all.
+    bundle = bundle_to_json(
+        create_bundle(
+            vector_resolution(),
+            private_key_pem=read_key("test-signing.key.pem"),
+            created_at=VECTOR_CREATED_AT,
+        )
+    )
+    document = json.loads((KEYS / "keyring.json").read_text(encoding="utf-8"))
+
+    def with_entry(**fields: object) -> dict[str, object]:
+        return {**document, "keys": [{**document["keys"][0], **fields}]}
+
+    assert verify_bundle(
+        bundle,
+        keyring=with_entry(not_after="2026-09-16T00:00:00.000Z"),
+        now=VECTOR_CREATED_AT,
+    ).valid
+
+    retired = verify_bundle(
+        bundle, keyring=with_entry(not_after=VECTOR_CREATED_AT), now=VECTOR_CREATED_AT
+    )
+    assert not retired.valid
+    assert retired.reason == REASON_KEY_RETIRED
+
+    revoked = verify_bundle(
+        bundle, keyring=with_entry(revoked=True), now=VECTOR_CREATED_AT
+    )
+    assert not revoked.valid
+    assert revoked.reason == REASON_KEY_REVOKED
 
 
 def test_an_unsigned_bundle_is_refused_at_verification() -> None:

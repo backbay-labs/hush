@@ -97,7 +97,7 @@ def _resolved(path: Path):
 
 
 def test_vector_manifest_is_populated() -> None:
-    assert len(CASES) == 8, "spec section 7 lists eight bundle vectors"
+    assert len(CASES) == 10, "spec section 7 lists ten bundle vectors"
     names = [case["name"] for case in CASES]
     assert len(set(names)) == len(names), "vector names must be unique"
 
