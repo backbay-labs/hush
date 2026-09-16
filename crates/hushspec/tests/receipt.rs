@@ -93,6 +93,32 @@ fn assert_schema_valid(receipt: &DecisionReceipt) {
     }
 }
 
+#[test]
+fn schema_rejects_a_timestamp_outside_the_calendar_ranges() {
+    let receipt = evaluate_audited(
+        &resolution(),
+        &action(serde_json::json!({"type": "tool_call", "target": "read_file"})),
+        &AuditConfig::default(),
+        &fixed_ctx(),
+    );
+    let mut value = serde_json::to_value(&receipt).unwrap();
+    value["policy"]["signature"] = serde_json::json!({
+        "verified": true,
+        "verified_at": "2026-09-15T12:00:00.000Z",
+    });
+    assert!(RECEIPT_SCHEMA.validate(&value).is_ok());
+
+    let out_of_range = "2026-99-99T99:99:99.000Z";
+    for pointer in ["/timestamp", "/policy/signature/verified_at"] {
+        let mut broken = value.clone();
+        *broken.pointer_mut(pointer).unwrap() = serde_json::json!(out_of_range);
+        assert!(
+            RECEIPT_SCHEMA.validate(&broken).is_err(),
+            "{pointer} must reject a month, day, hour, minute, or second out of range"
+        );
+    }
+}
+
 // ---------------------------------------------------------------- decisions --
 
 #[test]
