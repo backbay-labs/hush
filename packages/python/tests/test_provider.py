@@ -228,6 +228,24 @@ class TestPolicyWatcher:
         assert [c.spec.name for c in changes] == ["block-policy"]
         assert watcher.reload_count == 1
 
+    def test_a_rewrite_during_the_adopted_load_is_picked_up(self, policy_file: Path):
+        changes: list[Resolution] = []
+        provider = FileProvider(policy_file)
+        watcher = PolicyWatcher(provider, 0.01, changes.append)
+
+        adopted = provider.load()
+        # The writer lands between the read above and the adoption below. A
+        # fingerprint taken at adoption time would be the new file's, and the
+        # loop would treat the version it never read as already seen.
+        _write(policy_file, BLOCK_POLICY)
+        watcher.adopt(adopted)
+
+        reloaded = watcher.check_once()
+
+        assert reloaded is not None
+        assert reloaded.spec.name == "block-policy"
+        assert [c.spec.name for c in changes] == ["block-policy"]
+
     def test_touch_without_a_content_change_announces_nothing(self, policy_file: Path):
         changes: list[Resolution] = []
         watcher = PolicyWatcher(FileProvider(policy_file), 0.01, changes.append)

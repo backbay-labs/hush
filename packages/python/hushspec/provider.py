@@ -345,15 +345,22 @@ class _ReloadLoop:
         thread = self._thread
         return thread is not None and thread.is_alive()
 
-    def adopt(self, resolution: Resolution) -> None:
+    def adopt(self, resolution: Resolution, fingerprint: Any = None) -> None:
         """Seed the loop with a policy loaded elsewhere, without calling back.
 
         Used when a guard was already built from ``provider.load()``: the loop
         starts from what is in force rather than announcing it as a change.
+
+        *fingerprint* is the source's fingerprint as it stood **before** that
+        load, which only the caller that performed the load can observe; a tick
+        takes its own the same way round. Without it the loop keeps none, so
+        its first tick is a full load: a source rewritten between the read and
+        this call would otherwise be recorded as already seen, and the writer's
+        version would never be picked up.
         """
         with self._lock:
             self._current = resolution
-            self._fingerprint = self._stat_fingerprint()
+            self._fingerprint = fingerprint
 
     # -- ticking ------------------------------------------------------------ #
 
@@ -458,8 +465,9 @@ class _ReloadLoop:
             raise RuntimeError("already started")
         initial: Optional[Resolution] = None
         if load:
+            fingerprint = self._stat_fingerprint()
             initial = self._provider.load()
-            self.adopt(initial)
+            self.adopt(initial, fingerprint)
         self._stop.clear()
         self._thread = threading.Thread(
             target=self._run,
