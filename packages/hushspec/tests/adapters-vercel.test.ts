@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalizeValue } from '../src/canonical.js';
 import { HushGuard, HushSpecDenied } from '../src/middleware.js';
+import { utf8ByteLength } from '../src/utf8.js';
 import { createVercelGuard, mapVercelToolCall } from '../src/adapters/vercel.js';
 
 const POLICY = `
@@ -35,7 +37,7 @@ describe('mapVercelToolCall', () => {
     const action = mapVercelToolCall({ toolName: 'readFile', args: { path: '/etc/hosts' } });
     expect(action.type).toBe('file_read');
     expect(action.target).toBe('/etc/hosts');
-    expect(action.args_size).toBe(JSON.stringify({ path: '/etc/hosts' }).length);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue({ path: '/etc/hosts' })));
   });
 
   it('normalizes tool-name spelling', () => {
@@ -80,7 +82,7 @@ describe('mapVercelToolCall', () => {
     const action = mapVercelToolCall({ toolName: 'search', args });
     expect(action.type).toBe('tool_call');
     expect(action.target).toBe('search');
-    expect(action.args_size).toBe(JSON.stringify(args).length);
+    expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue(args)));
   });
 
   it('accepts the AI SDK 5 `input` spelling', () => {
@@ -89,12 +91,12 @@ describe('mapVercelToolCall', () => {
     expect(action.target).toBe('whoami');
   });
 
-  it('parses JSON string arguments and sizes them as supplied', () => {
+  it('parses JSON string arguments and sizes them as the bytes supplied', () => {
     const raw = '{"path":   "/tmp/a.txt"}';
     const action = mapVercelToolCall({ toolName: 'readFile', args: raw });
     expect(action.type).toBe('file_read');
     expect(action.target).toBe('/tmp/a.txt');
-    expect(action.args_size).toBe(raw.length);
+    expect(action.args_size).toBe(utf8ByteLength(raw));
   });
 
   it('tolerates missing arguments', () => {

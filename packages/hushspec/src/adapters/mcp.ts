@@ -1,5 +1,6 @@
 import type { EvaluationAction, EvaluationResult } from '../evaluate.js';
 import type { HushGuard } from '../middleware.js';
+import { argsSize } from './tool-mapping.js';
 
 export function mapMCPToolCall(
   toolName: string,
@@ -46,7 +47,7 @@ export function mapMCPToolCall(
   return {
     type: 'tool_call',
     target: toolName,
-    args_size: args ? JSON.stringify(args).length : undefined,
+    args_size: args ? argsSize(args) : undefined,
   };
 }
 

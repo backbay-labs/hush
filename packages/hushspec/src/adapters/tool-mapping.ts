@@ -1,4 +1,6 @@
+import { canonicalizeValue, type JsonValue } from '../canonical.js';
 import type { EvaluationAction } from '../evaluate.js';
+import { utf8ByteLength } from '../utf8.js';
 
 /**
  * Shared tool-name mapping for the framework adapters.
@@ -64,13 +66,24 @@ function firstString(args: ArgRecord | undefined, keys: readonly string[]): stri
   return undefined;
 }
 
-/** Content-free size signal: the JSON length of the arguments as supplied. */
+/**
+ * Content-free size signal: `args_size` as core spec 3.7 defines it, the
+ * length in **bytes of the UTF-8 encoding** of the arguments serialized as
+ * canonical JSON (RFC 8785, canonical spec 4).
+ *
+ * `JSON.stringify(x).length` counts UTF-16 code units, so it undercounts
+ * every non-ASCII argument -- a payload of emoji measured half its size would
+ * slip under a `max_args_size` limit the enforcement point believes it is
+ * applying. Arguments that arrive already serialized are measured as the
+ * bytes received, which core spec 3.7 permits; a payload with no JSON
+ * representation yields no size signal rather than an exception at the tool
+ * boundary.
+ */
 export function argsSize(raw: unknown): number | undefined {
   if (raw === undefined) return undefined;
-  if (typeof raw === 'string') return raw.length;
+  if (typeof raw === 'string') return utf8ByteLength(raw);
   try {
-    const encoded = JSON.stringify(raw);
-    return encoded === undefined ? undefined : encoded.length;
+    return utf8ByteLength(canonicalizeValue(raw as JsonValue));
   } catch {
     return undefined;
   }

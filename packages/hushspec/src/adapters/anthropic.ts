@@ -1,5 +1,6 @@
 import type { EvaluationAction, EvaluationResult } from '../evaluate.js';
 import type { HushGuard } from '../middleware.js';
+import { argsSize } from './tool-mapping.js';
 
 export function mapClaudeToolToAction(
   toolName: string,
@@ -40,13 +41,13 @@ export function mapClaudeToolToAction(
         return {
           type: 'tool_call',
           target: innerTool,
-          args_size: JSON.stringify(toolInput).length,
+          args_size: argsSize(toolInput),
         };
       }
       return {
         type: 'tool_call',
         target: toolName,
-        args_size: JSON.stringify(toolInput).length,
+        args_size: argsSize(toolInput),
       };
   }
 }
