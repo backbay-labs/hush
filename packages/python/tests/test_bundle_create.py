@@ -16,6 +16,7 @@ import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -52,6 +53,12 @@ BUNDLES = REPO_ROOT / "fixtures" / "bundle" / "bundles"
 #: The policy every bundle vector attests (``fixtures/bundle/README.md``).
 VECTOR_POLICY = REPO_ROOT / "library" / "healthcare" / "hipaa-base.yaml"
 
+#: A 0.x policy that declares ``name: ""``, which the frozen 0.x format admits.
+EMPTY_NAME_POLICY = REPO_ROOT / "fixtures" / "core" / "valid" / "empty-name-0-2.yaml"
+
+#: The published bundle schema a consumer validates against.
+BUNDLE_SCHEMA = REPO_ROOT / "schemas" / "hushspec-bundle.v1.schema.json"
+
 #: The ``created_at`` the vectors pin so the bundles are byte-reproducible.
 VECTOR_CREATED_AT = "2026-09-15T12:00:00.000Z"
 
@@ -78,11 +85,26 @@ def vector_resolver(name: str) -> dict[str, str]:
     return dict(payload["predicate"]["resolver"])
 
 
-def vector_resolution():
-    spec = parse_or_raise(VECTOR_POLICY.read_text(encoding="utf-8"))
+def resolution_of(policy: Path):
+    spec = parse_or_raise(policy.read_text(encoding="utf-8"))
     return resolve_with_options_or_raise(
-        spec, source=str(VECTOR_POLICY), loader=create_composite_loader()
+        spec, source=str(policy), loader=create_composite_loader()
     )
+
+
+def vector_resolution():
+    return resolution_of(VECTOR_POLICY)
+
+
+def statement_schema() -> dict[str, Any]:
+    """``$defs/Statement`` as a schema in its own right.
+
+    The definitions come along so its internal ``#/$defs/...`` refs still
+    resolve. The payload is base64, so the statement it decodes to is
+    validated separately from the envelope (spec section 5.2).
+    """
+    schema = json.loads(BUNDLE_SCHEMA.read_text(encoding="utf-8"))
+    return {**schema["$defs"]["Statement"], "$defs": schema["$defs"]}
 
 
 def keyring():
@@ -243,6 +265,48 @@ def test_the_subject_name_falls_back_to_the_leaf_file_name() -> None:
     )
     assert statement.subject[0].name == "hipaa-base.yaml"
     assert statement.predicate.policy.name is None
+
+
+def test_a_policy_with_an_empty_name_bundles_under_its_file_name() -> None:
+    """An empty name is a name the bundle schema will not accept.
+
+    Both ``subject[0].name`` and ``predicate.policy.name`` need at least one
+    character, while the 0.x document format places no such constraint on
+    ``name``, so a policy that declares one is bundled without it.
+    """
+    jsonschema = pytest.importorskip(
+        "jsonschema", reason="schema validation needs the `dev` extra"
+    )
+    resolution = resolution_of(EMPTY_NAME_POLICY)
+    statement = build_statement(
+        resolution, created_at=VECTOR_CREATED_AT, base_dir=REPO_ROOT
+    )
+
+    assert statement.subject[0].name == "empty-name-0-2.yaml"
+    assert statement.predicate.policy.name is None
+    # Absent, not present and empty.
+    assert "name" not in statement_to_dict(statement)["predicate"]["policy"]
+
+    bundle = create_bundle(
+        resolution,
+        private_key_pem=read_key("test-signing.key.pem"),
+        created_at=VECTOR_CREATED_AT,
+        base_dir=REPO_ROOT,
+    )
+    jsonschema.validate(
+        json.loads(base64.b64decode(bundle.payload)), statement_schema()
+    )
+
+    result = verify_bundle(
+        bundle_to_json(bundle),
+        keyring=keyring(),
+        now=VECTOR_CREATED_AT,
+        policy=resolution,
+    )
+    assert result.valid, result.detail
+    assert result.subject_name == "empty-name-0-2.yaml"
+    assert result.policy_name is None
+    assert result.policy_checked
 
 
 def test_an_explicit_subject_name_wins() -> None:
