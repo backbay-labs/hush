@@ -264,14 +264,11 @@ func TestValidateInvalidPostureInitial(t *testing.T) {
 	}
 }
 
-// TestValidateRejectsNonFiniteMaxImbalanceRatio locks in the shared
-// wave-3 fix (spec item A): every float-typed config field must reject NaN
-// and +/-Infinity at validation time. Before this fix, `.nan` failed every
-// `<= 0` bounds check (NaN comparisons are always false), so it silently
-// passed validation and then made `require_balance` fail OPEN at evaluation
-// time (`ratio > NaN` is also always false) -- and, separately, made
-// json.Marshal error on the NaN when hashing the policy for a receipt,
-// silently dropping content_hash. Rejecting it here closes both holes.
+// Every float-typed configuration field rejects NaN and infinities at
+// validation time. A NaN would pass every `<= 0` bounds check, since a
+// comparison with NaN is always false, and would then make
+// `require_balance` fail open at evaluation time for the same reason, while
+// json.Marshal refuses it when the policy is hashed for a receipt.
 func TestValidateRejectsNonFiniteMaxImbalanceRatio(t *testing.T) {
 	cases := []struct {
 		name string
@@ -303,10 +300,8 @@ rules:
 	}
 }
 
-// TestValidateRejectsNonFiniteSimilarityThreshold mirrors the
-// max_imbalance_ratio test above for extensions.detection.threat_intel.
-// similarity_threshold, the other float-typed config field the shared
-// wave-3 fix names explicitly.
+// extensions.detection.threat_intel.similarity_threshold is the other
+// float-typed configuration field and rejects non-finite values the same way.
 func TestValidateRejectsNonFiniteSimilarityThreshold(t *testing.T) {
 	nan := math.NaN()
 	spec := &HushSpec{

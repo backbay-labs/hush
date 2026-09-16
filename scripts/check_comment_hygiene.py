@@ -85,7 +85,7 @@ PATTERNS: tuple[tuple[str, bool], ...] = (
     # for UUIDv7, and that is not a planning reference.
     (r"RFC[- ]0?9\b", False),
     (r"\bP[0-6]-[0-9]{2}\b", True),
-    (r"\bWave [0-6]\b", False),
+    (r"\bwave[- ][0-6]\b", False),
     (r"\(D[12]?[0-9]\)", True),
     (r"\bD[12]?[0-9]\b", True),
     # How the work was divided up.
