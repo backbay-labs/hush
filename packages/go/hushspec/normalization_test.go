@@ -243,6 +243,69 @@ func TestEmptyNameUnderAnUnreadableVersion(t *testing.T) {
 	}
 }
 
+// TestAWrittenNullIsRefusedForEveryDeclaredProperty covers canonical spec 2.2:
+// no HushSpec property is nullable, and yaml.v3 would otherwise decode a
+// written null into the zero value -- for an optional field, exactly what an
+// absent key decodes to.
+func TestAWrittenNullIsRefusedForEveryDeclaredProperty(t *testing.T) {
+	cases := []struct{ name, source, want string }{
+		{
+			name:   "rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress: null\n",
+			want:   "rules.egress: invalid type: null, expected an object",
+		},
+		{
+			name:   "top-level string",
+			source: "hushspec: \"1.0.0\"\nname: null\n",
+			want:   "name: invalid type: null, expected a string",
+		},
+		{
+			name:   "governance string",
+			source: "hushspec: \"1.0.0\"\nmetadata:\n  author: null\n",
+			want:   "metadata.author: invalid type: null, expected a string",
+		},
+		{
+			name:   "list inside a rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    allow: null\n",
+			want:   "rules.egress.allow: invalid type: null, expected an array",
+		},
+		{
+			name: "condition nested under a rule block",
+			source: "hushspec: \"1.0.0\"\nrules:\n  egress:\n    when:\n" +
+				"      all_of:\n        - capability: null\n",
+			want: "rules.egress.when.all_of[0].capability: invalid type: null, expected a string",
+		},
+		{
+			name: "extension module property",
+			source: "hushspec: \"1.0.0\"\nextensions:\n  posture:\n    initial: standard\n" +
+				"    transitions: []\n    states:\n      standard:\n        description: null\n",
+			want: "extensions.posture.states.standard.description: invalid type: null, expected a string",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := Parse(testCase.source)
+			if err == nil {
+				t.Fatalf("expected a refusal, the document was accepted")
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Fatalf("error = %v, want it to contain %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+// TestANullInsideAContextValueIsALeaf draws the line the walk stops at:
+// `when.context` holds values to compare against the runtime context, so a
+// null there is data, not a property of the document format.
+func TestANullInsideAContextValueIsALeaf(t *testing.T) {
+	source := "hushspec: \"1.0.0\"\nrules:\n  egress:\n    default: block\n" +
+		"    when:\n      context:\n        user.tenant: null\n"
+	if _, err := Parse(source); err != nil {
+		t.Fatalf("expected a null context value to be accepted, got %v", err)
+	}
+}
+
 // TestYAMLProfileRejections covers core spec 2.4: anchors, aliases, merge
 // keys, multi-document streams, YAML 1.1 booleans in boolean-typed fields,
 // duplicate keys, and tab indentation are all parse errors.
