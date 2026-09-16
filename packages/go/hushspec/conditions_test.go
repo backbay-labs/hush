@@ -109,7 +109,7 @@ func TestTimeWindowMatchesDuringBusinessHours(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "17:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 		},
 	}
 	if !EvaluateCondition(cond, ctx) {
@@ -123,7 +123,7 @@ func TestTimeWindowRejectsOutsideHours(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "17:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 		},
 	}
 	if EvaluateCondition(cond, ctx) {
@@ -139,7 +139,7 @@ func TestTimeWindowDayFilter(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "17:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 			Days:     []string{"mon", "tue", "wed", "thu", "fri"},
 		},
 	}
@@ -151,7 +151,7 @@ func TestTimeWindowDayFilter(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "17:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 			Days:     []string{"sat", "sun"},
 		},
 	}
@@ -165,7 +165,7 @@ func TestTimeWindowWrapsMidnight(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "22:00",
 			End:      "06:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 		},
 	}
 
@@ -185,7 +185,7 @@ func TestTimeWindowSameStartEndMeansAllDay(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "12:00",
 			End:      "12:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 		},
 	}
 	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T03:00:00Z")) {
@@ -198,7 +198,7 @@ func TestTimeWindowSupportsMinuteOffsets(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "05:30",
 			End:      "06:30",
-			Timezone: "+05:30",
+			Timezone: strPtr("+05:30"),
 		},
 	}
 	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T00:15:00Z")) {
@@ -214,7 +214,7 @@ func TestTimeWindowUsesDSTForIANATimezones(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "08:30",
 			End:      "09:30",
-			Timezone: "America/New_York",
+			Timezone: strPtr("America/New_York"),
 		},
 	}
 	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T13:45:00Z")) {
@@ -235,7 +235,7 @@ func TestTimeWindowLoadsIANAZonesFromTzdata(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "10:00",
-			Timezone: "America/New_York",
+			Timezone: strPtr("America/New_York"),
 		},
 	}
 	// 09:30 in New York, winter (UTC-5) and summer (UTC-4).
@@ -253,7 +253,7 @@ func TestTimeWindowLoadsIANAZonesFromTzdata(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "10:00",
-			Timezone: "Asia/Kolkata",
+			Timezone: strPtr("Asia/Kolkata"),
 		},
 	}
 	// 09:30 in Kolkata (UTC+5:30 year-round).
@@ -270,7 +270,7 @@ func TestTimeWindowWrapsMidnightWithDayFilter(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "22:00",
 			End:      "06:00",
-			Timezone: "UTC",
+			Timezone: strPtr("UTC"),
 			Days:     []string{"fri"},
 		},
 	}
@@ -289,7 +289,7 @@ func TestTimeWindowUnresolvableTimezoneLeavesBlockActive(t *testing.T) {
 		TimeWindow: &TimeWindowCondition{
 			Start:    "09:00",
 			End:      "17:00",
-			Timezone: "America/NeYork",
+			Timezone: strPtr("America/NeYork"),
 		},
 	}
 	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T13:30:00Z")) {
@@ -375,7 +375,7 @@ func TestNestedCompoundConditions(t *testing.T) {
 				TimeWindow: &TimeWindowCondition{
 					Start:    "09:00",
 					End:      "17:00",
-					Timezone: "UTC",
+					Timezone: strPtr("UTC"),
 				},
 			},
 			{Context: map[string]any{"environment": "production"}},
@@ -442,7 +442,7 @@ func TestValidateConditionReportsEveryViolation(t *testing.T) {
 			TimeWindow: &TimeWindowCondition{
 				Start:    "25:00",
 				End:      "17:61",
-				Timezone: "Mars/Olympus_Mons",
+				Timezone: strPtr("Mars/Olympus_Mons"),
 				Days:     []string{"mon", "funday"},
 			},
 		}},

@@ -25,10 +25,14 @@ var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 // optionally restricted to named days (core spec 3.13). A window the engine
 // cannot evaluate leaves the block active.
 type TimeWindowCondition struct {
-	Start    string   `yaml:"start" json:"start"`                           // HH:MM (24-hour)
-	End      string   `yaml:"end" json:"end"`                               // HH:MM (24-hour)
-	Timezone string   `yaml:"timezone,omitempty" json:"timezone,omitempty"` // IANA tz, defaults to UTC
-	Days     []string `yaml:"days,omitempty" json:"days,omitempty"`         // mon..sun
+	Start string `yaml:"start" json:"start"` // HH:MM (24-hour)
+	End   string `yaml:"end" json:"end"`     // HH:MM (24-hour)
+	// Timezone is an IANA identifier or a fixed offset; an absent one is UTC.
+	// It is a *string because presence is part of the wire format: an absent
+	// timezone takes the schema default and a written one is kept as it
+	// stands, so the two carry different content hashes.
+	Timezone *string  `yaml:"timezone,omitempty" json:"timezone,omitempty"`
+	Days     []string `yaml:"days,omitempty" json:"days,omitempty"` // mon..sun
 }
 
 // RateComparison is how a [RateCondition] compares its counter with its
@@ -76,8 +80,10 @@ type Condition struct {
 	// Capability is true when the effective posture state -- the state the
 	// posture guard uses, after origins profile selection and the action's
 	// posture input -- grants it. Unevaluable, and therefore held, when the
-	// policy has no posture extension (core spec 3.13).
-	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
+	// policy has no posture extension (core spec 3.13). It is a *string
+	// because presence is part of the wire format: a written "" is a present
+	// value the canonical form keeps, and validation refuses it.
+	Capability *string `yaml:"capability,omitempty" json:"capability,omitempty"`
 	// Rate compares an engine-supplied counter with a threshold. Unevaluable,
 	// and therefore held, when the context carries no such counter.
 	Rate *RateCondition `yaml:"rate,omitempty" json:"rate,omitempty"`
@@ -227,9 +233,9 @@ func evaluateConditionDepth(
 
 	// `capability`: unevaluable without a posture extension; otherwise the
 	// effective state must list the capability.
-	if condition.Capability != "" {
+	if condition.Capability != nil {
 		if capabilities.known {
-			verdict = verdict.and(verdictOf(capabilities.grants(condition.Capability)))
+			verdict = verdict.and(verdictOf(capabilities.grants(*condition.Capability)))
 		} else {
 			verdict = verdict.and(verdictUnevaluable)
 		}
@@ -458,9 +464,9 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 					"%s.time_window.%s: %q is not a valid HH:MM time", path, field.name, field.value))
 			}
 		}
-		if tw.Timezone != "" && !TimezoneIsKnown(tw.Timezone) {
+		if tw.Timezone != nil && !TimezoneIsKnown(*tw.Timezone) {
 			*errs = append(*errs, fmt.Sprintf(
-				"%s.time_window.timezone: %q is neither an IANA time zone nor a fixed offset", path, tw.Timezone))
+				"%s.time_window.timezone: %q is neither an IANA time zone nor a fixed offset", path, *tw.Timezone))
 		}
 		for _, day := range tw.Days {
 			known := false
@@ -476,10 +482,10 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			}
 		}
 	}
-	if name := condition.Capability; name != "" && !IsCapabilityIdentifier(name) {
+	if name := condition.Capability; name != nil && !IsCapabilityIdentifier(*name) {
 		*errs = append(*errs, fmt.Sprintf(
 			"%s.capability: %q is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
-			path, name))
+			path, *name))
 	}
 	if rate := condition.Rate; rate != nil && !IsCapabilityIdentifier(rate.Counter) {
 		*errs = append(*errs, fmt.Sprintf(
@@ -534,7 +540,7 @@ func TimezoneIsKnown(tz string) bool {
 }
 
 // resolveCurrentTimeForCondition returns [hour, minute, dayOfWeek (0=Mon..6=Sun)].
-func resolveCurrentTimeForCondition(context *RuntimeContext, tz string) []int {
+func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 	var t time.Time
 
 	if context.CurrentTime != "" {
@@ -552,9 +558,11 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz string) []int {
 		t = time.Now().UTC()
 	}
 
-	tzName := tz
-	if tzName == "" {
-		tzName = "UTC"
+	// An absent timezone is UTC (core spec 3.13); a written one is resolved as
+	// it stands, so an unresolvable identifier leaves the window unevaluable.
+	tzName := "UTC"
+	if tz != nil {
+		tzName = *tz
 	}
 	location := resolveConditionLocation(tzName)
 	if location == nil {

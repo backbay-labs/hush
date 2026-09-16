@@ -152,26 +152,167 @@ func TestCanonicalJSONNeverEmitsMergeStrategy(t *testing.T) {
 	}
 }
 
-// TestCanonicalJSONRefusesUnsafeInteger covers spec section 4.3: an integer
-// outside the IEEE 754 safe range must be refused, never silently rounded.
-func TestCanonicalJSONRefusesUnsafeInteger(t *testing.T) {
+// contextPolicy is a document whose only free-form value is the given
+// literal, written where the schema constrains nothing.
+func contextPolicy(literal string) string {
+	return strings.Join([]string{
+		"hushspec: \"0.1.0\"",
+		"rules:",
+		"  egress:",
+		"    when:",
+		"      context:",
+		"        budget: " + literal,
+		"",
+	}, "\n")
+}
+
+// TestParseRefusesIntegerLiteralsBeyondTheSafeRange covers spec section 4.3:
+// an integer literal an IEEE 754 double cannot hold exactly is refused, never
+// silently rounded. The literal is the only place the bound can be applied,
+// because gopkg.in/yaml.v3 hands one past uint64 over as a float64.
+func TestParseRefusesIntegerLiteralsBeyondTheSafeRange(t *testing.T) {
+	for _, literal := range []string{"9007199254740993", "18446744073709551617"} {
+		if _, err := Parse(contextPolicy(literal)); err == nil {
+			t.Fatalf("expected Parse to refuse the integer literal %s", literal)
+		} else if !strings.Contains(err.Error(), "integer "+literal+" exceeds the safe range") {
+			t.Fatalf("unexpected refusal for %s: %v", literal, err)
+		}
+	}
+
+	spec, err := Parse(contextPolicy("9007199254740991"))
+	if err != nil {
+		t.Fatalf("failed to parse an integer inside the range: %v", err)
+	}
+	canonical, err := CanonicalJSON(spec)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	if !strings.Contains(canonical, `"budget":9007199254740991`) {
+		t.Fatalf("unexpected canonical form: %s", canonical)
+	}
+}
+
+// TestCanonicalJSONLeavesFloatSyntaxUnbounded covers the other half of spec
+// section 4.3: a number written in float syntax is emitted by the ECMAScript
+// algorithm at any magnitude.
+func TestCanonicalJSONLeavesFloatSyntaxUnbounded(t *testing.T) {
 	spec, err := Parse(strings.Join([]string{
 		"hushspec: \"0.1.0\"",
-		"extensions:",
-		"  posture:",
-		"    initial: normal",
-		"    states:",
-		"      normal:",
-		"        budgets:",
-		"          tool_calls: 9007199254740993",
-		"    transitions: []",
+		"rules:",
+		"  egress:",
+		"    when:",
+		"      context:",
+		"        a: 1.0e+16",
+		"        b: 1.0e+21",
+		"        c: 1.5e+300",
+		"        d: -0.0",
 		"",
 	}, "\n"))
 	if err != nil {
 		t.Fatalf("failed to parse: %v", err)
 	}
+	canonical, err := CanonicalJSON(spec)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	const expected = `"context":{"a":10000000000000000,"b":1e+21,"c":1.5e+300,"d":0}`
+	if !strings.Contains(canonical, expected) {
+		t.Fatalf("unexpected canonical form: %s", canonical)
+	}
+}
+
+// TestCanonicalJSONRefusesUnsafeInteger covers the serializer's own guard, for
+// an integer a caller builds in memory rather than parses.
+func TestCanonicalJSONRefusesUnsafeInteger(t *testing.T) {
+	spec := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Rules: &Rules{Egress: &EgressRule{
+			When: &Condition{Context: map[string]any{"budget": int64(1) << 53}},
+		}},
+	}
 	if _, err := CanonicalJSON(spec); err == nil {
 		t.Fatal("expected CanonicalJSON to refuse an integer beyond 2^53-1")
+	}
+}
+
+// TestPresentEmptyConditionStringsSurviveTheProjection covers spec sections
+// 3.2 and 3.3: `timezone` and `capability` are optional strings, so a written
+// "" is a present value the canonical form keeps, where an absent `timezone`
+// takes its schema default. Both are refused by validation, which is what
+// makes them distinguishable in the first place.
+func TestPresentEmptyConditionStringsSurviveTheProjection(t *testing.T) {
+	empty := ""
+	spec := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Rules: &Rules{Egress: &EgressRule{
+			When: &Condition{
+				Capability: &empty,
+				TimeWindow: &TimeWindowCondition{Start: "09:00", End: "17:00", Timezone: &empty},
+			},
+		}},
+	}
+	canonical, err := CanonicalJSON(spec)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	for _, want := range []string{`"capability":""`, `"timezone":""`} {
+		if !strings.Contains(canonical, want) {
+			t.Fatalf("canonical form dropped %s: %s", want, canonical)
+		}
+	}
+
+	absent := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Rules: &Rules{Egress: &EgressRule{
+			When: &Condition{TimeWindow: &TimeWindowCondition{Start: "09:00", End: "17:00"}},
+		}},
+	}
+	canonical, err = CanonicalJSON(absent)
+	if err != nil {
+		t.Fatalf("CanonicalJSON failed: %v", err)
+	}
+	if !strings.Contains(canonical, `"timezone":"UTC"`) {
+		t.Fatalf("an absent timezone did not take its default: %s", canonical)
+	}
+}
+
+// TestValidateRefusesPresentEmptyConditionStrings locks in that a written ""
+// is a value, not an absence: the other three SDKs refuse both, and a document
+// Go accepted here would carry a content hash no engine agrees to enforce.
+func TestValidateRefusesPresentEmptyConditionStrings(t *testing.T) {
+	cases := map[string]string{
+		"capability": strings.Join([]string{
+			"hushspec: \"0.1.0\"",
+			"rules:",
+			"  egress:",
+			"    when:",
+			"      capability: \"\"",
+			"",
+		}, "\n"),
+		"time_window.timezone": strings.Join([]string{
+			"hushspec: \"0.1.0\"",
+			"rules:",
+			"  egress:",
+			"    when:",
+			"      time_window:",
+			"        start: \"09:00\"",
+			"        end: \"17:00\"",
+			"        timezone: \"\"",
+			"",
+		}, "\n"),
+	}
+	for field, document := range cases {
+		spec, err := Parse(document)
+		if err != nil {
+			t.Fatalf("%s: failed to parse: %v", field, err)
+		}
+		result := Validate(spec)
+		if result.IsValid() {
+			t.Fatalf("%s: expected a present empty value to be invalid", field)
+		}
+		if !strings.Contains(result.Errors[0].Path, field) {
+			t.Fatalf("%s: unexpected error path %q", field, result.Errors[0].Path)
+		}
 	}
 }
 
