@@ -741,3 +741,20 @@ func TestFailedSignatureKeepsOnlyAWellFormedKeyID(t *testing.T) {
 		}
 	}
 }
+
+// One error, one code: a hop that required a signature reports the check that
+// failed, whichever helper reads the error.
+func TestResolveReasonAgreesWithReasonFromError(t *testing.T) {
+	for _, err := range []error{
+		&SignatureRequiredError{Source: "leaf.yaml", Status: FailedSignature(ReasonMissingSignature, "")},
+		&SignatureRequiredError{Source: "leaf.yaml", Status: FailedSignature(ReasonKeyRevoked, "")},
+		&DigestMismatchError{Source: "base.yaml", Expected: "a", Actual: "b"},
+	} {
+		resolveReason, resolveOK := ResolveReason(err)
+		verifyReason, verifyOK := ReasonFromError(err)
+		if !resolveOK || !verifyOK || resolveReason != verifyReason {
+			t.Errorf("%T: ResolveReason = (%q, %t), ReasonFromError = (%q, %t)",
+				err, resolveReason, resolveOK, verifyReason, verifyOK)
+		}
+	}
+}
