@@ -98,6 +98,14 @@ PATTERNS: tuple[tuple[str, bool], ...] = (
     (r"work package", False),
     (r"the fork", False),
     (r"concurrent(ly)? (agent|edit)", False),
+    (r"\bsubagents?\b", False),
+    # Review-thread vocabulary and task markers. Source text describes what
+    # the code does, not the conversation that produced it; a task marker is a
+    # note to a future editor that belongs in an issue.
+    (r"\bCodex\b", True),
+    (r"review (comment|finding|thread)s?", False),
+    (r"\bFinding [A-F0-9]\b", True),
+    (r"\b(FIXME|HACK)\b", True),
     # One implementation described as the source of truth for another. Every
     # SDK implements the same specification; none of them defines it.
     (r"Rust reference", False),
