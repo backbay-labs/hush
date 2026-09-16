@@ -16,10 +16,19 @@
  * `items`, `minimum`, `exclusiveMinimum`, `maximum`, `minLength`,
  * `maxLength`, `minItems`, `maxItems`, `uniqueItems` and `minProperties`.
  *
+ * Boolean subschemas (`true`, `false`) are accepted anywhere a schema is
+ * permitted, as 2020-12 requires.
+ *
  * A keyword outside that list throws rather than being ignored. An ignored
  * constraint loosens the schema silently, which is the one failure mode a
  * fail-closed project cannot accept from its own test tooling: the vectors
  * would keep passing while the property under test had stopped being checked.
+ *
+ * That check walks the whole schema document up front, not only the branches
+ * some instance happens to reach. Checking it during validation made the
+ * guarantee instance-driven: a keyword added to a branch no fixture exercises
+ * would be reached by nothing and would throw for nobody, which is precisely
+ * the silent loosening the rule exists to prevent.
  */
 
 export interface SchemaDocument {
@@ -95,10 +104,68 @@ interface Scope {
 
 /** Every validation error found, as `path: message`. */
 export function schemaErrors(document: SchemaDocument, value: unknown): string[] {
+  assertSupported(document);
   const errors: string[] = [];
   const scope: Scope = { registry: buildRegistry(document), resource: document };
   check(scope, document, value, '$', errors);
   return errors;
+}
+
+/** Keywords whose value is itself a schema. */
+const SCHEMA_VALUED = ['additionalProperties', 'unevaluatedProperties', 'items', 'not', 'if', 'then', 'else'];
+
+/** Keywords whose value maps names to schemas. */
+const SCHEMA_MAPS = ['properties', '$defs'];
+
+/** Documents already walked, so a fixture loop pays for the walk once. */
+const checkedDocuments = new WeakSet<object>();
+
+/**
+ * Walk every schema position in `document` and throw on anything this
+ * validator would not enforce -- an unknown keyword, or an
+ * `unevaluatedProperties` that is not `false`, which is the only form
+ * `check` implements.
+ */
+export function assertSupported(document: SchemaDocument): void {
+  if (checkedDocuments.has(document)) return;
+
+  const visit = (node: unknown, path: string): void => {
+    if (typeof node === 'boolean' || node === undefined) return;
+    if (typeof node !== 'object' || node === null) {
+      throw new Error(`${path} is not a schema`);
+    }
+    const record = node as Record<string, unknown>;
+
+    for (const keyword of Object.keys(record)) {
+      if (!ASSERTIONS.has(keyword) && !ANNOTATIONS.has(keyword)) {
+        throw new Error(`unsupported schema keyword ${keyword} at ${path}`);
+      }
+    }
+    if ('unevaluatedProperties' in record && record['unevaluatedProperties'] !== false) {
+      throw new Error(
+        `unsupported unevaluatedProperties at ${path}: only \`false\` is implemented`,
+      );
+    }
+    for (const keyword of ['required', 'enum'] as const) {
+      if (keyword in record && !Array.isArray(record[keyword])) {
+        throw new Error(`${keyword} at ${path} must be an array`);
+      }
+    }
+
+    for (const keyword of SCHEMA_VALUED) {
+      if (keyword in record) visit(record[keyword], `${path}/${keyword}`);
+    }
+    for (const keyword of SCHEMA_MAPS) {
+      const members = record[keyword];
+      if (typeof members !== 'object' || members === null) continue;
+      for (const [name, member] of Object.entries(members)) {
+        visit(member, `${path}/${keyword}/${name}`);
+      }
+    }
+  };
+
+  visit(document, '#');
+  checkedDocuments.add(document);
 }
 
 /** True when `value` satisfies `document`. */
@@ -161,6 +228,32 @@ function pointerInto(resource: SchemaDocument, pointer: string, ref: string): Sc
   return node as SchemaDocument;
 }
 
+/**
+ * A stable serialization used for JSON Schema equality, which is structural:
+ * two objects are equal when they have the same members regardless of the
+ * order they were written in (2020-12 section 4.2.2).
+ */
+function canonicalForm(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalForm).join(',')}]`;
+  }
+  if (typeof value === 'object' && value !== null) {
+    const members = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, member]) => `${JSON.stringify(key)}:${canonicalForm(member)}`);
+    return `{${members.join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** JSON Schema equality, as `const` and `enum` are defined against. */
+function jsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== typeof right) return false;
+  if (typeof left !== 'object' || left === null || right === null) return false;
+  return canonicalForm(left) === canonicalForm(right);
+}
+
 function typeMatches(type: string, value: unknown): boolean {
   switch (type) {
     case 'object':
@@ -207,18 +300,20 @@ function formatMatches(format: string, value: string): boolean {
  */
 function check(
   scope: Scope,
-  schema: SchemaDocument,
+  schema: SchemaDocument | boolean,
   value: unknown,
   path: string,
   errors: string[],
 ): Set<string> {
-  for (const keyword of Object.keys(schema)) {
-    if (!ASSERTIONS.has(keyword) && !ANNOTATIONS.has(keyword)) {
-      throw new Error(`unsupported schema keyword ${keyword} at ${path}`);
-    }
-  }
-
   const evaluated = new Set<string>();
+
+  // A boolean schema: `true` accepts anything and evaluates nothing, `false`
+  // accepts nothing (2020-12 section 4.3.2).
+  if (schema === true) return evaluated;
+  if (schema === false) {
+    errors.push(`${path}: the false schema accepts nothing`);
+    return evaluated;
+  }
 
   const ref = schema['$ref'];
   if (typeof ref === 'string') {
@@ -241,20 +336,50 @@ function check(
     return evaluated;
   }
 
-  if ('const' in schema && value !== schema['const']) {
+  if ('const' in schema && !jsonEqual(value, schema['const'])) {
     errors.push(`${path}: expected const ${JSON.stringify(schema['const'])}`);
   }
   const enumValues = schema['enum'];
-  if (Array.isArray(enumValues) && !enumValues.includes(value as never)) {
+  if (Array.isArray(enumValues) && !enumValues.some((one) => jsonEqual(value, one))) {
     errors.push(`${path}: ${JSON.stringify(value)} is not one of the enum values`);
   }
 
-  const negated = schema['not'];
-  if (typeof negated === 'object' && negated !== null) {
+  if ('not' in schema) {
     const negatedErrors: string[] = [];
-    check(scope, negated as SchemaDocument, value, path, negatedErrors);
+    check(scope, schema['not'] as SchemaDocument | boolean, value, path, negatedErrors);
     if (negatedErrors.length === 0) {
       errors.push(`${path}: ${JSON.stringify(value)} is excluded by "not"`);
+    }
+  }
+
+  // `if`/`then`/`else` applies to every instance type, so it sits above the
+  // array and non-object returns below. Only an object contributes evaluated
+  // property names, and `check` returns an empty set for everything else, so
+  // merging unconditionally is safe.
+  if ('if' in schema) {
+    const conditionErrors: string[] = [];
+    const conditionEvaluated = check(
+      scope,
+      schema['if'] as SchemaDocument | boolean,
+      value,
+      path,
+      conditionErrors,
+    );
+    const matched = conditionErrors.length === 0;
+    if (matched) {
+      for (const key of conditionEvaluated) evaluated.add(key);
+    }
+    const branch = matched ? schema['then'] : schema['else'];
+    if (branch !== undefined) {
+      for (const key of check(
+        scope,
+        branch as SchemaDocument | boolean,
+        value,
+        path,
+        errors,
+      )) {
+        evaluated.add(key);
+      }
     }
   }
 
@@ -267,12 +392,15 @@ function check(
     if (typeof format === 'string' && !formatMatches(format, value)) {
       errors.push(`${path}: ${JSON.stringify(value)} is not a valid ${format}`);
     }
+    // Both are defined over Unicode code points (2020-12 sections 6.3.1 and
+    // 6.3.2), not UTF-16 code units, so an astral character counts once.
+    const codePoints = [...value].length;
     const minLength = schema['minLength'];
-    if (typeof minLength === 'number' && value.length < minLength) {
+    if (typeof minLength === 'number' && codePoints < minLength) {
       errors.push(`${path}: shorter than minLength ${minLength}`);
     }
     const maxLength = schema['maxLength'];
-    if (typeof maxLength === 'number' && value.length > maxLength) {
+    if (typeof maxLength === 'number' && codePoints > maxLength) {
       errors.push(`${path}: longer than maxLength ${maxLength}`);
     }
   }
@@ -293,10 +421,10 @@ function check(
   }
 
   if (Array.isArray(value)) {
-    const items = schema['items'];
-    if (typeof items === 'object' && items !== null) {
+    if ('items' in schema) {
+      const items = schema['items'] as SchemaDocument | boolean;
       value.forEach((item, index) => {
-        check(scope, items as SchemaDocument, item, `${path}[${index}]`, errors);
+        check(scope, items, item, `${path}[${index}]`, errors);
       });
     }
     const minItems = schema['minItems'];
@@ -308,7 +436,9 @@ function check(
       errors.push(`${path}: more than maxItems ${maxItems}`);
     }
     if (schema['uniqueItems'] === true) {
-      const seen = new Set(value.map((item) => JSON.stringify(item)));
+      // JSON Schema equality ignores object key order, so compare canonical
+      // forms rather than `JSON.stringify` output.
+      const seen = new Set(value.map(canonicalForm));
       if (seen.size !== value.length) {
         errors.push(`${path}: items are not unique`);
       }
@@ -332,8 +462,9 @@ function check(
     errors.push(`${path}: fewer than minProperties ${minProperties}`);
   }
 
-  const properties = (schema['properties'] ?? {}) as Record<string, SchemaDocument>;
-  const additional = schema['additionalProperties'];
+  const properties = (schema['properties'] ?? {}) as Record<string, SchemaDocument | boolean>;
+  const hasAdditional = 'additionalProperties' in schema;
+  const additional = schema['additionalProperties'] as SchemaDocument | boolean;
   for (const [key, member] of Object.entries(members)) {
     const property = properties[key];
     if (property !== undefined) {
@@ -342,32 +473,9 @@ function check(
     } else if (additional === false) {
       errors.push(`${path}: unknown property ${key}`);
       evaluated.add(key);
-    } else if (typeof additional === 'object' && additional !== null) {
-      check(scope, additional as SchemaDocument, member, `${path}.${key}`, errors);
+    } else if (hasAdditional) {
+      check(scope, additional, member, `${path}.${key}`, errors);
       evaluated.add(key);
-    } else if (additional === true) {
-      evaluated.add(key);
-    }
-  }
-
-  const condition = schema['if'];
-  if (typeof condition === 'object' && condition !== null) {
-    const conditionErrors: string[] = [];
-    const conditionEvaluated = check(
-      scope,
-      condition as SchemaDocument,
-      value,
-      path,
-      conditionErrors,
-    );
-    const branch = conditionErrors.length === 0 ? schema['then'] : schema['else'];
-    if (conditionErrors.length === 0) {
-      for (const key of conditionEvaluated) evaluated.add(key);
-    }
-    if (typeof branch === 'object' && branch !== null) {
-      for (const key of check(scope, branch as SchemaDocument, value, path, errors)) {
-        evaluated.add(key);
-      }
     }
   }
 
