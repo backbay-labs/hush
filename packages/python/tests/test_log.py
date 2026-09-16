@@ -149,6 +149,31 @@ class TestChainedFileSink:
         )
         assert verify_log("log.jsonl", path.read_text()).entries == 5
 
+    def test_two_sinks_on_one_file_extend_one_chain(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        resolution = _resolution()
+        first = ChainedFileSink.open(path).with_clock(CLOCK)
+        second = ChainedFileSink.open(path).with_clock(CLOCK)
+
+        first.record_policy_event(
+            PolicyEvent.loaded(
+                policy_summary(resolution),
+                "enforce",
+                timestamp="2026-09-15T12:00:00.000Z",
+                sdk=SdkInfo(name="hushspec-conformance", version="0.2"),
+            )
+        )
+        for index, action in enumerate(_actions()):
+            sink = second if index % 2 == 0 else first
+            sink.send(evaluate_audited(resolution, action, _config(), _context(index)))
+
+        entries = [json.loads(line) for line in path.read_text().splitlines()]
+        assert [entry["seq"] for entry in entries] == [1, 2, 3, 4]
+        report = verify_log("log.jsonl", path.read_text())
+        assert report.entries == 4
+        assert report.last_seq == 4
+        assert second.head() == (4, entries[3]["entry_hash"])
+
     def test_rotation_carries_the_chain_into_the_next_file(self, tmp_path: Path) -> None:
         first, second = tmp_path / "log-1.jsonl", tmp_path / "log-2.jsonl"
         sink = _write_basic(first)

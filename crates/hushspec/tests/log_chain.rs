@@ -183,6 +183,39 @@ fn reopening_continues_the_chain() {
 }
 
 #[test]
+fn two_sinks_on_one_file_extend_one_chain() {
+    let dir = temp_dir("two-sinks");
+    let path = dir.join("log.jsonl");
+    let resolution = resolution();
+    let first = ChainedFileSink::open(&path).unwrap().with_clock(clock());
+    let second = ChainedFileSink::open(&path).unwrap().with_clock(clock());
+
+    first
+        .record_policy_event(&loaded_event(&resolution))
+        .unwrap();
+    for (index, action) in actions().iter().enumerate() {
+        let receipt = evaluate_audited(&resolution, action, &config(), &ctx(index as u64));
+        let sink = if index % 2 == 0 { &second } else { &first };
+        sink.send(&receipt).unwrap();
+    }
+
+    let text = fs::read_to_string(&path).unwrap();
+    let entries: Vec<LogEntry> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(
+        entries.iter().map(|entry| entry.seq).collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+    let report = verify_log("log.jsonl", &text, &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.entries, 4);
+    assert_eq!(report.last_seq, 4);
+    assert_eq!(report.last_entry_hash, entries[3].entry_hash);
+    assert_eq!(second.head(), (4, entries[3].entry_hash.clone()));
+}
+
+#[test]
 fn signed_entries_verify_with_the_keyring_and_fail_without() {
     let dir = temp_dir("signed");
     let path = dir.join("log.jsonl");

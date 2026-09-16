@@ -1,10 +1,11 @@
 package hushspec
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,8 +264,11 @@ func (p LogPayload) entryType() (EntryType, error) {
 // are serialized in-process by a mutex and across processes by an exclusive
 // lock on the file itself (flock where the platform has it, a `<path>.lock`
 // file elsewhere); a lock held longer than [LogLockTimeout] is reported as an
-// error rather than bypassed. [ChainedFileSink.Rotate] carries the chain into
-// a new file through a `log_started` entry.
+// error rather than bypassed. Each entry's `seq` and `prev_hash` come from the
+// file's current last entry, read while that lock is held, so a second sink or
+// process writing the same log extends the chain instead of forking it.
+// [ChainedFileSink.Rotate] carries the chain into a new file through a
+// `log_started` entry.
 type ChainedFileSink struct {
 	mu       sync.Mutex
 	path     string
@@ -336,6 +340,11 @@ func (s *ChainedFileSink) now() time.Time {
 }
 
 // Append writes one entry, linked to the previous one, and returns it.
+//
+// The chain head is re-read from the file under the write lock, so an entry
+// continues what the file holds rather than what this sink last wrote. A tail
+// that cannot be parsed fails the append: continuing past it would leave a
+// second, unlinked chain in the file.
 func (s *ChainedFileSink) Append(payload LogPayload) (*LogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -352,10 +361,34 @@ func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 		return nil, fmt.Errorf("log: %w", err)
 	}
 
+	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("log: cannot open %s: %w", s.path, err)
+	}
+	defer file.Close()
+
+	unlock, err := lockLogFile(file, s.path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	// A missing or empty file means a fresh log, or a rotation whose
+	// `log_started` entry is about to seed the new file; both continue from
+	// the head this sink carries.
+	seq, prevHash := s.seq, s.prevHash
+	head, err := lastLogEntryIn(file, s.path)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil {
+		seq, prevHash = head.Seq, head.EntryHash
+	}
+
 	entry := &LogEntry{
 		LogVersion:  LogVersion,
-		Seq:         s.seq + 1,
-		PrevHash:    s.prevHash,
+		Seq:         seq + 1,
+		PrevHash:    prevHash,
 		EntryType:   entryType,
 		Receipt:     payload.Receipt,
 		PolicyEvent: payload.PolicyEvent,
@@ -365,6 +398,8 @@ func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("log: %w", err)
 	}
+	// Signing belongs under the lock too: the signature covers `entry_hash`,
+	// which depends on the `prev_hash` just read.
 	if len(s.signerPEM) > 0 {
 		signedAt := s.now()
 		envelope, err := SignContentHash(entry.EntryHash, s.signerPEM, SignOptions{SignedAt: &signedAt})
@@ -378,7 +413,7 @@ func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("log: cannot serialize entry %d: %w", entry.Seq, err)
 	}
-	if err := appendLine(s.path, append(line, '\n')); err != nil {
+	if err := writeLine(file, s.path, append(line, '\n')); err != nil {
 		return nil, err
 	}
 
@@ -445,23 +480,18 @@ func lastLogEntry(path string) (*LogEntry, error) {
 		return nil, fmt.Errorf("log: cannot open %s: %w", path, err)
 	}
 	defer file.Close()
+	return lastLogEntryIn(file, path)
+}
 
-	last := ""
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxLogLineBytes)
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
-			last = scanner.Text()
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("log: cannot read %s: %w", path, err)
-	}
-	if last == "" {
-		return nil, nil
+// lastLogEntryIn reads the last non-empty line of an already open log as an
+// entry, or nil for an empty file.
+func lastLogEntryIn(file *os.File, path string) (*LogEntry, error) {
+	last, err := lastLogLine(file, path)
+	if err != nil || last == nil {
+		return nil, err
 	}
 	var entry LogEntry
-	if err := strictUnmarshalJSON([]byte(last), &entry); err != nil {
+	if err := strictUnmarshalJSON(last, &entry); err != nil {
 		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %w", path, err)
 	}
 	return &entry, nil
@@ -471,21 +501,60 @@ func lastLogEntry(path string) (*LogEntry, error) {
 // megabyte is generous and keeps a corrupt file from exhausting memory.
 const maxLogLineBytes = 1 << 20
 
-// appendLine writes one whole line under an exclusive lock and fsyncs it
+// tailChunkBytes is how much of the tail to read at a time when looking for
+// the last line.
+const tailChunkBytes = 8 * 1024
+
+// lastLogLine is the last non-empty line of file, read by seeking back from
+// the end. Every append reads the head this way, so the cost has to be the
+// size of one entry rather than the size of the log.
+func lastLogLine(file *os.File, path string) ([]byte, error) {
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("log: cannot read %s: %w", path, err)
+	}
+	end := info.Size()
+	var tail []byte
+	for end > 0 {
+		start := end - tailChunkBytes
+		if start < 0 {
+			start = 0
+		}
+		chunk := make([]byte, end-start)
+		if _, err := file.ReadAt(chunk, start); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("log: cannot read %s: %w", path, err)
+		}
+		tail = append(chunk, tail...)
+		end = start
+		if line, ok := lastLineOf(tail, end == 0); ok {
+			if len(line) > maxLogLineBytes {
+				return nil, fmt.Errorf(
+					"log: the last line of %s is longer than %d bytes", path, maxLogLineBytes)
+			}
+			return line, nil
+		}
+	}
+	return nil, nil
+}
+
+// lastLineOf is the last non-empty line inside buffer, or ok false when it may
+// still begin earlier in the file. atStart says buffer reaches the file's
+// first byte, so a line with no newline before it is already complete.
+func lastLineOf(buffer []byte, atStart bool) ([]byte, bool) {
+	trimmed := bytes.TrimRight(buffer, " \t\n\v\f\r")
+	if len(trimmed) == 0 {
+		return nil, false
+	}
+	newline := bytes.LastIndexByte(trimmed, '\n')
+	if newline < 0 && !atStart {
+		return nil, false
+	}
+	return trimmed[newline+1:], true
+}
+
+// writeLine writes one whole line to an already locked log and fsyncs it
 // before returning (log spec 3).
-func appendLine(path string, line []byte) error {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return fmt.Errorf("log: cannot open %s: %w", path, err)
-	}
-	defer file.Close()
-
-	unlock, err := lockLogFile(file, path)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-
+func writeLine(file *os.File, path string, line []byte) error {
 	if _, err := file.Write(line); err != nil {
 		return fmt.Errorf("log: cannot write to %s: %w", path, err)
 	}

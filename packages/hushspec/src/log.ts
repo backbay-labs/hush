@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import {
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -305,8 +307,11 @@ function withFileLock<T>(target: string, body: () => T): T {
  * Opening an existing file continues its chain from the last entry. Appends
  * are serialized across processes by a best-effort `<path>.lock` file; a lock
  * held longer than {@link LOCK_TIMEOUT_MS} is reported as an error rather
- * than bypassed. {@link ChainedFileSink.rotate} carries the chain into a new
- * file through a `log_started` entry.
+ * than bypassed. Each entry's `seq` and `prev_hash` come from the file's
+ * current last entry, read while that lock is held, so a second sink or
+ * process writing the same log extends the chain instead of forking it.
+ * {@link ChainedFileSink.rotate} carries the chain into a new file through a
+ * `log_started` entry.
  */
 export class ChainedFileSink implements ReceiptSink {
   private logPath: string;
@@ -368,42 +373,56 @@ export class ChainedFileSink implements ReceiptSink {
   /**
    * Append one entry, fsynced before it is reported as written (log spec 3).
    *
-   * @throws {LogChainError} when the lock cannot be taken.
+   * The chain head is re-read from the file under the write lock, so an entry
+   * continues what the file holds rather than what this sink last wrote. A
+   * tail that cannot be parsed fails the append: continuing past it would
+   * leave a second, unlinked chain in the file.
+   *
+   * @throws {LogChainError} when the lock cannot be taken or the file's last
+   * line is not a log entry.
    */
   append(payload: Payload): LogEntry {
-    // Member order is fixed (log spec 4), so two writers appending the same
-    // chain produce byte-identical files. The hash itself is over the
-    // canonical form and does not depend on it.
-    const entry: LogEntry = {
-      log_version: LOG_VERSION,
-      seq: this.seq + 1,
-      prev_hash: this.prevHash,
-      entry_type: entryTypeOf(payload),
-      ...('receipt' in payload ? { receipt: payload.receipt } : {}),
-      ...('policyEvent' in payload ? { policy_event: payload.policyEvent } : {}),
-      ...('logStarted' in payload ? { log_started: payload.logStarted } : {}),
-      entry_hash: '',
-    };
-    entry.entry_hash = computeEntryHash(entry);
-    if (this.signerKey !== undefined) {
-      entry.signature = signContentHash(entry.entry_hash, this.signerKey, {
-        signedAt: this.now(),
-      });
-    }
-
-    const line = `${JSON.stringify(entry)}\n`;
     const target = this.logPath;
     // Before the lock: the lock file lives next to the log, so the directory
     // has to exist for the lock itself to be creatable.
     mkdirSync(path.dirname(target), { recursive: true });
-    withFileLock(target, () => {
+    const entry = withFileLock(target, () => {
+      // A missing or empty file means a fresh log, or a rotation whose
+      // `log_started` entry is about to seed the new file; both continue from
+      // the head this sink carries.
+      const head = lastEntry(target);
+      const seq = head === undefined ? this.seq : head.seq;
+      const prevHash = head === undefined ? this.prevHash : head.entry_hash;
+      // Member order is fixed (log spec 4), so two writers appending the same
+      // chain produce byte-identical files. The hash itself is over the
+      // canonical form and does not depend on it.
+      const written: LogEntry = {
+        log_version: LOG_VERSION,
+        seq: seq + 1,
+        prev_hash: prevHash,
+        entry_type: entryTypeOf(payload),
+        ...('receipt' in payload ? { receipt: payload.receipt } : {}),
+        ...('policyEvent' in payload ? { policy_event: payload.policyEvent } : {}),
+        ...('logStarted' in payload ? { log_started: payload.logStarted } : {}),
+        entry_hash: '',
+      };
+      written.entry_hash = computeEntryHash(written);
+      // Signing belongs under the lock too: the signature covers `entry_hash`,
+      // which depends on the `prev_hash` just read.
+      if (this.signerKey !== undefined) {
+        written.signature = signContentHash(written.entry_hash, this.signerKey, {
+          signedAt: this.now(),
+        });
+      }
+
       const fd = openSync(target, 'a');
       try {
-        writeSync(fd, line);
+        writeSync(fd, `${JSON.stringify(written)}\n`);
         fsyncSync(fd);
       } finally {
         closeSync(fd);
       }
+      return written;
     });
 
     this.seq = entry.seq;
@@ -452,14 +471,12 @@ export class ChainedFileSink implements ReceiptSink {
   }
 }
 
+/** How much of the tail to read at a time when looking for the last line. */
+const TAIL_CHUNK_BYTES = 8 * 1024;
+
 /** The last non-empty line of `filePath` as an entry, or `undefined`. */
 function lastEntry(filePath: string): LogEntry | undefined {
-  if (!existsSync(filePath)) return undefined;
-  const text = readFileSync(filePath, 'utf8');
-  let last: string | undefined;
-  for (const line of text.split('\n')) {
-    if (line.trim() !== '') last = line;
-  }
+  const last = lastLine(filePath);
   if (last === undefined) return undefined;
   try {
     return JSON.parse(last) as LogEntry;
@@ -469,6 +486,56 @@ function lastEntry(filePath: string): LogEntry | undefined {
         `${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * The last non-empty line of `filePath`, read by seeking back from the end.
+ *
+ * Every append reads the head this way, so the cost has to be the size of one
+ * entry rather than the size of the log.
+ */
+function lastLine(filePath: string): string | undefined {
+  let fd: number;
+  try {
+    fd = openSync(filePath, 'r');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  try {
+    let end = fstatSync(fd).size;
+    let tail = Buffer.alloc(0);
+    while (end > 0) {
+      const start = Math.max(0, end - TAIL_CHUNK_BYTES);
+      const chunk = Buffer.alloc(end - start);
+      readSync(fd, chunk, 0, chunk.length, start);
+      tail = Buffer.concat([chunk, tail]);
+      end = start;
+      const line = lastLineOf(tail, end === 0);
+      if (line !== undefined) return line;
+    }
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * The last non-empty line inside `buffer`, or `undefined` when it may still
+ * begin earlier in the file. `atStart` says `buffer` reaches the file's first
+ * byte, so a line with no newline before it is already complete.
+ */
+function lastLineOf(buffer: Buffer, atStart: boolean): string | undefined {
+  let end = buffer.length;
+  while (end > 0 && isAsciiWhitespace(buffer[end - 1]!)) end -= 1;
+  if (end === 0) return undefined;
+  const newline = buffer.lastIndexOf(0x0a, end - 1);
+  if (newline === -1 && !atStart) return undefined;
+  return buffer.toString('utf8', newline + 1, end);
+}
+
+function isAsciiWhitespace(byte: number): boolean {
+  return byte === 0x20 || (byte >= 0x09 && byte <= 0x0d);
 }
 
 // --------------------------------------------------------------------------
