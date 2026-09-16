@@ -26,6 +26,40 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 
 Every schema is embedded in the `h2h` binary; `h2h schema --list` prints the names and `h2h schema <name>` prints one to stdout.
 
+## Where the schemas are served
+
+Each schema declares its own `$id`, and that `$id` is the URL it is published
+at:
+
+```
+https://hushspec.dev/schemas/<file>
+```
+
+The docs deployment (`.github/workflows/docs.yml`) copies `schemas/` into the
+built site at `schemas/`, so the host serves exactly the directory this
+repository ships. Alongside them it publishes:
+
+- `https://hushspec.dev/schemas/index.json` -- every schema with its title,
+  description, and `$id`, built from the directory at deploy time, so it can
+  never name a schema the site does not serve.
+- `https://hushspec.dev/registries/<file>` -- the spec registries
+  (`frameworks.yaml`, `error-codes.yaml`) the schemas and lint rules
+  reference.
+
+`hushspec.dev` resolving depends on one maintainer-side step outside the
+workflow: pointing the domain's DNS at GitHub Pages and setting it as the
+repository's custom domain. The deploy does not depend on that having happened
+-- the site is also served at its `github.io` address -- so until the domain is
+confirmed live, fetch any schema from raw GitHub instead, which always resolves
+and tracks `main` directly:
+
+```
+https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
+```
+
+The two URLs serve the same bytes. Only the canonical one is what a schema's
+`$id` declares, so prefer it once it resolves.
+
 ## Usage
 
 ### Validate with `ajv` (Node.js)
@@ -59,13 +93,8 @@ rules:
       - "**/.ssh/**"
 ```
 
-`hushspec.dev` is the canonical host declared in each schema's own `$id`. Until it's
-confirmed live, fall back to the raw GitHub URL, which always resolves and tracks
-`main` directly:
-
-```
-https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v0.schema.json
-```
+See [Where the schemas are served](#where-the-schemas-are-served) for the raw
+GitHub URL to substitute until `hushspec.dev` is confirmed live.
 
 Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will pick up the schema directive and provide autocompletion, hover documentation, and inline validation. See the [Editor Setup](../guides/editor-setup.md) guide for the SchemaStore zero-configuration option and workspace-settings alternative.
 
@@ -73,4 +102,16 @@ Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will p
 
 The core schema uses `additionalProperties: false` at every level, enforcing the fail-closed principle. Any field not defined in the specification will cause validation failure.
 
-Extension schemas are designed to be composed with the core schema. The core schema's `extensions` object accepts the known extension keys; each extension key references its own schema.
+That holds inside `extensions` too. The core schema is a **compound schema
+document**: `extensions.posture`, `extensions.origins` and
+`extensions.detection` each `$ref` their companion schema by that schema's own
+`$id`, and the three companion documents are carried verbatim in the core
+schema's `$defs`. So a validator resolves the whole composition from the one
+file, with no network access, and an unknown key inside an extension block is
+a rejection rather than an annotation (core spec 2.1 and 9.5). Each reference
+also carries `unevaluatedProperties: false`, which keeps the block closed even
+if a companion schema's root ever stops setting `additionalProperties: false`.
+
+The embedded copies are byte-for-byte the published companion files; the test
+suites compare them, so a companion schema and the copy inside the core schema
+cannot drift apart.
