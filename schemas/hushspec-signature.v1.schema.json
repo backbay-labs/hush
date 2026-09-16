@@ -17,12 +17,12 @@
     "format_version": {
       "type": "string",
       "const": "0.2",
-      "description": "Envelope format version. Verifiers MUST reject any other value."
+      "description": "Envelope format version. Verifiers MUST reject any other value, reporting it as unsupported_format_version rather than malformed_envelope (spec/hushspec-signing.md section 6.2)."
     },
     "algorithm": {
       "type": "string",
       "const": "ed25519",
-      "description": "Signature algorithm. Only ed25519 (RFC 8032, pure, no pre-hash) is defined in 0.2. Verifiers MUST reject any other value."
+      "description": "Signature algorithm. Only ed25519 (RFC 8032, pure, no pre-hash) is defined in 0.2. Verifiers MUST reject any other value, reporting it as unsupported_algorithm rather than malformed_envelope (spec/hushspec-signing.md section 6.2)."
     },
     "key_id": {
       "type": "string",
