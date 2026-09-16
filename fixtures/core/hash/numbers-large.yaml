@@ -1,0 +1,18 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 4.3: float syntax carries no safe-integer bound, so a magnitude an integer\
+  \ literal could not hold keeps its ECMAScript form -- 1.0e+16 prints positionally, 1.0e+21 and\
+  \ 1.5e+300 switch to exponent notation, and negative zero prints as 0"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "egress":
+      "when":
+        "context":
+          "float_1e16": 1.0e+16
+          "float_1e21": 1.0e+21
+          "float_1_5e300": 1.5e+300
+          "negative_zero": -0.0
+      "allow":
+      - "api.example.com"
+canonical: "{\"hushspec\":\"0.1.0\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"context\":{\"float_1_5e300\":1.5e+300,\"float_1e16\":10000000000000000,\"float_1e21\":1e+21,\"negative_zero\":0}}}}}"
+content_hash: "sha256:6bb3250affe169206bd639fcca0135f0b29a1ec19db830df11cdf8947829fe8d"

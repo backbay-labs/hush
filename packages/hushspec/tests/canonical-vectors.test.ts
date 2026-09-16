@@ -79,7 +79,7 @@ function describeDifference(actual: string, expected: string): string {
 
 describe('canonical form vectors (spec/hushspec-canonical.md section 7)', () => {
   it('finds the full vector set', () => {
-    expect(vectorFiles.length).toBe(15);
+    expect(vectorFiles.length).toBe(16);
   });
 
   for (const file of vectorFiles) {
