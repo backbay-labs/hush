@@ -54,6 +54,7 @@ pub mod otlp;
 pub mod panic;
 pub mod policy;
 pub mod provider;
+mod raw_validate;
 pub mod receipt;
 pub mod regex_profile;
 pub mod report;

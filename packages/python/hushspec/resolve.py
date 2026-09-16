@@ -133,8 +133,6 @@ REJECT_NOT_FOUND = "not_found"
 REJECT_CYCLE = "cycle"
 #: The chain is longer than :data:`_MAX_EXTENDS_DEPTH`.
 REJECT_MAX_DEPTH = "max_depth"
-#: ``require_signature`` was set and a hop could not be proven.
-REJECT_SIGNATURE_REQUIRED = "signature_required"
 #: Rejection codes reported by :attr:`ResolveRejected.code`, the vocabulary of
 #: ``fixtures/core/resolve/*.yaml``'s ``expect.rejects``.
 RESOLVE_REJECT_CODES = (
@@ -143,7 +141,7 @@ RESOLVE_REJECT_CODES = (
     REJECT_NOT_FOUND,
     REJECT_CYCLE,
     REJECT_MAX_DEPTH,
-    REJECT_SIGNATURE_REQUIRED,
+    REASON_MISSING_SIGNATURE,
 )
 
 
@@ -308,7 +306,7 @@ class PolicyVerificationError(ResolveRejected):
         code = (
             reason
             if reason in (REASON_DIGEST_MISMATCH, REASON_INVALID_PIN)
-            else REJECT_SIGNATURE_REQUIRED
+            else REASON_MISSING_SIGNATURE
         )
         super().__init__(message, code=code)
         #: The hop that failed, as the loader reported it.

@@ -73,7 +73,7 @@ pub fn reason_code(error: &ResolveError) -> Option<&'static str> {
         ResolveError::Cycle { .. } => Some("cycle"),
         ResolveError::MaxDepth => Some("max_depth"),
         ResolveError::NotFound { .. } => Some("not_found"),
-        ResolveError::SignatureRequired { .. } => Some("signature_required"),
+        ResolveError::SignatureRequired { .. } => Some("missing_signature"),
         ResolveError::Read { .. }
         | ResolveError::Parse { .. }
         | ResolveError::Http { .. }

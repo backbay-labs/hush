@@ -106,7 +106,7 @@ extensions:
 	if err == nil {
 		t.Fatal("a null `transitions` was accepted; the other SDKs refuse it")
 	}
-	if !strings.Contains(err.Error(), "transitions must be an array") {
+	if !strings.Contains(err.Error(), "transitions: invalid type: null, expected an array") {
 		t.Errorf("error = %v, want it to name `transitions`", err)
 	}
 }

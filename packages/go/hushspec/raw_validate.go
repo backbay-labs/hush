@@ -2,9 +2,11 @@ package hushspec
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,6 +26,11 @@ import (
 //   - A posture extension missing its required `transitions` key, which the
 //     schema requires and supplies no default for.
 //
+// A fourth class is a `null` written for a property the document format
+// declares: gopkg.in/yaml.v3 decodes one into the zero value -- a nil pointer,
+// an empty slice -- which the typed model cannot tell apart from an absent
+// key. See [validateRawNullProperties].
+//
 // It also refuses, at parse time, the present-but-empty strings the schema
 // gives a minimum length: the top-level `name` and the free-text origin match
 // fields. [Validate] refuses those too, for a document a caller built in
@@ -42,6 +49,13 @@ func validateRawDocument(yamlStr string) []ValidationError {
 	}
 
 	var errs rawIssues
+	validateRawNullProperties(root, &errs)
+	if len(errs.items) > 0 {
+		// A written null decodes as an absent key, so every check below would
+		// be reading a document the author did not write. The nulls are
+		// reported on their own.
+		return errs.items
+	}
 	validateRawName(root, &errs)
 	checkRawVariant(root, "merge_strategy", "merge_strategy", MergeStrategies, &errs)
 	validateRawRules(rawObject(root, "rules"), &errs)
@@ -73,9 +87,11 @@ func (r *rawIssues) addConstraint(path, message string) {
 }
 
 // validateRawName refuses a present but empty top-level `name` (core spec 2),
-// which the 1.0 document format requires to be non-empty; `name: null` is an
-// absent name, as it is to every other SDK. See [requiresNonEmptyName] for the
-// constraint and the version it belongs to.
+// which the 1.0 document format requires to be non-empty. A written
+// `name: null` is refused by [validateRawNullProperties] instead: the schema
+// types `name` as a string, so a null is a value of the wrong type rather than
+// an absent name. See [requiresNonEmptyName] for the constraint and the
+// version it belongs to.
 func validateRawName(root map[string]any, errs *rawIssues) {
 	value, present := root["name"]
 	if !present {
@@ -99,6 +115,142 @@ func rawRequiresNonEmptyName(root map[string]any) bool {
 		return true
 	}
 	return requiresNonEmptyName(declared)
+}
+
+// validateRawNullProperties refuses a `null` written for a property the
+// document format declares. No HushSpec property is nullable (canonical spec
+// 2.2 and 3.2), but gopkg.in/yaml.v3 decodes a written null into the zero
+// value, which for an optional field is exactly what an absent key decodes to:
+// without this check the block would silently evaluate as if it had never been
+// written, and the document would hash as if it had never carried the key.
+//
+// The walk follows the generated model, so every declared object, array,
+// string, number and boolean property is covered at every depth. A free-form
+// value -- a `when.context` entry, whose model type is `any` -- is a leaf: the
+// null there is a value to compare against, not a property of the format.
+func validateRawNullProperties(root map[string]any, errs *rawIssues) {
+	walkRawNulls(root, reflect.TypeOf(HushSpec{}), "", errs)
+}
+
+// walkRawNulls checks one raw mapping against the model struct that declares
+// its properties, then descends into the values that carry declared properties
+// of their own.
+func walkRawNulls(node map[string]any, model reflect.Type, path string, errs *rawIssues) {
+	declared := rawModelFields(model)
+	// Go randomizes map iteration; the keys are walked in order so a document
+	// with more than one problem always reports them the same way.
+	keys := make([]string, 0, len(node))
+	for key := range node {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		field, isDeclared := declared[key]
+		if !isDeclared {
+			// An undeclared key is an unknown field, reported by the typed
+			// decode.
+			continue
+		}
+		childPath := key
+		if path != "" {
+			childPath = path + "." + key
+		}
+		value := node[key]
+		if value == nil {
+			errs.add(fmt.Sprintf("%s: invalid type: null, expected %s",
+				childPath, describeRawModelType(field.Type)))
+			continue
+		}
+		walkRawNullsValue(value, field.Type, childPath, errs)
+	}
+}
+
+// walkRawNullsValue descends a raw value against the model type it decodes
+// into. A value whose type declares no properties -- a scalar, or a map whose
+// entries are free-form -- ends the walk.
+func walkRawNullsValue(value any, model reflect.Type, path string, errs *rawIssues) {
+	model = rawModelElement(model)
+	switch model.Kind() {
+	case reflect.Struct:
+		if object, ok := value.(map[string]any); ok {
+			walkRawNulls(object, model, path, errs)
+		}
+	case reflect.Slice:
+		items, ok := value.([]any)
+		if !ok {
+			return
+		}
+		for index, item := range items {
+			walkRawNullsValue(item, model.Elem(), fmt.Sprintf("%s[%d]", path, index), errs)
+		}
+	case reflect.Map:
+		entries, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		keys := make([]string, 0, len(entries))
+		for key := range entries {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			walkRawNullsValue(entries[key], model.Elem(), path+"."+key, errs)
+		}
+	}
+}
+
+// rawModelFieldCache memoizes [rawModelFields]: a parse walks the same handful
+// of model types every time.
+var rawModelFieldCache sync.Map
+
+// rawModelFields indexes a model struct's fields by the key they decode from.
+func rawModelFields(model reflect.Type) map[string]reflect.StructField {
+	if cached, ok := rawModelFieldCache.Load(model); ok {
+		return cached.(map[string]reflect.StructField)
+	}
+	fields := make(map[string]reflect.StructField, model.NumField())
+	for index := range model.NumField() {
+		field := model.Field(index)
+		key, _, _ := strings.Cut(field.Tag.Get("yaml"), ",")
+		if key == "" || key == "-" {
+			continue
+		}
+		fields[key] = field
+	}
+	rawModelFieldCache.Store(model, fields)
+	return fields
+}
+
+// rawModelElement unwraps the pointers an optional model field is carried
+// behind, leaving the type whose shape the document declares.
+func rawModelElement(model reflect.Type) reflect.Type {
+	for model.Kind() == reflect.Pointer {
+		model = model.Elem()
+	}
+	return model
+}
+
+// describeRawModelType names a declared property's type the way a decoder does
+// in an "invalid type" diagnostic.
+func describeRawModelType(model reflect.Type) string {
+	switch rawModelElement(model).Kind() {
+	case reflect.Struct, reflect.Map:
+		return "an object"
+	case reflect.Slice:
+		return "an array"
+	case reflect.Bool:
+		return "a boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "an integer"
+	case reflect.Float32, reflect.Float64:
+		return "a number"
+	case reflect.String:
+		return "a string"
+	default:
+		return "a value"
+	}
 }
 
 // rawConditionBlocks are the rule blocks whose `when` the raw validator walks.
@@ -278,15 +430,10 @@ func validateRawExtensions(ext map[string]any, errs *rawIssues) {
 
 	if posture := rawObject(ext, "posture"); posture != nil {
 		// transitions is a required field in the reference models: an absent
-		// key is rejected (an empty list is fine).
-		if raw, ok := posture["transitions"]; !ok {
+		// key is rejected (an empty list is fine). A present-but-null one is
+		// refused by [validateRawNullProperties], before this runs.
+		if _, ok := posture["transitions"]; !ok {
 			errs.add("extensions.posture: missing field `transitions`")
-		} else if _, isArray := raw.([]any); !isArray {
-			// A present-but-null `transitions:` decodes to a nil slice rather
-			// than failing the typed decode, and Parse then materializes an
-			// empty one -- so without this check Go alone would accept, and
-			// hash, a document the other three SDKs refuse.
-			errs.add("extensions.posture.transitions must be an array")
 		}
 		for index, raw := range rawArray(posture, "transitions") {
 			transition, ok := raw.(map[string]any)

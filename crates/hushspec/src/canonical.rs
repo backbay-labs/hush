@@ -209,13 +209,15 @@ fn canonicalize(document: &Value) -> Result<String, CanonicalError> {
 // Schemas
 // --------------------------------------------------------------------------
 
-struct SchemaSet {
-    core: Value,
+pub(crate) struct SchemaSet {
+    pub(crate) core: Value,
     /// `(extensions key, schema file name, parsed schema)`.
-    extensions: Vec<(&'static str, &'static str, Value)>,
+    pub(crate) extensions: Vec<(&'static str, &'static str, Value)>,
 }
 
-fn schemas() -> Result<&'static SchemaSet, CanonicalError> {
+/// The embedded schemas, parsed once. The canonical projection walks them, and
+/// so does the parse-time check that no declared property is written `null`.
+pub(crate) fn schemas() -> Result<&'static SchemaSet, CanonicalError> {
     static SCHEMAS: OnceLock<Result<SchemaSet, (String, String)>> = OnceLock::new();
     match SCHEMAS.get_or_init(load_schemas) {
         Ok(set) => Ok(set),
@@ -428,7 +430,7 @@ fn project_value(
 
 /// Follow a local `#/$defs/...` reference, returning the target schema and
 /// the `$defs` name it was reached through (`None` for an inline schema).
-fn resolve_ref<'a>(
+pub(crate) fn resolve_ref<'a>(
     root: &'a Value,
     node: &'a Value,
     depth: usize,

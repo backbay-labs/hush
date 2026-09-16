@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T19:49:29Z",
+  "generated_at": "2026-09-16T20:03:46Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -664,6 +664,48 @@
     {
       "path": "fixtures/core/invalid/missing-version.yaml",
       "sha256": "c2d6416091a1ff6ce6d2da572bd811cbe5420119d9b3099d0201ae2ed4fadd99",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-description.expect.yaml",
+      "sha256": "bb2d762ea6ad814739394ee07cf4a3e9bb56efc621d73389266b23859d22d51a",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-description.yaml",
+      "sha256": "e702342456fe3af8342507a77bf9984cb816837d5060eeaa7d58c4c452289008",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-name.expect.yaml",
+      "sha256": "7faea95e86e33cf43a42f1442800f5c21be79c015c43d87b2d867cfb73e280f6",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-name.yaml",
+      "sha256": "cfec44f6265eadc67c19f7479dc6abac5c183b4604f8aaad498d2a2549c5f0a1",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-rule-block.expect.yaml",
+      "sha256": "e8de52fe6cbab14dd0306db1495055386aef81b5cc847f223bc9ecbcf6c0e79b",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/null-rule-block.yaml",
+      "sha256": "d325622fcb078ef3d5fbdd3e913e0b80decc252e0c56ad66f0314310552f213c",
       "category": "invalid",
       "module": "core",
       "level": 1

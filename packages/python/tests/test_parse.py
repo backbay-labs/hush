@@ -230,6 +230,55 @@ hushspec: "99.0.0"
         codes = [error.code for error in validate(spec).errors]
         assert "E004" in codes
 
+    @pytest.mark.parametrize(
+        ("yaml", "expected"),
+        [
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress: null\n',
+                "rules.egress: invalid type, expected an object",
+            ),
+            (
+                'hushspec: "1.0.0"\nname: null\n',
+                "name: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\ndescription: null\n',
+                "description: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nmetadata:\n  author: null\n',
+                "metadata.author: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n      capability: null\n',
+                "rules.egress.when.capability: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n'
+                "      all_of:\n        - rate: null\n",
+                "rules.egress.when.all_of[0].rate: invalid type, expected an object",
+            ),
+        ],
+    )
+    def test_a_written_null_is_refused_for_a_declared_property(self, yaml, expected):
+        """Canonical spec 2.2: no HushSpec property is nullable, so a written
+        null is a value of the wrong type rather than an absent property.
+        """
+        with pytest.raises(ValueError) as caught:
+            parse_or_raise(yaml)
+        assert expected in str(caught.value)
+
+    def test_a_null_inside_a_context_value_is_a_leaf(self):
+        """``when.context`` holds values to compare against the runtime
+        context, so a null there is data, not a property of the format.
+        """
+        yaml = (
+            'hushspec: "1.0.0"\nrules:\n  egress:\n    default: block\n'
+            "    when:\n      context:\n        user.tenant: null\n"
+        )
+        when = parse_or_raise(yaml).rules.egress.when
+        assert when["context"] == {"user.tenant": None}
+
     def test_parse_rejects_duplicate_secret_pattern_names(self):
         yaml = """
 hushspec: "0.1.0"

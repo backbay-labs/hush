@@ -43,6 +43,14 @@ impl HushSpec {
             )));
         }
 
+        // A written `null` deserializes into `None`, so the typed document
+        // cannot tell one from an absent key; the raw value tree can, and a
+        // document that writes one is not the document the typed parse below
+        // would report on.
+        if let Err(message) = crate::raw_validate::reject_null_properties(&value) {
+            return Err(serde_yaml::Error::custom(message));
+        }
+
         serde_yaml::from_str(yaml)
     }
 

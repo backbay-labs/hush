@@ -1,0 +1,6 @@
+# Expected rejection for null-description.yaml (canonical spec 2.2; core spec 8, Level 1).
+# Registry: spec/registries/error-codes.yaml
+# Schema:   schemas/hushspec-error-codes.v1.schema.json#/$defs/ExpectedError
+reject: true
+code: "E001"
+message_contains: "expected a string"

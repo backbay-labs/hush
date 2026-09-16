@@ -1,0 +1,8 @@
+# Canonical spec 2.2 and 3.2: no HushSpec property is nullable, so a written
+# `null` is a value of the wrong type. A rule block written this way must not
+# read as an absent block -- the document would then be enforced, and hashed,
+# as a policy its author did not write.
+hushspec: "1.0.0"
+name: null-rule-block
+rules:
+  egress: null
