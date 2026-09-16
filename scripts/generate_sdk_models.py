@@ -294,7 +294,7 @@ STRUCTS = [
             field("from", "string", required=True, py_name="from_state"),
             field("to", "string", required=True),
             field("on", "TransitionTrigger", required=True),
-            field("after", "string", go_pointer=True),
+            field("after", "string"),
         ],
     },
     {
@@ -309,13 +309,13 @@ STRUCTS = [
         "fields": [
             field("id", "string", required=True, go_name="ID"),
             field("match", "OriginMatch", py_name="match_rules", rs_name="match_rules", go_name="Match"),
-            field("posture", "string", go_pointer=True),
+            field("posture", "string"),
             field("tool_access", "OriginToolAccessOverlay"),
             field("egress", "OriginEgressOverlay"),
             field("data", "OriginDataPolicy"),
             field("budgets", "OriginBudgets"),
             field("bridge", "BridgePolicy"),
-            field("explanation", "string", go_pointer=True),
+            field("explanation", "string"),
         ],
     },
     {
@@ -421,7 +421,7 @@ STRUCTS = [
         "name": "ThreatIntelDetection",
         "fields": [
             field("enabled", "bool", go_pointer=True),
-            field("pattern_db", "string", go_pointer=True, go_name="PatternDB"),
+            field("pattern_db", "string", go_name="PatternDB"),
             field("similarity_threshold", "float", go_pointer=True),
             field("top_k", "count", go_pointer=True),
         ],
@@ -500,7 +500,26 @@ def go_type(field_info: dict) -> str:
         return f"*{base}"
     if (is_struct(field_info["type"]) or is_external(field_info["type"])) and not field_info["required"]:
         return f"*{base}"
+    if is_optional_go_string(field_info):
+        return f"*{base}"
     return base
+
+
+def is_optional_go_string(field_info: dict) -> bool:
+    """Whether a field is an optional free-text string.
+
+    Go has no zero value left over to mean "absent", so such a field is a
+    `*string`: nil is absent and a pointer to "" is a present empty value. The
+    other three SDKs model the same distinction with `Option<String>`,
+    `str | None` and `string | undefined`, and the canonical form keeps a
+    present empty string, so Go must be able to hold one. Enums need no pointer
+    -- "" is not one of their values, and validation rejects it.
+    """
+    return (
+        field_info["type"] == "string"
+        and not field_info["required"]
+        and field_info["default"] is None
+    )
 
 
 def render_type(type_info: object, language: str) -> str:

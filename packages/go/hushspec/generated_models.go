@@ -83,9 +83,9 @@ const (
 
 type HushSpec struct {
 	HushSpecVersion string              `yaml:"hushspec" json:"hushspec"`
-	Name            string              `yaml:"name,omitempty" json:"name,omitempty"`
-	Description     string              `yaml:"description,omitempty" json:"description,omitempty"`
-	Extends         string              `yaml:"extends,omitempty" json:"extends,omitempty"`
+	Name            *string             `yaml:"name,omitempty" json:"name,omitempty"`
+	Description     *string             `yaml:"description,omitempty" json:"description,omitempty"`
+	Extends         *string             `yaml:"extends,omitempty" json:"extends,omitempty"`
 	MergeStrategy   MergeStrategy       `yaml:"merge_strategy,omitempty" json:"merge_strategy,omitempty"`
 	Rules           *Rules              `yaml:"rules,omitempty" json:"rules,omitempty"`
 	Extensions      *Extensions         `yaml:"extensions,omitempty" json:"extensions,omitempty"`
@@ -145,7 +145,7 @@ type SecretPattern struct {
 	Name        string   `yaml:"name" json:"name"`
 	Pattern     string   `yaml:"pattern" json:"pattern"`
 	Severity    Severity `yaml:"severity" json:"severity"`
-	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Description *string  `yaml:"description,omitempty" json:"description,omitempty"`
 }
 
 type SecretPatternsRule struct {
@@ -262,7 +262,7 @@ func (x *PostureExtension) initEmptyCollections() {
 }
 
 type PostureState struct {
-	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
+	Description  *string        `yaml:"description,omitempty" json:"description,omitempty"`
 	Capabilities []string       `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Budgets      map[string]int `yaml:"budgets,omitempty" json:"budgets,omitempty"`
 }
@@ -306,15 +306,15 @@ type OriginEgressOverlay struct {
 }
 
 type OriginMatch struct {
-	Provider             string   `yaml:"provider,omitempty" json:"provider,omitempty"`
-	TenantID             string   `yaml:"tenant_id,omitempty" json:"tenant_id,omitempty"`
-	SpaceID              string   `yaml:"space_id,omitempty" json:"space_id,omitempty"`
-	SpaceType            string   `yaml:"space_type,omitempty" json:"space_type,omitempty"`
-	Visibility           string   `yaml:"visibility,omitempty" json:"visibility,omitempty"`
+	Provider             *string  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	TenantID             *string  `yaml:"tenant_id,omitempty" json:"tenant_id,omitempty"`
+	SpaceID              *string  `yaml:"space_id,omitempty" json:"space_id,omitempty"`
+	SpaceType            *string  `yaml:"space_type,omitempty" json:"space_type,omitempty"`
+	Visibility           *string  `yaml:"visibility,omitempty" json:"visibility,omitempty"`
 	ExternalParticipants *bool    `yaml:"external_participants,omitempty" json:"external_participants,omitempty"`
 	Tags                 []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Sensitivity          string   `yaml:"sensitivity,omitempty" json:"sensitivity,omitempty"`
-	ActorRole            string   `yaml:"actor_role,omitempty" json:"actor_role,omitempty"`
+	Sensitivity          *string  `yaml:"sensitivity,omitempty" json:"sensitivity,omitempty"`
+	ActorRole            *string  `yaml:"actor_role,omitempty" json:"actor_role,omitempty"`
 }
 
 type OriginDataPolicy struct {
@@ -336,10 +336,10 @@ type BridgePolicy struct {
 }
 
 type BridgeTarget struct {
-	Provider   string   `yaml:"provider,omitempty" json:"provider,omitempty"`
-	SpaceType  string   `yaml:"space_type,omitempty" json:"space_type,omitempty"`
+	Provider   *string  `yaml:"provider,omitempty" json:"provider,omitempty"`
+	SpaceType  *string  `yaml:"space_type,omitempty" json:"space_type,omitempty"`
 	Tags       []string `yaml:"tags,omitempty" json:"tags,omitempty"`
-	Visibility string   `yaml:"visibility,omitempty" json:"visibility,omitempty"`
+	Visibility *string  `yaml:"visibility,omitempty" json:"visibility,omitempty"`
 }
 
 type DetectionExtension struct {
@@ -379,7 +379,7 @@ type ControlMapping struct {
 	Framework string   `yaml:"framework" json:"framework"`
 	ControlID string   `yaml:"control_id" json:"control_id"`
 	RulePaths []string `yaml:"rule_paths" json:"rule_paths"`
-	Notes     string   `yaml:"notes,omitempty" json:"notes,omitempty"`
+	Notes     *string  `yaml:"notes,omitempty" json:"notes,omitempty"`
 }
 
 // initEmptyCollections gives every required collection a non-nil value and
@@ -395,27 +395,27 @@ func (x *ControlMapping) initEmptyCollections() {
 }
 
 type ChangelogEntry struct {
-	Version string `yaml:"version" json:"version"`
-	Date    string `yaml:"date" json:"date"`
-	Summary string `yaml:"summary" json:"summary"`
-	Author  string `yaml:"author,omitempty" json:"author,omitempty"`
+	Version string  `yaml:"version" json:"version"`
+	Date    string  `yaml:"date" json:"date"`
+	Summary string  `yaml:"summary" json:"summary"`
+	Author  *string `yaml:"author,omitempty" json:"author,omitempty"`
 }
 
 type GovernanceMetadata struct {
-	Author         string           `yaml:"author,omitempty" json:"author,omitempty"`
-	ApprovedBy     string           `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
-	ApprovalDate   string           `yaml:"approval_date,omitempty" json:"approval_date,omitempty"`
+	Author         *string          `yaml:"author,omitempty" json:"author,omitempty"`
+	ApprovedBy     *string          `yaml:"approved_by,omitempty" json:"approved_by,omitempty"`
+	ApprovalDate   *string          `yaml:"approval_date,omitempty" json:"approval_date,omitempty"`
 	Classification Classification   `yaml:"classification,omitempty" json:"classification,omitempty"`
-	ChangeTicket   string           `yaml:"change_ticket,omitempty" json:"change_ticket,omitempty"`
+	ChangeTicket   *string          `yaml:"change_ticket,omitempty" json:"change_ticket,omitempty"`
 	LifecycleState LifecycleState   `yaml:"lifecycle_state,omitempty" json:"lifecycle_state,omitempty"`
 	PolicyVersion  *int             `yaml:"policy_version,omitempty" json:"policy_version,omitempty"`
-	EffectiveDate  string           `yaml:"effective_date,omitempty" json:"effective_date,omitempty"`
-	ExpiryDate     string           `yaml:"expiry_date,omitempty" json:"expiry_date,omitempty"`
-	Owner          string           `yaml:"owner,omitempty" json:"owner,omitempty"`
+	EffectiveDate  *string          `yaml:"effective_date,omitempty" json:"effective_date,omitempty"`
+	ExpiryDate     *string          `yaml:"expiry_date,omitempty" json:"expiry_date,omitempty"`
+	Owner          *string          `yaml:"owner,omitempty" json:"owner,omitempty"`
 	Reviewers      []string         `yaml:"reviewers,omitempty" json:"reviewers,omitempty"`
-	NextReviewDate string           `yaml:"next_review_date,omitempty" json:"next_review_date,omitempty"`
+	NextReviewDate *string          `yaml:"next_review_date,omitempty" json:"next_review_date,omitempty"`
 	Changelog      []ChangelogEntry `yaml:"changelog,omitempty" json:"changelog,omitempty"`
-	Supersedes     string           `yaml:"supersedes,omitempty" json:"supersedes,omitempty"`
+	Supersedes     *string          `yaml:"supersedes,omitempty" json:"supersedes,omitempty"`
 	Controls       []ControlMapping `yaml:"controls,omitempty" json:"controls,omitempty"`
 }
 
