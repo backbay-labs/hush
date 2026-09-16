@@ -198,6 +198,16 @@ def _absent(block: str) -> _Inactive:
     return _Inactive(f"no {block} rule configured")
 
 
+def _content_not_supplied(block: str) -> _Inactive:
+    """A content-scanning block the action carries no content for."""
+    return _Inactive(f"content not supplied; {block} not consulted")
+
+
+def _target_not_a_channel(block: str) -> _Inactive:
+    """A channel block whose target names no remote desktop channel."""
+    return _Inactive(f"target is not a remote desktop channel; {block} not consulted")
+
+
 def _allow(matched_rule: Optional[str], reason: Optional[str]) -> _BlockDecision:
     return _BlockDecision(Decision.ALLOW, matched_rule, reason, 1)
 
@@ -450,7 +460,7 @@ class _SecretPatternsStep(_Step):
         "_patterns",
         "_invalid",
         "_clean",
-        "_absent",
+        "_no_content",
     )
 
     def __init__(
@@ -468,7 +478,7 @@ class _SecretPatternsStep(_Step):
             "path is excluded from secret scanning",
         )
         self._clean = _allow(None, "content did not match any secret pattern")
-        self._absent = _absent("secret_patterns")
+        self._no_content = _content_not_supplied("secret_patterns")
         # (rank, search, decision) in document order. Fail closed: the first
         # pattern outside the profile denies, whatever the others match.
         patterns: list[tuple[int, Any, _BlockDecision]] = []
@@ -518,7 +528,7 @@ class _SecretPatternsStep(_Step):
         action = ev.action
         content = action.content
         if not self._path_bearing and content is None:
-            return self._absent
+            return self._no_content
         inactive = self._inactive(ev)
         if inactive is not None:
             return inactive
@@ -1039,7 +1049,7 @@ class _ComputerUseStep(_Step):
 
 
 class _RemoteDesktopChannelsStep(_Step):
-    __slots__ = ("_channels", "_absent")
+    __slots__ = ("_channels", "_not_a_channel")
 
     def __init__(self, rule: RemoteDesktopChannelsRule) -> None:
         super().__init__("remote_desktop_channels", rule.enabled, rule.when)
@@ -1061,7 +1071,7 @@ class _RemoteDesktopChannelsStep(_Step):
                 )
             )
         self._channels = channels
-        self._absent = _absent("remote_desktop_channels")
+        self._not_a_channel = _target_not_a_channel("remote_desktop_channels")
 
     def run(self, ev: _Eval) -> Union[_BlockDecision, _Inactive]:
         inactive = self._inactive(ev)
@@ -1070,7 +1080,7 @@ class _RemoteDesktopChannelsStep(_Step):
         decision = self._channels.get(ev.action.target or "")
         if decision is None:
             # Not a remote-desktop channel target: the block does not apply.
-            return self._absent
+            return self._not_a_channel
         return decision
 
 

@@ -66,9 +66,15 @@ def read_vector(name: str) -> DsseEnvelope:
     return parse_bundle((BUNDLES / name).read_text(encoding="utf-8"))
 
 
-def vector_resolver() -> dict[str, str]:
-    """The reference CLI's resolver, read back from the vector it produced."""
-    payload = json.loads(base64.b64decode(read_vector("valid.bundle.json").payload))
+def vector_resolver(name: str) -> dict[str, str]:
+    """The reference CLI's resolver, read back from the vector it produced.
+
+    Each vector records the `h2h` version that built it, and the vectors were
+    not all rebuilt at the same release, so the resolver is read per vector
+    rather than shared: reproducing a vector means feeding the bundler the
+    inputs that vector names, and `resolver` is one of them (bundle spec 4.2).
+    """
+    payload = json.loads(base64.b64decode(read_vector(name).payload))
     return dict(payload["predicate"]["resolver"])
 
 
@@ -97,7 +103,7 @@ def test_reproduces_the_signed_vector_byte_for_byte() -> None:
         private_key_pem=read_key("test-signing.key.pem"),
         created_at=VECTOR_CREATED_AT,
         base_dir=REPO_ROOT,
-        **vector_resolver(),
+        **vector_resolver("valid.bundle.json"),
     )
 
     # Equal payloads mean the two bundlers agree on every member of the
@@ -116,7 +122,7 @@ def test_reproduces_the_unsigned_vector() -> None:
         vector_resolution(),
         created_at=VECTOR_CREATED_AT,
         base_dir=REPO_ROOT,
-        **vector_resolver(),
+        **vector_resolver("unsigned.bundle.json"),
     )
     assert built.signatures == ()
     assert built.payload == expected.payload
@@ -129,7 +135,7 @@ def test_reproduces_the_untrusted_key_vector() -> None:
         private_key_pem=read_key("test-untrusted.key.pem"),
         created_at=VECTOR_CREATED_AT,
         base_dir=REPO_ROOT,
-        **vector_resolver(),
+        **vector_resolver("wrong-key.bundle.json"),
     )
     assert built == expected
 

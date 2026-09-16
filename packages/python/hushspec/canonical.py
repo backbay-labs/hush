@@ -216,7 +216,7 @@ def _plain(value: Any) -> Any:
     return value
 
 
-# -- core schema (schemas/hushspec-core.v0.schema.json) --------------------- #
+# -- core schema (schemas/hushspec-core.v1.schema.json) --------------------- #
 
 _CONDITION = _Obj(CONDITION_KEYS)
 _TIME_WINDOW = _Obj(TIME_WINDOW_KEYS, defaults={"timezone": "UTC"}, required=("start", "end"))
@@ -331,7 +331,7 @@ _CORE_ROOT.children = {
     "metadata": _GOVERNANCE_METADATA,
 }
 
-# -- posture extension (schemas/hushspec-posture.v0.schema.json) ------------ #
+# -- posture extension (schemas/hushspec-posture.v1.schema.json) ------------ #
 
 _POSTURE_STATE = _Obj(POSTURE_STATE_KEYS)
 _POSTURE_TRANSITION = _Obj(POSTURE_TRANSITION_KEYS, required=("from", "to", "on"))
@@ -341,7 +341,7 @@ _POSTURE_ROOT.children = {
     "transitions": _ArrayOf(_POSTURE_TRANSITION),
 }
 
-# -- origins extension (schemas/hushspec-origins.v0.schema.json) ------------ #
+# -- origins extension (schemas/hushspec-origins.v1.schema.json) ------------ #
 #
 # `match` is the one presence-significant field of spec section 3.3: `match: {}`
 # is the explicit default profile, where an absent `match` never matches. The
@@ -381,7 +381,7 @@ _ORIGIN_PROFILE.children = {
 _ORIGINS_ROOT = _Obj(ORIGINS_KEYS, defaults={"default_behavior": "deny"})
 _ORIGINS_ROOT.children = {"profiles": _ArrayOf(_ORIGIN_PROFILE)}
 
-# -- detection extension (schemas/hushspec-detection.v0.schema.json) -------- #
+# -- detection extension (schemas/hushspec-detection.v1.schema.json) -------- #
 
 _PROMPT_INJECTION = _Obj(
     PROMPT_INJECTION_KEYS,
