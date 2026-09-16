@@ -57,9 +57,17 @@ const BEYOND_SCHEMA_VECTORS = new Set([
   'bad-initial.yaml',
   'duplicate-ids.yaml',
   'duplicate-pattern-names.yaml',
+  'regex-comment-group.yaml',
+  'regex-lookahead.yaml',
   'regex-mid-pattern-flag.yaml',
+  'regex-open-lower-bound.yaml',
+  'regex-posix-bracket.yaml',
   'version-unsupported-minor.yaml',
   'when-bad-timezone.yaml',
+  'when-timezone-double-sign.yaml',
+  'when-timezone-no-colon.yaml',
+  'when-timezone-short-hour.yaml',
+  'when-timezone-short-minute.yaml',
   'when-too-deep.yaml',
 ]);
 

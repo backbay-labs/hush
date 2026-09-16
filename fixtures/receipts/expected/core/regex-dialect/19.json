@@ -1,6 +1,6 @@
 {
   "receipt_version": "0.2",
-  "receipt_id": "01a0a4f0-3200-700e-8000-000000000000",
+  "receipt_id": "01a0a4f0-3200-7013-8000-000000000000",
   "timestamp": "2026-09-15T12:00:00.000Z",
   "time_source": "trusted",
   "actor": {
@@ -15,15 +15,15 @@
   },
   "action": {
     "type": "shell_command",
-    "target": "w😀"
+    "target": "🙏"
   },
   "decision": "deny",
-  "matched_rule": "rules.shell_commands.forbidden_patterns[6]",
+  "matched_rule": "rules.shell_commands.forbidden_patterns[9]",
   "reason": "shell command matched a forbidden pattern",
   "rule_trace": [
     {
       "rule_block": "shell_commands",
-      "rule_path": "rules.shell_commands.forbidden_patterns[6]",
+      "rule_path": "rules.shell_commands.forbidden_patterns[9]",
       "outcome": "deny",
       "evaluated": true,
       "reason": "shell command matched a forbidden pattern"

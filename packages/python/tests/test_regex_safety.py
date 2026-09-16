@@ -261,7 +261,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "not a HushSpec regex profile escape" in err
 
     def test_rejects_lookahead_in_shell_commands(self):
         yaml = """
@@ -273,7 +273,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "group form" in err
 
     def test_rejects_possessive_brace_in_shell_commands(self):
         yaml = """
@@ -285,7 +285,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "possessive" in err
 
     def test_rejects_end_anchor_in_secret_patterns(self):
         yaml = """
@@ -299,7 +299,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "end-anchors" in err
 
     def test_rejects_empty_character_class_in_patch_integrity(self):
         yaml = """
@@ -314,9 +314,9 @@ rules:
         assert ok is False
         # Empty classes are a portability rejection (JavaScript accepts `[]`
         # and `[^]`; the other three engines reject them), so they are reported
-        # by the shared RE2-subset pre-check rather than by Python's own
+        # by the shared portability pre-check rather than by Python's own
         # `re.compile`.
-        assert "RE2" in err
+        assert "empty character class" in err
 
     def test_rejects_lookbehind_in_patch_integrity(self):
         yaml = """
@@ -329,7 +329,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "group form" in err
 
     def test_accepts_all_valid_regex_fields(self):
         yaml = """

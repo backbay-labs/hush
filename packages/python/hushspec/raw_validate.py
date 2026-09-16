@@ -13,15 +13,11 @@ from hushspec.error_codes import (
     ERROR_UNSUPPORTED_VERSION,
     ErrorMessage,
 )
-from hushspec.regex_profile import compile_profile_regex
+from hushspec.regex_profile import NESTED_QUANTIFIER_MESSAGE, compile_profile_regex
 # The regex-portability scanners are shared with hushspec.validate rather
 # than copied: a pattern parse() refuses and one validate() refuses can then
 # never drift apart.
-from hushspec.validate import (
-    _RE2_DISALLOWED,
-    _disallowed_regex_feature,
-    _has_nested_quantifier,
-)
+from hushspec.validate import _disallowed_regex_feature, _has_nested_quantifier
 from hushspec.generated_contract import (
     BROWSER_AUTOMATION_KEYS,
     CODE_EXECUTION_KEYS,
@@ -1108,35 +1104,35 @@ def _validate_number_value(
 
 
 def _validate_regex(pattern: str, errors: list[str], path: str) -> None:
-    # Portability pre-check, RE2-feature check and nested-quantifier (ReDoS)
-    # heuristic first, all reported with the shared "not in the RE2 subset"
-    # message. These are hushspec.validate's own scanners, so what parse()
-    # refuses and what validate() refuses cannot drift apart.
-    if (
-        _disallowed_regex_feature(pattern) is not None
-        or _RE2_DISALLOWED.search(pattern)
-        or _has_nested_quantifier(pattern)
-    ):
-        errors.append(
-            f"{path}: pattern uses features not in the RE2 subset "
-            "(backreferences, lookaround, etc.) which may cause ReDoS"
-        )
-        return
-
-    # Everything else goes through compile_profile_regex, which repeats those
-    # checks and then applies the HushSpec regex profile (ASCII shorthands,
-    # leading-only inline flags, portable escapes) before compiling. It is the
-    # exact call the evaluator makes, so parse() rejects precisely the patterns
-    # evaluation would deny on.
-    try:
-        compile_profile_regex(pattern)
-    except ValueError as exc:
+    def reject(message: str) -> None:
         errors.append(
             ErrorMessage(
-                f"{path} must be a valid regular expression: {exc}",
+                f"{path} must be a valid regular expression: {message}",
                 ERROR_INVALID_REGEX,
             )
         )
+
+    # Portability pre-check and the nested-quantifier (ReDoS) heuristic first.
+    # These are hushspec.validate's own scanners, so what parse() refuses and
+    # what validate() refuses cannot drift apart.
+    feature = _disallowed_regex_feature(pattern)
+    if feature is not None:
+        reject(feature)
+        return
+    if _has_nested_quantifier(pattern):
+        reject(NESTED_QUANTIFIER_MESSAGE)
+        return
+
+    # Everything else goes through compile_profile_regex, which repeats those
+    # checks, refuses the rest of the non-RE2 syntax (lookaround,
+    # backreferences, atomic and recursive groups) and then applies the
+    # HushSpec regex profile (ASCII shorthands, leading-only inline flags,
+    # portable escapes) before compiling. It is the exact call the evaluator
+    # makes, so parse() rejects precisely the patterns evaluation would deny on.
+    try:
+        compile_profile_regex(pattern)
+    except ValueError as exc:
+        reject(str(exc))
 
 
 # Nested-quantifier (catastrophic backtracking / ReDoS) heuristic.

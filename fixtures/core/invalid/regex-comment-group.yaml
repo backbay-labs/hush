@@ -1,0 +1,9 @@
+# An inline comment group. Python's `re` accepts `(?#...)` and drops it;
+# Rust, JavaScript and Go reject it. The HushSpec regex profile allows only
+# `(?:...)`, the named group forms, and a leading inline flag group, so all
+# four SDKs must reject this document.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    forbidden_patterns:
+      - "rm(?# force)[ \\t]+-rf"

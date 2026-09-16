@@ -612,7 +612,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "nested unbounded quantifier" in err
 
     def test_accepts_valid_browser_automation_rule(self):
         yaml = """

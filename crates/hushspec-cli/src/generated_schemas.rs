@@ -815,7 +815,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "pattern": {
           "type": "string",
-          "description": "Regular expression to match against content."
+          "maxLength": 2048,
+          "description": "Regular expression to match against content, in the HushSpec regex profile (core spec 3.14.3)."
         },
         "severity": {
           "type": "string",
@@ -893,10 +894,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "forbidden_patterns": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "default": [],
-          "description": "Regex patterns forbidden in patch content."
+          "description": "Regex patterns forbidden in patch content, in the HushSpec regex profile (core spec 3.14.3)."
         },
         "require_balance": {
           "type": "boolean",
@@ -928,10 +930,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "forbidden_patterns": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "default": [],
-          "description": "Regex patterns forbidden in shell commands."
+          "description": "Regex patterns forbidden in shell commands, in the HushSpec regex profile (core spec 3.14.3)."
         }
       }
     },
@@ -1134,10 +1137,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "extra_credential_patterns": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 2048
           },
           "default": [],
-          "description": "Extra credential regex patterns layered on top of the built-in detectors."
+          "description": "Extra credential regex patterns layered on top of the built-in detectors, in the HushSpec regex profile (core spec 3.14.3)."
         }
       }
     },

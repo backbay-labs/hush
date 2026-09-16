@@ -71,6 +71,11 @@ const NFD_HOST: &str = "cafe\u{301}.example.com";
 const NFC_PATH: &str = "/data/caf\u{e9}/report.txt";
 const NFD_PATH: &str = "/data/cafe\u{301}/report.txt";
 
+/// Time zones for a `time_window` condition (core spec 3.13). The last four are
+/// deliberately malformed: a fixed offset is a sign and then `HH` or `HH:MM`
+/// with two ASCII digits per field, and a `timezone` outside that grammar and
+/// the engine's database must be refused by every SDK rather than resolved by
+/// some of them.
 const TIMEZONE_POOL: &[&str] = &[
     "UTC",
     "America/New_York",
@@ -79,6 +84,10 @@ const TIMEZONE_POOL: &[&str] = &[
     "Australia/Sydney",
     "+05:30",
     "-08:00",
+    "+5",
+    "+0530",
+    "+5:0",
+    "++5",
 ];
 const DAY_POOL: &[&str] = &["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
@@ -1500,12 +1509,7 @@ fn content_strategy(harvest: &TargetHarvest) -> BoxedStrategy<Option<String>> {
     // the profile's ASCII one.
     for pattern in harvest.secret_regexes.iter().take(2) {
         if let Ok(matching) = string_regex(pattern) {
-            options.push((
-                1,
-                matching
-                    .prop_map(|text| Some(sanitize_content(&text)))
-                    .boxed(),
-            ));
+            options.push((1, matching.prop_map(Some).boxed()));
         }
     }
     proptest::strategy::Union::new_weighted(options).boxed()
@@ -1634,18 +1638,6 @@ fn module_content_strategy() -> impl Strategy<Value = String> {
             .prop_map(|name| format!("my{name} = 1\nprint(my{name})")),
         module.prop_map(|name| format!("# {name}\nprint('hi')")),
     ]
-}
-
-/// Drop the two characters whose *case folding* still differs across the SDKs:
-/// U+017F (long s) and U+212A (Kelvin sign) simple-case-fold to ASCII `s`/`k`
-/// in Rust `regex` and Go RE2, but not in JavaScript `RegExp` (no `u` flag) or
-/// Python `re` under `re.ASCII`. That is the one regex-profile divergence left
-/// open (see `hushspec::regex_profile`), so generated haystacks stay clear of
-/// it rather than reporting it as a fresh difference on every run.
-fn sanitize_content(text: &str) -> String {
-    text.chars()
-        .filter(|c| *c != '\u{17F}' && *c != '\u{212A}')
-        .collect()
 }
 
 fn diff_content_strategy() -> impl Strategy<Value = String> {
