@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T02:48:42Z",
+  "generated_at": "2026-09-16T12:19:31Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1412,7 +1412,7 @@
     },
     {
       "path": "fixtures/library/finance/soc2-base.test.yaml",
-      "sha256": "0538575fa6f53eb3dca71593f2f58e32ac8298674bd9ba70fd8c866e4462fdfc",
+      "sha256": "69ab71c1531b3845bd56878967491c907e9cdf71cab9c4d7c5fcec3072499173",
       "category": "library-suite",
       "module": "library",
       "level": 3
@@ -1426,7 +1426,7 @@
     },
     {
       "path": "fixtures/library/general/recommended.test.yaml",
-      "sha256": "4edf3523123c74d8a74df52626b15d93a8794443d71fdc5a2f922a643e829404",
+      "sha256": "db745d1116c8e7a247f97ffedfd492da2516d11e8f5a1df7851289cd9f93bfb2",
       "category": "library-suite",
       "module": "library",
       "level": 3
