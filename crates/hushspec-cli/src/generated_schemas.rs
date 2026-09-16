@@ -1441,7 +1441,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             "type": "string",
             "minLength": 1
           },
-          "description": "Dot paths into the resolved document that implement the control. Grammar: path = root *( \".\" segment ) [ selector ]; root = \"rules\" / \"extensions\"; segment = 1*( ALPHA / DIGIT / \"_\" ); selector = \"[\" 1*( %x20-5A / %x5C-7C / %x7E ) \"]\" (any character except '[' and ']'). A selector names a list entry by its 'name' or 'id' field. Examples: 'rules' (the whole rules object), 'rules.egress' (one rule block), 'rules.egress.allow' (one field), 'rules.secret_patterns.patterns[ssn]' (one named secret pattern), 'extensions.posture'."
+          "description": "Dot paths into the resolved document that implement the control. Grammar: path = root *( \".\" segment ) [ selector ]; root = \"rules\" / \"extensions\"; segment = 1*( ALPHA / DIGIT / \"_\" ); selector = \"[\" 1*( %x20-5A / %x5C / %x5E-7E ) \"]\" (any character except '[' and ']'). A selector names a list entry by its 'name' or 'id' field. Examples: 'rules' (the whole rules object), 'rules.egress' (one rule block), 'rules.egress.allow' (one field), 'rules.secret_patterns.patterns[ssn]' (one named secret pattern), 'extensions.posture'."
         },
         "notes": {
           "type": "string",

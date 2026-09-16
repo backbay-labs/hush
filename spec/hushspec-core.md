@@ -142,7 +142,7 @@ Unknown keys within a mapping MUST be rejected (Section 2.1).
 rule-path = root *( "." segment ) [ selector ]
 root      = "rules" / "extensions"
 segment   = 1*( ALPHA / DIGIT / "_" )
-selector  = "[" 1*( %x20-5A / %x5C-7C / %x7E ) "]"   ; any character except "[" and "]"
+selector  = "[" 1*( %x20-5A / %x5C / %x5E-7E ) "]"   ; any character except "[" and "]"
 ```
 
 A selector names one entry of the list or mapping the preceding path resolves to, matching a list entry by its `name` or `id` field and a mapping by its key. Examples: `rules` (the whole rules object), `rules.egress` (one rule block), `rules.egress.allow` (one field), `rules.secret_patterns.patterns[ssn]` (one named secret pattern), `extensions.posture` (an extension subtree).
