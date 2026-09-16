@@ -296,7 +296,14 @@ class PolicyVerificationError(ResolveRejected):
     happens against a document that failed its own integrity check.
     """
 
-    def __init__(self, message: str, *, source: str, status: SignatureStatus) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        source: str,
+        status: SignatureStatus,
+        resolution: "Resolution | None" = None,
+    ) -> None:
         reason = status.reason
         code = (
             reason
@@ -308,6 +315,12 @@ class PolicyVerificationError(ResolveRejected):
         self.source = source
         #: Why, in the form a receipt records (``verified`` is always false).
         self.status = status
+        #: What was loaded, when the chain merged and only verification failed,
+        #: so a caller that must keep going -- a guard that refuses every action
+        #: but still reports the hash of what it was handed (signing spec
+        #: section 6.5) -- has the document without ever being able to mistake
+        #: it for a verified one. ``None`` when the chain did not merge at all.
+        self.resolution = resolution
 
     @property
     def reason(self) -> str | None:
@@ -408,13 +421,18 @@ def resolve_with_options_or_raise(
     """
     prepared = _prepare(options)
     stack = [source] if source is not None else []
-    resolved, chain = _resolve_inner(
-        spec,
-        source,
-        loader or _create_composite_loader(),
-        stack,
-        prepared=prepared,
-    )
+    try:
+        resolved, chain = _resolve_inner(
+            spec,
+            source,
+            loader or _create_composite_loader(),
+            stack,
+            prepared=prepared,
+        )
+    except PolicyVerificationError as exc:
+        if prepared.require_signature:
+            exc.resolution = _unverified_resolution(spec, source, loader, options)
+        raise
     leaf = chain[-1] if chain else None
     return Resolution(
         spec=resolved,
@@ -422,6 +440,28 @@ def resolve_with_options_or_raise(
         chain=chain,
         signature=leaf.signature if leaf is not None else None,
     )
+
+
+def _unverified_resolution(
+    spec: HushSpec,
+    source: str | None,
+    loader: Resolver | None,
+    options: ResolveOptions | None,
+) -> Resolution | None:
+    """The chain as it merges when signatures are not *required*.
+
+    Signatures are still verified where they are found, so every hop keeps the
+    outcome a receipt records. ``None`` when the chain does not resolve at all:
+    a digest pin is honoured whether or not signatures are required, so a pin
+    failure leaves no document to report.
+    """
+    relaxed = replace(options, require_signature=False) if options else ResolveOptions()
+    try:
+        return resolve_with_options_or_raise(
+            spec, source=source, loader=loader, options=relaxed
+        )
+    except (ValueError, SigningError):
+        return None
 
 
 def _resolve_tuple(

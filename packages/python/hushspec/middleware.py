@@ -53,13 +53,6 @@ _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 #: name the receipt carries -- one spelling per fact.
 POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
 
-#: ``policy.content_hash`` of a receipt for a load the guard refused. A 0.2
-#: receipt requires the field, but the guard will not vouch for the hash of a
-#: document it would not evaluate, so it records the all-zero digest: a
-#: well-formed content hash that joins to nothing.
-UNVERIFIED_POLICY_HASH = "sha256:" + "0" * 64
-
-
 @dataclass
 class EnforcementConfig:
     mode: str = "enforce"                                     # 'enforce' | 'monitor'
@@ -237,6 +230,10 @@ class _GuardState:
     resolution: Optional[Resolution]
     #: Why the guard is denying everything, or ``None`` when it is enforcing.
     refusal: Optional[SignatureStatus]
+    #: The document a refusal is about: merged and hashed, never verified, and
+    #: never evaluated. It is what a refusal receipt names (signing spec
+    #: section 6.5), which is why it is kept apart from :attr:`resolution`.
+    refused: Optional[Resolution]
     policy_hash: Optional[str]
     #: What the caller asked for, which a refused load still names.
     requested_name: Optional[str]
@@ -294,11 +291,14 @@ class HushGuard:
         self._watcher: Any = None
         requested = policy.spec if isinstance(policy, Resolution) else policy
         resolution: Optional[Resolution] = None
+        refused: Optional[Resolution] = None
         refusal: Optional[SignatureStatus] = None
         # Resolve before anything else touches the spec: a guard never holds an
         # unresolved document, and the receipt hash covers the resolved policy.
         # A policy that cannot be *verified* does not raise -- the guard has to
         # stay alive to deny, and to record the refusal (signing spec 6.5).
+        # A chain that would not merge at all does raise: there is no document
+        # to refuse against, so there is nothing a receipt could name.
         try:
             resolution = (
                 self._adopt_resolution(policy)
@@ -307,7 +307,10 @@ class HushGuard:
             )
             resolved = resolution.spec
         except PolicyVerificationError as exc:
+            if exc.resolution is None:
+                raise
             refusal = exc.status
+            refused = exc.resolution
             # A deny-everything policy as a backstop: nothing should reach it
             # (every evaluation short-circuits on the refusal), and if anything
             # ever did, it must not be the document that failed verification.
@@ -326,6 +329,7 @@ class HushGuard:
             ),
             resolution=resolution,
             refusal=refusal,
+            refused=refused,
             policy_hash=(
                 resolution.content_hash if resolution is not None else None
             ),
@@ -482,6 +486,7 @@ class HushGuard:
                     "guard requires one",
                     source=leaf,
                     status=status,
+                    resolution=resolution,
                 )
         return resolution
 
@@ -623,8 +628,9 @@ class HushGuard:
     def resolution(self) -> Optional[Resolution]:
         """Evidence from the policy load: chain hashes and signature outcomes.
 
-        ``None`` while the guard is refusing an unverified policy -- there is no
-        resolution to report. :attr:`refusal` says why.
+        ``None`` while the guard is refusing an unverified policy: there is a
+        document, and its hash and chain go into every refusal receipt, but it
+        is not a resolution this guard will enforce. :attr:`refusal` says why.
         """
         return self._state.resolution
 
@@ -773,10 +779,10 @@ class HushGuard:
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
         """Deny without evaluating: the policy was never verified (signing 6.5).
 
-        No rule ran, so the receipt carries an empty ``rule_trace`` and no
-        content hash -- the guard refuses to vouch for the hash of a document it
-        would not evaluate. It still names the policy, so an auditor can see
-        *which* load was refused and why.
+        No rule ran, so the receipt carries an empty ``rule_trace``. It names
+        the refused document by its real content hash and chain, so an auditor
+        can see *which* load was refused, and carries the verifier's own
+        outcome, so nobody can read it as a policy that was proven.
         """
         refusal = state.refusal
         reason = (refusal.reason if refusal is not None else None) or "unverified"
@@ -785,21 +791,17 @@ class HushGuard:
             matched_rule=POLICY_SIGNATURE_RULE,
             reason=f"policy signature verification failed: {reason}",
         )
-        if self._sink is None:
+        if self._sink is None or state.refused is None:
             return result, 0, None
 
-        from hushspec.receipt import PolicySummary, unverified_policy_receipt
+        from hushspec.receipt import policy_summary, unverified_policy_receipt
 
-        receipt = unverified_policy_receipt(
-            PolicySummary(
-                name=state.requested_name,
-                spec_version=state.requested_version,
-                content_hash=UNVERIFIED_POLICY_HASH,
-                signature=refusal,
-            ),
-            action,
-            self._audit_context(),
-        )
+        summary = policy_summary(state.refused)
+        if summary.signature is None:
+            # The resolver stopped at the failing hop, so the leaf has no
+            # outcome of its own; the refusal is that outcome.
+            summary.signature = refusal
+        receipt = unverified_policy_receipt(summary, action, self._audit_context())
         return result, 0, receipt
 
     def _record(
@@ -900,6 +902,7 @@ class HushGuard:
             compiled=compiled,
             resolution=resolution,
             refusal=None,
+            refused=None,
             policy_hash=resolution.content_hash,
             requested_name=requested_name,
             requested_version=requested_version,

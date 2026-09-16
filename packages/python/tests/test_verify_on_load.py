@@ -23,7 +23,6 @@ import pytest
 from hushspec.canonical import content_hash
 from hushspec.evaluate import Decision
 from hushspec.middleware import (
-    UNVERIFIED_POLICY_HASH,
     POLICY_SIGNATURE_RULE,
     EnforcementConfig,
     HushGuard,
@@ -693,10 +692,10 @@ def test_a_refusal_cannot_be_downgraded_to_monitor(tmp_path: Path) -> None:
     assert refused.matched_rule == POLICY_SIGNATURE_RULE
     assert refused.rule_trace == []
     assert refused.policy.name == "standalone"
-    # A 0.2 receipt always carries a well-formed content hash; the guard will
-    # not vouch for the hash of a document it would not evaluate, so it records
-    # the all-zero digest and the verifier's reason instead.
-    assert refused.policy.content_hash == UNVERIFIED_POLICY_HASH
+    # The refused document's own content hash, so an auditor can join the
+    # receipt to the load it is about; `signature.verified` is what says the
+    # document was never proven.
+    assert refused.policy.content_hash == content_hash(parse_or_raise(STANDALONE))
     assert refused.policy.signature.verified is False
     assert refused.policy.signature.reason == "missing_signature"
     assert refused.enforcement.outcome == "blocked"
