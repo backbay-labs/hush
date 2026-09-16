@@ -1,7 +1,7 @@
 # HushSpec Policy Bundle Specification
 
-**Version:** 0.1 (Draft)
-**Status:** Draft
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
 **Date:** 2026-09-15
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2, Policy Signing 0.2
 
@@ -236,6 +236,8 @@ The envelope is ordinary DSSE and the payload is an ordinary in-toto Statement, 
 ---
 
 ## 8. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **A bundle is not a policy.** Nothing here authorizes loading `predicate.resolved` and enforcing it. An enforcement point loads policy files and verifies them under the Policy Signing specification; a bundle an attacker could feed to a loader would be a signed document its signer never intended to be enforced.
 - **The bundler is in the trusted computing base.** The subject digest is computed by the bundler from the document the bundler resolved. A verifier that never re-resolves is trusting that resolution. Check 4 (`--policy`) is how an auditor removes that trust, and `chain` is what lets them see which bases were in force.

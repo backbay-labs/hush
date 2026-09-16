@@ -1,7 +1,7 @@
 # HushSpec Policy Signing Specification
 
-**Version:** 0.2 (Draft)
-**Status:** Draft
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
 **Date:** 2026-09-15
 **Supersedes:** Signature format 0.1.0 (schemas/hushspec-signature.v0.schema.json as shipped with HushSpec 0.1.x)
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Decision Receipts 0.2
@@ -266,6 +266,8 @@ Every SDK runs these vectors; a divergence between engines is a conformance fail
 ---
 
 ## 10. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **Key compromise.** Revoke the key in every keyring (`revoked: true`), re-sign affected policies with a new key, and rotate. Because `key_id` is inside the signed envelope, an attacker cannot re-point an existing signature at a different key.
 - **Replay.** A valid old envelope for an older policy version remains cryptographically valid forever. Rollback protection (`policy_version`, check 10) and expiry (`expires_at`) are the two defenses; deployments that need either MUST populate the corresponding fields.

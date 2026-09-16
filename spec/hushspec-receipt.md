@@ -1,7 +1,7 @@
 # HushSpec Decision Receipt Specification
 
-**Version:** 0.2 (Draft)
-**Status:** Draft
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
 **Date:** 2026-09-15
 **Supersedes:** Receipt format 0.1 (schemas/hushspec-receipt.v0.schema.json as shipped with HushSpec 0.1.x)
 **Companion to:** HushSpec Core 0.2.0, Canonical Form 0.2.0, Policy Signing 0.2
@@ -146,7 +146,7 @@ The evaluated action, minus its content.
 - `target`: the target string as supplied, **not** normalized. The evaluator normalizes internally (Core Sections 3.1, 3.3); the receipt keeps what the agent asked for, so an auditor sees `API.EXAMPLE.COM:443` if that is what was requested.
 - `content_hash` and `content_size`: present whenever content was supplied. `content_hash` is `sha256:` over the UTF-8 bytes of the content as supplied. Content itself MUST NOT appear in a receipt; the schema has no field for it and unknown fields are rejected.
 - `args_size`: the serialized size of tool-call arguments when the runtime measured it against `tool_access.max_args_size`.
-- `origin` and `context`: the origin descriptor and runtime context supplied with the action, verbatim, except that a runtime MAY redact context values it considers sensitive (it MUST then drop the key rather than substitute a placeholder).
+- `origin` and `context`: the origin descriptor and runtime context supplied with the action, recorded as JSON objects with top-level members that are absent, `null`, `{}`, or `[]` removed (typed models differ in which empty members they materialize; the document the caller supplied did not have them). A runtime MAY redact context values it considers sensitive; it MUST then drop the key rather than substitute a placeholder.
 
 ### 4.5 `decision`, `matched_rule`, `reason`
 
@@ -252,6 +252,8 @@ Because the hash covers every field, engines MUST NOT mutate a receipt after com
 ---
 
 ## 9. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **Secrets.** The only fields that can carry agent-supplied text are `action.target`, `action.origin`, `action.context`, and `reason`. Runtimes SHOULD redact context values that may contain secrets and MUST never place content in any field.
 - **Clock trust.** `time_source` lets an auditor discount timestamps from untrusted clocks, but ordering within a log comes from the log's sequence numbers, not from timestamps.

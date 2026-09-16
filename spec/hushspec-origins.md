@@ -1,8 +1,8 @@
 # HushSpec Origins Extension Specification
 
-**Version:** 0.2.0 (Draft)
-**Status:** Draft
-**Date:** 2026-09-14
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
+**Date:** 2026-09-15
 **Companion to:** HushSpec Core v0.2.0
 **Supersedes:** 0.1.0 (2026-03-15). See Appendix B for the list of changes.
 
@@ -266,6 +266,12 @@ If the child defines `default_behavior`, it overrides the base's value. If the c
 ### 9.3 Replace and Merge Strategies
 
 Under `replace` strategy, the child's origins object entirely replaces the base's. Under `merge` strategy, the child's origins object entirely replaces the base's (since origins is a single block under extensions).
+
+---
+
+## Security Considerations
+
+The security considerations for the whole specification family are collected in `hushspec-security.md`; the ones that bear on this extension are the panic sentinel and monitor mode (Security Sections 10 and 11) for posture, and remote resolution and canonicalization (Security Sections 4 and 12) for origin overlays.
 
 ---
 

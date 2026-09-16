@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
-  "fixtures_version": "0.2.0",
-  "generated_at": "2026-09-15T22:05:29Z",
+  "fixtures_version": "1.0.0",
+  "generated_at": "2026-09-16T00:36:09Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",

@@ -1,7 +1,7 @@
 # HushSpec Receipt Log Specification
 
-**Version:** 0.1 (Draft)
-**Status:** Draft
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
 **Date:** 2026-09-15
 **Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 0.2.0
 
@@ -66,6 +66,8 @@ For each file in order, for each non-blank line in order:
 The first failing step identifies the break by file and line. Test vectors: `fixtures/log/valid/`, `fixtures/log/invalid/`.
 
 ## 9. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **Truncation.** Deleting entries from the end of a log leaves a valid chain. Detecting truncation needs an external anchor: the `entry_hash` a signer published, a receipt's presence in another system, or a `policy_swapped` entry expected on a schedule. Writers SHOULD publish the head hash periodically.
 - **Key custody.** An entry signature proves the writer held the key; it does not prove the clock. Auditors weigh `timestamp` by the receipt's `time_source`.

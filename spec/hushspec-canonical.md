@@ -1,7 +1,7 @@
 # HushSpec Canonical Form Specification
 
-**Version:** 0.2.0 (Draft)
-**Status:** Draft
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
 **Date:** 2026-09-15
 **Companion to:** HushSpec Core 0.2.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
 
@@ -289,6 +289,8 @@ All four SDKs walk `fixtures/core/hash/`, as does the conformance testkit's `has
 ---
 
 ## 8. Security Considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
 
 - **Hash identity, not authenticity.** A content hash proves that two parties hold the same policy; it does not prove who wrote it. Authenticity comes from the signature specification.
 - **Canonicalization must precede validation of nothing.** Validate first (Section 2.3). A canonicalizer that tolerates unknown fields could be made to hash a document that no conformant engine would accept.

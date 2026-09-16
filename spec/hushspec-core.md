@@ -1,8 +1,8 @@
 # HushSpec Core Specification
 
-**Version:** 0.2.0 (Draft)
-**Status:** Draft
-**Date:** 2026-09-14
+**Version:** 1.0.0-rc.1
+**Status:** Release Candidate
+**Date:** 2026-09-15
 **Supersedes:** 0.1.0 (2026-03-15). See Appendix D for the list of changes.
 
 ---
@@ -51,7 +51,7 @@ Test vectors: `fixtures/core/invalid/unknown-top-level.yaml`, `fixtures/core/inv
 
 ### 2.2 Version Field
 
-The `hushspec` field is the only REQUIRED field. Its value MUST be a string matching the pattern `^0\.\d+\.\d+$` for the v0.x series. Parsers MUST reject documents where this field is absent, is not a string (a YAML float such as `0.1` MUST be rejected), or does not match the expected pattern.
+The `hushspec` field is the only REQUIRED field. Its value MUST be a string of the form `MAJOR.MINOR.PATCH` (Appendix A; Grammars specification, Section 8). Parsers MUST reject documents where this field is absent, is not a string (a YAML float such as `0.1` MUST be rejected), or does not match that form.
 
 **Version acceptance.** An engine that declares support for minor version `X.Y` MUST accept every document whose `hushspec` value is `X.Y.Z` for any non-negative integer `Z`. Patch versions contain only clarifications and errata (see Section 10.1) and never change document validity or evaluation semantics, so rejecting them is a conformance failure. Engines MUST reject documents whose `X.Y` they do not support.
 
@@ -170,6 +170,55 @@ Test vectors: `fixtures/core/valid/metadata.yaml`, `fixtures/core/valid/metadata
 
 ---
 
+### 2.6 Resolution
+
+Resolution turns a document that declares `extends` into the resolved document Section 2.3 requires. This section defines the reference forms every engine MUST accept, the limits every resolver MUST enforce, and the loader an engine MAY provide for remote documents.
+
+#### 2.6.1 Reference Forms
+
+| Form | Example | Meaning |
+|------|---------|---------|
+| Built-in ruleset | `builtin:strict` | A ruleset embedded in the engine. The reference implementation embeds the documents under `rulesets/` and, under `builtin:library/`, the vertical policy library (`builtin:library/healthcare/hipaa-base`). |
+| Bare built-in name | `strict` | Equivalent to `builtin:strict` when the name is a known built-in; otherwise a relative path. |
+| Relative path | `../base.yaml` | Resolved against the directory of the referencing document. A document supplied in memory has no directory; a relative reference from it resolves against the working directory or is refused, as the engine documents. |
+| Absolute path | `/etc/hush/base.yaml` | Loaded from the filesystem as given. |
+| HTTPS URL | `https://policies.example.com/base.yaml` | Fetched with the loader of Section 2.6.4. An engine without an HTTPS loader MUST refuse the reference rather than treat it as a path. |
+
+Any form MAY carry a digest pin fragment (Section 2.3). The `builtin:` prefix is stripped exactly once: `builtin:builtin:strict` names nothing. `http://` references MUST be refused.
+
+The source recorded for a document in receipts and resolution results is the reference as the loader saw it (`builtin:strict`, the path, the URL); a document supplied in memory records the source `memory`.
+
+#### 2.6.2 Chain Walk and Limits
+
+A resolver walks the chain from the leaf to the root, loading each reference, then merges from the root back down (Section 4.2). It MUST:
+
+1. Detect a cycle (a reference naming a document already on the chain) and reject the resolution, reporting the cycle.
+2. Reject a chain longer than 32 documents.
+3. Check every digest pin and reject on mismatch, whether or not signatures are required.
+4. Verify signatures when required (Signing specification, Section 6.5) and refuse to produce a resolved document for a chain that fails verification.
+5. Fail closed on any loader error: an unreadable file, a network failure, an unparseable document, or an unknown built-in name MUST refuse the resolution. A resolver MUST NOT fall back to evaluating the leaf alone.
+
+#### 2.6.3 Loader Composition
+
+The reference implementation's default loader tries, in order: the built-in loader for `builtin:` references and bare names that match a built-in; the HTTPS loader for `https://` references when one is compiled in; and the filesystem loader for everything else. Engines MAY offer additional loaders (a registry, an object store) and MUST document their order and the reference forms each accepts.
+
+#### 2.6.4 HTTPS Loader
+
+An engine that loads documents over the network MUST apply the following rules; they are what the reference implementation enforces.
+
+1. **TLS only.** The scheme MUST be `https`. Certificate verification MUST be on by default; an option to disable it exists for test harnesses only and MUST be documented as unsafe.
+2. **Address filtering after resolution.** The host MUST be resolved before connecting, and every resolved address MUST be checked. Loopback, private (RFC 1918), link-local (`169.254.0.0/16`, `fe80::/10`), unspecified, and unique-local (`fc00::/7`) addresses MUST be refused, including IPv4-mapped IPv6 forms of them. This closes the cloud-metadata endpoint and the usual server-side request forgery targets.
+3. **No redirects.** A redirect response MUST be treated as a failure; a loader MUST NOT follow it.
+4. **Bounded body.** The response body MUST be capped at the document size limit of Section 2.4; a longer body is a failure.
+5. **Bounded time.** The request MUST have a timeout (the reference default is 10 seconds).
+6. **Revalidation, not staleness.** A loader MAY cache by URL keyed on the `ETag` and revalidate with `If-None-Match`; it MUST NOT serve a cached document after a failed revalidation.
+
+Digest pins and detached signatures (`<url>.sig`) apply to remote documents as to local ones. The Security Considerations (`hushspec-security.md`, Section 4) discuss DNS rebinding, which rule 2 mitigates but does not eliminate.
+
+Test vectors: `fixtures/core/resolve/`, `fixtures/core/merge/`.
+
+---
+
 ## 3. Rules
 
 The `rules` object contains up to twelve named rule blocks. Each rule block controls a specific security domain.
@@ -273,6 +322,8 @@ Detect secrets in content before it is written or transmitted.
 
 Test vectors: `fixtures/core/evaluation/secret-patterns.test.yaml`, `fixtures/core/evaluation/severity-mapping.test.yaml`, `fixtures/core/evaluation/severity-precedence.test.yaml`, `fixtures/core/evaluation/content-scan-egress-tool.test.yaml`.
 
+**Which actions are scanned.** `file_write` and `patch_apply` actions are always scanned, and `skip_paths` applies to their target path. `egress` and `tool_call` actions are scanned only when the action carries `content`; an egress or tool call without content is not a secret-scanning event. Other action types are never scanned by this block.
+
 ### 3.5 `rules.patch_integrity`
 
 Validate the safety and reasonableness of patch/diff content.
@@ -332,7 +383,7 @@ Control tool and MCP (Model Context Protocol) invocations.
 **Tool name matching.** Tool names MUST be compared as exact, case-sensitive strings after Unicode NFC normalization of both sides. Glob and regex metacharacters (`*`, `?`, `[`, `{`) have no special meaning in tool names: the entry `danger_*` matches only a tool literally named `danger_*`. Engines MUST NOT apply glob matching to tool names.
 
 **Semantics:** For a given tool invocation:
-1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps.
+1. If `max_args_size` is specified and `args_size` exceeds it, the decision is **deny** (`rules.tool_access.max_args_size`) regardless of other steps. `args_size` is the byte length of the arguments serialized as JSON in the canonical form of the Canonical Form specification, Section 4 (RFC 8785). An enforcement point that receives arguments already serialized MAY measure the bytes it received; it MUST NOT measure a pretty-printed or re-encoded form. The measured value is what a receipt records as `action.args_size`.
 2. If the tool name equals any entry in `block`, the decision is **deny** (`rules.tool_access.block`). Block takes precedence.
 3. If the tool name equals any entry in `require_confirmation`, the decision is **warn** (`rules.tool_access.require_confirmation`). Confirmation semantics are engine-specific; see Section 6.
 4. If `allow` is non-empty and the tool name equals an entry, the decision is **allow** (`rules.tool_access.allow`).
@@ -613,7 +664,9 @@ Shallow merge at the `rules` level. If the child defines a rule block (e.g., `ru
 **`replace`:**
 The child document entirely replaces the base document. The base document is loaded only to validate that the reference is resolvable; its content is discarded.
 
-Under every strategy, `metadata` follows Section 2.5.
+Under every strategy the child's `metadata` object, when present, replaces the base's `metadata` object as a whole; a child without `metadata` inherits the base's. Members of `metadata` are never merged individually (Section 2.5).
+
+**Extensions by strategy.** Under `merge`, an extension block present in the child (`extensions.posture`, `extensions.origins`, `extensions.detection`) replaces the base's block as a whole. Under `deep_merge`, each companion specification defines the field-level merge of its block (Posture specification Section 7, Origins specification Section 9, Detection specification Section 8); a block absent in the child is inherited unchanged. Under `replace`, the base's extensions are discarded with the rest of the base.
 
 ### 4.2 Merge Order
 
@@ -676,9 +729,41 @@ Evaluation of one action proceeds as follows:
 
 Test vectors: `fixtures/core/evaluation/decision-precedence.test.yaml`, `fixtures/core/evaluation/no-early-return.test.yaml`.
 
-### 6.2 Monitor (Shadow) Enforcement
+### 6.2 Enforcement
 
-Engines MAY provide an explicit, operator-configured monitor mode in which decisions are evaluated and recorded but not enforced (a `deny` does not block execution). Monitor mode is engine configuration, never a property of the HushSpec document. When monitoring, engines MUST compute and record the evaluated decision unchanged, and SHOULD tag emitted receipts and events with the enforcement disposition (see the decision receipt schema's `enforcement` field). Emergency panic mode MUST always enforce, regardless of monitor configuration.
+A policy decision is what the evaluator computed; enforcement is what the enforcement point (an SDK guard, a proxy, a CLI) did with it. The two are recorded separately in a receipt (`decision` and `enforcement`, Receipt specification Sections 4.5 and 4.7). This section defines the enforcement configuration a conformant enforcement point MUST support and the outcomes it MUST record.
+
+**Modes.** An enforcement point runs in one of two modes: `enforce`, in which `deny` blocks the action and `warn` requires confirmation, and `monitor`, in which every decision is computed and recorded but the action proceeds. Mode is engine configuration, never a property of the HushSpec document.
+
+**Per-rule overrides.** An enforcement point MAY override the mode for a rule-path prefix (`rules.egress`, `rules.secret_patterns.patterns`, `extensions.detection`). An override applies to a decision whose `matched_rule` equals the prefix or continues past it at a segment boundary (`.` or `[`); the longest matching prefix wins over the mode. A prefix under `rules.` MUST name a rule block of this specification; other prefixes MUST be rejected at configuration time.
+
+**Monitor mode fails closed.** An enforcement point configured so that monitor mode is reachable, as the mode or through an override, MUST refuse that configuration unless a receipt sink or an observer is attached: a shadow decision nobody records is indistinguishable from no policy.
+
+**Outcomes.** Every enforcement records one of four outcomes:
+
+| Decision | Mode | Outcome |
+|----------|------|---------|
+| `allow` | either | `allowed` |
+| `warn` | `enforce`, confirmation obtained | `confirmed` |
+| `warn` | `enforce`, no confirmation channel or confirmation refused | `blocked` |
+| `deny` | `enforce` | `blocked` |
+| `warn` or `deny` | `monitor` | `would_block` |
+
+An enforcement point with no confirmation channel MUST treat `warn` as `deny` (Section 6). Whatever the configured mode, three decisions MUST always be enforced: a deny produced by panic mode (Section 6.3), a deny produced because the enforcement point refused its policy after signature verification failed (`__hushspec_policy_unverified__`, Signing specification Section 6.5), and a deny produced by the unknown-action rule (`__unknown_action_type__`). The refused-policy state persists until a policy that verifies replaces it; every action in that state is denied and recorded.
+
+Test vectors: `fixtures/receipts/expected/` (the `enforcement` member of every expected receipt).
+
+### 6.3 Panic Mode
+
+Panic mode is an operator-controlled kill switch that denies every action without consulting the policy.
+
+- **Latch.** Panic is a boolean latch. While it is set, every evaluation MUST return `deny` with `matched_rule` `__hushspec_panic__`, the receipt's rule trace MUST contain a single `panic` entry and no rule block entries, and the decision MUST be enforced whatever the enforcement mode.
+- **Activation.** The latch is set programmatically or through a sentinel file. An engine that supports the sentinel MUST arm the latch when the file exists at the configured path (the reference implementation's default is `.hushspec_panic` in the working directory, and its `h2h panic activate` creates that file). Checking the sentinel MUST fail closed: if the file's existence cannot be determined, the latch is armed.
+- **Latching.** The absence of the sentinel does not disarm the latch; only an explicit deactivation does. An enforcement point SHOULD consult the sentinel before each evaluation or on a short interval so that activation takes effect within one evaluation cycle.
+- **Scope.** The reference implementation's latch is process-wide by default; an embedder MAY give a policy or guard an independent latch so that arming one tenant's kill switch does not deny every tenant in the process. Which latch a guard consults MUST be documented.
+- **Panic policy.** Engines MAY also expose a deny-all policy document (the reference implementation embeds `builtin:panic`) for deployments that prefer to swap policies rather than set a latch; the two mechanisms are independent.
+
+Test vectors: the receipt vectors under `fixtures/receipts/valid/` include a panic receipt.
 
 ---
 
@@ -800,7 +885,7 @@ The detection extension schema is defined in a separate specification document. 
 
 ### 9.4 Extension Versioning
 
-In the HushSpec v0 series, extension modules do **not** declare independent version fields inside documents. The posture, origins, and detection companion specs are versioned alongside the core HushSpec release. A future major version MAY add in-document extension versioning if interoperability needs require it.
+Extension modules are versioned with the core specification and do not declare independent version fields inside documents: a document's `hushspec` value names the release of the whole specification family, and the posture, origins, and detection companion specifications carry that release. The member name `version` under each extension block is reserved and MUST be rejected as unknown in 1.x. A future major version MAY introduce in-document extension versioning; the versioning policy (`versioning.md`) states the stability guarantee this rests on.
 
 ### 9.5 Unknown Extensions
 
@@ -810,20 +895,22 @@ Conformant parsers MUST reject unknown keys under `extensions`. Only the keys de
 
 ## 10. Versioning
 
-HushSpec uses semantic versioning (SemVer 2.0.0).
+HushSpec uses semantic versioning (SemVer 2.0.0). The normative policy is `versioning.md`; this section summarizes it.
 
 ### 10.1 v0.x Series
 
-The v0.x series is the initial development series. Breaking changes (field removals, semantic changes, structural reorganization) MAY occur between minor versions (e.g., 0.1.0 to 0.2.0). Patch versions (e.g., 0.2.0 to 0.2.1) are reserved for clarifications and errata that do not change document validity or evaluation semantics; an engine supporting `0.2` MUST therefore accept every `0.2.Z` document (Section 2.2).
+The v0.x series was the development series. Breaking changes (field removals, semantic changes, structural reorganization) could occur between minor versions. Patch versions were reserved for clarifications and errata that do not change document validity or evaluation semantics; an engine supporting `0.2` MUST therefore accept every `0.2.Z` document (Section 2.2). Engines MUST document which v0.x minor version(s) they support.
 
-Implementations MUST document which v0.x minor version(s) they support.
+### 10.2 v1.0 and Later
 
-### 10.2 v1.0+ Series
+This document is a release candidate for 1.0.0. The 1.0.0 release is declared by a versioning decision recorded in `versioning.md` and `CHANGELOG.md`; until then, engines treat a `1.0.Z` document exactly as a `0.2.Z` document, because 1.0 freezes the 0.2 semantics without changing them.
 
-Upon reaching v1.0.0, HushSpec guarantees backward compatibility within each major version:
-- Minor versions (1.1.0, 1.2.0, ...) MAY add new optional fields and new rule blocks. Existing documents remain valid.
-- Patch versions (1.0.1, 1.0.2, ...) contain only clarifications and errata.
-- Major versions (2.0.0) MAY introduce breaking changes.
+From 1.0.0, within a major version:
+- Minor versions MAY add new optional fields, rule blocks, and open-registry entries. Existing valid documents remain valid, keep their semantics, and keep their canonical content hash (Canonical Form specification, Section 3.2).
+- Patch versions contain only clarifications and errata (`errata.md`).
+- Major versions MAY introduce breaking changes.
+
+What 1.0 freezes: the document format and validation rules, evaluation semantics, the canonical form and content hash, the receipt, log entry, signature envelope, keyring, and bundle wire formats, the error and reason codes, and the closed registries (`spec/registries/`).
 
 ### 10.3 Independence
 
@@ -831,11 +918,22 @@ HushSpec versioning is independent of any engine, SDK, or implementation. An eng
 
 ---
 
+## 11. Security Considerations
+
+The security considerations for the whole specification family are collected in `hushspec-security.md`. The ones that bear directly on this document are regular-expression denial of service (Section 3.14.3; Security Section 2), path traversal and normalization (Section 3.14.1; Security Section 3), remote resolution (Section 2.6.4; Security Section 4), and the panic sentinel (Section 6.3; Security Section 11).
+
+---
+
 ## Appendix A. ABNF for Version Field
 
 ```abnf
-hushspec-version = "0." 1*DIGIT "." 1*DIGIT
+hushspec-version = major "." minor "." patch
+major            = 1*DIGIT
+minor            = 1*DIGIT
+patch            = 1*DIGIT
 ```
+
+An engine accepts a document whose `major.minor` it supports (Section 2.2). The grammar collection for the whole family is `hushspec-grammars.md`.
 
 ## Appendix B. Minimal Valid Document
 
