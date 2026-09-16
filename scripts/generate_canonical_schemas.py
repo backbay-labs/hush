@@ -112,10 +112,13 @@ def render() -> str:
     # `--check` then reports it as permanently stale.
     rustfmt = shutil.which("rustfmt")
     if rustfmt is None:
-        return content
+        raise SystemExit(
+            "rustfmt is required to generate formatted Rust; install it with "
+            "`rustup component add rustfmt`"
+        )
 
     result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
+        [rustfmt, "--emit", "stdout", "--edition", "2024"],
         input=content,
         text=True,
         capture_output=True,
