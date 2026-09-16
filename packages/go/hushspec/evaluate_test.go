@@ -19,11 +19,13 @@ type evaluatorTestFixture struct {
 }
 
 type evaluatorTestFixtureCase struct {
-	Description string         `yaml:"description"`
-	Action      map[string]any `yaml:"action"`
+	Description string          `yaml:"description"`
+	Action      map[string]any  `yaml:"action"`
+	Context     *RuntimeContext `yaml:"context,omitempty"`
 	Expect      struct {
 		Decision      string         `yaml:"decision"`
 		MatchedRule   string         `yaml:"matched_rule,omitempty"`
+		Reason        string         `yaml:"reason,omitempty"`
 		OriginProfile string         `yaml:"origin_profile,omitempty"`
 		Posture       *PostureResult `yaml:"posture,omitempty"`
 	} `yaml:"expect"`
@@ -58,78 +60,144 @@ func TestEvaluationFixtures(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to read fixture %s: %v", fixturePath, err)
 				}
-
-				var fixture evaluatorTestFixture
-				if err := yaml.Unmarshal(data, &fixture); err != nil {
-					t.Fatalf("failed to parse fixture %s: %v", fixturePath, err)
-				}
-
-				policyBytes, err := yaml.Marshal(fixture.Policy)
-				if err != nil {
-					t.Fatalf("failed to re-encode policy: %v", err)
-				}
-				spec, err := Parse(string(policyBytes))
-				if err != nil {
-					t.Fatalf("embedded policy failed to parse: %v", err)
-				}
-
-				for i, tc := range fixture.Cases {
-					t.Run(fmt.Sprintf("case_%d_%s", i, tc.Description), func(t *testing.T) {
-						action := buildEvaluationAction(t, tc.Action)
-						// Route through EvaluateWithDetection so fixtures that declare
-						// a `detection:` extension exercise it; §1 of the detection-
-						// wiring spec makes this an exact no-op for every fixture that
-						// doesn't (i.e. every fixture outside detection/evaluation), so
-						// pre-existing coverage is unaffected.
-						result := EvaluateWithDetection(spec, action).Evaluation
-
-						if string(result.Decision) != tc.Expect.Decision {
-							t.Errorf("decision mismatch: got %q, want %q (action: %+v)",
-								result.Decision, tc.Expect.Decision, tc.Action)
-						}
-
-						if tc.Expect.MatchedRule != "" && result.MatchedRule != tc.Expect.MatchedRule {
-							t.Errorf("matched_rule mismatch: got %q, want %q",
-								result.MatchedRule, tc.Expect.MatchedRule)
-						}
-
-						if tc.Expect.OriginProfile != "" && result.OriginProfile != tc.Expect.OriginProfile {
-							t.Errorf("origin_profile mismatch: got %q, want %q",
-								result.OriginProfile, tc.Expect.OriginProfile)
-						}
-
-						if tc.Expect.Posture != nil {
-							if result.Posture == nil {
-								t.Errorf("expected posture %+v, got nil", tc.Expect.Posture)
-							} else {
-								if result.Posture.Current != tc.Expect.Posture.Current {
-									t.Errorf("posture.current mismatch: got %q, want %q",
-										result.Posture.Current, tc.Expect.Posture.Current)
-								}
-								if result.Posture.Next != tc.Expect.Posture.Next {
-									t.Errorf("posture.next mismatch: got %q, want %q",
-										result.Posture.Next, tc.Expect.Posture.Next)
-								}
-							}
-						}
-					})
-				}
+				runEvaluationFixture(t, fixturePath, string(data))
 			})
 		}
 	}
 }
 
+// runEvaluationFixture parses an evaluator fixture's embedded policy and
+// asserts every case against the reference evaluator. It is shared with
+// TestSharedFixtures so the CI job that runs only the shared-fixture test
+// really evaluates rather than shape-checking.
+func runEvaluationFixture(t *testing.T, fixturePath, source string) {
+	t.Helper()
+
+	var fixture evaluatorTestFixture
+	if err := yaml.Unmarshal([]byte(source), &fixture); err != nil {
+		t.Fatalf("failed to parse fixture %s: %v", fixturePath, err)
+	}
+
+	policyBytes, err := yaml.Marshal(fixture.Policy)
+	if err != nil {
+		t.Fatalf("failed to re-encode policy: %v", err)
+	}
+	spec, err := Parse(string(policyBytes))
+	if err != nil {
+		t.Fatalf("embedded policy failed to parse: %v", err)
+	}
+
+	for i, tc := range fixture.Cases {
+		t.Run(fmt.Sprintf("case_%d_%s", i, tc.Description), func(t *testing.T) {
+			action := buildEvaluationAction(t, tc.Action)
+			// The per-case `context` of the evaluator-test schema feeds the
+			// `when` conditions of core spec 3.13.
+			action.Context = tc.Context
+			// Route through EvaluateWithDetection so fixtures that declare
+			// a `detection:` extension exercise it; §1 of the detection-
+			// wiring spec makes this an exact no-op for every fixture that
+			// doesn't (i.e. every fixture outside detection/evaluation), so
+			// pre-existing coverage is unaffected.
+			result := EvaluateWithDetection(spec, action).Evaluation
+
+			if string(result.Decision) != tc.Expect.Decision {
+				t.Errorf("decision mismatch: got %q, want %q (action: %+v)",
+					result.Decision, tc.Expect.Decision, tc.Action)
+			}
+
+			if tc.Expect.MatchedRule != "" && result.MatchedRule != tc.Expect.MatchedRule {
+				t.Errorf("matched_rule mismatch: got %q, want %q",
+					result.MatchedRule, tc.Expect.MatchedRule)
+			}
+
+			if tc.Expect.Reason != "" && result.Reason != tc.Expect.Reason {
+				t.Errorf("reason mismatch: got %q, want %q", result.Reason, tc.Expect.Reason)
+			}
+
+			if tc.Expect.OriginProfile != "" && result.OriginProfile != tc.Expect.OriginProfile {
+				t.Errorf("origin_profile mismatch: got %q, want %q",
+					result.OriginProfile, tc.Expect.OriginProfile)
+			}
+
+			if tc.Expect.Posture != nil {
+				if result.Posture == nil {
+					t.Errorf("expected posture %+v, got nil", tc.Expect.Posture)
+				} else {
+					if result.Posture.Current != tc.Expect.Posture.Current {
+						t.Errorf("posture.current mismatch: got %q, want %q",
+							result.Posture.Current, tc.Expect.Posture.Current)
+					}
+					if result.Posture.Next != tc.Expect.Posture.Next {
+						t.Errorf("posture.next mismatch: got %q, want %q",
+							result.Posture.Next, tc.Expect.Posture.Next)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestEvaluateUnknownActionType locks in D1 (core 5): an action type the
+// specification does not define denies, it does not fall through to allow.
 func TestEvaluateUnknownActionType(t *testing.T) {
 	spec := &HushSpec{
-		HushSpecVersion: "0.1.0",
+		HushSpecVersion: "0.2.0",
 	}
 	action := &EvaluationAction{Type: "unknown_action"}
 	result := Evaluate(spec, action)
-	if result.Decision != DecisionAllow {
-		t.Errorf("expected allow for unknown action type, got %q", result.Decision)
+	if result.Decision != DecisionDeny {
+		t.Errorf("expected deny for unknown action type, got %q", result.Decision)
 	}
-	if result.Reason != "no reference evaluator rule for this action type" {
+	if result.MatchedRule != UnknownActionTypeRule {
+		t.Errorf("expected matched_rule %q, got %q", UnknownActionTypeRule, result.MatchedRule)
+	}
+	if result.Reason != "action type 'unknown_action' is unknown to the specification" {
 		t.Errorf("unexpected reason: %q", result.Reason)
+	}
+}
+
+// TestEvaluateCustomActionRequiresPostureCapability locks in D1: `custom` is
+// permitted only when the current posture state grants the `custom` capability.
+func TestEvaluateCustomActionRequiresPostureCapability(t *testing.T) {
+	withoutPosture := &HushSpec{HushSpecVersion: "0.2.0"}
+	result := Evaluate(withoutPosture, &EvaluationAction{Type: "custom", Target: "anything"})
+	if result.Decision != DecisionDeny || result.MatchedRule != UnknownActionTypeRule {
+		t.Fatalf("expected a custom action without posture to deny, got %q / %q", result.Decision, result.MatchedRule)
+	}
+
+	withCapability, err := Parse(`
+hushspec: "0.2.0"
+extensions:
+  posture:
+    initial: open
+    states:
+      open:
+        capabilities: [custom]
+      locked:
+        capabilities: []
+    transitions: []
+`)
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	open := "open"
+	granted := Evaluate(withCapability, &EvaluationAction{
+		Type:    "custom",
+		Target:  "engine-defined",
+		Posture: &PostureContext{Current: &open},
+	})
+	if granted.Decision != DecisionAllow {
+		t.Fatalf("expected the custom capability to permit a custom action, got %q", granted.Decision)
+	}
+	locked := "locked"
+	denied := Evaluate(withCapability, &EvaluationAction{
+		Type:    "custom",
+		Target:  "engine-defined",
+		Posture: &PostureContext{Current: &locked},
+	})
+	if denied.Decision != DecisionDeny || denied.MatchedRule != "extensions.posture.states.locked.capabilities" {
+		t.Fatalf("expected a posture without the custom capability to deny, got %q / %q",
+			denied.Decision, denied.MatchedRule)
 	}
 }
 
@@ -282,11 +350,10 @@ rules:
 
 func TestOriginProfileToolAccessStillRespectsBaseBlocklist(t *testing.T) {
 	spec, err := Parse(`
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 rules:
   tool_access:
     enabled: true
-    allow: ["*"]
     block: ["dangerous_tool"]
     require_confirmation: []
     default: allow
@@ -298,8 +365,6 @@ extensions:
         match:
           provider: slack
         tool_access:
-          enabled: true
-          allow: ["*"]
           block: []
           require_confirmation: []
           default: allow
@@ -321,9 +386,13 @@ extensions:
 	}
 }
 
+// TestOriginProfileEgressCannotBypassBaseDefaultBlock locks in D12: an overlay
+// `default: allow` cannot relax a base `default: block` -- the stricter of the
+// two wins -- and the reported rule is the base's, since the base's `block` is
+// what determined the effective value.
 func TestOriginProfileEgressCannotBypassBaseDefaultBlock(t *testing.T) {
 	spec, err := Parse(`
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 rules:
   egress:
     enabled: true
@@ -338,7 +407,6 @@ extensions:
         match:
           provider: slack
         egress:
-          enabled: true
           allow: []
           block: []
           default: allow
@@ -355,8 +423,8 @@ extensions:
 	if result.Decision != DecisionDeny {
 		t.Fatalf("expected base default block to deny, got %q (%s)", result.Decision, result.Reason)
 	}
-	if result.MatchedRule != "extensions.origins.profiles.slack.egress.default" {
-		t.Fatalf("expected profile default match, got %q", result.MatchedRule)
+	if result.MatchedRule != "rules.egress.default" {
+		t.Fatalf("expected base default match, got %q", result.MatchedRule)
 	}
 }
 

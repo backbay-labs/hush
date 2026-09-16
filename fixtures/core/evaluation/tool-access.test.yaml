@@ -30,13 +30,13 @@ cases:
     expect:
       decision: deny
       matched_rule: rules.tool_access.block
-  - description: "deny unlisted tool (default block)"
+  - description: "deny unlisted tool (allowlist mode; default is not consulted, D4)"
     action:
       type: tool_call
       target: "deploy_production"
     expect:
       decision: deny
-      matched_rule: rules.tool_access.default
+      matched_rule: rules.tool_access.allow
   - description: "require confirmation for flagged tool"
     action:
       type: tool_call

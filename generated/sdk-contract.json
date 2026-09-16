@@ -41,23 +41,27 @@
       "expiry_date"
     ],
     "FORBIDDEN_PATH_KEYS": [
+      "when",
       "enabled",
       "patterns",
       "exceptions"
     ],
     "PATH_ALLOWLIST_KEYS": [
+      "when",
       "enabled",
       "read",
       "write",
       "patch"
     ],
     "EGRESS_KEYS": [
+      "when",
       "enabled",
       "allow",
       "block",
       "default"
     ],
     "SECRET_PATTERNS_KEYS": [
+      "when",
       "enabled",
       "patterns",
       "skip_paths"
@@ -69,6 +73,7 @@
       "description"
     ],
     "PATCH_INTEGRITY_KEYS": [
+      "when",
       "enabled",
       "max_additions",
       "max_deletions",
@@ -77,10 +82,12 @@
       "max_imbalance_ratio"
     ],
     "SHELL_COMMAND_KEYS": [
+      "when",
       "enabled",
       "forbidden_patterns"
     ],
     "TOOL_ACCESS_KEYS": [
+      "when",
       "enabled",
       "allow",
       "block",
@@ -89,11 +96,13 @@
       "max_args_size"
     ],
     "COMPUTER_USE_KEYS": [
+      "when",
       "enabled",
       "mode",
       "allowed_actions"
     ],
     "REMOTE_DESKTOP_KEYS": [
+      "when",
       "enabled",
       "clipboard",
       "file_transfer",
@@ -101,9 +110,41 @@
       "drive_mapping"
     ],
     "INPUT_INJECTION_KEYS": [
+      "when",
       "enabled",
       "allowed_types",
       "require_postcondition_probe"
+    ],
+    "BROWSER_AUTOMATION_KEYS": [
+      "when",
+      "enabled",
+      "allowed_domains",
+      "blocked_domains",
+      "allowed_verbs",
+      "credential_detection",
+      "extra_credential_patterns"
+    ],
+    "CODE_EXECUTION_KEYS": [
+      "when",
+      "enabled",
+      "language_allowlist",
+      "module_denylist",
+      "network_access",
+      "max_execution_time_ms",
+      "max_scan_bytes"
+    ],
+    "CONDITION_KEYS": [
+      "time_window",
+      "context",
+      "all_of",
+      "any_of",
+      "not"
+    ],
+    "TIME_WINDOW_KEYS": [
+      "start",
+      "end",
+      "timezone",
+      "days"
     ],
     "POSTURE_KEYS": [
       "initial",
@@ -146,6 +187,18 @@
       "tags",
       "sensitivity",
       "actor_role"
+    ],
+    "ORIGIN_TOOL_ACCESS_OVERLAY_KEYS": [
+      "allow",
+      "block",
+      "require_confirmation",
+      "default",
+      "max_args_size"
+    ],
+    "ORIGIN_EGRESS_OVERLAY_KEYS": [
+      "allow",
+      "block",
+      "default"
     ],
     "ORIGIN_DATA_KEYS": [
       "allow_external_sharing",

@@ -165,10 +165,10 @@ fn eval_resolves_extends_chain() {
 }
 
 #[test]
-fn eval_unknown_action_type_allows_with_stderr_note() {
-    // The reference evaluator allows unknown action types ("no reference
-    // evaluator rule for this action type"); the CLI mirrors that and
-    // surfaces likely typos on stderr without changing stdout or the code.
+fn eval_unknown_action_type_denies_with_stderr_note() {
+    // The reference evaluator denies unknown action types fail-closed
+    // (`__unknown_action_type__`, core spec Section 5); the CLI mirrors that
+    // and surfaces likely typos on stderr.
     let dir = TempDir::new().unwrap();
     let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
     h2h()
@@ -176,8 +176,9 @@ fn eval_unknown_action_type_allows_with_stderr_note() {
         .arg(&policy)
         .args(["--type", "frobnicate", "--target", "anything"])
         .assert()
-        .code(0)
-        .stdout(predicate::str::contains("ALLOW"))
+        .code(1)
+        .stdout(predicate::str::contains("DENY"))
+        .stdout(predicate::str::contains("__unknown_action_type__"))
         .stderr(predicate::str::contains("not a reference action type"));
 }
 
@@ -311,6 +312,7 @@ rules:
     default: block
 extensions:
   origins:
+    default_behavior: minimal_profile
     profiles:
       - id: "public-channel"
         match:
@@ -499,7 +501,9 @@ fn eval_explain_renders_rule_trace() {
         .stdout(predicate::str::contains("Policy: explain-fixture"))
         .stdout(predicate::str::contains("Rule trace:"))
         .stdout(predicate::str::contains("forbidden_paths"))
-        .stdout(predicate::str::contains("short-circuited by prior deny"))
+        // Every applicable block is evaluated (core spec 6.1): the allowlist
+        // still runs after the forbidden-path deny.
+        .stdout(predicate::str::contains("path_allowlist"))
         .stdout(predicate::str::contains("Precedence:"))
         .stdout(predicate::str::contains("Decision: DENY"));
 }

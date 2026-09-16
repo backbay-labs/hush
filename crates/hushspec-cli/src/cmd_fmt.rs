@@ -1065,6 +1065,7 @@ mod tests {
             rules: Some(hushspec::Rules {
                 secret_patterns: Some(hushspec::SecretPatternsRule {
                     enabled: true,
+                    when: None,
                     patterns: vec![hushspec::SecretPattern {
                         name: "token".to_string(),
                         pattern: "token".to_string(),
@@ -1075,6 +1076,7 @@ mod tests {
                 }),
                 computer_use: Some(hushspec::ComputerUseRule {
                     enabled: true,
+                    when: None,
                     mode: hushspec::ComputerUseMode::Guardrail,
                     allowed_actions: vec![],
                 }),

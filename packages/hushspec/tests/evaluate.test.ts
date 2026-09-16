@@ -270,38 +270,66 @@ rules:
     expect(result.reason).toContain('RE2 subset');
   });
 
+  // D3 (core 3.7): tool names are exact strings. Glob metacharacters in an
+  // allow/block entry are literal, so wildcard behavior is exercised through
+  // the path globs of `forbidden_paths`, which is where it still lives.
+  describe('tool names are matched exactly (D3)', () => {
+    const toolSpec = (entry: string): HushSpec => ({
+      hushspec: '0.1.0',
+      name: 'tool-exact',
+      rules: { tool_access: { enabled: true, block: [entry], default: 'allow' } },
+    });
+
+    it('does not glob a `*` entry against a similarly prefixed tool', () => {
+      const result = evaluate(toolSpec('danger_*'), { type: 'tool_call', target: 'danger_zone' });
+      expect(result.decision).toBe('allow');
+      expect(result.matched_rule).toBe('rules.tool_access.default');
+    });
+
+    it('matches only the literal name', () => {
+      const result = evaluate(toolSpec('danger_*'), { type: 'tool_call', target: 'danger_*' });
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('rules.tool_access.block');
+    });
+
+    it('compares tool names under NFC', () => {
+      // "cafe" + combining acute (NFD) must match the composed entry.
+      const result = evaluate(toolSpec('caf\u00e9'), { type: 'tool_call', target: 'cafe\u0301' });
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('rules.tool_access.block');
+    });
+  });
+
   // Spec item C for TS (wave-3): the glob translator's compiled RegExp was
-  // missing the 'u' flag, so `?` -> `.` matched a single UTF-16 code unit
-  // instead of a full Unicode code point. An astral character like an emoji
-  // is TWO UTF-16 code units (a surrogate pair), so without 'u' a single `?`
-  // only ever consumed half of it and the glob failed to match. With 'u',
-  // `.` is code-point-aware and consumes the whole character.
-  describe('glob `?` wildcard is code-point-aware', () => {
+  // missing the 'u' flag, so `?` matched a single UTF-16 code unit instead of
+  // a full Unicode code point. An astral character like an emoji is TWO UTF-16
+  // code units (a surrogate pair), so without 'u' a single `?` only ever
+  // consumed half of it and the glob failed to match.
+  describe('path glob `?` wildcard is code-point-aware', () => {
     const globSpec = (pattern: string): HushSpec => ({
       hushspec: '0.1.0',
       name: 'glob-wildcard',
-      rules: {
-        tool_access: {
-          enabled: true,
-          allow: [pattern],
-          default: 'block',
-        },
-      },
+      rules: { forbidden_paths: { enabled: true, patterns: [pattern] } },
     });
 
     it('matches a target with an astral character (emoji) in the `?` position', () => {
-      const result = evaluate(globSpec('a?b'), { type: 'tool_call', target: 'a\u{1F600}b' });
-      expect(result.decision).toBe('allow');
-      expect(result.matched_rule).toBe('rules.tool_access.allow');
+      const result = evaluate(globSpec('a?b'), { type: 'file_read', target: 'a\u{1F600}b' });
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('rules.forbidden_paths.patterns');
     });
 
     it('leaves ASCII glob behavior unchanged: `?` still matches exactly one character', () => {
       const spec = globSpec('a?b');
-      expect(evaluate(spec, { type: 'tool_call', target: 'axb' }).decision).toBe('allow');
+      expect(evaluate(spec, { type: 'file_read', target: 'axb' }).decision).toBe('deny');
       // Two characters where `?` expects one must still not match.
-      expect(evaluate(spec, { type: 'tool_call', target: 'axxb' }).decision).toBe('deny');
+      expect(evaluate(spec, { type: 'file_read', target: 'axxb' }).decision).toBe('allow');
       // Zero characters must still not match either.
-      expect(evaluate(spec, { type: 'tool_call', target: 'ab' }).decision).toBe('deny');
+      expect(evaluate(spec, { type: 'file_read', target: 'ab' }).decision).toBe('allow');
+    });
+
+    it('`?` never crosses a separator (D6)', () => {
+      expect(evaluate(globSpec('/a?b'), { type: 'file_read', target: '/a/b' }).decision)
+        .toBe('allow');
     });
   });
 
@@ -330,11 +358,11 @@ rules:
       const spec: HushSpec = {
         hushspec: '0.1.0',
         name: 'glob-question-cr',
-        rules: { tool_access: { enabled: true, allow: ['a?b'], default: 'block' } },
+        rules: { forbidden_paths: { enabled: true, patterns: ['a?b'] } },
       };
-      const result = evaluate(spec, { type: 'tool_call', target: 'a\rb' });
-      expect(result.decision).toBe('allow');
-      expect(result.matched_rule).toBe('rules.tool_access.allow');
+      const result = evaluate(spec, { type: 'file_read', target: 'a\rb' });
+      expect(result.decision).toBe('deny');
+      expect(result.matched_rule).toBe('rules.forbidden_paths.patterns');
     });
 
     it('`**` still excludes a bare `\\n` like the reference `.` does', () => {

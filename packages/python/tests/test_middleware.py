@@ -24,10 +24,8 @@ hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
   egress:
-    allow: ["*"]
     default: allow
 """
 

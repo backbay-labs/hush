@@ -1,18 +1,59 @@
+"""Conditional rules for HushSpec (core spec 3.13).
+
+A :class:`Condition` gates whether a rule block is active. Conditions are
+carried in the document as the ``when`` field of every rule block and are
+evaluated against a :class:`RuntimeContext`.
+
+Design principles:
+
+* **Fail-closed toward enforcement.** A missing context field makes a context
+  predicate false (the block is inert), but a condition the engine *cannot
+  evaluate* -- an unresolvable timezone, an unparsable ``current_time``, a
+  malformed ``HH:MM``, or nesting past the depth cap -- leaves the block
+  ACTIVE, because an unevaluable condition must never switch a security
+  control off.
+* **Deterministic**: same context + condition = same result, always.
+* **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
+
+This module deliberately does not import :mod:`hushspec.evaluate` at module
+scope: ``evaluate`` imports the condition types, so the dependency runs one
+way only. :func:`evaluate_with_context` defers its import to call time.
+"""
+
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from hushspec.evaluate import EvaluationAction, EvaluationResult, evaluate
 from hushspec.schema import HushSpec
 
+#: Maximum allowed nesting depth for compound conditions (core spec 3.13).
 MAX_NESTING_DEPTH = 8
 
+#: Day abbreviations accepted in ``time_window.days``.
+DAY_ABBREVIATIONS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
+#: Field names accepted inside a ``when`` object.
+CONDITION_KEYS = frozenset(("time_window", "context", "all_of", "any_of", "not"))
 
+#: Field names accepted inside a ``time_window`` object.
+TIME_WINDOW_KEYS = frozenset(("start", "end", "timezone", "days"))
+
+#: Field names accepted inside a per-case ``RuntimeContext``.
+RUNTIME_CONTEXT_KEYS = frozenset(
+    (
+        "user",
+        "environment",
+        "deployment",
+        "agent",
+        "session",
+        "request",
+        "custom",
+        "current_time",
+    )
+)
 
 
 @dataclass
@@ -30,6 +71,33 @@ class TimeWindowCondition:
 
     days: list[str] = field(default_factory=list)
     """Day abbreviations: mon, tue, wed, thu, fri, sat, sun."""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> TimeWindowCondition:
+        if not isinstance(data, dict):
+            raise ValueError("time_window must be an object")
+        unknown = sorted(set(data) - TIME_WINDOW_KEYS)
+        if unknown:
+            raise ValueError(f"unknown time_window field: {unknown[0]}")
+        start = data.get("start")
+        end = data.get("end")
+        if not isinstance(start, str) or not isinstance(end, str):
+            raise ValueError("time_window.start and time_window.end are required strings")
+        tz = data.get("timezone")
+        if tz is not None and not isinstance(tz, str):
+            raise ValueError("time_window.timezone must be a string")
+        days = data.get("days") or []
+        if not isinstance(days, list) or not all(isinstance(day, str) for day in days):
+            raise ValueError("time_window.days must be an array of strings")
+        return cls(start=start, end=end, timezone=tz, days=list(days))
+
+    def to_dict(self) -> dict:
+        data: dict = {"start": self.start, "end": self.end}
+        if self.timezone is not None:
+            data["timezone"] = self.timezone
+        if self.days:
+            data["days"] = list(self.days)
+        return data
 
 
 @dataclass
@@ -53,7 +121,62 @@ class Condition:
     """At least one sub-condition must be true (OR)."""
 
     not_: Optional[Condition] = None
-    """The sub-condition must be false (NOT)."""
+    """The sub-condition must be false (NOT). Serialized as ``not``."""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Condition:
+        """Decode a document ``when`` mapping, rejecting unknown keys.
+
+        The generated models carry ``when`` as an opaque ``dict`` so that
+        ``generated_models`` never has to import this module; this is the
+        decoder both validation and evaluation run it through.
+        """
+        if not isinstance(data, dict):
+            raise ValueError("when must be an object")
+        unknown = sorted(set(data) - CONDITION_KEYS)
+        if unknown:
+            raise ValueError(f"unknown condition field: {unknown[0]}")
+
+        time_window = (
+            TimeWindowCondition.from_dict(data["time_window"])
+            if data.get("time_window") is not None
+            else None
+        )
+
+        context = data.get("context")
+        if context is not None and not isinstance(context, dict):
+            raise ValueError("when.context must be an object")
+
+        def _decode_list(key: str) -> Optional[list[Condition]]:
+            value = data.get(key)
+            if value is None:
+                return None
+            if not isinstance(value, list):
+                raise ValueError(f"when.{key} must be an array")
+            return [cls.from_dict(item) for item in value]
+
+        not_value = data.get("not")
+        return cls(
+            time_window=time_window,
+            context=dict(context) if context is not None else None,
+            all_of=_decode_list("all_of"),
+            any_of=_decode_list("any_of"),
+            not_=cls.from_dict(not_value) if not_value is not None else None,
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        if self.time_window is not None:
+            data["time_window"] = self.time_window.to_dict()
+        if self.context is not None:
+            data["context"] = dict(self.context)
+        if self.all_of is not None:
+            data["all_of"] = [item.to_dict() for item in self.all_of]
+        if self.any_of is not None:
+            data["any_of"] = [item.to_dict() for item in self.any_of]
+        if self.not_ is not None:
+            data["not"] = self.not_.to_dict()
+        return data
 
 
 @dataclass
@@ -84,8 +207,108 @@ class RuntimeContext:
     current_time: Optional[str] = None
     """Current time override for testing (ISO 8601)."""
 
+    @classmethod
+    def from_dict(cls, data: dict) -> RuntimeContext:
+        if not isinstance(data, dict):
+            raise ValueError("context must be an object")
+        unknown = sorted(set(data) - RUNTIME_CONTEXT_KEYS)
+        if unknown:
+            raise ValueError(f"unknown context field: {unknown[0]}")
+        return cls(
+            user=dict(data.get("user") or {}),
+            environment=data.get("environment"),
+            deployment=dict(data.get("deployment") or {}),
+            agent=dict(data.get("agent") or {}),
+            session=dict(data.get("session") or {}),
+            request=dict(data.get("request") or {}),
+            custom=dict(data.get("custom") or {}),
+            current_time=data.get("current_time"),
+        )
 
 
+def decode_condition(when: Any) -> Optional[Condition]:
+    """Best-effort decode of a document ``when`` value for evaluation.
+
+    Validation rejects malformed conditions at parse time; if one still
+    reaches the evaluator it cannot be evaluated, and an unevaluable condition
+    must leave the rule block active (core spec 3.13), so this returns
+    ``None`` -- "no condition" -- rather than raising.
+    """
+    if when is None:
+        return None
+    if isinstance(when, Condition):
+        return when
+    try:
+        return Condition.from_dict(when)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Validation (core spec 3.13, 7.10)
+# ---------------------------------------------------------------------------
+
+
+def validate_condition(condition: Condition, path: str) -> list[str]:
+    """Parse-time validation of a condition.
+
+    Unknown keys are rejected by :meth:`Condition.from_dict`; this checks the
+    ``HH:MM`` fields, the timezone, the day abbreviations, and the nesting
+    depth. Returns one message per violation, each prefixed with *path* (for
+    example ``rules.egress.when``).
+    """
+    errors: list[str] = []
+    _validate_condition_depth(condition, path, 0, errors)
+    return errors
+
+
+def _validate_condition_depth(
+    condition: Condition, path: str, depth: int, errors: list[str]
+) -> None:
+    if depth > MAX_NESTING_DEPTH:
+        errors.append(
+            f"{path}: conditions nest deeper than the maximum of "
+            f"{MAX_NESTING_DEPTH} levels"
+        )
+        return
+
+    tw = condition.time_window
+    if tw is not None:
+        for field_name, value in (("start", tw.start), ("end", tw.end)):
+            if _parse_hhmm(value) is None:
+                errors.append(
+                    f"{path}.time_window.{field_name}: {value!r} is not a valid HH:MM time"
+                )
+        if tw.timezone is not None and not timezone_is_known(tw.timezone):
+            errors.append(
+                f"{path}.time_window.timezone: {tw.timezone!r} is neither an "
+                "IANA time zone nor a fixed offset"
+            )
+        for day in tw.days:
+            if not any(day.lower() == known for known in DAY_ABBREVIATIONS):
+                errors.append(
+                    f"{path}.time_window.days: {day!r} is not one of "
+                    "mon, tue, wed, thu, fri, sat, sun"
+                )
+
+    if condition.all_of is not None:
+        for index, child in enumerate(condition.all_of):
+            _validate_condition_depth(child, f"{path}.all_of[{index}]", depth + 1, errors)
+    if condition.any_of is not None:
+        for index, child in enumerate(condition.any_of):
+            _validate_condition_depth(child, f"{path}.any_of[{index}]", depth + 1, errors)
+    if condition.not_ is not None:
+        _validate_condition_depth(condition.not_, f"{path}.not", depth + 1, errors)
+
+
+def timezone_is_known(tz: str) -> bool:
+    """Whether *tz* is an IANA identifier, a known alias, or a fixed offset."""
+    return _resolve_timezone(tz) is not None
+
+
+# ---------------------------------------------------------------------------
+# Evaluation
+# ---------------------------------------------------------------------------
 
 
 def evaluate_condition(condition: Condition, context: RuntimeContext) -> bool:
@@ -96,7 +319,10 @@ def _evaluate_condition_depth(
     condition: Condition, context: RuntimeContext, depth: int
 ) -> bool:
     if depth > MAX_NESTING_DEPTH:
-        return False
+        # Validation rejects this at parse time; an out-of-band condition that
+        # exceeds the depth cannot be evaluated, and an unevaluable condition
+        # must not switch a control off (core spec 3.13), so treat it as held.
+        return True
 
     if condition.time_window is not None:
         if not _check_time_window(condition.time_window, context):
@@ -125,20 +351,22 @@ def _evaluate_condition_depth(
     return True
 
 
-
-
-
 def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> bool:
+    # Fail closed toward enforcement (core spec 3.13): a window the engine
+    # cannot evaluate -- unresolvable time zone, unparsable current_time, or a
+    # malformed HH:MM that escaped validation -- leaves the block ACTIVE.
     now = _resolve_current_time(context, tw.timezone)
     if now is None:
-        return False
+        return True
 
     hour, minute, day_of_week = now
 
     start_parsed = _parse_hhmm(tw.start)
+    if start_parsed is None:
+        return True
     end_parsed = _parse_hhmm(tw.end)
-    if start_parsed is None or end_parsed is None:
-        return False
+    if end_parsed is None:
+        return True
 
     start_h, start_m = start_parsed
     end_h, end_m = end_parsed
@@ -167,6 +395,8 @@ def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> bool
 
 
 def _parse_hhmm(s: str) -> Optional[tuple[int, int]]:
+    if not isinstance(s, str):
+        return None
     parts = s.split(":")
     if len(parts) != 2:
         return None
@@ -193,9 +423,8 @@ def _parse_strict_uint(s: str) -> Optional[int]:
 
 
 def _day_abbreviation(day: int) -> str:
-    days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    if 0 <= day < len(days):
-        return days[day]
+    if 0 <= day < len(DAY_ABBREVIATIONS):
+        return DAY_ABBREVIATIONS[day]
     return "mon"
 
 
@@ -206,7 +435,7 @@ def _resolve_current_time(
     if context.current_time is not None:
         try:
             dt = datetime.fromisoformat(context.current_time.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, AttributeError):
             return None
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -234,9 +463,13 @@ _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {
     "Etc/UTC": 0,
     "Etc/GMT": 0,
     "GMT": 0,
+    "US/Eastern": -5 * 60,
     "EST": -5 * 60,
+    "US/Central": -6 * 60,
     "CST": -6 * 60,
+    "US/Mountain": -7 * 60,
     "MST": -7 * 60,
+    "US/Pacific": -8 * 60,
     "PST": -8 * 60,
     "GB": 0,
     "CET": 60,
@@ -249,9 +482,11 @@ _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {
 
 
 def _resolve_timezone(tz: str) -> Optional[tzinfo]:
+    if not isinstance(tz, str):
+        return None
     try:
         return ZoneInfo(tz)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError, OSError):
         pass
 
     if tz in _FIXED_TIMEZONE_OFFSETS:
@@ -287,7 +522,9 @@ def _parse_offset_value(s: str) -> Optional[int]:
     return hours * 60 + minutes
 
 
-
+# ---------------------------------------------------------------------------
+# Context matching
+# ---------------------------------------------------------------------------
 
 
 def _check_context_match(
@@ -330,7 +567,7 @@ _F64_EPSILON = 2.220446049250313e-16
 
 def _values_equal(actual: Any, expected: Any) -> bool:
     """Leaf-level scalar equality, byte-identical to Rust's `values_equal`
-    (crates/hushspec/src/evaluate.rs).
+    (crates/hushspec/src/conditions.rs).
 
     ``expected`` is always a non-array scalar (str/bool/int/float) here --
     array unwrapping happens one level up, in ``_matches_scalar_or_membership``.
@@ -404,28 +641,15 @@ def _match_value(actual: Any, expected: Any) -> bool:
 
 def evaluate_with_context(
     spec: HushSpec,
-    action: EvaluationAction,
+    action: "Any",
     context: RuntimeContext,
     conditions: dict[str, Condition],
-) -> EvaluationResult:
-    effective_spec = _apply_conditions(spec, context, conditions)
-    return evaluate(effective_spec, action)
+):
+    """Evaluate with an explicit runtime context and out-of-band conditions.
 
+    The explicit *context* replaces ``action.context``; each entry in
+    *conditions* is ANDed with its rule block's own ``when`` (core spec 3.13).
+    """
+    from hushspec.evaluate import evaluate_traced
 
-def _apply_conditions(
-    spec: HushSpec,
-    context: RuntimeContext,
-    conditions: dict[str, Condition],
-) -> HushSpec:
-    if spec.rules is None:
-        return spec
-
-    effective = copy.copy(spec)
-    effective.rules = copy.copy(spec.rules)
-
-    for block_name, condition in conditions.items():
-        if not evaluate_condition(condition, context):
-            if hasattr(effective.rules, block_name):
-                setattr(effective.rules, block_name, None)
-
-    return effective
+    return evaluate_traced(spec, action, context, conditions).result

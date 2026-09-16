@@ -108,20 +108,23 @@ type Rules struct {
 }
 
 type ForbiddenPathsRule struct {
-	Enabled    bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Patterns   []string `yaml:"patterns,omitempty" json:"patterns,omitempty"`
-	Exceptions []string `yaml:"exceptions,omitempty" json:"exceptions,omitempty"`
+	Enabled    bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When       *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	Patterns   []string   `yaml:"patterns,omitempty" json:"patterns,omitempty"`
+	Exceptions []string   `yaml:"exceptions,omitempty" json:"exceptions,omitempty"`
 }
 
 type PathAllowlistRule struct {
-	Enabled bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Read    []string `yaml:"read,omitempty" json:"read,omitempty"`
-	Write   []string `yaml:"write,omitempty" json:"write,omitempty"`
-	Patch   []string `yaml:"patch,omitempty" json:"patch,omitempty"`
+	Enabled bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When    *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	Read    []string   `yaml:"read,omitempty" json:"read,omitempty"`
+	Write   []string   `yaml:"write,omitempty" json:"write,omitempty"`
+	Patch   []string   `yaml:"patch,omitempty" json:"patch,omitempty"`
 }
 
 type EgressRule struct {
 	Enabled bool          `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When    *Condition    `yaml:"when,omitempty" json:"when,omitempty"`
 	Allow   []string      `yaml:"allow,omitempty" json:"allow,omitempty"`
 	Block   []string      `yaml:"block,omitempty" json:"block,omitempty"`
 	Default DefaultAction `yaml:"default,omitempty" json:"default,omitempty"`
@@ -136,26 +139,30 @@ type SecretPattern struct {
 
 type SecretPatternsRule struct {
 	Enabled   bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When      *Condition      `yaml:"when,omitempty" json:"when,omitempty"`
 	Patterns  []SecretPattern `yaml:"patterns,omitempty" json:"patterns,omitempty"`
 	SkipPaths []string        `yaml:"skip_paths,omitempty" json:"skip_paths,omitempty"`
 }
 
 type PatchIntegrityRule struct {
-	Enabled           bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	MaxAdditions      int      `yaml:"max_additions,omitempty" json:"max_additions,omitempty"`
-	MaxDeletions      int      `yaml:"max_deletions,omitempty" json:"max_deletions,omitempty"`
-	ForbiddenPatterns []string `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
-	RequireBalance    bool     `yaml:"require_balance,omitempty" json:"require_balance,omitempty"`
-	MaxImbalanceRatio *float64 `yaml:"max_imbalance_ratio,omitempty" json:"max_imbalance_ratio,omitempty"`
+	Enabled           bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When              *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	MaxAdditions      int        `yaml:"max_additions,omitempty" json:"max_additions,omitempty"`
+	MaxDeletions      int        `yaml:"max_deletions,omitempty" json:"max_deletions,omitempty"`
+	ForbiddenPatterns []string   `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
+	RequireBalance    bool       `yaml:"require_balance,omitempty" json:"require_balance,omitempty"`
+	MaxImbalanceRatio *float64   `yaml:"max_imbalance_ratio,omitempty" json:"max_imbalance_ratio,omitempty"`
 }
 
 type ShellCommandsRule struct {
-	Enabled           bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	ForbiddenPatterns []string `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
+	Enabled           bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When              *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	ForbiddenPatterns []string   `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
 }
 
 type ToolAccessRule struct {
 	Enabled             bool          `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When                *Condition    `yaml:"when,omitempty" json:"when,omitempty"`
 	Allow               []string      `yaml:"allow,omitempty" json:"allow,omitempty"`
 	Block               []string      `yaml:"block,omitempty" json:"block,omitempty"`
 	RequireConfirmation []string      `yaml:"require_confirmation,omitempty" json:"require_confirmation,omitempty"`
@@ -165,40 +172,45 @@ type ToolAccessRule struct {
 
 type ComputerUseRule struct {
 	Enabled        bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When           *Condition      `yaml:"when,omitempty" json:"when,omitempty"`
 	Mode           ComputerUseMode `yaml:"mode,omitempty" json:"mode,omitempty"`
 	AllowedActions []string        `yaml:"allowed_actions,omitempty" json:"allowed_actions,omitempty"`
 }
 
 type RemoteDesktopChannelsRule struct {
-	Enabled      bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	Clipboard    bool `yaml:"clipboard,omitempty" json:"clipboard,omitempty"`
-	FileTransfer bool `yaml:"file_transfer,omitempty" json:"file_transfer,omitempty"`
-	Audio        bool `yaml:"audio,omitempty" json:"audio,omitempty"`
-	DriveMapping bool `yaml:"drive_mapping,omitempty" json:"drive_mapping,omitempty"`
+	Enabled      bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When         *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	Clipboard    bool       `yaml:"clipboard,omitempty" json:"clipboard,omitempty"`
+	FileTransfer bool       `yaml:"file_transfer,omitempty" json:"file_transfer,omitempty"`
+	Audio        bool       `yaml:"audio,omitempty" json:"audio,omitempty"`
+	DriveMapping bool       `yaml:"drive_mapping,omitempty" json:"drive_mapping,omitempty"`
 }
 
 type InputInjectionRule struct {
-	Enabled                   bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	AllowedTypes              []string `yaml:"allowed_types,omitempty" json:"allowed_types,omitempty"`
-	RequirePostconditionProbe bool     `yaml:"require_postcondition_probe,omitempty" json:"require_postcondition_probe,omitempty"`
+	Enabled                   bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When                      *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	AllowedTypes              []string   `yaml:"allowed_types,omitempty" json:"allowed_types,omitempty"`
+	RequirePostconditionProbe bool       `yaml:"require_postcondition_probe,omitempty" json:"require_postcondition_probe,omitempty"`
 }
 
 type BrowserAutomationRule struct {
-	Enabled                 bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	AllowedDomains          []string `yaml:"allowed_domains,omitempty" json:"allowed_domains,omitempty"`
-	BlockedDomains          []string `yaml:"blocked_domains,omitempty" json:"blocked_domains,omitempty"`
-	AllowedVerbs            []string `yaml:"allowed_verbs,omitempty" json:"allowed_verbs,omitempty"`
-	CredentialDetection     bool     `yaml:"credential_detection,omitempty" json:"credential_detection,omitempty"`
-	ExtraCredentialPatterns []string `yaml:"extra_credential_patterns,omitempty" json:"extra_credential_patterns,omitempty"`
+	Enabled                 bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When                    *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	AllowedDomains          []string   `yaml:"allowed_domains,omitempty" json:"allowed_domains,omitempty"`
+	BlockedDomains          []string   `yaml:"blocked_domains,omitempty" json:"blocked_domains,omitempty"`
+	AllowedVerbs            []string   `yaml:"allowed_verbs,omitempty" json:"allowed_verbs,omitempty"`
+	CredentialDetection     bool       `yaml:"credential_detection,omitempty" json:"credential_detection,omitempty"`
+	ExtraCredentialPatterns []string   `yaml:"extra_credential_patterns,omitempty" json:"extra_credential_patterns,omitempty"`
 }
 
 type CodeExecutionRule struct {
-	Enabled            bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
-	LanguageAllowlist  []string `yaml:"language_allowlist,omitempty" json:"language_allowlist,omitempty"`
-	ModuleDenylist     []string `yaml:"module_denylist,omitempty" json:"module_denylist,omitempty"`
-	NetworkAccess      bool     `yaml:"network_access,omitempty" json:"network_access,omitempty"`
-	MaxExecutionTimeMs *int     `yaml:"max_execution_time_ms,omitempty" json:"max_execution_time_ms,omitempty"`
-	MaxScanBytes       *int     `yaml:"max_scan_bytes,omitempty" json:"max_scan_bytes,omitempty"`
+	Enabled            bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	When               *Condition `yaml:"when,omitempty" json:"when,omitempty"`
+	LanguageAllowlist  []string   `yaml:"language_allowlist,omitempty" json:"language_allowlist,omitempty"`
+	ModuleDenylist     []string   `yaml:"module_denylist,omitempty" json:"module_denylist,omitempty"`
+	NetworkAccess      bool       `yaml:"network_access,omitempty" json:"network_access,omitempty"`
+	MaxExecutionTimeMs *int       `yaml:"max_execution_time_ms,omitempty" json:"max_execution_time_ms,omitempty"`
+	MaxScanBytes       *int       `yaml:"max_scan_bytes,omitempty" json:"max_scan_bytes,omitempty"`
 }
 
 type Extensions struct {
@@ -232,15 +244,29 @@ type OriginsExtension struct {
 }
 
 type OriginProfile struct {
-	ID          string            `yaml:"id" json:"id"`
-	Match       *OriginMatch      `yaml:"match,omitempty" json:"match,omitempty"`
-	Posture     *string           `yaml:"posture,omitempty" json:"posture,omitempty"`
-	ToolAccess  *ToolAccessRule   `yaml:"tool_access,omitempty" json:"tool_access,omitempty"`
-	Egress      *EgressRule       `yaml:"egress,omitempty" json:"egress,omitempty"`
-	Data        *OriginDataPolicy `yaml:"data,omitempty" json:"data,omitempty"`
-	Budgets     *OriginBudgets    `yaml:"budgets,omitempty" json:"budgets,omitempty"`
-	Bridge      *BridgePolicy     `yaml:"bridge,omitempty" json:"bridge,omitempty"`
-	Explanation *string           `yaml:"explanation,omitempty" json:"explanation,omitempty"`
+	ID          string                   `yaml:"id" json:"id"`
+	Match       *OriginMatch             `yaml:"match,omitempty" json:"match,omitempty"`
+	Posture     *string                  `yaml:"posture,omitempty" json:"posture,omitempty"`
+	ToolAccess  *OriginToolAccessOverlay `yaml:"tool_access,omitempty" json:"tool_access,omitempty"`
+	Egress      *OriginEgressOverlay     `yaml:"egress,omitempty" json:"egress,omitempty"`
+	Data        *OriginDataPolicy        `yaml:"data,omitempty" json:"data,omitempty"`
+	Budgets     *OriginBudgets           `yaml:"budgets,omitempty" json:"budgets,omitempty"`
+	Bridge      *BridgePolicy            `yaml:"bridge,omitempty" json:"bridge,omitempty"`
+	Explanation *string                  `yaml:"explanation,omitempty" json:"explanation,omitempty"`
+}
+
+type OriginToolAccessOverlay struct {
+	Allow               []string       `yaml:"allow,omitempty" json:"allow,omitempty"`
+	Block               []string       `yaml:"block,omitempty" json:"block,omitempty"`
+	RequireConfirmation []string       `yaml:"require_confirmation,omitempty" json:"require_confirmation,omitempty"`
+	Default             *DefaultAction `yaml:"default,omitempty" json:"default,omitempty"`
+	MaxArgsSize         *int           `yaml:"max_args_size,omitempty" json:"max_args_size,omitempty"`
+}
+
+type OriginEgressOverlay struct {
+	Allow   []string       `yaml:"allow,omitempty" json:"allow,omitempty"`
+	Block   []string       `yaml:"block,omitempty" json:"block,omitempty"`
+	Default *DefaultAction `yaml:"default,omitempty" json:"default,omitempty"`
 }
 
 type OriginMatch struct {

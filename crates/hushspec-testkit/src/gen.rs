@@ -1,7 +1,7 @@
 use crate::bundle::{BUNDLE_FORMAT_VERSION, CaseAction, CaseBundle, CaseGroup};
 use hushspec::extensions::{
-    Extensions, OriginMatch, OriginProfile, OriginsExtension, PostureExtension, PostureState,
-    PostureTransition, TransitionTrigger,
+    Extensions, OriginEgressOverlay, OriginMatch, OriginProfile, OriginToolAccessOverlay,
+    OriginsExtension, PostureExtension, PostureState, PostureTransition, TransitionTrigger,
 };
 use hushspec::{
     ComputerUseMode, ComputerUseRule, DefaultAction, EgressRule, EvaluationAction,
@@ -194,6 +194,7 @@ fn forbidden_paths_strategy() -> impl Strategy<Value = ForbiddenPathsRule> {
     )
         .prop_map(|(enabled, patterns, exceptions)| ForbiddenPathsRule {
             enabled,
+            when: None,
             patterns,
             exceptions,
         })
@@ -208,6 +209,7 @@ fn path_allowlist_strategy() -> impl Strategy<Value = PathAllowlistRule> {
     )
         .prop_map(|(enabled, read, write, patch)| PathAllowlistRule {
             enabled,
+            when: None,
             read,
             write,
             patch,
@@ -223,6 +225,7 @@ fn egress_strategy() -> impl Strategy<Value = EgressRule> {
     )
         .prop_map(|(enabled, allow, block, default)| EgressRule {
             enabled,
+            when: None,
             allow,
             block,
             default,
@@ -257,6 +260,7 @@ fn secret_patterns_strategy() -> impl Strategy<Value = SecretPatternsRule> {
             }
             SecretPatternsRule {
                 enabled,
+                when: None,
                 patterns,
                 skip_paths,
             }
@@ -283,6 +287,7 @@ fn patch_integrity_strategy() -> impl Strategy<Value = PatchIntegrityRule> {
             )| {
                 PatchIntegrityRule {
                     enabled,
+                    when: None,
                     max_additions,
                     max_deletions,
                     forbidden_patterns,
@@ -301,6 +306,7 @@ fn shell_commands_strategy() -> impl Strategy<Value = ShellCommandsRule> {
     )
         .prop_map(|(enabled, forbidden_patterns)| ShellCommandsRule {
             enabled,
+            when: None,
             forbidden_patterns,
         })
 }
@@ -318,6 +324,7 @@ fn tool_access_strategy() -> impl Strategy<Value = ToolAccessRule> {
             |(enabled, allow, block, require_confirmation, default, max_args_size)| {
                 ToolAccessRule {
                     enabled,
+                    when: None,
                     allow,
                     block,
                     require_confirmation,
@@ -340,6 +347,7 @@ fn computer_use_strategy() -> impl Strategy<Value = ComputerUseRule> {
     )
         .prop_map(|(enabled, mode, allowed_actions)| ComputerUseRule {
             enabled,
+            when: None,
             mode,
             allowed_actions,
         })
@@ -356,6 +364,7 @@ fn remote_desktop_strategy() -> impl Strategy<Value = RemoteDesktopChannelsRule>
         .prop_map(
             |(enabled, clipboard, file_transfer, audio, drive_mapping)| RemoteDesktopChannelsRule {
                 enabled,
+                when: None,
                 clipboard,
                 file_transfer,
                 audio,
@@ -373,6 +382,7 @@ fn input_injection_strategy() -> impl Strategy<Value = InputInjectionRule> {
         .prop_map(
             |(enabled, allowed_types, require_postcondition_probe)| InputInjectionRule {
                 enabled,
+                when: None,
                 allowed_types,
                 require_postcondition_probe,
             },
@@ -511,11 +521,43 @@ fn origin_match_strategy() -> impl Strategy<Value = OriginMatch> {
         )
 }
 
+/// Tri-state origin overlay for tool access (origins spec 4.1): `default`
+/// and `max_args_size` are left absent half of the time so the fuzzer
+/// exercises inheritance from the base block.
+fn tool_access_overlay_strategy() -> impl Strategy<Value = OriginToolAccessOverlay> {
+    (tool_access_strategy(), any::<bool>()).prop_map(|(rule, keep_default)| {
+        OriginToolAccessOverlay {
+            allow: rule.allow,
+            block: rule.block,
+            require_confirmation: rule.require_confirmation,
+            default: if keep_default {
+                Some(rule.default)
+            } else {
+                None
+            },
+            max_args_size: rule.max_args_size,
+        }
+    })
+}
+
+/// Tri-state origin overlay for egress (origins spec 4.2).
+fn egress_overlay_strategy() -> impl Strategy<Value = OriginEgressOverlay> {
+    (egress_strategy(), any::<bool>()).prop_map(|(rule, keep_default)| OriginEgressOverlay {
+        allow: rule.allow,
+        block: rule.block,
+        default: if keep_default {
+            Some(rule.default)
+        } else {
+            None
+        },
+    })
+}
+
 fn origins_strategy() -> impl Strategy<Value = OriginsExtension> {
     let profile = (
         origin_match_strategy(),
-        prop::option::of(tool_access_strategy()),
-        prop::option::of(egress_strategy()),
+        prop::option::of(tool_access_overlay_strategy()),
+        prop::option::of(egress_overlay_strategy()),
     )
         .prop_map(|(match_rules, tool_access, egress)| OriginProfile {
             id: String::new(), // unique ids assigned below
@@ -665,6 +707,10 @@ fn action_strategy(harvest: &TargetHarvest) -> impl Strategy<Value = EvaluationA
     )
         .prop_map(
             |(action_type, target, content, origin, posture, args_size)| EvaluationAction {
+                url: None,
+                network: None,
+                timeout_ms: None,
+                context: None,
                 action_type,
                 target,
                 content,

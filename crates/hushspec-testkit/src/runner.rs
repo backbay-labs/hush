@@ -181,7 +181,11 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
             }
 
             for (index, case) in doc.cases.iter().enumerate() {
-                let actual = evaluate_with_detection(&spec, &case.action).evaluation;
+                let mut action = case.action.clone();
+                if action.context.is_none() {
+                    action.context = case.context.clone();
+                }
+                let actual = evaluate_with_detection(&spec, &action).evaluation;
                 if let Some(message) = compare_expected(&case.expect, &actual) {
                     return TestResult {
                         fixture_path: path,
@@ -346,6 +350,10 @@ struct EvaluationFixture {
 struct EvaluationCase {
     description: String,
     action: EvaluationAction,
+    /// Runtime context for `when` conditions (core spec 3.13); copied onto the
+    /// action before evaluation.
+    #[serde(default)]
+    context: Option<hushspec::RuntimeContext>,
     expect: ExpectedEvaluation,
 }
 

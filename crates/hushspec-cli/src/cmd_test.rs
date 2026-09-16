@@ -64,6 +64,10 @@ struct EvaluationFixture {
 struct EvaluationCase {
     description: String,
     action: EvaluationAction,
+    /// Runtime context for `when` conditions (core spec 3.13); copied onto the
+    /// action before evaluation.
+    #[serde(default)]
+    context: Option<hushspec::RuntimeContext>,
     expect: ExpectedEvaluation,
 }
 
@@ -395,7 +399,11 @@ fn run_fixture_file(path: &Path, external_policy: Option<&HushSpec>) -> FixtureR
     // Run each case
     let mut case_results = Vec::new();
     for case in &fixture.cases {
-        let actual = evaluate_with_detection(&spec, &case.action).evaluation;
+        let mut action = case.action.clone();
+        if action.context.is_none() {
+            action.context = case.context.clone();
+        }
+        let actual = evaluate_with_detection(&spec, &action).evaluation;
         let mismatch = compare_expected(&case.expect, &actual);
 
         case_results.push(CaseResult {

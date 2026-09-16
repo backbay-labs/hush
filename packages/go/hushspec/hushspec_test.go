@@ -160,9 +160,13 @@ rules:
 	}
 }
 
-func TestParseDefaultsOriginProfileNestedRuleEnabledFlags(t *testing.T) {
+// TestParseKeepsOriginProfileOverlaysTriState locks in D12: an origin profile
+// rule block is a tri-state overlay, not a rule block. It carries no `enabled`
+// flag, and an omitted `default` stays unset so the base document's default is
+// inherited rather than a `block` being materialized.
+func TestParseKeepsOriginProfileOverlaysTriState(t *testing.T) {
 	spec, err := Parse(`
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 extensions:
   origins:
     profiles:
@@ -171,23 +175,55 @@ extensions:
           provider: slack
         tool_access:
           allow: [github_search]
-          default: block
         egress:
           allow: ["api.github.com"]
+      - id: teams
+        match:
+          provider: teams
+        tool_access:
           default: block
+        egress:
+          default: allow
 `)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if spec.Extensions == nil || spec.Extensions.Origins == nil || len(spec.Extensions.Origins.Profiles) != 1 {
-		t.Fatal("expected origins profile to parse")
+	if spec.Extensions == nil || spec.Extensions.Origins == nil || len(spec.Extensions.Origins.Profiles) != 2 {
+		t.Fatal("expected origins profiles to parse")
 	}
-	profile := spec.Extensions.Origins.Profiles[0]
-	if profile.ToolAccess == nil || !profile.ToolAccess.Enabled {
-		t.Fatal("expected omitted origins.profile.tool_access.enabled to default to true")
+	slack := spec.Extensions.Origins.Profiles[0]
+	if slack.ToolAccess == nil || slack.ToolAccess.Default != nil {
+		t.Fatalf("expected omitted origins.profile.tool_access.default to stay unset, got %v", slack.ToolAccess.Default)
 	}
-	if profile.Egress == nil || !profile.Egress.Enabled {
-		t.Fatal("expected omitted origins.profile.egress.enabled to default to true")
+	if slack.Egress == nil || slack.Egress.Default != nil {
+		t.Fatalf("expected omitted origins.profile.egress.default to stay unset, got %v", slack.Egress.Default)
+	}
+	teams := spec.Extensions.Origins.Profiles[1]
+	if teams.ToolAccess == nil || teams.ToolAccess.Default == nil || *teams.ToolAccess.Default != DefaultActionBlock {
+		t.Fatal("expected a stated origins.profile.tool_access.default to be preserved")
+	}
+	if teams.Egress == nil || teams.Egress.Default == nil || *teams.Egress.Default != DefaultActionAllow {
+		t.Fatal("expected a stated origins.profile.egress.default to be preserved")
+	}
+}
+
+// TestParseRejectsEnabledOnOriginProfileOverlay locks in that the overlay has
+// no `enabled` field at all: a document that sets one is a parse error.
+func TestParseRejectsEnabledOnOriginProfileOverlay(t *testing.T) {
+	_, err := Parse(`
+hushspec: "0.2.0"
+extensions:
+  origins:
+    profiles:
+      - id: slack
+        match:
+          provider: slack
+        tool_access:
+          enabled: true
+          allow: [github_search]
+`)
+	if err == nil {
+		t.Fatal("expected `enabled` on an origin profile overlay to be rejected")
 	}
 }
 

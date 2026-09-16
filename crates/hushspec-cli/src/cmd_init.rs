@@ -268,13 +268,13 @@ policy:
       require_confirmation: []
       default: allow
 cases:
-  - description: "allow egress to any domain"
+  - description: "allow egress to any domain (default allow)"
     action:
       type: egress
       target: "anything.example.com"
     expect:
       decision: allow
-      matched_rule: rules.egress.allow
+      matched_rule: rules.egress.default
   - description: "allow any tool call"
     action:
       type: tool_call
@@ -323,11 +323,11 @@ cases:
     expect:
       decision: allow
       matched_rule: rules.tool_access.allow
-  - description: "block unknown tool"
+  - description: "deny unknown tool (allowlist mode)"
     action:
       type: tool_call
       target: "dangerous_tool"
     expect:
       decision: deny
-      matched_rule: rules.tool_access.default
+      matched_rule: rules.tool_access.allow
 "#;

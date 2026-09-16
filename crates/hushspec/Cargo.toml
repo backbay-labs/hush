@@ -20,6 +20,7 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+unicode-normalization = "0.1"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], optional = true }
 url = { version = "2", optional = true }
 ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }

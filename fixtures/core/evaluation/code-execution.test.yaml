@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D13 (core 3.12): code_execution evaluation for code_exec (staged: evaluator-test schema must add the code_exec type and the network and timeout_ms fields)"
+description: "D13 (core 3.12): code_execution evaluation for code_exec"
 policy:
   hushspec: "0.1.0"
   rules:

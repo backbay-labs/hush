@@ -8,6 +8,7 @@ import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
 import { evaluateWithDetection } from '../src/detection.js';
 import type { EvaluationAction } from '../src/evaluate.js';
+import type { RuntimeContext } from '../src/conditions.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const fixturesRoot = path.join(repoRoot, 'fixtures');
@@ -15,9 +16,12 @@ const fixturesRoot = path.join(repoRoot, 'fixtures');
 interface EvaluationCase {
   description: string;
   action: Record<string, unknown>;
+  /** Runtime context for `when` conditions (evaluator-test schema v0, D15). */
+  context?: RuntimeContext;
   expect: {
     decision: string;
     matched_rule?: string;
+    reason?: string;
     origin_profile?: string;
     posture?: {
       current: string;
@@ -114,7 +118,7 @@ describe('shared fixture corpus', () => {
       const parsed = parse(policyYaml);
 
       it(`validates evaluator fixture ${path.relative(fixturesRoot, fixturePath)}`, () => {
-        expect(raw.hushspec_test).toBe('0.1.0');
+        expect(raw.hushspec_test).toMatch(/^0\.\d+\.\d+$/);
         expect(raw.description.trim().length).toBeGreaterThan(0);
         expect(Array.isArray(raw.cases)).toBe(true);
         expect(raw.cases.length).toBeGreaterThan(0);
@@ -128,13 +132,22 @@ describe('shared fixture corpus', () => {
 
       for (const testCase of raw.cases) {
         it(`evaluates [${path.relative(fixturesRoot, fixturePath)}] ${testCase.description}`, () => {
-          const action = testCase.action as unknown as EvaluationAction;
+          // Per-case `context` is delivered on the action, which is where the
+          // evaluator reads the runtime context for `when` conditions (D15).
+          const action: EvaluationAction = {
+            ...(testCase.action as unknown as EvaluationAction),
+            ...(testCase.context != null ? { context: testCase.context } : {}),
+          };
           const result = evaluateWithDetection(spec, action).evaluation;
 
           expect(result.decision).toBe(testCase.expect.decision);
 
           if (testCase.expect.matched_rule != null) {
             expect(result.matched_rule).toBe(testCase.expect.matched_rule);
+          }
+
+          if (testCase.expect.reason != null) {
+            expect(result.reason).toBe(testCase.expect.reason);
           }
 
           if (testCase.expect.origin_profile != null) {

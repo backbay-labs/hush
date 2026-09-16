@@ -73,6 +73,17 @@ def field(
     }
 
 
+# Types defined by hand in each SDK (not generated) that generated structs may
+# reference. `when` conditions live in each SDK's conditions module; Python's
+# conditions module imports evaluate/schema, so the generated Python keeps the
+# raw mapping to avoid an import cycle and lets the conditions module decode it.
+EXTERNAL_TYPES = {
+    "Condition": {"rs": "Condition", "py": "dict", "go": "Condition"},
+}
+
+RS_EXTERNAL_IMPORTS = ["use crate::conditions::Condition;"]
+
+
 def list_of(item: object) -> dict:
     return {"kind": "list", "item": item}
 
@@ -117,6 +128,7 @@ STRUCTS = [
         "name": "ForbiddenPathsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("patterns", list_of("string"), default=[], emit_empty=False),
             field("exceptions", list_of("string"), default=[], emit_empty=False),
         ],
@@ -125,6 +137,7 @@ STRUCTS = [
         "name": "PathAllowlistRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("read", list_of("string"), default=[], emit_empty=False),
             field("write", list_of("string"), default=[], emit_empty=False),
             field("patch", list_of("string"), default=[], emit_empty=False),
@@ -134,6 +147,7 @@ STRUCTS = [
         "name": "EgressRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("allow", list_of("string"), default=[], emit_empty=False),
             field("block", list_of("string"), default=[], emit_empty=False),
             field("default", "DefaultAction", default=("enum", "DefaultAction", "block")),
@@ -152,6 +166,7 @@ STRUCTS = [
         "name": "SecretPatternsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("patterns", list_of("SecretPattern"), default=[], emit_empty=False),
             field("skip_paths", list_of("string"), default=[], emit_empty=False),
         ],
@@ -160,6 +175,7 @@ STRUCTS = [
         "name": "PatchIntegrityRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("max_additions", "count", default=1000),
             field("max_deletions", "count", default=500),
             field("forbidden_patterns", list_of("string"), default=[], emit_empty=False),
@@ -171,6 +187,7 @@ STRUCTS = [
         "name": "ShellCommandsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("forbidden_patterns", list_of("string"), default=[], emit_empty=False),
         ],
     },
@@ -178,6 +195,7 @@ STRUCTS = [
         "name": "ToolAccessRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("allow", list_of("string"), default=[], emit_empty=False),
             field("block", list_of("string"), default=[], emit_empty=False),
             field("require_confirmation", list_of("string"), default=[], emit_empty=False),
@@ -189,6 +207,7 @@ STRUCTS = [
         "name": "ComputerUseRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("mode", "ComputerUseMode", default=("enum", "ComputerUseMode", "guardrail")),
             field("allowed_actions", list_of("string"), default=[], emit_empty=False),
         ],
@@ -197,6 +216,7 @@ STRUCTS = [
         "name": "RemoteDesktopChannelsRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("clipboard", "bool", default=False),
             field("file_transfer", "bool", default=False),
             field("audio", "bool", default=True),
@@ -207,6 +227,7 @@ STRUCTS = [
         "name": "InputInjectionRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("allowed_types", list_of("string"), default=[], emit_empty=False),
             field("require_postcondition_probe", "bool", default=False),
         ],
@@ -215,6 +236,7 @@ STRUCTS = [
         "name": "BrowserAutomationRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("allowed_domains", list_of("string"), default=[], emit_empty=False),
             field("blocked_domains", list_of("string"), default=[], emit_empty=False),
             field("allowed_verbs", list_of("string"), default=[], emit_empty=False),
@@ -226,6 +248,7 @@ STRUCTS = [
         "name": "CodeExecutionRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("language_allowlist", list_of("string"), default=[], emit_empty=False),
             field("module_denylist", list_of("string"), default=[], emit_empty=False),
             field("network_access", "bool", default=False),
@@ -280,12 +303,30 @@ STRUCTS = [
             field("id", "string", required=True, go_name="ID"),
             field("match", "OriginMatch", py_name="match_rules", rs_name="match_rules", go_name="Match"),
             field("posture", "string", go_pointer=True),
-            field("tool_access", "ToolAccessRule"),
-            field("egress", "EgressRule"),
+            field("tool_access", "OriginToolAccessOverlay"),
+            field("egress", "OriginEgressOverlay"),
             field("data", "OriginDataPolicy"),
             field("budgets", "OriginBudgets"),
             field("bridge", "BridgePolicy"),
             field("explanation", "string", go_pointer=True),
+        ],
+    },
+    {
+        "name": "OriginToolAccessOverlay",
+        "fields": [
+            field("allow", list_of("string"), default=[], emit_empty=False),
+            field("block", list_of("string"), default=[], emit_empty=False),
+            field("require_confirmation", list_of("string"), default=[], emit_empty=False),
+            field("default", "DefaultAction", go_pointer=True),
+            field("max_args_size", "count", go_pointer=True),
+        ],
+    },
+    {
+        "name": "OriginEgressOverlay",
+        "fields": [
+            field("allow", list_of("string"), default=[], emit_empty=False),
+            field("block", list_of("string"), default=[], emit_empty=False),
+            field("default", "DefaultAction", go_pointer=True),
         ],
     },
     {
@@ -418,7 +459,7 @@ def go_type(field_info: dict) -> str:
     base = render_type(field_info["type"], "go")
     if field_info["go_pointer"] and not is_collection(field_info["type"]):
         return f"*{base}"
-    if is_struct(field_info["type"]) and not field_info["required"]:
+    if (is_struct(field_info["type"]) or is_external(field_info["type"])) and not field_info["required"]:
         return f"*{base}"
     return base
 
@@ -442,6 +483,8 @@ def render_type(type_info: object, language: str) -> str:
         raise ValueError(f"unsupported type info: {type_info}")
     if type_info in SCALARS:
         return SCALARS[type_info][language]
+    if type_info in EXTERNAL_TYPES:
+        return EXTERNAL_TYPES[type_info][language]
     return str(type_info)
 
 
@@ -451,6 +494,10 @@ def is_collection(type_info: object) -> bool:
 
 def is_struct(type_info: object) -> bool:
     return isinstance(type_info, str) and type_info in STRUCT_MAP
+
+
+def is_external(type_info: object) -> bool:
+    return isinstance(type_info, str) and type_info in EXTERNAL_TYPES
 
 
 def is_enum(type_info: object) -> bool:
@@ -623,6 +670,7 @@ def render_rust() -> str:
         "// Code generated by scripts/generate_sdk_models.py. DO NOT EDIT.",
         "use serde::{Deserialize, Serialize};",
         "use std::collections::BTreeMap;",
+        *RS_EXTERNAL_IMPORTS,
         "",
     ]
 

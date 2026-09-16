@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "D15 (core 3.13): a when condition gates its rule block; missing context makes the block inert; current_time drives time windows (staged: evaluator-test schema must add a per-case context field)"
+description: "D15 (core 3.13): a when condition gates its rule block; missing context makes the block inert; current_time drives time windows"
 policy:
   hushspec: "0.1.0"
   rules:

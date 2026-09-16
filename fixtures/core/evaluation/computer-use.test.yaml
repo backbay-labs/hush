@@ -1,9 +1,5 @@
-# NOTE: the "warn on unlisted action (guardrail mode)" case below encodes 0.1.0
-# behavior. Spec 0.2.0 (D9, core 3.8) ratifies deny; the superseding vector is
-# fixtures/staged/0.2.0/core/evaluation/computer-use-guardrail-deny.test.yaml.
-# Rewrite that case to deny when the staged vector is promoted.
 hushspec_test: "0.1.0"
-description: "Computer use guard evaluation"
+description: "Computer use guard evaluation (D9, core 3.8: guardrail denies unlisted actions)"
 policy:
   hushspec: "0.1.0"
   rules:
@@ -22,12 +18,12 @@ cases:
     expect:
       decision: allow
       matched_rule: rules.computer_use.allowed_actions
-  - description: "warn on unlisted action (guardrail mode)"
+  - description: "deny unlisted action (guardrail mode)"
     action:
       type: computer_use
       target: "remote.file_transfer"
     expect:
-      decision: warn
+      decision: deny
       matched_rule: rules.computer_use.mode
   - description: "allow input injection"
     action:

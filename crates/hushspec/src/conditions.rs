@@ -12,8 +12,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Maximum allowed nesting depth for compound conditions.
-const MAX_NESTING_DEPTH: usize = 8;
+/// Maximum allowed nesting depth for compound conditions (core spec 3.13).
+pub const MAX_NESTING_DEPTH: usize = 8;
+
+/// Day abbreviations accepted in `time_window.days`.
+pub const DAY_ABBREVIATIONS: &[&str] = &["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /// A condition that gates whether a rule block is active.
 ///
@@ -69,7 +72,8 @@ pub struct TimeWindowCondition {
 /// Conditions reference context fields using dot-delimited paths (e.g.,
 /// `user.role`, `environment`). The engine populates this struct from its
 /// runtime environment.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeContext {
     /// User attributes (id, role, tier, groups, department, etc.).
     #[serde(default)]
@@ -110,10 +114,82 @@ pub fn evaluate_condition(condition: &Condition, context: &RuntimeContext) -> bo
     evaluate_condition_depth(condition, context, 0)
 }
 
+/// Parse-time validation of a condition (core spec 3.13): unknown keys are
+/// rejected by serde; this checks `HH:MM` fields, the timezone, the day
+/// abbreviations, and the nesting depth. Returns one message per violation,
+/// each prefixed with `path` (for example `rules.egress.when`).
+pub fn validate_condition(condition: &Condition, path: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    validate_condition_depth(condition, path, 0, &mut errors);
+    errors
+}
+
+fn validate_condition_depth(
+    condition: &Condition,
+    path: &str,
+    depth: usize,
+    errors: &mut Vec<String>,
+) {
+    if depth > MAX_NESTING_DEPTH {
+        errors.push(format!(
+            "{path}: conditions nest deeper than the maximum of {MAX_NESTING_DEPTH} levels"
+        ));
+        return;
+    }
+    if let Some(tw) = &condition.time_window {
+        for (field, value) in [("start", &tw.start), ("end", &tw.end)] {
+            if parse_hhmm(value).is_none() {
+                errors.push(format!(
+                    "{path}.time_window.{field}: {value:?} is not a valid HH:MM time"
+                ));
+            }
+        }
+        if let Some(tz) = tw.timezone.as_deref()
+            && !timezone_is_known(tz)
+        {
+            errors.push(format!(
+                "{path}.time_window.timezone: {tz:?} is neither an IANA time zone nor a fixed offset"
+            ));
+        }
+        for day in &tw.days {
+            if !DAY_ABBREVIATIONS
+                .iter()
+                .any(|known| day.eq_ignore_ascii_case(known))
+            {
+                errors.push(format!(
+                    "{path}.time_window.days: {day:?} is not one of mon, tue, wed, thu, fri, sat, sun"
+                ));
+            }
+        }
+    }
+    if let Some(all) = &condition.all_of {
+        for (index, child) in all.iter().enumerate() {
+            validate_condition_depth(child, &format!("{path}.all_of[{index}]"), depth + 1, errors);
+        }
+    }
+    if let Some(any) = &condition.any_of {
+        for (index, child) in any.iter().enumerate() {
+            validate_condition_depth(child, &format!("{path}.any_of[{index}]"), depth + 1, errors);
+        }
+    }
+    if let Some(not) = &condition.not {
+        validate_condition_depth(not, &format!("{path}.not"), depth + 1, errors);
+    }
+}
+
+/// Whether `tz` is an IANA identifier known to this engine, a known alias, or
+/// a fixed `+HH:MM` / `-HH:MM` offset.
+pub fn timezone_is_known(tz: &str) -> bool {
+    use std::str::FromStr;
+    chrono_tz::Tz::from_str(tz).is_ok() || parse_timezone_offset(tz).is_some()
+}
+
 fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, depth: usize) -> bool {
     if depth > MAX_NESTING_DEPTH {
-        // Exceeded maximum nesting depth -- fail-closed.
-        return false;
+        // Validation rejects this at parse time; an out-of-band condition that
+        // exceeds the depth cannot be evaluated, and an unevaluable condition
+        // must not switch a control off (core spec 3.13), so treat it as held.
+        return true;
     }
 
     if let Some(tw) = &condition.time_window
@@ -155,16 +231,19 @@ fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, dep
 }
 
 fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> bool {
+    // Fail closed toward enforcement (core spec 3.13): a window the engine
+    // cannot evaluate -- unresolvable time zone, unparsable current_time, or a
+    // malformed HH:MM that escaped validation -- leaves the block ACTIVE.
     let now = resolve_current_time(context, tw.timezone.as_deref());
     let Some((hour, minute, day_of_week)) = now else {
-        return false;
+        return true;
     };
 
     let Some((start_h, start_m)) = parse_hhmm(&tw.start) else {
-        return false;
+        return true;
     };
     let Some((end_h, end_m)) = parse_hhmm(&tw.end) else {
-        return false;
+        return true;
     };
 
     let current_minutes = hour as u32 * 60 + minute as u32;
@@ -775,11 +854,13 @@ mod tests {
     }
 
     #[test]
-    fn time_window_leading_plus_start_is_inert() {
+    fn time_window_leading_plus_start_keeps_block_active() {
         // A leading `+` in an HH:MM token (`+9:00`) must fail to parse, matching
-        // the TS/Python parsers, so the time-window condition is inert
-        // (fail-closed) rather than treating it as 09:00 and activating.
-        let ctx = ctx_with_time("2026-01-14T10:30:00Z");
+        // the TS/Python parsers. Validation rejects it at parse time; if it
+        // reaches evaluation the window cannot be evaluated, and an unevaluable
+        // condition leaves the block ACTIVE (core spec 3.13), so the condition
+        // holds rather than switching the control off.
+        let ctx = ctx_with_time("2026-01-14T20:30:00Z");
         let cond = Condition {
             time_window: Some(TimeWindowCondition {
                 start: "+9:00".to_string(),
@@ -792,11 +873,15 @@ mod tests {
             any_of: None,
             not: None,
         };
-        assert!(!evaluate_condition(&cond, &ctx));
+        assert!(evaluate_condition(&cond, &ctx));
+        assert!(!validate_condition(&cond, "rules.x.when").is_empty());
     }
 
     #[test]
-    fn time_window_invalid_timezone_fails_closed() {
+    fn time_window_invalid_timezone_keeps_block_active() {
+        // An unresolvable time zone MUST NOT switch a security control off
+        // (core spec 3.13): the window is treated as satisfied. Validation
+        // rejects the zone at parse time.
         let ctx = ctx_with_time("2026-01-14T13:30:00Z");
         let cond = Condition {
             time_window: Some(TimeWindowCondition {
@@ -807,7 +892,54 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!evaluate_condition(&cond, &ctx));
+        assert!(evaluate_condition(&cond, &ctx));
+        let errors = validate_condition(&cond, "rules.x.when");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("timezone"), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_condition_reports_each_violation() {
+        let cond = Condition {
+            time_window: Some(TimeWindowCondition {
+                start: "25:00".to_string(),
+                end: "17:60".to_string(),
+                timezone: Some("+05:30".to_string()),
+                days: vec!["Mon".to_string(), "funday".to_string()],
+            }),
+            ..Default::default()
+        };
+        let errors = validate_condition(&cond, "rules.shell_commands.when");
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("time_window.start")));
+        assert!(errors.iter().any(|e| e.contains("time_window.end")));
+        assert!(errors.iter().any(|e| e.contains("funday")));
+
+        let mut deep = Condition {
+            context: Some(HashMap::new()),
+            ..Default::default()
+        };
+        for _ in 0..(MAX_NESTING_DEPTH + 1) {
+            deep = Condition {
+                not: Some(Box::new(deep)),
+                ..Default::default()
+            };
+        }
+        let errors = validate_condition(&deep, "rules.egress.when");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("nest deeper"), "{errors:?}");
+
+        let mut ok = Condition {
+            context: Some(HashMap::new()),
+            ..Default::default()
+        };
+        for _ in 0..MAX_NESTING_DEPTH {
+            ok = Condition {
+                not: Some(Box::new(ok)),
+                ..Default::default()
+            };
+        }
+        assert!(validate_condition(&ok, "rules.egress.when").is_empty());
     }
 
     #[test]
@@ -989,8 +1121,11 @@ mod tests {
                 ..Default::default()
             };
         }
-        // Should fail because nesting depth is exceeded.
-        assert!(!evaluate_condition(&cond, &ctx_with_env("production")));
+        // Validation rejects this document; if such a condition still reaches
+        // evaluation (out-of-band map) it cannot be evaluated, and an
+        // unevaluable condition leaves the block active (core spec 3.13).
+        assert!(evaluate_condition(&cond, &ctx_with_env("production")));
+        assert!(!validate_condition(&cond, "rules.x.when").is_empty());
     }
 
     #[test]

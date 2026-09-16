@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hushspec import parse
+from hushspec import parse, parse_or_raise
+from hushspec.conditions import RuntimeContext
+from hushspec.parse import CoreSafeLoader
 from hushspec.evaluate import (
     Decision,
     EvaluationAction,
@@ -13,7 +15,12 @@ from hushspec.evaluate import (
     PostureContext,
     evaluate,
     glob_matches,
+    host_pattern_matches,
+    normalize_host,
+    normalize_path,
     patch_stats,
+    path_glob_matches,
+    punycode_encode,
 )
 
 FIXTURES_ROOT = Path(__file__).parent.parent.parent.parent / "fixtures"
@@ -42,7 +49,7 @@ def _build_posture(data: dict) -> PostureContext:
     )
 
 
-def _build_action(data: dict) -> EvaluationAction:
+def _build_action(data: dict, context: dict | None = None) -> EvaluationAction:
     origin = _build_origin(data["origin"]) if "origin" in data else None
     posture = _build_posture(data["posture"]) if "posture" in data else None
     return EvaluationAction(
@@ -52,6 +59,10 @@ def _build_action(data: dict) -> EvaluationAction:
         origin=origin,
         posture=posture,
         args_size=data.get("args_size"),
+        url=data.get("url"),
+        network=data.get("network"),
+        timeout_ms=data.get("timeout_ms"),
+        context=RuntimeContext.from_dict(context) if context is not None else None,
     )
 
 
@@ -63,7 +74,10 @@ def _collect_evaluation_cases():
             continue
         for yaml_file in sorted(dir_path.glob("*.yaml")):
             with open(yaml_file) as f:
-                fixture = yaml.safe_load(f)
+                # The HushSpec YAML profile is YAML 1.2 Core: `on`/`yes` are
+                # plain strings, not booleans, so a fixture's `on:` transition
+                # trigger must survive the load -> re-dump round trip below.
+                fixture = yaml.load(f, Loader=CoreSafeLoader)
             for case in fixture["cases"]:
                 test_id = (
                     f"{yaml_file.relative_to(FIXTURES_ROOT)}::{case['description']}"
@@ -84,7 +98,7 @@ def test_evaluation(policy: dict, case: dict):
     assert ok, f"Failed to parse policy: {spec_or_err}"
     spec = spec_or_err
 
-    action = _build_action(case["action"])
+    action = _build_action(case["action"], case.get("context"))
     result = evaluate(spec, action)
 
     expected = case["expect"]
@@ -126,7 +140,6 @@ hushspec: "0.1.0"
 rules:
   tool_access:
     enabled: true
-    allow: ["*"]
     block: ["dangerous_tool"]
     require_confirmation: []
     default: allow
@@ -138,8 +151,7 @@ extensions:
         match:
           provider: slack
         tool_access:
-          enabled: true
-          allow: ["*"]
+          allow: []
           block: []
           require_confirmation: []
           default: allow
@@ -180,7 +192,6 @@ extensions:
         match:
           provider: slack
         egress:
-          enabled: true
           allow: []
           block: []
           default: allow
@@ -198,8 +209,10 @@ extensions:
         ),
     )
 
+    # D12: the effective default is the stricter of base and overlay, and the
+    # reported path is the object whose `default` determined it -- the base.
     assert result.decision == Decision.DENY
-    assert result.matched_rule == "extensions.origins.profiles.slack.egress.default"
+    assert result.matched_rule == "rules.egress.default"
     assert result.origin_profile == "slack"
 
 
@@ -331,3 +344,117 @@ def test_glob_ascii_patterns_unchanged():
     assert glob_matches("a?b", "ab") is False
     assert glob_matches("literal$", "literal$") is True
     assert glob_matches("literal$", "literal") is False
+
+
+# D5/D6: host and path normalization (core spec 3.14). These mirror the unit
+# tests of the Rust reference (crates/hushspec/src/evaluate.rs) case for case,
+# so a divergence surfaces here rather than only in the differential fuzzer.
+
+
+class TestNormalizePath:
+    def test_collapses_dot_and_dot_dot_segments(self):
+        assert normalize_path("/proj/../.env") == "/.env"
+        assert normalize_path("/a/../../b") == "/b"
+        assert normalize_path("./a/./b") == "a/b"
+        assert normalize_path("../a") == "../a"
+
+    def test_unifies_separators_and_strips_trailing_slash(self):
+        assert normalize_path("C:\\proj\\..\\.env") == "C:/.env"
+        assert normalize_path("//data//x//") == "/data/x"
+        assert normalize_path("/") == "/"
+
+    def test_normalizes_to_nfc(self):
+        assert normalize_path("/data/cafe\u0301/x") == "/data/caf\u00e9/x"
+
+
+class TestPathGlobs:
+    def test_leading_globstar_matches_zero_or_more_segments(self):
+        assert path_glob_matches("**/.env", ".env") is True
+        assert path_glob_matches("**/.env", "a/.env") is True
+        assert path_glob_matches("**/.env", "/home/u/.env") is True
+        assert path_glob_matches("/proj/**/secret.txt", "/proj/secret.txt") is True
+
+    def test_trailing_globstar_requires_at_least_one_character(self):
+        assert path_glob_matches("/home/**", "/home/x/y") is True
+        assert path_glob_matches("/home/**", "/home") is False
+
+    def test_single_wildcards_never_cross_a_separator(self):
+        assert path_glob_matches("/tmp/*.log", "/tmp/a.log") is True
+        assert path_glob_matches("/tmp/*.log", "/tmp/sub/a.log") is False
+        assert path_glob_matches("/a?b", "/axb") is True
+        assert path_glob_matches("/a?b", "/a/b") is False
+
+    def test_brackets_and_braces_are_literal(self):
+        assert path_glob_matches("/logs/[old]/**", "/logs/[old]/a") is True
+        assert path_glob_matches("/logs/[old]/**", "/logs/o/a") is False
+
+
+class TestNormalizeHost:
+    def test_strips_scheme_userinfo_port_path_and_trailing_dot(self):
+        assert normalize_host("API.EXAMPLE.COM:443") == "api.example.com"
+        assert (
+            normalize_host("https://user:pw@api.example.com:8443/v1?x=1#f")
+            == "api.example.com"
+        )
+        assert normalize_host("api.example.com.") == "api.example.com"
+
+    def test_keeps_bracketed_ipv6_literals(self):
+        assert normalize_host("[::1]:8080") == "[::1]"
+
+    def test_encodes_non_ascii_labels_as_idna_a_labels(self):
+        assert normalize_host("B\u00dcCHER.example") == "xn--bcher-kva.example"
+
+    def test_returns_none_for_syntactically_invalid_hosts(self):
+        assert normalize_host("") is None
+        assert normalize_host("a..b") is None
+        assert normalize_host("bad host") is None
+
+
+class TestHostPatterns:
+    def test_single_star_is_exactly_one_label(self):
+        assert host_pattern_matches("*.example.com", "api.example.com") is True
+        assert host_pattern_matches("*.example.com", "a.b.example.com") is False
+        assert host_pattern_matches("*.example.com", "example.com") is False
+        assert host_pattern_matches("api-*.example.com", "api-1.example.com") is True
+
+    def test_double_star_is_one_or_more_labels(self):
+        assert host_pattern_matches("**.example.com", "a.b.example.com") is True
+        assert host_pattern_matches("**.example.com", "example.com") is False
+
+    def test_patterns_are_idna_normalized(self):
+        assert (
+            host_pattern_matches("b\u00fccher.example", "xn--bcher-kva.example") is True
+        )
+
+    def test_ip_literals_match_only_exactly(self):
+        assert host_pattern_matches("10.0.*.*", "10.0.0.1") is False
+        assert host_pattern_matches("10.0.0.1", "10.0.0.1") is True
+        assert host_pattern_matches("[::1]", "[::1]") is True
+
+
+class TestPunycode:
+    def test_matches_rfc_3492_examples(self):
+        assert punycode_encode("b\u00fccher") == "bcher-kva"
+        assert punycode_encode("m\u00fcnchen") == "mnchen-3ya"
+
+    def test_agrees_with_the_standard_library_codec(self):
+        for label in ("b\u00fccher", "m\u00fcnchen", "\u4f8b\u3048", "caf\u00e9"):
+            assert punycode_encode(label) == label.encode("punycode").decode("ascii")
+
+
+class TestUnknownActionTypes:
+    def test_unknown_action_type_denies(self):
+        spec = parse_or_raise(
+            'hushspec: "0.2.0"\nrules:\n  tool_access:\n    default: allow\n'
+        )
+        result = evaluate(spec, EvaluationAction(type="teleport", target="anywhere"))
+        assert result.decision == Decision.DENY
+        assert result.matched_rule == "__unknown_action_type__"
+
+    def test_custom_action_without_posture_denies(self):
+        spec = parse_or_raise(
+            'hushspec: "0.2.0"\nrules:\n  tool_access:\n    default: allow\n'
+        )
+        result = evaluate(spec, EvaluationAction(type="custom", target="anything"))
+        assert result.decision == Decision.DENY
+        assert result.matched_rule == "__unknown_action_type__"

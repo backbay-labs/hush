@@ -450,7 +450,7 @@ fn receipt_contains_hushspec_version() {
     };
 
     let receipt = evaluate_audited(&spec, &action, &default_audit_config());
-    assert_eq!(receipt.hushspec_version, "0.1.0");
+    assert_eq!(receipt.hushspec_version, hushspec::HUSHSPEC_VERSION);
 }
 
 // --- Content redaction ---

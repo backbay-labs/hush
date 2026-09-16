@@ -833,6 +833,18 @@ fn check_disabled_rules(rules: &hushspec::Rules, file: &str, findings: &mut Vec<
             "rules.input_injection",
             rules.input_injection.as_ref().map(|r| r.enabled),
         ),
+        (
+            "rules.path_allowlist",
+            rules.path_allowlist.as_ref().map(|r| r.enabled),
+        ),
+        (
+            "rules.browser_automation",
+            rules.browser_automation.as_ref().map(|r| r.enabled),
+        ),
+        (
+            "rules.code_execution",
+            rules.code_execution.as_ref().map(|r| r.enabled),
+        ),
     ];
 
     for &(name, enabled) in disabled_checks {

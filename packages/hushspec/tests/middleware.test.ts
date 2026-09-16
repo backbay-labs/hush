@@ -19,10 +19,9 @@ hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
   egress:
-    allow: ["*"]
+    allow: ["**"]
     default: allow
 `;
 
@@ -643,7 +642,6 @@ hushspec: "0.1.0"
 name: detection-enforced
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -680,7 +678,6 @@ hushspec: "0.1.0"
 name: detection-monitor
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:

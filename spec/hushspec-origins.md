@@ -83,7 +83,7 @@ The `default_behavior` field controls what happens when no profile matches an in
 
 Engines MUST enforce `default_behavior`. When the origins extension is present and no profile matches (Section 3), a `default_behavior` of `"deny"` MUST produce **deny** with `matched_rule` `extensions.origins.default_behavior` and no rule block is evaluated. A request that carries **no origin context at all** is unmatched for this purpose: with `default_behavior: deny`, every such request is denied. Documents that must serve requests without origin context MUST declare `default_behavior: minimal_profile`.
 
-Test vectors: `fixtures/staged/0.2.0/origins/evaluation/default-behavior-deny.test.yaml` (staged), `fixtures/origins/evaluation/origin-matching.test.yaml`.
+Test vectors: `fixtures/origins/evaluation/default-behavior-deny.test.yaml`, `fixtures/origins/evaluation/origin-matching.test.yaml`.
 
 ### 2.2 `profiles`
 
@@ -107,7 +107,7 @@ When an incoming request carries origin context, the engine MUST determine which
 
 4. **No candidate.** `default_behavior` applies (Section 2.1).
 
-Test vectors: `fixtures/origins/evaluation/origin-matching.test.yaml`, `fixtures/origins/evaluation/tied-profiles.test.yaml`, `fixtures/origins/evaluation/match-presence.test.yaml`, `fixtures/staged/0.2.0/origins/evaluation/priority-staged.test.yaml` (staged).
+Test vectors: `fixtures/origins/evaluation/origin-matching.test.yaml`, `fixtures/origins/evaluation/tied-profiles.test.yaml`, `fixtures/origins/evaluation/match-presence.test.yaml`, `fixtures/origins/evaluation/origin-priority.test.yaml`.
 
 ---
 
@@ -135,7 +135,7 @@ Matched-rule paths for overlay decisions are `extensions.origins.profiles.<id>.t
 
 Matched-rule paths for overlay decisions are `extensions.origins.profiles.<id>.egress.<field>`.
 
-Test vector: `fixtures/staged/0.2.0/origins/evaluation/tri-state-overlay.test.yaml` (staged).
+Test vector: `fixtures/origins/evaluation/tri-state-overlay.test.yaml`.
 
 ### 4.3 Budget Composition
 

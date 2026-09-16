@@ -274,14 +274,16 @@ describe('rule trace for different action types', () => {
     expect(toolTrace!.outcome).toBe('skip');
   });
 
-  it('handles unknown action type with default trace', () => {
+  it('denies an unknown action type and records the default trace entry (D1)', () => {
     const spec: HushSpec = { hushspec: '0.1.0' };
     const action: EvaluationAction = { type: 'unknown_action', target: 'test' };
     const receipt = evaluateAudited(spec, action, enabledConfig());
 
-    expect(receipt.decision).toBe('allow');
+    expect(receipt.decision).toBe('deny');
+    expect(receipt.matched_rule).toBe('__unknown_action_type__');
     const defaultTrace = receipt.rule_trace.find(t => t.rule_block === 'default');
     expect(defaultTrace).toBeDefined();
     expect(defaultTrace!.evaluated).toBe(true);
+    expect(defaultTrace!.outcome).toBe('deny');
   });
 });
