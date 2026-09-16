@@ -405,23 +405,27 @@ def _unknown_policy_event_key(event: Any) -> Optional[str]:
     entry names directly, so the check reaches the policy identity and the SDK
     record too.
     """
-    top = _unknown_key(event, _POLICY_EVENT_KEYS)
-    if top is not None or not isinstance(event, dict):
-        return top
-    policy = event.get("policy")
-    unknown = _unknown_key(policy, _POLICY_SUMMARY_KEYS)
-    if unknown is None and isinstance(policy, dict):
-        chain = policy.get("extends_chain")
-        if isinstance(chain, list):
-            for link in chain:
-                unknown = _unknown_key(link, _CHAIN_LINK_KEYS)
-                if unknown is not None:
-                    break
-        if unknown is None:
-            unknown = _unknown_key(policy.get("signature"), _SIGNATURE_STATUS_KEYS)
+    unknown = _unknown_key(event, _POLICY_EVENT_KEYS)
+    if unknown is not None or not isinstance(event, dict):
+        return unknown
+    unknown = _unknown_policy_summary_key(event.get("policy"))
     if unknown is not None:
         return unknown
     return _unknown_key(event.get("sdk"), _SDK_KEYS)
+
+
+def _unknown_policy_summary_key(policy: Any) -> Optional[str]:
+    """The first unknown member of a policy summary or of its own objects."""
+    unknown = _unknown_key(policy, _POLICY_SUMMARY_KEYS)
+    if unknown is not None or not isinstance(policy, dict):
+        return unknown
+    chain = policy.get("extends_chain")
+    if isinstance(chain, list):
+        for link in chain:
+            unknown = _unknown_key(link, _CHAIN_LINK_KEYS)
+            if unknown is not None:
+                return unknown
+    return _unknown_key(policy.get("signature"), _SIGNATURE_STATUS_KEYS)
 
 
 # --------------------------------------------------------------------------- #
