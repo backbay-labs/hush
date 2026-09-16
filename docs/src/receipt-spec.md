@@ -12,6 +12,6 @@ A receipt is the unit of compliance evidence: one JSON object per evaluation tha
 - **what the runtime did** with the decision (`enforcement`: enforce or monitor, allowed, confirmed, blocked, would_block);
 - **when**, at millisecond precision, with a `time_source` that says how much to trust the clock.
 
-Receipts have a canonical form and a hash of their own, so a log can chain them and a signer can sign them. Format 0.2 replaces the 0.1 receipts the SDKs currently emit; the migration table in the spec lists every change.
+Receipts have a canonical form and a hash of their own, so a log can chain them and a signer can sign them.
 
 Vectors: `fixtures/receipts/valid/` must be accepted, `fixtures/receipts/invalid/` must be rejected.
