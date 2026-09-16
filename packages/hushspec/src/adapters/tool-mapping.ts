@@ -74,14 +74,29 @@ function firstString(args: ArgRecord | undefined, keys: readonly string[]): stri
  * `JSON.stringify(x).length` counts UTF-16 code units, so it undercounts
  * every non-ASCII argument -- a payload of emoji measured half its size would
  * slip under a `max_args_size` limit the enforcement point believes it is
- * applying. Arguments that arrive already serialized are measured as the
- * bytes received, which core spec 3.7 permits; a payload with no JSON
- * representation yields no size signal rather than an exception at the tool
- * boundary.
+ * applying.
+ *
+ * Arguments that arrive already serialized are re-measured in that same
+ * canonical form. Core spec 3.7 lets an enforcement point measure the bytes
+ * it received only when they are *compact* JSON, and forbids measuring a
+ * pretty-printed or re-encoded form outright: the whitespace a model padded
+ * its arguments with, and whatever `\uXXXX` escaping the transport chose, are
+ * not part of the payload a limit bounds. Canonicalizing first is what makes
+ * one `max_args_size` mean the same number here, behind an adapter handed a
+ * live object, and in every other SDK. A string that is not JSON at all has
+ * no canonical form and is measured as received, because an unmeasured call
+ * is one `max_args_size` cannot bound; a payload with no JSON representation
+ * at all yields no size signal rather than an exception at the tool boundary.
  */
 export function argsSize(raw: unknown): number | undefined {
   if (raw === undefined) return undefined;
-  if (typeof raw === 'string') return utf8ByteLength(raw);
+  if (typeof raw === 'string') {
+    try {
+      return utf8ByteLength(canonicalizeValue(JSON.parse(raw) as JsonValue));
+    } catch {
+      return utf8ByteLength(raw);
+    }
+  }
   try {
     return utf8ByteLength(canonicalizeValue(raw as JsonValue));
   } catch {

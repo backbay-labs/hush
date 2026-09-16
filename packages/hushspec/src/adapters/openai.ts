@@ -7,14 +7,16 @@ import { argsSize } from './tool-mapping.js';
  *
  * The call is always a `tool_call` against the function's own name: the API
  * declares no action semantics, and guessing one would consult the wrong rule
- * block. `args_size` records the payload's size without the payload -- for a
- * string it is the arguments exactly as the model emitted them, which is what
- * a `max_args_size` limit is about.
+ * block. `args_size` records the payload's size without the payload, in the
+ * one canonical form core spec 3.7 fixes, so the whitespace a model padded
+ * its arguments with does not change the number a `max_args_size` limit is
+ * compared against.
  *
- * The arguments are never parsed. A model can emit a truncated or malformed
- * JSON string, and an enforcement point that threw on one would fail open:
- * the call would be gated by whatever the caller does with the exception
- * rather than by the policy.
+ * A model can emit a truncated or malformed JSON string, and an enforcement
+ * point that threw on one would fail open: the call would be gated by
+ * whatever the caller does with the exception rather than by the policy. Such
+ * a payload is measured as received instead, because an unmeasured call is
+ * one `max_args_size` cannot bound.
  */
 export function mapOpenAIToolCall(
   functionName: string,

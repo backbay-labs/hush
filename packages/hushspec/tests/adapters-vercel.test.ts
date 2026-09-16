@@ -91,12 +91,15 @@ describe('mapVercelToolCall', () => {
     expect(action.target).toBe('whoami');
   });
 
-  it('parses JSON string arguments and sizes them as the bytes supplied', () => {
+  it('parses JSON string arguments and sizes them canonically', () => {
+    // Core spec 3.7: the padding is not part of the payload a
+    // `max_args_size` limit bounds, so it is not part of the count.
     const raw = '{"path":   "/tmp/a.txt"}';
     const action = mapVercelToolCall({ toolName: 'readFile', args: raw });
     expect(action.type).toBe('file_read');
     expect(action.target).toBe('/tmp/a.txt');
-    expect(action.args_size).toBe(utf8ByteLength(raw));
+    expect(action.args_size).toBe(utf8ByteLength('{"path":"/tmp/a.txt"}'));
+    expect(action.args_size).toBeLessThan(utf8ByteLength(raw));
   });
 
   it('tolerates missing arguments', () => {

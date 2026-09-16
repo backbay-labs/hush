@@ -61,10 +61,15 @@ describe('mapOpenAIToolCall', () => {
     expect(action.args_size).toBe(utf8ByteLength(canonicalizeValue(args)));
   });
 
-  it('measures string args as the bytes supplied', () => {
-    const rawArgs = '{"key":   "value"}'; // note extra spaces
+  it('measures string args canonically, so padding does not change the count', () => {
+    // Core spec 3.7 permits measuring the bytes received only when they are
+    // compact JSON, and forbids measuring a pretty-printed form: the spaces
+    // the model padded these arguments with are not part of the payload a
+    // `max_args_size` limit bounds.
+    const rawArgs = '{"key":   "value"}';
     const action = mapOpenAIToolCall('fn', rawArgs);
-    expect(action.args_size).toBe(utf8ByteLength(rawArgs));
+    expect(action.args_size).toBe(utf8ByteLength('{"key":"value"}'));
+    expect(action.args_size).toBeLessThan(utf8ByteLength(rawArgs));
   });
 
   it('handles empty object args', () => {
@@ -82,7 +87,8 @@ describe('mapOpenAIToolCall', () => {
 
   // A model can emit truncated or malformed JSON arguments. Throwing here
   // would gate the call on whatever the caller does with the exception rather
-  // than on the policy, so the mapping never parses the arguments.
+  // than on the policy, so a payload with no canonical form is measured as
+  // received instead.
   it('maps malformed JSON arguments without throwing', () => {
     const truncated = '{"location":"NY';
     const action = mapOpenAIToolCall('get_weather', truncated);
@@ -180,6 +186,15 @@ describe('mapMCPToolCall', () => {
     expect(action.type).toBe('tool_call');
     expect(action.target).toBe('ping');
     expect(action.args_size).toBeUndefined();
+  });
+
+  it('measures an empty arguments object as the two bytes it is', () => {
+    // A call carrying `"arguments": {}` did carry arguments; only a call with
+    // no `arguments` member goes unmeasured. The Python and Go adapters agree,
+    // so one `max_args_size` bounds the same payload in all three.
+    const action = mapMCPToolCall('custom_search', {});
+    expect(action.type).toBe('tool_call');
+    expect(action.args_size).toBe(2);
   });
 
   it('handles missing path in read_file gracefully', () => {
@@ -330,12 +345,25 @@ describe('args_size (core spec 3.7)', () => {
     expect(argsSize({ b: 1, a: 2 })).toBe(specSize({ a: 2, b: 1 }));
   });
 
-  it('measures arguments that arrive already serialized as the bytes received', () => {
-    // Core spec 3.7 permits measuring the received bytes; what it forbids is
-    // measuring them in code units.
+  it('measures arguments that arrive already serialized in the same canonical form', () => {
+    // Compact JSON is already its own canonical form, so the received bytes
+    // are the answer -- counted as bytes, never as code units.
     const raw = '{"q":"h\u00e9llo"}';
     expect(argsSize(raw)).toBe(utf8ByteLength(raw));
     expect(argsSize(raw)).toBe(raw.length + 1);
+    // The same payload padded, escaped, or with its keys out of order is the
+    // same payload: one `max_args_size` must bound all four.
+    expect(argsSize('{ "q": "h\u00e9llo" }')).toBe(argsSize(raw));
+    expect(argsSize('{"q":"h\\u00e9llo"}')).toBe(argsSize(raw));
+    expect(argsSize('{"b":1,"a":2}')).toBe(argsSize('{"a":2,"b":1}'));
+  });
+
+  it('measures a string with no canonical form as received', () => {
+    // Not JSON at all: LangChain's single-input tools hand the argument over
+    // bare, and a model can emit a truncated payload. Either way an
+    // unmeasured call is one `max_args_size` cannot bound.
+    expect(argsSize('/etc/h\u00f6sts')).toBe(utf8ByteLength('/etc/h\u00f6sts'));
+    expect(argsSize('{"q":"tru')).toBe(utf8ByteLength('{"q":"tru'));
   });
 
   it('yields no size signal for a payload with no JSON representation', () => {
