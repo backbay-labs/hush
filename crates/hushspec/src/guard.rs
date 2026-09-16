@@ -1004,10 +1004,9 @@ struct Evaluated {
 mod tests {
     use super::*;
     use crate::observer::{
-        ErrorEvent, EvaluationCompletedEvent, MetricsCollector, ObserverEventType,
-        PolicyLoadedEvent,
+        EvaluationCompletedEvent, MetricsCollector, ObserverEventType, PolicyLoadedEvent,
     };
-    use crate::sink::{FilteredSink, NullSink, SinkError};
+    use crate::sink::{FilteredSink, NullSink};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const EGRESS_POLICY: &str = r#"
