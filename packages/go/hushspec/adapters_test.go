@@ -356,3 +356,138 @@ func TestGuardedToolHandlerRefusesUnrecordedDecision(t *testing.T) {
 		t.Fatal("expected the sink failure to stop the call")
 	}
 }
+
+// TestArgsSizeIsCanonicalJSONBytes covers core spec 3.7: `args_size` is the
+// length in bytes of the UTF-8 encoding of the arguments serialized in the
+// canonical JSON form of spec/hushspec-canonical.md section 4 (RFC 8785).
+//
+// Every case below is one the naive measurements get wrong. Measuring the
+// bytes as received counts whitespace and whatever `\uXXXX` escaping the
+// transport chose; re-encoding with Go's own JSON encoder counts its HTML
+// escaping of `<`, `>` and `&`; counting characters of an escaped form, or
+// UTF-16 code units, misses that the unit is the UTF-8 byte. All three
+// adapters must land on the same number for the same call, or one
+// `max_args_size` would bound three different payloads.
+func TestArgsSizeIsCanonicalJSONBytes(t *testing.T) {
+	// b is one backslash, so each case below is written as the JSON text a
+	// runtime would actually hand over rather than as Go escapes of it.
+	const b = "\\"
+
+	cases := []struct {
+		name string
+		json string
+		want int
+	}{
+		{
+			// "café" is four characters and five UTF-8 bytes.
+			name: "an escaped non-ASCII character is measured as its UTF-8 bytes",
+			json: `{"q":"caf` + b + `u00e9"}`,
+			want: 13,
+		},
+		{
+			name: "a literal non-ASCII character measures the same as its escape",
+			json: `{"q":"café"}`,
+			want: 13,
+		},
+		{
+			// U+1F600 is four UTF-8 bytes but two UTF-16 code units, and
+			// twelve characters in the surrogate-pair escape that arrived.
+			name: "an astral character is four UTF-8 bytes, not two UTF-16 units",
+			json: `{"q":"` + b + `ud83d` + b + `ude00"}`,
+			want: 12,
+		},
+		{
+			// Go's encoding/json escapes these three by default, which would
+			// measure 30; the canonical form leaves them literal.
+			name: "HTML-significant characters are not escaped by the canonicalizer",
+			json: `{"q":"a` + b + `u003cb` + b + `u0026c` + b + `u003ed"}`,
+			want: 15,
+		},
+		{
+			name: "a control character keeps its two-character canonical escape",
+			json: `{"q":"a` + b + `tb"}`,
+			want: 12,
+		},
+		{
+			name: "whitespace and member order do not change the size",
+			json: `{ "b" : 1 , "a" : 2 }`,
+			want: 13,
+		},
+		{
+			name: "a trailing zero is dropped by the canonical number form",
+			json: `{"n":1.0}`,
+			want: 7,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			anthropic := MapAnthropicToolUse("search", json.RawMessage(c.json))
+			if anthropic.ArgsSize == nil || *anthropic.ArgsSize != c.want {
+				t.Errorf("MapAnthropicToolUse measured %v, want %d",
+					sizeOrNil(anthropic.ArgsSize), c.want)
+			}
+
+			openai := MapOpenAIToolCall("search", c.json)
+			if openai.ArgsSize == nil || *openai.ArgsSize != c.want {
+				t.Errorf("MapOpenAIToolCall measured %v, want %d",
+					sizeOrNil(openai.ArgsSize), c.want)
+			}
+
+			var arguments map[string]any
+			if err := json.Unmarshal([]byte(c.json), &arguments); err != nil {
+				t.Fatalf("the case is not a JSON object: %v", err)
+			}
+			mcp := MapMCPToolCall("search", arguments)
+			if mcp.ArgsSize == nil || *mcp.ArgsSize != c.want {
+				t.Errorf("MapMCPToolCall measured %v, want %d",
+					sizeOrNil(mcp.ArgsSize), c.want)
+			}
+		})
+	}
+}
+
+// TestMCPArgsSizeMeasuresLiveGoValues covers the MCP adapter's own shape: it
+// is handed a live Go map rather than bytes, so values a JSON decoder never
+// produces (an `int`, a typed slice) must still be measured as the JSON they
+// serialize to (core spec 3.7).
+func TestMCPArgsSizeMeasuresLiveGoValues(t *testing.T) {
+	action := MapMCPToolCall("search", map[string]any{
+		"n":   42,
+		"xs":  []string{"a", "b"},
+		"q":   "café",
+		"lt":  "<",
+		"ok":  true,
+		"nil": nil,
+	})
+	// {"lt":"<","n":42,"nil":null,"ok":true,"q":"café","xs":["a","b"]},
+	// which is 65 bytes: the two-byte é is the only character that is not one.
+	const want = 65
+	if action.ArgsSize == nil || *action.ArgsSize != want {
+		t.Errorf("measured %v, want %d", sizeOrNil(action.ArgsSize), want)
+	}
+}
+
+// TestArgsSizeFallsBackToTheBytesReceived covers arguments that are not JSON
+// at all: they are still measured, because a call the engine leaves unmeasured
+// is one `tool_access.max_args_size` cannot bound.
+func TestArgsSizeFallsBackToTheBytesReceived(t *testing.T) {
+	const malformed = `{"q":`
+	if action := MapOpenAIToolCall("search", malformed); action.ArgsSize == nil ||
+		*action.ArgsSize != len(malformed) {
+		t.Errorf("MapOpenAIToolCall measured %v, want %d",
+			sizeOrNil(action.ArgsSize), len(malformed))
+	}
+	if action := MapAnthropicToolUse("search", json.RawMessage(malformed)); action.ArgsSize == nil ||
+		*action.ArgsSize != len(malformed) {
+		t.Errorf("MapAnthropicToolUse measured %v, want %d",
+			sizeOrNil(action.ArgsSize), len(malformed))
+	}
+}
+
+func sizeOrNil(size *int) any {
+	if size == nil {
+		return "nil"
+	}
+	return *size
+}
