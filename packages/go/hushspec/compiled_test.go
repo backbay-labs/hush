@@ -253,7 +253,10 @@ func TestCompiledEvaluateAuditedMatchesSpecReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("audited spec: %v", err)
 	}
-	got := policy.EvaluateAudited(nil, action, &config, ctx)
+	got, err := policy.EvaluateAudited(nil, action, &config, ctx)
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
 
 	if got.Policy.ContentHash != want.Policy.ContentHash ||
 		got.Policy.Name != want.Policy.Name ||
