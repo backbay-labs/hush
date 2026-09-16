@@ -392,7 +392,10 @@ def test_a_matching_pin_satisfies_require_signature_for_that_hop(tmp_path: Path)
         options=keyring_options(require_signature=True),
     )
 
-    assert resolution.chain[0].signature is None  # proven by its pin, not a key
+    # The base was checked and had no envelope, which the link records: a pin
+    # satisfies the requirement without turning into a signature.
+    assert resolution.chain[0].signature.verified is False
+    assert resolution.chain[0].signature.reason == "missing_signature"
     assert resolution.signature.verified is True
 
 

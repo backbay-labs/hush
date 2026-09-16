@@ -237,7 +237,12 @@ name: pinned
       keyring: TRUSTED_KEYRING,
     });
     expect(resolution.signature?.verified).toBe(true);
-    expect(resolution.chain[0]!.signature).toBeUndefined();
+    // The base was checked and had no envelope, which the link records: a pin
+    // satisfies the requirement without turning into a signature.
+    expect(resolution.chain[0]!.signature).toEqual({
+      verified: false,
+      reason: 'missing_signature',
+    });
   });
 });
 

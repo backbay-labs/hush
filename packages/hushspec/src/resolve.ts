@@ -689,13 +689,14 @@ function buildResolution(
     }
 
     const envelope = envelopes[index] ?? null;
-    if (options.keyring !== undefined && envelope !== null) {
-      link.signature = verifyLink(
-        partials[index]!,
-        envelope,
-        options,
-        index === leafIndex,
-      );
+    if (options.keyring !== undefined && !isBuiltinSource(hop.source)) {
+      // Verification was attempted, so the outcome is always recorded
+      // (signing spec section 6.5): a hop with no envelope carries
+      // `missing_signature` rather than nothing at all, which a reader could
+      // only take for "no check was configured".
+      link.signature = envelope === null
+        ? { verified: false, reason: 'missing_signature' }
+        : verifyLink(partials[index]!, envelope, options, index === leafIndex);
     }
 
     if (options.requireSignature !== true || isBuiltinSource(hop.source) || pinned) {

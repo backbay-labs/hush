@@ -702,28 +702,31 @@ def _verify_hop(
 
     required = prepared.require_signature and not pinned
 
-    status: SignatureStatus | None = None
     envelope = prepared.locator(label)
-    if envelope is not None:
-        status = _verify_envelope(resolved, envelope, prepared)
+    # Verification was attempted, so the outcome is always recorded (signing
+    # spec section 6.5): a hop with no envelope carries ``missing_signature``
+    # rather than nothing at all, which a reader could only take for "no check
+    # was configured".
+    status = (
+        _verify_envelope(resolved, envelope, prepared)
+        if envelope is not None
+        else SignatureStatus(verified=False, reason=REASON_MISSING_SIGNATURE)
+    )
 
-    if not required:
-        return status
-    if status is not None and status.verified:
+    if not required or status.verified:
         return status
 
-    failure = status or SignatureStatus(verified=False, reason=REASON_MISSING_SIGNATURE)
     detail = (
         "no signature envelope was found"
-        if status is None
+        if envelope is None
         else "signature verification failed"
     )
     # The reason code is part of the message as well as of `status`, so the
     # tuple-returning entry points do not lose it.
     raise PolicyVerificationError(
-        f"refusing to load {label}: {detail} ({failure.reason})",
+        f"refusing to load {label}: {detail} ({status.reason})",
         source=label,
-        status=failure,
+        status=status,
     )
 
 
