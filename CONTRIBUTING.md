@@ -150,6 +150,16 @@ for the full list and directory layout). To add a new one:
    have per-policy evaluation test suites in `fixtures/library/` -- adding those is on
    the roadmap, and contributions toward that are welcome.
 
+## Releasing
+
+The three Rust crates depend on each other by path and by version. Package and verify them together so the path dependencies resolve locally:
+
+```bash
+cargo package --workspace --allow-dirty
+```
+
+Packaging `hushspec-cli` or `hushspec-testkit` on its own resolves `hushspec` against crates.io and fails until the library at the same version has been published; the publish workflow publishes the library first and waits for the index before publishing the CLI and the testkit. Tag the release as `v<version>` (and `packages/go/v<version>` for the Go module) only after the workflow's dry run is green.
+
 ## Reporting Bugs and Security Issues
 
 Open a GitHub issue for ordinary bugs. For anything that could cause a policy to
