@@ -59,10 +59,12 @@ Concretely:
 ## Versioning
 
 Specification version numbers follow [`spec/versioning.md`](./spec/versioning.md):
-the `0.x` series permits breaking changes between minor versions; patch versions
-(`0.1.0` -> `0.1.1`) are non-breaking, editorial/errata-only changes. SDK and CLI
-package version numbers are independent of the specification version they implement --
-there is no coupling between "HushSpec 0.1.0" and, say, "`@hushspec/core` 0.1.1".
+within the `1.x` series a minor version only adds, never removes, renames, or changes a
+default or a decision; patch versions (`1.0.0` -> `1.0.1`) are editorial and errata-only
+changes; anything that would break an existing document, evaluation, canonical form or
+wire format is a major version. SDK and CLI package version numbers are independent of
+the specification version they implement -- there is no coupling between "HushSpec 1.0.0"
+and, say, "`@hushspec/core` 1.0.2".
 
 ## Errata
 

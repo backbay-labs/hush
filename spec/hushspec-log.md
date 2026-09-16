@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Date:** 2026-09-15
-**Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 0.2.0
+**Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 1.0.0
 
 ---
 

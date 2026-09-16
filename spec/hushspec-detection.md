@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Date:** 2026-09-15
-**Companion to:** HushSpec Core v0.1.0
+**Companion to:** HushSpec Core 1.0.0
 
 ---
 

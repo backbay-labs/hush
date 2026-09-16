@@ -3,7 +3,7 @@
 **Version:** 1.0.0
 **Status:** Stable
 **Date:** 2026-09-15
-**Companion to:** HushSpec Core 0.2.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
+**Companion to:** HushSpec Core 1.0.0 (Section 2.3), Decision Receipts 0.2, Policy Signing 0.2
 
 ---
 

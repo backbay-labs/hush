@@ -609,14 +609,11 @@ func (s jsonSchemaShape) assertValid(t *testing.T, document map[string]any) {
 	}
 }
 
-// loadSignatureSchema reads the 0.2 signature schema from whichever location
-// currently holds it: the staging directory it lands in first, or the
-// published directory once it is promoted.
+// loadSignatureSchema reads the published 0.2 signature schema.
 func loadSignatureSchema(t *testing.T) jsonSchemaShape {
 	t.Helper()
 	root := fixtureRepoRoot(t)
 	candidates := []string{
-		filepath.Join(root, "schemas", "staged", "0.2.0", "hushspec-signature.v1.schema.json"),
 		filepath.Join(root, "schemas", "hushspec-signature.v1.schema.json"),
 	}
 
