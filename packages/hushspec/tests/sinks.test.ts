@@ -18,13 +18,18 @@ import {
 
 function makeReceipt(decision: 'allow' | 'warn' | 'deny'): DecisionReceipt {
   return {
-    receipt_id: 'test-receipt-001',
+    receipt_version: '0.2',
+    receipt_id: '01994b7e-2c1a-7c3e-8f4a-0123456789ab',
     timestamp: '2026-03-15T00:00:00.000Z',
-    hushspec_version: '0.1.0',
+    time_source: 'system',
+    policy: {
+      name: 'test-policy',
+      spec_version: '0.1.0',
+      content_hash: `sha256:${'ab'.repeat(32)}`,
+    },
     action: {
       type: 'tool_call',
       target: 'test_tool',
-      content_redacted: false,
     },
     decision,
     matched_rule: 'rules.tool_access.allow',
@@ -32,18 +37,14 @@ function makeReceipt(decision: 'allow' | 'warn' | 'deny'): DecisionReceipt {
     rule_trace: [
       {
         rule_block: 'tool_access',
+        rule_path: 'rules.tool_access.allow',
         outcome: 'allow',
-        matched_rule: 'rules.tool_access.allow',
-        reason: 'tool is explicitly allowed',
         evaluated: true,
+        reason: 'tool is explicitly allowed',
       },
     ],
-    policy: {
-      name: 'test-policy',
-      version: '0.1.0',
-      content_hash: 'abc123',
-    },
-    evaluation_duration_us: 42,
+    enforcement: { mode: 'enforce', outcome: decision === 'allow' ? 'allowed' : 'blocked' },
+    duration_us: 42,
   };
 }
 
@@ -74,7 +75,7 @@ describe('FileReceiptSink', () => {
     expect(lines).toHaveLength(2);
 
     const parsed1 = JSON.parse(lines[0]);
-    expect(parsed1.receipt_id).toBe('test-receipt-001');
+    expect(parsed1.receipt_id).toBe('01994b7e-2c1a-7c3e-8f4a-0123456789ab');
     expect(parsed1.decision).toBe('allow');
 
     const parsed2 = JSON.parse(lines[1]);

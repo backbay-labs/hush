@@ -10,9 +10,10 @@ from hushspec.evaluate import (
     Decision,
     EvaluationAction,
     EvaluationResult,
-    evaluate,
+    TracedEvaluation,
 )
-from hushspec.extensions import DetectionLevel, JailbreakDetection, PromptInjectionDetection
+from hushspec.conditions import Condition, RuntimeContext
+from hushspec.extensions import DetectionLevel
 from hushspec.schema import HushSpec
 
 
@@ -383,6 +384,66 @@ class EvaluationWithDetection:
     detection_decision: Optional[Decision] = None
 
 
+class DetectorLevel(str, Enum):
+    """The level a normalized detector score maps to in a receipt's
+    ``detection_trace`` (receipt spec section 4.6).
+
+    ``none`` is a zero score, ``low`` a non-zero score below every threshold
+    floor, and the rest follow the ``DetectionLevel`` floors of the
+    prompt-injection mapping (0.25 / 0.5 / 0.75), applied to every detector's
+    normalized 0-1 score whatever its own threshold spelling.
+    """
+
+    NONE = "none"
+    LOW = "low"
+    SUSPICIOUS = "suspicious"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+    @classmethod
+    def from_score(cls, score: float) -> "DetectorLevel":
+        if score <= 0.0:
+            return cls.NONE
+        if score < _LEVEL_FLOORS[DetectionLevel.SUSPICIOUS]:
+            return cls.LOW
+        if score < _LEVEL_FLOORS[DetectionLevel.HIGH]:
+            return cls.SUSPICIOUS
+        if score < _LEVEL_FLOORS[DetectionLevel.CRITICAL]:
+            return cls.HIGH
+        return cls.CRITICAL
+
+
+@dataclass
+class DetectorEvaluation:
+    """One detector's contribution, recorded as it ran (receipt spec 4.6)."""
+
+    detector_id: str
+    category: DetectionCategory
+    score: float
+    level: DetectorLevel
+    matched: bool = False
+
+
+#: Version suffix appended to a built-in detector's name to form its id.
+DETECTOR_ID_VERSION = "@1"
+
+
+@dataclass
+class TracedEvaluationWithDetection:
+    """A traced evaluation with the detection pipeline folded in."""
+
+    #: The rule-block evaluation and its recorded trace, before detection.
+    traced: "TracedEvaluation"
+    #: The decision callers act on (base evaluation, possibly escalated).
+    evaluation: EvaluationResult
+    detections: list[DetectionResult] = field(default_factory=list)
+    detection_decision: Optional[Decision] = None
+    #: Per-detector receipt entries in run order. ``None`` when the pipeline did
+    #: not run (no ``detection:`` extension); an empty list when it ran and
+    #: nothing was enabled or there was no content to scan.
+    detector_trace: Optional[list[DetectorEvaluation]] = None
+
+
 
 # evaluate_with_detection: spec-driven wiring
 #
@@ -420,15 +481,13 @@ _DEFAULT_JAILBREAK_BLOCK_THRESHOLD = 80
 _injection_detector = RegexInjectionDetector()
 _jailbreak_detector = RegexJailbreakDetector()
 
+#: Detection escalation ordering: detection can only raise a decision, never
+#: weaken it. Kept separate from the rule-block ranks, which start at 1.
 _DECISION_RANK: dict[Decision, int] = {
     Decision.ALLOW: 0,
     Decision.WARN: 1,
     Decision.DENY: 2,
 }
-
-
-def _stricter(left: Decision, right: Decision) -> Decision:
-    return right if _DECISION_RANK[right] > _DECISION_RANK[left] else left
 
 
 def _truncate_to_bytes(content: str, max_bytes: int) -> str:
@@ -442,75 +501,6 @@ def _truncate_to_bytes(content: str, max_bytes: int) -> str:
     if len(encoded) <= max_bytes:
         return content
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
-
-
-def _prompt_injection_contribution(
-    config: PromptInjectionDetection, content: str
-) -> tuple[DetectionResult, Optional[Decision]]:
-    """Run the injection detector per the `prompt_injection:` mapping.
-
-    Level floors: safe=0.0, suspicious=0.25, high=0.5, critical=0.75.
-    ``block_at_or_above`` defaults to ``high``, ``warn_at_or_above`` defaults
-    to ``suspicious``.
-    """
-    max_bytes = (
-        config.max_scan_bytes
-        if config.max_scan_bytes is not None
-        else _DEFAULT_MAX_SCAN_BYTES
-    )
-    result = _injection_detector.detect(_truncate_to_bytes(content, max_bytes))
-
-    block_at = (
-        config.block_at_or_above
-        if config.block_at_or_above is not None
-        else _DEFAULT_PROMPT_INJECTION_BLOCK_AT
-    )
-    warn_at = (
-        config.warn_at_or_above
-        if config.warn_at_or_above is not None
-        else _DEFAULT_PROMPT_INJECTION_WARN_AT
-    )
-
-    if result.score >= _LEVEL_FLOORS[block_at]:
-        return result, Decision.DENY
-    if result.score >= _LEVEL_FLOORS[warn_at]:
-        return result, Decision.WARN
-    return result, None
-
-
-def _jailbreak_contribution(
-    config: JailbreakDetection, content: str
-) -> tuple[DetectionResult, Optional[Decision]]:
-    """Run the jailbreak detector per the `jailbreak:` mapping.
-
-    The detector's 0.0-1.0 score is compared directly (no rounding) against
-    0-100 thresholds: ``block_threshold`` defaults to 80, ``warn_threshold``
-    defaults to 50.
-    """
-    max_bytes = (
-        config.max_input_bytes
-        if config.max_input_bytes is not None
-        else _DEFAULT_MAX_INPUT_BYTES
-    )
-    result = _jailbreak_detector.detect(_truncate_to_bytes(content, max_bytes))
-
-    block_threshold = (
-        config.block_threshold
-        if config.block_threshold is not None
-        else _DEFAULT_JAILBREAK_BLOCK_THRESHOLD
-    )
-    warn_threshold = (
-        config.warn_threshold
-        if config.warn_threshold is not None
-        else _DEFAULT_JAILBREAK_WARN_THRESHOLD
-    )
-    percent = result.score * 100.0
-
-    if percent >= block_threshold:
-        return result, Decision.DENY
-    if percent >= warn_threshold:
-        return result, Decision.WARN
-    return result, None
 
 
 def evaluate_with_detection(
@@ -538,70 +528,38 @@ def evaluate_with_detection(
          otherwise return ``base`` unchanged so a policy deny keeps its own
          matched_rule.
     """
-    base = evaluate(spec, action)
+    return compiled_policy(spec).evaluate_with_detection(action)
 
-    detection = spec.extensions.detection if spec.extensions is not None else None
-    if detection is None:
-        return EvaluationWithDetection(evaluation=base)
 
-    content = action.content or ""
-    if not content:
-        return EvaluationWithDetection(evaluation=base)
+def evaluate_with_detection_traced(
+    spec: HushSpec,
+    action: EvaluationAction,
+    context: Optional[RuntimeContext] = None,
+    conditions: Optional[dict[str, Condition]] = None,
+) -> TracedEvaluationWithDetection:
+    """:func:`evaluate_with_detection` with the recorded rule trace and the
+    per-detector receipt entries a receipt's ``detection_trace`` carries.
 
-    detections: list[DetectionResult] = []
-    # (contribution, category) pairs in detector run order, used below to
-    # find "the first detector that forced the escalation".
-    contributions: list[tuple[Decision, str]] = []
-
-    pi_config = detection.prompt_injection
-    if pi_config is not None and pi_config.enabled is not False:
-        result, contribution = _prompt_injection_contribution(pi_config, content)
-        detections.append(result)
-        if contribution is not None:
-            contributions.append((contribution, "prompt_injection"))
-
-    jb_config = detection.jailbreak
-    if jb_config is not None and jb_config.enabled is not False:
-        result, contribution = _jailbreak_contribution(jb_config, content)
-        detections.append(result)
-        if contribution is not None:
-            contributions.append((contribution, "jailbreak"))
-
-    # threat_intel is deliberately NOT auto-wired: the built-in engine ships
-    # only regex detectors and has no pattern-db / similarity model to
-    # satisfy detection.threat_intel. Satisfying it requires registering a
-    # custom Detector through DetectorRegistry; no detector runs here.
-
-    detection_decision: Optional[Decision] = None
-    for contribution, _category in contributions:
-        if (
-            detection_decision is None
-            or _DECISION_RANK[contribution] > _DECISION_RANK[detection_decision]
-        ):
-            detection_decision = contribution
-
-    final_decision = (
-        base.decision
-        if detection_decision is None
-        else _stricter(base.decision, detection_decision)
+    ``detector_trace`` is ``None`` when the pipeline did not run at all (the
+    policy has no ``detection:`` extension) and a list -- possibly empty --
+    whenever it did, which is exactly the presence rule of receipt spec 4.6.
+    """
+    return compiled_policy(spec).evaluate_with_detection_traced(
+        action, context, conditions
     )
 
-    if final_decision != base.decision:
-        category = next(
-            cat for decision, cat in contributions if decision == detection_decision
-        )
-        evaluation = EvaluationResult(
-            decision=final_decision,
-            matched_rule="detection",
-            reason=f"content flagged by {category} detection",
-            origin_profile=base.origin_profile,
-            posture=base.posture,
-        )
-    else:
-        evaluation = base
 
-    return EvaluationWithDetection(
-        evaluation=evaluation,
-        detections=detections,
-        detection_decision=detection_decision,
-    )
+_compiled_policy = None
+
+
+def compiled_policy(spec: HushSpec):
+    """The cached compiled form of *spec* (see :mod:`hushspec.compiled`).
+
+    Imported lazily: :mod:`hushspec.compiled` builds on this module.
+    """
+    global _compiled_policy
+    if _compiled_policy is None:
+        from hushspec.compiled import compiled_for_spec
+
+        _compiled_policy = compiled_for_spec
+    return _compiled_policy(spec)

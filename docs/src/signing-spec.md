@@ -1,6 +1,6 @@
 # Policy Signing
 
-The full normative specification is at [`spec/hushspec-signing.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-signing.md). The 0.2 envelope and keyring schemas are staged at [`schemas/staged/0.2.0/`](https://github.com/backbay-labs/hush/tree/main/schemas/staged/0.2.0) until the SDKs implement them.
+The full normative specification is at [`spec/hushspec-signing.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-signing.md). The 0.2 envelope and keyring schemas are [`schemas/hushspec-signature.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-signature.v0.schema.json) and [`schemas/hushspec-keyring.v0.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v0.schema.json).
 
 A policy signature is a detached JSON envelope (`policy.yaml.sig`) carrying an Ed25519 signature over the **canonical content hash of the resolved policy**, not over the file bytes. Reformatting the YAML keeps the signature valid; changing a base policy reached through `extends` invalidates it.
 

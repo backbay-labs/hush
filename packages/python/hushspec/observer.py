@@ -160,16 +160,18 @@ class ObservableEvaluator:
     def _redact(self, action: EvaluationAction) -> EvaluationAction:
         """Return *action* with ``content`` stripped for observer emission.
 
-        Evaluation itself (``evaluate()`` above) always runs against the
-        real, unredacted action -- this only affects what gets embedded in
-        observer events, mirroring how a redacted receipt's ActionSummary
-        never carries raw content, just a ``content_redacted`` flag.
+        Evaluation itself (``evaluate()`` above) always runs against the real,
+        unredacted action -- this only affects what gets embedded in observer
+        events. A 0.2 receipt needs no such switch: it records the content's
+        hash and size and has no field content could go in (receipt spec 4.4).
         """
         if self._redact_content and action.content is not None:
             return dataclasses.replace(action, content=None)
         return action
 
     def notify_policy_loaded(self, name: Optional[str] = None, hash: Optional[str] = None) -> None:
+        """Announce the policy now in force. ``hash`` is its canonical content
+        hash (``sha256:<hex>``), the same value its receipts carry."""
         self._emit({
             "type": "policy.loaded",
             "timestamp": _iso_now(),
@@ -218,9 +220,9 @@ def _json_default(obj: Any) -> Any:
 
     if isinstance(obj, DecisionReceipt):
         # Route through the shared helper (rather than a plain asdict) so a
-        # receipt embedded in an observer event serializes identically to
-        # one sent through a ReceiptSink: content_hash/content_redacted
-        # dropped when empty/false instead of emitted as "" / false.
+        # receipt embedded in an observer event serializes identically to one
+        # sent through a ReceiptSink: spec member order, enums as their string
+        # values, and absent optional fields omitted rather than null.
         return receipt_to_dict(obj)
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return dataclasses.asdict(obj)

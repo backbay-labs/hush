@@ -34,6 +34,10 @@ pub fn run_conformance(fixtures: &[TestFixture]) -> Vec<TestResult> {
 
             FixtureCategory::Evaluation => test_evaluation_fixture(fixture),
 
+            FixtureCategory::Hash => test_hash_fixture(fixture),
+
+            FixtureCategory::Resolve => test_resolve_fixture(fixture),
+
             FixtureCategory::MergeBase
             | FixtureCategory::MergeChild
             | FixtureCategory::MergeExpected => {
@@ -212,6 +216,206 @@ fn test_evaluation_fixture(fixture: &TestFixture) -> TestResult {
     }
 }
 
+/// A canonical-form vector (spec/hushspec-canonical.md section 7): a resolved
+/// document paired with the exact canonical text and content hash every
+/// conformant implementation must produce for it.
+///
+/// The vector's `policy` is projected as a value tree, which is the path the
+/// specification recommends (canonical spec 6) and the only one that can
+/// express the absent/empty distinctions of section 3.3.
+fn test_hash_fixture(fixture: &TestFixture) -> TestResult {
+    let path = fixture.path.display().to_string();
+    let fail = |message: String| TestResult {
+        fixture_path: path.clone(),
+        category: fixture.category,
+        passed: false,
+        message,
+    };
+
+    let vector: HashVector = match serde_yaml::from_str(&fixture.content) {
+        Ok(vector) => vector,
+        Err(error) => return fail(format!("Invalid canonical-form vector: {error}")),
+    };
+    if vector.hushspec_hash_vector != HASH_VECTOR_VERSION {
+        return fail(format!(
+            "Unsupported hushspec_hash_vector version: {}",
+            vector.hushspec_hash_vector
+        ));
+    }
+
+    // A vector's `policy` is already resolved; resolve defensively so a future
+    // vector that ships an `extends` chain is canonicalized after resolution
+    // rather than hashed as a fragment (canonical spec 2.1).
+    let document = if vector.policy.get("extends").is_some() {
+        match resolve_vector_policy(&vector.policy) {
+            Ok(document) => document,
+            Err(message) => return fail(message),
+        }
+    } else {
+        vector.policy.clone()
+    };
+
+    let canonical = match hushspec::canonical_json_value(&document) {
+        Ok(canonical) => canonical,
+        Err(error) => return fail(format!("Canonicalization failed: {error}")),
+    };
+    if canonical != vector.canonical {
+        return fail(format!(
+            "Canonical form mismatch: expected {} bytes, got {} bytes",
+            vector.canonical.len(),
+            canonical.len()
+        ));
+    }
+
+    let digest = hushspec::canonical::digest(&canonical);
+    if digest != vector.content_hash {
+        return fail(format!(
+            "content_hash mismatch: expected {}, got {digest}",
+            vector.content_hash
+        ));
+    }
+
+    TestResult {
+        fixture_path: path,
+        category: fixture.category,
+        passed: true,
+        message: format!("OK ({digest})"),
+    }
+}
+
+/// A resolution vector (core spec 2.3, receipt spec 4.2): an inline leaf
+/// whose `extends` references builtins, expected to resolve to a given
+/// content hash and chain, or to be rejected with a given reason.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveVector {
+    hushspec_resolve: String,
+    #[allow(dead_code)]
+    description: String,
+    policy: serde_json::Value,
+    expect: ResolveExpect,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveExpect {
+    #[serde(default)]
+    #[allow(dead_code)]
+    resolves: Option<bool>,
+    #[serde(default)]
+    content_hash: Option<String>,
+    #[serde(default)]
+    chain: Option<Vec<ResolveLink>>,
+    #[serde(default)]
+    rejects: Option<String>,
+}
+
+#[derive(serde::Deserialize, PartialEq, Debug)]
+#[serde(deny_unknown_fields)]
+struct ResolveLink {
+    source: String,
+    content_hash: String,
+}
+
+fn resolve_reason(error: &hushspec::ResolveError) -> &'static str {
+    use hushspec::ResolveError as E;
+    match error {
+        E::DigestMismatch { .. } => "digest_mismatch",
+        E::InvalidPin { .. } => "invalid_pin",
+        E::Cycle { .. } => "cycle",
+        E::MaxDepth => "max_depth",
+        E::NotFound { .. } => "not_found",
+        E::SignatureRequired { .. } => "signature_required",
+        _ => "error",
+    }
+}
+
+fn test_resolve_fixture(fixture: &TestFixture) -> TestResult {
+    let path = fixture.path.display().to_string();
+    let fail = |message: String| TestResult {
+        fixture_path: path.clone(),
+        category: fixture.category,
+        passed: false,
+        message,
+    };
+    let vector: ResolveVector = match serde_yaml::from_str(&fixture.content) {
+        Ok(vector) => vector,
+        Err(error) => return fail(format!("Invalid resolve vector: {error}")),
+    };
+    if vector.hushspec_resolve != "0.1.0" {
+        return fail(format!(
+            "Unsupported hushspec_resolve version: {}",
+            vector.hushspec_resolve
+        ));
+    }
+    let yaml = match serde_yaml::to_string(&vector.policy) {
+        Ok(yaml) => yaml,
+        Err(error) => return fail(format!("Failed to re-encode the policy: {error}")),
+    };
+    let spec = match HushSpec::parse(&yaml) {
+        Ok(spec) => spec,
+        Err(error) => return fail(format!("Policy failed to parse: {error}")),
+    };
+    let loader = hushspec::create_composite_loader();
+    let result =
+        hushspec::resolve_with_options(&spec, None, &loader, &hushspec::ResolveOptions::default());
+    match (&vector.expect.rejects, result) {
+        (Some(expected), Err(error)) if resolve_reason(&error) == expected => TestResult {
+            fixture_path: path,
+            category: fixture.category,
+            passed: true,
+            message: format!("Correctly rejected: {expected}"),
+        },
+        (Some(expected), Err(error)) => fail(format!(
+            "Expected rejection {expected}, got {}: {error}",
+            resolve_reason(&error)
+        )),
+        (Some(expected), Ok(_)) => fail(format!("Expected rejection {expected}, but it resolved")),
+        (None, Err(error)) => fail(format!("Expected to resolve: {error}")),
+        (None, Ok(resolution)) => {
+            if let Some(expected) = &vector.expect.content_hash
+                && expected != &resolution.content_hash
+            {
+                return fail(format!(
+                    "content_hash mismatch: expected {expected}, got {}",
+                    resolution.content_hash
+                ));
+            }
+            if let Some(expected) = &vector.expect.chain {
+                let actual: Vec<ResolveLink> = resolution
+                    .chain
+                    .iter()
+                    .map(|link| ResolveLink {
+                        source: link.source.clone(),
+                        content_hash: link.content_hash.clone(),
+                    })
+                    .collect();
+                if &actual != expected {
+                    return fail(format!(
+                        "chain mismatch: expected {expected:?}, got {actual:?}"
+                    ));
+                }
+            }
+            TestResult {
+                fixture_path: path,
+                category: fixture.category,
+                passed: true,
+                message: format!("OK ({} link(s))", resolution.chain.len()),
+            }
+        }
+    }
+}
+
+fn resolve_vector_policy(policy: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let yaml = serde_yaml::to_string(policy)
+        .map_err(|error| format!("Failed to re-encode the policy: {error}"))?;
+    let spec = HushSpec::parse(&yaml).map_err(|error| format!("Failed to parse: {error}"))?;
+    let resolved = hushspec::resolve_with_loader(&spec, None, &hushspec::create_composite_loader())
+        .map_err(|error| format!("Failed to resolve: {error}"))?;
+    serde_json::to_value(&resolved)
+        .map_err(|error| format!("Failed to re-encode the resolved policy: {error}"))
+}
+
 fn test_merge_fixtures(fixtures: &[TestFixture]) -> Vec<TestResult> {
     if fixtures.is_empty() {
         return Vec::new();
@@ -335,6 +539,24 @@ fn test_merge_case(
             message: format!("Merged result did not match {expected_name}.yaml"),
         }
     }
+}
+
+/// Vector format version (`schemas/hushspec-hash-vector.v0.schema.json`).
+const HASH_VECTOR_VERSION: &str = "0.1.0";
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HashVector {
+    hushspec_hash_vector: String,
+    #[allow(dead_code)]
+    description: String,
+    /// Informational: the unresolved document `policy` came from.
+    #[serde(default)]
+    #[allow(dead_code)]
+    source: Option<serde_json::Value>,
+    policy: serde_json::Value,
+    canonical: String,
+    content_hash: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -12,6 +12,13 @@ Evaluation of one action is:
 
 Unknown action types deny (``__unknown_action_type__``). Hosts and paths are
 normalized as specified in Section 3.14 before any pattern is consulted.
+
+The engine itself lives in :mod:`hushspec.compiled`: a policy's patterns,
+conditions and per-action-type plans are compiled once into a
+:class:`~hushspec.compiled.CompiledPolicy`, and the functions here are thin
+wrappers that compile on first use and reuse the result. Callers that hold a
+policy for more than one action should hold the compiled form directly
+(:func:`hushspec.compiled.compile_policy`).
 """
 
 from __future__ import annotations
@@ -19,42 +26,17 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from functools import lru_cache
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
-from hushspec.conditions import (
-    Condition,
-    RuntimeContext,
-    decode_condition,
-    evaluate_condition,
-)
+from hushspec.conditions import Condition, RuntimeContext
 from hushspec.extensions import (
-    OriginDefaultBehavior,
-    OriginEgressOverlay,
     OriginMatch,
     OriginProfile,
-    OriginToolAccessOverlay,
-    PostureExtension,
     TransitionTrigger,
 )
-from hushspec.regex_profile import compile_profile_regex
-from hushspec.rules import (
-    BrowserAutomationRule,
-    CodeExecutionRule,
-    ComputerUseMode,
-    ComputerUseRule,
-    DefaultAction,
-    EgressRule,
-    ForbiddenPathsRule,
-    InputInjectionRule,
-    PatchIntegrityRule,
-    PathAllowlistRule,
-    RemoteDesktopChannelsRule,
-    SecretPatternsRule,
-    Severity,
-    ShellCommandsRule,
-    ToolAccessRule,
-)
+from hushspec.rules import DefaultAction
 from hushspec.schema import HushSpec
 
 #: ``matched_rule`` reported when the action type is unknown to the specification.
@@ -110,13 +92,6 @@ class Decision(str, Enum):
     DENY = "deny"
 
 
-_DECISION_RANK: dict[Decision, int] = {
-    Decision.ALLOW: 1,
-    Decision.WARN: 2,
-    Decision.DENY: 3,
-}
-
-
 class RuleOutcome(str, Enum):
     """Outcome of consulting one rule block (or extension guard).
 
@@ -128,10 +103,6 @@ class RuleOutcome(str, Enum):
     WARN = "warn"
     DENY = "deny"
     SKIP = "skip"
-
-
-def _outcome_of(decision: Decision) -> RuleOutcome:
-    return RuleOutcome(decision.value)
 
 
 @dataclass
@@ -205,59 +176,10 @@ class TracedEvaluation:
     trace: list[RuleEvaluation]
 
 
-class _PathOperation(Enum):
-    READ = "read"
-    WRITE = "write"
-    PATCH = "patch"
-
-
 @dataclass
 class _PatchStats:
     additions: int
     deletions: int
-
-
-@dataclass
-class _BlockDecision:
-    """Decision contributed by one rule block."""
-
-    decision: Decision
-    matched_rule: Optional[str] = None
-    reason: Optional[str] = None
-
-
-def _allow(matched_rule: Optional[str], reason: Optional[str]) -> _BlockDecision:
-    return _BlockDecision(Decision.ALLOW, matched_rule, reason)
-
-
-def _warn(matched_rule: str, reason: str) -> _BlockDecision:
-    return _BlockDecision(Decision.WARN, matched_rule, reason)
-
-
-def _deny(matched_rule: str, reason: str) -> _BlockDecision:
-    return _BlockDecision(Decision.DENY, matched_rule, reason)
-
-
-class _Inactive(Exception):
-    """Why an applicable block was not evaluated."""
-
-    ABSENT = "absent"
-    DISABLED = "disabled"
-    CONDITION_FALSE = "condition_false"
-    OUT_OF_BAND_CONDITION_FALSE = "out_of_band_condition_false"
-
-    def __init__(self, kind: str) -> None:
-        super().__init__(kind)
-        self.kind = kind
-
-    def reason(self, block: str) -> str:
-        if self.kind == _Inactive.ABSENT:
-            return f"no {block} rule configured"
-        if self.kind == _Inactive.DISABLED:
-            return "rule disabled"
-        if self.kind == _Inactive.CONDITION_FALSE:
-            return "when condition is false"
-        return "out-of-band condition is false"
 
 
 #: Rule blocks applicable to each reference action type, in evaluation order
@@ -292,13 +214,32 @@ def applicable_blocks(action_type: str) -> Optional[tuple[str, ...]]:
 # ---------------------------------------------------------------------------
 
 
+_compiled_for_spec = None
+
+
+def compiled_policy(spec: HushSpec):
+    """The cached :class:`~hushspec.compiled.CompiledPolicy` for *spec*.
+
+    Imported lazily: :mod:`hushspec.compiled` is built on top of this module.
+    """
+    global _compiled_for_spec
+    if _compiled_for_spec is None:
+        from hushspec.compiled import compiled_for_spec
+
+        _compiled_for_spec = compiled_for_spec
+    return _compiled_for_spec(spec)
+
+
 def evaluate(spec: HushSpec, action: EvaluationAction) -> EvaluationResult:
     """Evaluate *action* against a resolved document.
 
     ``when`` conditions are evaluated against ``action.context`` (an empty
     context and the engine clock when absent).
+
+    *spec* is compiled on first use and the compiled policy is reused for
+    later calls with the same document.
     """
-    return evaluate_traced(spec, action, None, {}).result
+    return compiled_policy(spec).evaluate(action)
 
 
 def evaluate_traced(
@@ -308,493 +249,35 @@ def evaluate_traced(
     conditions: Optional[dict[str, Condition]] = None,
 ) -> TracedEvaluation:
     """Full evaluation with the recorded rule trace (used by receipts)."""
-    effective_context = context
-    if effective_context is None:
-        effective_context = action.context
-    if effective_context is None:
-        effective_context = RuntimeContext()
-    return _Evaluator(spec, action, effective_context, conditions or {}).run()
-
-
-class _Evaluator:
-    def __init__(
-        self,
-        spec: HushSpec,
-        action: EvaluationAction,
-        context: RuntimeContext,
-        conditions: dict[str, Condition],
-    ) -> None:
-        self.spec = spec
-        self.action = action
-        self.context = context
-        self.conditions = conditions
-        self.trace: list[RuleEvaluation] = []
-
-    # -- trace helpers ------------------------------------------------------
-
-    def _record(
-        self,
-        block: str,
-        outcome: RuleOutcome,
-        matched_rule: Optional[str],
-        reason: Optional[str],
-        evaluated: bool,
-    ) -> None:
-        self.trace.append(
-            RuleEvaluation(
-                rule_block=block,
-                outcome=outcome,
-                matched_rule=matched_rule,
-                reason=reason,
-                evaluated=evaluated,
-            )
-        )
-
-    def _skip_all(self, blocks: tuple[str, ...], reason: str) -> None:
-        for block in blocks:
-            self._record(block, RuleOutcome.SKIP, None, reason, False)
-
-    def _finish(
-        self,
-        decision: Decision,
-        matched_rule: Optional[str],
-        reason: Optional[str],
-        origin_profile: Optional[str],
-        posture: Optional[PostureResult],
-    ) -> TracedEvaluation:
-        return TracedEvaluation(
-            result=EvaluationResult(
-                decision=decision,
-                matched_rule=matched_rule,
-                reason=reason,
-                origin_profile=origin_profile,
-                posture=posture,
-            ),
-            trace=self.trace,
-        )
-
-    # -- main loop ----------------------------------------------------------
-
-    def run(self) -> TracedEvaluation:
-        if is_panic_active():
-            reason = "emergency panic mode is active"
-            self._record("panic", RuleOutcome.DENY, PANIC_RULE, reason, True)
-            return self._finish(Decision.DENY, PANIC_RULE, reason, None, None)
-
-        action_type = self.action.type
-        blocks = applicable_blocks(action_type)
-        if blocks is None:
-            reason = f"action type '{action_type}' is unknown to the specification"
-            self._record(
-                "default", RuleOutcome.DENY, UNKNOWN_ACTION_TYPE_RULE, reason, True
-            )
-            return self._finish(
-                Decision.DENY, UNKNOWN_ACTION_TYPE_RULE, reason, None, None
-            )
-
-        # Origins guard: select a profile or apply default_behavior.
-        origins = (
-            self.spec.extensions.origins if self.spec.extensions is not None else None
-        )
-        matched_profile = select_origin_profile(self.spec, self.action.origin)
-        origin_profile_id = matched_profile.id if matched_profile is not None else None
-        if (
-            origins is not None
-            and matched_profile is None
-            and (origins.default_behavior or OriginDefaultBehavior.DENY)
-            == OriginDefaultBehavior.DENY
-        ):
-            reason = "no origin profile matched and default_behavior is deny"
-            rule = "extensions.origins.default_behavior"
-            self._record("origins", RuleOutcome.DENY, rule, reason, True)
-            self._skip_all(blocks, "short-circuited by origins deny")
-            return self._finish(Decision.DENY, rule, reason, None, None)
-
-        # Posture guard.
-        posture = resolve_posture(self.spec, matched_profile, self.action.posture)
-        denied = self._posture_capability_guard(posture)
-        if denied is not None:
-            self._skip_all(blocks, "short-circuited by posture deny")
-            return self._finish(
-                Decision.DENY,
-                denied.matched_rule,
-                denied.reason,
-                origin_profile_id,
-                posture,
-            )
-
-        if action_type == "custom":
-            # Only a posture state granting the `custom` capability can vouch
-            # for an engine-defined action (core spec Section 5).
-            if posture is None:
-                reason = (
-                    "custom actions require a posture state granting the "
-                    "custom capability"
-                )
-                self._record(
-                    "default", RuleOutcome.DENY, UNKNOWN_ACTION_TYPE_RULE, reason, True
-                )
-                return self._finish(
-                    Decision.DENY,
-                    UNKNOWN_ACTION_TYPE_RULE,
-                    reason,
-                    origin_profile_id,
-                    None,
-                )
-            return self._finish(Decision.ALLOW, None, None, origin_profile_id, posture)
-
-        # Block evaluation and aggregation (core spec 6.1).
-        normalized_path = (
-            normalize_path(self.action.target) if self.action.target is not None else None
-        )
-        decisions: list[_BlockDecision] = []
-        for block in blocks:
-            try:
-                decision = self._evaluate_block(block, matched_profile, normalized_path)
-            except _Inactive as inactive:
-                self._record(
-                    block, RuleOutcome.SKIP, None, inactive.reason(block), False
-                )
-                continue
-            self._record(
-                block,
-                _outcome_of(decision.decision),
-                decision.matched_rule,
-                decision.reason,
-                True,
-            )
-            decisions.append(decision)
-
-        aggregate = Decision.ALLOW
-        for decision in decisions:
-            if _DECISION_RANK[decision.decision] > _DECISION_RANK[aggregate]:
-                aggregate = decision.decision
-        matched_rule: Optional[str] = None
-        reason: Optional[str] = None
-        for decision in decisions:
-            if decision.decision == aggregate and decision.matched_rule is not None:
-                matched_rule = decision.matched_rule
-                reason = decision.reason
-                break
-        return self._finish(
-            aggregate, matched_rule, reason, origin_profile_id, posture
-        )
-
-    # -- activity -----------------------------------------------------------
-
-    def _activity(self, block: str, enabled: bool, when: Any) -> None:
-        """Raise :class:`_Inactive` unless the block is enabled and its
-        ``when`` plus any out-of-band condition hold for the runtime context."""
-        if not enabled:
-            raise _Inactive(_Inactive.DISABLED)
-        condition = decode_condition(when)
-        if condition is not None and not evaluate_condition(condition, self.context):
-            raise _Inactive(_Inactive.CONDITION_FALSE)
-        out_of_band = self.conditions.get(block)
-        if out_of_band is not None and not evaluate_condition(
-            out_of_band, self.context
-        ):
-            raise _Inactive(_Inactive.OUT_OF_BAND_CONDITION_FALSE)
-
-    # -- per-block dispatch -------------------------------------------------
-
-    def _evaluate_block(
-        self,
-        block: str,
-        matched_profile: Optional[OriginProfile],
-        normalized_path: Optional[str],
-    ) -> _BlockDecision:
-        rules = self.spec.rules
-        action = self.action
-        content = action.content
-
-        if block == "forbidden_paths":
-            rule = rules.forbidden_paths if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_forbidden_paths(rule, normalized_path or "")
-
-        if block == "path_allowlist":
-            rule = rules.path_allowlist if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            if action.type == "file_read":
-                operation = _PathOperation.READ
-            elif action.type == "patch_apply":
-                operation = _PathOperation.PATCH
-            else:
-                operation = _PathOperation.WRITE
-            return evaluate_path_allowlist(rule, normalized_path or "", operation)
-
-        if block == "secret_patterns":
-            rule = rules.secret_patterns if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            path_bearing = action.type in ("file_write", "patch_apply")
-            # egress and tool_call are scanned only when they carry content.
-            if not path_bearing and content is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            skip_path = normalized_path if path_bearing else None
-            return evaluate_secret_patterns(rule, skip_path, content or "")
-
-        if block == "patch_integrity":
-            rule = rules.patch_integrity if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_patch_integrity(rule, content or "")
-
-        if block == "shell_commands":
-            rule = rules.shell_commands if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_shell_commands(rule, action.target or "")
-
-        if block == "tool_access":
-            base = rules.tool_access if rules is not None else None
-            overlay = None
-            if matched_profile is not None and matched_profile.tool_access is not None:
-                overlay = (matched_profile.id, matched_profile.tool_access)
-            if base is None and overlay is None:
-                raise _Inactive(_Inactive.ABSENT)
-            if base is not None:
-                self._activity(block, base.enabled, base.when)
-            return evaluate_tool_access(base, overlay, action)
-
-        if block == "egress":
-            base = rules.egress if rules is not None else None
-            overlay = None
-            if matched_profile is not None and matched_profile.egress is not None:
-                overlay = (matched_profile.id, matched_profile.egress)
-            if base is None and overlay is None:
-                raise _Inactive(_Inactive.ABSENT)
-            if base is not None:
-                self._activity(block, base.enabled, base.when)
-            host = normalize_host(action.target) if action.target is not None else None
-            return evaluate_egress(base, overlay, host)
-
-        if block == "computer_use":
-            rule = rules.computer_use if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_computer_use(rule, action.target or "")
-
-        if block == "remote_desktop_channels":
-            rule = rules.remote_desktop_channels if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            decision = evaluate_remote_desktop_channels(rule, action.target or "")
-            if decision is None:
-                raise _Inactive(_Inactive.ABSENT)
-            return decision
-
-        if block == "input_injection":
-            rule = rules.input_injection if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_input_injection(rule, action.target or "")
-
-        if block == "browser_automation":
-            rule = rules.browser_automation if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_browser_automation(rule, action)
-
-        if block == "code_execution":
-            rule = rules.code_execution if rules is not None else None
-            if rule is None:
-                raise _Inactive(_Inactive.ABSENT)
-            self._activity(block, rule.enabled, rule.when)
-            return evaluate_code_execution(rule, action)
-
-        raise _Inactive(_Inactive.ABSENT)
-
-    # -- posture ------------------------------------------------------------
-
-    def _posture_capability_guard(
-        self, posture: Optional[PostureResult]
-    ) -> Optional[_BlockDecision]:
-        if posture is None:
-            return None
-        posture_extension = (
-            self.spec.extensions.posture if self.spec.extensions is not None else None
-        )
-        if posture_extension is None:
-            return None
-        capability = required_capability(self.action.type)
-        if capability is None:
-            return None
-
-        current_state = posture_extension.states.get(posture.current)
-        if current_state is None:
-            rule = f"extensions.posture.states.{posture.current}"
-            reason = f"unknown posture state '{posture.current}'"
-            self._record("posture_capability", RuleOutcome.DENY, rule, reason, True)
-            return _deny(rule, reason)
-
-        if capability in current_state.capabilities:
-            self._record(
-                "posture_capability",
-                RuleOutcome.ALLOW,
-                None,
-                "posture capabilities satisfied",
-                True,
-            )
-            return None
-
-        rule = f"extensions.posture.states.{posture.current}.capabilities"
-        reason = (
-            f"posture '{posture.current}' does not allow capability '{capability}'"
-        )
-        self._record("posture_capability", RuleOutcome.DENY, rule, reason, True)
-        return _deny(rule, reason)
+    return compiled_policy(spec).evaluate_traced(action, context, conditions)
 
 
 # ---------------------------------------------------------------------------
-# Rule blocks
+# Rule-block helpers
+#
+# The rule blocks themselves are compiled per policy in hushspec.compiled;
+# what stays here is the matching vocabulary they are defined in terms of.
 # ---------------------------------------------------------------------------
 
 
-def evaluate_forbidden_paths(rule: ForbiddenPathsRule, path: str) -> _BlockDecision:
-    if _any_path_glob_matches(rule.exceptions, path):
-        return _allow(
-            "rules.forbidden_paths.exceptions", "path matched an explicit exception"
-        )
-    if _any_path_glob_matches(rule.patterns, path):
-        return _deny(
-            "rules.forbidden_paths.patterns", "path matched a forbidden pattern"
-        )
-    return _allow(None, "path did not match any forbidden pattern")
-
-
-def evaluate_path_allowlist(
-    rule: PathAllowlistRule, path: str, operation: _PathOperation
-) -> _BlockDecision:
-    if operation == _PathOperation.READ:
-        patterns = rule.read
-    elif operation == _PathOperation.PATCH:
-        patterns = rule.patch if rule.patch else rule.write
-    else:
-        patterns = rule.write
-    if _any_path_glob_matches(patterns, path):
-        return _allow("rules.path_allowlist", "path matched allowlist")
-    return _deny("rules.path_allowlist", "path did not match allowlist")
-
-
-_SEVERITY_RANK: dict[Severity, int] = {
-    Severity.WARN: 1,
-    Severity.ERROR: 2,
-    Severity.CRITICAL: 3,
-}
-
-
-def evaluate_secret_patterns(
-    rule: SecretPatternsRule, skip_path: Optional[str], content: str
-) -> _BlockDecision:
-    if skip_path is not None and _any_path_glob_matches(rule.skip_paths, skip_path):
-        return _allow(
-            "rules.secret_patterns.skip_paths",
-            "path is excluded from secret scanning",
-        )
-
-    best_rank = 0
-    best = None
-    for pattern in rule.patterns:
-        # Fail closed: a pattern that will not compile under the HushSpec regex
-        # profile denies the action rather than being skipped (core spec 3.14.3).
-        try:
-            compiled = compile_profile_regex(pattern.pattern)
-        except ValueError as exc:
-            return _deny(
-                f"rules.secret_patterns.patterns.{pattern.name}.pattern",
-                f"secret pattern '{pattern.name}' is invalid: {exc}",
-            )
-        if compiled.search(content):
-            rank = _SEVERITY_RANK[pattern.severity]
-            # Strictly greater keeps the first pattern in document order among
-            # those at the highest matched severity.
-            if rank > best_rank:
-                best_rank = rank
-                best = pattern
-
-    if best is None:
-        return _allow(None, "content did not match any secret pattern")
-
-    matched_rule = f"rules.secret_patterns.patterns.{best.name}"
-    reason = f"content matched secret pattern '{best.name}'"
-    if best.severity == Severity.WARN:
-        return _warn(matched_rule, reason)
-    return _deny(matched_rule, reason)
-
-
-def evaluate_patch_integrity(rule: PatchIntegrityRule, content: str) -> _BlockDecision:
-    for index, pattern in enumerate(rule.forbidden_patterns):
-        try:
-            compiled = compile_profile_regex(pattern)
-        except ValueError as exc:
-            return _deny(
-                f"rules.patch_integrity.forbidden_patterns[{index}]",
-                f"patch forbidden pattern is invalid: {exc}",
-            )
-        if compiled.search(content):
-            return _deny(
-                f"rules.patch_integrity.forbidden_patterns[{index}]",
-                "patch content matched a forbidden pattern",
-            )
-
-    stats = patch_stats(content)
-    if stats.additions > rule.max_additions:
-        return _deny(
-            "rules.patch_integrity.max_additions",
-            "patch additions exceeded max_additions",
-        )
-    if stats.deletions > rule.max_deletions:
-        return _deny(
-            "rules.patch_integrity.max_deletions",
-            "patch deletions exceeded max_deletions",
-        )
-    if rule.require_balance:
-        one_sided = (stats.additions == 0) != (stats.deletions == 0)
-        if one_sided:
-            return _deny(
-                "rules.patch_integrity.max_imbalance_ratio",
-                "patch has changes on only one side; the imbalance ratio is infinite",
-            )
-        if stats.additions > 0 and stats.deletions > 0:
-            larger = float(max(stats.additions, stats.deletions))
-            smaller = float(min(stats.additions, stats.deletions))
-            if larger / smaller > rule.max_imbalance_ratio:
-                return _deny(
-                    "rules.patch_integrity.max_imbalance_ratio",
-                    "patch exceeded max imbalance ratio",
-                )
-
-    return _allow(None, "patch passed integrity checks")
-
-
-def evaluate_shell_commands(rule: ShellCommandsRule, command: str) -> _BlockDecision:
-    for index, pattern in enumerate(rule.forbidden_patterns):
-        try:
-            compiled = compile_profile_regex(pattern)
-        except ValueError as exc:
-            return _deny(
-                f"rules.shell_commands.forbidden_patterns[{index}]",
-                f"shell forbidden pattern is invalid: {exc}",
-            )
-        if compiled.search(command):
-            return _deny(
-                f"rules.shell_commands.forbidden_patterns[{index}]",
-                "shell command matched a forbidden pattern",
-            )
-    return _allow(None, "command did not match any forbidden pattern")
+#: Built-in credential detectors consulted by ``browser_automation`` when
+#: ``credential_detection`` is true (core spec 3.11). Documents needing
+#: portable detection list their own patterns in ``extra_credential_patterns``.
+BUILTIN_CREDENTIAL_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("aws_access_key", "(AKIA|ASIA)[0-9A-Z]{16}"),
+    ("github_token", "gh[opsur]_[A-Za-z0-9]{36}"),
+    ("github_fine_grained_pat", "github_pat_[0-9a-zA-Z_]{50,}"),
+    ("openai_key", "sk-[A-Za-z0-9_-]{20,}"),
+    ("slack_token", "xox[baprs]-[0-9A-Za-z-]{10,}"),
+    (
+        "private_key",
+        "-----BEGIN[ \\t]+(RSA[ \\t]+|EC[ \\t]+|OPENSSH[ \\t]+)?PRIVATE[ \\t]+KEY-----",
+    ),
+    (
+        "jwt",
+        "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}",
+    ),
+)
 
 
 def tool_list_contains(entries: list[str], tool: str) -> bool:
@@ -824,340 +307,6 @@ def _default_rule_path(
     if base_present or overlay_default is None:
         return base_path
     return overlay_path
-
-
-def evaluate_tool_access(
-    base: Optional[ToolAccessRule],
-    overlay: Optional[tuple[str, OriginToolAccessOverlay]],
-    action: EvaluationAction,
-) -> _BlockDecision:
-    tool = action.target or ""
-    prefix: Optional[str] = None
-    overlay_rule: Optional[OriginToolAccessOverlay] = None
-    if overlay is not None:
-        prefix = f"extensions.origins.profiles.{overlay[0]}.tool_access"
-        overlay_rule = overlay[1]
-
-    # 1. max_args_size: the smaller of the two when both are specified.
-    base_limit = (
-        (base.max_args_size, "rules.tool_access.max_args_size")
-        if base is not None and base.max_args_size is not None
-        else None
-    )
-    overlay_limit = (
-        (overlay_rule.max_args_size, f"{prefix}.max_args_size")
-        if overlay_rule is not None
-        and overlay_rule.max_args_size is not None
-        and prefix is not None
-        else None
-    )
-    if base_limit is not None and overlay_limit is not None:
-        limit = overlay_limit if overlay_limit[0] < base_limit[0] else base_limit
-    else:
-        limit = base_limit if base_limit is not None else overlay_limit
-    if limit is not None and (action.args_size or 0) > limit[0]:
-        return _deny(limit[1], "tool arguments exceeded max_args_size")
-
-    # 2. block: union of both lists.
-    if base is not None and tool_list_contains(base.block, tool):
-        return _deny("rules.tool_access.block", "tool is explicitly blocked")
-    if (
-        overlay_rule is not None
-        and prefix is not None
-        and tool_list_contains(overlay_rule.block, tool)
-    ):
-        return _deny(f"{prefix}.block", "tool is explicitly blocked")
-
-    # 3. require_confirmation: union of both lists.
-    if base is not None and tool_list_contains(base.require_confirmation, tool):
-        return _warn(
-            "rules.tool_access.require_confirmation", "tool requires confirmation"
-        )
-    if (
-        overlay_rule is not None
-        and prefix is not None
-        and tool_list_contains(overlay_rule.require_confirmation, tool)
-    ):
-        return _warn(f"{prefix}.require_confirmation", "tool requires confirmation")
-
-    # 4/5. allowlist mode: intersection when both lists are non-empty.
-    base_allow = base.allow if base is not None and base.allow else None
-    overlay_allow = (
-        overlay_rule.allow if overlay_rule is not None and overlay_rule.allow else None
-    )
-    if base_allow is not None or overlay_allow is not None:
-        if base_allow is not None and not tool_list_contains(base_allow, tool):
-            return _deny("rules.tool_access.allow", "tool is not in the allowlist")
-        if (
-            overlay_allow is not None
-            and prefix is not None
-            and not tool_list_contains(overlay_allow, tool)
-        ):
-            return _deny(f"{prefix}.allow", "tool is not in the allowlist")
-        matched_rule = (
-            f"{prefix}.allow"
-            if overlay_allow is not None and prefix is not None
-            else "rules.tool_access.allow"
-        )
-        return _allow(matched_rule, "tool is explicitly allowed")
-
-    # 6. default: block when the base says block or the overlay specifies block.
-    base_default = base.default if base is not None else DefaultAction.ALLOW
-    overlay_default = overlay_rule.default if overlay_rule is not None else None
-    effective = (
-        DefaultAction.BLOCK
-        if base_default == DefaultAction.BLOCK
-        or overlay_default == DefaultAction.BLOCK
-        else DefaultAction.ALLOW
-    )
-    matched_rule = _default_rule_path(
-        base is not None,
-        base_default,
-        overlay_default,
-        effective,
-        "rules.tool_access.default",
-        prefix,
-    )
-    if effective == DefaultAction.ALLOW:
-        return _allow(matched_rule, "tool matched default allow")
-    return _deny(matched_rule, "tool matched default block")
-
-
-def evaluate_egress(
-    base: Optional[EgressRule],
-    overlay: Optional[tuple[str, OriginEgressOverlay]],
-    host: Optional[str],
-) -> _BlockDecision:
-    prefix: Optional[str] = None
-    overlay_rule: Optional[OriginEgressOverlay] = None
-    if overlay is not None:
-        prefix = f"extensions.origins.profiles.{overlay[0]}.egress"
-        overlay_rule = overlay[1]
-
-    # 1. block: union of both lists.
-    if base is not None and _any_host_pattern_matches(base.block, host):
-        return _deny("rules.egress.block", "domain is explicitly blocked")
-    if (
-        overlay_rule is not None
-        and prefix is not None
-        and _any_host_pattern_matches(overlay_rule.block, host)
-    ):
-        return _deny(f"{prefix}.block", "domain is explicitly blocked")
-
-    # 2. allow: intersection when both lists are non-empty.
-    base_allow = base.allow if base is not None and base.allow else None
-    overlay_allow = (
-        overlay_rule.allow if overlay_rule is not None and overlay_rule.allow else None
-    )
-    if base_allow is not None or overlay_allow is not None:
-        base_ok = base_allow is None or _any_host_pattern_matches(base_allow, host)
-        overlay_ok = overlay_allow is None or _any_host_pattern_matches(
-            overlay_allow, host
-        )
-        if base_ok and overlay_ok:
-            matched_rule = (
-                f"{prefix}.allow"
-                if overlay_allow is not None and prefix is not None
-                else "rules.egress.allow"
-            )
-            return _allow(matched_rule, "domain is explicitly allowed")
-
-    # 3. default.
-    base_default = base.default if base is not None else DefaultAction.BLOCK
-    overlay_default = overlay_rule.default if overlay_rule is not None else None
-    effective = (
-        DefaultAction.BLOCK
-        if base_default == DefaultAction.BLOCK
-        or overlay_default == DefaultAction.BLOCK
-        else DefaultAction.ALLOW
-    )
-    matched_rule = _default_rule_path(
-        base is not None,
-        base_default,
-        overlay_default,
-        effective,
-        "rules.egress.default",
-        prefix,
-    )
-    if effective == DefaultAction.ALLOW:
-        return _allow(matched_rule, "domain matched default allow")
-    return _deny(matched_rule, "domain matched default block")
-
-
-def evaluate_computer_use(rule: ComputerUseRule, target: str) -> _BlockDecision:
-    if target in rule.allowed_actions:
-        return _allow(
-            "rules.computer_use.allowed_actions",
-            "computer-use action is explicitly allowed",
-        )
-    if rule.mode == ComputerUseMode.OBSERVE:
-        return _allow(
-            "rules.computer_use.mode",
-            "observe mode does not block unlisted actions",
-        )
-    # guardrail and fail_closed have identical reference semantics (D9).
-    return _deny(
-        "rules.computer_use.mode", "unlisted computer-use action is denied"
-    )
-
-
-def evaluate_remote_desktop_channels(
-    rule: RemoteDesktopChannelsRule, target: str
-) -> Optional[_BlockDecision]:
-    if target == "remote.clipboard":
-        field_name, allowed = "clipboard", rule.clipboard
-    elif target == "remote.file_transfer":
-        field_name, allowed = "file_transfer", rule.file_transfer
-    elif target == "remote.audio":
-        field_name, allowed = "audio", rule.audio
-    elif target == "remote.drive_mapping":
-        field_name, allowed = "drive_mapping", rule.drive_mapping
-    else:
-        return None
-
-    matched_rule = f"rules.remote_desktop_channels.{field_name}"
-    if allowed:
-        return _allow(
-            matched_rule, f"remote desktop channel '{field_name}' is enabled"
-        )
-    return _deny(matched_rule, f"remote desktop channel '{field_name}' is disabled")
-
-
-def evaluate_input_injection(rule: InputInjectionRule, target: str) -> _BlockDecision:
-    if not rule.allowed_types:
-        return _deny(
-            "rules.input_injection.allowed_types",
-            "input injection is not allowed when allowed_types is empty",
-        )
-    if target in rule.allowed_types:
-        return _allow(
-            "rules.input_injection.allowed_types",
-            "input injection type is explicitly allowed",
-        )
-    return _deny(
-        "rules.input_injection.allowed_types", "input injection type is not allowed"
-    )
-
-
-#: Built-in credential detectors consulted by ``browser_automation`` when
-#: ``credential_detection`` is true (core spec 3.11). Documents needing
-#: portable detection list their own patterns in ``extra_credential_patterns``.
-BUILTIN_CREDENTIAL_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("aws_access_key", "(AKIA|ASIA)[0-9A-Z]{16}"),
-    ("github_token", "gh[opsur]_[A-Za-z0-9]{36}"),
-    ("github_fine_grained_pat", "github_pat_[0-9a-zA-Z_]{50,}"),
-    ("openai_key", "sk-[A-Za-z0-9_-]{20,}"),
-    ("slack_token", "xox[baprs]-[0-9A-Za-z-]{10,}"),
-    (
-        "private_key",
-        "-----BEGIN[ \\t]+(RSA[ \\t]+|EC[ \\t]+|OPENSSH[ \\t]+)?PRIVATE[ \\t]+KEY-----",
-    ),
-    (
-        "jwt",
-        "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}",
-    ),
-)
-
-
-def evaluate_browser_automation(
-    rule: BrowserAutomationRule, action: EvaluationAction
-) -> _BlockDecision:
-    verb = action.target or ""
-
-    # 1. verb allowlist (exact match).
-    if rule.allowed_verbs and verb not in rule.allowed_verbs:
-        return _deny(
-            "rules.browser_automation.allowed_verbs",
-            "browser verb is not in the allowlist",
-        )
-
-    # 2. destination host.
-    if action.url is not None:
-        host = normalize_host(action.url)
-        if _any_host_pattern_matches(rule.blocked_domains, host):
-            return _deny(
-                "rules.browser_automation.blocked_domains",
-                "destination host is explicitly blocked",
-            )
-        if rule.allowed_domains and not _any_host_pattern_matches(
-            rule.allowed_domains, host
-        ):
-            return _deny(
-                "rules.browser_automation.allowed_domains",
-                "destination host is not in the allowlist",
-            )
-
-    # 3. credential detection on typed input.
-    if rule.credential_detection and action.content is not None:
-        content = action.content
-        for name, pattern in BUILTIN_CREDENTIAL_PATTERNS:
-            try:
-                compiled = compile_profile_regex(pattern)
-            except ValueError:
-                continue
-            if compiled.search(content):
-                return _deny(
-                    "rules.browser_automation.credential_detection",
-                    f"typed input matched built-in credential detector '{name}'",
-                )
-        for index, pattern in enumerate(rule.extra_credential_patterns):
-            try:
-                compiled = compile_profile_regex(pattern)
-            except ValueError as exc:
-                return _deny(
-                    f"rules.browser_automation.extra_credential_patterns[{index}]",
-                    f"credential pattern is invalid: {exc}",
-                )
-            if compiled.search(content):
-                return _deny(
-                    "rules.browser_automation.credential_detection",
-                    f"typed input matched extra_credential_patterns[{index}]",
-                )
-
-    return _allow("rules.browser_automation", "browser action is permitted")
-
-
-def evaluate_code_execution(
-    rule: CodeExecutionRule, action: EvaluationAction
-) -> _BlockDecision:
-    language = action.target or ""
-
-    # 1. language allowlist (exact, case-sensitive).
-    if rule.language_allowlist and language not in rule.language_allowlist:
-        return _deny(
-            "rules.code_execution.language_allowlist",
-            "language is not in the allowlist",
-        )
-
-    # 2. network access.
-    if action.network is True and not rule.network_access:
-        return _deny(
-            "rules.code_execution.network_access",
-            "network access is not permitted for code execution",
-        )
-
-    # 3. execution time bound.
-    if (
-        rule.max_execution_time_ms is not None
-        and action.timeout_ms is not None
-        and action.timeout_ms > rule.max_execution_time_ms
-    ):
-        return _deny(
-            "rules.code_execution.max_execution_time_ms",
-            "requested execution time exceeds max_execution_time_ms",
-        )
-
-    # 4. module denylist: literal word match within the scanned prefix.
-    if action.content is not None:
-        scanned = _scan_prefix(action.content, rule.max_scan_bytes)
-        for module in rule.module_denylist:
-            if contains_word(scanned, module):
-                return _deny(
-                    "rules.code_execution.module_denylist",
-                    f"code references denied module '{module}'",
-                )
-
-    return _allow("rules.code_execution", "code execution is permitted")
 
 
 def _scan_prefix(content: str, max_scan_bytes: Optional[int]) -> str:
@@ -1234,46 +383,13 @@ def _trigger_name(trigger: TransitionTrigger) -> str:
     return _TRIGGER_NAMES.get(trigger, "")
 
 
-def _next_posture_state(
-    posture_ext: PostureExtension, current: str, signal: str
-) -> Optional[str]:
-    # D18 (pending): first matching transition in document order.
-    for transition in posture_ext.transitions:
-        if transition.from_state != "*" and transition.from_state != current:
-            continue
-        if _trigger_name(transition.on) != signal:
-            continue
-        return transition.to
-    return None
-
-
 def resolve_posture(
     spec: HushSpec,
     matched_profile: Optional[OriginProfile],
     posture: Optional[PostureContext],
 ) -> Optional[PostureResult]:
-    if spec.extensions is None or spec.extensions.posture is None:
-        return None
-    posture_ext = spec.extensions.posture
-
-    current: Optional[str] = None
-    if matched_profile is not None and matched_profile.posture is not None:
-        current = matched_profile.posture
-    elif posture is not None and posture.current is not None:
-        current = posture.current
-    if current is None:
-        current = posture_ext.initial
-
-    signal: Optional[str] = None
-    if posture is not None and posture.signal is not None and posture.signal != "none":
-        signal = posture.signal
-
-    if signal is not None:
-        next_state = _next_posture_state(posture_ext, current, signal)
-        if next_state is not None:
-            return PostureResult(current=current, next=next_state)
-
-    return PostureResult(current=current, next=current)
+    """Posture state in force for this action, and the state it transitions to."""
+    return compiled_policy(spec).resolve_posture(matched_profile, posture)
 
 
 def _match_origin(rules: OriginMatch, origin: OriginContext) -> Optional[int]:
@@ -1316,24 +432,7 @@ def select_origin_profile(
     profiles with a ``match`` object every present field of which is satisfied;
     a ``space_id`` match wins outright, then the greatest matched-field count,
     then document order."""
-    if origin is None:
-        return None
-    if spec.extensions is None or spec.extensions.origins is None:
-        return None
-
-    best: Optional[tuple[int, OriginProfile]] = None
-    for profile in spec.extensions.origins.profiles:
-        if profile.match_rules is None:
-            continue
-        matched_fields = _match_origin(profile.match_rules, origin)
-        if matched_fields is None:
-            continue
-        if profile.match_rules.space_id is not None:
-            return profile
-        if best is None or matched_fields > best[0]:
-            best = (matched_fields, profile)
-
-    return best[1] if best is not None else None
+    return compiled_policy(spec).select_origin_profile(origin)
 
 
 # ---------------------------------------------------------------------------
@@ -1363,35 +462,54 @@ def normalize_path(target: str) -> str:
     return f"/{joined}" if absolute else joined
 
 
+@lru_cache(maxsize=4096)
 def _path_glob_regex(pattern: str) -> Optional[re.Pattern[str]]:
-    """Compile a path glob (core spec 3.14.1) into an anchored regex."""
+    """Compile a path glob (core spec 3.14.1) into an anchored regex.
+
+    Memoized: the same glob recurs across a policy's rule blocks and across
+    documents that share a base, and a compiled pattern is immutable.
+    """
     chars = list(unicodedata.normalize("NFC", pattern))
-    regex = "^"
+    parts: list[str] = ["^"]
+    literal: list[str] = []
+
+    def flush() -> None:
+        if literal:
+            # re.escape() escapes character by character, so escaping a run is
+            # the same string as escaping each of its characters in turn.
+            parts.append(re.escape("".join(literal)))
+            literal.clear()
+
     index = 0
     length = len(chars)
     while index < length:
         ch = chars[index]
         if ch == "*" and index + 1 < length and chars[index + 1] == "*":
             at_segment_start = index == 0 or chars[index - 1] == "/"
+            flush()
             if (
                 at_segment_start
                 and index + 2 < length
                 and chars[index + 2] == "/"
             ):
                 # `**/`: zero or more complete leading segments.
-                regex += "(?:[^/]*/)*"
+                parts.append("(?:[^/]*/)*")
                 index += 3
             else:
-                regex += ".*"
+                parts.append(".*")
                 index += 2
             continue
         if ch == "*":
-            regex += "[^/]*"
+            flush()
+            parts.append("[^/]*")
         elif ch == "?":
-            regex += "[^/]"
+            flush()
+            parts.append("[^/]")
         else:
-            regex += re.escape(ch)
+            literal.append(ch)
         index += 1
+    flush()
+    regex = "".join(parts)
     # \Z (not $): Python's `$` also matches just before a trailing "\n", so a
     # glob like "internal.corp" would wrongly match "internal.corp\n". \Z is a
     # true end-of-string anchor with no newline exception, matching Rust
@@ -1404,13 +522,13 @@ def _path_glob_regex(pattern: str) -> Optional[re.Pattern[str]]:
 
 
 def path_glob_matches(pattern: str, path: str) -> bool:
-    """Whether *path* (already normalized) matches the path glob *pattern*."""
+    """Whether *path* (already normalized) matches the path glob *pattern*.
+
+    One-shot: the glob is compiled for this call. A policy's own globs are
+    compiled once by :mod:`hushspec.compiled` instead.
+    """
     compiled = _path_glob_regex(pattern)
     return compiled is not None and compiled.search(path) is not None
-
-
-def _any_path_glob_matches(patterns: list[str], path: str) -> bool:
-    return any(path_glob_matches(pattern, path) for pattern in patterns)
 
 
 def glob_matches(pattern: str, target: str) -> bool:
@@ -1536,13 +654,11 @@ def _is_ip_literal(host: str) -> bool:
     return host.startswith("[") or _is_ipv4_literal(host)
 
 
-def host_pattern_matches(pattern: str, host: str) -> bool:
-    """Whether a normalized *host* matches a host pattern (core spec 3.14.2):
-    ``*`` is one or more non-dot characters, ``**`` one or more characters
-    including dots, everything else literal. IP literals match only exactly."""
-    pattern = _normalize_host_pattern(pattern)
-    if _is_ip_literal(host):
-        return pattern == host
+@lru_cache(maxsize=4096)
+def _host_pattern_regex(pattern: str) -> Optional[re.Pattern[str]]:
+    """Compile an already-normalized host pattern (core spec 3.14.2) into an
+    anchored regex: ``*`` is one or more non-dot characters, ``**`` one or more
+    characters including dots, everything else literal."""
     regex = "^"
     chars = list(pattern)
     index = 0
@@ -1560,16 +676,23 @@ def host_pattern_matches(pattern: str, host: str) -> bool:
         index += 1
     regex += r"\Z"
     try:
-        compiled = re.compile(regex)
+        return re.compile(regex)
     except re.error:
-        return False
-    return compiled.search(host) is not None
+        return None
 
 
-def _any_host_pattern_matches(patterns: list[str], host: Optional[str]) -> bool:
-    if host is None:
-        return False
-    return any(host_pattern_matches(pattern, host) for pattern in patterns)
+def host_pattern_matches(pattern: str, host: str) -> bool:
+    """Whether a normalized *host* matches a host pattern (core spec 3.14.2).
+
+    IP literals match only exactly. One-shot: the pattern is normalized and
+    compiled for this call; a policy's own host patterns are prepared once by
+    :mod:`hushspec.compiled` instead.
+    """
+    pattern = _normalize_host_pattern(pattern)
+    if _is_ip_literal(host):
+        return pattern == host
+    compiled = _host_pattern_regex(pattern)
+    return compiled is not None and compiled.search(host) is not None
 
 
 _PUNYCODE_BASE = 36

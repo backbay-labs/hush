@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1e63e39c015d01182296a25e82ba120dc26e9cf70b5edb8d9b38de8279af7517"
+  },
+  "action": {
+    "type": "code_exec",
+    "target": "javascript",
+    "content_hash": "sha256:0a286891c11c056e1ab5bfc25bf5d6b2f5b06d38eac10944f678fd8a2e70c393",
+    "content_size": 14
+  },
+  "decision": "deny",
+  "matched_rule": "rules.code_execution.language_allowlist",
+  "reason": "language is not in the allowlist",
+  "rule_trace": [
+    {
+      "rule_block": "code_execution",
+      "rule_path": "rules.code_execution.language_allowlist",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "language is not in the allowlist"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

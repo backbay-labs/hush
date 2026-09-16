@@ -16,6 +16,7 @@ from hushspec.generated_contract import (
     CLASSIFICATIONS,
     COMPUTER_USE_KEYS,
     COMPUTER_USE_MODES,
+    CHANGELOG_ENTRY_KEYS,
     CONTROL_MAPPING_KEYS,
     DEFAULT_ACTIONS,
     DETECTION_KEYS,
@@ -310,7 +311,52 @@ def _validate_governance_metadata(obj: dict[str, Any], errors: list[str]) -> Non
     _validate_optional_int(obj, "policy_version", errors, f"{path}.policy_version", min_value=1)
     _validate_optional_string(obj, "effective_date", errors, f"{path}.effective_date")
     _validate_optional_string(obj, "expiry_date", errors, f"{path}.expiry_date")
+    _validate_optional_string(obj, "owner", errors, f"{path}.owner")
+    _validate_optional_string_array(obj, "reviewers", errors, f"{path}.reviewers")
+    _validate_optional_string(obj, "next_review_date", errors, f"{path}.next_review_date")
+    _validate_optional_string(obj, "supersedes", errors, f"{path}.supersedes")
+    _validate_changelog(obj, errors, path)
     _validate_control_mappings(obj, errors, path)
+
+
+def _validate_changelog(obj: dict[str, Any], errors: list[str], path: str) -> None:
+    """Structural check of ``metadata.changelog`` (core spec 2.5.2).
+
+    The typed model cannot tell a missing ``version`` from an empty one, so the
+    required fields are checked here, at the raw level, exactly as the control
+    mappings above are.
+    """
+    if "changelog" not in obj:
+        return
+
+    changelog = obj["changelog"]
+    if not isinstance(changelog, list):
+        errors.append(f"{path}.changelog must be an array")
+        return
+
+    for index, entry in enumerate(changelog):
+        entry_path = f"{path}.changelog[{index}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{entry_path} must be an object")
+            continue
+
+        _reject_unknown_keys(entry, CHANGELOG_ENTRY_KEYS, errors, entry_path)
+
+        version = _validate_required_string(
+            entry, "version", errors, f"{entry_path}.version is required"
+        )
+        if version == "":
+            errors.append(f"{entry_path}.version must not be empty")
+
+        _validate_required_string(entry, "date", errors, f"{entry_path}.date is required")
+
+        _validate_optional_string(entry, "author", errors, f"{entry_path}.author")
+
+        summary = _validate_required_string(
+            entry, "summary", errors, f"{entry_path}.summary is required"
+        )
+        if summary == "":
+            errors.append(f"{entry_path}.summary must not be empty")
 
 
 def _validate_control_mappings(obj: dict[str, Any], errors: list[str], path: str) -> None:

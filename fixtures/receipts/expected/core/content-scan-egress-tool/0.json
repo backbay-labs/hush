@@ -1,0 +1,45 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:78e68ad3929cf9183d5c9e6ea4b0a7891efc85817c856177f5a2cd8329ab0854"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com",
+    "content_hash": "sha256:b8c88afc5d5db1037825ee4032d7f9dcb269d0798967a89c095a0be03fb33842",
+    "content_size": 30
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.aws",
+  "reason": "content matched secret pattern 'aws'",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "domain is explicitly allowed"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.aws",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'aws'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

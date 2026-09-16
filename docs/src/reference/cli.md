@@ -70,7 +70,8 @@ Exit: `0` valid · `1` invalid · `2` a file was missing.
 
 Error codes in the output: `E000` I/O, `E001` YAML parse, `E002` unsupported
 version, `E003` duplicate pattern name, `E004` other validation error, `E005`
-invalid regex, `E010` extends resolution failure.
+invalid regex, `E010` extends resolution failure, `E011` a `metadata` date that
+is not an ISO 8601 calendar date (`YYYY-MM-DD`).
 
 ## `h2h resolve`
 
@@ -98,6 +99,38 @@ layers, say) fails rather than being emitted. Warnings go to stderr, so
 
 Exit: `0` success · `1` parse, resolve or validation failure (including strict
 warnings) · `2` the policy file was not found.
+
+## `h2h hash`
+
+Print a policy's **content hash** — the portable identity defined by the canonical form
+specification (`spec/hushspec-canonical.md`). Two parties holding the same policy get the
+same digest in every SDK, regardless of which optional keys the author omitted or which
+language wrote the file.
+
+```bash
+h2h hash policy.yaml                      # sha256:<64 hex>
+h2h hash policy.yaml --format canonical   # the RFC 8785 JSON the digest covers
+h2h hash builtin:default                  # builtins work too
+h2h resolve policy.yaml | h2h hash -      # read an already-resolved document
+```
+
+| Flag | Description |
+|---|---|
+| `<POLICY>` | Policy file, a builtin reference (`builtin:default`), or `-` for stdin. |
+| `-f, --format <digest\|canonical>` | Print the `sha256:` digest (default) or the canonical JSON text it is computed over. |
+| `--strict` | Fail when the document produces validation warnings. |
+
+The hash covers the **resolved** document, so a policy that declares `extends` is resolved
+through the same chain `h2h resolve` walks before it is hashed. Changing a base therefore
+changes the identity of every policy that extends it, even when the child file is
+untouched — that is the point: the enforced policy changed. `merge_strategy` is a
+resolution field and never appears in the canonical form.
+
+The document is validated first: an invalid document has no canonical form, because a
+digest for something no engine would accept is worse than no digest at all.
+
+Exit: `0` success · `1` parse, resolve, validation or canonicalization failure · `2` the
+policy file was not found.
 
 ## `h2h lint`
 
@@ -268,24 +301,35 @@ found or the policy could not be read.
 ## `h2h audit`
 
 Show a policy's governance metadata (author, approver, classification,
-lifecycle, change ticket, effective and expiry dates) and run advisory
-governance checks.
+lifecycle, change ticket, effective and expiry dates), run the governance
+checks, and optionally print the control → rule-path matrix.
 
 ```bash
 h2h audit policy.yaml
 h2h audit policy.yaml --format json
+h2h audit policy.yaml --controls        # control -> rule-path matrix + coverage
+h2h audit policy.yaml --strict          # every finding is fatal
 ```
 
 | Flag | Description |
 |---|---|
 | `<FILE>` | Policy file to audit. |
 | `-f, --format <text\|json>` | Output format (default `text`). |
+| `--controls` | Also report the control → rule-path matrix and rule-block coverage. |
+| `--strict` | Exit non-zero when a check fails, a governance finding is reported, or a control rule path does not resolve (L012). |
 
-Checks are advisory: a failing check is reported but does not by itself change
-the exit code.
+Every governance check that fires is listed with its code, severity and the
+document path it concerns — `GOV_SOD_VIOLATION` (author is also the approver),
+`GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER`,
+`GOV_EXPIRED`, `GOV_LIFECYCLE`, `GOV_MISSING_APPROVAL_DATE`,
+`GOV_RESTRICTED_NO_APPROVER` (core spec 2.5). Warnings are advisory: without
+`--strict` they are reported and the command still exits `0`. The one
+error-severity finding, `GOV_SELF_SUPERSEDES`, fails the audit either way,
+because `h2h validate` rejects that document too.
 
-Exit: `0` report produced · `1` the document did not parse · `2` file not found
-or unreadable.
+Exit: `0` report produced · `1` the document did not parse, an error-severity
+finding fired, or `--strict` saw a failing check or finding · `2` file not
+found or unreadable.
 
 ## `h2h init`
 
@@ -317,7 +361,7 @@ h2h schema --list --format json
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | `core`, `detection`, `evaluator-test`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
+| `[NAME]` | `core`, `detection`, `evaluator-test`, `keyring`, `origins`, `posture`, `receipt`, `signature` — or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -327,25 +371,68 @@ Exit: `0` printed · `2` unknown schema name, or neither a name nor `--list`.
 
 ## `h2h sign` / `h2h verify` / `h2h keygen`
 
-Ed25519 detached signatures over the raw policy bytes.
+Ed25519 detached signatures, envelope format 0.2
+([`spec/hushspec-signing.md`](https://github.com/backbay-labs/hush/blob/main/spec/hushspec-signing.md)).
 
 ```bash
 h2h keygen --output-dir ~/.hushspec
-h2h sign policy.yaml --key h2h.key --signer security@example.com
-h2h verify policy.yaml --key h2h.pub
+h2h sign policy.yaml --key ~/.hushspec/h2h.key.pem --expires-in 90d --signer security@example.com
+h2h verify policy.yaml --keyring ~/.hushspec/keyring.json --last-seen-version 4
 ```
 
 | Command | Flags |
 |---|---|
-| `keygen` | `--output-dir <DIR>` (default `.`); writes `h2h.key` (mode `0600`) and `h2h.pub`. |
-| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--key-id <ID>`, `--signer <IDENTITY>`, `-o, --output <PATH>` (default `<POLICY>.sig`). |
-| `verify` | `<POLICY>`, `-k, --key <PATH>`, `-s, --sig <PATH>` (default `<POLICY>.sig`). |
+| `keygen` | `--output-dir <DIR>` (default `.`), `--name <NAME>` (default `h2h`), `--convert <OLD_KEY>`, `--force`; writes `<NAME>.key.pem` (PKCS#8, mode `0600`) and `<NAME>.pub.pem` (SPKI), and prints the `key_id`. |
+| `sign` | `<POLICY>`, `-k, --key <PATH>`, `--expires-in <DURATION>` (`30d`, `12h`, `90m`, `3600s`), `--policy-version <N>`, `--signer <IDENTITY>`, `-o, --out <PATH>` (default `<POLICY>.sig`), `--allow-unapproved`. |
+| `verify` | `<POLICY>`, `-s, --sig <PATH>`, `-k, --key <PATH>` **or** `--keyring <PATH>`, `--now <TIMESTAMP>`, `--max-skew <SECONDS>` (default `300`), `--last-seen-version <N>`, `-f, --format <text\|json>`. |
 
-Signatures cover the file's exact bytes, so reformatting a signed policy
-invalidates its signature — sign after `h2h fmt`, not before.
+### What is signed
 
-Exit: `0` signed / signature valid · `1` any failure (unreadable file, invalid
-key, missing or invalid signature).
+The envelope covers the **content hash of the resolved policy**, not the file's
+bytes — the same digest `h2h hash` prints. So reformatting a signed policy keeps
+its signature valid, and a change to a base policy reached through `extends`
+invalidates every signature over the policies that extend it, because the
+enforced policy changed. `sign` resolves and validates the chain first and
+refuses to sign when it cannot.
+
+### Keys and trust
+
+Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public — exactly
+what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
+key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
+recomputes that id from the public key rather than trusting a keyring's claim.
+
+`--keyring` takes a [keyring document](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-keyring.v0.schema.json)
+listing the trusted keys, each of which may carry `not_after` (retire a key
+without invalidating older signatures) or `revoked: true` (reject everything it
+signed). `--key` is the one-key shorthand.
+
+### Reason codes
+
+A failed `verify` prints the reason code of the first check that failed, the
+same string a receipt's `policy.signature.reason` carries:
+
+`malformed_envelope`, `unsupported_format_version`, `unsupported_algorithm`,
+`unknown_key_id`, `key_revoked`, `key_retired`, `signed_at_in_future`,
+`expired`, `signature_mismatch`, `content_hash_mismatch`,
+`policy_version_rollback`.
+
+### Migrating from 0.1
+
+HushSpec 0.1 signed raw file bytes with bespoke 32-byte key files. Convert the
+key with `h2h keygen --convert old.key` and re-sign: a 0.1 signature attests
+something 0.2 does not claim, so `verify` reports
+`unsupported_format_version` and says to re-sign rather than failing obscurely.
+
+`sign` refuses a policy whose `metadata.lifecycle_state` is not `approved` or
+`deployed`, and a policy that does not parse: a signature is a durable
+attestation that this exact document was approved, so signing a draft would
+attest something that never happened. `--allow-unapproved` overrides the gate
+for development.
+
+Exit: `0` signed / signature valid · `1` a signing or verification failure
+(invalid key or keyring, any reason code) · `2` usage (missing policy or
+signature file, nothing to trust, unparseable `--now` or `--expires-in`).
 
 ## `h2h panic`
 
@@ -405,3 +492,108 @@ h2h --version          # clap's short form, CLI version only
 | `target` | Rust target triple the binary was built for. |
 
 Exit: always `0`.
+
+## Evidence chain (RFC 09 Wave 4)
+
+### Verify-on-load flags (`eval`, `explain`, `resolve`)
+
+| Flag | Meaning |
+|---|---|
+| `--require-signature` | Every non-builtin document in the `extends` chain must carry a detached signature that verifies, or a matching `#sha256:` pin. A policy that does not verify is refused: `eval` emits a deny receipt with `matched_rule: __hushspec_policy_unverified__` and `policy.signature.verified: false`, and exits 1. |
+| `--keyring <PATH>` / `--key <PATH>` | Trusted keys (keyring JSON, or one SPKI PEM). With `--keyring` and no `--require-signature`, verification runs opportunistically and the outcome is recorded in the receipt. |
+| `--now`, `--max-skew`, `--last-seen-version` | Verifier clock, allowed signer skew, rollback floor (signing spec 6). |
+
+Digest pins: `extends: "builtin:default#sha256:<hex>"` is checked always; the pinned value is the base's *own* content hash, which `h2h hash <policy> --own` prints. A mismatch is reported as `digest_mismatch` (exit 2 on `eval`).
+
+### Receipt fields on `eval`
+
+| Flag | Meaning |
+|---|---|
+| `--agent-id`, `--session-id`, `--principal` | The `actor` recorded in the receipt (`runtime` is always `h2h/<version>`). |
+| `--monitor` | Record the disposition in monitor mode (`would_block` instead of `blocked`). |
+| `--log <PATH>` | Append a `policy_loaded` entry and the receipt to a hash-linked log (log spec). |
+| `--log-key <PATH>` | Sign every log entry with this Ed25519 private key. |
+
+### `h2h log verify <files...>`
+
+Checks a hash-linked log: sequence continuity, `prev_hash` links, `entry_hash` recomputation, payload/entry-type agreement, receipt schema validity, and entry signatures. Pass rotated files oldest first; each continued file must start with a `log_started` entry that names the previous file's last hash.
+
+| Flag | Meaning |
+|---|---|
+| `--keyring` / `--key` | Verify entry signatures. |
+| `--require-signatures` | Every entry must be signed and verify. |
+| `--now`, `--max-skew` | Verifier clock and skew. |
+| `--format json` | Machine-readable report. |
+
+Exit 0 when the chain verifies, 1 at the first break (reported as `file:line: reason`), 2 for unusable inputs.
+
+### `h2h receipts verify <files...>`
+
+Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
+
+Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
+
+### `h2h hash --own`
+
+Prints the document's own content hash with `extends` and `merge_strategy` stripped and no resolution: the value a digest pin names and a receipt records for a chain link.
+
+## `h2h bundle`
+
+Policy bundle attestation ([bundle spec](../bundle-spec.md)). A bundle is a DSSE
+envelope whose payload is an in-toto Statement v1: the subject is the canonical
+form of the *resolved* policy, and the predicate carries that document, every
+`extends` hop with its own hash and signature status, and the resolver that
+produced them. It is signed with the same Ed25519 keys as policies and receipts,
+so `h2h keygen` output works unchanged.
+
+### `h2h bundle create <policy>`
+
+Resolves the policy (builtin references included), validates the merged
+document, builds the statement, and signs it.
+
+| Flag | Meaning |
+|---|---|
+| `--key <PATH>` | PEM PKCS#8 Ed25519 **private** key that signs the bundle. Without it the bundle is unsigned: it still carries the evidence, attests nothing, and `h2h bundle verify` rejects it -- so `create` warns. |
+| `--keyring <PATH>` | Trusted keys used to verify the *policy's own* signature while loading it. The outcome is recorded in `predicate.signature_verification` and per chain link. Omitted keyring means no verification was attempted, and those members are absent rather than `false`. |
+| `--require-signature` | Refuse to bundle unless every non-builtin hop carries a verifying signature or a matching `#sha256:` pin. |
+| `--max-skew <SECONDS>` | Allowed signer clock skew while verifying on load (default 300). |
+| `--created-at <TIMESTAMP>` | Pin `predicate.created_at` instead of reading the clock. With it, the same policy, key and resolver produce a byte-identical bundle: JCS payload plus deterministic Ed25519. |
+| `--subject-name <NAME>` | Override the subject label (defaults to the policy's `name`, then the leaf file name). |
+| `--out <PATH>` | Output path (defaults to `<policy file name>.bundle.json` in the working directory). |
+| `--format json` | Machine-readable summary. |
+
+Filesystem chain sources are recorded relative to the working directory when
+they lie beneath it, so a bundle built in CI carries no runner workspace path.
+
+Exit 0 on success, 1 when the policy will not resolve, will not validate, or is
+refused by `--require-signature`, 2 for unusable inputs.
+
+### `h2h bundle verify <bundle.json>`
+
+Runs the four ordered checks of bundle spec 5.2 and stops at the first failure.
+
+| Flag | Meaning |
+|---|---|
+| `--keyring <PATH>` / `--key <PATH>` | Trusted keys (keyring JSON, or one SPKI PEM taken as a one-key keyring). One of the two is required. |
+| `--policy <PATH>` | Re-resolve this policy and assert the bundle attests it (check 4): the canonical forms must match and every chain hop's hash must match, in order. Chain `source` labels are not compared -- the same policy resolved on another host is the same policy. |
+| `--now <TIMESTAMP>` | Verifier clock. A bundle carries no expiry, so this only stamps `verified_at` in the report. |
+| `--format json` | Machine-readable report carrying `valid` and, on failure, `reason` and `detail`. |
+
+| Reason code | Check |
+|---|---|
+| `malformed_bundle` | 1: not a well-formed envelope, statement, or predicate; an unknown `predicateType` or `bundle_version` lands here. |
+| `unknown_key_id` | 2: no signature names a key in the keyring. |
+| `dsse_signature_mismatch` | 2: a trusted key was found but no signature verifies over the PAE. An unsigned bundle reports this. |
+| `subject_digest_mismatch` | 3: `predicate.resolved` does not hash to the declared subject. |
+| `policy_mismatch` | 4: `--policy` resolves to something else, or does not resolve at all. |
+
+Exit 0 on `valid`, 1 with the reason code otherwise, 2 for unusable inputs.
+
+### `h2h bundle inspect <bundle.json>`
+
+Prints the predicate summary -- subject, content hash, policy identity,
+resolver, `created_at`, every chain hop with its signature status, and the
+signing key ids -- without verifying anything. `--format json` prints the whole
+decoded statement.
+
+Exit 0, or 1 when the bundle cannot be decoded.

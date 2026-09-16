@@ -18,7 +18,8 @@
     "build": "tsc",
     "lint": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "npm run build && node bench/evaluate.mjs"
   },
   "license": "Apache-2.0",
   "repository": {

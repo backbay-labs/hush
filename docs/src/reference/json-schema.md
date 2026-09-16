@@ -8,11 +8,20 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 
 | File | Description |
 |------|-------------|
-| `hushspec-core.v0.schema.json` | Core HushSpec document schema (v0.x) |
+| `hushspec-core.v0.schema.json` | Core HushSpec document schema (v0.x): rules, extensions, metadata, `when` conditions |
 | `hushspec-posture.v0.schema.json` | Posture extension schema (v0.x) |
 | `hushspec-origins.v0.schema.json` | Origins extension schema (v0.x) |
 | `hushspec-detection.v0.schema.json` | Detection extension schema (v0.x) |
+| `hushspec-evaluator-test.v0.schema.json` | Evaluation test fixture format used by `h2h test`, the testkit, and every SDK's shared-fixture runner |
+| `hushspec-hash-vector.v0.schema.json` | Canonical-form test vector format ([`fixtures/core/hash/`](https://github.com/backbay-labs/hush/tree/main/fixtures/core/hash)); see the [canonical form spec](../canonical-spec.md) |
+| `hushspec-receipt.v0.schema.json` | Decision receipt format 0.2; see the [receipt spec](../receipt-spec.md) |
+| `hushspec-log-entry.v0.schema.json` | Hash-linked log entry (receipts and policy events) written by chained sinks and checked by `h2h log verify` |
+| `hushspec-signature.v0.schema.json` | Detached policy signature envelope 0.2; see the [signing spec](../signing-spec.md) |
+| `hushspec-keyring.v0.schema.json` | Trusted keyring consumed by verify-on-load and `h2h verify --keyring` |
+| `hushspec-bundle.v0.schema.json` | Policy bundle attestation (DSSE envelope with an in-toto statement) produced by `h2h bundle create` |
 | `hushspec-framework-registry.v0.schema.json` | Schema for [`spec/registries/frameworks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/frameworks.yaml), the compliance frameworks `metadata.controls[].framework` may name |
+
+Every schema is embedded in the `h2h` binary; `h2h schema --list` prints the names and `h2h schema <name>` prints one to stdout.
 
 ## Usage
 

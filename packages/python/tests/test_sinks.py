@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from hushspec.evaluate import Decision
+from hushspec.log import PolicyEvent
 from hushspec.receipt import (
     ActionSummary,
     DecisionReceipt,
+    EnforcementSummary,
     PolicySummary,
-    RuleEvaluation,
+    RuleOutcome,
+    RuleTraceEntry,
 )
 from hushspec.sinks import (
     CallbackSink,
@@ -14,6 +17,7 @@ from hushspec.sinks import (
     FilteredSink,
     MultiSink,
     NullSink,
+    ReceiptSink,
     StderrReceiptSink,
 )
 
@@ -23,34 +27,35 @@ from hushspec.sinks import (
 
 
 
+def _policy_summary() -> PolicySummary:
+    return PolicySummary(
+        name="test-policy",
+        spec_version="0.1.0",
+        content_hash="sha256:" + "ab" * 32,
+    )
+
+
 def _make_receipt(decision: Decision = Decision.ALLOW) -> DecisionReceipt:
     return DecisionReceipt(
-        receipt_id="test-receipt-001",
+        receipt_id="01994b7e-2c1a-7c3e-8f4a-0123456789ab",
         timestamp="2026-03-15T00:00:00.000Z",
-        hushspec_version="0.1.0",
-        action=ActionSummary(
-            type="tool_call",
-            target="test_tool",
-            content_redacted=False,
-        ),
+        time_source="system",
+        action=ActionSummary(type="tool_call", target="test_tool"),
         decision=decision,
         matched_rule="rules.tool_access.allow",
         reason="tool is explicitly allowed",
         rule_trace=[
-            RuleEvaluation(
+            RuleTraceEntry(
                 rule_block="tool_access",
-                outcome="allow",
-                matched_rule="rules.tool_access.allow",
+                outcome=RuleOutcome.ALLOW,
+                rule_path="rules.tool_access.allow",
                 reason="tool is explicitly allowed",
                 evaluated=True,
             ),
         ],
-        policy=PolicySummary(
-            name="test-policy",
-            version="0.1.0",
-            content_hash="abc123",
-        ),
-        evaluation_duration_us=42,
+        policy=_policy_summary(),
+        enforcement=EnforcementSummary("enforce", "allowed"),
+        duration_us=42,
     )
 
 
@@ -73,7 +78,9 @@ class TestFileReceiptSink:
         assert len(lines) == 2
 
         parsed1 = json.loads(lines[0])
-        assert parsed1["receipt_id"] == "test-receipt-001"
+        assert parsed1["receipt_id"] == "01994b7e-2c1a-7c3e-8f4a-0123456789ab"
+        assert parsed1["receipt_version"] == "0.2"
+        assert parsed1["enforcement"] == {"mode": "enforce", "outcome": "allowed"}
 
         parsed2 = json.loads(lines[1])
         assert parsed2["decision"] == "deny"
@@ -208,3 +215,36 @@ class TestNullSink:
         sink.send(_make_receipt(Decision.ALLOW))
         sink.send(_make_receipt(Decision.DENY))
         sink.send(_make_receipt(Decision.WARN))
+
+
+
+# ReceiptSink.record_policy_event
+
+
+
+class TestPolicyEvents:
+    def test_plain_sinks_ignore_a_policy_event(self):
+        # Log spec section 6: only a hash-linked log writes the record; every
+        # other sink carries receipts and must not break on one.
+        received: list[DecisionReceipt] = []
+        sink = CallbackSink(lambda r: received.append(r))
+        sink.record_policy_event(PolicyEvent.loaded(_policy_summary()))
+        NullSink().record_policy_event(PolicyEvent.loaded(_policy_summary()))
+        assert received == []
+
+    def test_multi_and_filtered_sinks_forward_it(self):
+        seen: list[PolicyEvent] = []
+
+        class Recording(ReceiptSink):
+            def send(self, receipt):
+                pass
+
+            def record_policy_event(self, event):
+                seen.append(event)
+
+        event = PolicyEvent.loaded(_policy_summary())
+        MultiSink([Recording(), Recording()]).record_policy_event(event)
+        # A decision filter is about decisions; a policy event is not one, and
+        # a log that drops it cannot map its receipts back to a policy at all.
+        FilteredSink.deny_only(Recording()).record_policy_event(event)
+        assert len(seen) == 3

@@ -1,17 +1,38 @@
-import { readFileSync } from 'node:fs';
 import type { HushSpec } from './schema.js';
 import { PolicyWatcher, type WatcherOptions } from './watcher.js';
 import { PolicyPoller, type PollerOptions } from './poller.js';
-import { parse } from './parse.js';
-import { createBuiltinLoader, resolve as resolveSpec, resolveFromFile } from './resolve.js';
-import { computePolicyHash } from './receipt.js';
+import type { ResolveOptions, Resolution } from './resolve.js';
+import {
+  createBuiltinLoader,
+  resolveFromFileWithOptions,
+  resolveWithOptionsAsync,
+} from './resolve.js';
 import { createHttpLoader } from './http-loader.js';
 
 export interface PolicyProvider {
   load(): Promise<HushSpec>;
-  watch(onChange: (spec: HushSpec) => void, onError?: (error: Error) => void): void;
+  watch(
+    onChange: (spec: HushSpec, resolution?: Resolution) => void,
+    onError?: (error: Error) => void,
+  ): void;
   stop(): void;
   current(): HushSpec | null;
+  /**
+   * The chain and signature outcome of the load that produced
+   * {@link PolicyProvider.current}, when the provider verified one.
+   *
+   * `HushGuard.fromProvider()` adopts it rather than resolving again: by the
+   * time a provider hands over a spec the `extends` chain is already merged
+   * away and the source it was verified against is gone, so a second
+   * resolution could not find the signatures the first one checked.
+   */
+  resolution?(): Resolution | null;
+}
+
+/** Verification options shared by the built-in providers. */
+export interface ProviderResolveOptions {
+  /** Verification policy applied on every load and reload. */
+  resolveOptions?: ResolveOptions;
 }
 
 export class FileProvider implements PolicyProvider {
@@ -19,31 +40,38 @@ export class FileProvider implements PolicyProvider {
   private debounceMs: number;
   private watcher: PolicyWatcher | null = null;
   private currentSpec: HushSpec | null = null;
+  private currentResolution: Resolution | null = null;
+  private readonly resolveOptions: ResolveOptions;
 
-  constructor(path: string, options?: { debounceMs?: number }) {
+  constructor(path: string, options?: { debounceMs?: number } & ProviderResolveOptions) {
     this.path = path;
     this.debounceMs = options?.debounceMs ?? 300;
+    this.resolveOptions = options?.resolveOptions ?? {};
   }
 
   async load(): Promise<HushSpec> {
     // Resolve here, not in the guard: a file policy's relative `extends`
-    // references are only meaningful against this file's own directory.
-    const result = resolveFromFile(this.path);
-    if (!result.ok) {
-      throw new Error(result.error);
-    }
-    this.currentSpec = result.value;
-    return result.value;
+    // references are only meaningful against this file's own directory, and
+    // its detached signature is only findable next to the file itself.
+    const resolution = resolveFromFileWithOptions(this.path, this.resolveOptions);
+    this.currentResolution = resolution;
+    this.currentSpec = resolution.spec;
+    return resolution.spec;
   }
 
-  watch(onChange: (spec: HushSpec) => void, onError?: (error: Error) => void): void {
+  watch(
+    onChange: (spec: HushSpec, resolution?: Resolution) => void,
+    onError?: (error: Error) => void,
+  ): void {
     this.stop();
 
     const watcherOptions: WatcherOptions = {
       debounceMs: this.debounceMs,
-      onChange: (spec: HushSpec) => {
+      resolveOptions: this.resolveOptions,
+      onChange: (spec: HushSpec, resolution?: Resolution) => {
         this.currentSpec = spec;
-        onChange(spec);
+        this.currentResolution = resolution ?? null;
+        onChange(spec, resolution);
       },
       onError,
     };
@@ -51,6 +79,7 @@ export class FileProvider implements PolicyProvider {
     this.watcher = new PolicyWatcher(this.path, watcherOptions);
     const spec = this.watcher.start();
     this.currentSpec = spec;
+    this.currentResolution = this.watcher.resolution();
   }
 
   stop(): void {
@@ -63,6 +92,10 @@ export class FileProvider implements PolicyProvider {
   current(): HushSpec | null {
     return this.currentSpec;
   }
+
+  resolution(): Resolution | null {
+    return this.currentResolution;
+  }
 }
 
 export class HttpProvider implements PolicyProvider {
@@ -71,6 +104,8 @@ export class HttpProvider implements PolicyProvider {
   private maxStaleMs: number;
   private poller: PolicyPoller | null = null;
   private currentSpec: HushSpec | null = null;
+  private currentResolution: Resolution | null = null;
+  private readonly resolveOptions: ResolveOptions;
   private readonly httpLoader: ReturnType<typeof createHttpLoader>;
 
   constructor(url: string, options?: {
@@ -80,10 +115,11 @@ export class HttpProvider implements PolicyProvider {
     timeoutMs?: number;
     maxSize?: number;
     cacheDir?: string;
-  }) {
+  } & ProviderResolveOptions) {
     this.url = url;
     this.intervalMs = options?.intervalMs ?? 60_000;
     this.maxStaleMs = options?.maxStaleMs ?? Infinity;
+    this.resolveOptions = options?.resolveOptions ?? {};
     this.httpLoader = createHttpLoader({
       authHeader: options?.authHeader,
       timeoutMs: options?.timeoutMs,
@@ -93,23 +129,30 @@ export class HttpProvider implements PolicyProvider {
   }
 
   async load(): Promise<HushSpec> {
-    const spec = await this.loadRemoteSpec();
-    this.currentSpec = spec;
-    return spec;
+    const resolution = await this.loadRemoteSpec();
+    this.currentResolution = resolution;
+    this.currentSpec = resolution.spec;
+    return resolution.spec;
   }
 
-  watch(onChange: (spec: HushSpec) => void, onError?: (error: Error) => void): void {
+  watch(
+    onChange: (spec: HushSpec, resolution?: Resolution) => void,
+    onError?: (error: Error) => void,
+  ): void {
     this.stop();
 
     const pollerOptions: PollerOptions = {
       loader: async () => {
-        const spec = await this.loadRemoteSpec();
-        return { spec, fingerprint: computePolicyHash(spec) };
+        const resolution = await this.loadRemoteSpec();
+        // `content_hash` is the canonical hash of the resolved policy, which
+        // is exactly the "did it change" fingerprint the poller wants.
+        return { spec: resolution.spec, resolution, fingerprint: resolution.content_hash };
       },
       intervalMs: this.intervalMs,
-      onChange: (spec: HushSpec) => {
+      onChange: (spec: HushSpec, resolution?: Resolution) => {
         this.currentSpec = spec;
-        onChange(spec);
+        this.currentResolution = resolution ?? null;
+        onChange(spec, resolution);
       },
       onError,
       maxStaleMs: this.maxStaleMs,
@@ -139,23 +182,28 @@ export class HttpProvider implements PolicyProvider {
     return this.currentSpec;
   }
 
-  private async loadRemoteSpec(): Promise<HushSpec> {
+  resolution(): Resolution | null {
+    return this.currentResolution;
+  }
+
+  private async loadRemoteSpec(): Promise<Resolution> {
     const loaded = await this.httpLoader(this.url);
-    if (loaded.spec.extends == null) {
-      return loaded.spec;
-    }
-    // `resolve()` is synchronous, so a remote policy can only extend a
-    // builtin. A remote base (`extends: https://...`) fails closed here with
-    // a clear message rather than being evaluated without its base.
-    const resolved = resolveSpec(loaded.spec, {
-      source: loaded.source,
-      load: createBuiltinLoader(),
-    });
-    if (!resolved.ok) {
+    // A remote policy may only extend a builtin: a remote base
+    // (`extends: https://...`) fails closed here with a clear message rather
+    // than being evaluated without its base. `source` is the URL the policy
+    // came from, so the default locator looks for `<url>.sig`.
+    try {
+      return await resolveWithOptionsAsync(loaded.spec, {
+        source: loaded.source,
+        loader: createBuiltinLoader(),
+        options: this.resolveOptions,
+      });
+    } catch (error) {
+      if (loaded.spec.extends == null) throw error;
+      const message = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `Failed to resolve policy 'extends: ${loaded.spec.extends}' from ${this.url}: ${resolved.error}`,
+        `Failed to resolve policy 'extends: ${loaded.spec.extends}' from ${this.url}: ${message}`,
       );
     }
-    return resolved.value;
   }
 }

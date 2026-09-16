@@ -1,0 +1,42 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:afc39b3bbf00f919e838e5e83badb066cb5977e3cdd98a691bdc004a4756cb28"
+  },
+  "action": {
+    "type": "computer_use",
+    "target": "remote.file_transfer"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.computer_use.mode",
+  "reason": "unlisted computer-use action is denied",
+  "rule_trace": [
+    {
+      "rule_block": "computer_use",
+      "rule_path": "rules.computer_use.mode",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "unlisted computer-use action is denied"
+    },
+    {
+      "rule_block": "remote_desktop_channels",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no remote_desktop_channels rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

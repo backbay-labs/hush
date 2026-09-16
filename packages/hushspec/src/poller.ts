@@ -1,53 +1,69 @@
 import { createHash } from 'node:crypto';
 import { parse } from './parse.js';
-import { createBuiltinLoader, resolve as resolveSpec } from './resolve.js';
+import type { ResolveOptions, Resolution } from './resolve.js';
+import { createBuiltinLoader, resolveWithOptions } from './resolve.js';
 import type { HushSpec } from './schema.js';
 
 /**
- * Parse polled YAML and resolve its `extends` chain.
+ * Parse polled YAML, resolve its `extends` chain, and verify whatever the
+ * options require.
  *
  * A polled document has no directory of its own, so only `builtin:` bases can
  * be resolved; anything else fails closed here instead of reaching the guard
- * as a leaf policy that silently drops every block its base declares.
+ * as a leaf policy that silently drops every block its base declares. It has
+ * no source either, so `requireSignature` on a raw-YAML poll refuses the load:
+ * there is nowhere to look for the envelope. A caller that polls signed
+ * policies should return a {@link PolicySnapshot} from a loader that verified
+ * against the real source (`HttpProvider` does).
  */
-function parseAndResolve(yaml: string): { ok: true; value: HushSpec } | { ok: false; error: Error } {
+function parseAndResolve(
+  yaml: string,
+  options: ResolveOptions,
+): { ok: true; value: Resolution } | { ok: false; error: Error } {
   const parsed = parse(yaml);
   if (!parsed.ok) {
     return { ok: false, error: new Error(`Failed to parse policy: ${parsed.error}`) };
   }
-  if (parsed.value.extends == null) {
-    return { ok: true, value: parsed.value };
-  }
-  const resolved = resolveSpec(parsed.value, { load: createBuiltinLoader() });
-  if (!resolved.ok) {
+  try {
+    return {
+      ok: true,
+      value: resolveWithOptions(parsed.value, { loader: createBuiltinLoader(), options }),
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return {
       ok: false,
-      error: new Error(
-        `Failed to resolve policy 'extends: ${parsed.value.extends}': ${resolved.error}`,
-      ),
+      error:
+        parsed.value.extends == null
+          ? new Error(`Failed to load policy: ${message}`)
+          : new Error(`Failed to resolve policy 'extends: ${parsed.value.extends}': ${message}`),
     };
   }
-  return { ok: true, value: resolved.value };
 }
 
 export interface PolicySnapshot {
   spec: HushSpec;
   fingerprint?: string;
+  /** The verified resolution behind `spec`, when the loader produced one. */
+  resolution?: Resolution;
 }
 
 export interface PollerOptions {
   loader: () => Promise<string | PolicySnapshot>;
   intervalMs?: number;
-  onChange: (spec: HushSpec) => void;
+  onChange: (spec: HushSpec, resolution?: Resolution) => void;
   onError?: (error: Error) => void;
   /** If set, `current()` throws when the last load exceeds this age. */
   maxStaleMs?: number;
+  /** Verification policy for loaders that return raw YAML. */
+  resolveOptions?: ResolveOptions;
 }
 
 export class PolicyPoller {
   private options: PollerOptions;
   private timer: ReturnType<typeof setInterval> | null = null;
   private currentSpec: HushSpec | null = null;
+  private currentResolution: Resolution | null = null;
   private lastSuccessfulLoad: number = 0;
   private contentHash: string | null = null;
   private nextLoadId: number = 0;
@@ -100,6 +116,11 @@ export class PolicyPoller {
     return this.doLoad(true);
   }
 
+  /** The chain and signature outcome behind the policy `current()` returns. */
+  resolution(): Resolution | null {
+    return this.currentResolution;
+  }
+
   private async doLoad(throwOnError: boolean): Promise<HushSpec> {
     const loadId = ++this.nextLoadId;
     let loaded: string | PolicySnapshot;
@@ -118,11 +139,12 @@ export class PolicyPoller {
     }
 
     let spec: HushSpec;
+    let resolution: Resolution | undefined;
     let fingerprintSource: string;
 
     if (typeof loaded === 'string') {
       fingerprintSource = loaded;
-      const result = parseAndResolve(loaded);
+      const result = parseAndResolve(loaded, this.options.resolveOptions ?? {});
       if (!result.ok) {
         const error = result.error;
         if (throwOnError && this.currentSpec == null) {
@@ -134,9 +156,11 @@ export class PolicyPoller {
         this.options.onError?.(error);
         return this.currentSpec!;
       }
-      spec = result.value;
+      resolution = result.value;
+      spec = resolution.spec;
     } else {
       spec = loaded.spec;
+      resolution = loaded.resolution;
       fingerprintSource = loaded.fingerprint ?? JSON.stringify(loaded.spec);
     }
 
@@ -153,9 +177,10 @@ export class PolicyPoller {
 
     this.latestAppliedLoadId = loadId;
     this.currentSpec = spec;
+    this.currentResolution = resolution ?? null;
     this.contentHash = hash;
     this.lastSuccessfulLoad = Date.now();
-    this.options.onChange(spec);
+    this.options.onChange(spec, resolution);
 
     return spec;
   }

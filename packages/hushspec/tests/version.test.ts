@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   HUSHSPEC_SUPPORTED_MINORS,
   HUSHSPEC_VERSION,
+  SDK_NAME,
+  SDK_VERSION,
   isSupported,
   supportedMinor,
 } from '../src/version.js';
@@ -46,5 +51,26 @@ describe('version acceptance (D14)', () => {
     expect(result.errors[0].message).toBe(
       'unsupported hushspec version: 0.9.0 (this engine accepts minor versions 0.1, 0.2)',
     );
+  });
+});
+
+// The SDK identity a receipt log's `sdk` member records (log spec 6) has to be
+// this package's real name and version, or a log would attribute entries to a
+// release that never wrote them.
+
+describe('SDK identity', () => {
+  it('matches package.json', () => {
+    const packageJson = JSON.parse(
+      readFileSync(
+        path.join(path.dirname(fileURLToPath(import.meta.url)), '../package.json'),
+        'utf8',
+      ),
+    ) as { name: string; version: string };
+    expect(SDK_NAME).toBe(packageJson.name);
+    expect(SDK_VERSION).toBe(packageJson.version);
+  });
+
+  it('is distinct from the specification version', () => {
+    expect(SDK_VERSION).not.toBe(HUSHSPEC_VERSION);
   });
 });

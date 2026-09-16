@@ -108,13 +108,13 @@ This rule applies at every level, including the top level (`rules: {}`, `extensi
 
 Properties whose default **is** an empty array (`patterns`, `allow`, `block`, `exceptions`, and so on) are unaffected: the empty array is the default and is materialized anyway.
 
-**Presence-significant exceptions.** For the following origins fields, an empty value changes meaning and MUST be preserved:
+**Presence-significant exception.** One field's empty value changes meaning and MUST be preserved:
 
 | Schema | Property | Why presence matters |
 |---|---|---|
 | `OriginProfile` | `match` | `match: {}` is the explicit default profile; an absent `match` never matches (Origins Section 3, D12). |
-| `ToolAccessRule` (profile overlay) | `allow`, `block`, `require_confirmation` | An overlay field that is written overrides the base block, even when written empty; an absent field inherits (Origins Section 4). |
-| `EgressRule` (profile overlay) | `allow`, `block` | Same tri-state rule. |
+
+The origins profile overlay lists -- `ToolAccessRule.allow`, `block`, `require_confirmation` and `EgressRule.allow`, `block` -- are **not** presence-significant: Origins Section 4 gives an absent overlay list ("inherit the base") and a present-but-empty one ("contributes nothing") the same evaluation result, so a written-empty overlay list has no meaning for the canonical form to carry.
 
 No other field in the current schemas is presence-significant. A future schema revision that adds one MUST extend this table in the same change.
 
@@ -162,7 +162,7 @@ The following points are ambiguous from the schemas alone. This section resolves
 | `PostureState.capabilities`, `PostureState.budgets` | No default; absent and empty both mean "none". | Empty is omitted. |
 | `Condition.all_of`, `Condition.any_of`, `Condition.context` | No default; empty is vacuous. | Empty is omitted. |
 | `OriginProfile.match` | `{}` and absent differ. | Preserved (Section 3.3 table). |
-| Origin overlays `allow`/`block`/`require_confirmation` | Tri-state overlays. | Preserved (Section 3.3 table). |
+| Origin overlays `allow`/`block`/`require_confirmation` | Absent inherits the base; written empty contributes nothing. | Both evaluate alike (Origins Section 4), so empty is omitted. |
 | `origins.profiles` | No default; `[]` is the same as absent. | Empty is omitted. |
 | Posture root `states`, `transitions` | Required. | Required properties are never omitted, even when empty. |
 | `metadata` sub-fields | No defaults. | Written values only. `metadata.signature` is stripped (Section 3.1). |
@@ -273,7 +273,8 @@ Vectors are YAML files under `fixtures/core/hash/` conforming to `schemas/hushsp
 | `metadata-governance.yaml` | Section 3.1: metadata is covered by the hash. |
 | `when-conditions.yaml` | Sections 3.2 and 3.3 applied to `when`; `timezone` default. |
 | `extension-posture.yaml` | Section 3.4: schema maps, required-but-empty arrays. |
-| `extension-origins.yaml` | Section 3.3 presence-significant exceptions; origins defaults. |
+| `extension-origins.yaml` | Section 3.3: the presence-significant `match: {}`; origins defaults. |
+| `origins-overlay-empties.yaml` | Section 3.3: overlay lists written empty are omitted; `match: {}` is kept. |
 | `extension-detection.yaml` | Section 3.4: detector defaults. |
 | `extends-resolved.yaml` | Section 2.1: canonicalized after resolution; `source` shows the unresolved child. |
 
@@ -283,7 +284,7 @@ Verify with:
 python3 scripts/canonical_json.py --check fixtures/core/hash
 ```
 
-No SDK test runner walks `fixtures/core/hash/` yet. Wave 4 (RFC 09 P2-02) adds the runners in all four SDKs and a differential-test assertion that every SDK reports the same content hash for every generated policy.
+All four SDKs walk `fixtures/core/hash/`, as does the conformance testkit's `hash` fixture category. `hushspec-difftest` additionally asserts that every SDK reports the same content hash for every generated policy.
 
 ---
 
@@ -297,3 +298,5 @@ No SDK test runner walks `fixtures/core/hash/` yet. Wave 4 (RFC 09 P2-02) adds t
 ## Appendix A. Changes from 0.1
 
 HushSpec 0.1 defined no canonical form. Each SDK hashed its own serialization of the parsed document, so identical policies produced four different `content_hash` values. This specification replaces all of those with one definition and moves the wire form from bare hex to `sha256:`-prefixed hex.
+
+Within the 0.2 draft, an earlier revision of Section 3.3 also declared the five origins profile overlay lists presence-significant. It no longer does: Origins Section 4 makes an absent overlay list and an empty one evaluate identically, so the distinction never reached a decision, while no SDK's typed model could express it. `OriginProfile.match` is now the only presence-significant field. A document that writes an empty overlay list has a different content hash under this revision than under that earlier draft.

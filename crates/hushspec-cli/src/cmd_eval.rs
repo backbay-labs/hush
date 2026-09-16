@@ -1,8 +1,10 @@
 use colored::Colorize;
-use hushspec::receipt::RuleOutcome;
+use hushspec::log::{ChainedFileSink, PolicyEvent};
+use hushspec::receipt::{DetectorEvaluation, RuleOutcome, RuleTraceEntry};
 use hushspec::{
-    AuditConfig, Decision, DecisionReceipt, EvaluationAction, HushSpec, evaluate_audited,
-    evaluate_with_detection, validate,
+    Actor, AuditConfig, AuditContext, CompiledPolicy, Decision, DecisionReceipt, EnforcementMode,
+    EnforcementSummary, EvaluationAction, HushSpec, Policy, PolicyError, PolicySummary, Resolution,
+    ResolveError, ResolveOptions, policy_summary, unverified_policy_receipt,
 };
 
 const KNOWN_ACTION_TYPES: &[&str] = &[
@@ -109,6 +111,35 @@ pub struct EvalArgs {
     #[arg(long)]
     explain: bool,
 
+    #[command(flatten)]
+    verify: crate::verify_opts::VerifyOnLoadArgs,
+
+    /// Record the decision in monitor mode (a warn or deny is recorded as
+    /// would_block instead of blocked)
+    #[arg(long)]
+    monitor: bool,
+
+    /// Actor recorded in the receipt: the agent
+    #[arg(long, value_name = "ID")]
+    agent_id: Option<String>,
+
+    /// Actor recorded in the receipt: the session, run, or job
+    #[arg(long, value_name = "ID")]
+    session_id: Option<String>,
+
+    /// Actor recorded in the receipt: the principal the agent acts for
+    #[arg(long, value_name = "ID")]
+    principal: Option<String>,
+
+    /// Append the receipt to a hash-linked log (log spec), recording a
+    /// policy_loaded event first
+    #[arg(long, value_name = "PATH")]
+    log: Option<std::path::PathBuf>,
+
+    /// Sign log entries with this Ed25519 private key (PEM)
+    #[arg(long, value_name = "PATH", requires = "log")]
+    log_key: Option<std::path::PathBuf>,
+
     /// Output format
     #[arg(short, long, default_value = "text")]
     format: EvalOutputFormat,
@@ -119,12 +150,9 @@ pub fn run(args: EvalArgs) -> i32 {
     // panic latch before evaluation, otherwise the kill switch is a no-op here.
     crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
 
-    let policy = match load_policy(&args.policy) {
-        Ok(policy) => policy,
-        Err(message) => {
-            eprintln!("{} {message}", "error:".red());
-            return 2;
-        }
+    let options = match args.verify.to_options() {
+        Ok(options) => options,
+        Err(code) => return code,
     };
 
     let mut action = match build_action(&args) {
@@ -153,29 +181,117 @@ pub fn run(args: EvalArgs) -> i32 {
         );
     }
 
-    let mut receipt = evaluate_audited(&policy.spec, &action, &AuditConfig::default());
-    apply_detection(&mut receipt, &policy.spec, &action);
+    let ctx = audit_context(&args);
 
-    match args.format {
-        EvalOutputFormat::Text => {
-            if args.explain {
-                print_explain(&receipt, &policy);
-            } else {
-                print_compact(&receipt);
-            }
-        }
-        EvalOutputFormat::Json => {
-            if let Err(code) = print_json_report(&EvalReport::from(&receipt)) {
+    let policy = match load_policy(&args.policy, options) {
+        Ok(policy) => policy,
+        Err(LoadFailure::Unverified { summary, message }) => {
+            // Signing spec 6.5: refuse to evaluate against an unverified
+            // policy, but still emit the evidence that the refusal happened.
+            eprintln!("{} {message}", "error:".red());
+            let receipt = unverified_policy_receipt(*summary, &action, &ctx);
+            if let Err(code) = record_log(&args, None, &receipt) {
                 return code;
             }
-        }
-        EvalOutputFormat::Receipt => {
-            if let Err(code) = print_json_report(&receipt) {
+            if let Err(code) = emit(&args, &receipt, None) {
                 return code;
             }
+            return 1;
         }
+        Err(LoadFailure::Other(message)) => {
+            eprintln!("{} {message}", "error:".red());
+            return 2;
+        }
+    };
+
+    let receipt = match policy
+        .compiled
+        .evaluate_audited(&action, &AuditConfig::default(), &ctx)
+    {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            eprintln!("{} {error}", "error:".red());
+            return 2;
+        }
+    };
+    let resolution = policy.compiled.resolution().ok();
+    if let Err(code) = record_log(&args, resolution, &receipt) {
+        return code;
+    }
+    if let Err(code) = emit(&args, &receipt, Some(&policy)) {
+        return code;
     }
     decision_exit_code(receipt.decision)
+}
+
+fn audit_context(args: &EvalArgs) -> AuditContext {
+    AuditContext {
+        actor: Some(Actor {
+            agent_id: args.agent_id.clone(),
+            session_id: args.session_id.clone(),
+            principal: args.principal.clone(),
+            runtime: Some(format!("h2h/{}", env!("CARGO_PKG_VERSION"))),
+        }),
+        enforcement_mode: if args.monitor {
+            EnforcementMode::Monitor
+        } else {
+            EnforcementMode::Enforce
+        },
+        ..AuditContext::default()
+    }
+}
+
+/// Append the receipt (and, when a resolution is in hand, a preceding
+/// `policy_loaded` event) to the log named by `--log`.
+fn record_log(
+    args: &EvalArgs,
+    resolution: Option<&Resolution>,
+    receipt: &DecisionReceipt,
+) -> Result<(), i32> {
+    let Some(path) = &args.log else {
+        return Ok(());
+    };
+    let failed = |message: String| {
+        eprintln!("{} {message}", "error:".red());
+        2
+    };
+    let mut sink = ChainedFileSink::open(path)
+        .map_err(|e| failed(format!("failed to open log {}: {e}", path.display())))?;
+    if let Some(key_path) = &args.log_key {
+        let key = hushspec::signing::load_private_key(key_path)
+            .map_err(|e| failed(format!("failed to load {}: {e}", key_path.display())))?;
+        sink = sink.with_signer(key);
+    }
+    if let Some(resolution) = resolution {
+        let mode = if args.monitor {
+            EnforcementMode::Monitor
+        } else {
+            EnforcementMode::Enforce
+        };
+        sink.record_policy_event(&PolicyEvent::loaded(policy_summary(resolution), mode))
+            .map_err(|e| failed(format!("failed to write policy event: {e}")))?;
+    }
+    hushspec::sink::ReceiptSink::send(&sink, receipt)
+        .map_err(|e| failed(format!("failed to write receipt: {e}")))?;
+    Ok(())
+}
+
+fn emit(
+    args: &EvalArgs,
+    receipt: &DecisionReceipt,
+    policy: Option<&LoadedPolicy>,
+) -> Result<(), i32> {
+    match args.format {
+        EvalOutputFormat::Text => {
+            match (args.explain, policy) {
+                (true, Some(policy)) => print_explain(receipt, policy),
+                _ => print_compact(receipt),
+            }
+            Ok(())
+        }
+        EvalOutputFormat::Json => print_json_report(&EvalReport::from(receipt)),
+        EvalOutputFormat::Receipt => print_json_report(receipt),
+    }
 }
 
 /// `h2h explain` — identical to `h2h eval` with trace rendering forced on.
@@ -184,93 +300,91 @@ pub fn run_explain(mut args: EvalArgs) -> i32 {
     run(args)
 }
 
-/// Fold a policy's `detection:` extension into an already-computed receipt.
-///
-/// `h2h eval`/`explain` build their receipt from `evaluate_audited`, which does
-/// not consult the detection extension. When content detection escalates the
-/// decision (allow/warn -> deny, or allow -> warn), mirror the escalated
-/// decision, matched_rule, and reason onto the receipt and append a `detection`
-/// rule-trace entry so the exit code, compact output, and explain trace all
-/// agree. A no-op when the policy has no detection extension, there is no
-/// content, or detection does not escalate -- detection never weakens a policy
-/// decision.
-fn apply_detection(receipt: &mut DecisionReceipt, spec: &HushSpec, action: &EvaluationAction) {
-    let detected = evaluate_with_detection(spec, action);
-    if detected.evaluation.decision == receipt.decision {
-        return;
-    }
-
-    let outcome = match detected.evaluation.decision {
-        Decision::Allow => RuleOutcome::Allow,
-        Decision::Warn => RuleOutcome::Warn,
-        Decision::Deny => RuleOutcome::Deny,
-    };
-    receipt.rule_trace.push(hushspec::receipt::RuleEvaluation {
-        rule_block: "detection".to_string(),
-        outcome,
-        matched_rule: detected.evaluation.matched_rule.clone(),
-        reason: detected.evaluation.reason.clone(),
-        evaluated: true,
-    });
-    receipt.decision = detected.evaluation.decision;
-    receipt.matched_rule = detected.evaluation.matched_rule;
-    receipt.reason = detected.evaluation.reason;
-}
-
-/// A resolved, validated policy plus display metadata.
+/// A resolved, validated, compiled policy plus display metadata.
 struct LoadedPolicy {
-    spec: HushSpec,
+    compiled: CompiledPolicy,
     extends: Option<String>,
     source: String,
 }
 
-/// Load a policy from a builtin reference or a filesystem path, resolve
-/// its extends chain, and validate the resolved document.
-fn load_policy(reference: &str) -> Result<LoadedPolicy, String> {
-    if let Some(yaml) = hushspec::load_builtin(reference) {
-        let unresolved = HushSpec::parse(yaml)
-            .map_err(|e| format!("failed to parse builtin '{reference}': {e}"))?;
-        let extends = unresolved.extends.clone();
+enum LoadFailure {
+    /// Verification on load failed (signing spec 6.5): the evaluation is
+    /// refused and a deny receipt records why.
+    Unverified {
+        summary: Box<PolicySummary>,
+        message: String,
+    },
+    Other(String),
+}
+
+/// Load a policy from a builtin reference or a filesystem path and run the
+/// whole pipeline -- resolve with verify-on-load, validate, compile -- through
+/// the [`Policy`] façade, so `h2h eval` takes exactly the path the SDK
+/// documents.
+fn load_policy(reference: &str, options: ResolveOptions) -> Result<LoadedPolicy, LoadFailure> {
+    let (policy, source) = if let Some(yaml) = hushspec::load_builtin(reference) {
         let source = if reference.starts_with("builtin:") {
             reference.to_string()
         } else {
             format!("builtin:{reference}")
         };
-        let loader = hushspec::create_composite_loader();
-        let spec = hushspec::resolve_with_loader(&unresolved, Some(&source), &loader)
-            .map_err(|e| format!("failed to resolve '{reference}': {e}"))?;
-        return validated(LoadedPolicy {
-            spec,
-            extends,
-            source,
-        });
-    }
+        let policy = Policy::from_str(yaml)
+            .map_err(|e| LoadFailure::Other(format!("failed to parse builtin '{reference}': {e}")))?
+            .with_source(source.clone());
+        (policy, source)
+    } else {
+        let path = std::path::Path::new(reference);
+        if !path.exists() {
+            return Err(LoadFailure::Other(format!("file not found: {reference}")));
+        }
+        let policy = Policy::from_path(path).map_err(|e| LoadFailure::Other(e.to_string()))?;
+        (policy, reference.to_string())
+    };
 
-    let path = std::path::Path::new(reference);
-    if !path.exists() {
-        return Err(format!("file not found: {reference}"));
-    }
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("failed to read {reference}: {e}"))?;
-    let unresolved =
-        HushSpec::parse(&content).map_err(|e| format!("failed to parse {reference}: {e}"))?;
-    let extends = unresolved.extends.clone();
-    let spec = hushspec::resolve_from_path_with_builtins(path)
-        .map_err(|e| format!("failed to resolve {reference}: {e}"))?;
-    validated(LoadedPolicy {
-        spec,
+    let extends = policy.spec().extends.clone();
+    // Kept for the unverified-policy receipt, which reports on the leaf.
+    let leaf = policy.spec().clone();
+    let compiled = policy
+        .resolve(options)
+        .compile()
+        .map_err(|error| map_policy_error(error, &leaf, &source))?;
+    Ok(LoadedPolicy {
+        compiled,
         extends,
-        source: reference.to_string(),
+        source,
     })
 }
 
-fn validated(policy: LoadedPolicy) -> Result<LoadedPolicy, String> {
-    let validation = validate(&policy.spec);
-    if !validation.is_valid() {
-        let errors: Vec<String> = validation.errors.iter().map(|e| e.to_string()).collect();
-        return Err(format!("policy failed validation: {}", errors.join(", ")));
+fn map_policy_error(error: PolicyError, leaf: &HushSpec, source: &str) -> LoadFailure {
+    match error {
+        PolicyError::Resolve(ResolveError::SignatureRequired { document, status }) => {
+            match hushspec::own_content_hash(leaf, source) {
+                Ok(content_hash) => LoadFailure::Unverified {
+                    summary: Box::new(PolicySummary {
+                        name: leaf.name.clone(),
+                        version: leaf
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.policy_version)
+                            .map(|v| v as u64),
+                        spec_version: leaf.hushspec.clone(),
+                        content_hash,
+                        extends_chain: None,
+                        signature: Some(status.clone()),
+                    }),
+                    message: format!(
+                        "policy did not verify ({document}): {}",
+                        status.reason.as_deref().unwrap_or("unverified")
+                    ),
+                },
+                Err(e) => LoadFailure::Other(format!("failed to resolve {source}: {e}")),
+            }
+        }
+        PolicyError::Resolve(other) => {
+            LoadFailure::Other(format!("failed to resolve {source}: {other}"))
+        }
+        other => LoadFailure::Other(other.to_string()),
     }
-    Ok(policy)
 }
 
 fn build_action(args: &EvalArgs) -> Result<EvaluationAction, String> {
@@ -514,13 +628,51 @@ fn precedence_note(action_type: &str) -> Option<String> {
     ))
 }
 
+fn enum_label<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_default()
+        .trim_matches('"')
+        .to_string()
+}
+
 fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
     let name = receipt.policy.name.as_deref().unwrap_or("(unnamed)");
-    println!("Policy: {} ({})", name.bold(), receipt.policy.version);
+    println!(
+        "Policy: {} (hushspec {})",
+        name.bold(),
+        receipt.policy.spec_version
+    );
     println!("  source:  {}", policy.source);
-    println!("  sha256:  {}", receipt.policy.content_hash);
+    println!("  hash:    {}", receipt.policy.content_hash);
+    if let Some(version) = receipt.policy.version {
+        println!("  version: {version}");
+    }
     if let Some(extends) = &policy.extends {
         println!("  extends: {extends} (resolved)");
+    }
+    if let Some(chain) = &receipt.policy.extends_chain {
+        println!("  chain:");
+        for link in chain {
+            println!("    {}  {}", link.content_hash, link.source);
+        }
+    }
+    if let Some(signature) = &receipt.policy.signature {
+        let status = if signature.verified {
+            format!(
+                "verified ({})",
+                signature.key_id.as_deref().unwrap_or("unknown key")
+            )
+            .green()
+            .to_string()
+        } else {
+            format!(
+                "NOT verified: {}",
+                signature.reason.as_deref().unwrap_or("unverified")
+            )
+            .red()
+            .to_string()
+        };
+        println!("  signature: {status}");
     }
     println!();
 
@@ -533,13 +685,13 @@ fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
 
     println!("Rule trace:");
     for (index, entry) in receipt.rule_trace.iter().enumerate() {
-        let matched = match &entry.matched_rule {
+        let matched = match &entry.rule_path {
             Some(rule) => rule.clone(),
             None if !entry.evaluated => "(not evaluated)".to_string(),
             None => String::new(),
         };
         let line = format!(
-            "  {}. {:<18} {} {}",
+            "  {}. {:<20} {} {}",
             index + 1,
             entry.rule_block,
             outcome_label(entry.outcome),
@@ -552,6 +704,23 @@ fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
     }
     if let Some(note) = precedence_note(&receipt.action.action_type) {
         println!("Precedence: {note}");
+    }
+    if let Some(trace) = &receipt.detection_trace {
+        println!();
+        println!("Detection trace:");
+        if trace.is_empty() {
+            println!("  (no detector ran)");
+        }
+        for detector in trace {
+            println!(
+                "  {:<22} {:<18} score {:.2}  level {:<10} {}",
+                detector.detector_id,
+                enum_label(&detector.category),
+                detector.score,
+                enum_label(&detector.level),
+                if detector.matched { "matched" } else { "" }
+            );
+        }
     }
     println!();
 
@@ -568,15 +737,20 @@ fn print_explain(receipt: &DecisionReceipt, policy: &LoadedPolicy) {
     if let Some(posture) = &receipt.posture {
         println!("  posture: {} -> {}", posture.current, posture.next);
     }
+    println!(
+        "  enforce: {} / {}",
+        enum_label(&receipt.enforcement.mode),
+        enum_label(&receipt.enforcement.outcome)
+    );
 }
 
 /// Deterministic machine report: the receipt minus its non-deterministic
-/// fields (receipt_id, timestamp, hushspec_version, evaluation_duration_us).
+/// fields (receipt_id, timestamp, actor runtime, duration_us).
 /// Identical inputs produce byte-identical output.
 #[derive(serde::Serialize)]
 struct EvalReport<'a> {
-    policy: &'a hushspec::receipt::PolicySummary,
-    action: &'a hushspec::receipt::ActionSummary,
+    policy: &'a PolicySummary,
+    action: &'a hushspec::ActionSummary,
     decision: Decision,
     #[serde(skip_serializing_if = "Option::is_none")]
     matched_rule: Option<&'a String>,
@@ -586,7 +760,10 @@ struct EvalReport<'a> {
     origin_profile: Option<&'a String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     posture: Option<&'a hushspec::PostureResult>,
-    rule_trace: &'a [hushspec::receipt::RuleEvaluation],
+    rule_trace: &'a [RuleTraceEntry],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detection_trace: Option<&'a Vec<DetectorEvaluation>>,
+    enforcement: &'a EnforcementSummary,
 }
 
 impl<'a> From<&'a DecisionReceipt> for EvalReport<'a> {
@@ -600,6 +777,8 @@ impl<'a> From<&'a DecisionReceipt> for EvalReport<'a> {
             origin_profile: receipt.origin_profile.as_ref(),
             posture: receipt.posture.as_ref(),
             rule_trace: &receipt.rule_trace,
+            detection_trace: receipt.detection_trace.as_ref(),
+            enforcement: &receipt.enforcement,
         }
     }
 }

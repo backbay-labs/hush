@@ -145,6 +145,10 @@ type patchStats struct {
 //
 // `when` conditions are evaluated against action.Context (an empty context and
 // the engine clock when absent).
+//
+// The document is compiled on the fly (and memoized), so a caller evaluating
+// many actions against one policy should hold a [CompiledPolicy] from
+// [CompilePolicy] and call its methods instead.
 func Evaluate(spec *HushSpec, action *EvaluationAction) EvaluationResult {
 	return EvaluateTraced(spec, action, nil, nil).Result
 }
@@ -159,53 +163,7 @@ func EvaluateTraced(
 	context *RuntimeContext,
 	conditions map[string]*Condition,
 ) TracedEvaluation {
-	effective := context
-	if effective == nil {
-		effective = action.Context
-	}
-	if effective == nil {
-		effective = &RuntimeContext{}
-	}
-	evaluator := &evaluator{
-		spec:       spec,
-		action:     action,
-		context:    effective,
-		conditions: conditions,
-		trace:      []RuleEvaluation{},
-	}
-	return evaluator.run()
-}
-
-// applicableBlocks lists the rule blocks applicable to each reference action
-// type, in evaluation order (core spec Section 5). ok is false when the type is
-// unknown to the specification.
-func applicableBlocks(actionType string) (blocks []string, ok bool) {
-	switch actionType {
-	case "file_read":
-		return []string{"forbidden_paths", "path_allowlist"}, true
-	case "file_write":
-		return []string{"forbidden_paths", "path_allowlist", "secret_patterns"}, true
-	case "patch_apply":
-		return []string{"forbidden_paths", "path_allowlist", "patch_integrity", "secret_patterns"}, true
-	case "shell_command":
-		return []string{"shell_commands"}, true
-	case "egress":
-		return []string{"egress", "secret_patterns"}, true
-	case "tool_call":
-		return []string{"tool_access", "secret_patterns"}, true
-	case "computer_use":
-		return []string{"computer_use", "remote_desktop_channels"}, true
-	case "input_inject":
-		return []string{"input_injection"}, true
-	case "browser_action":
-		return []string{"browser_automation"}, true
-	case "code_exec":
-		return []string{"code_execution"}, true
-	case "custom":
-		return nil, true
-	default:
-		return nil, false
-	}
+	return cachedCompile(spec).EvaluateTraced(action, context, conditions)
 }
 
 // blockDecision is the decision contributed by one rule block. An empty
@@ -231,10 +189,6 @@ func denyDecision(matchedRule, reason string) blockDecision {
 // inactive records why an applicable block was not evaluated.
 type inactive struct{ reason string }
 
-func inactiveAbsent(block string) *inactive {
-	return &inactive{reason: fmt.Sprintf("no %s rule configured", block)}
-}
-
 var (
 	inactiveDisabled           = &inactive{reason: "rule disabled"}
 	inactiveConditionFalse     = &inactive{reason: "when condition is false"}
@@ -242,11 +196,25 @@ var (
 )
 
 type evaluator struct {
-	spec       *HushSpec
+	policy     *CompiledPolicy
 	action     *EvaluationAction
 	context    *RuntimeContext
 	conditions map[string]*Condition
 	trace      []RuleEvaluation
+}
+
+// blockMask is the set of applicable blocks that are active for one
+// evaluation: a bit per [blockID] that is present, applicable to this action,
+// enabled, and whose in-document `when` plus any out-of-band condition hold.
+// Inactive blocks carry the reason the trace records. It is derived once per
+// evaluation rather than re-derived per block, and never copies the document.
+type blockMask struct {
+	active  uint32
+	reasons [blockCount]*inactive
+}
+
+func (m *blockMask) isActive(block blockID) bool {
+	return m.active&(1<<uint(block)) != 0
 }
 
 func (e *evaluator) run() TracedEvaluation {
@@ -262,17 +230,16 @@ func (e *evaluator) run() TracedEvaluation {
 		return e.finish(DecisionDeny, UnknownActionTypeRule, reason, "", nil)
 	}
 
+	policy := e.policy
+
 	// Origins guard: select a profile or apply default_behavior.
-	var origins *OriginsExtension
-	if e.spec.Extensions != nil {
-		origins = e.spec.Extensions.Origins
-	}
-	matchedProfile := selectOriginProfile(e.spec, e.action.Origin)
+	origins := policy.origins
+	matchedProfile := origins.selectProfile(e.action.Origin)
 	originProfileID := ""
 	if matchedProfile != nil {
-		originProfileID = matchedProfile.ID
+		originProfileID = matchedProfile.id
 	}
-	if origins != nil && matchedProfile == nil && originDefaultBehavior(origins) == OriginDefaultBehaviorDeny {
+	if origins != nil && matchedProfile == nil && origins.defaultBehavior == OriginDefaultBehaviorDeny {
 		const reason = "no origin profile matched and default_behavior is deny"
 		e.record("origins", RuleOutcomeDeny, "extensions.origins.default_behavior", reason, true)
 		e.skipAll(blocks, "short-circuited by origins deny")
@@ -280,7 +247,7 @@ func (e *evaluator) run() TracedEvaluation {
 	}
 
 	// Posture guard.
-	posture := resolvePosture(e.spec, matchedProfile, e.action.Posture)
+	posture := resolvePosture(policy.posture, matchedProfile, e.action.Posture)
 	if denied := e.postureCapabilityGuard(posture); denied != nil {
 		e.skipAll(blocks, "short-circuited by posture deny")
 		return e.finish(DecisionDeny, denied.matchedRule, denied.reason, originProfileID, posture)
@@ -299,14 +266,15 @@ func (e *evaluator) run() TracedEvaluation {
 
 	// Block evaluation and aggregation (core spec 6.1).
 	normalizedPath := NormalizePath(e.action.Target)
+	mask := e.computeMask(blocks, matchedProfile)
 	decisions := make([]blockDecision, 0, len(blocks))
 	for _, block := range blocks {
-		decision, skipped := e.evaluateBlock(block, matchedProfile, normalizedPath)
-		if skipped != nil {
-			e.record(block, RuleOutcomeSkip, "", skipped.reason, false)
+		if !mask.isActive(block) {
+			e.record(blockNames[block], RuleOutcomeSkip, "", mask.reasons[block].reason, false)
 			continue
 		}
-		e.record(block, outcomeFromDecision(decision.decision), decision.matchedRule, decision.reason, true)
+		decision := e.evaluateBlock(block, matchedProfile, normalizedPath)
+		e.record(blockNames[block], outcomeFromDecision(decision.decision), decision.matchedRule, decision.reason, true)
 		decisions = append(decisions, decision)
 	}
 
@@ -353,57 +321,121 @@ func (e *evaluator) record(block string, outcome RuleOutcome, matchedRule, reaso
 	})
 }
 
-func (e *evaluator) skipAll(blocks []string, reason string) {
+func (e *evaluator) skipAll(blocks []blockID, reason string) {
 	for _, block := range blocks {
-		e.record(block, RuleOutcomeSkip, "", reason, false)
+		e.record(blockNames[block], RuleOutcomeSkip, "", reason, false)
+	}
+}
+
+// computeMask derives the active-block mask for this evaluation. Applicability
+// is checked in the order the specification states it -- presence, then the
+// action-shaped preconditions, then `enabled` and the conditions -- so an
+// inactive block carries exactly the reason the trace has always recorded.
+func (e *evaluator) computeMask(blocks []blockID, profile *compiledOriginProfile) blockMask {
+	var mask blockMask
+	for _, block := range blocks {
+		if reason := e.blockInactive(block, profile); reason != nil {
+			mask.reasons[block] = reason
+			continue
+		}
+		mask.active |= 1 << uint(block)
+	}
+	return mask
+}
+
+func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile) *inactive {
+	policy := e.policy
+	present := policy.gates[block].present
+
+	switch block {
+	case blockSecretPatterns:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		// egress and tool_call are scanned only when they carry content.
+		pathBearing := e.action.Type == "file_write" || e.action.Type == "patch_apply"
+		if !pathBearing && !e.action.HasContent() {
+			return inactiveAbsentBlocks[block]
+		}
+		return e.activity(block)
+
+	case blockToolAccess:
+		overlay := profile != nil && profile.toolAccess != nil
+		if !present && !overlay {
+			return inactiveAbsentBlocks[block]
+		}
+		if !present {
+			// An overlay alone carries no `enabled`/`when` of its own.
+			return nil
+		}
+		return e.activity(block)
+
+	case blockEgress:
+		overlay := profile != nil && profile.egress != nil
+		if !present && !overlay {
+			return inactiveAbsentBlocks[block]
+		}
+		if !present {
+			return nil
+		}
+		return e.activity(block)
+
+	case blockRemoteDesktopChannels:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		if reason := e.activity(block); reason != nil {
+			return reason
+		}
+		// A target that names no channel leaves the block unevaluated.
+		if remoteDesktopChannel(e.action.Target) == "" {
+			return inactiveAbsentBlocks[block]
+		}
+		return nil
+
+	default:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		return e.activity(block)
 	}
 }
 
 // activity reports whether a present block is active: enabled, and its `when`
 // plus any out-of-band condition hold for the runtime context.
-func (e *evaluator) activity(block string, enabled bool, when *Condition) *inactive {
-	if !enabled {
+func (e *evaluator) activity(block blockID) *inactive {
+	gate := &e.policy.gates[block]
+	if !gate.enabled {
 		return inactiveDisabled
 	}
-	if when != nil && !EvaluateCondition(when, e.context) {
+	if gate.when != nil && !EvaluateCondition(gate.when, e.context) {
 		return inactiveConditionFalse
 	}
-	if condition, ok := e.conditions[block]; ok && condition != nil && !EvaluateCondition(condition, e.context) {
-		return inactiveOutOfBandCondition
+	if len(e.conditions) > 0 {
+		condition, ok := e.conditions[blockNames[block]]
+		if ok && condition != nil && !EvaluateCondition(condition, e.context) {
+			return inactiveOutOfBandCondition
+		}
 	}
 	return nil
 }
 
+// evaluateBlock runs one active rule block against the action. Applicability
+// was settled by [evaluator.computeMask]; every block reached here is present
+// and active.
 func (e *evaluator) evaluateBlock(
-	block string,
-	matchedProfile *OriginProfile,
+	block blockID,
+	matchedProfile *compiledOriginProfile,
 	normalizedPath string,
-) (blockDecision, *inactive) {
-	var rules *Rules
-	if e.spec != nil {
-		rules = e.spec.Rules
-	}
+) blockDecision {
+	policy := e.policy
 	action := e.action
 
 	switch block {
-	case "forbidden_paths":
-		if rules == nil || rules.ForbiddenPaths == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.ForbiddenPaths
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateForbiddenPaths(rule, normalizedPath), nil
+	case blockForbiddenPaths:
+		return policy.forbiddenPaths.evaluate(normalizedPath)
 
-	case "path_allowlist":
-		if rules == nil || rules.PathAllowlist == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.PathAllowlist
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
+	case blockPathAllowlist:
 		operation := pathOperationWrite
 		switch action.Type {
 		case "file_read":
@@ -411,157 +443,61 @@ func (e *evaluator) evaluateBlock(
 		case "patch_apply":
 			operation = pathOperationPatch
 		}
-		return evaluatePathAllowlist(rule, normalizedPath, operation), nil
+		return policy.pathAllowlist.evaluate(normalizedPath, operation)
 
-	case "secret_patterns":
-		if rules == nil || rules.SecretPatterns == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.SecretPatterns
-		pathBearing := action.Type == "file_write" || action.Type == "patch_apply"
-		// egress and tool_call are scanned only when they carry content.
-		if !pathBearing && !action.HasContent() {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
+	case blockSecretPatterns:
 		// skip_paths only applies to the path-bearing action types; an egress
 		// or tool_call payload has no path to exclude.
 		var skipPath *string
-		if pathBearing {
+		if action.Type == "file_write" || action.Type == "patch_apply" {
 			skipPath = &normalizedPath
 		}
-		return evaluateSecretPatterns(rule, skipPath, action.ContentOrEmpty()), nil
+		return policy.secretPatterns.evaluate(skipPath, action.ContentOrEmpty())
 
-	case "patch_integrity":
-		if rules == nil || rules.PatchIntegrity == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.PatchIntegrity
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluatePatchIntegrity(rule, action.ContentOrEmpty()), nil
+	case blockPatchIntegrity:
+		return policy.patchIntegrity.evaluate(action.ContentOrEmpty())
 
-	case "shell_commands":
-		if rules == nil || rules.ShellCommands == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.ShellCommands
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateShellCommands(rule, action.Target), nil
+	case blockShellCommands:
+		return policy.shellCommands.evaluate(action.Target)
 
-	case "tool_access":
-		var base *ToolAccessRule
-		if rules != nil {
-			base = rules.ToolAccess
+	case blockToolAccess:
+		var overlay *compiledToolAccessOverlay
+		if matchedProfile != nil {
+			overlay = matchedProfile.toolAccess
 		}
-		var overlay *OriginToolAccessOverlay
-		overlayPrefix := ""
-		if matchedProfile != nil && matchedProfile.ToolAccess != nil {
-			overlay = matchedProfile.ToolAccess
-			overlayPrefix = profileRulePrefix(matchedProfile.ID, "tool_access")
-		}
-		if base == nil && overlay == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		if base != nil {
-			if skipped := e.activity(block, base.Enabled, base.When); skipped != nil {
-				return blockDecision{}, skipped
-			}
-		}
-		return evaluateToolAccess(base, overlay, overlayPrefix, action), nil
+		return evaluateToolAccess(policy.toolAccess, overlay, action)
 
-	case "egress":
-		var base *EgressRule
-		if rules != nil {
-			base = rules.Egress
+	case blockEgress:
+		var overlay *compiledEgressOverlay
+		if matchedProfile != nil {
+			overlay = matchedProfile.egress
 		}
-		var overlay *OriginEgressOverlay
-		overlayPrefix := ""
-		if matchedProfile != nil && matchedProfile.Egress != nil {
-			overlay = matchedProfile.Egress
-			overlayPrefix = profileRulePrefix(matchedProfile.ID, "egress")
-		}
-		if base == nil && overlay == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		if base != nil {
-			if skipped := e.activity(block, base.Enabled, base.When); skipped != nil {
-				return blockDecision{}, skipped
-			}
-		}
-		return evaluateEgressRule(base, overlay, overlayPrefix, NormalizeHost(action.Target)), nil
+		return evaluateEgressRule(policy.egress, overlay, NormalizeHost(action.Target))
 
-	case "computer_use":
-		if rules == nil || rules.ComputerUse == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.ComputerUse
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateComputerUse(rule, action.Target), nil
+	case blockComputerUse:
+		return policy.computerUse.evaluate(action.Target)
 
-	case "remote_desktop_channels":
-		if rules == nil || rules.RemoteDesktopChannels == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.RemoteDesktopChannels
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		decision, ok := evaluateRemoteDesktopChannels(rule, action.Target)
-		if !ok {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		return decision, nil
+	case blockRemoteDesktopChannels:
+		return evaluateRemoteDesktopChannels(policy.remoteDesktop, action.Target)
 
-	case "input_injection":
-		if rules == nil || rules.InputInjection == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.InputInjection
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateInputInjection(rule, action.Target), nil
+	case blockInputInjection:
+		return evaluateInputInjection(policy.inputInjection, action.Target)
 
-	case "browser_automation":
-		if rules == nil || rules.BrowserAutomation == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.BrowserAutomation
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateBrowserAutomation(rule, action), nil
+	case blockBrowserAutomation:
+		return policy.browser.evaluate(action)
 
-	case "code_execution":
-		if rules == nil || rules.CodeExecution == nil {
-			return blockDecision{}, inactiveAbsent(block)
-		}
-		rule := rules.CodeExecution
-		if skipped := e.activity(block, rule.Enabled, rule.When); skipped != nil {
-			return blockDecision{}, skipped
-		}
-		return evaluateCodeExecution(rule, action), nil
+	case blockCodeExecution:
+		return evaluateCodeExecution(policy.codeExecution, action)
 
 	default:
-		return blockDecision{}, inactiveAbsent(block)
+		return allowDecision("", "")
 	}
 }
 
 // postureCapabilityGuard denies when the current posture state lacks the
 // capability required by the action type.
 func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecision {
-	if posture == nil {
-		return nil
-	}
-	if e.spec.Extensions == nil || e.spec.Extensions.Posture == nil {
+	if posture == nil || e.policy.posture == nil {
 		return nil
 	}
 	capability := requiredCapability(e.action.Type)
@@ -569,7 +505,7 @@ func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecisio
 		return nil
 	}
 
-	currentState, ok := e.spec.Extensions.Posture.States[posture.Current]
+	currentState, ok := e.policy.posture.States[posture.Current]
 	if !ok {
 		rule := fmt.Sprintf("extensions.posture.states.%s", posture.Current)
 		reason := fmt.Sprintf("unknown posture state '%s'", posture.Current)
@@ -596,31 +532,25 @@ func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecisio
 // Rule blocks
 // ---------------------------------------------------------------------------
 
-func evaluateForbiddenPaths(rule *ForbiddenPathsRule, path string) blockDecision {
-	if anyPathGlobMatches(rule.Exceptions, path) {
+func (c *compiledForbiddenPaths) evaluate(path string) blockDecision {
+	if c.exceptions.matches(path) {
 		return allowDecision("rules.forbidden_paths.exceptions", "path matched an explicit exception")
 	}
-	if anyPathGlobMatches(rule.Patterns, path) {
+	if c.patterns.matches(path) {
 		return denyDecision("rules.forbidden_paths.patterns", "path matched a forbidden pattern")
 	}
 	return allowDecision("", "path did not match any forbidden pattern")
 }
 
-func evaluatePathAllowlist(rule *PathAllowlistRule, path string, operation pathOperation) blockDecision {
-	var patterns []string
+func (c *compiledPathAllowlist) evaluate(path string, operation pathOperation) blockDecision {
+	patterns := c.write
 	switch operation {
 	case pathOperationRead:
-		patterns = rule.Read
+		patterns = c.read
 	case pathOperationPatch:
-		if len(rule.Patch) > 0 {
-			patterns = rule.Patch
-		} else {
-			patterns = rule.Write
-		}
-	default:
-		patterns = rule.Write
+		patterns = c.patch
 	}
-	if anyPathGlobMatches(patterns, path) {
+	if patterns.matches(path) {
 		return allowDecision("rules.path_allowlist", "path matched allowlist")
 	}
 	return denyDecision("rules.path_allowlist", "path did not match allowlist")
@@ -639,61 +569,50 @@ func severityRank(severity Severity) int {
 	}
 }
 
-// evaluateSecretPatterns scans content and maps the highest matched severity to
-// a decision (D8): critical and error deny, warn warns. A pattern that will not
-// compile under the HushSpec regex profile denies the action rather than being
-// skipped (core spec 3.14.3).
-func evaluateSecretPatterns(rule *SecretPatternsRule, skipPath *string, content string) blockDecision {
-	if skipPath != nil && anyPathGlobMatches(rule.SkipPaths, *skipPath) {
+// evaluate scans content and maps the highest matched severity to a decision
+// (D8): critical and error deny, warn warns. A pattern that would not compile
+// under the HushSpec regex profile denies the action rather than being skipped
+// (core spec 3.14.3) -- the rejection was recorded at compile time.
+func (c *compiledSecretPatterns) evaluate(skipPath *string, content string) blockDecision {
+	if skipPath != nil && c.skipPaths.matches(*skipPath) {
 		return allowDecision("rules.secret_patterns.skip_paths", "path is excluded from secret scanning")
 	}
 
 	bestRank := 0
-	var best *SecretPattern
-	for index := range rule.Patterns {
-		pattern := &rule.Patterns[index]
-		re, err := CompileProfileRegex(pattern.Pattern)
-		if err != nil {
-			return denyDecision(
-				fmt.Sprintf("rules.secret_patterns.patterns.%s.pattern", pattern.Name),
-				fmt.Sprintf("secret pattern '%s' is invalid: %v", pattern.Name, err),
-			)
+	var best *compiledSecretPattern
+	for index := range c.patterns {
+		pattern := &c.patterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
 		}
-		if !re.MatchString(content) {
+		if !pattern.re.MatchString(content) {
 			continue
 		}
 		// Strictly greater keeps the first pattern in document order among
 		// those at the highest matched severity.
-		if rank := severityRank(pattern.Severity); best == nil || rank > bestRank {
-			bestRank, best = rank, pattern
+		if best == nil || pattern.rank > bestRank {
+			bestRank, best = pattern.rank, pattern
 		}
 	}
 
 	if best == nil {
 		return allowDecision("", "content did not match any secret pattern")
 	}
-	matchedRule := fmt.Sprintf("rules.secret_patterns.patterns.%s", best.Name)
-	reason := fmt.Sprintf("content matched secret pattern '%s'", best.Name)
-	if best.Severity == SeverityWarn {
-		return warnDecision(matchedRule, reason)
+	if best.severity == SeverityWarn {
+		return warnDecision(best.matchRule, best.matchReason)
 	}
-	return denyDecision(matchedRule, reason)
+	return denyDecision(best.matchRule, best.matchReason)
 }
 
-func evaluatePatchIntegrity(rule *PatchIntegrityRule, content string) blockDecision {
-	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := CompileProfileRegex(pattern)
-		if err != nil {
-			return denyDecision(
-				fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index),
-				fmt.Sprintf("patch forbidden pattern is invalid: %v", err),
-			)
+func (c *compiledPatchIntegrity) evaluate(content string) blockDecision {
+	rule := c.rule
+	for index := range c.forbiddenPatterns {
+		pattern := &c.forbiddenPatterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
 		}
-		if re.MatchString(content) {
-			return denyDecision(
-				fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index),
-				"patch content matched a forbidden pattern",
-			)
+		if pattern.re.MatchString(content) {
+			return denyDecision(pattern.matchRule, pattern.matchReason)
 		}
 	}
 
@@ -729,54 +648,42 @@ func evaluatePatchIntegrity(rule *PatchIntegrityRule, content string) blockDecis
 	return allowDecision("", "patch passed integrity checks")
 }
 
-func evaluateShellCommands(rule *ShellCommandsRule, command string) blockDecision {
-	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := CompileProfileRegex(pattern)
-		if err != nil {
-			return denyDecision(
-				fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index),
-				fmt.Sprintf("shell forbidden pattern is invalid: %v", err),
-			)
+func (c *compiledShellCommands) evaluate(command string) blockDecision {
+	for index := range c.forbiddenPatterns {
+		pattern := &c.forbiddenPatterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
 		}
-		if re.MatchString(command) {
-			return denyDecision(
-				fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index),
-				"shell command matched a forbidden pattern",
-			)
+		if pattern.re.MatchString(command) {
+			return denyDecision(pattern.matchRule, pattern.matchReason)
 		}
 	}
 	return allowDecision("", "command did not match any forbidden pattern")
 }
 
-// toolListContains compares tool names as exact, case-sensitive strings after
+// evaluateToolAccess compares tool names as exact, case-sensitive strings after
 // NFC normalization (D3, core spec 3.7); glob and regex metacharacters are
-// literal.
-func toolListContains(entries []string, tool string) bool {
-	normalized := norm.NFC.String(tool)
-	for _, entry := range entries {
-		if norm.NFC.String(entry) == normalized {
-			return true
-		}
-	}
-	return false
-}
-
+// literal. The policy's lists were NFC-folded at compile time, so only the
+// action's tool name is folded here.
 func evaluateToolAccess(
-	base *ToolAccessRule,
-	overlay *OriginToolAccessOverlay,
-	overlayPrefix string,
+	base *compiledToolAccess,
+	overlay *compiledToolAccessOverlay,
 	action *EvaluationAction,
 ) blockDecision {
-	tool := action.Target
+	tool := norm.NFC.String(action.Target)
+	overlayPrefix := ""
+	if overlay != nil {
+		overlayPrefix = overlay.prefix
+	}
 
 	// 1. max_args_size: the smaller of the two when both are specified.
 	limit, limitRule, hasLimit := 0, "", false
-	if base != nil && base.MaxArgsSize != nil {
-		limit, limitRule, hasLimit = *base.MaxArgsSize, "rules.tool_access.max_args_size", true
+	if base != nil && base.rule.MaxArgsSize != nil {
+		limit, limitRule, hasLimit = *base.rule.MaxArgsSize, "rules.tool_access.max_args_size", true
 	}
-	if overlay != nil && overlay.MaxArgsSize != nil {
-		if !hasLimit || *overlay.MaxArgsSize < limit {
-			limit, limitRule, hasLimit = *overlay.MaxArgsSize, overlayPrefix+".max_args_size", true
+	if overlay != nil && overlay.overlay.MaxArgsSize != nil {
+		if !hasLimit || *overlay.overlay.MaxArgsSize < limit {
+			limit, limitRule, hasLimit = *overlay.overlay.MaxArgsSize, overlayPrefix+".max_args_size", true
 		}
 	}
 	if hasLimit {
@@ -790,29 +697,29 @@ func evaluateToolAccess(
 	}
 
 	// 2. block: union of both lists.
-	if base != nil && toolListContains(base.Block, tool) {
+	if base != nil && containsNormalizedName(base.block, tool) {
 		return denyDecision("rules.tool_access.block", "tool is explicitly blocked")
 	}
-	if overlay != nil && toolListContains(overlay.Block, tool) {
+	if overlay != nil && containsNormalizedName(overlay.block, tool) {
 		return denyDecision(overlayPrefix+".block", "tool is explicitly blocked")
 	}
 
 	// 3. require_confirmation: union of both lists.
-	if base != nil && toolListContains(base.RequireConfirmation, tool) {
+	if base != nil && containsNormalizedName(base.requireConfirmation, tool) {
 		return warnDecision("rules.tool_access.require_confirmation", "tool requires confirmation")
 	}
-	if overlay != nil && toolListContains(overlay.RequireConfirmation, tool) {
+	if overlay != nil && containsNormalizedName(overlay.requireConfirmation, tool) {
 		return warnDecision(overlayPrefix+".require_confirmation", "tool requires confirmation")
 	}
 
 	// 4/5. allowlist mode: intersection when both lists are non-empty.
-	baseAllow := base != nil && len(base.Allow) > 0
-	overlayAllow := overlay != nil && len(overlay.Allow) > 0
+	baseAllow := base != nil && len(base.allow) > 0
+	overlayAllow := overlay != nil && len(overlay.allow) > 0
 	if baseAllow || overlayAllow {
-		if baseAllow && !toolListContains(base.Allow, tool) {
+		if baseAllow && !containsNormalizedName(base.allow, tool) {
 			return denyDecision("rules.tool_access.allow", "tool is not in the allowlist")
 		}
-		if overlayAllow && !toolListContains(overlay.Allow, tool) {
+		if overlayAllow && !containsNormalizedName(overlay.allow, tool) {
 			return denyDecision(overlayPrefix+".allow", "tool is not in the allowlist")
 		}
 		matchedRule := "rules.tool_access.allow"
@@ -824,12 +731,12 @@ func evaluateToolAccess(
 
 	// 6. default: block when the base says block or the overlay specifies block.
 	baseDefault := DefaultActionAllow
-	if base != nil && base.Default != "" {
-		baseDefault = base.Default
+	if base != nil && base.rule.Default != "" {
+		baseDefault = base.rule.Default
 	}
 	var overlayDefault *DefaultAction
 	if overlay != nil {
-		overlayDefault = overlay.Default
+		overlayDefault = overlay.overlay.Default
 	}
 	effective := DefaultActionAllow
 	if baseDefault == DefaultActionBlock || (overlayDefault != nil && *overlayDefault == DefaultActionBlock) {
@@ -872,25 +779,29 @@ func defaultRulePath(
 }
 
 func evaluateEgressRule(
-	base *EgressRule,
-	overlay *OriginEgressOverlay,
-	overlayPrefix string,
+	base *compiledEgress,
+	overlay *compiledEgressOverlay,
 	host *string,
 ) blockDecision {
+	overlayPrefix := ""
+	if overlay != nil {
+		overlayPrefix = overlay.prefix
+	}
+
 	// 1. block: union of both lists.
-	if base != nil && anyHostPatternMatches(base.Block, host) {
+	if base != nil && base.block.matches(host) {
 		return denyDecision("rules.egress.block", "domain is explicitly blocked")
 	}
-	if overlay != nil && anyHostPatternMatches(overlay.Block, host) {
+	if overlay != nil && overlay.block.matches(host) {
 		return denyDecision(overlayPrefix+".block", "domain is explicitly blocked")
 	}
 
 	// 2. allow: intersection when both lists are non-empty.
-	baseAllow := base != nil && len(base.Allow) > 0
-	overlayAllow := overlay != nil && len(overlay.Allow) > 0
+	baseAllow := base != nil && len(base.allow) > 0
+	overlayAllow := overlay != nil && len(overlay.allow) > 0
 	if baseAllow || overlayAllow {
-		baseOK := !baseAllow || anyHostPatternMatches(base.Allow, host)
-		overlayOK := !overlayAllow || anyHostPatternMatches(overlay.Allow, host)
+		baseOK := !baseAllow || base.allow.matches(host)
+		overlayOK := !overlayAllow || overlay.allow.matches(host)
 		if baseOK && overlayOK {
 			matchedRule := "rules.egress.allow"
 			if overlayAllow {
@@ -902,12 +813,12 @@ func evaluateEgressRule(
 
 	// 3. default.
 	baseDefault := DefaultActionBlock
-	if base != nil && base.Default != "" {
-		baseDefault = base.Default
+	if base != nil && base.rule.Default != "" {
+		baseDefault = base.rule.Default
 	}
 	var overlayDefault *DefaultAction
 	if overlay != nil {
-		overlayDefault = overlay.Default
+		overlayDefault = overlay.overlay.Default
 	}
 	effective := DefaultActionAllow
 	if baseDefault == DefaultActionBlock || (overlayDefault != nil && *overlayDefault == DefaultActionBlock) {
@@ -923,42 +834,57 @@ func evaluateEgressRule(
 	return allowDecision(matchedRule, "domain matched default allow")
 }
 
-func evaluateComputerUse(rule *ComputerUseRule, target string) blockDecision {
-	for _, allowed := range rule.AllowedActions {
+func (c *compiledComputerUse) evaluate(target string) blockDecision {
+	for _, allowed := range c.rule.AllowedActions {
 		if allowed == target {
 			return allowDecision("rules.computer_use.allowed_actions", "computer-use action is explicitly allowed")
 		}
 	}
-	mode := rule.Mode
-	if mode == "" {
-		mode = ComputerUseModeGuardrail
-	}
-	if mode == ComputerUseModeObserve {
+	if c.mode == ComputerUseModeObserve {
 		return allowDecision("rules.computer_use.mode", "observe mode does not block unlisted actions")
 	}
 	// guardrail and fail_closed have identical reference semantics (D9).
 	return denyDecision("rules.computer_use.mode", "unlisted computer-use action is denied")
 }
 
-func evaluateRemoteDesktopChannels(rule *RemoteDesktopChannelsRule, target string) (blockDecision, bool) {
-	field, allowed := "", false
+// remoteDesktopChannel names the remote_desktop_channels field a target
+// selects, or "" when the target names no channel and the block does not apply.
+func remoteDesktopChannel(target string) string {
 	switch target {
 	case "remote.clipboard":
-		field, allowed = "clipboard", rule.Clipboard
+		return "clipboard"
 	case "remote.file_transfer":
-		field, allowed = "file_transfer", rule.FileTransfer
+		return "file_transfer"
 	case "remote.audio":
-		field, allowed = "audio", rule.Audio
+		return "audio"
 	case "remote.drive_mapping":
-		field, allowed = "drive_mapping", rule.DriveMapping
+		return "drive_mapping"
 	default:
-		return blockDecision{}, false
+		return ""
+	}
+}
+
+func evaluateRemoteDesktopChannels(rule *RemoteDesktopChannelsRule, target string) blockDecision {
+	field := remoteDesktopChannel(target)
+	allowed := false
+	switch field {
+	case "clipboard":
+		allowed = rule.Clipboard
+	case "file_transfer":
+		allowed = rule.FileTransfer
+	case "audio":
+		allowed = rule.Audio
+	case "drive_mapping":
+		allowed = rule.DriveMapping
+	default:
+		// Unreachable: applicability already rejected an unnamed channel.
+		return allowDecision("", "")
 	}
 	matchedRule := "rules.remote_desktop_channels." + field
 	if allowed {
-		return allowDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is enabled", field)), true
+		return allowDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is enabled", field))
 	}
-	return denyDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is disabled", field)), true
+	return denyDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is disabled", field))
 }
 
 func evaluateInputInjection(rule *InputInjectionRule, target string) blockDecision {
@@ -981,22 +907,36 @@ func evaluateInputInjection(rule *InputInjectionRule, target string) blockDecisi
 type builtinCredentialPattern struct {
 	name    string
 	pattern string
+	// re is the pattern compiled under the regex profile, or nil when it does
+	// not compile -- a built-in that will not compile is skipped, never a deny.
+	re *regexp.Regexp
 }
 
 // BuiltinCredentialPatterns are the built-in credential detectors. Documents
 // needing portable detection list their own patterns in
-// extra_credential_patterns.
-var builtinCredentialPatterns = []builtinCredentialPattern{
-	{"aws_access_key", "(AKIA|ASIA)[0-9A-Z]{16}"},
-	{"github_token", "gh[opsur]_[A-Za-z0-9]{36}"},
-	{"github_fine_grained_pat", "github_pat_[0-9a-zA-Z_]{50,}"},
-	{"openai_key", "sk-[A-Za-z0-9_-]{20,}"},
-	{"slack_token", "xox[baprs]-[0-9A-Za-z-]{10,}"},
-	{"private_key", `-----BEGIN[ \t]+(RSA[ \t]+|EC[ \t]+|OPENSSH[ \t]+)?PRIVATE[ \t]+KEY-----`},
-	{"jwt", `eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`},
+// extra_credential_patterns. The set is static, so it is compiled once at
+// package initialization rather than per browser action.
+var builtinCredentialPatterns = compileBuiltinCredentialPatterns([]builtinCredentialPattern{
+	{"aws_access_key", "(AKIA|ASIA)[0-9A-Z]{16}", nil},
+	{"github_token", "gh[opsur]_[A-Za-z0-9]{36}", nil},
+	{"github_fine_grained_pat", "github_pat_[0-9a-zA-Z_]{50,}", nil},
+	{"openai_key", "sk-[A-Za-z0-9_-]{20,}", nil},
+	{"slack_token", "xox[baprs]-[0-9A-Za-z-]{10,}", nil},
+	{"private_key", `-----BEGIN[ \t]+(RSA[ \t]+|EC[ \t]+|OPENSSH[ \t]+)?PRIVATE[ \t]+KEY-----`, nil},
+	{"jwt", `eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, nil},
+})
+
+func compileBuiltinCredentialPatterns(patterns []builtinCredentialPattern) []builtinCredentialPattern {
+	for index := range patterns {
+		if re, err := CompileProfileRegex(patterns[index].pattern); err == nil {
+			patterns[index].re = re
+		}
+	}
+	return patterns
 }
 
-func evaluateBrowserAutomation(rule *BrowserAutomationRule, action *EvaluationAction) blockDecision {
+func (c *compiledBrowserAutomation) evaluate(action *EvaluationAction) blockDecision {
+	rule := c.rule
 	verb := action.Target
 
 	// 1. verb allowlist (exact match).
@@ -1016,38 +956,33 @@ func evaluateBrowserAutomation(rule *BrowserAutomationRule, action *EvaluationAc
 	// 2. destination host.
 	if action.URL != nil {
 		host := NormalizeHost(*action.URL)
-		if anyHostPatternMatches(rule.BlockedDomains, host) {
+		if c.blockedDomains.matches(host) {
 			return denyDecision("rules.browser_automation.blocked_domains", "destination host is explicitly blocked")
 		}
-		if len(rule.AllowedDomains) > 0 && !anyHostPatternMatches(rule.AllowedDomains, host) {
+		if len(c.allowedDomains) > 0 && !c.allowedDomains.matches(host) {
 			return denyDecision("rules.browser_automation.allowed_domains", "destination host is not in the allowlist")
 		}
 	}
 
 	// 3. credential detection on typed input.
 	if rule.CredentialDetection && action.HasContent() {
-		for _, builtin := range builtinCredentialPatterns {
-			re, err := CompileProfileRegex(builtin.pattern)
-			if err == nil && re.MatchString(action.ContentOrEmpty()) {
+		content := action.ContentOrEmpty()
+		for index := range builtinCredentialPatterns {
+			builtin := &builtinCredentialPatterns[index]
+			if builtin.re != nil && builtin.re.MatchString(content) {
 				return denyDecision(
 					"rules.browser_automation.credential_detection",
 					fmt.Sprintf("typed input matched built-in credential detector '%s'", builtin.name),
 				)
 			}
 		}
-		for index, pattern := range rule.ExtraCredentialPatterns {
-			re, err := CompileProfileRegex(pattern)
-			if err != nil {
-				return denyDecision(
-					fmt.Sprintf("rules.browser_automation.extra_credential_patterns[%d]", index),
-					fmt.Sprintf("credential pattern is invalid: %v", err),
-				)
+		for index := range c.extraCredentialPatterns {
+			pattern := &c.extraCredentialPatterns[index]
+			if pattern.err != nil {
+				return denyDecision(pattern.errRule, pattern.errReason)
 			}
-			if re.MatchString(action.ContentOrEmpty()) {
-				return denyDecision(
-					"rules.browser_automation.credential_detection",
-					fmt.Sprintf("typed input matched extra_credential_patterns[%d]", index),
-				)
+			if pattern.re.MatchString(content) {
+				return denyDecision(pattern.matchRule, pattern.matchReason)
 			}
 		}
 	}
@@ -1161,22 +1096,21 @@ func originDefaultBehavior(origins *OriginsExtension) OriginDefaultBehavior {
 // resolvePosture determines the current and next posture state from the origin
 // profile, action context, and posture extension (in priority order).
 func resolvePosture(
-	spec *HushSpec,
-	matchedProfile *OriginProfile,
+	postureExtension *PostureExtension,
+	matchedProfile *compiledOriginProfile,
 	postureCtx *PostureContext,
 ) *PostureResult {
-	if spec.Extensions == nil || spec.Extensions.Posture == nil {
+	if postureExtension == nil {
 		return nil
 	}
-	postureExtension := spec.Extensions.Posture
 
 	// The matched profile's posture wins, then the action context's current (a
 	// present-but-empty "" is a real value, not a fallback trigger), then the
 	// posture extension's initial state.
 	current := ""
 	set := false
-	if matchedProfile != nil && matchedProfile.Posture != nil {
-		current, set = *matchedProfile.Posture, true
+	if matchedProfile != nil && matchedProfile.posture != nil {
+		current, set = *matchedProfile.posture, true
 	}
 	if !set && postureCtx != nil && postureCtx.Current != nil {
 		current, set = *postureCtx.Current, true
@@ -1211,41 +1145,6 @@ func nextPostureState(posture *PostureExtension, current string, signal string) 
 		return transition.To
 	}
 	return ""
-}
-
-// selectOriginProfile implements origin profile selection (origins spec
-// Section 3): candidates are profiles with a `match` object every present field
-// of which is satisfied; a `space_id` match wins outright, then the greatest
-// matched-field count, then document order.
-func selectOriginProfile(spec *HushSpec, origin *OriginContext) *OriginProfile {
-	if origin == nil {
-		return nil
-	}
-	if spec.Extensions == nil || spec.Extensions.Origins == nil {
-		return nil
-	}
-	profiles := spec.Extensions.Origins.Profiles
-
-	bestCount := -1
-	var best *OriginProfile
-	for index := range profiles {
-		profile := &profiles[index]
-		// A profile without a `match` field is never a candidate (D12).
-		if profile.Match == nil {
-			continue
-		}
-		matchedFields, ok := matchOrigin(profile.Match, origin)
-		if !ok {
-			continue
-		}
-		if profile.Match.SpaceID != "" {
-			return profile
-		}
-		if matchedFields > bestCount {
-			bestCount, best = matchedFields, profile
-		}
-	}
-	return best
 }
 
 // matchOrigin returns the number of `match` fields satisfied by origin, or
@@ -1411,22 +1310,14 @@ func pathGlobRegex(pattern string) (*regexp.Regexp, error) {
 }
 
 // PathGlobMatches reports whether an already-normalized path matches the path
-// glob pattern.
+// glob pattern. It compiles the glob on every call; the evaluator matches
+// against a [compiledGlobSet] built once by [CompilePolicy] instead.
 func PathGlobMatches(pattern, path string) bool {
 	re, err := pathGlobRegex(pattern)
 	if err != nil {
 		return false
 	}
 	return re.MatchString(path)
-}
-
-func anyPathGlobMatches(patterns []string, path string) bool {
-	for _, pattern := range patterns {
-		if PathGlobMatches(pattern, path) {
-			return true
-		}
-	}
-	return false
 }
 
 // globMatches matches a raw path target against a path glob, normalizing the
@@ -1616,17 +1507,13 @@ func isIPLiteral(host string) bool {
 	return strings.HasPrefix(host, "[") || isIPv4Literal(host)
 }
 
-// HostPatternMatches reports whether a normalized host matches a host pattern
-// (core spec 3.14.2): `*` is one or more non-dot characters, `**` one or more
-// characters including dots, everything else literal. IP literals match only
-// an exact entry.
-func HostPatternMatches(pattern, host string) bool {
-	pattern = normalizeHostPattern(pattern)
-	if isIPLiteral(host) {
-		return pattern == host
-	}
+// hostPatternSource is the anchored regex source of an already-normalized host
+// pattern (core spec 3.14.2): `*` is one or more non-dot characters, `**` one
+// or more characters including dots, everything else literal.
+func hostPatternSource(pattern string) string {
 	chars := []rune(pattern)
 	var out strings.Builder
+	out.Grow(len(pattern) + 8)
 	out.WriteByte('^')
 	for index := 0; index < len(chars); {
 		if chars[index] == '*' {
@@ -1643,23 +1530,15 @@ func HostPatternMatches(pattern, host string) bool {
 		index++
 	}
 	out.WriteByte('$')
-	re, err := regexp.Compile(out.String())
-	if err != nil {
-		return false
-	}
-	return re.MatchString(host)
+	return out.String()
 }
 
-func anyHostPatternMatches(patterns []string, host *string) bool {
-	if host == nil {
-		return false
-	}
-	for _, pattern := range patterns {
-		if HostPatternMatches(pattern, *host) {
-			return true
-		}
-	}
-	return false
+// HostPatternMatches reports whether a normalized host matches a host pattern
+// (core spec 3.14.2). IP literals match only an exact entry. It normalizes and
+// compiles the pattern on every call; the evaluator matches against a
+// [compiledHostSet] built once by [CompilePolicy] instead.
+func HostPatternMatches(pattern, host string) bool {
+	return compileHostPattern(pattern).matches(host)
 }
 
 // PunycodeEncode is the RFC 3492 punycode encoding of one label, without the

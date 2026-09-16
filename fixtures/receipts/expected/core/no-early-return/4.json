@@ -1,0 +1,57 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7004-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:b2cc22a3e9230a87a1763eaf13d75bb305803a981da6b419bb662d332b0349f3"
+  },
+  "action": {
+    "type": "patch_apply",
+    "target": "/proj/config.py",
+    "content_hash": "sha256:70336955376f197274173b03d4613ef04628b2fc56bcedc26a7736b371545a3c",
+    "content_size": 30
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.aws",
+  "reason": "content matched secret pattern 'aws'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "path did not match any forbidden pattern"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "rule_path": "rules.path_allowlist",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "path matched allowlist"
+    },
+    {
+      "rule_block": "patch_integrity",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "patch passed integrity checks"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.aws",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'aws'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

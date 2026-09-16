@@ -45,9 +45,20 @@ type normalizedResult struct {
 	RuleTrace     []hushspec.RuleEvaluation `json:"rule_trace,omitempty"`
 }
 
+// groupReport carries the per-group facts that are not tied to a single
+// action. ContentHash is the canonical content hash
+// (spec/hushspec-canonical.md section 5) of the resolved policy this harness
+// evaluated; it is absent only when the policy was rejected and no spec was
+// evaluated. The differential runner compares it across SDKs, so a missing
+// hash for an accepted policy is a divergence.
+type groupReport struct {
+	ContentHash string `json:"content_hash,omitempty"`
+}
+
 type report struct {
-	SDK     string             `json:"sdk"`
-	Results map[string]verdict `json:"results"`
+	SDK     string                 `json:"sdk"`
+	Groups  map[string]groupReport `json:"groups"`
+	Results map[string]verdict     `json:"results"`
 }
 
 func main() {
@@ -73,8 +84,22 @@ func main() {
 	}
 
 	results := make(map[string]verdict)
+	groups := make(map[string]groupReport)
 	for _, group := range bundle.Groups {
 		spec, rejection := parsePolicy(group.Policy)
+		entry := groupReport{}
+		if rejection == nil {
+			// The canonical content hash identifies the policy that was
+			// actually enforced, so it is taken from the same resolved spec
+			// the actions below are evaluated against.
+			digest, err := hushspec.ContentHash(spec)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "failed to compute content hash for %s: %v\n", group.ID, err)
+				os.Exit(2)
+			}
+			entry.ContentHash = digest
+		}
+		groups[group.ID] = entry
 		for _, action := range group.Actions {
 			key := group.ID + "/" + action.ID
 			if rejection != nil {
@@ -85,7 +110,7 @@ func main() {
 		}
 	}
 
-	out, err := json.Marshal(report{SDK: "go", Results: results})
+	out, err := json.Marshal(report{SDK: "go", Groups: groups, Results: results})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to serialize report: %v\n", err)
 		os.Exit(2)

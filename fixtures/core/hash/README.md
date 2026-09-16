@@ -17,10 +17,29 @@ say why in the commit message: every SDK must be updated in the same change.
 
 ## Status
 
-No SDK test runner walks this directory yet. RFC 09 Wave 4 (P2-02) adds a hash-vector
-runner to the Rust testkit and to the TypeScript, Python, and Go shared-fixture suites, and a
-differential-test assertion that all four SDKs compute the same `content_hash` for every
-generated policy.
+Hash-vector runners (RFC 09 P2-02), one per SDK:
+
+- Rust: `cargo test -p hushspec --test canonical_vectors`, plus the testkit's `hash`
+  category (`cargo run -p hushspec-testkit --bin hushspec-testkit -- --fixtures fixtures`).
+- TypeScript, Python, Go: their shared-fixture suites.
+
+`hushspec-difftest` additionally compares the `content_hash` all four SDKs report for
+every generated policy; `--ignore-content-hash` opts out of that comparison.
+
+## Every vector policy is a valid document
+
+Canonicalization presupposes validity ([canonical spec section
+2.3](../../../spec/hushspec-canonical.md)): a policy no conformant engine accepts could pin
+an identity no engine can ever produce. Every runner here validates before it canonicalizes,
+and `h2h hash` reproduces all fourteen.
+
+Project the `policy` as a generic tree of maps, arrays and scalars, the way [canonical spec
+section 6](../../../spec/hushspec-canonical.md) recommends -- but a typed model reaches the
+same answer. The one presence-significant property, `OriginProfile.match` (section 3.3), is
+an optional object in every SDK's model. The origins profile overlay lists are *not*
+presence-significant: an absent overlay list and an empty one evaluate identically ([origins
+spec section 4](../../../spec/hushspec-origins.md)), so an empty one is omitted like any
+other no-default empty container. `origins-overlay-empties.yaml` pins that.
 
 ## Vectors
 
@@ -36,6 +55,7 @@ generated policy.
 | `metadata-governance.yaml` | 3.1 | `metadata` is covered by the hash. |
 | `when-conditions.yaml` | 3.2, 3.3 | `when` projection; `timezone` default; nested conditions. |
 | `extension-posture.yaml` | 3.4 | Schema maps; required-but-empty arrays are kept. |
-| `extension-origins.yaml` | 3.3, 3.4 | Presence-significant `match: {}` and overlay empties are preserved. |
+| `extension-origins.yaml` | 3.3, 3.4 | Origins defaults; the presence-significant `match: {}` is kept. |
+| `origins-overlay-empties.yaml` | 3.3 | Overlay lists written empty are omitted; `match: {}` is kept. |
 | `extension-detection.yaml` | 3.4 | Detector defaults. |
 | `extends-resolved.yaml` | 2.1 | Canonicalized after resolution; `source` is the unresolved child. |

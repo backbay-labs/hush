@@ -231,6 +231,7 @@ fn schema_output_matches_the_file_on_disk() {
         ("evaluator-test", "hushspec-evaluator-test.v0.schema.json"),
         ("receipt", "hushspec-receipt.v0.schema.json"),
         ("signature", "hushspec-signature.v0.schema.json"),
+        ("keyring", "hushspec-keyring.v0.schema.json"),
     ] {
         let output = h2h()
             .arg("schema")
@@ -287,7 +288,7 @@ fn schema_list_json_is_machine_readable() {
 
     let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
     let entries = parsed.as_array().expect("list should be a JSON array");
-    assert_eq!(entries.len(), 9);
+    assert_eq!(entries.len(), 12);
     assert!(entries.iter().any(|e| e["name"] == "core"));
     assert!(entries.iter().any(|e| e["name"] == "hash-vector"));
     assert!(entries.iter().any(|e| e["name"] == "framework-registry"));

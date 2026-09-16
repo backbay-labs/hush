@@ -36,6 +36,12 @@ pub enum ValidationError {
         pattern: String,
         message: String,
     },
+    /// A governance date field that is not an ISO 8601 calendar date
+    /// (`YYYY-MM-DD`). Dates are compared as strings throughout the toolchain,
+    /// so a value in any other shape would silently compare wrong rather than
+    /// fail -- an expired policy could read as current.
+    #[error("{field}: {value:?} is not an ISO 8601 date (YYYY-MM-DD)")]
+    InvalidDate { field: String, value: String },
     #[error("{0}")]
     Custom(String),
 }
@@ -79,10 +85,16 @@ pub fn validate(spec: &HushSpec) -> ValidationResult {
 
     if let Some(metadata) = &spec.metadata {
         validate_control_mappings(&metadata.controls, &mut errors);
+        validate_metadata_dates(metadata, &mut errors);
     }
 
-    for gw in crate::governance::validate_governance(spec) {
-        warnings.push(gw.message);
+    for finding in crate::governance::validate_governance(spec) {
+        match finding.severity {
+            crate::governance::GovernanceSeverity::Error => {
+                errors.push(ValidationError::Custom(finding.message));
+            }
+            crate::governance::GovernanceSeverity::Warning => warnings.push(finding.message),
+        }
     }
 
     ValidationResult { errors, warnings }
@@ -571,6 +583,43 @@ fn validate_control_mappings(
                     "{path}.rule_paths[{entry}] must not be empty"
                 )));
             }
+        }
+    }
+}
+
+/// Every governance date field must be an ISO 8601 calendar date (core spec
+/// 2.5). The whole toolchain compares these dates as strings -- lexicographic
+/// order is calendar order only for `YYYY-MM-DD` -- so an unchecked
+/// `01/02/2026` would make an expired policy compare as current instead of
+/// failing loudly.
+fn validate_metadata_dates(
+    metadata: &crate::generated_models::GovernanceMetadata,
+    errors: &mut Vec<ValidationError>,
+) {
+    let fields = [
+        ("metadata.approval_date", &metadata.approval_date),
+        ("metadata.effective_date", &metadata.effective_date),
+        ("metadata.expiry_date", &metadata.expiry_date),
+        ("metadata.next_review_date", &metadata.next_review_date),
+    ];
+
+    for (field, value) in fields {
+        if let Some(value) = value
+            && crate::governance::parse_iso_date(value).is_none()
+        {
+            errors.push(ValidationError::InvalidDate {
+                field: field.to_string(),
+                value: value.clone(),
+            });
+        }
+    }
+
+    for (index, entry) in metadata.changelog.iter().enumerate() {
+        if crate::governance::parse_iso_date(&entry.date).is_none() {
+            errors.push(ValidationError::InvalidDate {
+                field: format!("metadata.changelog[{index}].date"),
+                value: entry.date.clone(),
+            });
         }
     }
 }

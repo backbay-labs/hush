@@ -60,14 +60,11 @@ INLINE_SIGNATURE_FIELD = "signature"
 # Fields whose *presence* changes meaning even when the value is empty
 # (spec/hushspec-canonical.md section 3.3). Keyed by (schema file, $defs
 # name, property). Everything else that is an empty container with no schema
-# default is equivalent to absence and is omitted from the canonical form.
+# default is equivalent to absence and is omitted from the canonical form --
+# the origins profile overlay lists included, because an absent overlay list
+# and an empty one evaluate identically (origins spec section 4).
 PRESERVE_EMPTY = {
     ("hushspec-origins.v0.schema.json", "OriginProfile", "match"),
-    ("hushspec-origins.v0.schema.json", "ToolAccessRule", "allow"),
-    ("hushspec-origins.v0.schema.json", "ToolAccessRule", "block"),
-    ("hushspec-origins.v0.schema.json", "ToolAccessRule", "require_confirmation"),
-    ("hushspec-origins.v0.schema.json", "EgressRule", "allow"),
-    ("hushspec-origins.v0.schema.json", "EgressRule", "block"),
 }
 
 SAFE_INTEGER_MAX = 2**53 - 1

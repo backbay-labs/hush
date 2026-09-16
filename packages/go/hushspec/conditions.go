@@ -609,5 +609,5 @@ func EvaluateWithContext(
 	context *RuntimeContext,
 	conditions map[string]*Condition,
 ) EvaluationResult {
-	return EvaluateTraced(spec, action, context, conditions).Result
+	return cachedCompile(spec).EvaluateWithContext(action, context, conditions)
 }

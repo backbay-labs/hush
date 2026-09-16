@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1e63e39c015d01182296a25e82ba120dc26e9cf70b5edb8d9b38de8279af7517"
+  },
+  "action": {
+    "type": "code_exec",
+    "target": "python",
+    "content_hash": "sha256:d287bb7f9d15abdc5b6e98536263815744b6ef21c8f3c839fc434ca70d8efe99",
+    "content_size": 8
+  },
+  "decision": "allow",
+  "matched_rule": "rules.code_execution",
+  "reason": "code execution is permitted",
+  "rule_trace": [
+    {
+      "rule_block": "code_execution",
+      "rule_path": "rules.code_execution",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "code execution is permitted"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

@@ -1,0 +1,19 @@
+hushspec_resolve: 0.1.0
+description: 'core 2.3: a #sha256: pin naming the base''s own content hash is accepted and the chain is unchanged by it'
+policy:
+  hushspec: 0.1.0
+  name: pinned
+  extends: builtin:default#sha256:878b68aa0b4052de297925b1abf09bea95b58275ae8321922997c2de96b96f7d
+  rules:
+    egress:
+      allow:
+      - custom.example.com
+      default: block
+expect:
+  resolves: true
+  content_hash: sha256:a7ba2227b16da519e1b7d7988df1196b17ffcd9935f2085577754b81d9e39044
+  chain:
+  - source: builtin:default
+    content_hash: sha256:878b68aa0b4052de297925b1abf09bea95b58275ae8321922997c2de96b96f7d
+  - source: memory
+    content_hash: sha256:cdc9ae91d8b59f4cb381763689cb6f8d251a89129d192c2fbb1fcc75be04201f

@@ -4,23 +4,54 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, Sequence, TYPE_CHECKING
 
-from hushspec.detection import evaluate_with_detection
+from hushspec.compiled import CompiledPolicy, compile_policy
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult, is_panic_active
 from hushspec.generated_contract import EXTENSION_KEYS, RULE_KEYS
 from hushspec.parse import parse_or_raise
-from hushspec.resolve import Resolver, create_builtin_loader, create_composite_loader, resolve
+from hushspec.resolve import (
+    PolicyVerificationError,
+    ResolveOptions,
+    Resolution,
+    Resolver,
+    SignatureStatus,
+    VerifyOptions,
+    create_builtin_loader,
+    create_composite_loader,
+    resolve_with_options_or_raise,
+)
+from hushspec.receipt import POLICY_UNVERIFIED_RULE
 from hushspec.schema import HushSpec
+from hushspec.signing import Keyring
 
 if TYPE_CHECKING:
     from hushspec.observer import EvaluationObserver
-    from hushspec.receipt import AuditConfig, DecisionReceipt, EnforcementSummary
+    from hushspec.receipt import (
+        Actor,
+        AuditConfig,
+        AuditContext,
+        DecisionReceipt,
+        EnforcementSummary,
+    )
     from hushspec.sinks import ReceiptSink
 
 WarnHandler = Callable[[EvaluationResult, EvaluationAction], bool]
 
 _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
+
+#: ``matched_rule`` of the denial a guard returns while it is refusing to
+#: enforce an unverified policy (signing spec section 6.5, receipt spec 4.5).
+#: Like the panic sentinel it is a guard-level rule, not a policy rule, so it
+#: can never be relaxed by an enforcement override. It is the same reserved
+#: name the receipt carries -- one spelling per fact.
+POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
+
+#: ``policy.content_hash`` of a receipt for a load the guard refused. A 0.2
+#: receipt requires the field, but the guard will not vouch for the hash of a
+#: document it would not evaluate, so it records the all-zero digest: a
+#: well-formed content hash that joins to nothing.
+UNVERIFIED_POLICY_HASH = "sha256:" + "0" * 64
 
 
 @dataclass
@@ -80,48 +111,15 @@ def _validate_enforcement_config(config: EnforcementConfig, observable: bool) ->
         )
 
 
-def _apply_detection(
-    receipt: "DecisionReceipt", spec: HushSpec, action: EvaluationAction
-) -> None:
-    """Fold a policy's ``detection:`` extension into an already-built receipt.
-
-    Mirrors the Rust reference ``apply_detection``
-    (crates/hushspec-cli/src/cmd_eval.rs): ``evaluate_audited`` builds the
-    receipt from the core rules only, so when content detection escalates the
-    decision this reconciles the receipt -- overwriting decision/matched_rule/
-    reason with the detected values and appending a ``detection`` rule-trace
-    entry whose outcome is the escalated decision. A no-op when the policy has
-    no detection extension, there is no content, or detection does not
-    escalate (detection never weakens a policy decision), so receipts for
-    every non-detection policy are byte-for-byte unchanged.
-    """
-    from hushspec.receipt import RuleEvaluation, RuleOutcome
-
-    detected = evaluate_with_detection(spec, action).evaluation
-    if detected.decision == receipt.decision:
-        return
-
-    receipt.rule_trace.append(
-        RuleEvaluation(
-            rule_block="detection",
-            outcome=RuleOutcome(detected.decision.value),
-            matched_rule=detected.matched_rule,
-            reason=detected.reason,
-            evaluated=True,
-        )
-    )
-    receipt.decision = detected.decision
-    receipt.matched_rule = detected.matched_rule
-    receipt.reason = detected.reason
-
-
-def resolve_policy_or_raise(
+def resolve_policy_resolution(
     policy: HushSpec,
     *,
     loader: Optional[Resolver] = None,
     base_dir: Optional[str] = None,
-) -> HushSpec:
-    """Resolve a policy's ``extends`` chain, or raise.
+    source: Optional[str] = None,
+    options: Optional[ResolveOptions] = None,
+) -> Resolution:
+    """Resolve a policy's ``extends`` chain and gather its evidence, or raise.
 
     Every entry point into :class:`HushGuard` funnels through this: the guard
     must never hold a spec whose ``extends`` is still set. An unresolved leaf
@@ -130,26 +128,90 @@ def resolve_policy_or_raise(
     ``forbidden_paths``, so evaluating it unresolved would allow reads of
     ``~/.ssh/id_rsa`` -- and hashes the wrong document into every receipt.
     Fail closed: if the base cannot be loaded, no evaluation happens at all.
+
+    ``source`` is the policy's own location, when it has one. It is both what a
+    relative ``extends`` resolves against and what a detached signature is
+    looked up next to (``<source>.sig``), so ``HushGuard.from_file`` passes the
+    real path rather than the ``base_dir`` placeholder.
+
+    Raises :class:`~hushspec.resolve.PolicyVerificationError` (unwrapped, so a
+    caller can read its ``status``) when a hop fails its digest pin or its
+    signature, and :class:`ValueError` when the chain cannot be resolved.
     """
-    if policy.extends is None:
-        return policy
-
     if loader is None:
-        loader = create_composite_loader() if base_dir is not None else create_builtin_loader()
-    # `resolve()` treats `source` as the *file* a relative reference resolves
-    # from, so point it at a placeholder inside base_dir.
-    source = str(Path(base_dir).resolve() / "<policy>") if base_dir is not None else None
+        loader = (
+            create_composite_loader()
+            if base_dir is not None or source is not None
+            else create_builtin_loader()
+        )
+    if source is None and base_dir is not None:
+        # Resolution treats `source` as the *file* a relative reference resolves
+        # from, so point it at a placeholder inside base_dir.
+        source = str(Path(base_dir).resolve() / "<policy>")
 
-    ok, result = resolve(policy, source=source, loader=loader)
-    if not ok:
-        raise ValueError(f"failed to resolve policy 'extends: {policy.extends}': {result}")
-    assert isinstance(result, HushSpec)
-    if result.extends is not None:
+    try:
+        resolution = resolve_with_options_or_raise(
+            policy, source=source, loader=loader, options=options
+        )
+    except PolicyVerificationError:
+        raise
+    except ValueError as exc:
+        raise ValueError(
+            f"failed to resolve policy 'extends: {policy.extends}': {exc}"
+        ) from exc
+    if resolution.spec.extends is not None:
         raise ValueError(
             f"failed to resolve policy 'extends: {policy.extends}': "
             "resolver returned an unresolved policy"
         )
-    return result
+    return resolution
+
+
+def resolve_policy_or_raise(
+    policy: HushSpec,
+    *,
+    loader: Optional[Resolver] = None,
+    base_dir: Optional[str] = None,
+) -> HushSpec:
+    """Resolve a policy's ``extends`` chain, or raise. Returns just the document.
+
+    A thin wrapper over :func:`resolve_policy_resolution` with default options:
+    no signature is required and none is looked for.
+    """
+    return resolve_policy_resolution(policy, loader=loader, base_dir=base_dir).spec
+
+
+def _build_resolve_options(
+    *,
+    require_signature: bool,
+    keyring: Any,
+    trusted_keys: Optional[Sequence[str]],
+    verify: Optional[VerifyOptions],
+) -> ResolveOptions:
+    """Fold a guard's trust settings into :class:`ResolveOptions`.
+
+    ``trusted_keys`` is the convenience form: bare SPKI public-key PEMs, which
+    become a keyring whose ids are recomputed from the key bits (signing spec
+    section 5.3). Pass ``keyring`` when the deployment has a real keyring
+    document with retirement and revocation.
+    """
+    if keyring is not None and trusted_keys:
+        raise ValueError("pass either `keyring` or `trusted_keys`, not both")
+    if isinstance(trusted_keys, str):
+        # A bare PEM is a sequence of characters, so without this a single key
+        # passed unwrapped would be read as one key per character.
+        trusted_keys = [trusted_keys]
+    if trusted_keys:
+        keyring = Keyring(
+            keys=tuple(
+                Keyring.from_public_key(pem).keys[0] for pem in trusted_keys
+            )
+        )
+    return ResolveOptions(
+        require_signature=require_signature,
+        keyring=keyring,
+        verify=verify,
+    )
 
 
 class HushSpecDenied(Exception):
@@ -172,6 +234,12 @@ class HushGuard:
         audit: Optional["AuditConfig"] = None,
         loader: Optional[Resolver] = None,
         base_dir: Optional[str] = None,
+        source: Optional[str] = None,
+        require_signature: bool = False,
+        keyring: Any = None,
+        trusted_keys: Optional[Sequence[str]] = None,
+        verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
         _validate_enforcement_config(config, observer is not None or sink is not None)
@@ -182,23 +250,67 @@ class HushGuard:
             from hushspec.receipt import AuditConfig
             audit = AuditConfig()
         self._audit = audit
+        #: Who the guard evaluates for (receipt spec 4.1). Every receipt it
+        #: emits carries it; an empty actor is omitted from receipts.
+        self._actor = actor
         self._resolve_loader = loader
         self._resolve_base_dir = base_dir
+        self._resolve_source = source
+        self._resolve_options = _build_resolve_options(
+            require_signature=require_signature,
+            keyring=keyring,
+            trusted_keys=trusted_keys,
+            verify=verify,
+        )
+        self._resolution: Optional[Resolution] = None
+        self._refusal: Optional[SignatureStatus] = None
+        self._requested_policy_name = policy.name
+        self._requested_policy_version = policy.hushspec
         # Resolve before anything else touches the spec: a guard never holds an
         # unresolved document, and the receipt hash covers the resolved policy.
-        self._policy = resolve_policy_or_raise(policy, loader=loader, base_dir=base_dir)
+        # A policy that cannot be *verified* does not raise -- the guard has to
+        # stay alive to deny, and to record the refusal (signing spec 6.5).
+        try:
+            self._resolution = self._resolve(policy)
+            self._policy = self._resolution.spec
+        except PolicyVerificationError as exc:
+            self._refusal = exc.status
+            # A deny-everything policy as a backstop: nothing should reach it
+            # (every evaluation short-circuits on `_refusal`), and if anything
+            # ever did, it must not be the document that failed verification.
+            from hushspec.evaluate import panic_policy
+            self._policy = panic_policy()
+        # Compile once, here: the guard evaluates the same document over and
+        # over, so its patterns, matchers and conditions are prepared at load
+        # time rather than per action. Lenient, because a pattern outside the
+        # regex profile must deny the actions that reach it (the reference
+        # behaviour), not stop the guard from loading.
+        self._compiled = compile_policy(
+            self._resolution if self._resolution is not None else self._policy,
+            strict=False,
+        )
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
-        self._policy_hash: Optional[str] = None
+        self._policy_hash: Optional[str] = (
+            self._resolution.content_hash if self._resolution is not None else None
+        )
         if observer is not None:
             from hushspec.observer import ObservableEvaluator
-            from hushspec.receipt import compute_policy_hash
             self._observable_evaluator = ObservableEvaluator(
                 redact_content=self._audit.redact_content
             )
             self._observable_evaluator.add_observer(observer)
-            self._policy_hash = compute_policy_hash(self._policy)
-            self._observable_evaluator.notify_policy_loaded(self._policy.name, self._policy_hash)
+            if self._refusal is None:
+                self._observable_evaluator.notify_policy_loaded(
+                    self._policy.name, self._policy_hash
+                )
+            # A refused guard announces no policy: it loaded none. The backstop
+            # deny-all document is an implementation detail, not something an
+            # observer should record as the policy in force.
+        # The log records which policy came into force before any receipt
+        # evaluated under it (log spec section 6). A refused guard loaded none.
+        if self._refusal is None:
+            self._record_policy_event(loaded=True)
 
     @classmethod
     def from_file(
@@ -211,17 +323,27 @@ class HushGuard:
         audit: Optional["AuditConfig"] = None,
         loader: Optional[Resolver] = None,
         base_dir: Optional[str] = None,
+        require_signature: bool = False,
+        keyring: Any = None,
+        trusted_keys: Optional[Sequence[str]] = None,
+        verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> HushGuard:
         """Load a policy file and resolve its ``extends`` chain.
 
         Relative references resolve against the policy file's own directory
         (overridable with ``base_dir``/``loader``); ``builtin:`` references come
         from the embedded rulesets. Raises if the chain cannot be resolved.
+
+        The file's own path is the ``source`` of the leaf, so its detached
+        signature is looked up at ``<path>.sig`` (then ``<stem>.sig``) when a
+        keyring is configured.
         """
         with open(path) as f:
             spec = parse_or_raise(f.read())
+        resolved_path = str(Path(path).resolve())
         if base_dir is None:
-            base_dir = str(Path(path).resolve().parent)
+            base_dir = str(Path(resolved_path).parent)
         return cls(
             spec,
             on_warn,
@@ -231,6 +353,12 @@ class HushGuard:
             audit=audit,
             loader=loader,
             base_dir=base_dir,
+            source=resolved_path,
+            require_signature=require_signature,
+            keyring=keyring,
+            trusted_keys=trusted_keys,
+            verify=verify,
+            actor=actor,
         )
 
     @classmethod
@@ -244,12 +372,21 @@ class HushGuard:
         audit: Optional["AuditConfig"] = None,
         loader: Optional[Resolver] = None,
         base_dir: Optional[str] = None,
+        require_signature: bool = False,
+        keyring: Any = None,
+        trusted_keys: Optional[Sequence[str]] = None,
+        verify: Optional[VerifyOptions] = None,
+        actor: Optional["Actor"] = None,
     ) -> HushGuard:
         """Parse a policy document and resolve its ``extends`` chain.
 
         ``builtin:`` references resolve out of the box; file references need an
         explicit ``base_dir`` (or ``loader``) since a YAML string has no
         directory of its own. Raises if the chain cannot be resolved.
+
+        A document with no file of its own has no ``<source>.sig`` either, so
+        under ``require_signature`` it can only be admitted through a caller
+        supplied locator; otherwise the guard refuses it.
         """
         spec = parse_or_raise(yaml_str)
         return cls(
@@ -261,15 +398,61 @@ class HushGuard:
             audit=audit,
             loader=loader,
             base_dir=base_dir,
+            require_signature=require_signature,
+            keyring=keyring,
+            trusted_keys=trusted_keys,
+            verify=verify,
+            actor=actor,
         )
+
+    def _resolve(self, policy: HushSpec) -> Resolution:
+        return resolve_policy_resolution(
+            policy,
+            loader=self._resolve_loader,
+            base_dir=self._resolve_base_dir,
+            source=self._resolve_source,
+            options=self._resolve_options,
+        )
+
+    @property
+    def resolution(self) -> Optional[Resolution]:
+        """Evidence from the policy load: chain hashes and signature outcomes.
+
+        ``None`` while the guard is refusing an unverified policy -- there is no
+        resolution to report. :attr:`refusal` says why.
+        """
+        return self._resolution
+
+    @property
+    def refusal(self) -> Optional[SignatureStatus]:
+        """Why the guard is denying everything, or ``None`` when it is not."""
+        return self._refusal
+
+    @property
+    def compiled(self) -> CompiledPolicy:
+        """The compiled policy in force, as every evaluation sees it.
+
+        Recompiled on :meth:`swap_policy`; for a guard that is refusing an
+        unverified policy this is the deny-all backstop, not the document that
+        failed to verify.
+        """
+        return self._compiled
 
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
         # Always routes through _run_evaluation() (sink or not) so this is
         # detection-aware the same way gate()/check()/enforce() are -- a
         # guard must not answer differently from .evaluate() than from
         # .check() for the same action against the same policy.
+        from hushspec.receipt import EnforcementSummary
+
         result, duration_us, receipt = self._run_evaluation(action)
         if receipt is not None:
+            # A 0.2 receipt always says what the enforcement point did (receipt
+            # spec 4.7). `evaluate()` applies nothing, so the disposition is the
+            # one the decision implies under this guard's effective mode.
+            receipt.enforcement = EnforcementSummary.implied(
+                result.decision, self._effective_mode(result)
+            )
             try:
                 self._sink.send(receipt)
             except Exception:
@@ -316,6 +499,10 @@ class HushGuard:
     def _effective_mode(self, result: EvaluationResult) -> str:
         if is_panic_active() or result.matched_rule == "__hushspec_panic__":
             return "enforce"
+        if self._refusal is not None or result.matched_rule == POLICY_SIGNATURE_RULE:
+            # A refusal is not a policy decision, so no enforcement override can
+            # downgrade it to monitor: there is no verified policy to monitor.
+            return "enforce"
         matched = result.matched_rule
         # detection.py emits the bare literal matched_rule "detection" (see
         # hushspec/detection.py) rather than a hierarchical rule path, so an
@@ -336,20 +523,27 @@ class HushGuard:
                 return best_mode
         return self._enforcement_mode
 
+    def _audit_context(self) -> "AuditContext":
+        from hushspec.receipt import AuditContext
+
+        return AuditContext(
+            actor=self._actor,
+            enforcement_mode=self._enforcement_mode,
+        )
+
     def _run_evaluation(
         self, action: EvaluationAction
     ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
+        if self._refusal is not None:
+            return self._refused_evaluation(action)
         if self._sink is not None:
-            from hushspec.receipt import evaluate_audited
-
-            # evaluate_audited() builds the receipt from the core rules only
-            # (it never consults extensions.detection), so fold detection in
-            # afterward -- exactly as the non-sink branch below routes through
-            # evaluate_with_detection() -- and build `result` from the
-            # possibly-reconciled receipt so the enforced decision honors the
-            # policy's detection extension identically to the sink-free path.
-            receipt = evaluate_audited(self._policy, action, self._audit)
-            _apply_detection(receipt, self._policy, action)
+            # The audited path routes through the detection pipeline itself, so
+            # the receipt's decision is already the one an enforcement point
+            # acts on -- identical to the sink-free path below, which is the
+            # same pipeline without the recording.
+            receipt = self._compiled.evaluate_audited(
+                action, self._audit, self._audit_context(), self._resolution
+            )
             result = EvaluationResult(
                 decision=receipt.decision,
                 matched_rule=receipt.matched_rule,
@@ -357,14 +551,48 @@ class HushGuard:
                 origin_profile=receipt.origin_profile,
                 posture=receipt.posture,
             )
-            return result, receipt.evaluation_duration_us, receipt
+            return result, receipt.duration_us or 0, receipt
         start_ns = time.perf_counter_ns()
-        # evaluate_with_detection() is an exact no-op unless the policy
-        # carries an extensions.detection block, so every non-detection
-        # policy behaves identically to a plain evaluate() call here.
-        result = evaluate_with_detection(self._policy, action).evaluation
+        # The detection pipeline is an exact no-op unless the policy carries an
+        # extensions.detection block, so every non-detection policy behaves
+        # identically to a plain evaluate() call here.
+        result = self._compiled.evaluate_with_detection(action).evaluation
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
         return result, duration_us, None
+
+    def _refused_evaluation(
+        self, action: EvaluationAction
+    ) -> tuple[EvaluationResult, int, Optional["DecisionReceipt"]]:
+        """Deny without evaluating: the policy was never verified (signing 6.5).
+
+        No rule ran, so the receipt carries an empty ``rule_trace`` and no
+        content hash -- the guard refuses to vouch for the hash of a document it
+        would not evaluate. It still names the policy, so an auditor can see
+        *which* load was refused and why.
+        """
+        assert self._refusal is not None
+        reason = self._refusal.reason or "unverified"
+        result = EvaluationResult(
+            decision=Decision.DENY,
+            matched_rule=POLICY_SIGNATURE_RULE,
+            reason=f"policy signature verification failed: {reason}",
+        )
+        if self._sink is None:
+            return result, 0, None
+
+        from hushspec.receipt import PolicySummary, unverified_policy_receipt
+
+        receipt = unverified_policy_receipt(
+            PolicySummary(
+                name=self._requested_policy_name,
+                spec_version=self._requested_policy_version,
+                content_hash=UNVERIFIED_POLICY_HASH,
+                signature=self._refusal,
+            ),
+            action,
+            self._audit_context(),
+        )
+        return result, 0, receipt
 
     def _record(
         self,
@@ -414,18 +642,59 @@ class HushGuard:
         return EvaluationAction(type="shell_command", target=command)
 
     def swap_policy(self, new_policy: HushSpec) -> None:
-        # Hot-reload is a policy load like any other: an unresolved document is
-        # rejected here rather than swapped in, leaving the policy in force.
-        resolved = resolve_policy_or_raise(
-            new_policy, loader=self._resolve_loader, base_dir=self._resolve_base_dir
-        )
+        # Hot-reload is a policy load like any other: a document that does not
+        # resolve, or that does not verify under `require_signature`, is
+        # rejected here rather than swapped in, leaving the policy in force. A
+        # failed swap therefore raises and changes nothing -- including a guard
+        # that is already refusing, which keeps refusing.
+        resolution = self._resolve(new_policy)
+        resolved = resolution.spec
+        # Compile before anything is swapped in: the guard never holds a
+        # policy it has not prepared.
+        compiled = compile_policy(resolution, strict=False)
         previous_hash = self._policy_hash
         self._policy = resolved
+        self._compiled = compiled
+        self._resolution = resolution
+        # A swap that verifies clears an earlier refusal: the guard now holds a
+        # policy it was able to prove.
+        self._refusal = None
+        self._requested_policy_name = new_policy.name
+        self._requested_policy_version = new_policy.hushspec
+        self._policy_hash = resolution.content_hash
         if self._observable_evaluator is not None:
-            from hushspec.receipt import compute_policy_hash
-            self._policy_hash = compute_policy_hash(resolved)
             self._observable_evaluator.notify_policy_reloaded(
                 resolved.name,
                 self._policy_hash,
                 previous_hash,
             )
+        # The log must carry the swap before any receipt evaluated under the
+        # new policy (log spec section 6).
+        self._record_policy_event(loaded=False, previous_content_hash=previous_hash)
+
+    def _record_policy_event(
+        self, *, loaded: bool, previous_content_hash: Optional[str] = None
+    ) -> None:
+        """Write the policy-in-effect record for this load or swap.
+
+        Goes through the sink, so a hash-linked log gets a `policy_loaded` /
+        `policy_swapped` entry and a plain receipt sink ignores it. A sink that
+        raises must not take the guard down with it.
+        """
+        if self._sink is None or self._resolution is None:
+            return
+        from hushspec.log import PolicyEvent
+        from hushspec.receipt import policy_summary
+
+        summary = policy_summary(self._resolution)
+        event = (
+            PolicyEvent.loaded(summary, self._enforcement_mode)
+            if loaded
+            else PolicyEvent.swapped(
+                summary, self._enforcement_mode, previous_content_hash
+            )
+        )
+        try:
+            self._sink.record_policy_event(event)
+        except Exception:
+            pass  # sinks must not break a policy load

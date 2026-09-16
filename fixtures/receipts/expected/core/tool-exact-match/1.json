@@ -1,0 +1,42 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:4fbd3f7782ab111637da555e314891ecc91686d77fd9ce897021295e891428c3"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "shell_exec2"
+  },
+  "decision": "allow",
+  "matched_rule": "rules.tool_access.default",
+  "reason": "tool matched default allow",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.default",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool matched default allow"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

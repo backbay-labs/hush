@@ -82,6 +82,41 @@ outcome = guard.gate(EvaluationAction(type="shell_command", target="rm -rf /"))
 Receipts written by the sink carry `enforcement` (mode + outcome) alongside
 the evaluated `decision`. Panic mode always blocks, even under monitor.
 
+### Verify on load
+
+A guard can refuse to enforce a policy it cannot prove. With
+`require_signature`, every hop of the `extends` chain that is not a `builtin:`
+ruleset must carry either a detached signature that verifies against the
+trusted keys (`<policy>.yaml.sig`, see `h2h sign`) or a digest pin naming its
+exact content hash.
+
+```python
+guard = HushGuard.from_file(
+    "./policy.yaml",
+    require_signature=True,
+    trusted_keys=[open("release.pub.pem").read()],
+)
+
+guard.resolution.signature.verified   # True
+guard.resolution.chain                # root first, leaf last, one hash per hop
+```
+
+If verification fails the guard does not raise -- it *refuses*: every
+evaluation denies with `matched_rule` `__hushspec_policy_signature__` and
+`guard.refusal.reason` carries the reason code (`missing_signature`,
+`unknown_key_id`, `content_hash_mismatch`, ...). Without `require_signature` a
+keyring still buys opportunistic verification, recorded in
+`guard.resolution.signature` and never blocking the load.
+
+Pin a base by digest to get integrity without keys at all:
+
+```yaml
+extends: "./base.yaml#sha256:9f2c...<64 hex>"
+```
+
+A pin that no longer matches is always fatal, signatures configured or not.
+`resolve_with_options()` exposes the same machinery without a guard.
+
 ## Features
 
 ### Evaluation
@@ -95,17 +130,46 @@ result = evaluate(spec, {"type": "egress", "target": "evil.example.com"})
 # result.matched_rule: "rules.egress.default"
 ```
 
+### Compiled policies
+
+`evaluate()` compiles the document on first use and reuses the result, so a
+repeated call costs no compilation. A long-lived enforcement point should hold
+the compiled policy itself:
+
+```python
+from hushspec import compile_policy, parse_or_raise
+
+compiled = compile_policy(parse_or_raise(policy_yaml))
+result = compiled.evaluate(action)
+```
+
+`compile_policy()` prepares everything that does not depend on the action --
+every regex, path glob and host matcher, the `when` conditions, the
+per-action-type rule-block plan, the origin overlays, and the detectors a
+`detection:` block enables -- and keeps the source document for receipts and
+hashing (`compiled.spec`, `compiled.content_hash`). It accepts a `Resolution`
+as well as a `HushSpec`, and carries that provenance into
+`compiled.evaluate_audited(action)`.
+
+It is strict by default: a pattern outside the [regex profile](../../spec/)
+raises `CompileError` naming the rule path, rather than waiting for the first
+action that reaches it. `compile_policy(spec, strict=False)` keeps the
+evaluator's deferred behaviour instead -- the offending pattern is recorded in
+`compiled.errors` and denies the actions that reach it.
+
+`HushGuard` compiles once at construction and on every `swap_policy()`;
+`guard.compiled` is the policy it is enforcing.
+
+`packages/python/bench/evaluate.py` measures it.
+
 ### Audit Trail
 
 ```python
-from hushspec import parse_or_raise, evaluate_audited
+from hushspec import AuditConfig, Resolution, evaluate_audited, parse_or_raise
 
-receipt = evaluate_audited(spec, action, {
-    "enabled": True,
-    "include_rule_trace": True,
-    "redact_content": False,
-})
-# receipt.decision, receipt.rule_evaluations, receipt.policy_summary
+resolution = Resolution.from_resolved(spec)
+receipt = evaluate_audited(resolution, action, AuditConfig())
+# receipt.decision, receipt.rule_trace, receipt.policy.content_hash
 ```
 
 ### Detection Pipeline
@@ -137,6 +201,49 @@ sink = MultiSink([
     FilteredSink(stderr_sink, lambda r: r.decision == "deny"),
 ])
 ```
+
+### Evidence chain
+
+A receipt proves one evaluation; a hash-linked log proves a sequence of them.
+`ChainedFileSink` writes format 0.2 receipts as JSON Lines, each entry carrying
+the previous entry's hash, so an auditor can see that nothing was edited,
+deleted, inserted, or reordered. A guard also records which policy came into
+force, and when it was swapped, so every receipt maps back to the exact
+document that produced it.
+
+```python
+from hushspec import ChainedFileSink, HushGuard, verify_log_files
+from hushspec.receipt import Actor
+
+sink = ChainedFileSink.open("/var/log/hushspec.jsonl")
+guard = HushGuard.from_file(
+    "policy.yaml",
+    sink=sink,
+    actor=Actor(agent_id="deploy-bot-3", session_id="run-42"),
+)
+guard.check(HushGuard.map_egress("api.example.com"))
+
+report = verify_log_files(["/var/log/hushspec.jsonl"])
+# report.entries / .receipts / .policy_events / .last_entry_hash
+```
+
+Hold a signing key and every entry is signed too (`sink.with_signer(pem)`);
+`verify_log_files(..., LogVerifyOptions(require_signatures=True, keyring=ring))`
+then checks each one and reports the first break by line. Rotate with
+`sink.rotate("next.jsonl")`, which carries the chain across files.
+
+A receipt can also be signed on its own -- the envelope covers the receipt hash,
+so the receipt's own identity is the same whether or not it was ever signed:
+
+```python
+from hushspec.signing import sign_receipt, verify_receipt
+
+signed = sign_receipt(receipt, private_key_pem)
+result = verify_receipt(signed, keyring=keyring)   # result.valid, result.reason
+```
+
+Both need the `signing` extra (`pip install "hushspec[signing]"`); without it
+they raise `SigningUnavailable` rather than returning an unchecked answer.
 
 ### Panic Mode
 

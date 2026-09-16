@@ -35,16 +35,21 @@ var ExtensionKeys = map[string]struct{}{
 }
 
 var GovernanceMetadataKeys = map[string]struct{}{
-	"author":          {},
-	"approved_by":     {},
-	"approval_date":   {},
-	"classification":  {},
-	"change_ticket":   {},
-	"lifecycle_state": {},
-	"policy_version":  {},
-	"effective_date":  {},
-	"expiry_date":     {},
-	"controls":        {},
+	"author":           {},
+	"approved_by":      {},
+	"approval_date":    {},
+	"classification":   {},
+	"change_ticket":    {},
+	"lifecycle_state":  {},
+	"policy_version":   {},
+	"effective_date":   {},
+	"expiry_date":      {},
+	"owner":            {},
+	"reviewers":        {},
+	"next_review_date": {},
+	"changelog":        {},
+	"supersedes":       {},
+	"controls":         {},
 }
 
 var ControlMappingKeys = map[string]struct{}{
@@ -52,6 +57,13 @@ var ControlMappingKeys = map[string]struct{}{
 	"control_id": {},
 	"rule_paths": {},
 	"notes":      {},
+}
+
+var ChangelogEntryKeys = map[string]struct{}{
+	"version": {},
+	"date":    {},
+	"summary": {},
+	"author":  {},
 }
 
 var ForbiddenPathKeys = map[string]struct{}{

@@ -1,8 +1,16 @@
 import type { DecisionReceipt } from './receipt.js';
+import type { PolicyEvent } from './log.js';
 import { appendFileSync } from 'node:fs';
 
 export interface ReceiptSink {
   send(receipt: DecisionReceipt): void;
+
+  /**
+   * Record a policy-in-effect event (RFC 09 P2-10). Sinks that only carry
+   * receipts leave it unimplemented; the hash-linked log writes it as an
+   * entry (`ChainedFileSink`).
+   */
+  recordPolicyEvent?(event: PolicyEvent): unknown;
 }
 
 export class FileReceiptSink implements ReceiptSink {
@@ -34,6 +42,15 @@ export class FilteredSink implements ReceiptSink {
       this.inner.send(receipt);
     }
   }
+
+  /**
+   * Policy events are never filtered by decision: a reader maps a receipt to
+   * the policy in force by walking back to the nearest policy event, so
+   * dropping one would orphan every receipt after it.
+   */
+  recordPolicyEvent(event: PolicyEvent): void {
+    this.inner.recordPolicyEvent?.(event);
+  }
 }
 
 export class MultiSink implements ReceiptSink {
@@ -43,6 +60,16 @@ export class MultiSink implements ReceiptSink {
     for (const sink of this.sinks) {
       try {
         sink.send(receipt);
+      } catch {
+        // Sinks must not crash the application.
+      }
+    }
+  }
+
+  recordPolicyEvent(event: PolicyEvent): void {
+    for (const sink of this.sinks) {
+      try {
+        sink.recordPolicyEvent?.(event);
       } catch {
         // Sinks must not crash the application.
       }

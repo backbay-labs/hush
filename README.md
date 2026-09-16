@@ -293,18 +293,18 @@ See [Installation](#installation) above for install options — Homebrew, npm, C
 <details>
 <summary>Decision Receipts (Audit Trail)</summary>
 
-`evaluate_audited()` generates structured decision receipts with rule traces, policy summaries, and optional content redaction. Receipts conform to `hushspec-receipt.v0.schema.json` and are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
+`evaluate_audited()` generates format 0.2 decision receipts: the resolved policy's canonical content hash, the actor, the recorded rule and detection traces, and the enforcement disposition. Content is never carried -- only its `sha256:` hash and byte size -- so a receipt log is safe to hand to an auditor. Receipts conform to `hushspec-receipt.v0.schema.json` and are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
 
 ```typescript
-import { parseOrThrow, evaluateAudited } from '@hushspec/core';
+import { parseOrThrow, resolveWithOptions, evaluateAudited } from '@hushspec/core';
 
-const spec = parseOrThrow(policyYaml);
-const receipt = evaluateAudited(spec, action, {
+const resolution = resolveWithOptions(parseOrThrow(policyYaml));
+const receipt = evaluateAudited(resolution, action, {
   enabled: true,
-  include_rule_trace: true,
-  redact_content: false,
+  includeRuleTrace: true,
+  recordDuration: true,
 });
-// receipt.decision, receipt.rule_evaluations, receipt.policy_summary
+// receipt.decision, receipt.rule_trace, receipt.policy.content_hash
 ```
 
 Receipt sinks (`FileReceiptSink`, `ConsoleReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`) are available in all four SDKs for routing receipts to storage, logging, or custom callback endpoints. No OTLP sink exists in any SDK today.
@@ -369,17 +369,17 @@ const result = evaluator.evaluate(spec, action);
 <details>
 <summary>Policy Signing</summary>
 
-Policies can be signed and verified with Ed25519 keys via the Rust SDK (feature-gated) and the `h2h` CLI's `sign`, `verify`, and `keygen` commands. Signature verification is a separate, explicit step today — it is not yet wired into policy loading or `extends` resolution, and it has not been ported to TypeScript, Python, or Go. The signature format conforms to `hushspec-signature.v0.schema.json`.
+Policies can be signed and verified with Ed25519 keys via the Rust SDK (feature-gated) and the `h2h` CLI's `sign`, `verify`, and `keygen` commands. The signature covers the **content hash of the resolved policy**, not the file's bytes, so reformatting a signed policy keeps it valid and a change to a base policy reached through `extends` invalidates it. Keys are standard PEM (PKCS#8 and SubjectPublicKeyInfo), named by the SHA-256 of their SPKI. Signature verification is a separate, explicit step today — it is not yet wired into policy loading or `extends` resolution, and it has not been ported to TypeScript, Python, or Go. The format is specified in [`spec/hushspec-signing.md`](./spec/hushspec-signing.md) and `hushspec-signature.v0.schema.json`.
 
 ```bash
-# Generate a keypair
+# Generate a keypair (writes h2h.key.pem and h2h.pub.pem, prints the key id)
 h2h keygen --output-dir mykeys
 
 # Sign a policy (creates policy.yaml.sig)
-h2h sign policy.yaml --key mykeys/h2h.key
+h2h sign policy.yaml --key mykeys/h2h.key.pem --expires-in 90d
 
 # Verify the signature
-h2h verify policy.yaml --key mykeys/h2h.pub
+h2h verify policy.yaml --key mykeys/h2h.pub.pem
 ```
 
 </details>
@@ -526,6 +526,7 @@ The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for prog
 | [`hushspec-canonical.md`](./spec/hushspec-canonical.md) | Canonical form and `content_hash` of a resolved policy (RFC 8785) |
 | [`hushspec-receipt.md`](./spec/hushspec-receipt.md) | Decision receipt format 0.2 |
 | [`hushspec-signing.md`](./spec/hushspec-signing.md) | Policy signature envelopes, keys, keyrings, verification |
+| [`hushspec-bundle.md`](./spec/hushspec-bundle.md) | Policy bundle attestation: DSSE envelope over an in-toto statement |
 | [`versioning.md`](./spec/versioning.md) | Versioning and stability policy |
 
 ## Project

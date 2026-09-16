@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,16 +66,44 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 		return
 	}
 	m := spec.Metadata
+	today := currentDateISO()
+
+	for _, field := range []struct {
+		path  string
+		value string
+	}{
+		{"metadata.approval_date", m.ApprovalDate},
+		{"metadata.effective_date", m.EffectiveDate},
+		{"metadata.expiry_date", m.ExpiryDate},
+		{"metadata.next_review_date", m.NextReviewDate},
+	} {
+		if field.value != "" && !isISODate(field.value) {
+			result.addError("INVALID_DATE", fmt.Sprintf(
+				"%s: %q is not an ISO 8601 date (YYYY-MM-DD)", field.path, field.value))
+		}
+	}
+
+	for i, entry := range m.Changelog {
+		if !isISODate(entry.Date) {
+			result.addError("INVALID_DATE", fmt.Sprintf(
+				"metadata.changelog[%d].date: %q is not an ISO 8601 date (YYYY-MM-DD)", i, entry.Date))
+		}
+	}
+
+	// GOV_SELF_SUPERSEDES: a document that replaces its own version describes
+	// an impossible lineage, so it is an error rather than an advisory warning.
+	if m.Supersedes != "" && m.PolicyVersion != nil &&
+		strings.TrimSpace(m.Supersedes) == strconv.Itoa(*m.PolicyVersion) {
+		result.addError("INVALID_VALUE", fmt.Sprintf(
+			"metadata.supersedes '%s' is the policy's own policy_version", m.Supersedes))
+	}
 
 	if m.LifecycleState == LifecycleStateDeprecated || m.LifecycleState == LifecycleStateArchived {
 		result.addWarning(fmt.Sprintf("policy lifecycle state is '%s'", m.LifecycleState))
 	}
 
-	if m.ExpiryDate != "" {
-		today := currentDateISO()
-		if m.ExpiryDate < today {
-			result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", m.ExpiryDate))
-		}
+	if m.ExpiryDate != "" && isISODate(m.ExpiryDate) && m.ExpiryDate < today {
+		result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", m.ExpiryDate))
 	}
 
 	if m.ApprovedBy != "" && m.ApprovalDate == "" {
@@ -84,6 +113,86 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 	if m.Classification == ClassificationRestricted && m.ApprovedBy == "" {
 		result.addWarning("classification is 'restricted' but no approved_by is set")
 	}
+
+	// GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that
+	// a copy-paste with different capitalization defeats is no check at all.
+	if author := strings.TrimSpace(m.Author); author != "" &&
+		strings.EqualFold(author, strings.TrimSpace(m.ApprovedBy)) {
+		result.addWarning(fmt.Sprintf(
+			"author and approved_by are the same identity '%s': separation of duties requires a different approver",
+			author))
+	}
+
+	// GOV_UNAPPROVED_STATE.
+	if (m.LifecycleState == LifecycleStateApproved || m.LifecycleState == LifecycleStateDeployed) &&
+		m.ApprovedBy == "" {
+		result.addWarning(fmt.Sprintf(
+			"lifecycle_state is '%s' but no approved_by is set", m.LifecycleState))
+	}
+
+	// GOV_REVIEW_OVERDUE.
+	if m.NextReviewDate != "" && isISODate(m.NextReviewDate) && m.NextReviewDate < today {
+		result.addWarning(fmt.Sprintf(
+			"policy next_review_date '%s' is in the past", m.NextReviewDate))
+	}
+
+	// GOV_CHANGELOG_ORDER.
+	if index := changelogDisorder(m.Changelog); index >= 0 {
+		result.addWarning(fmt.Sprintf(
+			"changelog entries are not in descending version/date order at entry %d", index))
+	}
+}
+
+// isISODate reports whether value is `YYYY-MM-DD` and names a date that
+// actually exists. Dates are compared as strings throughout the toolchain --
+// which is calendar order only for this shape -- so an unchecked `01/02/2026`
+// would make an expired policy compare as current instead of failing loudly.
+func isISODate(value string) bool {
+	if !isoDatePattern.MatchString(value) {
+		return false
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return false
+	}
+	// time.Parse normalizes out-of-range days (2023-02-29 -> 2023-03-01), so
+	// round-trip the result to reject a date that does not exist.
+	return parsed.Format("2006-01-02") == value
+}
+
+var isoDatePattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+
+// compareChangelogVersions orders two versions numerically when both are plain
+// integers (the shape metadata.policy_version takes), lexicographically
+// otherwise.
+func compareChangelogVersions(left, right string) int {
+	a, errA := strconv.Atoi(strings.TrimSpace(left))
+	b, errB := strconv.Atoi(strings.TrimSpace(right))
+	if errA == nil && errB == nil {
+		switch {
+		case a == b:
+			return 0
+		case a < b:
+			return -1
+		default:
+			return 1
+		}
+	}
+	return strings.Compare(left, right)
+}
+
+// changelogDisorder returns the index of the first entry that is not ordered
+// after the one above it (the list runs newest first), or -1 when ordered.
+func changelogDisorder(entries []ChangelogEntry) int {
+	for index := 1; index < len(entries); index++ {
+		previous, current := entries[index-1], entries[index]
+		versionOrder := compareChangelogVersions(previous.Version, current.Version)
+		ordered := versionOrder > 0 || (versionOrder == 0 && previous.Date >= current.Date)
+		if !ordered {
+			return index
+		}
+	}
+	return -1
 }
 
 // isNonFiniteFloat reports whether x is NaN or +/-Infinity. YAML's `.nan`,

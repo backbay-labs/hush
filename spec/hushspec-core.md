@@ -61,6 +61,8 @@ Test vectors: `fixtures/core/invalid/missing-version.yaml`, `fixtures/core/inval
 
 The `extends` field is a single string reference to a base policy document. Resolution of this reference (filesystem path, URL, registry identifier, built-in name) is engine-specific and outside the scope of this specification. Engines MUST document their resolution strategy. Circular inheritance MUST be detected and rejected.
 
+**Digest pinning.** An `extends` reference MAY carry a fragment `#sha256:<64 lowercase hex>` naming the content hash of the referenced document **canonicalized on its own**, with its `extends` and `merge_strategy` fields removed before projection (Canonical Form specification, Section 3; the same value a receipt records for a chain link and `h2h hash --own` prints). A resolver MUST strip the fragment before loading, compute the loaded document's own content hash, and reject the resolution with reason `digest_mismatch` when it differs. A pin is checked whether or not the engine requires signatures; a matching pin satisfies the signature requirement for that document (Signing specification, Section 6.5). A malformed fragment MUST be rejected. Test vectors: `fixtures/core/resolve/`.
+
 A **resolved document** is the output of merging the entire `extends` chain (Section 4). A resolved document MUST NOT contain the `extends` field and MUST NOT contain the `merge_strategy` field. Engines MUST evaluate only resolved documents: evaluating a document whose `extends` reference has not been resolved silently drops the base policy and is a conformance failure. An engine that cannot resolve a reference MUST refuse to evaluate the document rather than evaluate the child alone.
 
 The identity of a resolved document is its **content hash**, defined by the Canonical Form specification (`hushspec-canonical.md`): a deterministic projection of the resolved document with schema defaults made explicit, serialized per RFC 8785 and hashed with SHA-256. Decision receipts (`hushspec-receipt.md`) and policy signatures (`hushspec-signing.md`) both identify a policy by that hash, never by file bytes or by an engine-specific serialization.
@@ -87,16 +89,37 @@ The OPTIONAL `metadata` object carries governance information about the policy. 
 |-------------------|---------|----------|-----------------------------------------------------------------------------|
 | `author`          | string  | OPTIONAL | Identity of the policy author (email, team name).                           |
 | `approved_by`     | string  | OPTIONAL | Identity of the policy approver.                                            |
-| `approval_date`   | string  | OPTIONAL | ISO 8601 date the policy was approved.                                      |
+| `approval_date`   | string  | OPTIONAL | Date the policy was approved. MUST be an ISO 8601 calendar date.            |
 | `classification`  | string  | OPTIONAL | One of `public`, `internal`, `confidential`, `restricted`.                  |
 | `change_ticket`   | string  | OPTIONAL | Change-management reference.                                                |
 | `lifecycle_state` | string  | OPTIONAL | One of `draft`, `review`, `approved`, `deployed`, `deprecated`, `archived`. |
 | `policy_version`  | integer | OPTIONAL | Monotonically increasing version counter. MUST be >= 1.                     |
-| `effective_date`  | string  | OPTIONAL | ISO 8601 date the policy becomes effective.                                 |
-| `expiry_date`     | string  | OPTIONAL | ISO 8601 date the policy expires.                                           |
-| `controls`        | array   | OPTIONAL | Compliance control mappings. See below.                                     |
+| `effective_date`  | string  | OPTIONAL | Date the policy becomes effective. MUST be an ISO 8601 calendar date.       |
+| `expiry_date`     | string  | OPTIONAL | Date the policy expires. MUST be an ISO 8601 calendar date.                 |
+| `owner`           | string  | OPTIONAL | Identity accountable for the policy over its lifetime, as distinct from the `author` of this revision. |
+| `reviewers`       | array of string | OPTIONAL | Identities who reviewed the policy.                                 |
+| `next_review_date`| string  | OPTIONAL | Date the policy is next due for review. MUST be an ISO 8601 calendar date.  |
+| `changelog`       | array   | OPTIONAL | Revision history, newest first. See Section 2.5.2.                          |
+| `supersedes`      | string  | OPTIONAL | The `policy_version` this document replaces. MUST NOT equal this document's own `policy_version`. |
+| `controls`        | array   | OPTIONAL | Compliance control mappings. See Section 2.5.1.                             |
 
-Unknown keys under `metadata` MUST be rejected (Section 2.1). Under every merge strategy the child's `metadata` object, when present, replaces the base's `metadata` object entirely; when the child omits `metadata`, the base's is preserved. Governance semantics (lifecycle enforcement, approval checks) are defined by the HushSpec Governance specification, not by this document.
+**Dates.** `approval_date`, `effective_date`, `expiry_date`, `next_review_date` and each `changelog` entry's `date` MUST be an ISO 8601 calendar date in `YYYY-MM-DD` form, naming a day that exists. A document carrying any other shape MUST be rejected. Tools compare these dates as strings -- lexicographic order is calendar order only for `YYYY-MM-DD` -- so an unchecked value would make an expired policy compare as current rather than fail.
+
+Unknown keys under `metadata` MUST be rejected (Section 2.1). Under every merge strategy the child's `metadata` object, when present, replaces the base's `metadata` object entirely; when the child omits `metadata`, the base's is preserved.
+
+**Governance checks.** Governance metadata never influences evaluation, so every check below is a tooling concern, reported by `h2h audit` with a stable code, a severity and the path it concerns. All but the last are advisory warnings, which `h2h audit --strict` promotes to a failure; `GOV_SELF_SUPERSEDES` describes a document that contradicts itself and is a validation error, so a conformant validator MUST reject it.
+
+| Code                        | Severity | Condition                                                                 |
+|-----------------------------|----------|---------------------------------------------------------------------------|
+| `GOV_LIFECYCLE`             | warning  | `lifecycle_state` is `deprecated` or `archived`.                          |
+| `GOV_EXPIRED`               | warning  | `expiry_date` is in the past.                                             |
+| `GOV_MISSING_APPROVAL_DATE` | warning  | `approved_by` is set without `approval_date`.                             |
+| `GOV_RESTRICTED_NO_APPROVER`| warning  | `classification` is `restricted` with no `approved_by`.                   |
+| `GOV_SOD_VIOLATION`         | warning  | `author` and `approved_by` are the same identity, compared trimmed and case-insensitively. |
+| `GOV_UNAPPROVED_STATE`      | warning  | `lifecycle_state` is `approved` or `deployed` with no `approved_by`.      |
+| `GOV_REVIEW_OVERDUE`        | warning  | `next_review_date` is in the past.                                        |
+| `GOV_CHANGELOG_ORDER`       | warning  | `changelog` entries are not in descending version, then date, order.      |
+| `GOV_SELF_SUPERSEDES`       | error    | `supersedes` equals this document's own `policy_version`.                 |
 
 #### 2.5.1 Control Mappings
 
@@ -128,7 +151,22 @@ Because paths are resolved against the resolved document, a mapping in a child p
 
 **Frameworks.** Framework identifiers are listed, together with a `control_id_pattern` for each, in `spec/registries/frameworks.yaml`. Registration is advisory: a document naming an unregistered framework, or a control id that does not match its framework's pattern, is still a valid HushSpec document and engines MUST NOT reject it. Linters SHOULD flag both (`h2h lint` reports them as L013), SHOULD flag a rule path that resolves to nothing (L012), and SHOULD flag a rule block left unmapped once a policy declares any mapping (L011).
 
-Test vectors: `fixtures/core/valid/metadata.yaml`, `fixtures/core/valid/metadata-controls.yaml`, `fixtures/core/invalid/metadata-controls-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-empty-paths.yaml`, `fixtures/core/invalid/metadata-controls-bad-framework-id.yaml`.
+#### 2.5.2 Changelog
+
+The OPTIONAL `metadata.changelog` array records the policy's revision history, newest first. Each entry is an object:
+
+| Field     | Type   | Required | Description                                                      |
+|-----------|--------|----------|------------------------------------------------------------------|
+| `version` | string | REQUIRED | The `policy_version` this entry describes, as a string. MUST NOT be empty. |
+| `date`    | string | REQUIRED | ISO 8601 calendar date the revision was made.                    |
+| `summary` | string | REQUIRED | What changed in this revision. MUST NOT be empty.                |
+| `author`  | string | OPTIONAL | Identity that made the revision.                                 |
+
+Unknown keys within an entry MUST be rejected (Section 2.1). Entries SHOULD run newest first: descending by `version` -- compared numerically when both versions are plain integers, lexicographically otherwise -- and, for equal versions, descending by `date`. A list in any other order is a valid document; linters report it (`GOV_CHANGELOG_ORDER`).
+
+**Changelog entries MUST NOT influence evaluation.** Like control mappings, they are a claim about the policy, never an input to a rule.
+
+Test vectors: `fixtures/core/valid/metadata.yaml`, `fixtures/core/valid/metadata-governance-full.yaml`, `fixtures/core/valid/metadata-controls.yaml`, `fixtures/core/invalid/metadata-bad-date.yaml`, `fixtures/core/invalid/metadata-changelog-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-unknown-key.yaml`, `fixtures/core/invalid/metadata-controls-empty-paths.yaml`, `fixtures/core/invalid/metadata-controls-bad-framework-id.yaml`.
 
 ---
 

@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use hushspec::evaluate::Decision;
 use hushspec::receipt::{
-    ActionSummary, DecisionReceipt, PolicySummary, RuleEvaluation, RuleOutcome,
+    ActionSummary, DecisionReceipt, EnforcementMode, EnforcementOutcome, EnforcementSummary,
+    PolicySummary, RuleOutcome, RuleTraceEntry, TimeSource,
 };
 use hushspec::sink::{
     CallbackSink, FileReceiptSink, FilteredSink, MultiSink, NullSink, ReceiptSink, SinkError,
@@ -10,33 +11,47 @@ use hushspec::sink::{
 
 fn make_receipt(decision: Decision) -> DecisionReceipt {
     DecisionReceipt {
-        receipt_id: "test-receipt-001".to_string(),
+        receipt_version: "0.2".to_string(),
+        receipt_id: "01994b7e-2c1f-7c00-a000-0123456789ab".to_string(),
         timestamp: "2026-03-15T00:00:00.000Z".to_string(),
-        hushspec_version: "0.1.0".to_string(),
+        time_source: TimeSource::System,
+        actor: None,
+        policy: PolicySummary {
+            name: Some("test-policy".to_string()),
+            version: None,
+            spec_version: "0.1.0".to_string(),
+            content_hash: "sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5"
+                .to_string(),
+            extends_chain: None,
+            signature: None,
+        },
         action: ActionSummary {
             action_type: "tool_call".to_string(),
             target: Some("test_tool".to_string()),
-            content_redacted: false,
+            content_hash: None,
+            content_size: None,
+            args_size: None,
+            origin: None,
+            context: None,
         },
         decision,
         matched_rule: Some("rules.tool_access.allow".to_string()),
         reason: Some("tool is explicitly allowed".to_string()),
-        rule_trace: vec![RuleEvaluation {
+        rule_trace: vec![RuleTraceEntry {
             rule_block: "tool_access".to_string(),
+            rule_path: Some("rules.tool_access.allow".to_string()),
             outcome: RuleOutcome::Allow,
-            matched_rule: Some("rules.tool_access.allow".to_string()),
-            reason: Some("tool is explicitly allowed".to_string()),
             evaluated: true,
+            reason: Some("tool is explicitly allowed".to_string()),
         }],
-        policy: PolicySummary {
-            name: Some("test-policy".to_string()),
-            version: "0.1.0".to_string(),
-            content_hash: "abc123".to_string(),
+        detection_trace: None,
+        enforcement: EnforcementSummary {
+            mode: EnforcementMode::Enforce,
+            outcome: EnforcementOutcome::Allowed,
         },
         origin_profile: None,
         posture: None,
-        enforcement: None,
-        evaluation_duration_us: 42,
+        duration_us: Some(42),
     }
 }
 
@@ -61,7 +76,7 @@ fn file_sink_writes_json_lines() {
 
     // Each line should parse as valid JSON.
     let parsed1: DecisionReceipt = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(parsed1.receipt_id, "test-receipt-001");
+    assert_eq!(parsed1.receipt_id, "01994b7e-2c1f-7c00-a000-0123456789ab");
 
     let parsed2: DecisionReceipt = serde_json::from_str(lines[1]).unwrap();
     assert_eq!(parsed2.decision, Decision::Deny);
@@ -379,8 +394,8 @@ fn callback_sink_invokes_callback() {
 
     let ids = receipts.lock().unwrap();
     assert_eq!(ids.len(), 2);
-    assert_eq!(ids[0], "test-receipt-001");
-    assert_eq!(ids[1], "test-receipt-001");
+    assert_eq!(ids[0], "01994b7e-2c1f-7c00-a000-0123456789ab");
+    assert_eq!(ids[1], "01994b7e-2c1f-7c00-a000-0123456789ab");
 }
 
 // --- StderrReceiptSink ---

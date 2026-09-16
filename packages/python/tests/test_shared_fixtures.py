@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from hushspec import merge, parse, validate
@@ -10,6 +11,7 @@ from hushspec.conditions import RuntimeContext
 from hushspec.detection import evaluate_with_detection
 from hushspec.evaluate import EvaluationAction, OriginContext, PostureContext
 from hushspec.parse import CoreSafeLoader
+from hushspec.resolve import DIGEST_PIN_MARKER, create_composite_loader, resolve
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -45,7 +47,10 @@ MERGE_DIRS = [
 
 
 def iter_yaml_files(subdir: str) -> list[Path]:
-    directory = FIXTURES_ROOT / subdir
+    return iter_yaml_files_in(FIXTURES_ROOT / subdir)
+
+
+def iter_yaml_files_in(directory: Path) -> list[Path]:
     if not directory.exists():
         return []
     return sorted(
@@ -55,6 +60,81 @@ def iter_yaml_files(subdir: str) -> list[Path]:
             if path.suffix in {".yaml", ".yml"} and path.is_file()
         ]
     )
+
+
+def iter_fixture_dirs(subdir: str) -> list[Path]:
+    """The fixture directory and any per-case subdirectory under it.
+
+    Merge vectors have historically been flat (`base.yaml` + `child-*.yaml` +
+    `expected-*.yaml` in one directory). A vector that needs its own base -- a
+    digest pin names one exact document, so a pin-mismatch case cannot share a
+    base with a pin-match case -- gets its own subdirectory with its own
+    `base.yaml`, and this picks those up too.
+    """
+    root = FIXTURES_ROOT / subdir
+    if not root.exists():
+        return []
+    return [root] + sorted(path for path in root.iterdir() if path.is_dir())
+
+
+def fixture_pins_its_base(child_path: Path) -> bool:
+    """Whether a merge fixture's child pins its base by digest."""
+    extends = (parse_raw_or_fail(child_path) or {}).get("extends")
+    return isinstance(extends, str) and DIGEST_PIN_MARKER in extends
+
+
+def expects_rejection(child_path: Path) -> bool:
+    """Whether a merge fixture is expected to be rejected rather than merged.
+
+    Two conventions are honoured, so a digest-pin vector lands correctly under
+    whichever one the Rust reference chose when it added the fixtures:
+
+    * a marker file -- `child-x.yaml.expect-reject`, `child-x.expect-reject`,
+      or a directory-wide `expect-reject`;
+    * `reject: true` in a `fixture.yaml`, either beside the child
+      (`child-x.fixture.yaml`) or for the directory, where a per-child mapping
+      keyed by the child's file name or stem is also read.
+    """
+    for marker in (
+        child_path.parent / f"{child_path.name}.expect-reject",
+        child_path.parent / f"{child_path.stem}.expect-reject",
+        child_path.parent / "expect-reject",
+    ):
+        if marker.exists():
+            return True
+
+    names = {child_path.name, child_path.stem}
+    for meta_path in (
+        child_path.parent / f"{child_path.stem}.fixture.yaml",
+        child_path.parent / "fixture.yaml",
+    ):
+        if not meta_path.is_file():
+            continue
+        meta = yaml.load(meta_path.read_text(), Loader=CoreSafeLoader)
+        if isinstance(meta, dict) and _declares_rejection(meta, names):
+            return True
+    return False
+
+
+def _declares_rejection(meta: dict[str, Any], names: set[str]) -> bool:
+    if meta.get("reject") is True:
+        return True
+    for key in ("cases", "children", "fixtures", "merge"):
+        section = meta.get(key)
+        if isinstance(section, dict):
+            for name in names:
+                entry = section.get(name)
+                if entry is True:
+                    return True
+                if isinstance(entry, dict) and entry.get("reject") is True:
+                    return True
+        elif isinstance(section, list):
+            for entry in section:
+                if not isinstance(entry, dict) or entry.get("reject") is not True:
+                    continue
+                if names & {entry.get("child"), entry.get("name"), entry.get("file")}:
+                    return True
+    return False
 
 
 class TestSharedFixtures:
@@ -78,22 +158,54 @@ class TestSharedFixtures:
 
     def test_merge_fixtures(self):
         for subdir in MERGE_DIRS:
-            base_path = FIXTURES_ROOT / subdir / "base.yaml"
-            if not base_path.exists():
-                continue
-            base = parse_or_fail(base_path)
-
-            for child_path in iter_yaml_files(subdir):
-                if not child_path.stem.startswith("child-"):
+            for directory in iter_fixture_dirs(subdir):
+                base_path = directory / "base.yaml"
+                if not base_path.exists():
                     continue
-                expected_path = child_path.with_name(
-                    child_path.name.replace("child-", "expected-", 1)
-                )
-                expected = parse_or_fail(expected_path)
-                merged = merge(base, parse_or_fail(child_path))
-                assert (
-                    merged.to_dict() == expected.to_dict()
-                ), f"{child_path}: merged output differed from {expected_path.name}"
+                base = parse_or_fail(base_path)
+
+                for child_path in iter_yaml_files_in(directory):
+                    if not child_path.stem.startswith("child-"):
+                        continue
+                    self._run_merge_fixture(base, child_path)
+
+    def _run_merge_fixture(self, base, child_path: Path) -> None:
+        """Merge (or resolve) one `child-*.yaml` and compare with its expectation.
+
+        A child that pins its base by digest (`extends: "base.yaml#sha256:..."`)
+        goes through the resolver instead of a bare `merge()`, because the pin
+        is only checked while resolving; the merged document that comes out is
+        the same one `merge()` would produce for a matching pin.
+
+        A fixture marked as expected-to-reject (see `expects_rejection`) must
+        fail instead, and needs no `expected-*.yaml`.
+        """
+        expect_reject = expects_rejection(child_path)
+        pinned = fixture_pins_its_base(child_path)
+
+        if pinned:
+            ok, result = resolve(
+                parse_or_fail(child_path),
+                source=str(child_path),
+                loader=create_composite_loader(),
+            )
+        else:
+            ok, result = True, merge(base, parse_or_fail(child_path))
+
+        if expect_reject:
+            assert not ok, f"{child_path}: expected rejection, got a merged document"
+            return
+        assert ok, f"{child_path}: {result}"
+
+        expected_path = child_path.with_name(
+            child_path.name.replace("child-", "expected-", 1)
+        )
+        if pinned and not expected_path.is_file():
+            return  # a pin-only fixture: the outcome is the assertion
+        expected = parse_or_fail(expected_path)
+        assert (
+            result.to_dict() == expected.to_dict()
+        ), f"{child_path}: merged output differed from {expected_path.name}"
 
     def test_evaluator_fixtures(self):
         for subdir in EVALUATION_DIRS:
@@ -150,6 +262,130 @@ def parse_or_fail(path: Path):
     ok, result = parse(path.read_text())
     assert ok, f"{path}: {result}"
     return result
+
+
+def parse_raw_or_fail(path: Path) -> dict[str, Any] | None:
+    """The document as a plain mapping -- for fields the typed model normalizes."""
+    raw = yaml.load(path.read_text(), Loader=CoreSafeLoader)
+    return raw if isinstance(raw, dict) else None
+
+
+class TestMergeFixtureConventions:
+    """The runner's handling of digest-pinned and expected-to-reject vectors.
+
+    The pinned merge vectors themselves are added to ``fixtures/`` by the Rust
+    reference; these build the same shapes in a temp directory so the runner is
+    proven independently of when those files land, and so a vector written in
+    either marker convention is known to be honoured.
+    """
+
+    MERGE_BASE = 'hushspec: "0.1.0"\nname: base\nrules:\n  egress:\n    allow: ["a.com"]\n    default: block\n'
+    MERGE_CHILD = 'hushspec: "0.1.0"\nname: child\nextends: "base.yaml#{pin}"\nrules:\n  egress:\n    allow: ["b.com"]\n    default: block\n'
+
+    def _fixture(self, tmp_path: Path, pin: str) -> tuple[Any, Path]:
+        base_path = tmp_path / "base.yaml"
+        base_path.write_text(self.MERGE_BASE)
+        child_path = tmp_path / "child-pinned.yaml"
+        child_path.write_text(self.MERGE_CHILD.format(pin=pin))
+        return parse_or_fail(base_path), child_path
+
+    def _good_pin(self, tmp_path: Path) -> str:
+        from hushspec import content_hash
+
+        return content_hash(parse_or_fail(tmp_path / "base.yaml"))
+
+    def test_a_matching_pin_resolves_and_matches_the_expected_document(self, tmp_path):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        child_path.write_text(self.MERGE_CHILD.format(pin=self._good_pin(tmp_path)))
+        expected = merge(base, parse_or_fail(child_path))
+        (tmp_path / "expected-pinned.yaml").write_text(
+            yaml.safe_dump(expected.to_dict(), sort_keys=False)
+        )
+
+        TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_a_pin_only_vector_needs_no_expected_document(self, tmp_path):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        child_path.write_text(self.MERGE_CHILD.format(pin=self._good_pin(tmp_path)))
+
+        TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_a_pin_mismatch_fails_unless_it_is_marked(self, tmp_path):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+
+        with pytest.raises(AssertionError, match="expected rejection|digest pin"):
+            TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    @pytest.mark.parametrize(
+        "marker",
+        ["child-pinned.yaml.expect-reject", "child-pinned.expect-reject", "expect-reject"],
+    )
+    def test_a_marker_file_makes_a_pin_mismatch_the_expected_outcome(self, tmp_path, marker):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        (tmp_path / marker).write_text("")
+
+        assert expects_rejection(child_path)
+        TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    @pytest.mark.parametrize(
+        "meta",
+        [
+            {"reject": True},
+            {"cases": {"child-pinned.yaml": {"reject": True}}},
+            {"children": {"child-pinned": True}},
+            {"fixtures": [{"child": "child-pinned.yaml", "reject": True}]},
+        ],
+    )
+    def test_a_fixture_yaml_reject_flag_is_honoured(self, tmp_path, meta):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        (tmp_path / "fixture.yaml").write_text(yaml.safe_dump(meta))
+
+        assert expects_rejection(child_path)
+        TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_a_reject_flag_for_another_child_does_not_apply(self, tmp_path):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        (tmp_path / "fixture.yaml").write_text(
+            yaml.safe_dump({"cases": {"child-other.yaml": {"reject": True}}})
+        )
+
+        assert not expects_rejection(child_path)
+        with pytest.raises(AssertionError):
+            TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_a_vector_marked_reject_that_resolves_is_a_failure(self, tmp_path):
+        base, child_path = self._fixture(tmp_path, "sha256:" + "0" * 64)
+        child_path.write_text(self.MERGE_CHILD.format(pin=self._good_pin(tmp_path)))
+        (tmp_path / "expect-reject").write_text("")
+
+        with pytest.raises(AssertionError, match="expected rejection"):
+            TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_unpinned_vectors_still_merge_without_resolving(self, tmp_path):
+        base_path = tmp_path / "base.yaml"
+        base_path.write_text(self.MERGE_BASE)
+        base = parse_or_fail(base_path)
+        # `extends: base` is not a loadable reference (the historical fixtures
+        # use it as a label), so this would fail if the runner resolved it.
+        child_path = tmp_path / "child-plain.yaml"
+        child_path.write_text(
+            'hushspec: "0.1.0"\nname: child\nextends: "base"\nrules:\n'
+            '  egress:\n    allow: ["b.com"]\n    default: block\n'
+        )
+        assert not fixture_pins_its_base(child_path)
+        (tmp_path / "expected-plain.yaml").write_text(
+            yaml.safe_dump(merge(base, parse_or_fail(child_path)).to_dict(), sort_keys=False)
+        )
+
+        TestSharedFixtures()._run_merge_fixture(base, child_path)
+
+    def test_per_case_subdirectories_are_discovered(self, tmp_path, monkeypatch):
+        root = tmp_path / "core" / "merge"
+        (root / "digest-pin").mkdir(parents=True)
+        monkeypatch.setitem(globals(), "FIXTURES_ROOT", tmp_path)
+
+        found = iter_fixture_dirs("core/merge")
+        assert found == [root, root / "digest-pin"]
 
 
 def _action_from_case(

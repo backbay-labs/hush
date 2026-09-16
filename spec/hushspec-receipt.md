@@ -212,13 +212,13 @@ Because the hash covers every field, engines MUST NOT mutate a receipt after com
 | `evaluation_duration_us` required | `duration_us` optional |
 | nullable fields (`type: [..., "null"]`) | no nulls anywhere; absent means absent |
 
-The SDKs shipped with HushSpec 0.2.0-draft still emit format 0.1 until RFC 09 P2-04 lands; the schema in `schemas/staged/0.2.0/` is the normative 0.2 schema and replaces `schemas/hushspec-receipt.v0.schema.json` in that change.
+The Rust SDK emits format 0.2 as of RFC 09 P2-04; `schemas/hushspec-receipt.v0.schema.json` is the normative 0.2 schema. The TypeScript, Python, and Go SDKs move to it in the port step that follows, against the expected receipts under `fixtures/receipts/expected/`.
 
 ---
 
 ## 8. Test vectors
 
-`fixtures/receipts/valid/*.json` are receipts that MUST be accepted; `fixtures/receipts/invalid/*.json` MUST be rejected. Each file name says what it exercises. They validate against the 0.2 schema with any JSON Schema 2020-12 validator; no SDK runner walks the directory until P2-04.
+`fixtures/receipts/valid/*.json` are receipts that MUST be accepted; `fixtures/receipts/invalid/*.json` MUST be rejected. Each file name says what it exercises. They validate against the 0.2 schema with any JSON Schema 2020-12 validator. The Rust test `crates/hushspec/tests/receipt.rs` walks both directories; `fixtures/receipts/expected/` additionally holds the receipt every SDK must produce, byte for byte after canonicalization, for each shared evaluation fixture case under fixed inputs.
 
 | Valid vector | Exercises |
 |---|---|
