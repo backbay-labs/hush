@@ -90,3 +90,11 @@ cases:
   keyring: keys/keyring-revoked.json
   expect:
     invalid: key_revoked
+- name: impossible-signed-at-date
+  policy: policies/basic.yaml
+  signature: policies/impossible-date.sig
+  expect:
+    invalid: malformed_envelope
+  note: February 30 is not a calendar date, so the shape check of section 6.2 fails before any
+    signature check; an engine that normalized it would compare expiry and retirement against
+    March 2

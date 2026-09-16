@@ -718,3 +718,20 @@ export async function fetchSignature(
   const result = await fetchTarget(target, settings, null, true);
   return result.missing ? null : result.body;
 }
+
+/**
+ * A signature locator for URL sources: it looks for `<source>.sig` under
+ * `config` and returns `null` when there is none, which the resolver reads as
+ * `missing_signature`.
+ *
+ * A policy fetched over the network needs its sidecar fetched the same way and
+ * under the same rules -- the TLS trust anchor, the loopback exemption and the
+ * authorization header the policy was fetched with. The resolver's own default
+ * locator carries no configuration, so a signed policy behind any of them
+ * could not be verified without this.
+ */
+export function httpSignatureLocator(
+  config?: HttpLoaderConfig,
+): (source: string) => Promise<string | null> {
+  return (source: string) => fetchSignature(`${source}.sig`, config);
+}

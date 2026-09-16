@@ -217,6 +217,32 @@ func TestValidateAcceptsAnyPatchOfASupportedMinor(t *testing.T) {
 	}
 }
 
+// TestEmptyNameOnlyRefusedInThe10Format covers core spec 2 and versioning spec
+// 10: a present `name` must be non-empty from the 1.0 document format on, while
+// the frozen 0.x format allows `name: ""`.
+func TestEmptyNameOnlyRefusedInThe10Format(t *testing.T) {
+	for _, version := range []string{"0.1.0", "0.2.0", "0.2.7"} {
+		if _, err := Parse("hushspec: \"" + version + "\"\nname: \"\"\n"); err != nil {
+			t.Errorf("expected %s to accept an empty name, got %v", version, err)
+		}
+	}
+	for _, version := range []string{"1.0.0", "1.0.3"} {
+		if _, err := Parse("hushspec: \"" + version + "\"\nname: \"\"\n"); err == nil {
+			t.Errorf("expected %s to refuse an empty name", version)
+		}
+	}
+}
+
+// TestEmptyNameUnderAnUnreadableVersion covers the fail-closed half: a version
+// that cannot be read as MAJOR.MINOR.PATCH is refused on its own account, and
+// must never be a way to relax a constraint as well.
+func TestEmptyNameUnderAnUnreadableVersion(t *testing.T) {
+	if _, err := Parse("hushspec: \"not-a-version\"\nname: \"\"\n"); err == nil ||
+		!strings.Contains(err.Error(), "name: must not be empty when present") {
+		t.Fatalf("expected the empty name to be refused, got %v", err)
+	}
+}
+
 // TestYAMLProfileRejections covers core spec 2.4: anchors, aliases, merge
 // keys, multi-document streams, YAML 1.1 booleans in boolean-typed fields,
 // duplicate keys, and tab indentation are all parse errors.

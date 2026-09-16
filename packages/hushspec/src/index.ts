@@ -166,6 +166,7 @@ export {
   createHttpLoader,
   createSyncHttpLoader,
   fetchSignature,
+  httpSignatureLocator,
   isBlockedAddress,
   resolveTarget,
   CLOUD_METADATA_ADDRESSES,

@@ -23,6 +23,29 @@ pub fn is_supported(version: &str) -> bool {
     supported_minor(version).is_some()
 }
 
+/// The MAJOR component of a well-formed `X.Y.Z` version string, or `None` when
+/// the string is not one.
+///
+/// The document format is versioned by its major component: the 1.0 format
+/// differs from 0.x only in the constraints it places on a document (core spec
+/// 10), so a constraint introduced with 1.0 is gated on this rather than on the
+/// minor an engine happens to support.
+#[must_use]
+pub fn major_version(version: &str) -> Option<u32> {
+    let mut parts = version.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    let patch = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let is_digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
+    if !is_digits(minor) || !is_digits(patch) {
+        return None;
+    }
+    major.parse().ok()
+}
+
 /// The `X.Y` minor of a well-formed, supported version string.
 #[must_use]
 pub fn supported_minor(version: &str) -> Option<&'static str> {

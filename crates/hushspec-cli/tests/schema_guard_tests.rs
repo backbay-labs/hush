@@ -381,6 +381,7 @@ fn the_core_schema_embeds_the_companion_schemas_verbatim() {
 fn the_core_schema_accepts_the_valid_vectors_and_refuses_the_invalid_ones() {
     let root = repo_root();
     let schema = compile(&core_schema());
+    let schema_v0 = compile(&read_schema("hushspec-core.v0.schema.json"));
 
     let mut accepted = 0;
     let mut refused = 0;
@@ -402,6 +403,7 @@ fn the_core_schema_accepts_the_valid_vectors_and_refuses_the_invalid_ones() {
                 let text = fs::read_to_string(&path).unwrap();
                 let document: serde_json::Value = serde_yaml::from_str(&text)
                     .unwrap_or_else(|e| panic!("{} is not YAML: {e}", path.display()));
+                let schema = schema_for(&document, &schema, &schema_v0);
                 let valid = schema.is_valid(&document);
 
                 if expect_valid {
@@ -584,6 +586,23 @@ fn read_schema(file_name: &str) -> serde_json::Value {
 
 fn core_schema() -> serde_json::Value {
     read_schema("hushspec-core.v1.schema.json")
+}
+
+/// The published core schema of the lineage `document` declares.
+///
+/// The two lineages are one schema apart: 0.x documents are validated against
+/// the frozen `core.v0` file, 1.x (and anything unreadable, which the v1 file
+/// refuses) against the current one. They differ only in the version pattern
+/// and in `name`, which 1.0 requires to be non-empty (versioning spec 10).
+fn schema_for<'a>(
+    document: &serde_json::Value,
+    current: &'a jsonschema::JSONSchema,
+    frozen: &'a jsonschema::JSONSchema,
+) -> &'a jsonschema::JSONSchema {
+    match document.get("hushspec").and_then(serde_json::Value::as_str) {
+        Some(declared) if hushspec::version::major_version(declared) == Some(0) => frozen,
+        _ => current,
+    }
 }
 
 fn compile(document: &serde_json::Value) -> jsonschema::JSONSchema {

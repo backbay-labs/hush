@@ -45,6 +45,22 @@ export const SUPPORTED_VERSIONS = HUSHSPEC_SUPPORTED_VERSIONS;
 const DIGITS = /^[0-9]+$/;
 
 /**
+ * The MAJOR component of a well-formed `X.Y.Z` version string, or `undefined`
+ * when the string is not one.
+ *
+ * The document format is versioned by its major component: the 1.0 format
+ * differs from 0.x only in the constraints it places on a document (core spec
+ * 10), so a constraint introduced with 1.0 is gated on this rather than on the
+ * minor an engine happens to support.
+ */
+export function majorVersion(version: string): number | undefined {
+  const parts = version.split('.');
+  if (parts.length !== 3) return undefined;
+  if (!parts.every(part => DIGITS.test(part))) return undefined;
+  return Number(parts[0]);
+}
+
+/**
  * The `X.Y` minor of a well-formed, supported version string, or `undefined`
  * when the version is malformed or its minor is not supported.
  */

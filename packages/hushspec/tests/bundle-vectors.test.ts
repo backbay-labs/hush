@@ -138,6 +138,22 @@ describe('bundle parsing', () => {
     expect(statement.subject).toHaveLength(1);
   });
 
+  it('refuses a created_at that is not a calendar date', () => {
+    // Shaped like an instant, but February 30 does not exist. `Date.parse`
+    // normalizes it to March 2, so a shape-only check would report the bundle
+    // as created two days after the statement says it was.
+    const envelope = parseBundle(validBundle());
+    const statement = JSON.parse(
+      Buffer.from(envelope.payload, 'base64').toString('utf8'),
+    ) as { predicate: Record<string, unknown> };
+    statement.predicate['created_at'] = '2026-02-30T00:00:00.000Z';
+    const edited = {
+      ...envelope,
+      payload: Buffer.from(JSON.stringify(statement), 'utf8').toString('base64'),
+    };
+    expect(() => bundleStatement(edited)).toThrow(/created_at/);
+  });
+
   it('refuses a document that is not a DSSE envelope', () => {
     expect(() => parseBundle('{}')).toThrow(/payloadType is required/);
     expect(() => parseBundle('not json')).toThrow(/not JSON/);

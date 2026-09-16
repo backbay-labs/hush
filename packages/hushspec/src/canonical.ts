@@ -576,6 +576,9 @@ function clone(value: unknown, path = '$'): JsonValue {
     if (!Number.isFinite(numeric)) {
       throw new CanonicalError(`${path}: NaN and Infinity have no JSON representation`);
     }
+    if (isUnsafeInteger(numeric)) {
+      throw new CanonicalError(`${path}: ${unsafeIntegerMessage(numeric)}`);
+    }
     return numeric;
   }
   if (Array.isArray(value)) {
@@ -669,19 +672,39 @@ function compareKeys(left: string, right: string): number {
 }
 
 /**
+ * Whether `value` is an integer outside the IEEE 754 safe range of spec
+ * section 4.3, which an implementation MUST refuse to canonicalize rather
+ * than round.
+ *
+ * JavaScript has a single number type, so the YAML/JSON parser has already
+ * rounded an oversized integer literal to the nearest double by the time it
+ * is seen here: what is refused is the rounded value, and the diagnostic
+ * names it. Refusing is still the point -- silently hashing a rounded integer
+ * would give the document a content hash no other SDK agrees with.
+ */
+function isUnsafeInteger(value: number): boolean {
+  return Number.isInteger(value) && !Number.isSafeInteger(value);
+}
+
+/** Spelled as every other HushSpec SDK spells it. */
+function unsafeIntegerMessage(value: number): string {
+  return `integer ${String(value)} exceeds the safe range (2^53-1)`;
+}
+
+/**
  * ES6 `Number::toString` (RFC 8785 3.2.2.3): the shortest decimal that
  * round-trips through an IEEE 754 double.
  *
  * `String(n)` *is* that algorithm, so there is nothing to reimplement: whole
  * values lose their fraction (`10.0` -> `10`), `1e21` becomes `1e+21`, and
- * negative zero prints as `0`. JavaScript has a single number type, so the
- * safe-integer bound of spec section 4.3 cannot be enforced here -- by the
- * time a value reaches this function the YAML/JSON parser has already rounded
- * an oversized integer literal to the nearest double.
+ * negative zero prints as `0`.
  */
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) {
     throw new CanonicalError('NaN and Infinity have no JSON representation');
+  }
+  if (isUnsafeInteger(value)) {
+    throw new CanonicalError(unsafeIntegerMessage(value));
   }
   return Object.is(value, -0) ? '0' : String(value);
 }
@@ -751,7 +774,8 @@ function serialize(value: JsonValue, out: string[]): void {
  * hashed. `merge_strategy` and `metadata.signature` are never emitted.
  *
  * @throws {CanonicalError} if `extends` is set, or the document holds a value
- * with no JSON representation.
+ * with no JSON representation, or an integer outside the IEEE 754 safe range
+ * (spec section 4.3).
  */
 export function canonicalJson(spec: HushSpec): string {
   const out: string[] = [];
@@ -771,7 +795,8 @@ export function canonicalJson(spec: HushSpec): string {
  * canonicalized by the same code as the policy hash inside them.
  *
  * @throws {CanonicalError} if the value holds something with no JSON
- * representation (NaN, Infinity, a function, a symbol).
+ * representation (NaN, Infinity, a function, a symbol) or an integer outside
+ * the IEEE 754 safe range (spec section 4.3).
  */
 export function canonicalizeValue(value: JsonValue): string {
   const out: string[] = [];

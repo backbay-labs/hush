@@ -26,6 +26,15 @@ policy:
         # ASCII whitespace including \\v and excluding NBSP: JavaScript's
         # \\s includes NBSP, Go's RE2 \\s omits \\v.
         - "c\\sd"
+        # `.` counts code points, not UTF-16 code units: an astral character is
+        # one `.`, never two. JavaScript strings are UTF-16, so a translation
+        # that let `.` fall back to a single code unit would match here.
+        - "^x..$"
+        - "^y.$"
+        # A negated class and a negated shorthand are "one code point outside
+        # this set", so they take an astral character whole as well.
+        - "^z[^a]$"
+        - "^w\\D$"
 cases:
   - description: "allow key followed by Arabic-Indic digits (ASCII \\d does not match)"
     action:
@@ -96,3 +105,37 @@ cases:
       target: "a\nb"
     expect:
       decision: allow
+  - description: "allow two dots against a single astral character (one code point, not two)"
+    action:
+      type: shell_command
+      target: "x\U0001F600"
+    expect:
+      decision: allow
+  - description: "deny two dots against two BMP characters"
+    action:
+      type: shell_command
+      target: "xab"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[3]
+  - description: "deny one dot against a single astral character"
+    action:
+      type: shell_command
+      target: "y\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[4]
+  - description: "deny a negated class against a single astral character"
+    action:
+      type: shell_command
+      target: "z\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[5]
+  - description: "deny a negated shorthand against a single astral character"
+    action:
+      type: shell_command
+      target: "w\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[6]

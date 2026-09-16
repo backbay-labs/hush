@@ -52,7 +52,7 @@ import {
   TRANSITION_TRIGGERS_SET,
 } from './generated/contract.js';
 import { compileProfileRegex, isSafeRegex } from './regex.js';
-import { HUSHSPEC_SUPPORTED_MINORS, isSupported } from './version.js';
+import { HUSHSPEC_SUPPORTED_MINORS, isSupported, majorVersion } from './version.js';
 import type { Condition } from './conditions.js';
 import { MAX_NESTING_DEPTH, RATE_COMPARISONS, validateCondition } from './conditions.js';
 
@@ -191,6 +191,22 @@ function validateDocument(
   };
 }
 
+/**
+ * Whether a document declaring `version` must give a present `name` a
+ * non-empty value.
+ *
+ * This is the one constraint the 1.0 document format adds to 0.2
+ * (spec/versioning.md section 10): the frozen 0.x format allows `name: ''`.
+ * A version that is absent or unreadable as `MAJOR.MINOR.PATCH` is already
+ * refused above, and is held to the current format's constraints here so an
+ * unreadable version can never relax one.
+ */
+function requiresNonEmptyName(version: string | undefined): boolean {
+  if (version === undefined) return true;
+  const major = majorVersion(version);
+  return major === undefined || major >= 1;
+}
+
 function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   rejectUnknownKeys(obj, TOP_LEVEL_KEYS_SET, ctx);
 
@@ -223,7 +239,7 @@ function validateTopLevel(obj: UnknownRecord, ctx: ValidationContext): void {
   validateOptionalString(obj, 'name', ctx, 'name');
   // Core spec 2: `name` is optional, but an empty one names nothing -- a
   // bundle subject and a receipt's policy summary both carry it.
-  if (obj.name === '') {
+  if (obj.name === '' && requiresNonEmptyName(version)) {
     addError(ctx, 'E004', 'name: must not be empty when present');
   }
   validateOptionalString(obj, 'description', ctx, 'description');

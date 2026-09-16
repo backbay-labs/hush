@@ -259,6 +259,27 @@ export function formatTimestamp(instant: Date | number = new Date()): string {
   return date.toISOString();
 }
 
+/** `YYYY-MM-DDTHH:MM:SS.sssZ`, the one instant form these formats accept. */
+const MILLISECOND_TIMESTAMP =
+  /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/;
+
+/**
+ * Whether `value` is an RFC 3339 UTC instant with millisecond precision and a
+ * `Z` suffix -- the one form receipts, signature envelopes, keyrings and
+ * bundles spell an instant in.
+ *
+ * The shape check alone is not enough: `Date.parse` accepts and normalizes
+ * impossible calendar dates, so `2026-02-30T00:00:00.000Z` would pass as
+ * March 2 and go on to take part in expiry and retirement comparisons. Rust,
+ * Python and Go all reject it, so the round-trip through `toISOString` makes
+ * the calendar date part of the check here too.
+ */
+export function isMillisecondTimestamp(value: string): boolean {
+  if (!MILLISECOND_TIMESTAMP.test(value)) return false;
+  const date = new Date(value);
+  return !Number.isNaN(date.getTime()) && date.toISOString() === value;
+}
+
 function uuidFromBytes(bytes: Uint8Array): string {
   const hex = Buffer.from(bytes).toString('hex');
   return (

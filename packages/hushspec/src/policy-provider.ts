@@ -7,7 +7,7 @@ import {
   resolveFromFileWithOptions,
   resolveWithOptionsAsync,
 } from './resolve.js';
-import { createHttpLoader, type HttpLoaderConfig } from './http-loader.js';
+import { createHttpLoader, httpSignatureLocator, type HttpLoaderConfig } from './http-loader.js';
 
 export interface PolicyProvider {
   load(): Promise<HushSpec>;
@@ -115,10 +115,18 @@ export class HttpProvider implements PolicyProvider {
     this.url = url;
     this.intervalMs = options?.intervalMs ?? 60_000;
     this.maxStaleMs = options?.maxStaleMs ?? Infinity;
-    this.resolveOptions = options?.resolveOptions ?? {};
     // Every rule the HTTPS loader enforces (core spec 2.6.4) is configured
     // where the loader is, so a provider cannot quietly relax one.
     this.httpLoader = createHttpLoader(options);
+    const resolveOptions = options?.resolveOptions ?? {};
+    // The policy came over the network, so its sidecar has to as well, under
+    // the same configuration: the resolver's default locator carries none, so
+    // a TLS trust anchor, the loopback exemption or an authorization header
+    // would be dropped for the `.sig` fetch and a signed policy could not load.
+    this.resolveOptions =
+      resolveOptions.signatureLocator === undefined
+        ? { ...resolveOptions, signatureLocator: httpSignatureLocator(options) }
+        : resolveOptions;
   }
 
   async load(): Promise<HushSpec> {
@@ -184,7 +192,7 @@ export class HttpProvider implements PolicyProvider {
     // A remote policy may only extend a builtin: a remote base
     // (`extends: https://...`) fails closed here with a clear message rather
     // than being evaluated without its base. `source` is the URL the policy
-    // came from, so the default locator looks for `<url>.sig`.
+    // came from, so the locator set in the constructor looks for `<url>.sig`.
     try {
       return await resolveWithOptionsAsync(loaded.spec, {
         source: loaded.source,

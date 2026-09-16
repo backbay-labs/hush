@@ -7,6 +7,7 @@ import {
   CANONICAL_SCHEMA_TABLE,
   CanonicalError,
   canonicalJson,
+  canonicalizeValue,
   contentHash,
   type PropertySchema,
   type SchemaNode,
@@ -136,6 +137,38 @@ describe('canonicalJson', () => {
 
   it('hashes the canonical bytes with the sha256: wire prefix (section 5)', () => {
     expect(contentHash({ hushspec: '0.1.0' })).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  // Section 4.3: an integer outside the IEEE 754 safe range must be refused,
+  // never silently rounded. The same literal is refused by the Rust, Python
+  // and Go suites; it arrives here already rounded to 2^53, which is itself
+  // outside the safe range, so the refusal still lands.
+  it('refuses an integer beyond the safe range (section 4.3)', () => {
+    const document = {
+      hushspec: '0.1.0',
+      extensions: {
+        posture: {
+          initial: 'normal',
+          states: { normal: { budgets: { tool_calls: 9007199254740993 } } },
+          transitions: [],
+        },
+      },
+    } as unknown as HushSpec;
+    expect(() => canonicalJson(document)).toThrow(CanonicalError);
+    expect(() => canonicalJson(document)).toThrow(/exceeds the safe range/);
+
+    expect(() => canonicalizeValue({ budget: 9007199254740993 })).toThrow(
+      /integer 9007199254740992 exceeds the safe range \(2\^53-1\)/,
+    );
+    expect(() => canonicalizeValue({ budget: -9007199254740993 })).toThrow(
+      /exceeds the safe range/,
+    );
+  });
+
+  it('keeps every integer inside the safe range', () => {
+    expect(canonicalizeValue({ budget: 9007199254740991 })).toBe('{"budget":9007199254740991}');
+    expect(canonicalizeValue({ budget: -9007199254740991 })).toBe('{"budget":-9007199254740991}');
+    expect(canonicalizeValue({ ratio: 0.35 })).toBe('{"ratio":0.35}');
   });
 });
 
