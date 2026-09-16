@@ -201,12 +201,15 @@ def project(document: dict) -> dict:
     # Section 2.1: the canonical form identifies the policy that is enforced,
     # so a document that still names a base has none. Resolve it first, for
     # example with `h2h resolve --format json`.
-    if "extends" in doc:
+    # A written `extends: null` is an absent base, as it is to every SDK's
+    # typed model.
+    if doc.get("extends") is not None:
         raise CanonicalError(
             "cannot canonicalize an unresolved document (extends: "
             f"{doc['extends']!r}); resolve the extends chain first"
         )
-    doc.pop("merge_strategy", None)
+    for field in RESOLUTION_FIELDS:
+        doc.pop(field, None)
     meta = doc.get("metadata")
     if isinstance(meta, dict):
         meta.pop(INLINE_SIGNATURE_FIELD, None)
