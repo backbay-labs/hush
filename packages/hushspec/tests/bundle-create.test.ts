@@ -47,6 +47,9 @@ const bundlesRoot = path.join(repoRoot, 'fixtures', 'bundle', 'bundles');
 /** The policy every bundle vector attests (`fixtures/bundle/README.md`). */
 const vectorPolicy = path.join(repoRoot, 'library', 'healthcare', 'hipaa-base.yaml');
 
+/** A 0.x policy that declares `name: ""`, which the frozen 0.x format admits. */
+const emptyNamePolicy = path.join(repoRoot, 'fixtures', 'core', 'valid', 'empty-name-0-2.yaml');
+
 /** The `created_at` the vectors pin so the bundles are byte-reproducible. */
 const vectorCreatedAt = '2026-09-15T12:00:00.000Z';
 
@@ -78,14 +81,30 @@ function statementOf(envelope: DsseEnvelope) {
   return JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf8'));
 }
 
-function resolveVectorPolicy(): Resolution {
-  const parsed = parse(readFileSync(vectorPolicy, 'utf8'));
-  if (!parsed.ok) throw new Error(`${vectorPolicy} does not parse: ${parsed.error}`);
-  return resolveWithOptions(parsed.value, {
-    source: vectorPolicy,
-    loader: createCompositeLoader(),
-  });
+function resolvePolicy(file: string): Resolution {
+  const parsed = parse(readFileSync(file, 'utf8'));
+  if (!parsed.ok) throw new Error(`${file} does not parse: ${parsed.error}`);
+  return resolveWithOptions(parsed.value, { source: file, loader: createCompositeLoader() });
 }
+
+function resolveVectorPolicy(): Resolution {
+  return resolvePolicy(vectorPolicy);
+}
+
+const bundleSchema = JSON.parse(
+  readFileSync(path.join(repoRoot, 'schemas', 'hushspec-bundle.v1.schema.json'), 'utf8'),
+) as SchemaDocument;
+
+/**
+ * `$defs/Statement` as a schema in its own right: the definitions come along
+ * so its internal `#/$defs/...` refs still resolve. The payload is base64, so
+ * the statement it decodes to is validated separately from the envelope
+ * (bundle spec 5.2).
+ */
+const statementSchema = {
+  ...(bundleSchema['$defs'] as Record<string, SchemaDocument>)['Statement'],
+  $defs: bundleSchema['$defs'],
+} as SchemaDocument;
 
 /** The keyring the vectors verify against. */
 function vectorKeyring() {
@@ -368,10 +387,6 @@ describe('createBundle key handling', () => {
  * agrees with the schema a consumer validates against -- so check it here too.
  */
 describe('createBundle output against the published schema', () => {
-  const bundleSchema = JSON.parse(
-    readFileSync(path.join(repoRoot, 'schemas', 'hushspec-bundle.v1.schema.json'), 'utf8'),
-  ) as SchemaDocument;
-
   it.each([
     ['signed', 'test-signing.key.pem'],
     ['unsigned', undefined],
@@ -383,15 +398,48 @@ describe('createBundle output against the published schema', () => {
     });
 
     expect(schemaErrors(bundleSchema, JSON.parse(bundleToJson(bundle)))).toEqual([]);
+    expect(schemaErrors(statementSchema, statementOf(bundle))).toEqual([]);
+  });
+});
 
-    // The payload is base64, so the statement it decodes to is described by
-    // `$defs/Statement` and has to be validated separately (bundle spec 5.2).
-    const statement = JSON.parse(Buffer.from(bundle.payload, 'base64').toString('utf8'));
-    const statementSchema = {
-      ...(bundleSchema['$defs'] as Record<string, SchemaDocument>)['Statement'],
-      $defs: bundleSchema['$defs'],
-    } as SchemaDocument;
-    expect(schemaErrors(statementSchema, statement)).toEqual([]);
+/**
+ * An empty name is a name the bundle schema will not accept: both
+ * `subject[0].name` and `predicate.policy.name` need at least one character.
+ * The 0.x document format places no such constraint on `name`, so a policy
+ * that declares one has to be bundled without it.
+ */
+describe('a policy whose name is empty', () => {
+  it('takes its subject name from the leaf file and makes no name claim', () => {
+    const statement = buildBundleStatement(resolvePolicy(emptyNamePolicy), {
+      createdAt: vectorCreatedAt,
+      baseDir: repoRoot,
+    });
+    expect(statement.subject[0]?.name).toBe('empty-name-0-2.yaml');
+    // Absent, not present and empty.
+    expect('name' in statement.predicate.policy).toBe(false);
+  });
+
+  it('produces a schema-valid statement that verifies', () => {
+    const resolution = resolvePolicy(emptyNamePolicy);
+    const bundle = createBundle(resolution, {
+      privateKeyPem: readKey('test-signing.key.pem'),
+      createdAt: vectorCreatedAt,
+      baseDir: repoRoot,
+    });
+
+    expect(schemaErrors(statementSchema, statementOf(bundle))).toEqual([]);
+
+    const outcome = verifyBundle(bundle, {
+      keyring: vectorKeyring(),
+      now: vectorCreatedAt,
+      policy: resolution,
+    });
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.subjectName).toBe('empty-name-0-2.yaml');
+      expect(outcome.policyName).toBeUndefined();
+      expect(outcome.policyChecked).toBe(true);
+    }
   });
 });
 

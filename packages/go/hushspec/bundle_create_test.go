@@ -31,6 +31,10 @@ const bundleVectorCreatedAt = "2026-09-15T12:00:00.000Z"
 // (fixtures/bundle/README.md).
 var bundleVectorPolicy = filepath.Join("library", "healthcare", "hipaa-base.yaml")
 
+// bundleEmptyNamePolicy is a 0.x policy that declares `name: ""`, which the
+// frozen 0.x format admits.
+var bundleEmptyNamePolicy = filepath.Join("fixtures", "core", "valid", "empty-name-0-2.yaml")
+
 // readBundleTestKey reads a published test key, minus the DO-NOT-USE header
 // above its PEM block.
 func readBundleTestKey(t *testing.T, name string) []byte {
@@ -362,6 +366,96 @@ func TestBuildBundleStatementFallsBackToTheLeafFileName(t *testing.T) {
 	}
 	if statement.Predicate.Policy.Name != nil {
 		t.Errorf("policy.name = %q, want it absent", *statement.Predicate.Policy.Name)
+	}
+}
+
+// TestBundlingAPolicyWhoseNameIsEmpty covers a name the bundle schema will not
+// accept: `subject[0].name` and `predicate.policy.name` both need at least one
+// character, while the 0.x document format places no such constraint on
+// `name`. The subject falls through to the leaf file name and the policy claim
+// is left out altogether.
+func TestBundlingAPolicyWhoseNameIsEmpty(t *testing.T) {
+	policy := filepath.Join(fixtureRepoRoot(t), bundleEmptyNamePolicy)
+	resolution, err := ResolveFileWithOptions(policy, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve %s: %v", policy, err)
+	}
+	created, err := time.Parse(time.RFC3339, bundleVectorCreatedAt)
+	if err != nil {
+		t.Fatalf("parse the pinned created_at: %v", err)
+	}
+	options := CreateBundleOptions{
+		CreatedAt:     created,
+		BaseDir:       fixtureRepoRoot(t),
+		PrivateKeyPEM: readBundleTestKey(t, "test-signing.key.pem"),
+	}
+
+	statement, err := BuildBundleStatement(resolution, options)
+	if err != nil {
+		t.Fatalf("BuildBundleStatement: %v", err)
+	}
+	if statement.Subject[0].Name != "empty-name-0-2.yaml" {
+		t.Errorf("subject name = %q, want the leaf file name", statement.Subject[0].Name)
+	}
+	if statement.Predicate.Policy.Name != nil {
+		t.Errorf("policy.name = %q, want it absent", *statement.Predicate.Policy.Name)
+	}
+
+	// This SDK carries no JSON Schema engine, so the two constraints the
+	// published schema states for these members are read out of the schema and
+	// asserted against the serialized statement directly.
+	payload, err := BundleStatementBytes(statement)
+	if err != nil {
+		t.Fatalf("BundleStatementBytes: %v", err)
+	}
+	var decoded struct {
+		Subject []struct {
+			Name string `json:"name"`
+		} `json:"subject"`
+		Predicate struct {
+			Policy map[string]any `json:"policy"`
+		} `json:"predicate"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("the payload is not a statement: %v", err)
+	}
+	schema := bundleSchemaDocument(t)
+	if want := schemaMinLength(t, schema, "$defs", "Subject", "properties", "name"); len(decoded.Subject[0].Name) < want {
+		t.Errorf("the subject name is shorter than the schema's minLength of %d", want)
+	}
+	// Absent, not present and empty: no string is shorter than the empty one,
+	// so a policy with an empty name can only satisfy the schema by omission.
+	if schemaMinLength(t, schema, "$defs", "PolicyIdentity", "properties", "name") < 1 {
+		t.Error("the schema no longer requires a policy name to carry a character")
+	}
+	if value, present := decoded.Predicate.Policy["name"]; present {
+		t.Errorf("predicate.policy carries name = %v, want it absent", value)
+	}
+
+	bundle, err := CreateBundle(resolution, options)
+	if err != nil {
+		t.Fatalf("CreateBundle: %v", err)
+	}
+	encoded, err := MarshalBundle(bundle)
+	if err != nil {
+		t.Fatalf("MarshalBundle: %v", err)
+	}
+	result := VerifyBundle(encoded, VerifyBundleOptions{
+		Keyring:          bundleVectorKeyring(t),
+		Now:              created,
+		PolicyResolution: resolution,
+	})
+	if !result.OK {
+		t.Fatalf("a bundle this SDK created did not verify: %s: %s", result.Reason, result.Detail)
+	}
+	if result.SubjectName != "empty-name-0-2.yaml" {
+		t.Errorf("subject name = %q, want the leaf file name", result.SubjectName)
+	}
+	if result.PolicyName != nil {
+		t.Errorf("policy name = %q, want none", *result.PolicyName)
+	}
+	if !result.PolicyChecked {
+		t.Error("check 4 did not run even though a resolution was supplied")
 	}
 }
 

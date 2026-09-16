@@ -149,9 +149,9 @@ type BundleResolver struct {
 type BundlePolicyIdentity struct {
 	ContentHash string `json:"content_hash"`
 	SpecVersion string `json:"spec_version"`
-	// Name is the policy's own `name`, copied as written: a policy that
-	// declares an empty name claims an empty name, and only a policy that
-	// declares none leaves this absent.
+	// Name is the policy's own `name`, absent when it declares none and
+	// absent when it declares an empty one: the bundle schema admits no
+	// empty name claim.
 	Name          *string `json:"name,omitempty"`
 	PolicyVersion *int64  `json:"policy_version,omitempty"`
 }
@@ -599,10 +599,6 @@ func bundleRelativeSource(source, base string) string {
 	return filepath.ToSlash(relative)
 }
 
-// bundleSubjectName is the subject's informational label: the first of an
-// explicit override, the policy's own name, the leaf source's file name, and a
-// constant. The subject needs at least one character (bundle spec 4.1), so a
-// policy that declares an empty name falls through to the file name.
 // bundlePolicyName is the policy's `name` when it has one character or more:
 // the bundle schema admits no empty subject name or policy name claim.
 func bundlePolicyName(spec *HushSpec) *string {
@@ -612,6 +608,10 @@ func bundlePolicyName(spec *HushSpec) *string {
 	return spec.Name
 }
 
+// bundleSubjectName is the subject's informational label: the first of an
+// explicit override, the policy's own name, the leaf source's file name, and a
+// constant. The subject needs at least one character (bundle spec 4.1), so a
+// policy that declares an empty name falls through to the file name.
 func bundleSubjectName(override string, spec *HushSpec, chain []ChainLink) string {
 	if override != "" {
 		return override
