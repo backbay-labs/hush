@@ -14,7 +14,7 @@ import {
 import path from 'node:path';
 import { canonicalizeValue, type JsonValue } from './canonical.js';
 import type { DecisionReceipt, EnforcementMode, PolicySummary } from './receipt.js';
-import { RECEIPT_VERSION, formatTimestamp } from './receipt.js';
+import { RECEIPT_VERSION, formatTimestamp, parseReceipt } from './receipt.js';
 import type { Envelope, Keyring, KeyringDocument, VerificationOutcome } from './signing.js';
 import { signContentHash, verifyContentHash } from './signing.js';
 import type { ReceiptSink } from './sinks.js';
@@ -712,6 +712,17 @@ export function verifyLogs(
           return broke(
             `receipt_version ${JSON.stringify(entry.receipt.receipt_version)} is not ` +
               `${JSON.stringify(RECEIPT_VERSION)}`,
+          );
+        }
+        // The entry hash covers whatever JSON the line held, so a
+        // hash-consistent line can still carry something that is not a
+        // receipt. Log spec 8, step 8 requires the payload to validate.
+        try {
+          parseReceipt(entry.receipt);
+        } catch (error) {
+          return broke(
+            'receipt does not validate against the 0.2 receipt schema: ' +
+              `${error instanceof Error ? error.message : String(error)}`,
           );
         }
         report.receipts += 1;

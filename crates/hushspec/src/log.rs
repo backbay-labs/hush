@@ -714,7 +714,7 @@ pub fn verify_logs(
                 message,
             };
             let entry: LogEntry =
-                serde_json::from_str(line).map_err(|e| fail(format!("not a log entry: {e}")))?;
+                serde_json::from_str(line).map_err(|e| fail(entry_parse_message(line, &e)))?;
             if entry.log_version != LOG_VERSION {
                 return Err(fail(format!(
                     "unsupported log_version {:?}, expected {LOG_VERSION:?}",
@@ -849,6 +849,23 @@ pub fn verify_logs(
         carried_hash = Some(prev_hash);
     }
     Ok(report)
+}
+
+/// Why a line is not a log entry.
+///
+/// A `receipt` member of the wrong shape is named as such (log spec 8, step 8)
+/// rather than reported as an opaque parse failure, so every SDK reports the
+/// same break for the same line.
+fn entry_parse_message(line: &str, error: &serde_json::Error) -> String {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(line)
+        && let Some(receipt) = value.get("receipt")
+        && let Err(receipt_error) = serde_json::from_value::<DecisionReceipt>(receipt.clone())
+    {
+        return format!(
+            "receipt does not validate against the 0.2 receipt schema: {receipt_error}"
+        );
+    }
+    format!("not a log entry: {error}")
 }
 
 /// Verify the log files at `paths`, in order.

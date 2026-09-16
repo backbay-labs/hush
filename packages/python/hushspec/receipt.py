@@ -14,6 +14,7 @@ reconstructed from the decision afterwards.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -417,11 +418,13 @@ def receipt_hash(receipt: Union[DecisionReceipt, dict[str, Any]]) -> str:
 
 
 def parse_receipt(data: Union[str, bytes, dict[str, Any]]) -> DecisionReceipt:
-    """Parse a receipt object, rejecting a version this module does not implement.
+    """Parse a receipt object, rejecting anything that is not a 0.2 receipt.
 
     Unknown members are rejected the way every other HushSpec parser rejects
     them: a receipt with a field this format does not define is not a 0.2
-    receipt (receipt spec section 3).
+    receipt (receipt spec section 3). Required members, member types and the
+    closed enums are checked too, so a consumer -- a log verifier above all --
+    never counts an arbitrary JSON object as evidence.
     """
     import json
 
@@ -437,7 +440,240 @@ def parse_receipt(data: Union[str, bytes, dict[str, Any]]) -> DecisionReceipt:
         raise ReceiptError(
             f"unsupported receipt_version {version!r}, expected {RECEIPT_VERSION!r}"
         )
+    _validate_receipt_shape(data)
     return _receipt_from_dict(data)
+
+
+# --------------------------------------------------------------------------- #
+# Structural validation (receipt spec section 2, item 4)
+# --------------------------------------------------------------------------- #
+
+#: ``$.timestamp``: RFC 3339 UTC with exactly three fractional digits.
+_TIMESTAMP_PATTERN = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$"
+)
+
+_ACTOR_KEYS = ("agent_id", "session_id", "principal", "runtime")
+_POLICY_KEYS = (
+    "name",
+    "version",
+    "spec_version",
+    "content_hash",
+    "extends_chain",
+    "signature",
+)
+_CHAIN_LINK_KEYS = ("source", "content_hash")
+_SIGNATURE_STATUS_KEYS = ("verified", "key_id", "verified_at", "reason")
+_ACTION_KEYS = (
+    "type",
+    "target",
+    "content_hash",
+    "content_size",
+    "args_size",
+    "origin",
+    "context",
+)
+_RULE_TRACE_KEYS = ("rule_block", "rule_path", "outcome", "evaluated", "reason")
+_DETECTION_TRACE_KEYS = ("detector_id", "category", "score", "level", "matched")
+_ENFORCEMENT_KEYS = ("mode", "outcome")
+_POSTURE_KEYS = ("current", "next")
+
+_TIME_SOURCES = ("system", "monotonic_adjusted", "trusted", "unknown")
+_DECISIONS = ("allow", "warn", "deny")
+_RULE_OUTCOMES = ("allow", "warn", "deny", "skip")
+_ENFORCEMENT_MODES = ("enforce", "monitor")
+_ENFORCEMENT_OUTCOMES = ("allowed", "confirmed", "blocked", "would_block")
+_DETECTION_CATEGORIES = (
+    "prompt_injection",
+    "jailbreak",
+    "data_exfiltration",
+    "threat_intel",
+)
+_DETECTOR_LEVELS = ("none", "low", "suspicious", "high", "critical")
+
+
+def _require_object(value: Any, label: str, allowed: tuple[str, ...]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ReceiptError(f"{label} must be a JSON object")
+    unknown = sorted(set(value) - set(allowed))
+    if unknown:
+        raise ReceiptError(f"unknown field {unknown[0]!r} in {label}")
+    return value
+
+
+def _require_list(value: Any, label: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise ReceiptError(f"{label} must be an array")
+    return value
+
+
+def _require_members(obj: dict[str, Any], label: str, keys: tuple[str, ...]) -> None:
+    for key in keys:
+        if obj.get(key) is None:
+            raise ReceiptError(f"{label} is missing {key!r}")
+
+
+def _require_str(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ReceiptError(f"{label} must be a string")
+    return value
+
+
+def _optional_str(value: Any, label: str) -> None:
+    if value is not None:
+        _require_str(value, label)
+
+
+def _require_bool(value: Any, label: str) -> None:
+    if not isinstance(value, bool):
+        raise ReceiptError(f"{label} must be a boolean")
+
+
+def _optional_size(value: Any, label: str) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ReceiptError(f"{label} must be a non-negative integer")
+
+
+def _require_enum(value: Any, label: str, allowed: tuple[str, ...]) -> None:
+    text = _require_str(value, label)
+    if text not in allowed:
+        raise ReceiptError(f"{label} {text!r} is outside the closed enum")
+
+
+def _require_timestamp(value: Any, label: str) -> None:
+    text = _require_str(value, label)
+    if not _TIMESTAMP_PATTERN.match(text):
+        raise ReceiptError(
+            f"{label} {text!r} is not an RFC 3339 UTC instant with millisecond "
+            "precision"
+        )
+
+
+def _validate_receipt_shape(receipt: dict[str, Any]) -> None:
+    _require_members(
+        receipt,
+        "receipt",
+        (
+            "receipt_id",
+            "timestamp",
+            "time_source",
+            "policy",
+            "action",
+            "decision",
+            "rule_trace",
+            "enforcement",
+        ),
+    )
+    _require_str(receipt["receipt_id"], "receipt_id")
+    _require_timestamp(receipt["timestamp"], "timestamp")
+    _require_enum(receipt["time_source"], "time_source", _TIME_SOURCES)
+    _require_enum(receipt["decision"], "decision", _DECISIONS)
+    _optional_str(receipt.get("matched_rule"), "matched_rule")
+    _optional_str(receipt.get("reason"), "reason")
+    _optional_str(receipt.get("origin_profile"), "origin_profile")
+    _optional_size(receipt.get("duration_us"), "duration_us")
+
+    if receipt.get("actor") is not None:
+        actor = _require_object(receipt["actor"], "actor", _ACTOR_KEYS)
+        for key in _ACTOR_KEYS:
+            _optional_str(actor.get(key), f"actor.{key}")
+
+    _validate_policy(_require_object(receipt["policy"], "policy", _POLICY_KEYS))
+    _validate_action(_require_object(receipt["action"], "action", _ACTION_KEYS))
+    _validate_rule_trace(_require_list(receipt["rule_trace"], "rule_trace"))
+    if receipt.get("detection_trace") is not None:
+        _validate_detection_trace(
+            _require_list(receipt["detection_trace"], "detection_trace")
+        )
+
+    enforcement = _require_object(
+        receipt["enforcement"], "enforcement", _ENFORCEMENT_KEYS
+    )
+    _require_members(enforcement, "enforcement", _ENFORCEMENT_KEYS)
+    _require_enum(enforcement["mode"], "enforcement.mode", _ENFORCEMENT_MODES)
+    _require_enum(
+        enforcement["outcome"], "enforcement.outcome", _ENFORCEMENT_OUTCOMES
+    )
+
+    if receipt.get("posture") is not None:
+        posture = _require_object(receipt["posture"], "posture", _POSTURE_KEYS)
+        _require_members(posture, "posture", _POSTURE_KEYS)
+        _require_str(posture["current"], "posture.current")
+        _require_str(posture["next"], "posture.next")
+
+
+def _validate_policy(policy: dict[str, Any]) -> None:
+    _require_members(policy, "policy", ("spec_version", "content_hash"))
+    _require_str(policy["spec_version"], "policy.spec_version")
+    _require_str(policy["content_hash"], "policy.content_hash")
+    _optional_str(policy.get("name"), "policy.name")
+    _optional_size(policy.get("version"), "policy.version")
+
+    if policy.get("extends_chain") is not None:
+        chain = _require_list(policy["extends_chain"], "policy.extends_chain")
+        for index, raw in enumerate(chain):
+            label = f"policy.extends_chain[{index}]"
+            link = _require_object(raw, label, _CHAIN_LINK_KEYS)
+            _require_members(link, label, _CHAIN_LINK_KEYS)
+            _require_str(link["source"], f"{label}.source")
+            _require_str(link["content_hash"], f"{label}.content_hash")
+
+    if policy.get("signature") is not None:
+        status = _require_object(
+            policy["signature"], "policy.signature", _SIGNATURE_STATUS_KEYS
+        )
+        if "verified" not in status:
+            raise ReceiptError("policy.signature is missing 'verified'")
+        _require_bool(status["verified"], "policy.signature.verified")
+        _optional_str(status.get("key_id"), "policy.signature.key_id")
+        _optional_str(status.get("reason"), "policy.signature.reason")
+        if status.get("verified_at") is not None:
+            _require_timestamp(status["verified_at"], "policy.signature.verified_at")
+
+
+def _validate_action(action: dict[str, Any]) -> None:
+    _require_members(action, "action", ("type",))
+    _require_str(action["type"], "action.type")
+    _optional_str(action.get("target"), "action.target")
+    _optional_str(action.get("content_hash"), "action.content_hash")
+    _optional_size(action.get("content_size"), "action.content_size")
+    _optional_size(action.get("args_size"), "action.args_size")
+    # `origin` and `context` are the descriptors the caller supplied, carried
+    # verbatim (receipt spec section 4.4); any JSON value is in range.
+
+
+def _validate_rule_trace(entries: list[Any]) -> None:
+    for index, raw in enumerate(entries):
+        label = f"rule_trace[{index}]"
+        entry = _require_object(raw, label, _RULE_TRACE_KEYS)
+        if "evaluated" not in entry:
+            raise ReceiptError(f"{label} is missing 'evaluated'")
+        _require_members(entry, label, ("rule_block", "outcome"))
+        _require_str(entry["rule_block"], f"{label}.rule_block")
+        _optional_str(entry.get("rule_path"), f"{label}.rule_path")
+        _require_enum(entry["outcome"], f"{label}.outcome", _RULE_OUTCOMES)
+        _require_bool(entry["evaluated"], f"{label}.evaluated")
+        _optional_str(entry.get("reason"), f"{label}.reason")
+
+
+def _validate_detection_trace(entries: list[Any]) -> None:
+    for index, raw in enumerate(entries):
+        label = f"detection_trace[{index}]"
+        entry = _require_object(raw, label, _DETECTION_TRACE_KEYS)
+        if "matched" not in entry:
+            raise ReceiptError(f"{label} is missing 'matched'")
+        _require_members(entry, label, ("detector_id", "category", "score", "level"))
+        _require_str(entry["detector_id"], f"{label}.detector_id")
+        _require_enum(entry["category"], f"{label}.category", _DETECTION_CATEGORIES)
+        score = entry["score"]
+        if isinstance(score, bool) or not isinstance(score, (int, float)):
+            raise ReceiptError(f"{label}.score must be a number in [0, 1]")
+        if not 0 <= score <= 1:
+            raise ReceiptError(f"{label}.score must be a number in [0, 1]")
+        _require_enum(entry["level"], f"{label}.level", _DETECTOR_LEVELS)
+        _require_bool(entry["matched"], f"{label}.matched")
 
 
 def _typed(

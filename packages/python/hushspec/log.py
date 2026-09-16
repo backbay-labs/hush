@@ -29,8 +29,10 @@ from hushspec.receipt import (
     RECEIPT_VERSION,
     DecisionReceipt,
     PolicySummary,
+    ReceiptError,
     digest,
     format_timestamp,
+    parse_receipt,
     policy_summary_to_dict,
     receipt_to_dict,
 )
@@ -777,6 +779,17 @@ def verify_logs(
                         f"receipt_version {receipt.get('receipt_version')!r} is not "
                         f"{RECEIPT_VERSION!r}"
                     )
+                # The entry hash covers whatever JSON the line held, so a
+                # hash-consistent line can still carry something that is not a
+                # receipt. Log spec section 8, step 8 requires the payload to
+                # validate.
+                try:
+                    parse_receipt(receipt)
+                except ReceiptError as exc:
+                    raise fail(
+                        f"receipt does not validate against the 0.2 receipt "
+                        f"schema: {exc}"
+                    ) from exc
                 report.receipts += 1
             if entry.get("policy_event") is not None:
                 report.policy_events += 1
