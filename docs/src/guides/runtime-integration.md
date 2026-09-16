@@ -319,7 +319,7 @@ entry, in a single `resourceLogs` → `scopeLogs` envelope per request.
 | Log record field | Value |
 |---|---|
 | `timeUnixNano` | The receipt's (or policy event's) `timestamp`, in nanoseconds since the epoch, as a decimal string |
-| `observedTimeUnixNano` | When the batch was assembled |
+| `observedTimeUnixNano` | When the sink took the entry |
 | `severityText` / `severityNumber` | `INFO`/9 for `allow`, `WARN`/13 for `warn`, `ERROR`/17 for `deny`; a policy event is `INFO` |
 | `body.stringValue` | The canonical JSON (RFC 8785) of the receipt, or of the policy event |
 

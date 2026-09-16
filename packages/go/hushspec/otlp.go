@@ -97,7 +97,11 @@ type OTLPOptions struct {
 // event) as the body, so a collector holds exactly the bytes the receipt hash
 // covers, and the decision, action type, matched rule, policy hash, receipt
 // hash and enforcement disposition as attributes, so a query never has to
-// parse the body.
+// parse the body. A record is stamped with the entry's own timestamp in
+// `timeUnixNano` and with the moment the sink took it in
+// `observedTimeUnixNano`, and carries `severityText` and `severityNumber` of
+// INFO/9, WARN/13 or ERROR/17 for an allow, a warn or a deny -- the mapping
+// every HushSpec SDK emits.
 //
 // Export happens on a background goroutine: [OTLPReceiptSink.Send] queues and
 // returns, and never blocks an evaluation. A full queue drops the record,
@@ -434,11 +438,14 @@ type otlpResource struct {
 
 type otlpLogRecord struct {
 	// TimeUnixNano is a decimal string: OTLP's JSON mapping spells 64-bit
-	// integers as strings so no consumer loses precision to a float.
-	TimeUnixNano string          `json:"timeUnixNano"`
-	SeverityText string          `json:"severityText"`
-	Body         otlpValue       `json:"body"`
-	Attributes   []otlpAttribute `json:"attributes"`
+	// integers as strings so no consumer loses precision to a float. It is the
+	// entry's own timestamp; ObservedTimeUnixNano is when the sink took it.
+	TimeUnixNano         string          `json:"timeUnixNano"`
+	ObservedTimeUnixNano string          `json:"observedTimeUnixNano"`
+	SeverityNumber       int             `json:"severityNumber"`
+	SeverityText         string          `json:"severityText"`
+	Body                 otlpValue       `json:"body"`
+	Attributes           []otlpAttribute `json:"attributes"`
 }
 
 // otlpScope names the instrumentation that produced the records. Every SDK
@@ -494,6 +501,8 @@ func receiptLogRecord(receipt *DecisionReceipt) (otlpLogRecord, error) {
 		return otlpLogRecord{}, fmt.Errorf("otlp sink: canonicalize receipt: %w", err)
 	}
 	receiptHash := DigestOf(canonical)
+	observed := nowUnixNano()
+	severityText, severityNumber := severityOf(receipt.Decision)
 
 	attributes := make([]otlpAttribute, 0, 9)
 	attributes = appendAttribute(attributes, otlpAttrEntryType, string(EntryTypeReceipt))
@@ -507,10 +516,12 @@ func receiptLogRecord(receipt *DecisionReceipt) (otlpLogRecord, error) {
 	attributes = appendAttribute(attributes, otlpAttrEnforcementOutcome, string(receipt.Enforcement.Outcome))
 
 	return otlpLogRecord{
-		TimeUnixNano: unixNanoOf(receipt.Timestamp),
-		SeverityText: severityOf(receipt.Decision),
-		Body:         otlpValue{StringValue: canonical},
-		Attributes:   attributes,
+		TimeUnixNano:         unixNanoOf(receipt.Timestamp, observed),
+		ObservedTimeUnixNano: observed,
+		SeverityNumber:       severityNumber,
+		SeverityText:         severityText,
+		Body:                 otlpValue{StringValue: canonical},
+		Attributes:           attributes,
 	}, nil
 }
 
@@ -521,6 +532,7 @@ func policyEventLogRecord(event *PolicyEvent) (otlpLogRecord, error) {
 	if err != nil {
 		return otlpLogRecord{}, fmt.Errorf("otlp sink: canonicalize policy event: %w", err)
 	}
+	observed := nowUnixNano()
 
 	entryType := EntryTypePolicyLoaded
 	if event.Event == PolicyEventSwapped {
@@ -532,39 +544,55 @@ func policyEventLogRecord(event *PolicyEvent) (otlpLogRecord, error) {
 	attributes = appendAttribute(attributes, otlpAttrEnforcementMode, string(event.EnforcementMode))
 
 	return otlpLogRecord{
-		TimeUnixNano: unixNanoOf(event.Timestamp),
-		SeverityText: "INFO",
-		Body:         otlpValue{StringValue: canonical},
-		Attributes:   attributes,
+		TimeUnixNano:         unixNanoOf(event.Timestamp, observed),
+		ObservedTimeUnixNano: observed,
+		SeverityNumber:       otlpSeverityInfo,
+		SeverityText:         "INFO",
+		Body:                 otlpValue{StringValue: canonical},
+		Attributes:           attributes,
 	}, nil
 }
+
+// Severity numbers of the OpenTelemetry logs data model, for the severities an
+// exported record carries.
+const (
+	otlpSeverityInfo  = 9
+	otlpSeverityWarn  = 13
+	otlpSeverityError = 17
+)
 
 // severityOf maps a decision to the severity a collector filters on: an allow
 // is routine, a warn is worth a look, a denial is an incident. A decision this
 // build does not know is not an "INFO".
-func severityOf(decision Decision) string {
+func severityOf(decision Decision) (string, int) {
 	switch decision {
 	case DecisionAllow:
-		return "INFO"
+		return "INFO", otlpSeverityInfo
 	case DecisionWarn:
-		return "WARN"
+		return "WARN", otlpSeverityWarn
 	default:
-		return "ERROR"
+		return "ERROR", otlpSeverityError
 	}
 }
 
 // unixNanoOf converts a receipt timestamp (RFC 3339 UTC, millisecond
 // precision) to the decimal nanoseconds OTLP records.
 //
-// A timestamp that will not parse falls back to the export time rather than to
-// zero: a record with no time at all is dropped by collectors, and the body
-// still carries the entry's own timestamp verbatim.
-func unixNanoOf(timestamp string) string {
+// A timestamp that will not parse falls back to observed, the moment the sink
+// took the entry, rather than to zero: a record with no time at all is dropped
+// by collectors, and the body still carries the entry's own timestamp
+// verbatim.
+func unixNanoOf(timestamp, observed string) string {
 	instant, err := time.Parse(time.RFC3339Nano, timestamp)
 	if err != nil {
-		instant = time.Now()
+		return observed
 	}
 	return strconv.FormatInt(instant.UnixNano(), 10)
+}
+
+// nowUnixNano is the current time as the decimal nanoseconds OTLP records.
+func nowUnixNano() string {
+	return strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 // logsEndpoint is "<endpoint>/v1/logs", without doubling a path the caller

@@ -20,10 +20,10 @@ import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from './version.js';
  * tell which produced an entry:
  *
  * - one `logRecord` per receipt or policy event;
- * - `timeUnixNano` from the entry's own timestamp (not the export time --
- *   `observedTimeUnixNano` carries that);
- * - `severityText` `INFO` for `allow`, `WARN` for `warn`, `ERROR` for `deny`,
- *   and `INFO` for a policy event;
+ * - `timeUnixNano` from the entry's own timestamp, and
+ *   `observedTimeUnixNano` from the moment the sink took it;
+ * - `severityText` and `severityNumber` of `INFO`/9 for `allow`, `WARN`/13 for
+ *   `warn` and `ERROR`/17 for `deny`, and `INFO`/9 for a policy event;
  * - `body.stringValue` is the entry's RFC 8785 canonical JSON, byte for byte
  *   the form its hash covers, so a collector-side consumer can re-hash it;
  * - attributes `hushspec.entry_type`, `hushspec.receipt_version`,
