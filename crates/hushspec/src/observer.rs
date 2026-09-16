@@ -7,7 +7,7 @@
 //! channel (best-effort, structured, cheap), and a guard drives both from the
 //! same evaluation.
 //!
-//! Three hooks, mirroring the TypeScript and Python SDKs:
+//! Three hooks, one per kind of event:
 //!
 //! - [`EvaluationObserver::on_policy_loaded`] -- a policy came into force
 //! - [`EvaluationObserver::on_evaluation`] -- an action was decided
@@ -50,6 +50,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::evaluate::{Decision, EvaluationAction, EvaluationResult};
+use crate::guard::top_segment as segment;
 use crate::receipt::{DecisionReceipt, EnforcementSummary, format_timestamp};
 
 /// What an [`ObserverEvent`] is about. The wire spelling matches the
@@ -68,8 +69,8 @@ pub enum ObserverEventType {
     /// A policy could not be loaded; the previous one stays in force.
     #[serde(rename = "policy.load_failed")]
     PolicyLoadFailed,
-    /// A sink could not export. Rust-only: it is how the OTLP sink reports a
-    /// dropped batch (see [`crate::otlp`]).
+    /// A sink could not record what it was handed; the decision it belonged
+    /// to stands and the policy still takes effect.
     #[serde(rename = "sink.error")]
     SinkError,
 }
@@ -816,8 +817,6 @@ fn rule_block_of(matched_rule: Option<&str>) -> Option<String> {
     // still worth a series of its own.
     Some(matched.trim_matches('_').to_string())
 }
-
-use crate::guard::top_segment as segment;
 
 fn escape_label(value: &str) -> String {
     value
