@@ -35,12 +35,17 @@
 //! 4.4). [`EvaluationCompletedEvent::content_redacted`] records that it
 //! happened.
 //!
-//! # Observers must not panic
+//! # A panicking observer
 //!
-//! An observer runs inline on the evaluation thread. A panicking observer
-//! takes the caller down with it; there is no `catch_unwind` around these
-//! hooks because swallowing a panic would leave the observer in an unknown
-//! state. Do the fallible work off-thread (see [`WebhookObserver`]).
+//! An observer runs inline on the evaluation thread but never decides whether
+//! an action proceeds. Every hook is called inside `std::panic::catch_unwind`,
+//! so a panic that escapes one is absorbed instead of unwinding into the
+//! enforcement point: the payload goes back to that observer's
+//! [`on_error`](EvaluationObserver::on_error), and the remaining observers
+//! still see the event. A build compiled with `panic = "abort"` has no
+//! unwinding to catch, and an observer left mid-panic is in whatever state the
+//! panic left it, so do the fallible work off-thread (see
+//! [`WebhookObserver`]).
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -73,6 +78,10 @@ pub enum ObserverEventType {
     /// to stands and the policy still takes effect.
     #[serde(rename = "sink.error")]
     SinkError,
+    /// A failure a guard absorbed that is neither of the above -- an observer
+    /// that panicked, say.
+    #[serde(rename = "error")]
+    Error,
 }
 
 impl ObserverEventType {
@@ -85,6 +94,7 @@ impl ObserverEventType {
             Self::PolicyReloaded => "policy.reloaded",
             Self::PolicyLoadFailed => "policy.load_failed",
             Self::SinkError => "sink.error",
+            Self::Error => "error",
         }
     }
 }
@@ -165,8 +175,8 @@ pub struct EvaluationCompletedEvent {
 /// A load or an export failed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ErrorEvent {
-    /// [`ObserverEventType::PolicyLoadFailed`] or
-    /// [`ObserverEventType::SinkError`].
+    /// [`ObserverEventType::PolicyLoadFailed`],
+    /// [`ObserverEventType::SinkError`] or [`ObserverEventType::Error`].
     #[serde(rename = "type")]
     pub event_type: ObserverEventType,
     /// RFC 3339 UTC, millisecond precision.
@@ -195,6 +205,15 @@ impl ErrorEvent {
         Self {
             event_type: ObserverEventType::SinkError,
             ..Self::load_failed(error, source)
+        }
+    }
+
+    /// An observer that panicked, carrying the panic payload, stamped now.
+    #[must_use]
+    pub fn observer_panicked(error: impl Into<String>) -> Self {
+        Self {
+            event_type: ObserverEventType::Error,
+            ..Self::load_failed(error, None)
         }
     }
 }
@@ -350,7 +369,7 @@ impl ObservableEvaluator {
             receipt: receipt.cloned(),
         };
         for observer in &self.observers {
-            observer.on_evaluation(&event);
+            deliver(observer.as_ref(), |observer| observer.on_evaluation(&event));
         }
     }
 
@@ -388,15 +407,49 @@ impl ObservableEvaluator {
 
     fn emit_policy(&self, event: PolicyLoadedEvent) {
         for observer in &self.observers {
-            observer.on_policy_loaded(&event);
+            deliver(observer.as_ref(), |observer| {
+                observer.on_policy_loaded(&event);
+            });
         }
     }
 
     fn emit_error(&self, event: ErrorEvent) {
         for observer in &self.observers {
-            observer.on_error(&event);
+            deliver(observer.as_ref(), |observer| observer.on_error(&event));
         }
     }
+}
+
+/// Call one hook on one observer, absorbing a panic.
+///
+/// An observer is a bystander: it never decides whether an action proceeds, so
+/// a panic in one must stop neither the evaluation that produced the event nor
+/// the rest of the fan-out. The payload is handed back to the same observer's
+/// [`EvaluationObserver::on_error`], because a failure nobody is told about is
+/// the one that goes unnoticed.
+fn deliver(observer: &dyn EvaluationObserver, hook: impl FnOnce(&dyn EvaluationObserver)) {
+    let call = std::panic::AssertUnwindSafe(|| hook(observer));
+    let Err(payload) = std::panic::catch_unwind(call) else {
+        return;
+    };
+    let event =
+        ErrorEvent::observer_panicked(format!("observer panicked: {}", panic_text(&*payload)));
+    // The report is best-effort too: an observer that panics reporting its own
+    // panic is dropped rather than retried.
+    let report = std::panic::AssertUnwindSafe(|| observer.on_error(&event));
+    let _ = std::panic::catch_unwind(report);
+}
+
+/// The text of a panic payload, for the `&str` and `String` payloads `panic!`
+/// produces. A payload of any other type carries no text to report.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return message;
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return message.as_str();
+    }
+    "unknown payload"
 }
 
 /// Strip `content` for observer emission (receipt spec 4.4: evidence records
@@ -418,8 +471,8 @@ fn redact(action: &EvaluationAction) -> (EvaluationAction, bool) {
 ///
 /// The line is the event as the TypeScript and Python SDKs spell it: a `type`
 /// member (`evaluation.completed`, `policy.loaded`, `policy.reloaded`,
-/// `policy.load_failed`, `sink.error`), a `timestamp`, and the event's own
-/// members.
+/// `policy.load_failed`, `sink.error`, `error`), a `timestamp`, and the
+/// event's own members.
 pub struct JsonLineObserver<W: Write + Send> {
     writer: Mutex<W>,
 }
@@ -1190,26 +1243,27 @@ mod tests {
         evaluator.notify_evaluation_completed(&action("egress", "x"), &allow(), 1, None, None);
     }
 
+    #[derive(Default)]
+    struct Counting {
+        evaluations: AtomicU64,
+        policies: AtomicU64,
+        errors: AtomicU64,
+    }
+
+    impl EvaluationObserver for Counting {
+        fn on_policy_loaded(&self, _: &PolicyLoadedEvent) {
+            self.policies.fetch_add(1, Ordering::Relaxed);
+        }
+        fn on_evaluation(&self, _: &EvaluationCompletedEvent) {
+            self.evaluations.fetch_add(1, Ordering::Relaxed);
+        }
+        fn on_error(&self, _: &ErrorEvent) {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     #[test]
     fn fan_out_reaches_every_observer() {
-        #[derive(Default)]
-        struct Counting {
-            evaluations: AtomicU64,
-            policies: AtomicU64,
-            errors: AtomicU64,
-        }
-        impl EvaluationObserver for Counting {
-            fn on_policy_loaded(&self, _: &PolicyLoadedEvent) {
-                self.policies.fetch_add(1, Ordering::Relaxed);
-            }
-            fn on_evaluation(&self, _: &EvaluationCompletedEvent) {
-                self.evaluations.fetch_add(1, Ordering::Relaxed);
-            }
-            fn on_error(&self, _: &ErrorEvent) {
-                self.errors.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-
         let first = std::sync::Arc::new(Counting::default());
         let second = std::sync::Arc::new(Counting::default());
         let mut evaluator = ObservableEvaluator::new();
@@ -1227,5 +1281,93 @@ mod tests {
             assert_eq!(observer.evaluations.load(Ordering::Relaxed), 1);
             assert_eq!(observer.errors.load(Ordering::Relaxed), 1);
         }
+    }
+
+    #[derive(Default)]
+    struct Panicking {
+        errors: Mutex<Vec<ErrorEvent>>,
+    }
+
+    impl EvaluationObserver for Panicking {
+        fn on_policy_loaded(&self, _: &PolicyLoadedEvent) {
+            panic!("policy hook");
+        }
+        fn on_evaluation(&self, _: &EvaluationCompletedEvent) {
+            panic!("evaluation hook");
+        }
+        fn on_error(&self, event: &ErrorEvent) {
+            self.errors.lock().expect("lock").push(event.clone());
+        }
+    }
+
+    /// Keeps a panicking observer's default-hook output off the test log.
+    fn without_panic_output<T>(body: impl FnOnce() -> T) -> T {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+        std::panic::set_hook(previous);
+        match outcome {
+            Ok(value) => value,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    #[test]
+    fn a_panicking_observer_neither_unwinds_nor_stops_the_fan_out() {
+        let panicking = std::sync::Arc::new(Panicking::default());
+        let counting = std::sync::Arc::new(Counting::default());
+        let mut evaluator = ObservableEvaluator::new();
+        evaluator.add_observer(panicking.clone());
+        evaluator.add_observer(counting.clone());
+
+        without_panic_output(|| {
+            evaluator.notify_policy_loaded(None, "sha256:ab");
+            evaluator.notify_evaluation_completed(&action("egress", "x"), &allow(), 3, None, None);
+        });
+
+        assert_eq!(
+            counting.policies.load(Ordering::Relaxed),
+            1,
+            "an observer that panicked must not cost the next one its event"
+        );
+        assert_eq!(counting.evaluations.load(Ordering::Relaxed), 1);
+
+        let errors = panicking.errors.lock().expect("lock");
+        let payloads: Vec<&str> = errors.iter().map(|event| event.error.as_str()).collect();
+        assert_eq!(
+            payloads,
+            vec![
+                "observer panicked: policy hook",
+                "observer panicked: evaluation hook"
+            ],
+            "the panic payload comes back to the observer that panicked"
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|event| event.event_type == ObserverEventType::Error)
+        );
+    }
+
+    #[test]
+    fn an_observer_that_panics_reporting_its_own_panic_is_dropped() {
+        struct AlwaysPanics;
+        impl EvaluationObserver for AlwaysPanics {
+            fn on_policy_loaded(&self, _: &PolicyLoadedEvent) {
+                panic!("policy hook");
+            }
+            fn on_error(&self, _: &ErrorEvent) {
+                panic!("error hook");
+            }
+        }
+
+        let counting = std::sync::Arc::new(Counting::default());
+        let mut evaluator = ObservableEvaluator::new();
+        evaluator.add_observer(std::sync::Arc::new(AlwaysPanics));
+        evaluator.add_observer(counting.clone());
+
+        without_panic_output(|| evaluator.notify_policy_loaded(None, "sha256:ab"));
+
+        assert_eq!(counting.policies.load(Ordering::Relaxed), 1);
     }
 }
