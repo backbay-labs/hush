@@ -229,6 +229,17 @@ func TestMapMCPToolCall(t *testing.T) {
 			arguments: nil,
 			want:      EvaluationAction{Type: "tool_call", Target: "summarize"},
 		},
+		{
+			// A call carrying `"arguments": {}` did carry arguments, and `{}`
+			// is two bytes of canonical JSON; only a call with no `arguments`
+			// member at all goes unmeasured. The TypeScript and Python
+			// adapters agree, so one `max_args_size` bounds the same payload
+			// in all three.
+			name:      "an empty arguments object is two bytes",
+			tool:      "summarize",
+			arguments: map[string]any{},
+			want:      EvaluationAction{Type: "tool_call", Target: "summarize", ArgsSize: intPtr(2)},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

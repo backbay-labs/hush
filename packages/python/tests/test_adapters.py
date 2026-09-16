@@ -202,6 +202,16 @@ class TestMapMCPToolCall:
         assert action.target == "ping"
         assert action.args_size is None
 
+    def test_an_empty_arguments_object_is_two_bytes_not_no_measurement(self):
+        # An MCP call carrying `"arguments": {}` did carry arguments, and `{}`
+        # is two bytes of canonical JSON. Reporting no size instead would let
+        # it past a `max_args_size` of 1 that the TypeScript and Go adapters
+        # deny, so one limit would bound three different payloads.
+        action = map_mcp_tool_call("custom_search", {})
+        assert action.type == "tool_call"
+        assert action.args_size == 2
+        assert action.args_size == canonical_size({})
+
     def test_missing_path_in_read_file(self):
         action = map_mcp_tool_call("read_file", {})
         assert action.type == "file_read"

@@ -62,16 +62,18 @@ def map_mcp_tool_call(
     args: Optional[dict[str, Any]] = None,
 ) -> EvaluationAction:
     """Map one MCP tool call onto the action a policy evaluates."""
-    args = args or {}
     mapper = _MAPPINGS.get(tool_name)
     if mapper is not None:
-        return mapper(args)
+        return mapper(args or {})
 
     return EvaluationAction(
         type="tool_call",
         target=tool_name,
-        # Core spec 3.7: the UTF-8 byte length of the canonical JSON.
-        args_size=args_size_of(args) if args else None,
+        # Core spec 3.7: the UTF-8 byte length of the canonical JSON. A call
+        # that carries an empty `arguments` object still carries arguments --
+        # `{}` is two bytes -- and only a call with no `arguments` member at
+        # all goes unmeasured, as it does in the TypeScript and Go adapters.
+        args_size=None if args is None else args_size_of(args),
     )
 
 
