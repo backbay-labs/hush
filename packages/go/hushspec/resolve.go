@@ -131,7 +131,16 @@ type SignatureStatus struct {
 
 // FailedSignature is the status recorded for a document whose verification
 // failed at the check named by reason.
+//
+// keyID is what the envelope *claimed*, which is worth recording even though
+// nothing about it was trusted -- it is how a rotation mistake stays
+// distinguishable from an attack. It is dropped unless it is a well-formed
+// key id: the receipt schema admits only `sha256:` plus 64 lowercase hex, and
+// an envelope that failed its own shape check may carry anything at all.
 func FailedSignature(reason, keyID string) SignatureStatus {
+	if !digestPinPattern.MatchString(keyID) {
+		keyID = ""
+	}
 	return SignatureStatus{Verified: false, KeyID: keyID, Reason: reason}
 }
 

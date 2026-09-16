@@ -721,3 +721,23 @@ rules:
 		}
 	})
 }
+
+// The receipt schema admits `sha256:` plus 64 lowercase hex and nothing else,
+// so an envelope that failed its own shape check contributes the reason code
+// but never the key id it claimed.
+func TestFailedSignatureKeepsOnlyAWellFormedKeyID(t *testing.T) {
+	claimed := "sha256:" + strings.Repeat("0", 64)
+	if status := FailedSignature(ReasonMalformedEnvelope, claimed); status.KeyID != claimed {
+		t.Errorf("key id = %q, want %q", status.KeyID, claimed)
+	}
+	for _, id := range []string{
+		"nonsense",
+		"sha256:",
+		strings.Repeat("0", 64),
+		"SHA256:" + strings.Repeat("A", 64),
+	} {
+		if status := FailedSignature(ReasonMalformedEnvelope, id); status.KeyID != "" {
+			t.Errorf("key id %q was recorded as %q, want it dropped", id, status.KeyID)
+		}
+	}
+}
