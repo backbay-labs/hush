@@ -65,10 +65,34 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
-      - name: Publish schemas at their $id URLs
+      # Serves each schema at the URL its own `$id` declares
+      # (https://hushspec.dev/schemas/<file>) and each spec registry at
+      # https://hushspec.dev/registries/<file>, next to the book. `index.json`
+      # is built from the directory that is being copied, so it can never name
+      # a schema the site does not serve.
+      - name: Publish schemas and registries at their canonical URLs
+        env:
+          HUSHSPEC_COMMIT: ${{ github.sha }}
         run: |
-          mkdir -p docs/book/schemas
+          mkdir -p docs/book/schemas docs/book/registries
           cp schemas/*.json docs/book/schemas/
+          cp spec/registries/*.yaml docs/book/registries/
+          python3 scripts/build_schema_index.py --out docs/book/schemas/index.json
+
+      # `hushspec.dev` is the host every `$id` names, so the site claims it.
+      #
+      # This step does not assume the domain is bound: GitHub Pages serves the
+      # site at its *.github.io URL regardless, and a CNAME file naming a
+      # domain whose DNS does not point at GitHub Pages is inert -- it is
+      # copied, never verified, so an unbound domain cannot fail the deploy.
+      # Making the domain actually resolve is a one-time, maintainer-side step
+      # outside this workflow: point hushspec.dev at GitHub Pages (an ALIAS or
+      # ANAME record at the apex, or four A records for the Pages IPv4
+      # addresses) and set it as the custom domain in the repository's Pages
+      # settings. Until then, docs/src/reference/json-schema.md documents the
+      # raw-GitHub fallback the schemas can be fetched from.
+      - name: Claim the schema host
+        run: cp docs/CNAME docs/book/CNAME
 
       - uses: actions/configure-pages@v5
 
