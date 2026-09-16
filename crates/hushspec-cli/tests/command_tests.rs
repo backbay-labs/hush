@@ -63,6 +63,7 @@ rules:
             r#"hushspec: "0.1.0"
 name: child
 extends: "{}"
+merge_strategy: merge
 rules:
   egress:
     allow:
@@ -84,9 +85,16 @@ rules:
         .clone();
 
     let yaml = String::from_utf8(output).unwrap();
+    // Core spec 2.3: both resolution instructions are consumed, so what the
+    // command prints is what `Resolution.spec` holds -- a document that says
+    // what the policy permits and nothing about how it was assembled.
     assert!(
         !yaml.contains("extends:"),
         "extends should be consumed by resolution:\n{yaml}"
+    );
+    assert!(
+        !yaml.contains("merge_strategy:"),
+        "merge_strategy should be consumed by resolution:\n{yaml}"
     );
     assert!(yaml.contains("child.example.com"), "{yaml}");
     assert!(

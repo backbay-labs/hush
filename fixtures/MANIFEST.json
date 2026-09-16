@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-16T00:50:09Z",
+  "generated_at": "2026-09-16T01:33:28Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -943,7 +943,7 @@
     },
     {
       "path": "fixtures/core/merge/metadata-replaces-whole/child-deep-merge.yaml",
-      "sha256": "3c862d6ef2604d41dd7c8fa81ac90dcaf5338507804f8fe5d09c7b4516d65e1d",
+      "sha256": "6ce79323955c261cafec8216ebf419c98bbcfc1a72a54ac40089123a779cc6d1",
       "category": "merge",
       "module": "core",
       "level": 2
@@ -957,7 +957,7 @@
     },
     {
       "path": "fixtures/core/merge/metadata-replaces-whole/fixture.yaml",
-      "sha256": "992a4effcb0b5c373b4cc7f9adc4c7e9138f85f0e90ee7e65a03d836bcfb89a7",
+      "sha256": "4ffbbd070d90dd65dfe3efcfb9ec0f1c430093cd4aeafdb618e7d69cb8ec932e",
       "category": "merge",
       "module": "core",
       "level": 2
