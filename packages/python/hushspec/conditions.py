@@ -903,22 +903,13 @@ def _values_equal(actual: Any, expected: Any) -> bool:
         # boolean, never to a number.
         return isinstance(actual, bool) and actual == expected
 
-    if isinstance(expected, int):
-        # Integer-shaped expected: actual must also be integer-shaped (not
-        # bool, not float) with an equal value. A float actual does not match
-        # even when its value is integral (e.g. 5.0) -- JSON number shape,
-        # not numeric value, decides the comparison.
-        if isinstance(actual, bool) or not isinstance(actual, int):
-            return False
-        return actual == expected
-
-    if isinstance(expected, float):
-        # Float-shaped expected: actual may be integer- or float-shaped (both
-        # widen to a double), compared by exact value with no tolerance, so
-        # 0.3 does not match 0.30000000000000004.
+    if isinstance(expected, (int, float)):
+        # Numbers compare by exact value with no tolerance, so 0.3 does not
+        # match 0.30000000000000004, and by value alone: the integer 1 and the
+        # float 1.0 are the same number whichever spelling either side used.
         if isinstance(actual, bool) or not isinstance(actual, (int, float)):
             return False
-        return float(actual) == float(expected)
+        return actual == expected
 
     return False
 

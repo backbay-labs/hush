@@ -576,7 +576,7 @@ The window is half-open: it contains the current local time `t` when `start <= t
 
 **Runtime context.** The engine supplies an object with the following top-level keys, each OPTIONAL: `user` (object), `environment` (string), `deployment` (object), `agent` (object), `session` (object), `request` (object), `custom` (object), `counters` (object of string to non-negative integer, consulted by `rate` conditions), and `current_time` (RFC 3339 string; used only for deterministic testing). A `context` condition key such as `user.role` resolves `user` then `role`; the key `environment` resolves the top-level string.
 
-**Context comparison.** Only strings, booleans and numbers compare equal; an expected object or `null` never matches. Comparison is type-sensitive -- the number `1` equals neither the string `"1"` nor the boolean `true` -- and numbers compare by exact value with no tolerance, so `0.3` does not match `0.30000000000000004`. Either side MAY be an array:
+**Context comparison.** Only strings, booleans and numbers compare equal; an expected object or `null` never matches. Comparison is type-sensitive -- the number `1` equals neither the string `"1"` nor the boolean `true` -- and numbers compare by exact value with no tolerance, so `0.3` does not match `0.30000000000000004`, and by value alone, so the integer `1` and the float `1.0` are the same number whichever spelling the document or the context used. Either side MAY be an array:
 
 | Expected | Context value | Matches when                                        |
 |----------|---------------|-----------------------------------------------------|

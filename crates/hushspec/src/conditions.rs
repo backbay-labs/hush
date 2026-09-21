@@ -655,22 +655,25 @@ fn resolve_map_field(
 /// `expected` is always a non-array scalar here -- array unwrapping happens one
 /// level up, in [`matches_scalar_or_membership`]. Strings and booleans compare
 /// exactly, and a boolean is never numeric. Numbers compare by exact value with
-/// no tolerance, so `0.3` does not match `0.30000000000000004`; an
-/// integer-shaped expected value matches only an integer-shaped actual value,
-/// while a fractional one widens an integer actual to a double.
+/// no tolerance, so `0.3` does not match `0.30000000000000004`, and by value
+/// alone: the integer `1` and the float `1.0` are the same number, whichever
+/// spelling the document or the runtime context used.
 fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match expected {
         serde_json::Value::String(expected_str) => actual.as_str() == Some(expected_str.as_str()),
         serde_json::Value::Bool(expected_bool) => actual.as_bool() == Some(*expected_bool),
-        serde_json::Value::Number(expected_num) => {
-            if let Some(expected_i64) = expected_num.as_i64() {
-                actual.as_i64() == Some(expected_i64)
-            } else if let Some(expected_f64) = expected_num.as_f64() {
-                actual.as_f64() == Some(expected_f64)
-            } else {
-                false
+        serde_json::Value::Number(expected_num) => match actual {
+            serde_json::Value::Number(actual_num) => {
+                match (actual_num.as_i64(), expected_num.as_i64()) {
+                    (Some(a), Some(e)) => a == e,
+                    _ => match (actual_num.as_f64(), expected_num.as_f64()) {
+                        (Some(a), Some(e)) => a == e,
+                        _ => false,
+                    },
+                }
             }
-        }
+            _ => false,
+        },
         _ => false,
     }
 }

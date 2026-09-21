@@ -961,11 +961,16 @@ var builtinCredentialPatterns = compileBuiltinCredentialPatterns([]builtinCreden
 	{"jwt", `eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, nil},
 })
 
+// The patterns are constants of this package, so one that does not compile is
+// a defect in the package itself and is reported when it loads rather than
+// silently detecting nothing.
 func compileBuiltinCredentialPatterns(patterns []builtinCredentialPattern) []builtinCredentialPattern {
 	for index := range patterns {
-		if re, err := CompileProfileRegex(patterns[index].pattern); err == nil {
-			patterns[index].re = re
+		re, err := CompileProfileRegex(patterns[index].pattern)
+		if err != nil {
+			panic(fmt.Sprintf("built-in credential pattern %s does not compile: %v", patterns[index].name, err))
 		}
+		patterns[index].re = re
 	}
 	return patterns
 }

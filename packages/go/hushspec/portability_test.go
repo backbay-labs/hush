@@ -63,36 +63,34 @@ func TestConditionBoolArrayMembership(t *testing.T) {
 	}
 }
 
-// TestConditionIntFloatDistinction locks in the int-vs-float distinction: an
-// integer-shaped expected value matches ONLY an integer actual, while a
-// float-shaped expected value matches an int or float actual by numeric value.
-// Coercing both to float64 would let int 5 match a float 5.0 actual.
-func TestConditionIntFloatDistinction(t *testing.T) {
-	// expected 5 (int) vs actual 5.0 (float) -> false
-	if EvaluateCondition(
+// TestConditionNumbersCompareByValue pins that a number matches by value
+// alone: the integer 5 and the float 5.0 are the same number whichever
+// spelling the document or the runtime context used (core spec 3.13).
+func TestConditionNumbersCompareByValue(t *testing.T) {
+	if !EvaluateCondition(
 		&Condition{Context: map[string]any{"session.count": 5}},
 		&RuntimeContext{Session: map[string]any{"count": 5.0}},
 	) {
-		t.Error("expected int 5 must NOT match a float 5.0 actual")
+		t.Error("expected int 5 must match a float 5.0 actual")
 	}
-
-	// expected 5.0 (float) vs actual 5 (int) -> true
 	if !EvaluateCondition(
 		&Condition{Context: map[string]any{"session.count": 5.0}},
 		&RuntimeContext{Session: map[string]any{"count": 5}},
 	) {
 		t.Error("expected float 5.0 must match an int 5 actual")
 	}
-
-	// expected [5] (int) vs actual [5.0] (float) -> false
 	if EvaluateCondition(
+		&Condition{Context: map[string]any{"session.count": 5}},
+		&RuntimeContext{Session: map[string]any{"count": 5.5}},
+	) {
+		t.Error("expected int 5 must not match a float 5.5 actual")
+	}
+	if !EvaluateCondition(
 		&Condition{Context: map[string]any{"session.counts": []any{5}}},
 		&RuntimeContext{Session: map[string]any{"counts": []any{5.0}}},
 	) {
-		t.Error("expected int-array [5] must NOT match a float-array [5.0] actual")
+		t.Error("expected int-array [5] must intersect a float-array [5.0] actual")
 	}
-
-	// expected 5.0 (float) vs actual [5] (int array, membership) -> true
 	if !EvaluateCondition(
 		&Condition{Context: map[string]any{"session.counts": 5.0}},
 		&RuntimeContext{Session: map[string]any{"counts": []any{5}}},

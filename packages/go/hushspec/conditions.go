@@ -154,10 +154,12 @@ func EvaluateConditionWithCapabilities(
 // never switches a block off: a block is inert only on an evaluated false.
 type conditionVerdict uint8
 
+// The zero value is unevaluable, so a verdict that was never assigned leaves
+// its block active rather than switching it off.
 const (
-	verdictTrue conditionVerdict = iota
+	verdictUnevaluable conditionVerdict = iota
+	verdictTrue
 	verdictFalse
-	verdictUnevaluable
 )
 
 func verdictOf(value bool) conditionVerdict {
@@ -493,6 +495,10 @@ func validateConditionDepth(condition *Condition, path string, depth int, errs *
 			"%s.rate.counter: %q is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
 			path, rate.Counter))
 	}
+	if rate := condition.Rate; rate != nil && rate.Comparison != RateComparisonGte && rate.Comparison != RateComparisonLt {
+		*errs = append(*errs, fmt.Sprintf(
+			"%s.rate.comparison: unknown variant %q, expected `gte` or `lt`", path, string(rate.Comparison)))
+	}
 	for index := range condition.AllOf {
 		validateConditionDepth(&condition.AllOf[index], fmt.Sprintf("%s.all_of[%d]", path, index), depth+1, errs)
 	}
@@ -793,15 +799,17 @@ func matchValue(actual, expected any) bool {
 	}
 }
 
-// matchIntNumber compares an integer-shaped expected value: it matches ONLY an
-// integer-typed actual (int/int64) with an equal value -- a float64 actual such
-// as 5.0 does NOT match, even when numerically equal.
+// matchIntNumber compares an integer-shaped expected value by value alone: an
+// integer-typed actual with the same value matches, and so does a float64
+// actual such as 5.0, which is how a JSON-decoded context spells the integer 5.
 func matchIntNumber(actual any, expected int64) bool {
 	switch av := actual.(type) {
 	case int:
 		return int64(av) == expected
 	case int64:
 		return av == expected
+	case float64:
+		return av == float64(expected)
 	default:
 		return false
 	}
