@@ -113,7 +113,7 @@ Add a `$schema` comment to your HushSpec YAML files for editor autocompletion an
 
 ```yaml
 # yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "my-policy"
 
 rules:

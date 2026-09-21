@@ -23,7 +23,10 @@ hush/
 │   ├── python/        # Python (hushspec)
 │   └── go/            # Go (hushspec)
 ├── rulesets/          # Example and built-in ruleset YAML files
+├── library/           # Vertical policy library, embedded as builtins
 ├── fixtures/          # Test fixtures (valid/invalid documents, edge cases)
+├── generated/         # Cross-SDK contract data the generators consume
+├── scripts/           # Generators and checks CI runs with --check
 └── docs/              # Documentation source (mdBook)
 ```
 

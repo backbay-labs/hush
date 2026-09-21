@@ -97,7 +97,7 @@ entry-point name each SDK publishes for each capability below is in the
 | Receipt sinks (file, stderr, filtered, multi, callback, null) | Yes | Yes | Yes | Yes |
 | OTLP receipt sink | Partial<br>`otlp` feature | Yes | Yes | Yes |
 | Providers + hot reload (watch/poll) | Yes | Yes | Yes | Yes |
-| HTTPS policy loading (ETag, SSRF-hardened) | Partial<br>`http` feature | Yes | No | No |
+| HTTPS policy loading (ETag, SSRF-hardened) | Yes<br>`http` feature | Yes | Yes<br>opt-in loader | Yes<br>opt-in loader |
 | Framework adapters | No | Yes<br>5 frameworks | Yes<br>5 frameworks | Yes<br>3 frameworks |
 | Panic mode (kill switch) | Yes | Yes | Yes | Yes |
 
@@ -110,9 +110,10 @@ Every "No" is deliberate, and here is why:
   frameworks live. The worked example
   `cargo run --example guarded_agent --features otlp` wires a policy through a
   guard, a chained sink and an OTLP sink instead.
-- **Python and Go ship no HTTP client**, so they reject an `https:` `extends`
-  reference outright rather than resolving it unverified. Pass your own loader,
-  or resolve ahead of time and hand them the `Resolution`.
+- **Python and Go load `https:` references only through their opt-in loaders**
+  (`install_https_loader()` in Python, `NewHTTPLoader` in Go); with none registered they
+  reject an `https:` `extends` reference outright rather than resolving it unverified. Pass
+  your own loader, or resolve ahead of time and hand them the `Resolution`.
 
 For the same resolved policy, all four produce the same decision, the same
 canonical bytes, the same `content_hash`, and — under the fixed inputs of
@@ -707,6 +708,8 @@ The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for prog
 | [`hushspec-signing.md`](./spec/hushspec-signing.md) | Policy signature envelopes, keys, keyrings, verification |
 | [`hushspec-bundle.md`](./spec/hushspec-bundle.md) | Policy bundle attestation: DSSE envelope over an in-toto statement |
 | [`hushspec-log.md`](./spec/hushspec-log.md) | Hash-linked receipt log |
+| [`hushspec-grammars.md`](./spec/hushspec-grammars.md) | ABNF grammars for every string form the specifications define |
+| [`hushspec-security.md`](./spec/hushspec-security.md) | Security considerations for engines and policy authors |
 | [`versioning.md`](./spec/versioning.md) | Versioning and stability policy |
 
 ## Project

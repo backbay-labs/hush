@@ -161,7 +161,7 @@ code" is the answer a relying party needs:
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Format version | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `RECEIPT_VERSION` | `ReceiptVersion` | `"0.2"` | |
-| Evaluate and record | `evaluate_audited` | `evaluateAudited` | `evaluate_audited` | `EvaluateAudited` | Takes a **`Resolution`**, an action, an `AuditConfig` and an `AuditContext`; returns a format 0.2 receipt | Content is never carried -- only `action.content_hash` and `content_size` |
+| Evaluate and record | `evaluate_audited` | `evaluateAudited` | `evaluate_audited` | `EvaluateAudited` | Takes a **`Resolution`**, an action, an `AuditConfig` and an `AuditContext`; returns a format 0.2 receipt | Content is never carried -- only `action.content_hash` and `content_size`. Go returns `(receipt, error)`, the error for a resolution with no canonical form, where the other three raise |
 | From a bare document | `evaluate_audited_spec` | `evaluateAuditedSpec` | `evaluate_audited_spec` | `EvaluateAuditedSpec` | Resolves the leaf as `memory` first | |
 | Receipt value | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `DecisionReceipt` | `receipt_version`, UUID v7 `receipt_id`, millisecond `timestamp` with `time_source`, `actor`, `policy`, `action`, decision, recorded `rule_trace`, `detection_trace`, required `enforcement` | Validates against `hushspec-receipt.v1.schema.json` |
 | Parse a receipt | `DecisionReceipt::parse` | `parseReceipt` | `parse_receipt` | `ParseReceipt` | Accepts exactly what the 0.2 schema accepts; every `receipts/invalid/` vector is rejected | |

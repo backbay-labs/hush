@@ -36,7 +36,7 @@ The child document entirely replaces the base. No fields from the base are prese
 
 ```yaml
 # base.yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: base
 rules:
   egress:
@@ -48,7 +48,7 @@ rules:
 
 ```yaml
 # child.yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: child
 extends: base.yaml
 rules:

@@ -287,7 +287,7 @@ discarded (first at line 2); pass --strip-comments to reformat anyway
 - `--check` and `--diff` report `has comments; would not reformat` and treat it
   as a skip, not a failure — a commented policy does not fail a `fmt --check` CI
   gate.
-- `--strip-comments` opts in to the old behavior and reformats anyway.
+- `--strip-comments` discards the comments and reformats anyway.
 - The modeline alone never triggers the refusal; it is preserved verbatim.
 
 JSON output carries `has_comments`, `comment_count`, `first_comment_line` and

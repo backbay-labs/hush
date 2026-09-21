@@ -77,7 +77,7 @@ Without this, "the document was rejected" is a weak assertion — a vector that
 tests the YAML profile passes just as well when the engine refuses it for an
 unrelated reason.
 
-All four reference SDK fixture runners now assert the code and the
+All four reference SDK fixture runners assert the code and the
 `message_contains` substring, not merely that the vector was rejected. The
 spec's rule is the weaker one, and stays that way for third-party engines: an
 implementation that reports no codes at all conforms at this level; one that

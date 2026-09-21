@@ -62,7 +62,7 @@ These Clawdstrike features are not part of HushSpec and have no HushSpec equival
 Clawdstrike resolves HushSpec `extends` references against its built-in rulesets:
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "production"
 extends: "strict"
 

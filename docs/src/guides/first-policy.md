@@ -7,7 +7,7 @@ This guide walks through building a HushSpec policy from scratch.
 Every HushSpec document needs exactly one required field:
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 ```
 
 This is a valid document. It declares no rules, so no actions are restricted.
@@ -17,7 +17,7 @@ This is a valid document. It declares no rules, so no actions are restricted.
 Give your policy a name and description:
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "my-first-policy"
 description: "A starter policy for development"
 ```
@@ -27,7 +27,7 @@ description: "A starter policy for development"
 The most common first rule. Block access to credentials and secrets:
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "my-first-policy"
 
 rules:
@@ -104,7 +104,7 @@ rules:
 ## The Complete Policy
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "my-first-policy"
 description: "Development policy with basic protections"
 

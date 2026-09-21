@@ -14,7 +14,7 @@ AI agents interact with tools — file systems, network APIs, shell commands, MC
 ## A Minimal Example
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: my-policy
 
 rules:

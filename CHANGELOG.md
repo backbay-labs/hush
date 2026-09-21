@@ -173,7 +173,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `dsse_signature_mismatch`, `subject_digest_mismatch`, `policy_mismatch`), optionally re-resolving
   the policy to cross-check it, and `h2h bundle inspect` prints the predicate. Bundles are signed
   with the same Ed25519 keys and `key_id` convention as policies, and are readable by generic DSSE
-  and in-toto tooling. Eight vectors under `fixtures/bundle/`; every release now attaches a bundle
+  and in-toto tooling. Ten vectors under `fixtures/bundle/`; every release now attaches a bundle
   for each `library/` and `rulesets/` policy, covered by `actions/attest-build-provenance`.
 - Signing format 0.2: `hushspec::signing` now signs the content hash of the *resolved* policy
   over an RFC 8785 envelope, so reformatting a signed policy keeps its signature valid and a
@@ -433,7 +433,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 
 **Docs**
 
-- `docs/src/reference/sdk-api.md`: the cross-SDK API contract. Eighteen capability
+- `docs/src/reference/sdk-api.md`: the cross-SDK API contract. Nineteen capability
   areas -- parse/validate, merge/resolve with verify-on-load and digest pins, compiled
   policies, the four evaluation entry points, conditions (`capability` and `rate`),
   detection (`heuristic_injection@1`), canonical form and content hash, receipts 0.2 and
@@ -580,8 +580,8 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   signing, receipt signing and the OTLP sink are in all four SDKs, not two; `content_hash` *is*
   byte-identical across the SDKs (`hushspec-difftest` compares it, and the receipt hash, on 500
   generated policy groups per commit); there are twelve rule blocks, not ten; the CLI has 22
-  subcommands, not ten. Newly documented limits: Python and Go ship no HTTP client and reject an
-  `https:` `extends` reference outright, bundle *creation* is Rust and `h2h` only, Rust ships no
+  subcommands, not ten. Newly documented limits: Python and Go load `https:` `extends` references only through
+  their opt-in loaders and refuse them otherwise, bundle *creation* is Rust and `h2h` only, Rust ships no
   framework adapters, Rust signing needs the `signing` feature and Python's needs the `signing`
   extra, and Go spells the guard `Guard`. `docs/src/reference/sdk-conformance.md` is written from
   the vectors each SDK's tests actually walk, citing the test file for every vector family, and
@@ -591,8 +591,8 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   and schema-defined, all four SDKs past Level 3, `HushGuard` in every SDK, Ed25519 signing in
   every SDK, panic mode in every SDK, separation of duties enforceable (`GOV_SOD_VIOLATION`,
   `h2h sign --allow-unapproved`), compliance mappings on every library policy, and evaluation
-  suites for all eight -- and which are not: the 1.0 freeze, package-registry publication and
-  prebuilt binaries (no `v0.x` tag cut yet), a cloud-storage policy loader, and published
+  suites for all eight -- and which are not: package-registry publication and prebuilt binaries (no
+  `v1.0.0` tag cut yet), a cloud-storage policy loader, and published
   Prometheus recording rules and alert examples.
 - Repositioned the project around "agentic compliance as code": updated the tagline and
   introductory copy across `README.md`, `docs/src/introduction.md`, package manifests, and

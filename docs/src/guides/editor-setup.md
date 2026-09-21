@@ -64,7 +64,7 @@ Add a `yaml-language-server` modeline as the **first line** of the file:
 
 ```yaml
 # yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: "my-policy"
 ```
 

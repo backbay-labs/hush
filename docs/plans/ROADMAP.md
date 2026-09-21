@@ -11,7 +11,7 @@
 
 ## 0. Status after RFC 09 Waves 0-5 (2026-09-15)
 
-**Wave 6 (2026-09-15) declared HushSpec 1.0.0.** Every specification document is Stable at 1.0.0 with the stability guarantee in `spec/versioning.md`; the `.v1.` schema lineage is canonical and the `.v0.` files are frozen; engines accept minors 0.1, 0.2, and 1.0; nine registries with drift tests, formal grammars, and a security-considerations document accompany the specs. The git tag and registry publishing remain release actions.
+**HushSpec 1.0.0 was declared on 2026-09-15.** Every specification document is Stable at 1.0.0 with the stability guarantee in `spec/versioning.md`; the `.v1.` schema lineage is canonical and the `.v0.` files are frozen; engines accept minors 0.1, 0.2, and 1.0; nine registries with drift tests, formal grammars, and a security-considerations document accompany the specs. The git tag and registry publishing remain release actions.
 
 Waves 0 through 5 of [RFC 09](./09-compliance-as-code-plan.md) have landed. That
 plan, not this document, is the source of truth for what remains; this section
@@ -19,12 +19,12 @@ records where the code stands so the phases below can be read against it.
 
 **Shipped in Waves 0-5:**
 
-- **The specification Wave 6 declared as 1.0.0.** Twelve rule blocks, three
+- **The specification, declared 1.0.0.** Twelve rule blocks, three
   extension modules, and six normative conformance levels (core spec section 8)
   -- Levels 4 (Auditor) and 5 (Attested) are now written down rather than
   forward-referenced. Companion
   specifications for canonical form, decision receipts, policy signing, the
-  hash-linked log and policy bundles. Ratified decisions D14-D20, including
+  hash-linked log and policy bundles. The ratified conditions and guards, including
   `when.capability`, `when.rate`, and the normative `heuristic_injection@1`
   detector.
 - **All four SDKs at Level 5.** Rust, TypeScript, Python and Go each run the
@@ -47,7 +47,7 @@ records where the code stands so the phases below can be read against it.
   image, the eight-policy vertical library with 198 control-tagged evaluation
   cases, and `h2h report` for compliance evidence over a window of receipts.
 
-**Not yet done:** the 1.0 spec freeze (RFC 09 Wave 6, packages P5-01..05), the
+**Not yet done:** the
 first tagged release and package-registry publication, cloud-storage policy
 loaders, and published Prometheus recording rules and alert examples. Each is
 called out in Section 8 below.
@@ -77,7 +77,7 @@ HushSpec v0.1.0 is a draft specification with four SDK implementations (Rust, Ty
 - **Sign** and **verify** policies with Ed25519 keys in all four SDKs and the `h2h` CLI (Rust behind the `signing` feature, Python behind the `signing` extra), with verification on load
 - **Observe** evaluation events with structured logging and metrics collectors in all four SDKs
 
-The spec covers 10 core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection) and three extension modules (posture, origins, detection). The `h2h` CLI provides 22 subcommands spanning validation, hashing, testing, linting, diffing, formatting, scaffolding, governance audit, signing, verification, key generation, bundles, log and receipt verification, compliance reporting, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI and MCP in TypeScript, Python and Go, plus Vercel AI SDK and LangChain in TypeScript and LangChain and CrewAI in Python. SDKs are not yet published to package registries.
+The spec covers twelve core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection, browser_automation, code_execution) and three extension modules (posture, origins, detection). The `h2h` CLI provides 22 subcommands spanning validation, hashing, testing, linting, diffing, formatting, scaffolding, governance audit, signing, verification, key generation, bundles, log and receipt verification, compliance reporting, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI and MCP in TypeScript, Python and Go, plus Vercel AI SDK and LangChain in TypeScript and LangChain and CrewAI in Python. SDKs are not yet published to package registries.
 
 ### Where We Need to Be
 
@@ -86,7 +86,7 @@ Production adoption requires HushSpec to be a complete, trusted, and ergonomic s
 - Every SDK must evaluate policies identically (Level 3 across all four languages; all four now reach Level 5) -- **DONE**
 - Operators must have audit trails that satisfy SOC2, HIPAA, PCI-DSS, and FedRAMP requirements
 - Policy authors must have CLI tooling for validation, testing, linting, and diffing -- **DONE**
-- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **Partial** (HTTPS loading with ETag caching ships in Rust, behind the `http` feature, and TypeScript; Python and Go ship no HTTP client and reject an `https:` reference outright. File-watching and polling hot reload, and signature verification on load, ship in all four. No S3, GCS, Azure, Vault, or git loader exists in any SDK)
+- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **Partial** (HTTPS loading with ETag caching ships in all four SDKs, behind the `http` feature in Rust and as opt-in loaders in Python and Go. File-watching and polling hot reload, and signature verification on load, ship in all four. No S3, GCS, Azure, Vault, or git loader exists in any SDK)
 - Detection extensions must have working implementations, not just schema fields -- **DONE**
 - Enterprise deployments must have governance, signing, RBAC, and emergency override capabilities -- **Partial** (Ed25519 signing implemented in the Rust SDK and `h2h` CLI only; panic mode done in Rust and Go; separation-of-duties and RBAC/OIDC/LDAP integration not implemented)
 - Regulated industries must have vetted, compliance-mapped policy templates to start from
