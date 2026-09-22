@@ -31,6 +31,8 @@ from hushspec.middleware import (
 from hushspec.parse import parse_or_raise
 from hushspec.resolve import (
     INLINE_SOURCE,
+    REASON_MISSING_SIGNATURE,
+    REASON_NO_KEYRING,
     PolicyVerificationError,
     ResolveOptions,
     VerifyOptions,
@@ -41,7 +43,7 @@ from hushspec.resolve import (
     resolve_with_options,
     resolve_with_options_or_raise,
 )
-from hushspec.signing import SigningError, sign_policy
+from hushspec.signing import sign_policy
 from hushspec.sinks import CallbackSink
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -470,12 +472,27 @@ def test_require_signature_honours_the_verifier_clock_and_rollback_inputs(
     assert "signed_at_in_future" in message
 
 
-def test_require_signature_without_a_keyring_is_refused_outright() -> None:
-    with pytest.raises(SigningError, match="require_signature needs a keyring"):
+def test_require_signature_without_a_keyring_refuses_every_unpinned_hop() -> None:
+    # Signing spec 6.5: a hop with no envelope at all records
+    # `missing_signature`, and one whose envelope cannot be checked against
+    # anything records `no_keyring`. Both refuse; neither is silently admitted.
+    with pytest.raises(PolicyVerificationError) as unsigned:
         resolve_with_options_or_raise(
             parse_or_raise(STANDALONE),
             options=ResolveOptions(require_signature=True),
         )
+    assert unsigned.value.code == REASON_MISSING_SIGNATURE
+
+    envelope = sign_policy(parse_or_raise(STANDALONE), SIGNING_KEY).to_json().encode()
+    with pytest.raises(PolicyVerificationError) as unkeyed:
+        resolve_with_options_or_raise(
+            parse_or_raise(STANDALONE),
+            options=ResolveOptions(
+                require_signature=True, signature_locator=lambda _source: envelope
+            ),
+        )
+    assert unkeyed.value.code == REASON_NO_KEYRING
+    assert unkeyed.value.status.verified is False
 
 
 def test_an_in_memory_policy_cannot_satisfy_require_signature_by_default() -> None:

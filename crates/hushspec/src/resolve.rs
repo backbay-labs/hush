@@ -232,6 +232,11 @@ impl ResolveOptions {
 
 /// Split `reference#sha256:<hex>` into the reference and its pin.
 ///
+/// Every fragment is read as a pin: core spec 2.3 requires a malformed
+/// fragment to be rejected, so anything after the last `#` that is not exactly
+/// `sha256:` followed by 64 lowercase hex digits refuses the load. Treating it
+/// as part of the reference would turn a typo'd pin into an unpinned load.
+///
 /// # Errors
 ///
 /// [`ResolveError::InvalidPin`] for a fragment that is present but is not a
@@ -370,13 +375,21 @@ fn verify_hop(
     #[cfg(not(feature = "signing"))]
     {
         let _ = resolved_hash;
+        if !options.require_signature {
+            return Ok(None);
+        }
+        // Verification was attempted and this build has no backend to do it
+        // with, so the outcome is recorded either way (signing spec 6.5): a
+        // pinned hop carries `signing_unavailable` rather than nothing at all,
+        // which a reader could only take for "no check was configured".
+        let status = SignatureStatus::failed("signing_unavailable", None);
         if required {
             return Err(ResolveError::SignatureRequired {
                 document: source.to_string(),
-                status: SignatureStatus::failed("signing_unavailable", None),
+                status,
             });
         }
-        Ok(None)
+        Ok(Some(status))
     }
 }
 

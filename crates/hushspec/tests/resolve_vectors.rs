@@ -16,7 +16,8 @@ use hushspec::{
     HushSpec, ResolveError, ResolveOptions, create_composite_loader, resolve_with_options,
 };
 use hushspec_testkit::resolve_vector::{
-    ResolveExpect, ResolveLink, ResolveVector, VECTORS_VERSION, chain_of, check,
+    ResolveExpect, ResolveLink, ResolveLoad, ResolveVector, VECTORS_VERSION, VectorEnvelope,
+    chain_of, check,
 };
 
 fn repo_root() -> PathBuf {
@@ -33,10 +34,19 @@ fn own_hash_of_builtin(name: &str) -> String {
 }
 
 /// Vector definitions: name, description, leaf YAML, expected rejection
-/// (or `None` for a resolution whose hashes are filled in on generation).
-fn definitions() -> Vec<(&'static str, &'static str, String, Option<&'static str>)> {
+/// (or `None` for a resolution whose hashes are filled in on generation), and
+/// the load-time configuration to resolve under.
+struct Definition {
+    name: &'static str,
+    description: &'static str,
+    yaml: String,
+    rejects: Option<&'static str>,
+    load: Option<ResolveLoad>,
+}
+
+fn definitions() -> Vec<Definition> {
     let default_own = own_hash_of_builtin("default");
-    vec![
+    plain(vec![
         (
             "no-extends",
             "a document with no extends resolves to itself: one chain link, the leaf, recorded as memory",
@@ -74,19 +84,71 @@ fn definitions() -> Vec<(&'static str, &'static str, String, Option<&'static str
             Some("invalid_pin"),
         ),
         (
+            "pin-uppercase-algorithm",
+            "core 2.3: the algorithm label is case-sensitive, so #SHA256: is a malformed fragment and never an unpinned reference",
+            format!("hushspec: \"0.1.0\"\nname: uppercase-algorithm-pin\nextends: \"builtin:default#{}\"\n", default_own.replace("sha256:", "SHA256:")),
+            Some("invalid_pin"),
+        ),
+        (
+            "pin-short-digest",
+            "core 2.3: a digest one hex digit short of 64 is malformed, not a shorter pin to be accepted",
+            format!("hushspec: \"0.1.0\"\nname: short-digest-pin\nextends: \"builtin:default#{}\"\n", &default_own[..default_own.len() - 1]),
+            Some("invalid_pin"),
+        ),
+        (
+            "pin-non-digest-fragment",
+            "core 2.3: every fragment is read as a pin, so one that names no digest is rejected rather than loaded as part of the reference",
+            "hushspec: \"0.1.0\"\nname: word-fragment-pin\nextends: \"builtin:default#notes\"\n".to_string(),
+            Some("invalid_pin"),
+        ),
+        (
             "unknown-builtin",
             "a reference no loader can serve is rejected, never resolved as the leaf alone",
             "hushspec: \"0.1.0\"\nname: dangling\nextends: \"builtin:no-such-ruleset\"\n".to_string(),
             Some("not_found"),
         ),
-    ]
+    ])
+    .chain([Definition {
+        name: "require-signature-without-a-keyring",
+        description: "signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature",
+        yaml: "hushspec: \"0.1.0\"\nname: unkeyed\nrules:\n  egress:\n    allow: [\"api.example.com\"]\n    default: block\n".to_string(),
+        rejects: Some("no_keyring"),
+        load: Some(ResolveLoad {
+            require_signature: true,
+            signature: VectorEnvelope::Present,
+        }),
+    }])
+    .collect()
+}
+
+/// The definitions that resolve under the default options, with no `load`
+/// block of their own.
+fn plain(
+    cases: Vec<(&'static str, &'static str, String, Option<&'static str>)>,
+) -> impl Iterator<Item = Definition> {
+    cases
+        .into_iter()
+        .map(|(name, description, yaml, rejects)| Definition {
+            name,
+            description,
+            yaml,
+            rejects,
+            load: None,
+        })
 }
 
 fn generate() -> Vec<(String, ResolveVector)> {
     let loader = create_composite_loader();
     definitions()
         .into_iter()
-        .map(|(name, description, yaml, rejects)| {
+        .map(|definition| {
+            let Definition {
+                name,
+                description,
+                yaml,
+                rejects,
+                load,
+            } = definition;
             let policy: serde_yaml::Value = serde_yaml::from_str(&yaml).unwrap();
             let expect = match rejects {
                 Some(reason) => ResolveExpect {
@@ -114,6 +176,7 @@ fn generate() -> Vec<(String, ResolveVector)> {
                     hushspec_resolve: VECTORS_VERSION.to_string(),
                     description: description.to_string(),
                     policy,
+                    load,
                     expect,
                 },
             )
@@ -166,8 +229,8 @@ fn resolve_vectors_are_current_and_pass() {
         count += 1;
     }
     assert!(
-        count >= 7,
-        "expected at least 7 resolve vectors, found {count}"
+        count >= 11,
+        "expected at least 11 resolve vectors, found {count}"
     );
 }
 

@@ -35,7 +35,6 @@ which is enforced everywhere because it is part of the reference itself.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,9 +48,9 @@ from hushspec.parse import parse
 from hushspec.schema import HushSpec
 from hushspec.signing import (
     DEFAULT_MAX_CLOCK_SKEW_SECONDS,
+    REASON_CODES,
     Keyring,
     MalformedEnvelope,
-    SigningError,
     SigningUnavailable,
     format_timestamp,
     load_keyring,
@@ -59,10 +58,10 @@ from hushspec.signing import (
     verify_policy,
 )
 
-# Package-internal: the lazy Ed25519 backend probe. `require_signature` has to
-# fail with `SigningUnavailable` *before* any hop is examined, so that a missing
-# `cryptography` can never be mistaken for a policy that simply has no signature
-# (which would otherwise be reported as `missing_signature`).
+# Package-internal: the lazy Ed25519 backend probe. A load that has keys to
+# check against fails with `SigningUnavailable` *before* any hop is examined, so
+# that a missing `cryptography` can never be mistaken for a policy that simply
+# has no signature (which would otherwise be reported as `missing_signature`).
 from hushspec.signing import _coerce_moment, _ed25519
 
 
@@ -97,12 +96,9 @@ MEMORY_SOURCE = "memory"
 #: pre-0.2 spelling keep working.
 INLINE_SOURCE = MEMORY_SOURCE
 
-#: The fragment that turns an ``extends`` reference into a pinned one.
+#: The fragment that turns an ``extends`` reference into a pinned one. The pin
+#: is always the fragment after the last ``#``.
 DIGEST_PIN_MARKER = "#sha256:"
-
-# Greedy on the reference so the *last* `#sha256:` wins: a path may legally
-# contain a `#`, but a pin is always the trailing fragment.
-_PIN_RE = re.compile(r"^(?P<ref>.+)#(?P<digest>sha256:[^#]*)$")
 
 #: A digest pin was present and the hop hashed to something else. Always fatal.
 REASON_DIGEST_MISMATCH = "digest_mismatch"
@@ -114,18 +110,26 @@ REASON_INVALID_PIN = "invalid_pin"
 #: (``fixtures/core/resolve/pin-malformed.yaml``) name the rejection
 #: ``invalid_pin``, so that is the code every SDK reports.
 REASON_MALFORMED_DIGEST_PIN = REASON_INVALID_PIN
+#: An envelope was found but there is no keyring to check it against.
+REASON_NO_KEYRING = "no_keyring"
 #: An envelope was found but the Ed25519 backend is missing, so it could not be
-#: checked. Only reachable opportunistically: under ``require_signature`` the
-#: missing backend raises :class:`~hushspec.signing.SigningUnavailable`.
+#: checked.
 REASON_SIGNING_UNAVAILABLE = "signing_unavailable"
 
 #: Reasons this module can report beyond the signing spec's section 6.4 codes.
+#: These are the five load-time conditions of signing spec section 6.5, the set
+#: every SDK records on a hop it attempted to verify.
 RESOLVE_REASON_CODES = (
     REASON_DIGEST_MISMATCH,
     REASON_MISSING_SIGNATURE,
     REASON_INVALID_PIN,
+    REASON_NO_KEYRING,
     REASON_SIGNING_UNAVAILABLE,
 )
+
+#: Alias of :data:`RESOLVE_REASON_CODES` under the name signing spec section
+#: 6.5 gives the set.
+LOAD_REASON_CODES = RESOLVE_REASON_CODES
 
 #: A reference no loader could serve.
 REJECT_NOT_FOUND = "not_found"
@@ -142,7 +146,22 @@ RESOLVE_REJECT_CODES = (
     REJECT_CYCLE,
     REJECT_MAX_DEPTH,
     REASON_MISSING_SIGNATURE,
+    REASON_NO_KEYRING,
+    REASON_SIGNING_UNAVAILABLE,
 )
+
+
+def load_reason_of(status: "SignatureStatus | None") -> str:
+    """The reason an unverified *status* names, as a member of the closed set.
+
+    A status that names none, or one outside the section 6.4 and 6.5 codes,
+    reads as ``missing_signature``: the hop proved nothing, and that is all a
+    caller can act on.
+    """
+    reason = status.reason if status is not None else None
+    if reason is not None and (reason in LOAD_REASON_CODES or reason in REASON_CODES):
+        return reason
+    return REASON_MISSING_SIGNATURE
 
 
 # --------------------------------------------------------------------------- #
@@ -303,11 +322,10 @@ class PolicyVerificationError(ResolveRejected):
         resolution: "Resolution | None" = None,
     ) -> None:
         reason = status.reason
-        code = (
-            reason
-            if reason in (REASON_DIGEST_MISMATCH, REASON_INVALID_PIN)
-            else REASON_MISSING_SIGNATURE
-        )
+        # The load-time codes of signing spec 6.5 are reported as themselves;
+        # anything else -- a section 6.4 envelope failure, or no reason at all
+        # -- is a hop that proved nothing, which is all a caller can act on.
+        code = reason if reason in LOAD_REASON_CODES else REASON_MISSING_SIGNATURE
         super().__init__(message, code=code)
         #: The hop that failed, as the loader reported it.
         self.source = source
@@ -458,7 +476,7 @@ def _unverified_resolution(
         return resolve_with_options_or_raise(
             spec, source=source, loader=loader, options=relaxed
         )
-    except (ValueError, SigningError):
+    except ValueError:
         return None
 
 
@@ -520,15 +538,7 @@ class _Prepared:
 def _prepare(options: ResolveOptions | None) -> _Prepared:
     options = options or ResolveOptions()
     keyring = load_keyring(options.keyring) if options.keyring is not None else None
-    if options.require_signature:
-        if keyring is None:
-            # The leaf can never be pinned -- nothing references it -- so
-            # `require_signature` without trusted keys can only ever fail.
-            # Saying so now beats failing at the leaf with `missing_signature`.
-            raise SigningError(
-                "require_signature needs a keyring: there is no default trust, and the "
-                "leaf policy can only be proven by a signature"
-            )
+    if options.require_signature and keyring is not None:
         # Fail on a missing backend before any hop is judged (see the import
         # note at the top of this module).
         _ed25519()
@@ -650,21 +660,23 @@ def _label(source: str | None) -> str:
 def _split_digest_pin(reference: str, source: str | None) -> tuple[str, str | None]:
     """Split ``<ref>#sha256:<hex>`` into the reference and the pinned digest.
 
-    A reference with no ``#sha256:`` fragment comes back unchanged. A fragment
-    that is present but malformed is fatal rather than ignored: silently loading
-    the base would turn a typo in a pin into no integrity check at all.
+    A reference with no ``#`` fragment comes back unchanged. Every fragment is
+    read as a pin: core spec 2.3 requires a malformed fragment to be rejected,
+    so anything after the last ``#`` that is not exactly ``sha256:`` followed by
+    64 lowercase hex digits is fatal rather than ignored. Loading the base
+    anyway would turn a typo in a pin into no integrity check at all.
     """
-    if DIGEST_PIN_MARKER not in reference:
+    reference_part, marker, digest = reference.rpartition("#")
+    if not marker:
         return reference, None
-    match = _PIN_RE.match(reference)
-    if match is None or not is_content_hash(match.group("digest")):
+    if not reference_part or not is_content_hash(digest):
         raise PolicyVerificationError(
             f"malformed digest pin in 'extends: {reference}' at {_label(source)}: "
             "expected '<reference>#sha256:<64 lowercase hex>'",
             source=_label(source),
             status=SignatureStatus(verified=False, reason=REASON_INVALID_PIN),
         )
-    return match.group("ref"), match.group("digest")
+    return reference_part, digest
 
 
 # --------------------------------------------------------------------------- #
@@ -704,21 +716,24 @@ def _verify_hop(
     # Verification was attempted, so the outcome is always recorded (signing
     # spec section 6.5): a hop with no envelope carries ``missing_signature``
     # rather than nothing at all, which a reader could only take for "no check
-    # was configured".
-    status = (
-        _verify_envelope(resolved, envelope, prepared)
-        if envelope is not None
-        else SignatureStatus(verified=False, reason=REASON_MISSING_SIGNATURE)
-    )
+    # was configured", and one whose envelope has nothing to be checked against
+    # carries ``no_keyring``.
+    if envelope is None:
+        status = SignatureStatus(verified=False, reason=REASON_MISSING_SIGNATURE)
+    elif prepared.keyring is None:
+        status = SignatureStatus(verified=False, reason=REASON_NO_KEYRING)
+    else:
+        status = _verify_envelope(resolved, envelope, prepared)
 
     if not required or status.verified:
         return status
 
-    detail = (
-        "no signature envelope was found"
-        if envelope is None
-        else "signature verification failed"
-    )
+    if envelope is None:
+        detail = "no signature envelope was found"
+    elif prepared.keyring is None:
+        detail = "a signature envelope was found but no keyring was configured"
+    else:
+        detail = "signature verification failed"
     # The reason code is part of the message as well as of `status`, so the
     # tuple-returning entry points do not lose it.
     raise PolicyVerificationError(

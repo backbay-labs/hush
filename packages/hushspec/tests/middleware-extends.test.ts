@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { HushGuard } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
 import { computePolicyHash } from '../src/receipt.js';
@@ -191,10 +191,25 @@ describe('HushGuard extends resolution', () => {
     const file = path.join(dir, 'policy.yaml');
     writeFileSync(file, BUILTIN_CHILD);
 
-    const provider = new FileProvider(file);
+    const provider = new FileProvider(file, { debounceMs: 10 });
     const spec = await provider.load();
     expect(spec.extends).toBeUndefined();
     expect(spec.rules?.forbidden_paths?.patterns).toContain('/etc/shadow');
+
+    // The reload runs the same resolution: a policy that still declares
+    // `extends` after a hot swap would silently drop everything its base
+    // contributes (core spec 2.3).
+    const reloads: HushSpec[] = [];
+    provider.watch((reloaded) => reloads.push(reloaded));
+    writeFileSync(file, `${BUILTIN_CHILD}\ndescription: reloaded\n`);
+    await vi.waitFor(() => expect(reloads).toHaveLength(1), { timeout: 5000, interval: 20 });
+
+    const reloaded = reloads[0]!;
+    expect(reloaded.description).toBe('reloaded');
+    expect(reloaded.extends).toBeUndefined();
+    expect(reloaded.rules?.forbidden_paths?.patterns).toContain('/etc/shadow');
+    expect(provider.current()).toBe(reloaded);
+    expect(provider.resolution()?.spec).toBe(reloaded);
     provider.stop();
 
     rmSync(dir, { recursive: true, force: true });

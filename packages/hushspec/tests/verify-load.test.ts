@@ -344,11 +344,30 @@ rules:
     expect(resolution.chain.map((link) => link.signature?.verified)).toEqual([true, true]);
   });
 
-  it('is a configuration error without a keyring', () => {
+  it('refuses every unpinned hop without a keyring, recording why', () => {
+    // Signing spec 6.5: a hop whose envelope cannot be checked against
+    // anything records `no_keyring`, and one with no envelope at all records
+    // `missing_signature`. Both refuse; neither is silently admitted.
     const leafPath = write('leaf.yaml', ROOT_POLICY);
-    expect(() => resolveFromFileWithOptions(leafPath, { requireSignature: true })).toThrow(
-      /requireSignature needs a keyring/,
-    );
+    let unsigned: unknown;
+    try {
+      resolveFromFileWithOptions(leafPath, { requireSignature: true });
+    } catch (error) {
+      unsigned = error;
+    }
+    expect(unsigned).toBeInstanceOf(PolicyVerificationError);
+    expect((unsigned as PolicyVerificationError).reason).toBe('missing_signature');
+
+    signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
+    let unkeyed: unknown;
+    try {
+      resolveFromFileWithOptions(leafPath, { requireSignature: true });
+    } catch (error) {
+      unkeyed = error;
+    }
+    expect(unkeyed).toBeInstanceOf(PolicyVerificationError);
+    expect((unkeyed as PolicyVerificationError).reason).toBe('no_keyring');
+    expect((unkeyed as PolicyVerificationError).status.verified).toBe(false);
   });
 
   it('refuses a policy whose content changed after signing', () => {
@@ -643,6 +662,42 @@ name: pinned
 
     expect(guard.resolution?.signature?.verified).toBe(true);
     expect(guard.check(ACTION)).toBe(true);
+  });
+
+  it('refuses a provider reload that cannot prove itself', async () => {
+    const leafPath = write('leaf.yaml', ROOT_POLICY);
+    signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
+    const verified = resolveFromFileWithOptions(leafPath, {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    // A reload with no signature evidence of its own: it must never become the
+    // policy in force, however it reaches the guard (signing spec 6.5).
+    const unproven = resolveFromFileWithOptions(
+      write('other.yaml', ROOT_POLICY.replace('name: root', 'name: reloaded')),
+      {},
+    );
+
+    let current = verified;
+    const guard = await HushGuard.fromProvider(
+      {
+        load: async () => current.spec,
+        watch: () => {},
+        stop: () => {},
+        current: () => current.spec,
+        resolution: () => current,
+      },
+      { requireSignature: true, keyring: TRUSTED_KEYRING },
+    );
+    expect(guard.check(ACTION)).toBe(true);
+
+    current = unproven;
+    const result = guard.evaluate(ACTION);
+    expect(result.decision).toBe('deny');
+    expect(result.matched_rule).toBe(POLICY_SIGNATURE_RULE);
+    expect(result.reason).toMatch(/missing_signature/);
+    // The refused document never became the policy in force.
+    expect(guard.resolution?.content_hash).toBe(verified.content_hash);
   });
 
   it('still resolves relative extends against an explicit baseDir', () => {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -332,10 +333,12 @@ rules:
 // the filename, so a typo cannot silently drop the pin.
 func TestResolveRejectsMalformedDigestPins(t *testing.T) {
 	cases := map[string]string{
-		"short hex":            "base.yaml#sha256:abc123",
-		"uppercase hex":        "base.yaml#sha256:" + strings.ToUpper(strings.Repeat("ab", 32)),
-		"unknown algorithm":    "base.yaml#sha512:" + strings.Repeat("ab", 32),
-		"pin without a target": "#sha256:" + strings.Repeat("ab", 32),
+		"short hex":              "base.yaml#sha256:abc123",
+		"uppercase hex":          "base.yaml#sha256:" + strings.ToUpper(strings.Repeat("ab", 32)),
+		"uppercase algorithm":    "base.yaml#SHA256:" + strings.Repeat("ab", 32),
+		"unknown algorithm":      "base.yaml#sha512:" + strings.Repeat("ab", 32),
+		"pin without a target":   "#sha256:" + strings.Repeat("ab", 32),
+		"fragment that is words": "base.yaml#notes",
 	}
 	for name, reference := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -345,10 +348,10 @@ func TestResolveRejectsMalformedDigestPins(t *testing.T) {
 		})
 	}
 
-	t.Run("fragment that is not a pin", func(t *testing.T) {
-		ref, pin, err := splitDigestPin("weird#name.yaml")
-		if err != nil || pin != "" || ref != "weird#name.yaml" {
-			t.Fatalf("expected a non-pin fragment to pass through, got (%q, %q, %v)", ref, pin, err)
+	t.Run("a reference with no fragment is unpinned", func(t *testing.T) {
+		ref, pin, err := splitDigestPin("weird-name.yaml")
+		if err != nil || pin != "" || ref != "weird-name.yaml" {
+			t.Fatalf("expected an unpinned reference to pass through, got (%q, %q, %v)", ref, pin, err)
 		}
 	})
 }
@@ -756,5 +759,54 @@ func TestResolveReasonAgreesWithReasonFromError(t *testing.T) {
 			t.Errorf("%T: ResolveReason = (%q, %t), ReasonFromError = (%q, %t)",
 				err, resolveReason, resolveOK, verifyReason, verifyOK)
 		}
+	}
+}
+
+// TestLoadReasonCodesCoverTheClosedSet keeps the set a receipt may carry in
+// step with signing spec sections 6.4 and 6.5: the five load-time conditions
+// plus the ten envelope checks.
+func TestLoadReasonCodesCoverTheClosedSet(t *testing.T) {
+	codes := LoadReasonCodes()
+	if len(codes) != 16 {
+		t.Fatalf("expected 16 load reason codes, got %d: %v", len(codes), codes)
+	}
+	for _, want := range []string{
+		ReasonMissingSignature,
+		ReasonNoKeyring,
+		ReasonSigningUnavailable,
+		ReasonDigestMismatch,
+		ReasonInvalidPin,
+	} {
+		if !slices.Contains(codes, want) {
+			t.Errorf("load reason codes omit %q", want)
+		}
+	}
+	seen := map[string]bool{}
+	for _, code := range codes {
+		if seen[code] {
+			t.Errorf("duplicate load reason code %q", code)
+		}
+		seen[code] = true
+	}
+}
+
+// TestLoadReasonOfFallsBackToMissingSignature reads a status the way a receipt
+// does: a reason outside the closed set proves nothing, which is exactly what
+// missing_signature says.
+func TestLoadReasonOfFallsBackToMissingSignature(t *testing.T) {
+	revoked := FailedSignature(ReasonKeyRevoked, "")
+	if got := LoadReasonOf(&revoked); got != ReasonKeyRevoked {
+		t.Errorf("LoadReasonOf(key_revoked) = %q", got)
+	}
+	unkeyed := FailedSignature(ReasonNoKeyring, "")
+	if got := LoadReasonOf(&unkeyed); got != ReasonNoKeyring {
+		t.Errorf("LoadReasonOf(no_keyring) = %q", got)
+	}
+	outside := FailedSignature("locator_timeout", "")
+	if got := LoadReasonOf(&outside); got != ReasonMissingSignature {
+		t.Errorf("LoadReasonOf(locator_timeout) = %q", got)
+	}
+	if got := LoadReasonOf(nil); got != ReasonMissingSignature {
+		t.Errorf("LoadReasonOf(nil) = %q", got)
 	}
 }

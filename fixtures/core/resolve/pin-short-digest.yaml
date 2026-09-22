@@ -1,0 +1,9 @@
+hushspec_resolve: 0.1.0
+description: 'core 2.3: a digest one hex digit short of 64 is malformed, not a shorter pin to be accepted'
+policy:
+  hushspec: 0.1.0
+  name: short-digest-pin
+  extends: builtin:default#sha256:878b68aa0b4052de297925b1abf09bea95b58275ae8321922997c2de96b96f7
+expect:
+  resolves: false
+  rejects: invalid_pin

@@ -81,9 +81,9 @@ export interface AsyncResolveInput {
 export interface ResolveOptions {
   /**
    * Refuse the load unless every non-`builtin:` hop is pinned by digest or
-   * carries a valid signature. Requires `keyring` (a policy that demands
-   * signatures with no keys to check them against is a configuration error,
-   * not an allow-everything default).
+   * carries a valid signature. Without a `keyring` nothing can verify, so
+   * every unpinned hop is refused -- with `no_keyring` where an envelope was
+   * found and `missing_signature` where there was none (Signing section 6.5).
    */
   requireSignature?: boolean;
   /** Keys signatures are checked against. Without it nothing is verified. */
@@ -166,9 +166,15 @@ export interface Resolution {
 
 /**
  * The reasons a load can be refused: the closed set of Signing section 6.4,
- * plus the two that only verification-on-load can produce.
+ * plus the five load-time conditions Signing section 6.5 names.
  */
-export type LoadReasonCode = ReasonCode | 'digest_mismatch' | 'missing_signature';
+export type LoadReasonCode =
+  | ReasonCode
+  | 'missing_signature'
+  | 'no_keyring'
+  | 'signing_unavailable'
+  | 'digest_mismatch'
+  | 'invalid_pin';
 
 // A record rather than a set, so adding a member to the union without
 // listing it here is a compile error.
@@ -184,8 +190,11 @@ const LOAD_REASON_CODES: Record<LoadReasonCode, true> = {
   signature_mismatch: true,
   content_hash_mismatch: true,
   policy_version_rollback: true,
-  digest_mismatch: true,
   missing_signature: true,
+  no_keyring: true,
+  signing_unavailable: true,
+  digest_mismatch: true,
+  invalid_pin: true,
 };
 
 /** Whether `value` is a member of the closed {@link LoadReasonCode} set. */
@@ -402,7 +411,9 @@ export function resolveFromFile(filePath: string): ResolveResult {
 export function resolveWithOptions(spec: HushSpec, input: ResolveInput = {}): Resolution {
   const options = input.options ?? {};
   const hops = collectChain(spec, input.source, loaderOf(input));
-  const locator = options.keyring ? options.signatureLocator ?? defaultSignatureLocator : undefined;
+  const locator = verificationAttempted(options)
+    ? options.signatureLocator ?? defaultSignatureLocator
+    : undefined;
   const envelopes = hops.map((hop) => {
     if (locator === undefined || isBuiltinSource(hop.source)) return null;
     const located = locator(hop.source);
@@ -426,7 +437,7 @@ export async function resolveWithOptionsAsync(
 ): Promise<Resolution> {
   const options = input.options ?? {};
   const hops = await collectChainAsync(spec, input.source, asyncLoaderOf(input));
-  const locator = options.keyring
+  const locator = verificationAttempted(options)
     ? options.signatureLocator ?? defaultAsyncSignatureLocator
     : undefined;
   const envelopes: (Uint8Array | string | null)[] = [];
@@ -519,38 +530,38 @@ function loadBuiltinOrThrow(reference: string): LoadedSpec {
 // --------------------------------------------------------------------------
 
 /** `extends: "<ref>#sha256:<64 hex>"` -- the pin is a URI fragment. */
-const DIGEST_PIN_PATTERN = /#(sha256:[0-9a-f]{64})$/;
+const DIGEST_PIN_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 /**
  * Split `extends: "<ref>#sha256:<digest>"` into the reference the loader sees
  * and the digest the loaded document must hash to.
  *
- * A fragment that *looks* like a pin but is not one (wrong algorithm, wrong
- * length, uppercase hex) is an error rather than part of the path: silently
- * treating `base.yaml#sha256:abcd` as a filename would turn a typo'd pin into
- * an unpinned load, which is precisely the downgrade pinning exists to stop.
+ * Every fragment is read as a pin: Core section 2.3 requires a malformed
+ * fragment to be rejected, so anything after the last `#` that is not exactly
+ * `sha256:` followed by 64 lowercase hex digits refuses the load. Treating
+ * `base.yaml#sha256:abcd`, `base.yaml#SHA256:<64 hex>` or `base.yaml#notes` as
+ * part of the path would turn a typo'd pin into an unpinned load, which is
+ * precisely the downgrade pinning exists to stop.
  */
 export function splitDigestPin(reference: string): { reference: string; pin?: string } {
-  const match = DIGEST_PIN_PATTERN.exec(reference);
-  if (match === null) {
-    const hash = reference.lastIndexOf('#');
-    if (hash >= 0 && /^#sha(256)?:/i.test(reference.slice(hash))) {
-      throw new ResolveError(
-        'invalid_pin',
-        `malformed digest pin in 'extends: ${reference}': ` +
-          'expected "#sha256:" followed by 64 lowercase hex digits',
-      );
-    }
-    return { reference };
+  const hash = reference.lastIndexOf('#');
+  if (hash < 0) return { reference };
+  const fragment = reference.slice(hash + 1);
+  if (!DIGEST_PIN_PATTERN.test(fragment)) {
+    throw new ResolveError(
+      'invalid_pin',
+      `malformed digest pin in 'extends: ${reference}': ` +
+        'expected "#sha256:" followed by 64 lowercase hex digits',
+    );
   }
-  const base = reference.slice(0, match.index);
+  const base = reference.slice(0, hash);
   if (base === '') {
     throw new ResolveError(
       'invalid_pin',
       `'extends: ${reference}' pins a digest but names no policy`,
     );
   }
-  return { reference: base, pin: match[1] };
+  return { reference: base, pin: fragment };
 }
 
 // --------------------------------------------------------------------------
@@ -686,17 +697,32 @@ function stripResolutionFields(spec: HushSpec): HushSpec {
 // Verification (Signing specification section 6.5)
 // --------------------------------------------------------------------------
 
+/**
+ * Whether a load verifies at all: a keyring to check against, or a
+ * requirement that leaves every unpinned hop to refuse (Signing section 6.5).
+ * With neither, nothing is looked for and no status is recorded.
+ */
+function verificationAttempted(options: ResolveOptions): boolean {
+  return options.keyring !== undefined || options.requireSignature === true;
+}
+
+/** The detail an unproven hop's reason code reads as in a refusal message. */
+function refusalDetail(reason: LoadReasonCode): string {
+  switch (reason) {
+    case 'missing_signature':
+      return 'no detached signature was found and no digest was pinned';
+    case 'no_keyring':
+      return 'a detached signature was found but no keyring was configured to check it against';
+    default:
+      return `signature did not verify (${reason})`;
+  }
+}
+
 function buildResolution(
   hops: Hop[],
   envelopes: readonly (Uint8Array | string | null)[],
   options: ResolveOptions,
 ): Resolution {
-  if (options.requireSignature === true && options.keyring === undefined) {
-    throw new Error(
-      'requireSignature needs a keyring: there is nothing to verify signatures against',
-    );
-  }
-
   const partials = foldChain(hops);
   const leafIndex = hops.length - 1;
   const chain: ChainLink[] = hops.map((hop) => ({
@@ -723,14 +749,18 @@ function buildResolution(
     }
 
     const envelope = envelopes[index] ?? null;
-    if (options.keyring !== undefined && !isBuiltinSource(hop.source)) {
+    if (verificationAttempted(options) && !isBuiltinSource(hop.source)) {
       // Verification was attempted, so the outcome is always recorded
       // (signing spec section 6.5): a hop with no envelope carries
       // `missing_signature` rather than nothing at all, which a reader could
-      // only take for "no check was configured".
-      link.signature = envelope === null
-        ? { verified: false, reason: 'missing_signature' }
-        : verifyLink(partials[index]!, envelope, options, index === leafIndex);
+      // only take for "no check was configured", and one whose envelope has
+      // nothing to be checked against carries `no_keyring`.
+      link.signature =
+        envelope === null
+          ? { verified: false, reason: 'missing_signature' }
+          : options.keyring === undefined
+            ? { verified: false, reason: 'no_keyring' }
+            : verifyLink(partials[index]!, envelope, options, index === leafIndex);
     }
 
     if (options.requireSignature !== true || isBuiltinSource(hop.source) || pinned) {
@@ -739,12 +769,11 @@ function buildResolution(
     const status = link.signature ?? { verified: false, reason: 'missing_signature' };
     if (!status.verified) {
       resolution.signature = chain[leafIndex]!.signature;
+      const reason = loadReasonOf(status);
       throw new PolicyVerificationError(
         hop.source,
-        loadReasonOf(status),
-        status.reason === 'missing_signature' || status.reason === undefined
-          ? 'no detached signature was found and no digest was pinned'
-          : `signature did not verify (${status.reason})`,
+        reason,
+        refusalDetail(reason),
         resolution,
         status,
       );

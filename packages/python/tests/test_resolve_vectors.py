@@ -16,6 +16,7 @@ import yaml
 from hushspec.parse import CoreSafeLoader, parse_or_raise
 from hushspec.resolve import (
     MEMORY_SOURCE,
+    ResolveOptions,
     ResolveRejected,
     Resolution,
     create_composite_loader,
@@ -25,9 +26,33 @@ from hushspec.resolve import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VECTORS = sorted((REPO_ROOT / "fixtures" / "core" / "resolve").glob("*.yaml"))
 
+#: The placeholder envelope a vector's locator serves for ``signature:
+#: present``. No vector configures a keyring, so the outcome is decided before
+#: these bytes are ever parsed.
+VECTOR_ENVELOPE = b"{}"
+
+
+def _options(vector: dict) -> ResolveOptions:
+    """The resolver options a vector's ``load`` block asks for.
+
+    Absent, the defaults apply: nothing required, nothing verified. No vector
+    carries key material, so what a vector with this block pins down is the
+    outcome an enforcement point records when it has no keyring.
+    """
+    load = vector.get("load")
+    if load is None:
+        return ResolveOptions()
+    locator = None
+    if load.get("signature") == "present":
+        locator = lambda source: None if source.startswith("builtin:") else VECTOR_ENVELOPE
+    return ResolveOptions(
+        require_signature=bool(load.get("require_signature", False)),
+        signature_locator=locator,
+    )
+
 
 def test_the_vector_directory_is_populated() -> None:
-    assert len(VECTORS) >= 7
+    assert len(VECTORS) >= 11
 
 
 @pytest.mark.parametrize("path", VECTORS, ids=[p.stem for p in VECTORS])
@@ -36,14 +61,19 @@ def test_resolve_vector(path: Path) -> None:
     assert vector["hushspec_resolve"] == "0.1.0", "unsupported vector version"
     spec = parse_or_raise(yaml.safe_dump(vector["policy"]))
     expect = vector["expect"]
+    options = _options(vector)
 
     if expect.get("rejects") is not None:
         with pytest.raises(ResolveRejected) as caught:
-            resolve_with_options_or_raise(spec, loader=create_composite_loader())
+            resolve_with_options_or_raise(
+                spec, loader=create_composite_loader(), options=options
+            )
         assert caught.value.code == expect["rejects"], str(caught.value)
         return
 
-    resolution = resolve_with_options_or_raise(spec, loader=create_composite_loader())
+    resolution = resolve_with_options_or_raise(
+        spec, loader=create_composite_loader(), options=options
+    )
     assert resolution.content_hash == expect["content_hash"]
     assert [
         {"source": link.source, "content_hash": link.content_hash}

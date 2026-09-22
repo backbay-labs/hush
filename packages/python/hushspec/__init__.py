@@ -230,6 +230,7 @@ from hushspec.conditions import (
 from hushspec.parse import parse, parse_or_raise
 from hushspec.builtins import BUILTIN_NAMES, load_builtin
 from hushspec.resolve import (
+    LOAD_REASON_CODES,
     MEMORY_SOURCE,
     ChainLink,
     LoadedSpec,
@@ -242,6 +243,7 @@ from hushspec.resolve import (
     create_builtin_loader,
     create_composite_loader,
     default_signature_locator,
+    load_reason_of,
     resolve,
     resolve_file,
     resolve_or_raise,
@@ -375,6 +377,7 @@ __all__ = [
     "Resolution",
     "SignatureStatus",
     "ResolveRejected",
+    "LOAD_REASON_CODES",
     "MEMORY_SOURCE",
     "VerifyOptions",
     "load_builtin",
@@ -432,6 +435,7 @@ __all__ = [
     "parse_envelope",
     "signing_input",
     "load_keyring",
+    "load_reason_of",
     "key_id_from_public_key",
     "Envelope",
     "Keyring",

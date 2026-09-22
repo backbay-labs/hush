@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         AuditContext,
         DecisionReceipt,
         EnforcementSummary,
+        TimeSource,
     )
     from hushspec.sinks import ReceiptSink
 
@@ -85,6 +86,22 @@ def matches_rule_path_prefix(matched_rule: str, key: str) -> bool:
     if matched_rule == key:
         return True
     return matched_rule.startswith(key + ".") or matched_rule.startswith(key + "[")
+
+
+def _time_source_value(value: Union[str, "TimeSource", None]) -> str:
+    """The ``time_source`` a guard's receipts record (receipt spec 3.3).
+
+    The enum is closed, so a value outside it is refused here rather than
+    written into receipts that a validator would then reject.
+    """
+    from hushspec.receipt import TimeSource
+
+    if value is None:
+        return TimeSource.SYSTEM.value
+    text = value.value if isinstance(value, TimeSource) else str(value)
+    if text not in {member.value for member in TimeSource}:
+        raise ValueError(f"invalid time_source: {value!r}")
+    return text
 
 
 def _validate_enforcement_config(config: EnforcementConfig, observable: bool) -> None:
@@ -277,6 +294,7 @@ class HushGuard:
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
         actor: Optional["Actor"] = None,
+        time_source: Union[str, "TimeSource", None] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
         _validate_enforcement_config(config, observer is not None or sink is not None)
@@ -290,6 +308,10 @@ class HushGuard:
         #: Who the guard evaluates for (receipt spec 4.1). Every receipt it
         #: emits carries it; an empty actor is omitted from receipts.
         self._actor = actor
+        #: How much the receipt clock can be trusted (receipt spec 3.3). Every
+        #: receipt the guard emits carries it; ``system`` is the default an
+        #: enforcement point with an ordinary wall clock reports.
+        self._time_source = _time_source_value(time_source)
         self._resolve_loader = loader
         self._resolve_base_dir = base_dir
         self._resolve_source = source
@@ -380,6 +402,7 @@ class HushGuard:
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
         actor: Optional["Actor"] = None,
+        time_source: Union[str, "TimeSource", None] = None,
     ) -> HushGuard:
         """Load a policy file and resolve its ``extends`` chain.
 
@@ -411,6 +434,7 @@ class HushGuard:
             trusted_keys=trusted_keys,
             verify=verify,
             actor=actor,
+            time_source=time_source,
         )
 
     @classmethod
@@ -429,6 +453,7 @@ class HushGuard:
         trusted_keys: Optional[Sequence[str]] = None,
         verify: Optional[VerifyOptions] = None,
         actor: Optional["Actor"] = None,
+        time_source: Union[str, "TimeSource", None] = None,
     ) -> HushGuard:
         """Parse a policy document and resolve its ``extends`` chain.
 
@@ -455,6 +480,7 @@ class HushGuard:
             trusted_keys=trusted_keys,
             verify=verify,
             actor=actor,
+            time_source=time_source,
         )
 
     def _resolve(self, policy: HushSpec) -> Resolution:
@@ -531,6 +557,7 @@ class HushGuard:
         actor: Optional["Actor"] = None,
         require_signature: bool = False,
         *,
+        time_source: Union[str, "TimeSource", None] = None,
         watch: bool = False,
         poll: bool = False,
         interval_s: Optional[float] = None,
@@ -578,6 +605,7 @@ class HushGuard:
             audit=audit,
             actor=actor,
             require_signature=require_signature,
+            time_source=time_source,
         )
         if not (watch or poll):
             return guard
@@ -768,6 +796,7 @@ class HushGuard:
         return AuditContext(
             actor=self._actor,
             enforcement_mode=self._enforcement_mode,
+            time_source=self._time_source,
         )
 
     def _run_evaluation(

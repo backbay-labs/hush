@@ -958,19 +958,27 @@ export class HushGuard {
   }
 
   /**
+   * The deny a guard in the refused state issues for every action, naming the
+   * hop that could not prove itself (signing spec 6.5).
+   */
+  private signatureRefusal(refusal: { source: string; status: SignatureStatus }): EvaluationResult {
+    return {
+      decision: 'deny',
+      matched_rule: POLICY_SIGNATURE_RULE,
+      reason:
+        `policy signature verification failed for ${refusal.source}: ` +
+        `${refusal.status.reason ?? 'unverified'}`,
+    };
+  }
+
+  /**
    * The resolution every action is evaluated against, or the deny that stands
    * in for it when there is none: a policy that did not verify (signing spec
    * 6.5) or a provider that cannot serve one.
    */
   private activeResolution(): Resolution | EvaluationResult {
     if (this.refusal != null) {
-      return {
-        decision: 'deny',
-        matched_rule: POLICY_SIGNATURE_RULE,
-        reason:
-          `policy signature verification failed for ${this.refusal.source}: ` +
-          `${this.refusal.status.reason ?? 'unverified'}`,
-      };
+      return this.signatureRefusal(this.refusal);
     }
     if (this.provider == null) {
       return this.resolutionValue;
@@ -1000,11 +1008,21 @@ export class HushGuard {
         // A provider that reloaded without notifying the guard: adopt its own
         // resolution when it has one for exactly this document, otherwise
         // re-derive the identity so receipts never name a stale hash.
+        const next = resolutionFor(this.provider, current) ?? resolutionFromResolved(current);
+        // A reload is a policy load like any other, so the requirement the
+        // guard was given is re-applied to it (signing spec 6.5). A reload
+        // that cannot prove itself never becomes the policy in force: the
+        // guard latches into the refused state instead of evaluating against
+        // a document it could not verify.
+        const unproven = this.unprovenHop(next);
+        if (unproven !== undefined) {
+          this.refusal = unproven;
+          return this.signatureRefusal(unproven);
+        }
         this.policy = current;
-        this.resolutionValue =
-          resolutionFor(this.provider, current) ?? resolutionFromResolved(current);
-        this.compiledValue = compiledForResolution(this.resolutionValue);
-        this.policyHash = this.resolutionValue.content_hash;
+        this.resolutionValue = next;
+        this.compiledValue = compiledForResolution(next);
+        this.policyHash = next.content_hash;
       }
       return this.resolutionValue;
     } catch (error) {

@@ -28,7 +28,12 @@ from hushspec.provider import (
     PolicyProvider,
     PolicyWatcher,
 )
-from hushspec.resolve import ResolveOptions, Resolution
+from hushspec.resolve import (
+    REASON_MISSING_SIGNATURE,
+    PolicyVerificationError,
+    ResolveOptions,
+    Resolution,
+)
 
 ALLOW_POLICY = """
 hushspec: "0.1.0"
@@ -159,8 +164,9 @@ class TestFileProvider:
         # Specifically the signature refusal: a bare ValueError would also be
         # raised by a document that simply failed to parse, which would let the
         # test pass with require_signature dropped entirely.
-        with pytest.raises(ValueError, match="require_signature needs a keyring"):
+        with pytest.raises(PolicyVerificationError) as refused:
             provider.load()
+        assert refused.value.code == REASON_MISSING_SIGNATURE
 
     def test_fingerprint_moves_with_the_file(self, policy_file: Path):
         provider = FileProvider(policy_file)

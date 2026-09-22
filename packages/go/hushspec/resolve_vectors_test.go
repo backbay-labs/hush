@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -22,7 +23,12 @@ type resolveVector struct {
 	HushSpecResolve string         `yaml:"hushspec_resolve"`
 	Description     string         `yaml:"description"`
 	Policy          map[string]any `yaml:"policy"`
-	Expect          struct {
+	// Load is the load-time configuration to resolve under (signing spec 6.5).
+	// Absent means the defaults: nothing required, nothing verified. No vector
+	// configures a keyring -- they carry no key material -- so what a vector
+	// with this block pins down is the outcome recorded when there is none.
+	Load   *resolveVectorLoad `yaml:"load"`
+	Expect struct {
 		Resolves    *bool               `yaml:"resolves"`
 		ContentHash string              `yaml:"content_hash"`
 		Chain       []resolveVectorLink `yaml:"chain"`
@@ -30,9 +36,36 @@ type resolveVector struct {
 	} `yaml:"expect"`
 }
 
+type resolveVectorLoad struct {
+	RequireSignature bool   `yaml:"require_signature"`
+	Signature        string `yaml:"signature"`
+}
+
 type resolveVectorLink struct {
 	Source      string `yaml:"source"`
 	ContentHash string `yaml:"content_hash"`
+}
+
+// vectorEnvelope is the placeholder envelope a vector's locator serves for
+// `signature: present`. No vector configures a keyring, so the outcome is
+// decided before these bytes are ever parsed.
+var vectorEnvelope = []byte("{}")
+
+// vectorOptions is the resolver configuration a vector's `load` block asks for.
+func vectorOptions(load *resolveVectorLoad) ResolveOptions {
+	if load == nil {
+		return ResolveOptions{}
+	}
+	opts := ResolveOptions{RequireSignature: load.RequireSignature}
+	if load.Signature == "present" {
+		opts.SignatureLocator = func(source string) ([]byte, bool, error) {
+			if strings.HasPrefix(source, "builtin:") {
+				return nil, false, nil
+			}
+			return vectorEnvelope, true, nil
+		}
+	}
+	return opts
 }
 
 func TestResolveVectors(t *testing.T) {
@@ -54,8 +87,8 @@ func TestResolveVectors(t *testing.T) {
 		})
 		checked++
 	}
-	if checked < 7 {
-		t.Fatalf("expected at least 7 resolve vectors, found %d", checked)
+	if checked < 11 {
+		t.Fatalf("expected at least 11 resolve vectors, found %d", checked)
 	}
 }
 
@@ -83,7 +116,7 @@ func runResolveVector(t *testing.T, path string) {
 	}
 
 	// An empty source is the in-memory leaf the vectors describe.
-	resolution, err := ResolveWithOptions(spec, "", nil, ResolveOptions{})
+	resolution, err := ResolveWithOptions(spec, "", nil, vectorOptions(vector.Load))
 
 	if vector.Expect.Rejects != "" {
 		if err == nil {
