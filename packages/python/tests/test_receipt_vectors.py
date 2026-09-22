@@ -200,7 +200,7 @@ INVALID = sorted((FIXTURES / "receipts" / "invalid").glob("*.json"))
 
 def test_the_vector_directories_are_populated() -> None:
     assert len(VALID) >= 12
-    assert len(INVALID) >= 12
+    assert len(INVALID) >= 15
 
 
 @pytest.mark.parametrize("path", VALID, ids=[p.stem for p in VALID])

@@ -567,6 +567,12 @@ def _require_non_empty(value: Any, label: str) -> None:
         raise ReceiptError(f"{label} is empty")
 
 
+def _optional_non_empty(obj: dict[str, Any], key: str, label: str) -> None:
+    """Check an optional member the schema gives ``minLength: 1``."""
+    if key in obj:
+        _require_non_empty(obj[key], label)
+
+
 def _require_pattern(value: Any, label: str, pattern: "re.Pattern[str]", expected: str) -> None:
     text = _require_str(value, label)
     if not pattern.match(text):
@@ -628,15 +634,15 @@ def _validate_receipt_shape(receipt: dict[str, Any]) -> None:
     _require_timestamp(receipt["timestamp"], "timestamp")
     _require_enum(receipt["time_source"], "time_source", _TIME_SOURCES)
     _require_enum(receipt["decision"], "decision", _DECISIONS)
-    _optional_str(receipt, "matched_rule", "matched_rule")
+    _optional_non_empty(receipt, "matched_rule", "matched_rule")
     _optional_str(receipt, "reason", "reason")
-    _optional_str(receipt, "origin_profile", "origin_profile")
+    _optional_non_empty(receipt, "origin_profile", "origin_profile")
     _optional_size(receipt, "duration_us", "duration_us")
 
     if "actor" in receipt:
         actor = _require_object(receipt["actor"], "actor", _ACTOR_KEYS)
         for key in _ACTOR_KEYS:
-            _optional_str(actor, key, f"actor.{key}")
+            _optional_non_empty(actor, key, f"actor.{key}")
 
     _validate_policy(_require_object(receipt["policy"], "policy", _POLICY_KEYS))
     _validate_action(_require_object(receipt["action"], "action", _ACTION_KEYS))
@@ -737,7 +743,7 @@ def _validate_rule_trace(entries: list[Any]) -> None:
             raise ReceiptError(f"{label} is missing 'evaluated'")
         _require_members(entry, label, ("rule_block", "outcome"))
         _require_enum(entry["rule_block"], f"{label}.rule_block", _RULE_BLOCKS)
-        _optional_str(entry, "rule_path", f"{label}.rule_path")
+        _optional_non_empty(entry, "rule_path", f"{label}.rule_path")
         _require_enum(entry["outcome"], f"{label}.outcome", _RULE_OUTCOMES)
         _require_bool(entry["evaluated"], f"{label}.evaluated")
         _optional_str(entry, "reason", f"{label}.reason")

@@ -89,6 +89,7 @@ var invalidReceiptVectorReasons = map[string]string{
 	"missing-enforcement.json":             "enforcement",
 	"action-carries-content.json":          "content",
 	"policy-version-not-integer.json":      "version",
+	"empty-matched-rule.json":              "matched_rule",
 }
 
 func TestInvalidReceiptVectorsAreRejected(t *testing.T) {

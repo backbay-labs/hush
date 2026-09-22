@@ -416,6 +416,11 @@ function optionalString(value: unknown, label: string): void {
   if (value !== undefined) requireString(value, label);
 }
 
+/** An optional member the schema gives `minLength: 1`. */
+function optionalNonEmpty(value: unknown, label: string): void {
+  if (value !== undefined) requireNonEmpty(value, label);
+}
+
 function requireNonEmpty(value: unknown, label: string): void {
   if (requireString(value, label) === '') {
     throw new ReceiptError(`${label} is empty`);
@@ -479,14 +484,14 @@ function validateReceiptShape(receipt: JsonObject): void {
   requireTimestamp(receipt.timestamp, 'timestamp');
   requireEnum(receipt.time_source, 'time_source', TIME_SOURCES);
   requireEnum(receipt.decision, 'decision', DECISIONS);
-  optionalString(receipt.matched_rule, 'matched_rule');
+  optionalNonEmpty(receipt.matched_rule, 'matched_rule');
   optionalString(receipt.reason, 'reason');
-  optionalString(receipt.origin_profile, 'origin_profile');
+  optionalNonEmpty(receipt.origin_profile, 'origin_profile');
   optionalSize(receipt.duration_us, 'duration_us');
 
   if (receipt.actor !== undefined) {
     const actor = requireObject(receipt.actor, 'actor', ACTOR_KEYS);
-    for (const key of ACTOR_KEYS) optionalString(actor[key], `actor.${key}`);
+    for (const key of ACTOR_KEYS) optionalNonEmpty(actor[key], `actor.${key}`);
   }
 
   validatePolicy(requireObject(receipt.policy, 'policy', POLICY_KEYS));
@@ -564,7 +569,7 @@ function validateRuleTrace(entries: readonly unknown[]): void {
     const entry = requireObject(raw, label, RULE_TRACE_KEYS);
     requireMembers(entry, label, ['rule_block', 'outcome', 'evaluated']);
     requireEnum(entry.rule_block, `${label}.rule_block`, RULE_BLOCKS);
-    optionalString(entry.rule_path, `${label}.rule_path`);
+    optionalNonEmpty(entry.rule_path, `${label}.rule_path`);
     requireEnum(entry.outcome, `${label}.outcome`, RULE_OUTCOMES);
     requireBoolean(entry.evaluated, `${label}.evaluated`);
     optionalString(entry.reason, `${label}.reason`);
