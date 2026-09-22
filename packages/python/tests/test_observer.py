@@ -1,7 +1,7 @@
 import io
 import json
 
-from hushspec.evaluate import Decision, EvaluationAction
+from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult
 from hushspec.middleware import HushGuard
 from hushspec.observer import (
     ConsoleObserver,
@@ -206,6 +206,36 @@ class TestObservableEvaluator:
 
 
 
+class TestObserverRedaction:
+    def test_every_evaluation_event_is_stripped_of_content(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+        action = EvaluationAction(
+            type="egress", target="api.example.com", content="sk-live-0123456789"
+        )
+
+        evaluator.evaluate(minimal_spec(), action)
+        evaluator.notify_evaluation_completed(
+            action, EvaluationResult(decision=Decision.ALLOW), 12
+        )
+
+        assert len(observer.events) == 2
+        for event in observer.events:
+            assert event["action"].content is None
+            assert event["content_redacted"] is True
+        assert action.content == "sk-live-0123456789"
+
+    def test_an_action_without_content_carries_no_flag(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+
+        evaluator.evaluate(minimal_spec(), EvaluationAction(type="tool_call", target="test"))
+
+        assert "content_redacted" not in observer.events[0]
+
+
 class TestMetricsCollector:
     def test_tracks_counts_by_decision_type(self):
         evaluator = ObservableEvaluator()
@@ -263,10 +293,12 @@ class TestMetricsCollector:
         assert metrics.get_total_evaluations() == 0
         assert metrics.get_count("nonexistent") == 0
 
-    def test_to_prometheus_outputs_valid_format(self):
+    def test_to_prometheus_renders_the_shared_series_set(self):
         evaluator = ObservableEvaluator()
         metrics = MetricsCollector()
         evaluator.add_observer(metrics)
+        evaluator.notify_policy_loaded("p", "sha256:aa")
+        evaluator.notify_policy_load_failed("unreadable", "policy.yaml")
 
         evaluator.evaluate(minimal_spec(), EvaluationAction(type="tool_call", target="test"))
         evaluator.evaluate(
@@ -275,11 +307,41 @@ class TestMetricsCollector:
         )
 
         output = metrics.to_prometheus()
-        assert "hushspec_evaluate_allow_total 1" in output
-        assert "hushspec_evaluate_deny_total 1" in output
-        assert "hushspec_evaluation_completed_total 2" in output
-        assert "hushspec_evaluate_duration_us_avg" in output
-        assert "hushspec_evaluate_duration_us_p99" in output
+        assert "# TYPE hushspec_evaluate_total counter" in output
+        assert 'hushspec_evaluate_total{decision="allow",action_type="tool_call"} 1' in output
+        assert 'hushspec_evaluate_total{decision="deny",action_type="tool_call"} 1' in output
+        assert "# TYPE hushspec_evaluate_duration_us histogram" in output
+        assert (
+            'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="10000"}' in output
+        )
+        assert (
+            'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="+Inf"} 2' in output
+        )
+        assert 'hushspec_evaluate_duration_us_count{action_type="tool_call"} 2' in output
+        assert 'hushspec_rule_match_total{rule_block="tool_access",decision="deny"} 1' in output
+        assert 'hushspec_policy_load_total{status="failure"} 1' in output
+        assert 'hushspec_policy_load_total{status="success"} 1' in output
+
+    def test_duration_window_is_bounded(self):
+        metrics = MetricsCollector(duration_window=4)
+        for sample in range(1, 101):
+            metrics.on_event(
+                {
+                    "type": "evaluation.completed",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "action": EvaluationAction(type="tool_call", target="test"),
+                    "result": EvaluationResult(decision=Decision.ALLOW),
+                    "duration_us": sample,
+                }
+            )
+
+        # Every evaluation is still counted; only the percentile window is bounded.
+        assert metrics.get_total_evaluations() == 100
+        assert metrics.get_average_duration_us() == (97 + 98 + 99 + 100) / 4
+        assert (
+            'hushspec_evaluate_duration_us_count{action_type="tool_call"} 100'
+            in metrics.to_prometheus()
+        )
 
     def test_reset_clears_all_data(self):
         evaluator = ObservableEvaluator()
@@ -292,7 +354,7 @@ class TestMetricsCollector:
         metrics.reset()
         assert metrics.get_total_evaluations() == 0
         assert metrics.get_count("evaluate.allow") == 0
-        assert metrics.to_prometheus() == ""
+        assert "hushspec_evaluate_total{" not in metrics.to_prometheus()
 
 
 

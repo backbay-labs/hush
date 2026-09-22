@@ -894,10 +894,6 @@ class AuditConfig:
     #: Record ``duration_us``. Off for conformance vectors, whose bytes must
     #: not depend on the machine that produced them.
     record_duration: bool = True
-    #: Gates whether a guard's observer events embed action content. It does
-    #: not affect a receipt: a 0.2 receipt carries only a content hash and
-    #: size, never the content itself (receipt spec 4.4).
-    redact_content: bool = True
 
 
 @dataclass

@@ -198,7 +198,8 @@ without enforcement.
 ### Metrics
 
 `MetricsCollector::render_prometheus()` emits the series the observability
-spec names, so an existing dashboard or recording rule works unchanged:
+spec names -- the same series from every SDK, so an existing dashboard or
+recording rule works unchanged whichever one is running:
 
 ```
 hushspec_evaluate_total{decision="deny",action_type="egress"} 89

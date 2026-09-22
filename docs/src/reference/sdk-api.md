@@ -237,7 +237,7 @@ good.
 | Check without throwing | `check` | `check` | `check` | `Check` | Returns the decision plus the receipt, the enforced flag and the duration | `GuardDecision` in all four |
 | Enforce | `enforce` -> `Result<_, Denied>` | `enforce` (throws `HushSpecDenied`) | `enforce` (raises `HushSpecDenied`) | `Check` plus `GuardDecision.Allowed` | A deny stops the tool call before its body runs | Go has no exceptions, so the caller branches on `Allowed()` |
 | Record without enforcing | `evaluate` | `evaluate` | `evaluate` | `Evaluate` | Monitor-mode observation | |
-| Enforcement mode | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `GuardOptions.RuleOverrides` | `enforce` or `monitor`, with per-rule-path overrides; **longest prefix wins** | Monitor mode is refused without a sink or an observer: an unrecorded observation is not evidence |
+| Enforcement mode | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `GuardOptions.RuleOverrides` | `enforce` or `monitor`, with per-rule-path overrides; **longest prefix wins** | Monitor mode is refused without an observer or a sink that auditing writes receipts to: an unrecorded observation is not evidence |
 | Outcome | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary` | `EnforcementOutcome`, `EnforcementSummary`, `ImpliedEnforcement` | `allowed`, `confirmed`, `blocked`, `would_block` -- required on every receipt | |
 | Rule-path prefix match | `matches_rule_path_prefix` | `matchesRulePathPrefix` | `matches_rule_path_prefix` | `MatchesRulePathPrefix` | How an override key matches a `matched_rule` | |
 | Receipt clock trust | `HushGuardBuilder::time_source` | `timeSource` | `time_source` | `GuardOptions.TimeSource` | The `time_source` every receipt the guard emits carries (receipt spec 3.3); `system` by default | The enum is closed, so a value outside it is refused when the guard is built |
@@ -250,13 +250,15 @@ good.
 
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Observer interface | `EvaluationObserver` | `EvaluationObserver` | `EvaluationObserver` | `EvaluationObserver` | `on_policy_loaded`, `on_evaluation`, `on_error`, all defaulted. **An observer sees every decision and can change none** | Action `content` is stripped before any observer sees it |
-| Fan-out wrapper | `ObservableEvaluator` | `ObservableEvaluator` | `ObservableEvaluator` | `NewObservableEvaluator` | One evaluation, every registered observer | |
+| Observer interface | `EvaluationObserver` | `EvaluationObserver` | `EvaluationObserver` | `EvaluationObserver` | `on_policy_loaded`, `on_evaluation`, `on_error`, all defaulted. **An observer sees every decision and can change none** | Action `content` is stripped inside the fan-out, before any observer sees it, and the event's `content_redacted` flag records that it happened. No SDK offers a way to turn it off |
+| Fan-out wrapper | `ObservableEvaluator` | `ObservableEvaluator` | `ObservableEvaluator` | `NewObservableEvaluator` | One evaluation, every registered observer. `evaluate()` routes through the detection pipeline, so a `detection:` escalation is never reported as the base decision | |
+| `evaluation.completed` shape | `EvaluationCompletedEvent` | `EvaluationCompletedEvent` | event dict | `ObserverEvent`, `EvaluationObservation` | `type`, `timestamp`, the redacted `action`, `content_redacted` when it applied, `result`, `duration_us`, and `enforcement` and `receipt` when the guard produced them | The same JSON in all four, so one collector pipeline reads a JSON line or a webhook payload from any SDK |
 | JSON lines | `JsonLineObserver` | `JsonLineObserver` | `JsonLineObserver` | `NewJSONLineObserver` | One JSON object per event | |
 | Console / stderr | `StderrObserver` | `ConsoleObserver` | `ConsoleObserver` | `NewStderrObserver`, `NewDenyOnlyStderrObserver` | Human-readable | TS and Python kept `ConsoleObserver`; Rust and Go say where it writes |
 | Metrics | `MetricsCollector`, `MetricsSnapshot` | `MetricsCollector` | `MetricsCollector` | `NewMetricsCollector`, `MetricsSnapshot` | Counters by decision, action type and rule block, plus a latency histogram | |
 | Prometheus exposition | `render_prometheus` | `toPrometheus` | `to_prometheus` | `RenderPrometheus` | The `hushspec_evaluate_total`, `hushspec_evaluate_duration_us`, `hushspec_rule_match_total` and `hushspec_policy_load_total` series | The one method whose name is not isomorphic: Rust and Go say `render`, TS and Python say `to` |
-| Latency buckets | `DURATION_BUCKETS_US` | internal | internal | `DefaultDurationBucketsUs` | 10, 25, 50, 100, 250, 500, 1000, 5000, 10000 microseconds | |
+| Latency buckets | `DURATION_BUCKETS_US` | `DURATION_BUCKETS_US` | `DURATION_BUCKETS_US` | `DefaultDurationBucketsUs` | 10, 25, 50, 100, 250, 500, 1000, 5000, 10000 microseconds, labelled by `action_type` | One list in all four, so a recording rule written against one reads the others |
+| Percentile window | -- | `DURATION_WINDOW` | `DURATION_WINDOW` | -- | 10000 recent samples behind the average and the 99th percentile | Rust and Go report the histogram alone; the counters and the histogram are exact in all four |
 | Webhook | `WebhookObserver` *(feature `http`)* | -- | -- | `NewWebhookObserver` | Bounded queue; drops with a counter rather than blocking an evaluation | |
 
 ## Providers and hot reload
@@ -270,7 +272,8 @@ good.
 | Watcher | `PolicyWatcher` | `PolicyWatcher` | `PolicyWatcher` | `NewPolicyWatcher`, `PolicyWatcher` | Stats one file per tick; delivers only on a real change (mtime **and** content hash) | |
 | Poller | `PolicyPoller` | `PolicyPoller` | `PolicyPoller` | `NewPolicyPoller` | Reloads through any provider on an interval; delivers only on a `content_hash` change | |
 | Manual tick | `PolicyHandle` | `PollerOptions` | `check_once` | `CheckOnce` | For tests, and for callers driving their own loop | |
-| Panic sentinel per tick | `panic_sentinel` | watcher option | watcher option | `ReloadOptions.PanicSentinel` | The kill switch is checked on the same tick as the reload | |
+| Panic sentinel per tick | `panic_sentinel` | `panicSentinel` | `panic_sentinel` | `ReloadOptions.PanicSentinel` | The kill switch is checked on the same tick as the reload, and fails closed: a sentinel whose absence cannot be proven arms panic mode | A watching TypeScript `FileProvider` checks it on its own tick, because a file watcher wakes only when the policy itself changes |
+| Reload intervals | `DEFAULT_WATCH_INTERVAL`, `DEFAULT_POLL_INTERVAL` | `DEFAULT_WATCH_INTERVAL_MS`, `DEFAULT_POLL_INTERVAL_MS` | `DEFAULT_WATCH_INTERVAL_S`, `DEFAULT_POLL_INTERVAL_S` | `DefaultWatchInterval`, `DefaultPollInterval` | 1 second for a watcher (a `stat` unless the file moved), 60 seconds for a poller (a full load, possibly remote) | One pair in all four, so the same swap is picked up at the same rate |
 | Failure handling | `on_error` plus last good policy | `onError` plus last good policy | `on_error` plus last good policy | `ReportError` plus last good policy | A reload that cannot be read, parsed, resolved, verified or compiled **leaves the policy in force untouched**, reports, and retries | There is never a window with no policy |
 
 ## Receipt sinks
@@ -285,7 +288,7 @@ good.
 | Callback | `CallbackSink` | `CallbackSink` | `CallbackSink` | `NewCallbackSink` | | |
 | Null | `NullSink` | `NullSink` | `NullSink` | `NullSink` | | |
 | Chained (hash-linked) | `ChainedFileSink` | `ChainedFileSink` | `ChainedFileSink` | `OpenChainedFileSink` | See [Hash-linked log](#hash-linked-log) | |
-| OTLP | `OtlpSink`, `OtlpConfig` *(feature `otlp`)* | `OtlpReceiptSink` | `OtlpReceiptSink` | `NewOTLPReceiptSink`, `OTLPOptions` | `POST <endpoint>/v1/logs`: one `logRecord` per entry, `INFO`/`WARN`/`ERROR` by decision, `body.stringValue` the entry's canonical JSON, and the same `hushspec.*` attributes and resource attributes in all four | Background thread or goroutine, bounded queue, batching, backoff on 429 and 5xx. Export **never blocks an evaluation**; overflow drops, counts and reports rather than silently losing evidence |
+| OTLP | `OtlpSink`, `OtlpConfig` *(feature `otlp`)* | `OtlpReceiptSink` | `OtlpReceiptSink` | `NewOTLPReceiptSink`, `OTLPOptions` | `POST <endpoint>/v1/logs`: one `logRecord` per entry, `INFO`/`WARN`/`ERROR` by decision, `body.stringValue` the entry's canonical JSON, and the same `hushspec.*` attributes and resource attributes in all four. `/v1/logs` is appended only when the endpoint does not already point at the signal, and an endpoint that is not `http` or `https` with a host is refused when the sink is configured | Background thread or goroutine, bounded queue, 64-entry batches, a first retry backoff of 100ms doubling per attempt. Export **never blocks an evaluation**; overflow, a rejected payload, an exhausted retry and a batch that will not serialize each drop, count and report as `sink.error` rather than silently losing evidence |
 
 ## Framework adapters
 
@@ -407,9 +410,11 @@ Stated once, because they are why the surface looks the way it does.
 6. **A failed reload keeps the last good policy.** There is no window in which
    no policy is in force.
 7. **Monitor mode needs somewhere to record.** A guard in monitor mode with no
-   sink and no observer is refused at construction.
+   observer, and no sink that auditing writes receipts to, is refused at
+   construction.
 8. **Panic mode and a refused policy always enforce.** Neither monitor mode nor
    a warn handler can let them through.
-9. **Evidence is never silently dropped.** A full OTLP queue drops with a
-   counter and an error callback; a sink that fails does not break the
-   evaluation but does surface through `on_error`.
+9. **Evidence is never silently dropped.** A full OTLP queue, a rejected
+   export, an exhausted retry and a batch that will not serialize each drop
+   with a counter and a `sink.error` event; a sink that fails does not break
+   the evaluation but does surface through `on_error`.

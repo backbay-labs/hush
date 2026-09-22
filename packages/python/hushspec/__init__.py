@@ -165,11 +165,14 @@ from hushspec.middleware import (
     matches_rule_path_prefix,
 )
 from hushspec.observer import (
+    DURATION_BUCKETS_US,
+    DURATION_WINDOW,
     ConsoleObserver,
     EvaluationObserver,
     JsonLineObserver,
     MetricsCollector,
     ObservableEvaluator,
+    rule_block_of,
 )
 from hushspec.sinks import (
     CallbackSink,
@@ -535,6 +538,9 @@ __all__ = [
     "JsonLineObserver",
     "ConsoleObserver",
     "MetricsCollector",
+    "DURATION_BUCKETS_US",
+    "DURATION_WINDOW",
+    "rule_block_of",
     "DetectionCategory",
     "DetectionResult",
     "Detector",

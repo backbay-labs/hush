@@ -25,6 +25,7 @@
  * `fixtures/core/evaluation/` pins it: a change in behaviour has to be a
  * change in the specification first.
  */
+import { statSync } from 'node:fs';
 import type { HushSpec } from './schema.js';
 import type { Condition, RuntimeContext } from './conditions.js';
 import { parseOrThrow } from './parse.js';
@@ -56,8 +57,6 @@ export interface EvaluationAction {
    * absent, conditions see an empty context and the engine clock.
    */
   context?: RuntimeContext;
-  /** Set on the redacted copy emitted to observers when content is stripped. */
-  content_redacted?: boolean;
 }
 
 export interface OriginContext {
@@ -578,4 +577,30 @@ export function isPanicActive(): boolean {
 
 export function panicPolicy(): HushSpec {
   return parseOrThrow(PANIC_POLICY_YAML);
+}
+
+/** The sentinel file `h2h panic` creates, and the one a reload loop consults. */
+export const DEFAULT_PANIC_SENTINEL = '.hushspec_panic';
+
+/**
+ * Activate panic mode when the sentinel file at `path` exists.
+ *
+ * A kill switch fails closed: when the file's existence cannot be determined
+ * (a permission error, say) the sentinel counts as present and panic mode is
+ * activated. Only a definite "not found" -- including a path component that is
+ * not a directory -- counts as absent.
+ */
+export function checkPanicSentinel(path: string): boolean {
+  let present: boolean;
+  try {
+    statSync(path);
+    present = true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    present = code !== 'ENOENT' && code !== 'ENOTDIR';
+  }
+  if (present) {
+    activatePanic();
+  }
+  return present;
 }

@@ -268,6 +268,14 @@ export function matchesRulePathPrefix(matchedRule: string, key: string): boolean
   return matchedRule.startsWith(key + '.') || matchedRule.startsWith(key + '[');
 }
 
+/**
+ * Reject a configuration an operator would misread.
+ *
+ * `observable` says whether a shadow decision is recorded anywhere: monitor
+ * mode without an observer, or without a sink that auditing actually writes
+ * receipts to, is refused, because it would silently allow everything the
+ * policy denies.
+ */
 function validateEnforcementConfig(config: EnforcementConfig, observable: boolean): void {
   const mode = config.mode ?? 'enforce';
   if (!ENFORCEMENT_MODES.has(mode)) {
@@ -401,14 +409,18 @@ export class HushGuard {
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
+    const audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
+    // A sink only counts as observability when auditing is on: with
+    // `enabled: false` no receipt is built, so the sink is handed nothing and
+    // the shadow decision leaves no trace at all.
     validateEnforcementConfig(
       enforcementConfig,
-      options?.observer != null || options?.sink != null,
+      options?.observer != null || (options?.sink != null && audit.enabled),
     );
     this.enforcementMode = enforcementConfig.mode ?? 'enforce';
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.sink = options?.sink ?? null;
-    this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
+    this.audit = audit;
     this.actor = options?.actor;
     this.timeSource = options?.timeSource ?? 'system';
     this.resolveOptions = {
@@ -619,7 +631,7 @@ export class HushGuard {
       const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
       this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
-        this.observerAction(action),
+        action,
         active,
         0,
         undefined,
@@ -631,7 +643,7 @@ export class HushGuard {
       const { result, durationUs, receipt } = this.runEvaluation(active, action);
       this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
-        this.observerAction(action),
+        action,
         result,
         durationUs,
         undefined,
@@ -640,12 +652,11 @@ export class HushGuard {
       return result;
     }
     if (this.observableEvaluator) {
-      // Route through runEvaluation() (not ObservableEvaluator.evaluate(),
-      // which calls the plain evaluate()) so a policy's detection extension
-      // is honored here too, then emit through the same public notification
-      // ObservableEvaluator.evaluate() would otherwise have sent.
+      // Through runEvaluation(), which carries the guard's enforcement mode
+      // and audit settings, then out on the same notification
+      // ObservableEvaluator.evaluate() sends.
       const { result, durationUs } = this.runEvaluation(active, action);
-      this.observableEvaluator.notifyEvaluationCompleted(this.observerAction(action), result, durationUs);
+      this.observableEvaluator.notifyEvaluationCompleted(action, result, durationUs);
       return result;
     }
     return this.runEvaluation(active, action).result;
@@ -855,26 +866,12 @@ export class HushGuard {
       this.send(receipt);
     }
     this.observableEvaluator?.notifyEvaluationCompleted(
-      this.observerAction(action),
+      action,
       result,
       durationUs,
       enforcement,
       receipt,
     );
-  }
-
-  /**
-   * Redact an action for observer emission the way a receipt does: content is
-   * never carried (receipt spec 4.4 records only its hash and size), so it is
-   * stripped here too and the redacted flag is set -- raw content must not
-   * leak into the observer stream either.
-   */
-  private observerAction(action: EvaluationAction): EvaluationAction {
-    if (action.content != null) {
-      const { content: _content, ...rest } = action;
-      return { ...rest, content_redacted: true };
-    }
-    return action;
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {

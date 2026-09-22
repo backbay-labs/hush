@@ -181,6 +181,29 @@ func TestGuardMonitorModeRequiresObservability(t *testing.T) {
 	}
 }
 
+func TestGuardMonitorModeRefusesASinkWithAuditingOff(t *testing.T) {
+	// With auditing off no receipt is built, so the sink is handed nothing and
+	// the shadow decision leaves no trace at all.
+	off := AuditConfig{Enabled: false}
+	_, err := NewGuard(guardResolution(t, guardSpec()), GuardOptions{
+		EnforcementMode: EnforcementModeMonitor,
+		Sink:            &recordingSink{},
+		Audit:           &off,
+	})
+	if err == nil || !strings.Contains(err.Error(), "monitor mode requires") {
+		t.Fatalf("an unrecorded shadow decision must not build, got %v", err)
+	}
+
+	// An observer still reports every decision, whatever auditing records.
+	if _, err := NewGuard(guardResolution(t, guardSpec()), GuardOptions{
+		EnforcementMode: EnforcementModeMonitor,
+		Observer:        &recordingObserver{},
+		Audit:           &off,
+	}); err != nil {
+		t.Fatalf("monitor mode with an observer must be accepted: %v", err)
+	}
+}
+
 func TestGuardMonitorModeRecordsWouldBlock(t *testing.T) {
 	sink := &recordingSink{}
 	guard := newTestGuard(t, GuardOptions{EnforcementMode: EnforcementModeMonitor, Sink: sink})
@@ -545,6 +568,34 @@ func TestGuardObserverSeesRedactedAction(t *testing.T) {
 	}
 	if errs != 0 {
 		t.Fatal("the observer must never see raw action content")
+	}
+}
+
+func TestGuardObservationCarriesTheEnforcementSummary(t *testing.T) {
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{Observer: observer})
+	decision, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "evil.example.com",
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if decision.Allowed() {
+		t.Fatal("the test policy must deny this egress")
+	}
+
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if len(observer.evaluations) != 1 {
+		t.Fatalf("expected one observed evaluation, got %d", len(observer.evaluations))
+	}
+	enforcement := observer.evaluations[0].Enforcement
+	if enforcement == nil {
+		t.Fatal("an observed evaluation must say what the enforcement point did")
+	}
+	if enforcement.Mode != EnforcementModeEnforce ||
+		enforcement.Outcome != EnforcementOutcomeBlocked {
+		t.Fatalf("unexpected enforcement summary: %+v", enforcement)
 	}
 }
 

@@ -170,10 +170,12 @@ func builtinOnlyLoader() ResolveLoader {
 // Hot reload
 // ---------------------------------------------------------------------------
 
-// DefaultWatchInterval is how often a [PolicyWatcher] stats its file.
-const DefaultWatchInterval = 2 * time.Second
+// DefaultWatchInterval is how often a [PolicyWatcher] stats its file. The same
+// value in every SDK.
+const DefaultWatchInterval = 1 * time.Second
 
 // DefaultPollInterval is how often a [PolicyPoller] reloads from its provider.
+// The same value in every SDK.
 const DefaultPollInterval = 60 * time.Second
 
 // ReloadOptions configures a [PolicyWatcher] or a [PolicyPoller].

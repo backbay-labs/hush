@@ -32,7 +32,7 @@ const (
 	// DefaultOTLPMaxRetries is how many times a retriable export is retried.
 	DefaultOTLPMaxRetries = 3
 	// DefaultOTLPRetryBackoff is the first retry delay; it doubles per attempt.
-	DefaultOTLPRetryBackoff = 250 * time.Millisecond
+	DefaultOTLPRetryBackoff = 100 * time.Millisecond
 )
 
 // Attribute keys of an exported record. They are the join keys between a trace

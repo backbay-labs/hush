@@ -198,7 +198,14 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 	if mode == "" {
 		mode = EnforcementModeEnforce
 	}
-	observable := options.Sink != nil || options.Observer != nil
+	audit := DefaultAuditConfig()
+	if options.Audit != nil {
+		audit = *options.Audit
+	}
+	// A sink only counts as observability when auditing is on: with
+	// Enabled false no receipt is built, so the sink is handed nothing and
+	// the shadow decision leaves no trace at all.
+	observable := (options.Sink != nil && audit.Enabled) || options.Observer != nil
 	overrides, err := validateEnforcement(mode, options.RuleOverrides, observable)
 	if err != nil {
 		return nil, err
@@ -209,10 +216,6 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 		return nil, fmt.Errorf("guard: policy does not compile: %w", err)
 	}
 
-	audit := DefaultAuditConfig()
-	if options.Audit != nil {
-		audit = *options.Audit
-	}
 	sdk := options.SDK
 	if sdk.Name == "" && sdk.Version == "" {
 		sdk = ThisSDK()
@@ -399,6 +402,9 @@ func (o GuardOptions) resolveOptions() ResolveOptions {
 
 // validateEnforcement checks the mode and the override keys, and refuses a
 // configuration in which a monitored decision would be invisible.
+//
+// observable says whether a shadow decision is recorded anywhere: an observer,
+// or a sink that auditing actually writes receipts to.
 func validateEnforcement(
 	mode EnforcementMode,
 	overrides map[string]EnforcementMode,
@@ -780,8 +786,16 @@ func (g *Guard) record(
 		}
 	}
 	if state.observer != nil {
+		enforcement := decision.Enforcement
+		observation := EvaluationObservation{
+			Action:      action,
+			Result:      decision.Result,
+			Enforcement: &enforcement,
+			Receipt:     decision.Receipt,
+			Duration:    duration,
+		}.redact()
 		notifyObserver(state.observer, func(observer EvaluationObserver) {
-			observer.OnEvaluation(redactedAction(action), decision.Result, decision.Receipt, duration)
+			observer.OnEvaluation(observation)
 		})
 		if sinkErr != nil {
 			notifyObserver(state.observer, func(observer EvaluationObserver) {

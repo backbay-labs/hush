@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { checkPanicSentinel } from './evaluate.js';
 import { parse } from './parse.js';
 import type { ResolveOptions, Resolution } from './resolve.js';
 import { createBuiltinLoader, resolveWithOptions } from './resolve.js';
@@ -48,8 +49,12 @@ export interface PolicySnapshot {
   resolution?: Resolution;
 }
 
+/** How often a {@link PolicyPoller} reloads, in milliseconds. */
+export const DEFAULT_POLL_INTERVAL_MS = 60_000;
+
 export interface PollerOptions {
   loader: () => Promise<string | PolicySnapshot>;
+  /** Tick period in milliseconds. Default {@link DEFAULT_POLL_INTERVAL_MS}. */
   intervalMs?: number;
   onChange: (spec: HushSpec, resolution?: Resolution) => void;
   onError?: (error: Error) => void;
@@ -57,6 +62,13 @@ export interface PollerOptions {
   maxStaleMs?: number;
   /** Verification policy for loaders that return raw YAML. */
   resolveOptions?: ResolveOptions;
+  /**
+   * Sentinel file consulted on every tick, before the reload. The kill switch
+   * has to be reachable from a running loop, so it is checked whether or not
+   * the policy changed, and it fails closed: a sentinel whose absence cannot
+   * be proven arms panic mode.
+   */
+  panicSentinel?: string;
 }
 
 export class PolicyPoller {
@@ -76,7 +88,7 @@ export class PolicyPoller {
   async start(): Promise<HushSpec> {
     const spec = await this.doLoad(true);
 
-    const intervalMs = this.options.intervalMs ?? 60_000;
+    const intervalMs = this.options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.timer = setInterval(() => {
       // A poll runs with nobody awaiting it, so a rejection here would be an
       // unhandled rejection rather than something a caller can catch. The
@@ -155,7 +167,15 @@ export class PolicyPoller {
     }
   }
 
+  /** Arm the kill switch when the sentinel is there, on every tick. */
+  private checkPanicSentinel(): void {
+    if (this.options.panicSentinel !== undefined) {
+      checkPanicSentinel(this.options.panicSentinel);
+    }
+  }
+
   private async doLoad(throwOnError: boolean): Promise<HushSpec> {
+    this.checkPanicSentinel();
     const loadId = ++this.nextLoadId;
     let loaded: string | PolicySnapshot;
     try {
@@ -193,6 +213,22 @@ export class PolicyPoller {
       resolution = result.value;
       spec = resolution.spec;
     } else {
+      if (loaded.spec.extends != null) {
+        // A loader that skipped resolution would otherwise have its leaf
+        // served by `current()` with every block its base declares silently
+        // dropped -- the same refusal the raw-YAML branch makes.
+        const error = new Error(
+          `Policy still declares 'extends: ${loaded.spec.extends}'; resolve it before returning a snapshot`,
+        );
+        if (throwOnError && this.currentSpec == null) {
+          throw error;
+        }
+        if (loadId < this.latestAppliedLoadId) {
+          return this.currentSpec!;
+        }
+        this.notifyError(error);
+        return this.currentSpec!;
+      }
       spec = loaded.spec;
       resolution = loaded.resolution;
       fingerprintSource = loaded.fingerprint ?? JSON.stringify(loaded.spec);

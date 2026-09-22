@@ -7,6 +7,64 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
+### Fixed
+
+- **An observed evaluation is decided by the same pipeline as every other one.**
+  TypeScript's `ObservableEvaluator.evaluate()` evaluated without the detection pipeline, so a
+  policy whose `extensions.detection` block escalates a payload to a deny reported an allow to
+  every observer (detection spec section 4).
+- **No path to an observer carries an action's `content`.** TypeScript redacted at the guard's
+  call sites and not in the fan-out, so an event raised anywhere else carried the payload; Python
+  offered `ObservableEvaluator(redact_content=False)` (and an `AuditConfig.redact_content` field
+  behind it) to turn redaction off altogether. Both are gone: every SDK strips `content` inside
+  the fan-out and records that it happened with the event's `content_redacted` flag (receipt spec
+  4.4).
+- **Monitor mode requires somewhere a shadow decision is actually recorded.** A guard with
+  monitor mode, a receipt sink and `audit(enabled: false)` built cleanly and then recorded
+  nothing, because no receipt is produced with auditing off. All four SDKs now count a sink as
+  observability only when auditing is enabled.
+- **The OTLP sink reports every failure it absorbs.** The Rust worker thread never saw the
+  observer installed by `OtlpSink::with_observer`, so an exhausted retry, a rejected payload and
+  a batch that would not serialize were counted and discarded while the other SDKs reported each
+  one through their error callback.
+- **An OTLP endpoint that already points at the signal is not rewritten.** Rust appended
+  `/v1/logs` unconditionally, producing `.../v1/logs/v1/logs`.
+- **An unusable OTLP endpoint is refused when the sink is configured.** Rust and TypeScript
+  accepted an endpoint with no host, and Rust accepted any scheme, so a `file:` endpoint built a
+  sink that could never export.
+- **The panic sentinel is reachable from a TypeScript reload loop.** The TypeScript SDK had no
+  sentinel check at all, so the kill switch the other three consult before every reload could not
+  be armed from a running loop.
+- **A policy snapshot that still declares `extends` is refused.** `PolicyPoller` accepted one
+  from a loader that skipped resolution and served the leaf from `current()`, silently dropping
+  every block its base declares -- the raw-YAML branch already refused it.
+
+### Changed
+
+- **One `evaluation.completed` wire shape in all four SDKs**: the redacted `EvaluationAction`, a
+  `content_redacted` flag when it applied, the result, `duration_us`, and `enforcement` and
+  `receipt` when the guard produced them. Go serialized the action as an `ActionSummary` and
+  carried no enforcement summary; its `EvaluationObserver.OnEvaluation` now takes one
+  `EvaluationObservation` rather than four positional arguments, which is what makes the
+  enforcement summary reachable from an observer.
+- **One Prometheus series set in all four SDKs.** TypeScript and Python exposed
+  `hushspec_<event_type>_total` counters with `_avg` and `_p99` gauges; they now render
+  `hushspec_evaluate_total` (`decision`, `action_type`), a `hushspec_evaluate_duration_us`
+  histogram labelled by `action_type`, `hushspec_rule_match_total` and
+  `hushspec_policy_load_total`, as Rust and Go do. Go's latency buckets are the shared bounds
+  (10, 25, 50, 100, 250, 500, 1000, 5000, 10000 microseconds) per action type rather than a
+  shorter unlabelled list. TypeScript and Python export `DURATION_BUCKETS_US` and
+  `ruleBlockOf`/`rule_block_of`.
+- **The TypeScript metrics collector bounds its percentile window** at `DURATION_WINDOW` samples,
+  as Python does, so a long-lived guard no longer grows without limit and its percentile
+  describes recent traffic rather than all time.
+- **One reload interval pair in all four SDKs**: 1 second for a watcher, 60 seconds for a poller.
+  Rust's `DEFAULT_INTERVAL` is replaced by `DEFAULT_WATCH_INTERVAL` and `DEFAULT_POLL_INTERVAL`,
+  and Go's `DefaultWatchInterval` moves from 2 seconds to 1.
+- **One OTLP batch size and retry backoff in all four SDKs**: 64 entries per request, and a first
+  retry delay of 100ms doubling per attempt. `OtlpConfig::logs_url` returns a `Result`, since it
+  now validates the endpoint.
+
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
