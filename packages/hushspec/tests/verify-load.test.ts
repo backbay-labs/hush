@@ -664,6 +664,42 @@ name: pinned
     expect(guard.check(ACTION)).toBe(true);
   });
 
+  it('refuses a provider reload that cannot prove itself', async () => {
+    const leafPath = write('leaf.yaml', ROOT_POLICY);
+    signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
+    const verified = resolveFromFileWithOptions(leafPath, {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    // A reload with no signature evidence of its own: it must never become the
+    // policy in force, however it reaches the guard (signing spec 6.5).
+    const unproven = resolveFromFileWithOptions(
+      write('other.yaml', ROOT_POLICY.replace('name: root', 'name: reloaded')),
+      {},
+    );
+
+    let current = verified;
+    const guard = await HushGuard.fromProvider(
+      {
+        load: async () => current.spec,
+        watch: () => {},
+        stop: () => {},
+        current: () => current.spec,
+        resolution: () => current,
+      },
+      { requireSignature: true, keyring: TRUSTED_KEYRING },
+    );
+    expect(guard.check(ACTION)).toBe(true);
+
+    current = unproven;
+    const result = guard.evaluate(ACTION);
+    expect(result.decision).toBe('deny');
+    expect(result.matched_rule).toBe(POLICY_SIGNATURE_RULE);
+    expect(result.reason).toMatch(/missing_signature/);
+    // The refused document never became the policy in force.
+    expect(guard.resolution?.content_hash).toBe(verified.content_hash);
+  });
+
   it('still resolves relative extends against an explicit baseDir', () => {
     const elsewhere = mkdtempSync(path.join(os.tmpdir(), 'hushspec-basedir-'));
     try {
