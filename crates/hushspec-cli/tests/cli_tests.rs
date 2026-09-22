@@ -53,8 +53,11 @@ fn validate_invalid_fixture_exits_1() {
         .arg("fixtures/core/invalid/missing-version.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("\u{2717}"))
-        .stdout(predicate::str::contains("error[E001]"));
+        // Every failure line is on stderr, so a caller redirecting it away
+        // never sees some failures and hides others.
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("\u{2717}"))
+        .stderr(predicate::str::contains("error[E001]"));
 }
 
 #[test]
@@ -64,7 +67,7 @@ fn validate_duplicate_patterns() {
         .arg("fixtures/core/invalid/duplicate-pattern-names.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E003]"));
+        .stderr(predicate::str::contains("error[E003]"));
 }
 
 #[test]
@@ -171,8 +174,8 @@ rules:
         .arg(child_path.to_str().unwrap())
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E010]"))
-        .stdout(predicate::str::contains("extends resolution failed"));
+        .stderr(predicate::str::contains("error[E010]"))
+        .stderr(predicate::str::contains("extends resolution failed"));
 }
 
 #[test]
