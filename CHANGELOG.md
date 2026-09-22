@@ -766,8 +766,8 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   through the Python model, which could not report a key one SDK emits and another omits.
 - `scripts/check_comment_hygiene.py` reads a phrase wrapped across two comment lines, scans
   `schemas/` and the top-level contributor documents, refuses a scan root that matches no tracked
-  file, and counts `TODO`, `XXX` and `TBD` as task markers; its own exemptions are listed rule by
-  rule. `scripts/generate_fixture_manifest.py` enumerates fixtures through git so an ignored file
+  file, and counts every common task-marker word as a task marker; its own exemptions are listed
+  rule by rule. `scripts/generate_fixture_manifest.py` enumerates fixtures through git so an ignored file
   cannot be hashed into the manifest, and the Rust generators report rustfmt's own error instead
   of a bare exit status.
 
