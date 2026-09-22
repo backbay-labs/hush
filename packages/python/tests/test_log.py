@@ -198,6 +198,29 @@ class TestChainedFileSink:
             verify_log_files([second, first])
         assert caught.value.line == 1
 
+    def test_rotation_links_the_last_entry_on_disk(self, tmp_path: Path) -> None:
+        first, second = tmp_path / "log-1.jsonl", tmp_path / "log-2.jsonl"
+        resolution = _resolution()
+        rotating = ChainedFileSink.open(first).with_clock(CLOCK)
+        other = ChainedFileSink.open(first).with_clock(CLOCK)
+        rotating.record_policy_event(
+            PolicyEvent.loaded(
+                policy_summary(resolution),
+                "enforce",
+                timestamp="2026-09-15T12:00:00.000Z",
+                sdk=SdkInfo(name="hushspec-conformance", version="0.2"),
+            )
+        )
+        # The other writer extends the file after this sink last wrote to it.
+        other.send(evaluate_audited(resolution, _actions()[0], _config(), _context(1)))
+        on_disk = other.head()[1]
+        assert rotating.head()[1] != on_disk
+
+        started = rotating.rotate(second)
+        assert started.prev_hash == on_disk
+        assert started.log_started.previous_entry_hash == on_disk
+        assert verify_log_files([first, second]).entries == 3
+
     def test_a_chain_rotated_at_genesis_verifies(self, tmp_path: Path) -> None:
         """A writer that rotates before writing anything carries the genesis
         hash into the new file. The link is recorded all the same, so a

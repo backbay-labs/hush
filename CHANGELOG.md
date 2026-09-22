@@ -842,6 +842,16 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   and Go runners do, and a listed fixture directory that is absent or holds no vector now fails the
   TypeScript and Go runs instead of contributing zero cases to a green suite.
 
+- A log rotation links the old file's last entry as it is on disk. Every SDK recorded the head
+  its own sink last wrote, so a writer sharing the file that had appended since left the new
+  file's `log_started` naming a hash the old file no longer ended with, and a verifier given both
+  files rejected the rotation. The old file is now locked, its head re-read, and the lock held
+  until the new file's first entry is written (log spec 5).
+- The Rust and Python HTTPS loaders ignore a proxy named in the environment (`HTTPS_PROXY`,
+  `ALL_PROXY`). Through a proxy the connection is made by the proxy, which resolves the host a
+  second time on its side, so the address the SSRF check approved was never the one dialled.
+  Go already disabled proxies and Node's `https.request` never reads them.
+
 **CLI and tooling**
 
 - `h2h report` runs the receipt schema pass `h2h log verify` runs and takes `--keyring`,

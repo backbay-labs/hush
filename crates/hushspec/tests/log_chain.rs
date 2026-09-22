@@ -309,6 +309,44 @@ fn rotation_carries_the_chain_into_the_next_file() {
 }
 
 #[test]
+fn rotation_links_the_old_files_last_entry_as_it_is_on_disk() {
+    let dir = temp_dir("rotate-shared");
+    let first = dir.join("log-1.jsonl");
+    let second = dir.join("log-2.jsonl");
+    let resolution = resolution();
+    let rotating = ChainedFileSink::open(&first).unwrap().with_clock(clock());
+    let other = ChainedFileSink::open(&first).unwrap().with_clock(clock());
+    rotating
+        .record_policy_event(&loaded_event(&resolution))
+        .unwrap();
+    // The other writer extends the file after this sink last wrote to it.
+    other
+        .send(&evaluate_audited(
+            &resolution,
+            &actions()[0],
+            &config(),
+            &ctx(1),
+        ))
+        .unwrap();
+    let on_disk = other.head().1;
+    assert_ne!(rotating.head().1, on_disk);
+
+    let started = rotating.rotate(&second).unwrap();
+    assert_eq!(started.prev_hash, on_disk);
+    assert_eq!(
+        started
+            .log_started
+            .as_ref()
+            .unwrap()
+            .previous_entry_hash
+            .as_deref(),
+        Some(on_disk.as_str())
+    );
+    let report = verify_log_files(&[&first, &second], &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.entries, 3);
+}
+
+#[test]
 fn a_chain_rotated_at_genesis_verifies() {
     let dir = temp_dir("rotate-genesis");
     let first = dir.join("log-1.jsonl");

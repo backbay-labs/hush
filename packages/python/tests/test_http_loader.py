@@ -751,6 +751,19 @@ def test_the_pinned_connection_validates_the_certificate_for_the_hostname(
 
 
 @pytest.mark.usefixtures("resolves_to_loopback")
+def test_a_proxy_in_the_environment_is_ignored(
+    tls_server: _TlsServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The pinned connection dials the vetted address itself. A proxy would
+    # resolve the host a second time on its side, past the SSRF check, so one
+    # named in the environment is never used; port 9 would refuse the attempt.
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+    loaded = create_http_loader(tls_server.client_config())(tls_server.url())
+    assert loaded.spec.name == "remote-base"
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
 def test_a_certificate_for_another_name_is_refused(tmp_path: Path) -> None:
     # Same address, same trusted issuer, wrong name: the handshake has to fail.
     # If it did not, `server_hostname` would be carrying the dialled address

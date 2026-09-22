@@ -640,21 +640,33 @@ class ChainedFileSink:
             # Only the file name: logs are moved between hosts, and a path
             # would leak the writer's layout for no verification benefit.
             previous_file = self._path.name or str(self._path)
-            previous_hash = self._prev_hash
-            entry = self._append_to(
-                new_path,
-                0,
-                previous_hash,
-                LogStarted(
-                    timestamp=format_timestamp(self._now()),
-                    previous_file=previous_file,
-                    # Always recorded, the genesis value included (log spec
-                    # section 5): a verifier given both files compares it
-                    # against the previous file's last hash, and an omitted
-                    # member is not that hash.
-                    previous_entry_hash=previous_hash,
-                ),
-            )
+
+            def link(previous_hash: str) -> LogEntry:
+                return self._append_to(
+                    new_path,
+                    0,
+                    previous_hash,
+                    LogStarted(
+                        timestamp=format_timestamp(self._now()),
+                        previous_file=previous_file,
+                        # Always recorded, the genesis value included (log spec
+                        # section 5): a verifier given both files compares it
+                        # against the previous file's last hash, and an omitted
+                        # member is not that hash.
+                        previous_entry_hash=previous_hash,
+                    ),
+                )
+
+            # The link names the old file's last hash as it is on disk, not as
+            # this sink last saw it: another writer sharing the file may have
+            # appended since. The old file stays locked until the new file's
+            # first entry is written, so nothing can extend it past the link.
+            if self._path.exists():
+                with _locked_for_append(self._path) as handle:
+                    head = _last_entry_of(handle, self._path)
+                    entry = link(self._prev_hash if head is None else head["entry_hash"])
+            else:
+                entry = link(self._prev_hash)
             self._path = new_path
             self._seq, self._prev_hash = entry.seq, entry.entry_hash
             return entry

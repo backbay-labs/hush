@@ -501,19 +501,35 @@ impl ChainedFileSink {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| state.path.display().to_string());
-        let previous_entry_hash = state.prev_hash.clone();
-        let entry = self.append_to(
-            &new_path,
-            (0, previous_entry_hash.clone()),
-            Payload::LogStarted(LogStarted {
-                timestamp: format_timestamp(self.now()),
-                previous_file: Some(previous_file),
-                // Always recorded, the genesis value included (log spec 5): a
-                // verifier given both files compares it against the previous
-                // file's last hash, and an omitted member is not that hash.
-                previous_entry_hash: Some(previous_entry_hash),
-            }),
-        )?;
+        let link = |previous_entry_hash: String| {
+            self.append_to(
+                &new_path,
+                (0, previous_entry_hash.clone()),
+                Payload::LogStarted(LogStarted {
+                    timestamp: format_timestamp(self.now()),
+                    previous_file: Some(previous_file.clone()),
+                    // Always recorded, the genesis value included (log spec 5):
+                    // a verifier given both files compares it against the
+                    // previous file's last hash, and an omitted member is not
+                    // that hash.
+                    previous_entry_hash: Some(previous_entry_hash),
+                }),
+            )
+        };
+        // The link names the old file's last hash as it is on disk, not as
+        // this sink last saw it: another writer sharing the file may have
+        // appended since. The old file stays locked until the new file's
+        // first entry is written, so nothing can extend it past the link.
+        let cached = state.prev_hash.clone();
+        let entry = if state.path.exists() {
+            let old_path = state.path.clone();
+            with_file_lock(&old_path, || {
+                let head = last_entry(&old_path)?;
+                link(head.map_or(cached, |head| head.entry_hash))
+            })?
+        } else {
+            link(cached)?
+        };
         state.path = new_path;
         state.seq = entry.seq;
         state.prev_hash.clone_from(&entry.entry_hash);

@@ -575,17 +575,25 @@ export class ChainedFileSink implements ReceiptSink {
     // Only the file name: logs are moved between hosts, and a path would leak
     // the writer's layout for no verification benefit.
     const previousFile = path.basename(this.logPath);
-    const previousEntryHash = this.prevHash;
-    const entry = this.appendTo(resolved, 0, previousEntryHash, {
-      logStarted: {
-        timestamp: formatTimestamp(this.now()),
-        previous_file: previousFile,
-        // Always recorded, the genesis value included (log spec 5): a verifier
-        // given both files compares this against the previous file's last
-        // hash, and an omitted member is not that hash.
-        previous_entry_hash: previousEntryHash,
-      },
-    });
+    const link = (previousEntryHash: string): LogEntry =>
+      this.appendTo(resolved, 0, previousEntryHash, {
+        logStarted: {
+          timestamp: formatTimestamp(this.now()),
+          previous_file: previousFile,
+          // Always recorded, the genesis value included (log spec 5): a
+          // verifier given both files compares this against the previous
+          // file's last hash, and an omitted member is not that hash.
+          previous_entry_hash: previousEntryHash,
+        },
+      });
+    // The link names the old file's last hash as it is on disk, not as this
+    // sink last saw it: another writer sharing the file may have appended
+    // since. The old file stays locked until the new file's first entry is
+    // written, so nothing can extend it past the link.
+    const oldPath = this.logPath;
+    const entry = existsSync(oldPath)
+      ? withFileLock(oldPath, () => link(lastEntry(oldPath)?.entry_hash ?? this.prevHash))
+      : link(this.prevHash);
     this.logPath = resolved;
     this.seq = entry.seq;
     this.prevHash = entry.entry_hash;

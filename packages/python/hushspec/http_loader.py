@@ -484,7 +484,13 @@ def _fetch(
         if target.scheme == "https"
         else _PinnedHTTPHandler(target, config)
     )
-    opener = urllib.request.build_opener(handler, _RefuseRedirects())
+    # An empty ProxyHandler replaces the default one, which would route the
+    # request through a proxy named in the environment (``HTTPS_PROXY``,
+    # ``ALL_PROXY``) that resolves the host a second time on its side; the
+    # loader always dials the validated address itself.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), handler, _RefuseRedirects()
+    )
     request = urllib.request.Request(target.url, headers=headers, method="GET")
 
     try:

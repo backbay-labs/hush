@@ -315,6 +315,26 @@ describe('ChainedFileSink', () => {
     expect(reversed.break!.line).toBe(1);
   });
 
+  it('links the last entry on disk when another sink extended the file before rotation', () => {
+    const first = path.join(dir, 'log-1.jsonl');
+    const second = path.join(dir, 'log-2.jsonl');
+    const resolved = resolution();
+    const rotating = ChainedFileSink.open(first).withClock(clock());
+    const other = ChainedFileSink.open(first).withClock(clock());
+    rotating.recordPolicyEvent(fixtureLoadedEvent());
+    // The other writer extends the file after this sink last wrote to it.
+    other.send(evaluateAudited(resolved, actions()[0], CONFIG, ctx(1)));
+    const onDisk = other.head().entry_hash;
+    expect(rotating.head().entry_hash).not.toBe(onDisk);
+
+    const started = rotating.rotate(second);
+    expect(started.prev_hash).toBe(onDisk);
+    expect(started.log_started!.previous_entry_hash).toBe(onDisk);
+    const both = verifyLogFiles([first, second]);
+    expect(both.ok).toBe(true);
+    expect(both.entries).toBe(3);
+  });
+
   it('carries the genesis hash into a file rotated before anything was written', () => {
     const first = path.join(dir, 'log-1.jsonl');
     const second = path.join(dir, 'log-2.jsonl');

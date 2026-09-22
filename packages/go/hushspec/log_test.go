@@ -383,6 +383,62 @@ func TestRotationCarriesTheChain(t *testing.T) {
 	}
 }
 
+// TestRotationLinksTheLastEntryOnDisk covers a writer whose cached head is
+// stale because another sink extended the file: the link it records is the
+// file's last hash as it is on disk, not the one this writer last wrote.
+func TestRotationLinksTheLastEntryOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "log-1.jsonl")
+	second := filepath.Join(dir, "log-2.jsonl")
+	clock := logVectorClock(t)
+	rotating, err := OpenChainedFileSink(first)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	other, err := OpenChainedFileSink(first)
+	if err != nil {
+		t.Fatalf("cannot open the log twice: %v", err)
+	}
+	rotating.WithClock(func() time.Time { return clock })
+	other.WithClock(func() time.Time { return clock })
+
+	resolution := vectorResolution(t)
+	if err := rotating.RecordPolicyEvent(vectorPolicyEvent(t, resolution)); err != nil {
+		t.Fatalf("cannot record the policy event: %v", err)
+	}
+	receipt, err := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
+		expectedReceiptContext(1))
+	if err != nil {
+		t.Fatalf("audited: %v", err)
+	}
+	if err := other.Send(&receipt); err != nil {
+		t.Fatalf("cannot append the other writer's receipt: %v", err)
+	}
+	_, onDisk := other.Head()
+	if _, cached := rotating.Head(); cached == onDisk {
+		t.Fatalf("the rotating sink's head must be stale for this test")
+	}
+
+	started, err := rotating.Rotate(second)
+	if err != nil {
+		t.Fatalf("Rotate failed: %v", err)
+	}
+	if started.PrevHash != onDisk {
+		t.Errorf("prev_hash must be the last hash on disk %s, got %s", onDisk, started.PrevHash)
+	}
+	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash == nil ||
+		*started.LogStarted.PreviousEntryHash != onDisk {
+		t.Errorf("log_started must name the last hash on disk, got %+v", started.LogStarted)
+	}
+	report, err := VerifyLogFiles([]string{first, second}, nil)
+	if err != nil {
+		t.Fatalf("the rotation must verify: %v", err)
+	}
+	if report.Entries != 3 {
+		t.Errorf("expected three entries across both files, got %d", report.Entries)
+	}
+}
+
 // TestRotateAtGenesisVerifies covers a writer that rotates before it has
 // written anything: the link it records is the genesis hash, and a verifier
 // given both files has to see one chain.

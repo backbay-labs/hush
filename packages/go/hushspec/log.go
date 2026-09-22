@@ -477,23 +477,59 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	// Only the file name: logs are moved between hosts, and a path would leak
 	// the writer's layout for no verification benefit.
 	previousFile := filepath.Base(s.path)
-	previousHash := s.prevHash
-	// The link is always recorded, the genesis value included (log spec 5): a
-	// verifier given both files compares it against the previous file's last
-	// hash, and an omitted member is not that hash.
-	started := &LogStarted{
-		Timestamp:         FormatTimestamp(s.now()),
-		PreviousFile:      previousFile,
-		PreviousEntryHash: &previousHash,
+	link := func(previousHash string) (*LogEntry, error) {
+		// The link is always recorded, the genesis value included (log spec 5):
+		// a verifier given both files compares it against the previous file's
+		// last hash, and an omitted member is not that hash.
+		started := &LogStarted{
+			Timestamp:         FormatTimestamp(s.now()),
+			PreviousFile:      previousFile,
+			PreviousEntryHash: &previousHash,
+		}
+		return s.appendTo(newPath, 0, previousHash, LogPayload{LogStarted: started})
 	}
-
-	entry, err := s.appendTo(newPath, 0, previousHash, LogPayload{LogStarted: started})
+	entry, err := s.linkUnderCurrentFileLock(link)
 	if err != nil {
 		return nil, err
 	}
 	s.path = newPath
 	s.seq, s.prevHash = entry.Seq, entry.EntryHash
 	return entry, nil
+}
+
+// linkUnderCurrentFileLock writes the entry link produces while holding the
+// current file's lock, so the link names that file's last hash as it is on
+// disk, not as this sink last saw it: another writer sharing the file may have
+// appended since, and nothing can extend it past the link before the new
+// file's first entry is written. A file that does not exist yet has only the
+// head this sink carries.
+func (s *ChainedFileSink) linkUnderCurrentFileLock(
+	link func(previousHash string) (*LogEntry, error),
+) (*LogEntry, error) {
+	file, err := os.OpenFile(s.path, os.O_RDWR, 0o644)
+	if errors.Is(err, os.ErrNotExist) {
+		return link(s.prevHash)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("log: cannot open %s: %w", s.path, err)
+	}
+	defer file.Close()
+
+	unlock, err := lockLogFile(file, s.path)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	previousHash := s.prevHash
+	head, err := lastLogEntryIn(file, s.path)
+	if err != nil {
+		return nil, err
+	}
+	if head != nil {
+		previousHash = head.EntryHash
+	}
+	return link(previousHash)
 }
 
 // lastLogEntry reads the last non-empty line of path as an entry, or nil for a

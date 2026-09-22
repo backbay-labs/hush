@@ -873,7 +873,11 @@ pub mod http {
     ) -> Result<reqwest::blocking::Client, ResolveError> {
         let connect = Duration::from_millis(config.connect_timeout_ms);
         let read = Duration::from_millis(config.read_timeout_ms);
+        // A proxy from the environment (`HTTPS_PROXY`, `ALL_PROXY`) would
+        // resolve the host a second time on its side, and the pin below
+        // would never reach it; the loader always dials the address itself.
         let mut builder = reqwest::blocking::Client::builder()
+            .no_proxy()
             .connect_timeout(connect)
             .timeout(connect + read)
             .redirect(reqwest::redirect::Policy::none())
