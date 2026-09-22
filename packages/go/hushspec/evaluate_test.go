@@ -664,3 +664,42 @@ func evaluatorRepoRoot(t *testing.T) string {
 	}
 	return root
 }
+
+// TestEvaluatePatchIntegrityAppliesTheDefaultImbalanceRatio covers a document
+// assembled in memory rather than parsed: an absent max_imbalance_ratio is the
+// schema default (core spec 3.5), not an absent limit.
+func TestEvaluatePatchIntegrityAppliesTheDefaultImbalanceRatio(t *testing.T) {
+	spec := &HushSpec{
+		HushSpecVersion: "0.1.0",
+		Rules: &Rules{PatchIntegrity: &PatchIntegrityRule{
+			Enabled:        true,
+			MaxAdditions:   1000,
+			MaxDeletions:   500,
+			RequireBalance: true,
+		}},
+	}
+
+	balanced := "--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@\n-line1\n+line2\n"
+	result := Evaluate(spec, &EvaluationAction{
+		Type:    "patch_apply",
+		Target:  "file.txt",
+		Content: strPtr(balanced),
+	})
+	if result.Decision != DecisionAllow {
+		t.Fatalf("expected a balanced patch to pass, got %q (%s)", result.Decision, result.Reason)
+	}
+
+	lopsided := "--- a/file.txt\n+++ b/file.txt\n@@ -1 +1,12 @@\n-line1\n" +
+		strings.Repeat("+added\n", 11)
+	result = Evaluate(spec, &EvaluationAction{
+		Type:    "patch_apply",
+		Target:  "file.txt",
+		Content: strPtr(lopsided),
+	})
+	if result.Decision != DecisionDeny {
+		t.Fatalf("expected a ratio past the default to deny, got %q (%s)", result.Decision, result.Reason)
+	}
+	if result.MatchedRule != "rules.patch_integrity.max_imbalance_ratio" {
+		t.Fatalf("expected a max_imbalance_ratio denial, got %q", result.MatchedRule)
+	}
+}

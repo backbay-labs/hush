@@ -663,15 +663,13 @@ func (c *compiledPatchIntegrity) evaluate(content string) blockDecision {
 		}
 		if stats.additions > 0 && stats.deletions > 0 {
 			// applyParseDefaults materializes max_imbalance_ratio, so a parsed
-			// document always carries the limit; an unset one is a document
-			// assembled in memory, which the engine cannot bound and refuses.
-			if rule.MaxImbalanceRatio == nil {
-				return denyDecision(
-					"rules.patch_integrity.max_imbalance_ratio",
-					"patch integrity declares no imbalance ratio limit",
-				)
+			// document always carries the limit. A document assembled in
+			// memory may not, and an absent value means the schema default
+			// (core spec 3.5), the same limit the other engines apply.
+			limit := defaultMaxImbalanceRatio
+			if rule.MaxImbalanceRatio != nil {
+				limit = *rule.MaxImbalanceRatio
 			}
-			limit := *rule.MaxImbalanceRatio
 			larger := math.Max(float64(stats.additions), float64(stats.deletions))
 			smaller := math.Min(float64(stats.additions), float64(stats.deletions))
 			if larger/smaller > limit {
