@@ -416,8 +416,9 @@ under `--fail-on-uncovered`.
 per-policy `declared`, `covered` and `uncovered` paths.
 
 Exit: `0` all cases passed · `1` a case failed, or a declared rule path was
-never hit under `--fail-on-uncovered` · `2` no fixture files were found, a
-fixture did not match the schema, or the policy could not be read.
+never hit under `--fail-on-uncovered` · `2` an argument named neither a file
+nor a directory, no fixture files were found, a fixture did not match the
+schema, or the policy could not be read.
 
 ## `h2h audit`
 

@@ -7,6 +7,12 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
+### Fixed
+
+- `h2h test` exits `2` when an argument names neither a file nor a directory. Such a path was
+  dropped silently, so a run with a mistyped suite reported a green summary for the suites that
+  did resolve.
+
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version

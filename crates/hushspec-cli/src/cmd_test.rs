@@ -282,7 +282,18 @@ pub fn run(args: TestArgs) -> i32 {
     // panic latch before evaluation, otherwise the kill switch is a no-op here.
     crate::cmd_panic::check_sentinel(args.sentinel.as_deref());
 
-    let test_files = collect_test_files(&args);
+    let (test_files, missing) = collect_test_files(&args);
+
+    if !missing.is_empty() {
+        for path in &missing {
+            eprintln!(
+                "{} Test fixture path not found: {}",
+                "ERROR".red(),
+                path.display()
+            );
+        }
+        return 2;
+    }
 
     if test_files.is_empty() {
         eprintln!("{} No test fixture files found", "ERROR".red());
@@ -470,28 +481,27 @@ fn validate_fixture_schema(path: &Path) -> Result<(), Vec<String>> {
     }
 }
 
-fn collect_test_files(args: &TestArgs) -> Vec<PathBuf> {
+/// The suite files named on the command line, together with every argument
+/// that named neither a file nor a directory. A path the run could not open is
+/// a config error, not an empty suite: dropping it would leave the remaining
+/// suites reporting green for a run that never covered what was asked for.
+fn collect_test_files(args: &TestArgs) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut files = Vec::new();
+    let mut missing = Vec::new();
 
-    if let Some(dir) = &args.fixtures {
-        if dir.is_dir() {
-            collect_yaml_files(dir, &mut files);
-        } else if dir.is_file() {
-            files.push(dir.clone());
-        }
-    }
-
-    for path in &args.tests {
+    for path in args.fixtures.iter().chain(args.tests.iter()) {
         if path.is_dir() {
             collect_yaml_files(path, &mut files);
         } else if path.is_file() {
             files.push(path.clone());
+        } else {
+            missing.push(path.clone());
         }
     }
 
     files.sort();
     files.dedup();
-    files
+    (files, missing)
 }
 
 fn collect_yaml_files(dir: &Path, files: &mut Vec<PathBuf>) {

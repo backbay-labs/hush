@@ -185,6 +185,19 @@ fn test_egress_fixtures() {
         .stdout(predicate::str::contains("5 passed, 0 failed"));
 }
 
+/// A suite argument that names nothing on disk stops the run: silently
+/// dropping it would report a green summary for suites that never ran.
+#[test]
+fn test_reports_a_missing_suite_path() {
+    h2h()
+        .arg("test")
+        .arg("fixtures/core/evaluation/egress.test.yaml")
+        .arg("fixtures/core/evaluation/does-not-exist.test.yaml")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("does-not-exist.test.yaml"));
+}
+
 #[test]
 fn test_fixtures_directory() {
     h2h()
