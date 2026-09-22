@@ -157,6 +157,10 @@ type Guard struct {
 	clock      func() time.Time
 	sdk        SdkInfo
 	provider   PolicyProvider
+	// requireSignature is [GuardOptions.RequireSignature], kept so that a
+	// resolution adopted from elsewhere -- a provider's load, a hot swap --
+	// is held to the same requirement as one the guard resolved itself.
+	requireSignature bool
 }
 
 // NewGuard builds a guard around an already-resolved policy.
@@ -214,6 +218,8 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 		audit:      audit,
 		clock:      options.Clock,
 		sdk:        sdk,
+
+		requireSignature: options.RequireSignature,
 	}
 
 	// A policy-in-effect record before any receipt evaluated under it (log
@@ -256,6 +262,10 @@ func NewGuardFromFile(path string, options GuardOptions) (*Guard, error) {
 // implements [GuardPolicyLoader] can also hand over a policy it refused, which
 // puts the guard in its refused state instead of failing construction.
 //
+// Under [GuardOptions.RequireSignature] the adopted chain is held to the
+// guard's own requirement: a resolution the provider produced without
+// verifying every non-`builtin:` hop puts the guard in its refused state.
+//
 // Hot reload is wired separately, by pointing a [PolicyWatcher] or
 // [PolicyPoller] at the same provider with this guard as its target.
 func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard, error) {
@@ -275,6 +285,9 @@ func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard
 	if err != nil {
 		return nil, fmt.Errorf("guard: policy provider %s: %w", provider.Source(), err)
 	}
+	if refusal == nil {
+		refusal = unprovenHop(resolution, options.RequireSignature)
+	}
 	if refusal != nil {
 		options.Refusal = refusal
 	}
@@ -286,6 +299,43 @@ func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard
 	guard.provider = provider
 	guard.mu.Unlock()
 	return guard, nil
+}
+
+// unprovenHop reports the first hop of an adopted chain that has not proved
+// itself under [GuardOptions.RequireSignature], or nil when the chain is
+// acceptable.
+//
+// A provider resolves against the source it loaded from -- which the guard
+// cannot reach a second time -- so its resolution is adopted rather than
+// rebuilt. It was built under the provider's options, though, not the guard's,
+// so the requirement the guard was given is re-applied here: without it,
+// RequireSignature would be dropped by handing the policy in pre-resolved,
+// which is exactly the fail-open the requirement exists to prevent.
+//
+// `builtin:` hops are exempt, as they are during resolution: they are embedded
+// in the SDK, not loaded from anywhere signable. Every other hop proves itself
+// by a verified signature on its link. A hop proved by a digest pin cannot be
+// re-checked from a resolution -- the chain records the hash each hop had, not
+// the digest its child pinned it to -- so an adopted chain has to carry
+// signatures.
+func unprovenHop(resolution *Resolution, requireSignature bool) *GuardRefusal {
+	if !requireSignature || resolution == nil {
+		return nil
+	}
+	for _, link := range resolution.Chain {
+		if strings.HasPrefix(link.Source, "builtin:") {
+			continue
+		}
+		if link.Signature != nil && link.Signature.Verified {
+			continue
+		}
+		status := SignatureStatus{Verified: false, Reason: ReasonMissingSignature}
+		if link.Signature != nil {
+			status = *link.Signature
+		}
+		return &GuardRefusal{Source: link.Source, Status: status}
+	}
+	return nil
 }
 
 // resolveFileForGuard resolves path under the given verification options, so a
@@ -767,10 +817,11 @@ func (g *Guard) unverifiedPolicySummary(resolution *Resolution) PolicySummary {
 
 // SwapPolicy replaces the policy in force.
 //
-// A resolution that is unusable -- absent, still extending, or holding a
-// pattern that does not compile -- is rejected and the policy already in force
-// stays: keeping a policy that was verified is strictly safer than replacing
-// it with one that was not. This is also why a swap never enters the refused
+// A resolution that is unusable -- absent, still extending, holding a pattern
+// that does not compile, or carrying a hop that does not prove itself under
+// [GuardOptions.RequireSignature] -- is rejected and the policy already in
+// force stays: keeping a policy that was verified is strictly safer than
+// replacing it with one that was not. This is also why a swap never enters the refused
 // state; a caller that wants a refused policy builds a new guard with
 // [GuardOptions.Refusal].
 //
@@ -785,6 +836,12 @@ func (g *Guard) SwapPolicy(resolution *Resolution) error {
 			"guard: policy still declares 'extends: %s'; resolve it first",
 			*resolution.Spec.Extends,
 		)
+	}
+	g.mu.RLock()
+	requireSignature := g.requireSignature
+	g.mu.RUnlock()
+	if unproven := unprovenHop(resolution, requireSignature); unproven != nil {
+		return &SignatureRequiredError{Source: unproven.Source, Status: unproven.Status}
 	}
 	compiled, err := CompilePolicy(resolution.Spec)
 	if err != nil {
