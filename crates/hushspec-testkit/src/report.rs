@@ -152,6 +152,65 @@ fn level_note(level: u8, skipped: u32) -> Option<String> {
     ))
 }
 
+/// Manifest categories the document-vector pipeline scores one result per
+/// file. The evidence categories are driven by their own vector manifests and
+/// list their inputs -- keys, signatures, bundles, logs -- beside the vectors
+/// that consume them, so they are not comparable file for file.
+const SCORED_CATEGORIES: [&str; 7] = [
+    "valid",
+    "invalid",
+    "merge",
+    "evaluation",
+    "canonical",
+    "resolve",
+    "library-suite",
+];
+
+/// Every scored vector the manifest lists that the run did not report on.
+///
+/// A corpus is cited by the digest of its manifest, so a level cannot be a
+/// pass while a vector that manifest lists went unrun: the report records each
+/// one as `not_attempted`, which core spec Section 8 states is never a pass.
+fn unattempted(manifest: &Manifest, results: &[VectorResult]) -> Vec<VectorResult> {
+    // A vector whose unit is a case inside a file appends `#<case>`, so the
+    // file it ran is the part before the separator.
+    let ran: std::collections::BTreeSet<&str> = results
+        .iter()
+        .map(|result| {
+            result
+                .path
+                .split_once('#')
+                .map_or(result.path.as_str(), |(path, _)| path)
+        })
+        .collect();
+    let ran_dirs: std::collections::BTreeSet<&str> = ran
+        .iter()
+        .map(|path| path.rsplit_once('/').map_or("", |(dir, _)| dir))
+        .collect();
+
+    manifest
+        .files
+        .iter()
+        .filter(|entry| SCORED_CATEGORIES.contains(&entry.category.as_str()))
+        .filter(|entry| !ran.contains(entry.path.as_str()))
+        // A merge group reports one result per `child-` vector; the base and
+        // the expected document beside it are that case's inputs.
+        .filter(|entry| {
+            entry.category != "merge"
+                || !ran_dirs.contains(entry.path.rsplit_once('/').map_or("", |(dir, _)| dir))
+        })
+        .map(|entry| VectorResult {
+            path: entry.path.clone(),
+            category: entry.category.clone(),
+            level: Some(entry.level),
+            status: Status::NotAttempted,
+            message: Some(
+                "the manifest lists this vector and the run did not attempt it".to_string(),
+            ),
+        })
+        .collect()
+}
+
 /// Build a report from the document-vector results and the evidence-vector
 /// results.
 pub fn build(
@@ -166,6 +225,7 @@ pub fn build(
 
     let mut results: Vec<VectorResult> = document_results.iter().map(VectorResult::from).collect();
     results.extend(evidence_results.iter().cloned());
+    results.extend(unattempted(&manifest, &results));
     results.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut levels: BTreeMap<String, LevelResult> = BTreeMap::new();
@@ -213,6 +273,9 @@ pub fn build(
         let entry = levels.get_mut("0").expect("level 0 exists");
         entry.passed = level_one.passed + level_one.failed - parse_failures;
         entry.failed = parse_failures;
+        // A document vector the run never attempted was never parsed either,
+        // so it is unattempted at Level 0 as well.
+        entry.skipped += level_one.skipped;
     }
 
     for (key, entry) in levels.iter_mut() {
@@ -376,5 +439,47 @@ mod tests {
             }
         }
         assert_eq!(highest, Some(2));
+    }
+
+    /// Every scored vector the manifest lists is reported on, so the corpus a
+    /// report cites by digest is the corpus it actually ran.
+    #[test]
+    fn the_full_report_leaves_no_manifest_vector_unattempted() {
+        let report = full_report();
+        let skipped: Vec<&str> = report
+            .results
+            .iter()
+            .filter(|result| result.status == Status::NotAttempted)
+            .map(|result| result.path.as_str())
+            .collect();
+        assert!(skipped.is_empty(), "not attempted: {skipped:?}");
+    }
+
+    /// A vector the discovery pass misses is recorded as `not_attempted`
+    /// rather than left out, and the level it belongs to cannot then pass.
+    #[test]
+    fn a_vector_the_run_missed_is_recorded_as_not_attempted() {
+        let manifest = Manifest::load(&fixtures_dir()).expect("manifest loads");
+        let listed = manifest
+            .files
+            .iter()
+            .find(|entry| entry.category == "evaluation")
+            .expect("an evaluation vector is listed");
+
+        let skipped = unattempted(&manifest, &[]);
+        let found = skipped
+            .iter()
+            .find(|result| result.path == listed.path)
+            .expect("the unrun vector is reported");
+        assert_eq!(found.status, Status::NotAttempted);
+        assert_eq!(found.level, Some(listed.level));
+
+        // The manifest's supporting inputs -- signing keys, bundles, logs --
+        // are never scored as vectors of their own.
+        assert!(
+            !skipped
+                .iter()
+                .any(|result| result.path.starts_with("fixtures/signing/keys/"))
+        );
     }
 }

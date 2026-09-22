@@ -7,35 +7,6 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
-### Changed
-
-- **Every `extends` fragment is read as a digest pin** (core spec 2.3). A reference whose text
-  after the last `#` is not exactly `sha256:` followed by 64 lowercase hex digits is rejected with
-  `invalid_pin` in all four SDKs, rather than being loaded as though the fragment were part of the
-  reference. `#SHA256:<64 hex>` was previously passed through unpinned by Python, and
-  `#notes`-style fragments by TypeScript, Python and Go. Vectors:
-  `fixtures/core/resolve/pin-uppercase-algorithm.yaml`, `pin-short-digest.yaml`,
-  `pin-non-digest-fragment.yaml`.
-- **`no_keyring` is recorded for a hop whose envelope has nothing to check it against**
-  (signing spec 6.5). TypeScript and Python now resolve with `require_signature` and no keyring
-  instead of failing up front, recording `no_keyring` on the hop where an envelope was found and
-  `missing_signature` where there was none -- the outcome Rust and Go already reported. Vector:
-  `fixtures/core/resolve/require-signature-without-a-keyring.yaml`.
-- **The load-time reason set is the five codes signing spec 6.5 names**, plus the section 6.4
-  envelope checks. TypeScript's `LoadReasonCode` no longer rewrites `no_keyring`,
-  `signing_unavailable` or `invalid_pin` to `missing_signature`; Python exposes
-  `LOAD_REASON_CODES` and `load_reason_of`, and Go `LoadReasonCodes` and `LoadReasonOf`.
-- A TypeScript guard built with `requireSignature` now re-checks a policy its provider reloaded
-  underneath it, and enters the refused state rather than evaluating one that cannot prove itself
-  (signing spec 6.5).
-- Built without the `signing` feature, the Rust resolver records `signing_unavailable` on a hop it
-  attempted to verify instead of recording nothing.
-
-### Added
-
-- The Python `HushGuard` accepts a `time_source` and records it in every receipt (receipt spec
-  3.3), matching the Rust, TypeScript and Go guards.
-
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
@@ -303,6 +274,9 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `verified_at`, an in-memory leaf resolves as `memory`, and a matching digest pin now
   satisfies `require_signature` for that hop.
 
+- The Python `HushGuard` accepts a `time_source` and records it in every receipt (receipt spec
+  3.3), matching the Rust, TypeScript and Go guards.
+
 **Go**
 
 - Parity for the runtime-integration surface. `Guard` (`hushspec.NewGuard`,
@@ -525,6 +499,28 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   adapter and in every SDK. Rust has no adapters and was already correct. Affects any
   `max_args_size` decision on a non-ASCII or non-compact payload, and the `action.args_size` a
   receipt records for it.
+
+- **Every `extends` fragment is read as a digest pin** (core spec 2.3). A reference whose text
+  after the last `#` is not exactly `sha256:` followed by 64 lowercase hex digits is rejected with
+  `invalid_pin` in all four SDKs, rather than being loaded as though the fragment were part of the
+  reference. `#SHA256:<64 hex>` was previously passed through unpinned by Python, and
+  `#notes`-style fragments by TypeScript, Python and Go. Vectors:
+  `fixtures/core/resolve/pin-uppercase-algorithm.yaml`, `pin-short-digest.yaml`,
+  `pin-non-digest-fragment.yaml`.
+- **`no_keyring` is recorded for a hop whose envelope has nothing to check it against**
+  (signing spec 6.5). TypeScript and Python now resolve with `require_signature` and no keyring
+  instead of failing up front, recording `no_keyring` on the hop where an envelope was found and
+  `missing_signature` where there was none -- the outcome Rust and Go already reported. Vector:
+  `fixtures/core/resolve/require-signature-without-a-keyring.yaml`.
+- **The load-time reason set is the five codes signing spec 6.5 names**, plus the section 6.4
+  envelope checks. TypeScript's `LoadReasonCode` no longer rewrites `no_keyring`,
+  `signing_unavailable` or `invalid_pin` to `missing_signature`; Python exposes
+  `LOAD_REASON_CODES` and `load_reason_of`, and Go `LoadReasonCodes` and `LoadReasonOf`.
+- A TypeScript guard built with `requireSignature` now re-checks a policy its provider reloaded
+  underneath it, and enters the refused state rather than evaluating one that cannot prove itself
+  (signing spec 6.5).
+- Built without the `signing` feature, the Rust resolver records `signing_unavailable` on a hop it
+  attempted to verify instead of recording nothing.
 
 **Rust**
 
@@ -770,6 +766,54 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   rule by rule. `scripts/generate_fixture_manifest.py` enumerates fixtures through git so an ignored file
   cannot be hashed into the manifest, and the Rust generators report rustfmt's own error instead
   of a bare exit status.
+
+- `h2h test` exits `2` when an argument names neither a file nor a directory. Such a path was
+  dropped silently, so a run with a mistyped suite reported a green summary for the suites that
+  did resolve.
+- `h2h lint --dry-run` reports the document on disk. It re-linted the mutated in-memory model, so
+  its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
+  never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
+  warnings.
+- `h2h validate` sends every failure line to stderr. Parse and validation errors went to stdout
+  while the not-found and IO errors went to stderr, so redirecting stderr away hid some failures and
+  showed others.
+- `h2h eval --context` conflicts with `--action-json` and `--action-file`, like every other
+  action-shaping flag. It silently overwrote a `context` supplied inside the action document.
+- `h2h diff --fail-on any` gates on any decision that changed, including a pair the classifier does
+  not label in either direction.
+- `h2h audit --strict` checks control rule paths whether or not `--controls` is also passed, as its
+  help says. The check only ran when `--controls` built the matrix, so plain `--strict` never
+  reported an unresolvable rule path. The matrix itself is still printed only under `--controls`.
+- `h2h test` credits rule coverage only from cases that passed. A failing case still credited its
+  `matched_rule` and rule-trace paths, so a JUnit or JSON artifact could report full coverage from
+  cases that did not pass.
+- `h2h lint` exits `2` for a file that is missing or unreadable, matching `validate` and `fmt` and
+  the documented exit-code table; it exited `1`, the code for a document that failed the check. A
+  JSON or SARIF report that cannot be serialized now also exits `2` with the error on stderr instead
+  of printing nothing and exiting `0`.
+- `h2h lint` reports an unresolvable `extends` chain as `E010`, the code
+  `spec/registries/error-codes.yaml` reserves for an extends failure. It emitted `E002`, which the
+  same registry reserves for an unsupported `hushspec` version.
+- `h2h receipts verify` replays a receipt under the posture state the receipt records, and fails the
+  `decision` check when a recorded `action.origin` or `action.context` will not deserialize. The
+  replay dropped both and always ran from the policy's initial posture state, then printed the check
+  as if the recorded action had been re-derived.
+- `h2h report --format oscal` carries the chain's status in `metadata`, the `result` and every
+  `finding` as a `chain-verified` prop, and reports no control `satisfied` when the hash chain did
+  not verify. An export made with `--unverified` over a broken chain read as clean evidence.
+- The conformance runner never scores a vector it did not read or run. A fixture that could not be
+  read stood in as an empty document, so an `invalid/` vector nobody opened was scored as correctly
+  rejected; a vector the discovery pass missed was absent from the report while the level still read
+  `pass` against the manifest digest it cited; an `invalid/` receipt vector passed when only one of
+  the schema and the typed parser refused it; a merge directory's malformed `fixture.yaml` read as
+  absent, so a vector marked `reject: true` was expected to be accepted; and a bundle case whose
+  policy would not resolve reported `policy_mismatch` regardless of what the bundle verifier
+  returned.
+- The differential runner reports a `harness_error` divergence when the SDKs do not both produce a
+  verdict. Two `Error` verdicts compared as agreement whatever they said, so an SDK failing for a
+  wholly different reason, or on every case, was normalized away.
+- An emitted differential regression fixture declares `hushspec_test: 0.2.0` when it pins
+  `expect.rule_trace` or `expect.receipt`, the members that format defines.
 
 **Library**
 

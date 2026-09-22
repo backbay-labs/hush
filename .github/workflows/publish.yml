@@ -82,14 +82,24 @@ jobs:
             exit 1
           fi
 
+      # Same already-published tolerance as the two steps above, so a rerun
+      # for an already-published version does not fail the job at its last
+      # step.
       - name: Publish hushspec-cli (h2h binary)
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             cargo publish -p hushspec-cli --dry-run
+          elif cargo publish -p hushspec-cli 2>publish_err.log; then
+            cat publish_err.log
+          elif grep -qiE "already (uploaded|exists)" publish_err.log; then
+            cat publish_err.log
+            echo "::warning::hushspec-cli version already on crates.io; continuing"
           else
-            cargo publish -p hushspec-cli
+            cat publish_err.log >&2
+            echo "::error::hushspec-cli publish failed (not an already-published error)"
+            exit 1
           fi
 
   # ── npm: publish @hushspec/core ────────────────────────────────────

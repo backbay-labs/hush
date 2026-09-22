@@ -28,7 +28,9 @@ hushspec-testkit --fixtures fixtures --report report.json
 
 `highest_level` in the report is the largest N for which levels 0 through N all
 pass. A level with any unattempted vector reports `not_attempted`, which is
-never a synonym for a pass.
+never a synonym for a pass. The runner diffs the manifest against what it
+actually ran, so a vector the run missed is recorded as `not_attempted` rather
+than left out of a report that still cites the manifest by digest.
 
 Everything needed to do this without cloning the repository ships as
 `hushspec-conformance-<version>.tar.gz`, attached to every release: the prose,

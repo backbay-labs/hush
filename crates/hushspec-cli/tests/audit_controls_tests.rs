@@ -156,6 +156,22 @@ rules:
         .arg(&policy)
         .assert()
         .code(1);
+
+    // `--strict` alone checks the rule paths too, and leaves the matrix out
+    // of the report, which only `--controls` asks for.
+    let output = h2h()
+        .arg("audit")
+        .arg("--strict")
+        .arg("--format")
+        .arg("json")
+        .arg(&policy)
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert!(report.get("controls").is_none(), "{report:#}");
 }
 
 #[test]

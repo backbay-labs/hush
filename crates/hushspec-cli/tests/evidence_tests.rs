@@ -265,6 +265,104 @@ fn receipts_verify_checks_policy_identity_and_replays_the_decision() {
         .stdout(predicate::str::contains("receipt names"));
 }
 
+/// A recorded `action.origin` the engine cannot read back is a failed
+/// replay, not an action to re-derive without it.
+#[test]
+fn receipts_verify_fails_on_a_recorded_origin_it_cannot_replay() {
+    let dir = TempDir::new().unwrap();
+    let policy = write(&dir, "policy.yaml", POLICY);
+    let receipt_path = dir.path().join("receipt.json");
+    let output = h2h()
+        .args(["eval"])
+        .arg(&policy)
+        .args([
+            "--type",
+            "egress",
+            "--target",
+            "api.github.com",
+            "--format",
+            "receipt",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let mut receipt: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    receipt["action"]["origin"] = serde_json::json!({ "not_an_origin_field": 1 });
+    std::fs::write(&receipt_path, receipt.to_string()).unwrap();
+
+    h2h()
+        .args(["receipts", "verify"])
+        .arg(&receipt_path)
+        .args(["--policy"])
+        .arg(&policy)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "action.origin does not deserialize",
+        ));
+}
+
+/// The replay runs under the posture state the receipt records, so a policy
+/// whose rules are gated on a posture capability re-derives the recorded
+/// decision rather than the one the initial state would give.
+#[test]
+fn receipts_verify_replays_under_the_recorded_posture() {
+    let dir = TempDir::new().unwrap();
+    let policy = write(
+        &dir,
+        "posture.yaml",
+        r#"hushspec: "0.1.0"
+name: posture-replay
+rules:
+  egress:
+    allow: ["api.github.com"]
+    default: block
+    when:
+      capability: egress
+extensions:
+  posture:
+    initial: locked
+    states:
+      locked:
+        capabilities: []
+      open:
+        capabilities:
+          - egress
+    transitions:
+      - from: locked
+        to: open
+        on: user_approval
+"#,
+    );
+    let log = dir.path().join("receipts.jsonl");
+    h2h()
+        .args(["eval"])
+        .arg(&policy)
+        .args([
+            "--type",
+            "egress",
+            "--target",
+            "api.github.com",
+            "--posture",
+            "open",
+            "--log",
+        ])
+        .arg(&log)
+        .assert()
+        .success();
+
+    h2h()
+        .args(["receipts", "verify"])
+        .arg(&log)
+        .args(["--policy"])
+        .arg(&policy)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("re-derived"));
+}
+
 #[test]
 fn receipts_verify_checks_signed_receipt_vectors() {
     let valid = repo_root().join("fixtures/receipts/signed/valid/allow-egress.signed.json");

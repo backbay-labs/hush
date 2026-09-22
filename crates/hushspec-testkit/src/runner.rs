@@ -33,6 +33,19 @@ pub fn run_conformance(fixtures: &[TestFixture]) -> Vec<TestResult> {
     let mut merge_fixtures = Vec::new();
 
     for fixture in fixtures {
+        // A vector that could not be read is a failure of the run, never an
+        // empty document that an `invalid/` category would score as a
+        // correct rejection.
+        if let Some(error) = &fixture.read_error {
+            results.push(TestResult {
+                fixture_path: fixture.path.display().to_string(),
+                category: fixture.category,
+                passed: false,
+                message: format!("Failed to read fixture: {error}"),
+            });
+            continue;
+        }
+
         let result = match fixture.category {
             FixtureCategory::ValidCore
             | FixtureCategory::PostureValid
@@ -612,7 +625,18 @@ fn test_merge_case(
     // A vector marked as a refusal (an `expect-reject` file, or `reject: true`
     // in the directory's fixture.yaml) has no expected document: the failure
     // is the assertion.
-    if crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+    let expects_reject = match crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+        Ok(expects_reject) => expects_reject,
+        Err(error) => {
+            return TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: format!("Failed to read the merge manifest: {error}"),
+            };
+        }
+    };
+    if expects_reject {
         return match crate::merge_vector::compose(base, &child_fixture.path) {
             Ok(_) => TestResult {
                 fixture_path: path,

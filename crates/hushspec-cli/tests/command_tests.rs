@@ -576,7 +576,7 @@ fn validate_stdin_reports_invalid_documents() {
         .write_stdin("name: no-version\n")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("<stdin>"));
+        .stderr(predicate::str::contains("<stdin>"));
 }
 
 #[test]

@@ -6,8 +6,7 @@
 //! mutating the model. Fail-closed beats over-fixing: a smaller fixable
 //! surface here is a deliberate feature, not a shortfall.
 //!
-//! ## Codes (verified against `cmd_lint`'s actual emitted `code:` values --
-//! not the descriptive slugs an earlier draft of this plan assumed)
+//! ## Codes
 //!
 //! - `L008` (`check_duplicate_patterns`): an entry is a byte-identical repeat
 //!   of an earlier entry in the same list. Provably neutral by construction

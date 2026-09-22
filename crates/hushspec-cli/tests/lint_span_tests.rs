@@ -312,6 +312,38 @@ fn sarif_output_validates_for_a_preflight_failure_and_for_stdin() {
     );
 }
 
+/// A file the tool could not read is "the check did not run" (exit 2), and an
+/// `extends` chain that will not resolve is `E010`, the registry's code for an
+/// extends failure.
+#[test]
+fn a_missing_file_exits_two_and_an_unresolvable_chain_reports_e010() {
+    let tmp = TempDir::new().unwrap();
+
+    h2h()
+        .arg("lint")
+        .arg(tmp.path().join("no-such-policy.yaml"))
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("file not found"));
+
+    let orphan = write_policy(
+        tmp.path(),
+        "orphan.yaml",
+        "hushspec: \"0.1.0\"\nname: orphan\nextends: \"./no-such-base.yaml\"\n",
+    );
+    let output = h2h()
+        .arg("lint")
+        .arg("--format")
+        .arg("sarif")
+        .arg(&orphan)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let document: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_valid_sarif(&document);
+    assert_eq!(document["runs"][0]["results"][0]["ruleId"], "E010");
+}
+
 #[test]
 fn out_writes_the_report_to_a_file_and_refuses_text() {
     let tmp = TempDir::new().unwrap();

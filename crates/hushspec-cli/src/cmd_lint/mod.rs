@@ -228,6 +228,9 @@ pub fn run(args: LintArgs) -> i32 {
     let mut any_warnings = false;
     let mut any_parse_error = false;
     let mut any_write_error = false;
+    // A file that could not be read is "the tool could not run the check at
+    // all" (exit 2), not a document that failed it (exit 1).
+    let mut any_read_error = false;
     let want_fix = args.fix || args.dry_run;
 
     // `--fix` rewrites files in place, which stdin has no way to receive:
@@ -271,7 +274,7 @@ pub fn run(args: LintArgs) -> i32 {
                     file: display,
                     fixed: Vec::new(),
                 });
-                any_parse_error = true;
+                any_read_error = true;
                 continue;
             }
             Err(crate::input::ReadError::Io(e)) => {
@@ -287,7 +290,7 @@ pub fn run(args: LintArgs) -> i32 {
                     file: display,
                     fixed: Vec::new(),
                 });
-                any_parse_error = true;
+                any_read_error = true;
                 continue;
             }
         };
@@ -343,7 +346,7 @@ pub fn run(args: LintArgs) -> i32 {
                     }
                     all_results.push(FileLintResult {
                         findings: vec![FindingJson::preflight(
-                            "E002",
+                            "E010",
                             format!("failed to resolve extends: {e}"),
                             &display,
                         )],
@@ -435,13 +438,21 @@ pub fn run(args: LintArgs) -> i32 {
                             );
                         }
                     }
-                } else if matches!(args.format, LintOutputFormat::Text) {
+                } else {
                     // --dry-run: never write, just show what would change.
-                    let original_normalized = crate::cmd_fmt::normalize_trailing_newline(&content);
-                    println!(
-                        "{}",
-                        crate::cmd_fmt::compute_diff(&original_normalized, &formatted, path)
-                    );
+                    if matches!(args.format, LintOutputFormat::Text) {
+                        let original_normalized =
+                            crate::cmd_fmt::normalize_trailing_newline(&content);
+                        println!(
+                            "{}",
+                            crate::cmd_fmt::compute_diff(&original_normalized, &formatted, path)
+                        );
+                    }
+                    // The report and the exit code describe the document on
+                    // disk, which still holds every finding: nothing was
+                    // written, so nothing was fixed.
+                    findings = pre_fix_findings;
+                    fixed_codes = Vec::new();
                 }
             } else if args.dry_run && matches!(args.format, LintOutputFormat::Text) {
                 println!("{} {display} nothing to fix", "ok".green());
@@ -473,10 +484,19 @@ pub fn run(args: LintArgs) -> i32 {
     }
 
     let report = match args.format {
-        LintOutputFormat::Text => None,
-        LintOutputFormat::Json => serde_json::to_string_pretty(&all_results).ok(),
+        LintOutputFormat::Text => Ok(None),
+        LintOutputFormat::Json => serde_json::to_string_pretty(&all_results).map(Some),
         LintOutputFormat::Sarif => {
-            serde_json::to_string_pretty(&sarif::document(&all_results)).ok()
+            serde_json::to_string_pretty(&sarif::document(&all_results)).map(Some)
+        }
+    };
+    // A report that will not serialize leaves nothing printed and no `--out`
+    // file written, which is a run that could not produce its answer.
+    let report = match report {
+        Ok(report) => report,
+        Err(e) => {
+            eprintln!("{} could not serialize the report: {e}", "error".red());
+            return 2;
         }
     };
     if let Some(report) = report {
@@ -491,7 +511,7 @@ pub fn run(args: LintArgs) -> i32 {
         }
     }
 
-    if any_write_error {
+    if any_write_error || any_read_error {
         2
     } else if any_parse_error || any_errors || (any_warnings && args.fail_on_warnings) {
         1

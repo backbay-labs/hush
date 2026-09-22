@@ -437,7 +437,53 @@ extensions:
     );
     let (_, severity, path) = find(&findings, "L022").expect("L022");
     assert_eq!(severity, "warning");
-    assert_eq!(path, "extensions.origins.profiles.partner.egress.allow[0]");
+    // `profiles` is a sequence, so the profile is addressed by its index --
+    // the spelling the span map and the other origins findings use.
+    assert_eq!(path, "extensions.origins.profiles[0].egress.allow[0]");
+}
+
+/// An origins overlay finding carries a source span, which it can only do
+/// when its path is one the document grammar actually spells.
+#[test]
+fn l022_locates_an_origins_overlay_entry_in_the_document() {
+    let tmp = TempDir::new().unwrap();
+    let policy = write_policy(
+        tmp.path(),
+        "overlay.yaml",
+        r#"hushspec: "0.1.0"
+name: empty-overlay-entry
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block
+extensions:
+  origins:
+    profiles:
+      - id: partner
+        match:
+          provider: slack
+        egress:
+          allow: [""]
+"#,
+    );
+    let output = h2h()
+        .arg("lint")
+        .arg("--format")
+        .arg("json")
+        .arg(&policy)
+        .output()
+        .unwrap();
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let finding = report[0]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["code"] == "L022")
+        .expect("L022");
+    assert!(
+        finding["span"]["line"].is_number(),
+        "the finding must resolve to a span: {finding}"
+    );
 }
 
 #[test]

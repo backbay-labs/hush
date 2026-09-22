@@ -53,8 +53,11 @@ fn validate_invalid_fixture_exits_1() {
         .arg("fixtures/core/invalid/missing-version.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("\u{2717}"))
-        .stdout(predicate::str::contains("error[E001]"));
+        // Every failure line is on stderr, so a caller redirecting it away
+        // never sees some failures and hides others.
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("\u{2717}"))
+        .stderr(predicate::str::contains("error[E001]"));
 }
 
 #[test]
@@ -64,7 +67,7 @@ fn validate_duplicate_patterns() {
         .arg("fixtures/core/invalid/duplicate-pattern-names.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E003]"));
+        .stderr(predicate::str::contains("error[E003]"));
 }
 
 #[test]
@@ -171,8 +174,8 @@ rules:
         .arg(child_path.to_str().unwrap())
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E010]"))
-        .stdout(predicate::str::contains("extends resolution failed"));
+        .stderr(predicate::str::contains("error[E010]"))
+        .stderr(predicate::str::contains("extends resolution failed"));
 }
 
 #[test]
@@ -183,6 +186,19 @@ fn test_egress_fixtures() {
         .assert()
         .success()
         .stdout(predicate::str::contains("5 passed, 0 failed"));
+}
+
+/// A suite argument that names nothing on disk stops the run: silently
+/// dropping it would report a green summary for suites that never ran.
+#[test]
+fn test_reports_a_missing_suite_path() {
+    h2h()
+        .arg("test")
+        .arg("fixtures/core/evaluation/egress.test.yaml")
+        .arg("fixtures/core/evaluation/does-not-exist.test.yaml")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("does-not-exist.test.yaml"));
 }
 
 #[test]
@@ -356,6 +372,52 @@ cases:
         .arg(fixture.to_str().unwrap())
         .assert()
         .success();
+}
+
+/// A failing case is not evidence that the rule paths it touched were
+/// exercised, so it credits no coverage.
+#[test]
+fn test_a_failing_case_credits_no_coverage() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("failing.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.1.0"
+description: "the only case fails"
+policy:
+  hushspec: "0.1.0"
+  name: failing
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "an allowed domain the fixture expects to be denied"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: deny
+"#,
+    )
+    .unwrap();
+
+    let output = h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("json")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["failed"], 1);
+    assert_eq!(
+        report["coverage"]["covered"], 0,
+        "a failing case credits nothing: {report}"
+    );
 }
 
 /// The 0.2 assertions are enforced, not merely parsed.

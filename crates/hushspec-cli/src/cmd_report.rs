@@ -1461,6 +1461,33 @@ fn stable_uuid(key: &str) -> String {
 /// boundary rather than an assessed system.
 fn oscal(report: &Report) -> serde_json::Value {
     let controls = report.controls.as_ref();
+    // A report over a log whose hash chain did not verify is not evidence that
+    // anything happened, so no control is satisfied from it and the document
+    // carries the chain's status where a consumer cannot miss it.
+    let chain_verified = report.chain_verified;
+    let chain_broken = chain_verified == Some(false);
+    let chain_reason = report
+        .chain
+        .as_ref()
+        .and_then(|chain| chain.reason.clone())
+        .unwrap_or_else(|| "the log chain did not verify".to_string());
+    let chain_props = serde_json::json!([{
+        "name": "chain-verified",
+        "ns": "https://hushspec.org/ns/oscal",
+        "value": match chain_verified {
+            Some(true) => "true",
+            Some(false) => "false",
+            None => "not-applicable",
+        },
+    }]);
+    let chain_remarks = if chain_broken {
+        Some(format!(
+            "The hash-linked log chain did not verify ({chain_reason}); no control is reported \
+             satisfied from this window."
+        ))
+    } else {
+        None
+    };
     let start = report
         .window
         .first_receipt
@@ -1496,7 +1523,7 @@ fn oscal(report: &Report) -> serde_json::Value {
                 "methods": ["TEST"],
                 "collected": row.last_seen.clone().unwrap_or_else(|| end.clone()),
             }));
-            findings.push(serde_json::json!({
+            let mut finding = serde_json::json!({
                 "uuid": stable_uuid(&format!("finding:{id}")),
                 "title": id.as_str(),
                 "description": format!(
@@ -1504,29 +1531,50 @@ fn oscal(report: &Report) -> serde_json::Value {
                     row.rule_paths.join(", "),
                     row.evaluated
                 ),
+                "props": chain_props.clone(),
                 "target": {
                     "type": "objective-id",
                     "target-id": row.control_id,
                     "status": {
-                        "state": if row.evaluated > 0 { "satisfied" } else { "not-satisfied" },
+                        "state": if row.evaluated > 0 && !chain_broken {
+                            "satisfied"
+                        } else {
+                            "not-satisfied"
+                        },
                     },
                 },
                 "related-observations": [
                     { "observation-uuid": stable_uuid(&format!("observation:{id}")) },
                 ],
-            }));
+            });
+            if let (Some(remarks), Some(object)) = (&chain_remarks, finding.as_object_mut()) {
+                object.insert(
+                    "remarks".to_string(),
+                    serde_json::Value::String(remarks.clone()),
+                );
+            }
+            findings.push(finding);
         }
+    }
+
+    let mut metadata = serde_json::json!({
+        "title": "HushSpec control evidence",
+        "last-modified": report.generated_at.clone().unwrap_or_else(|| end.clone()),
+        "version": report.report_version,
+        "oscal-version": "1.1.2",
+        "props": chain_props.clone(),
+    });
+    if let (Some(remarks), Some(object)) = (&chain_remarks, metadata.as_object_mut()) {
+        object.insert(
+            "remarks".to_string(),
+            serde_json::Value::String(remarks.clone()),
+        );
     }
 
     serde_json::json!({
         "assessment-results": {
             "uuid": stable_uuid(&format!("assessment:{}:{start}:{end}", report.sources.join(","))),
-            "metadata": {
-                "title": "HushSpec control evidence",
-                "last-modified": report.generated_at.clone().unwrap_or_else(|| end.clone()),
-                "version": report.report_version,
-                "oscal-version": "1.1.2",
-            },
+            "metadata": metadata,
             "import-ap": { "href": "#" },
             "results": [{
                 "uuid": stable_uuid(&format!("result:{start}:{end}")),
@@ -1539,6 +1587,7 @@ fn oscal(report: &Report) -> serde_json::Value {
                     report.totals.by_decision.warn,
                     report.totals.by_decision.deny
                 ),
+                "props": chain_props,
                 "start": start,
                 "end": end,
                 "reviewed-controls": {

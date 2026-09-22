@@ -266,7 +266,10 @@ pub fn run(args: AuditArgs) -> i32 {
     // computed over the resolved `extends` chain, exactly as `h2h lint` does.
     // A chain that will not resolve is reported rather than silently falling
     // back to the leaf, which would invent uncovered rule blocks.
-    let controls = if args.controls {
+    //
+    // `--strict` fails on a control rule path that does not resolve, so it
+    // needs the report whether or not `--controls` asked for it in the output.
+    let controls = if args.controls || args.strict {
         let resolved = if spec.extends.is_some() {
             match hushspec::resolve_from_path_with_builtins(&args.file) {
                 Ok(resolved) => resolved,
@@ -307,7 +310,9 @@ pub fn run(args: AuditArgs) -> i32 {
         expiry_date,
         checks,
         findings,
-        controls,
+        // The matrix is output only where it was asked for; `--strict` reads
+        // it for the rule-path check and leaves the report's shape alone.
+        controls: if args.controls { controls } else { None },
     };
 
     match args.format {

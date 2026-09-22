@@ -945,6 +945,63 @@ fn oscal_is_gated_and_emits_one_result_with_findings() {
     assert_eq!(results[0]["observations"].as_array().unwrap().len(), 6);
 }
 
+/// An OSCAL export over a log whose hash chain did not verify carries the
+/// chain's status and reports no control satisfied: a broken chain is not
+/// evidence that the evaluations it holds ever happened.
+#[test]
+fn oscal_over_a_broken_chain_satisfies_nothing() {
+    let dir = TempDir::new().unwrap();
+    let log = dir.path().join("tampered.jsonl");
+    let good = std::fs::read_to_string(vectors_dir().join("24h.jsonl")).unwrap();
+    let lines: Vec<&str> = good.lines().collect();
+    let tampered = lines[2].replacen("\"allow\"", "\"deny\"", 1);
+    std::fs::write(&log, format!("{}\n{}\n{}\n", lines[0], lines[1], tampered)).unwrap();
+
+    let output = h2h()
+        .current_dir(repo_root())
+        .arg("report")
+        .arg(&log)
+        .args([
+            "--policy",
+            POLICY,
+            "--format",
+            "oscal",
+            "--experimental-oscal",
+            "--unverified",
+            "--now",
+            "2026-09-16T00:00:00Z",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let document: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let metadata = &document["assessment-results"]["metadata"];
+    assert_eq!(metadata["props"][0]["name"], "chain-verified");
+    assert_eq!(metadata["props"][0]["value"], "false");
+    assert!(
+        metadata["remarks"]
+            .as_str()
+            .is_some_and(|remarks| remarks.contains("did not verify")),
+        "the metadata must say the chain did not verify: {metadata}"
+    );
+
+    let results = document["assessment-results"]["results"]
+        .as_array()
+        .unwrap();
+    assert_eq!(results[0]["props"][0]["value"], "false");
+    let findings = results[0]["findings"].as_array().unwrap();
+    assert!(!findings.is_empty());
+    for finding in findings {
+        assert_eq!(
+            finding["target"]["status"]["state"], "not-satisfied",
+            "no control is satisfied from an unverified chain: {finding}"
+        );
+        assert_eq!(finding["props"][0]["value"], "false");
+    }
+}
+
 #[test]
 fn a_block_that_fired_with_no_mapping_is_reported_as_a_gap() {
     let dir = TempDir::new().unwrap();

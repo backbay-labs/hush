@@ -64,41 +64,47 @@ pub fn is_pinned(spec: &HushSpec) -> bool {
 }
 
 /// Whether a merge directory's vectors are expected to be refused.
-#[must_use]
-pub fn expects_reject(dir: &Path) -> bool {
+///
+/// An unreadable or malformed `fixture.yaml` is an error, never an absent
+/// one: a manifest carrying `reject: true` that failed to parse would
+/// otherwise leave the vector expected to be accepted.
+pub fn expects_reject(dir: &Path) -> Result<bool, String> {
     if dir.join(REJECT_MARKER).is_file() {
-        return true;
+        return Ok(true);
     }
-    read_manifest(dir).is_some_and(|manifest| manifest.reject == Some(true))
+    Ok(read_manifest(dir)?.is_some_and(|manifest| manifest.reject == Some(true)))
 }
 
 /// Whether one child is expected to be refused: the directory-wide marking,
 /// or a per-child entry under `cases` (which only some runners honour, so a
 /// portable vector does not rely on it).
-#[must_use]
-pub fn child_expects_reject(dir: &Path, child: &Path) -> bool {
-    if expects_reject(dir) {
-        return true;
+pub fn child_expects_reject(dir: &Path, child: &Path) -> Result<bool, String> {
+    if expects_reject(dir)? {
+        return Ok(true);
     }
-    let Some(manifest) = read_manifest(dir) else {
-        return false;
-    };
-    let Some(cases) = manifest.cases else {
-        return false;
+    let Some(cases) = read_manifest(dir)?.and_then(|manifest| manifest.cases) else {
+        return Ok(false);
     };
     let name = child.file_name().unwrap_or_default().to_string_lossy();
     let stem = child.file_stem().unwrap_or_default().to_string_lossy();
-    [name.as_ref(), stem.as_ref()].iter().any(|key| {
+    Ok([name.as_ref(), stem.as_ref()].iter().any(|key| {
         cases
             .get(*key)
             .is_some_and(|case| case.reject == Some(true))
-    })
+    }))
 }
 
-fn read_manifest(dir: &Path) -> Option<FixtureManifest> {
+/// The directory's `fixture.yaml`, or `None` when it has none.
+fn read_manifest(dir: &Path) -> Result<Option<FixtureManifest>, String> {
     let path = dir.join(FIXTURE_MANIFEST);
-    let text = std::fs::read_to_string(path).ok()?;
-    serde_yaml::from_str(&text).ok()
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    serde_yaml::from_str(&text)
+        .map(Some)
+        .map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// A loader scoped to one merge directory.
@@ -181,7 +187,7 @@ pub fn compose(base: &HushSpec, child_path: &Path) -> Result<HushSpec, String> {
 pub fn describe(dir: &Path) -> Result<serde_json::Value, String> {
     let relative = crate::manifest::relative_fixture_path(dir)
         .ok_or_else(|| format!("{} is not under fixtures/", dir.display()))?;
-    let rejects = expects_reject(dir);
+    let rejects = expects_reject(dir)?;
 
     let mut children = Vec::new();
     let mut names: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -324,12 +330,42 @@ mod tests {
                         dir.display()
                     ),
                     None => assert!(
-                        expects_reject(&dir),
+                        expects_reject(&dir).expect("the merge manifest reads"),
                         "{}: a child with no expected document must be a refusal vector",
                         dir.display()
                     ),
                 }
             }
         }
+    }
+
+    /// A `fixture.yaml` that will not parse could be the one carrying
+    /// `reject: true`, so it is an error rather than an absent manifest that
+    /// leaves the vector expected to be accepted.
+    #[test]
+    fn a_malformed_fixture_manifest_is_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(FIXTURE_MANIFEST),
+            "reject: true\n  bad: [\n",
+        )
+        .expect("write manifest");
+
+        let error = expects_reject(dir.path()).expect_err("a malformed manifest is an error");
+        assert!(error.contains(FIXTURE_MANIFEST), "{error}");
+        assert!(
+            child_expects_reject(dir.path(), Path::new("child-x.yaml")).is_err(),
+            "the per-child marking reads the same manifest"
+        );
+    }
+
+    /// A directory with no `fixture.yaml` is not an error: the manifest is
+    /// optional and the directory-wide marker file stands alone.
+    #[test]
+    fn an_absent_fixture_manifest_is_not_an_error() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(expects_reject(dir.path()), Ok(false));
+        std::fs::write(dir.path().join(REJECT_MARKER), "").expect("write marker");
+        assert_eq!(expects_reject(dir.path()), Ok(true));
     }
 }

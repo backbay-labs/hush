@@ -459,6 +459,20 @@ fn eval_action_json_conflicts_with_field_flags() {
         .args(["--action-json", r#"{"type": "egress"}"#, "--type", "egress"])
         .assert()
         .code(2);
+
+    // `--context` shapes the action too, so it conflicts like the rest rather
+    // than silently overwriting the context inside the document.
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--action-json",
+            r#"{"type": "egress", "context": {"tags": ["a"]}}"#,
+            "--context",
+            r#"{"tags": ["b"]}"#,
+        ])
+        .assert()
+        .code(2);
 }
 
 #[test]

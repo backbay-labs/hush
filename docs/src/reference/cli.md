@@ -159,8 +159,9 @@ h2h lint policy.yaml --dry-run
 | `--fix` | Apply decision-neutral auto-fixes in place. Refused for `-`. |
 | `--dry-run` | Show what `--fix` would change without writing. |
 
-Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, `--out`
-was combined with `--format text`, or `--fix` was pointed at stdin.
+Exit: `0` clean · `1` findings (or a parse error) · `2` a file was missing or
+unreadable, a write failed, the report could not be serialized, `--out` was
+combined with `--format text`, or `--fix` was pointed at stdin.
 
 > `--fix` rewrites the file through the canonical formatter, which does not
 > preserve comments. Run it on documents whose comments you can afford to lose,
@@ -227,7 +228,7 @@ rows.
 |---|---|---|---|
 | `E000` | error | file-unreadable | The path does not exist, or the file is not readable UTF-8. Nothing was linted. |
 | `E001` | error | parse-error | YAML parsing or deserialization failed. HushSpec rejects unknown keys, so a typo in a field name lands here rather than being silently ignored. |
-| `E002` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
+| `E010` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
 | `L001` | warning | empty-rule-block | The block is enabled but declares nothing to allow or deny, so it makes no decision. A block that looks like enforcement and is not is worse than an absent one. |
 | `L002` | warning | overlapping-patterns | Sampled synthetic targets matched two patterns in the same list. Overlap is not itself a defect, but a redundant pair is dead weight. |
 | `L003` | warning | shadowed-exception | A `forbidden_paths` exception re-permits a path that nothing denies, so it has no effect. |
@@ -357,7 +358,7 @@ h2h eval policy.yaml --action-file - --format receipt   # action from stdin
 | `--timeout-ms <MS>` | `code_exec`: requested execution time in milliseconds. |
 | `--context <JSON\|@PATH>` | Runtime context for `when` conditions: inline JSON object or `@PATH` to a YAML/JSON file. |
 | `--posture <STATE>` / `--signal <SIGNAL>` | Posture state and transition signal. |
-| `--action-json <JSON>` / `--action-file <PATH>` | Full action document; `-` reads stdin. |
+| `--action-json <JSON>` / `--action-file <PATH>` | Full action document; `-` reads stdin. Conflicts with every flag above: the document carries the whole action. |
 | `--sentinel <PATH>` | Panic sentinel to consult before evaluating. |
 | `--explain` | Render the trace (implied by `h2h explain`). |
 | `-f, --format <text\|json\|receipt>` | Output format (default `text`); `receipt` emits a full decision receipt. |
@@ -397,8 +398,10 @@ document produces under the fixed inputs of
 
 **Rule coverage.** Every run compares the rule paths each policy under test
 *declares* -- every rule block of the resolved document, plus every named
-secret pattern -- with the paths any case *hit*, through `matched_rule` and
-through each `rule_trace` entry's `rule_path`. A path inside a block credits
+secret pattern -- with the paths a *passing* case hit, through `matched_rule`
+and through each `rule_trace` entry's `rule_path`. A failing case credits
+nothing: coverage says a control was exercised, and a case that failed showed
+the opposite. A path inside a block credits
 the block, so `rules.egress.allow` covers `rules.egress` and
 `rules.secret_patterns.patterns.ssn` covers both the block and that pattern.
 The table prints after the run; `--fail-on-uncovered` turns a gap into a
@@ -416,8 +419,9 @@ under `--fail-on-uncovered`.
 per-policy `declared`, `covered` and `uncovered` paths.
 
 Exit: `0` all cases passed · `1` a case failed, or a declared rule path was
-never hit under `--fail-on-uncovered` · `2` no fixture files were found, a
-fixture did not match the schema, or the policy could not be read.
+never hit under `--fail-on-uncovered` · `2` an argument named neither a file
+nor a directory, no fixture files were found, a fixture did not match the
+schema, or the policy could not be read.
 
 ## `h2h audit`
 
@@ -651,7 +655,7 @@ Exit 0 when the chain verifies, 1 at the first break (reported as `file:line: re
 
 ### `h2h receipts verify <files...>`
 
-Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
+Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived under the posture state the receipt records, and a recorded `origin` or `context` the engine cannot read back fails the check rather than being replayed without it. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
 
 Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
 
@@ -708,7 +712,7 @@ A mapping that names a rule block (`rules.egress`) is evidenced by everything th
 
 `--format json` emits one document validated by [`schemas/hushspec-report.v1.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v1.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
 
-`--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
+`--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. The chain's status travels with the document: `metadata`, the `result` and every `finding` carry a `chain-verified` prop (`true`, `false`, or `not-applicable` when the inputs were not logs), and under `--unverified` over a broken chain the `metadata` and each `finding` carry `remarks` naming the reason and no finding is `satisfied`. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
 
 Exit 0 when the report was produced, 1 for a broken chain without `--unverified`, 2 for unusable inputs or flags.
 

@@ -113,15 +113,18 @@ pub fn run(args: ValidateArgs) -> i32 {
                         println!("  {}", format!("warn: {w}").yellow());
                     }
                 } else {
-                    println!("{} {display}", "\u{2717}".red());
+                    // Every failure line goes to stderr, as the not-found and
+                    // IO failures above do, so `h2h validate policy.yaml
+                    // 2>/dev/null` hides all of them or none.
+                    eprintln!("{} {display}", "\u{2717}".red());
                     for err in &errors {
-                        println!(
+                        eprintln!(
                             "  {}",
                             format!("error[{}]: {}", err.code, err.message).red()
                         );
                     }
                     for w in &warnings {
-                        println!("  {}", format!("warn: {w}").yellow());
+                        eprintln!("  {}", format!("warn: {w}").yellow());
                     }
                 }
             }
