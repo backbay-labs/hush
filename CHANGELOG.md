@@ -16,6 +16,13 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
   its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
   never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
   warnings.
+- `h2h validate` sends every failure line to stderr. Parse and validation errors went to stdout
+  while the not-found and IO errors went to stderr, so redirecting stderr away hid some failures and
+  showed others.
+- `h2h eval --context` conflicts with `--action-json` and `--action-file`, like every other
+  action-shaping flag. It silently overwrote a `context` supplied inside the action document.
+- `h2h diff --fail-on any` gates on any decision that changed, including a pair the classifier does
+  not label in either direction.
 - `h2h audit --strict` checks control rule paths whether or not `--controls` is also passed, as its
   help says. The check only ran when `--controls` built the matrix, so plain `--strict` never
   reported an unresolvable rule path. The matrix itself is still printed only under `--controls`.

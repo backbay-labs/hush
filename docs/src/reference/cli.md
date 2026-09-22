@@ -358,7 +358,7 @@ h2h eval policy.yaml --action-file - --format receipt   # action from stdin
 | `--timeout-ms <MS>` | `code_exec`: requested execution time in milliseconds. |
 | `--context <JSON\|@PATH>` | Runtime context for `when` conditions: inline JSON object or `@PATH` to a YAML/JSON file. |
 | `--posture <STATE>` / `--signal <SIGNAL>` | Posture state and transition signal. |
-| `--action-json <JSON>` / `--action-file <PATH>` | Full action document; `-` reads stdin. |
+| `--action-json <JSON>` / `--action-file <PATH>` | Full action document; `-` reads stdin. Conflicts with every flag above: the document carries the whole action. |
 | `--sentinel <PATH>` | Panic sentinel to consult before evaluating. |
 | `--explain` | Render the trace (implied by `h2h explain`). |
 | `-f, --format <text\|json\|receipt>` | Output format (default `text`); `receipt` emits a full decision receipt. |
