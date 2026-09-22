@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from generator_support import rustfmt
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -58,7 +60,6 @@ def field(
     go_name: str | None = None,
     go_pointer: bool = False,
     emit_empty: bool = False,
-    rs_skip_empty: bool = False,
 ) -> dict:
     return {
         "name": name,
@@ -70,13 +71,9 @@ def field(
         "rs_name": rs_name or name,
         "go_name": go_name or camel(name),
         "go_pointer": go_pointer,
+        # An empty collection that is not emitted is omitted by every SDK's
+        # serializer, so absent and empty round-trip identically across all four.
         "emit_empty": emit_empty,
-        # Rust serializes empty collections by default (the other SDKs omit
-        # them). Set this to skip an empty collection in Rust too, so absent and
-        # empty round-trip identically across all four SDKs. Opt-in rather than
-        # global: flipping it for every list field would change the wire shape
-        # of every existing document.
-        "rs_skip_empty": rs_skip_empty,
     }
 
 
@@ -457,11 +454,11 @@ STRUCTS = [
             field("effective_date", "string"),
             field("expiry_date", "string"),
             field("owner", "string"),
-            field("reviewers", list_of("string"), default=[], emit_empty=False, rs_skip_empty=True),
+            field("reviewers", list_of("string"), default=[], emit_empty=False),
             field("next_review_date", "string"),
-            field("changelog", list_of("ChangelogEntry"), default=[], emit_empty=False, rs_skip_empty=True),
+            field("changelog", list_of("ChangelogEntry"), default=[], emit_empty=False),
             field("supersedes", "string"),
-            field("controls", list_of("ControlMapping"), default=[], emit_empty=False, rs_skip_empty=True),
+            field("controls", list_of("ControlMapping"), default=[], emit_empty=False),
         ],
     },
 ]
@@ -773,7 +770,7 @@ def render_rust() -> str:
                     attrs.append(f'default = "{default_meta[0]}"')
                 elif default == [] or default == {} or default is False or not field_info["required"]:
                     attrs.append("default")
-                    if field_info["rs_skip_empty"] and is_collection(field_info["type"]):
+                    if not field_info["emit_empty"] and is_collection(field_info["type"]):
                         helper = "Vec::is_empty" if field_info["type"]["kind"] == "list" else "BTreeMap::is_empty"
                         attrs.append(f'skip_serializing_if = "{helper}"')
             if attrs:
@@ -791,20 +788,7 @@ def render_rust() -> str:
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        raise SystemExit(
-            "rustfmt is required to generate formatted Rust; install it with "
-            "`rustup component add rustfmt`"
-        )
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2024"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def go_needs_init() -> set[str]:

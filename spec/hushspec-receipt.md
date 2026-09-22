@@ -132,7 +132,7 @@ The heart of the receipt: which controls ran. Entries are appended by the evalua
 | `unknown_action_type` | The action type is unknown or `custom` without a granting capability (Core Section 5). `deny`; no rule blocks follow. |
 | `origin_profile` | The origins extension selected (or failed to select) a profile. `rule_path` names the profile; `deny` when `default_behavior: deny` matched nothing. |
 | `posture_capability` | The posture state did not grant the action's required capability. `deny`. |
-| `default` | Reserved for engines that record an explicit default-allow entry when no block applied. Optional. |
+| `default` | Reserved. An engine MUST NOT emit it in format 0.2: when no block applied the trace ends without an entry, and the receipts under `fixtures/receipts/expected/` that Level 4 requires byte for byte (Core Section 8) carry none. |
 
 6. The twelve rule-block ids are the keys of `rules` exactly (`forbidden_paths`, not `rules.forbidden_paths`). Format 0.1 mixed both spellings.
 

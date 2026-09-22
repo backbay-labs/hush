@@ -47,8 +47,12 @@ SCAN_ROOTS = (
     "library",
     "rulesets",
     "spec",
+    "schemas",
     "docs/src",
     "README.md",
+    "CONTRIBUTING.md",
+    "GOVERNANCE.md",
+    "SECURITY.md",
     "CHANGELOG.md",
     "action.yml",
     "Dockerfile",
@@ -79,7 +83,8 @@ EXCLUDED_SUFFIXES = (".lock", ".sum")
 #:
 #: Identifier-shaped rules stay case-sensitive: lowercased, `p3-03` collides
 #: with ordinary identifiers and version strings, `(d7)` with any parenthesised
-#: label, and `codex`, `finding a`, `fixme` and `hack` with everyday words.
+#: label, and `codex`, `finding a`, `fixme`, `hack`, `todo`, `xxx` and `tbd` with
+#: everyday words.
 #: Everything else is prose, where case carries no signal.
 PATTERNS: tuple[tuple[str, bool], ...] = (
     # Planning-document identifiers. The trailing boundary on the RFC rule is
@@ -107,7 +112,7 @@ PATTERNS: tuple[tuple[str, bool], ...] = (
     (r"\bCodex\b", True),
     (r"review (comment|finding|thread)s?", False),
     (r"\bFinding [A-F0-9]\b", True),
-    (r"\b(FIXME|HACK)\b", True),
+    (r"\b(FIXME|HACK|TODO|XXX|TBD)\b", True),
     # One implementation described as the source of truth for another. Every
     # SDK implements the same specification; none of them defines it.
     (r"Rust reference", False),
@@ -134,12 +139,17 @@ def compiled() -> list[tuple[str, re.Pattern[str]]]:
 
 
 def tracked_files() -> list[str]:
-    """Every tracked path under SCAN_ROOTS, repo-relative with / separators."""
+    """Every tracked path under SCAN_ROOTS, repo-relative with / separators.
+
+    A root that matches no tracked file is an error rather than an empty scan:
+    a renamed directory would otherwise drop out of the check without a trace.
+    """
     result = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "-z", "--", *SCAN_ROOTS],
-        check=True,
+        ["git", "-C", str(ROOT), "ls-files", "-z", "--error-unmatch", "--", *SCAN_ROOTS],
         capture_output=True,
     )
+    if result.returncode != 0:
+        raise SystemExit(result.stderr.decode("utf-8", "replace").strip())
     return sorted(
         path for path in result.stdout.decode("utf-8").split("\0") if path
     )
@@ -194,8 +204,33 @@ def load_allowlist() -> tuple[set[tuple[str, str]], list[str]]:
     return entries, errors
 
 
+#: What a comment line starts with before its words: the marker of every
+#: comment syntax in the tree, or a list bullet inside a docstring.
+COMMENT_LEADER = re.compile(r"^\s*(?://[/!]?|#[:!]?|\*|--|;)?\s*")
+
+
+def wrapped(text: str, following: str | None) -> tuple[str, int] | None:
+    """`text` joined to the words of the next line, and where the join is.
+
+    A phrase the rules name can be wrapped across two comment lines; joining
+    each line to the next lets a rule see it whole. None when there is no next
+    line or it carries no words.
+    """
+    if following is None:
+        return None
+    tail = COMMENT_LEADER.sub("", following, count=1).strip()
+    if not tail:
+        return None
+    head = text.rstrip()
+    return f"{head} {tail}", len(head)
+
+
 def scan() -> tuple[list[tuple[str, int, str, str]], set[tuple[str, str]]]:
-    """Return every (path, line number, pattern, text) hit and the rules used."""
+    """Return every (path, line number, pattern, text) hit and the rules used.
+
+    A hit that only appears once a line is joined to the next is reported on
+    the first of the two lines with the joined text.
+    """
     rules = compiled()
     hits: list[tuple[str, int, str, str]] = []
     used: set[tuple[str, str]] = set()
@@ -205,10 +240,20 @@ def scan() -> tuple[list[tuple[str, int, str, str]], set[tuple[str, str]]]:
         lines = read_text(ROOT / relative)
         if lines is None:
             continue
-        for number, text in enumerate(lines, 1):
+        for index, text in enumerate(lines):
+            number = index + 1
+            following = lines[index + 1] if index + 1 < len(lines) else None
             for source, pattern in rules:
                 if pattern.search(text):
                     hits.append((relative, number, source, text.strip()))
+                    used.add((relative, source))
+                    continue
+                joined = wrapped(text, following)
+                if joined is None:
+                    continue
+                joined_text, boundary = joined
+                if any(match.start() <= boundary for match in pattern.finditer(joined_text)):
+                    hits.append((relative, number, source, joined_text.strip()))
                     used.add((relative, source))
     return hits, used
 
@@ -227,7 +272,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="report planning references and fail if any are found (the default)",
+        help="the only mode, named so every check under scripts/ takes the same flag",
     )
     parser.parse_args()
 

@@ -6,51 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+
+from generator_support import ROOT, all_builtin_names, builtin_yaml
 
 
-ROOT = Path(__file__).resolve().parent.parent
-RULESETS_DIR = ROOT / "rulesets"
 OUTPUT = ROOT / "packages" / "go" / "hushspec" / "builtins.go"
-
-BUILTIN_NAMES = [
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-]
-
-
-LIBRARY_DIR = ROOT / "library"
-
-
-def library_names() -> list[str]:
-    """Every vertical-library policy, as `library/<vertical>/<name>`.
-
-    The library ships as built-ins alongside `rulesets/` so that
-    `extends: "builtin:library/healthcare/hipaa-base"` resolves with no file
-    system, in every SDK. Discovered rather than listed, so adding a policy to
-    `library/` is one commit; the `library/` prefix keeps the existing
-    `rulesets/` names unchanged.
-    """
-    return sorted(
-        f"library/{path.parent.name}/{path.stem}"
-        for path in LIBRARY_DIR.glob("*/*.yaml")
-    )
-
-
-def all_builtin_names() -> list[str]:
-    """`rulesets/` first (historical order), then the library."""
-    return BUILTIN_NAMES + library_names()
-
-
-def builtin_yaml(name: str) -> str:
-    """The canonical YAML for a built-in name."""
-    if name.startswith("library/"):
-        return (ROOT / f"{name}.yaml").read_text()
-    return (RULESETS_DIR / f"{name}.yaml").read_text()
 
 
 def render() -> str:
@@ -64,7 +24,10 @@ def render() -> str:
         "",
         "package hushspec",
         "",
-        'import "strings"',
+        "import (",
+        '\t"fmt"',
+        '\t"strings"',
+        ")",
         "",
         "var builtinRulesets = map[string]string{",
     ]
@@ -103,7 +66,9 @@ def render() -> str:
             "}",
             "",
             "// LoadBuiltin parses the built-in ruleset for name (with or without the",
-            '// "builtin:" prefix) and reports whether the name was found.',
+            '// "builtin:" prefix) and reports whether the name was found. An embedded',
+            "// ruleset that does not parse panics: it is generated from rulesets/, so a",
+            "// failure there is a broken build, not an unknown built-in.",
             "func LoadBuiltin(name string) (*HushSpec, bool) {",
             '\tresolved := strings.TrimPrefix(name, "builtin:")',
             "\tyaml, ok := builtinRulesets[resolved]",
@@ -112,7 +77,7 @@ def render() -> str:
             "\t}",
             "\tspec, err := Parse(yaml)",
             "\tif err != nil {",
-            "\t\treturn nil, false",
+            '\t\tpanic(fmt.Sprintf("hushspec: built-in ruleset %q does not parse: %v", resolved, err))',
             "\t}",
             "\treturn spec, true",
             "}",

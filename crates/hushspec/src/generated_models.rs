@@ -141,9 +141,9 @@ pub struct ForbiddenPathsRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exceptions: Vec<String>,
 }
 
@@ -154,11 +154,11 @@ pub struct PathAllowlistRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub read: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub write: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patch: Vec<String>,
 }
 
@@ -169,9 +169,9 @@ pub struct EgressRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block: Vec<String>,
     #[serde(default = "default_block")]
     pub default: DefaultAction,
@@ -194,9 +194,9 @@ pub struct SecretPatternsRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<SecretPattern>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skip_paths: Vec<String>,
 }
 
@@ -211,7 +211,7 @@ pub struct PatchIntegrityRule {
     pub max_additions: usize,
     #[serde(default = "default_500")]
     pub max_deletions: usize,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forbidden_patterns: Vec<String>,
     #[serde(default)]
     pub require_balance: bool,
@@ -226,7 +226,7 @@ pub struct ShellCommandsRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub forbidden_patterns: Vec<String>,
 }
 
@@ -237,11 +237,11 @@ pub struct ToolAccessRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub require_confirmation: Vec<String>,
     #[serde(default = "default_allow")]
     pub default: DefaultAction,
@@ -258,7 +258,7 @@ pub struct ComputerUseRule {
     pub when: Option<Condition>,
     #[serde(default = "default_guardrail")]
     pub mode: ComputerUseMode,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_actions: Vec<String>,
 }
 
@@ -286,7 +286,7 @@ pub struct InputInjectionRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_types: Vec<String>,
     #[serde(default)]
     pub require_postcondition_probe: bool,
@@ -299,15 +299,15 @@ pub struct BrowserAutomationRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_domains: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked_domains: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_verbs: Vec<String>,
     #[serde(default = "default_true")]
     pub credential_detection: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_credential_patterns: Vec<String>,
 }
 
@@ -318,9 +318,9 @@ pub struct CodeExecutionRule {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<Condition>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub language_allowlist: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub module_denylist: Vec<String>,
     #[serde(default)]
     pub network_access: bool,
@@ -354,9 +354,9 @@ pub struct PostureExtension {
 pub struct PostureState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub budgets: BTreeMap<String, i64>,
 }
 
@@ -375,7 +375,7 @@ pub struct PostureTransition {
 pub struct OriginsExtension {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_behavior: Option<OriginDefaultBehavior>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<OriginProfile>,
 }
 
@@ -404,11 +404,11 @@ pub struct OriginProfile {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OriginToolAccessOverlay {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub require_confirmation: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<DefaultAction>,
@@ -419,9 +419,9 @@ pub struct OriginToolAccessOverlay {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OriginEgressOverlay {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allow: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<DefaultAction>,
@@ -442,7 +442,7 @@ pub struct OriginMatch {
     pub visibility: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_participants: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitivity: Option<String>,
@@ -477,7 +477,7 @@ pub struct OriginBudgets {
 pub struct BridgePolicy {
     #[serde(default)]
     pub allow_cross_origin: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_targets: Vec<BridgeTarget>,
     #[serde(default)]
     pub require_approval: bool,
@@ -490,7 +490,7 @@ pub struct BridgeTarget {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space_type: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visibility: Option<String>,

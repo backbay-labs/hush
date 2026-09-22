@@ -14,10 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from generator_support import rustfmt
 
 import yaml
 
@@ -149,24 +149,7 @@ def render() -> str:
     # Run the output through rustfmt so `cargo fmt --all` and this generator
     # agree: otherwise a long framework name or URL wraps under cargo fmt and
     # `--check` reports the committed file as permanently stale.
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        raise SystemExit(
-            "rustfmt is not on PATH, and generated_frameworks.rs is committed as rustfmt "
-            "output. Generating without it would write a file that `cargo fmt` "
-            "immediately reformats, which this script's --check then reports "
-            "as out of date forever. Install it with `rustup component add "
-            "rustfmt`."
-        )
-
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2024"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def main() -> int:

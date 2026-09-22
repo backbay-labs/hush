@@ -52,8 +52,7 @@ const VERSION_POOL: &[&str] = &["0.1.0", "0.2.0", "0.2.3"];
 
 /// `extends` targets. Only `builtin:` references are generated: they resolve
 /// identically in all four SDKs from embedded YAML, with no filesystem or
-/// network dependency, so the harnesses can resolve them the same way the
-/// oracle does.
+/// network dependency, so every harness resolves them the same way.
 const BUILTIN_EXTENDS_POOL: &[&str] = &[
     "builtin:default",
     "builtin:strict",

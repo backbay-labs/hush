@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from generator_support import rustfmt
+
 
 ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = ROOT / "schemas"
@@ -234,21 +236,7 @@ def render_rust() -> str:
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        raise SystemExit(
-            "rustfmt is required to generate formatted Rust; install it with "
-            "`rustup component add rustfmt`"
-        )
-
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2024"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def go_name(name: str) -> str:

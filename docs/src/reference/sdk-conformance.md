@@ -54,7 +54,7 @@ Every runner walks the same sixteen directories -- `{core,posture,origins,detect
 
 | Vector family | Level | Rust | TypeScript | Python | Go |
 |---|:--:|---|---|---|---|
-| `fixtures/core/hash/` (15) | 4 | `crates/hushspec/tests/canonical_vectors.rs` | `tests/canonical-vectors.test.ts` | `tests/test_canonical_vectors.py` | `canonical_vectors_test.go` |
+| `fixtures/core/hash/` (16) | 4 | `crates/hushspec/tests/canonical_vectors.rs` | `tests/canonical-vectors.test.ts` | `tests/test_canonical_vectors.py` | `canonical_vectors_test.go` |
 | `fixtures/core/resolve/` | 4 | `crates/hushspec/tests/resolve_vectors.rs` | `tests/resolve-vectors.test.ts` | `tests/test_resolve_vectors.py` | `resolve_vectors_test.go` |
 | `fixtures/receipts/{valid,invalid}/` | 4 | `crates/hushspec/tests/receipt.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_vectors_test.go` |
 | `fixtures/receipts/expected/` | 4 | `crates/hushspec/tests/receipt_expected.rs` | `tests/receipt-vectors.test.ts` | `tests/test_receipt_vectors.py` | `receipt_expected_test.go` |
@@ -62,7 +62,7 @@ Every runner walks the same sixteen directories -- `{core,posture,origins,detect
 | Verify-on-load, `receipt.policy.signature` | 5 | `crates/hushspec/src/{resolve,guard}.rs` tests | `tests/verify-load.test.ts`, `tests/guard-evidence.test.ts` | `tests/test_verify_on_load.py`, `tests/test_guard_evidence.py` | `resolve_verify_test.go`, `guard_test.go` |
 | `fixtures/log/{valid,invalid}/`, break identified by line | 5 | `crates/hushspec/tests/log_chain.rs` | `tests/log.test.ts` | `tests/test_log.py` | `log_test.go` |
 | `fixtures/receipts/signed/{valid,invalid}/` | 5 | `crates/hushspec/tests/receipt_signing.rs` | `tests/receipt-signing.test.ts` | `tests/test_receipt_signing.py` | `receipt_vectors_test.go` |
-| `fixtures/bundle/vectors.yaml` (8) | 5 | `crates/hushspec/tests/bundle_vectors.rs` | `tests/bundle-vectors.test.ts` | `tests/test_bundle_vectors.py` | `bundle_vectors_test.go` |
+| `fixtures/bundle/vectors.yaml` (10) | 5 | `crates/hushspec/tests/bundle_vectors.rs` | `tests/bundle-vectors.test.ts` | `tests/test_bundle_vectors.py` | `bundle_vectors_test.go` |
 
 The invalid-log vectors are named `<what>-line-<n>.jsonl`, and each runner
 parses `n` out of the file name and asserts the break is reported on exactly
@@ -99,7 +99,7 @@ The main CI workflow publishes the evidence this table relies on:
 - [`generated-sources`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) checks that schema-derived validator contracts, generated Rust/Python/Go model code, the embedded CLI and testkit schemas, and `fixtures/MANIFEST.json` are all up to date.
 - [`rust`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), [`typescript`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), [`python`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), and [`go`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) run each SDK's native unit and package tests, including every evidence-chain vector listed above.
 - [`shared-fixtures`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs the same conformance fixture corpus against Rust, TypeScript, Python, and Go.
-- [`cross-sdk-roundtrip`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) round-trips the shared corpus through all four SDKs and compares the normalized outputs (`scripts/check_cross_sdk_roundtrip.py`).
+- [`cross-sdk-roundtrip`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) parses the shared corpus with all four SDKs and compares each document's canonical form byte for byte (`scripts/check_cross_sdk_roundtrip.py`).
 - [`differential-fuzz`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the Rust oracle on decision, `matched_rule`, `reason`, recorded rule trace, canonical `content_hash` **and** receipt hash.
 - [`smoke-snippets`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) executes the marked README and getting-started examples directly from the markdown source.
 - [`docs`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) builds the mdBook site.

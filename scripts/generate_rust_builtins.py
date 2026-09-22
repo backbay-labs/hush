@@ -4,60 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import shutil
-import subprocess
 import sys
-from pathlib import Path
+
+from generator_support import ROOT, PANIC_NAME, all_builtin_names, builtin_yaml, rustfmt
 
 
-ROOT = Path(__file__).resolve().parent.parent
-RULESETS_DIR = ROOT / "rulesets"
 OUTPUT = ROOT / "crates" / "hushspec" / "src" / "generated_builtins.rs"
 
-BUILTIN_NAMES = [
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-]
 
-
-LIBRARY_DIR = ROOT / "library"
-
-
-def library_names() -> list[str]:
-    """Every vertical-library policy, as `library/<vertical>/<name>`.
-
-    The library ships as built-ins alongside `rulesets/` so that
-    `extends: "builtin:library/healthcare/hipaa-base"` resolves with no file
-    system, in every SDK. Discovered rather than listed, so adding a policy to
-    `library/` is one commit; the `library/` prefix keeps the existing
-    `rulesets/` names unchanged.
-    """
-    return sorted(
-        f"library/{path.parent.name}/{path.stem}"
-        for path in LIBRARY_DIR.glob("*/*.yaml")
-    )
-
-
-def all_builtin_names() -> list[str]:
-    """`rulesets/` first (historical order), then the library."""
-    return BUILTIN_NAMES + library_names()
-
-
-def builtin_yaml(name: str) -> str:
-    """The canonical YAML for a built-in name."""
-    if name.startswith("library/"):
-        return (ROOT / f"{name}.yaml").read_text()
-    return (RULESETS_DIR / f"{name}.yaml").read_text()
-
-
-# Embedded alongside the built-ins but deliberately *not* in BUILTIN_NAMES:
-# `extends: builtin:panic` is not a thing, the panic policy is only reachable
-# through the emergency kill switch.
-PANIC_NAME = "panic"
 
 
 def rust_string_literal(value: str) -> str:
@@ -145,24 +99,7 @@ def render() -> str:
     # where rustfmt starts breaking a tuple across lines; asking rustfmt rather
     # than reimplementing its heuristic keeps `cargo fmt --check` and this
     # generator's `--check` from disagreeing about the committed bytes.
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        raise SystemExit(
-            "rustfmt is not on PATH, and generated_builtins.rs is committed as rustfmt "
-            "output. Generating without it would write a file that `cargo fmt` "
-            "immediately reformats, which this script's --check then reports "
-            "as out of date forever. Install it with `rustup component add "
-            "rustfmt`."
-        )
-
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2024"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def main() -> int:

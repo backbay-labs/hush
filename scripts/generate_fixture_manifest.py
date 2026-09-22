@@ -29,6 +29,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -101,14 +102,27 @@ def module_of(relative: str) -> str:
 
 
 def iter_files() -> list[Path]:
-    files = [path for path in FIXTURES.rglob("*") if path.is_file()]
+    """Every file under fixtures/ that git tracks or would track.
+
+    The index plus untracked files no ignore rule covers, so a build product
+    or scratch file left in the tree cannot be hashed into the manifest.
+    """
+    result = subprocess.run(
+        [
+            "git", "-C", str(ROOT), "ls-files", "-z", "--cached", "--others",
+            "--exclude-standard", "--", FIXTURES.relative_to(ROOT).as_posix(),
+        ],
+        check=True,
+        capture_output=True,
+    )
     kept = []
-    for path in files:
-        relative = path.relative_to(ROOT).as_posix()
-        if relative in EXCLUDED_PATHS:
+    for relative in sorted(set(result.stdout.decode("utf-8").split("\0"))):
+        if not relative or relative in EXCLUDED_PATHS:
             continue
-        kept.append(path)
-    return sorted(kept, key=lambda path: path.relative_to(ROOT).as_posix())
+        path = ROOT / relative
+        if path.is_file():
+            kept.append(path)
+    return kept
 
 
 def build(generated_at: str) -> dict:

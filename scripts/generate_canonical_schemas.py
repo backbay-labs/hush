@@ -18,10 +18,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from generator_support import rustfmt
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,21 +110,7 @@ def render() -> str:
     # Run the output through rustfmt, exactly as generate_cli_schemas.py does.
     # Without this, `cargo fmt --all` reformats the committed file and
     # `--check` then reports it as permanently stale.
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        raise SystemExit(
-            "rustfmt is required to generate formatted Rust; install it with "
-            "`rustup component add rustfmt`"
-        )
-
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2024"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def main(argv: list[str] | None = None) -> int:

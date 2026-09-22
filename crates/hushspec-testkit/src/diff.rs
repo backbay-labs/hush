@@ -56,7 +56,7 @@ pub struct NormalizedResult {
     ///
     /// Defaulted rather than required so an older harness's report still
     /// deserializes; its omitted trace then compares as empty against the
-    /// oracle's populated one, which is exactly the `RuleTrace` divergence a
+    /// bundle's expected one, which is exactly the `RuleTrace` divergence a
     /// stale harness should produce rather than silently pass.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rule_trace: Vec<NormalizedRuleEvaluation>,
@@ -253,7 +253,7 @@ pub fn policy_identity_receipt(
 }
 
 /// The receipt one case of a bundle records: the same audited evaluation the
-/// oracle runs, for a caller that holds the policy and action rather than a
+/// generator runs, for a caller that holds the policy and action rather than a
 /// bundle (the fixture emitter).
 ///
 /// # Errors

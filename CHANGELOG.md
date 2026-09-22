@@ -701,6 +701,17 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `observedTimeUnixNano` and `severityNumber`; Go's metrics count only load failures as failed
   loads.
 
+- The emergency panic policy is generated from `rulesets/panic.yaml` for every SDK
+  (`PANIC_POLICY_YAML` in the generated built-ins module). The TypeScript copy had drifted to
+  `hushspec: "1.0.0"`, so a receipt emitted under panic mode named a different policy content
+  hash there than in the other SDKs.
+- Rust's serializer omits an empty collection the document did not write, as the other three
+  SDKs do, so `HushSpec::to_yaml` and the typed model's JSON no longer differ from theirs by
+  `[]` entries. The canonical form and content hash are unchanged.
+- A built-in ruleset that does not parse is reported, never mistaken for an unknown name: the
+  TypeScript `loadBuiltin` throws and the Go `LoadBuiltin` panics, matching Python; an embedded
+  document is generated from `rulesets/`, so a failure there is a broken build.
+
 **CLI and tooling**
 
 - `h2h report` runs the receipt schema pass `h2h log verify` runs and takes `--keyring`,
@@ -720,6 +731,16 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   the shell script.
 - The `h2h` build script watches the branch ref and `packed-refs` as well as `.git/HEAD`,
   including from a linked worktree, so `h2h version` reports the current commit.
+
+- `scripts/check_cross_sdk_roundtrip.py` compares each document's own canonical form byte for
+  byte across the four SDKs, and re-parses that form, instead of projecting every SDK's output
+  through the Python model, which could not report a key one SDK emits and another omits.
+- `scripts/check_comment_hygiene.py` reads a phrase wrapped across two comment lines, scans
+  `schemas/` and the top-level contributor documents, refuses a scan root that matches no tracked
+  file, and counts `TODO`, `XXX` and `TBD` as task markers; its own exemptions are listed rule by
+  rule. `scripts/generate_fixture_manifest.py` enumerates fixtures through git so an ignored file
+  cannot be hashed into the manifest, and the Rust generators report rustfmt's own error instead
+  of a bare exit status.
 
 **Library**
 

@@ -124,7 +124,7 @@ The machine-readable copy of this table is `HEURISTIC_FAMILIES` in the reference
 - A family contributes its weight **once** when any of its patterns matches (or, for `structural_uppercase`, when the signal is present), regardless of how many patterns or occurrences match.
 - The integer score is the sum of contributing weights, clamped to `100`.
 - If the integer score is below `heuristics.min_score`, it is reported as `0` with no contributing families.
-- The receipt's `detection_trace` entry carries `detector_id` `heuristic_injection@1`, `category` `prompt_injection`, and `score` = integer score divided by 100 (so `40` is recorded as `0.4`); `level` follows the floors of Section 3.2 as applied to normalized scores (`0` → `none`, below `0.25` → `low`, then `suspicious` / `high` / `critical` at `0.25` / `0.5` / `0.75`), and `matched` is true when the score reached `warn_at_or_above`.
+- The receipt's `detection_trace` entry carries `detector_id` `heuristic_injection@1`, `category` `prompt_injection`, and `score` = integer score divided by 100 (so `40` is recorded as `0.4`); `level` follows the floors of Section 9.3 as applied to normalized scores (`0` → `none`, below `0.25` → `low`, then `suspicious` / `high` / `critical` at `0.25` / `0.5` / `0.75`), and `matched` is true when the score reached `warn_at_or_above`.
 - Threshold semantics are those of Section 3.3, applied to each prompt-injection detector independently; the strictest contribution across detectors escalates the decision, and detection never weakens a policy decision.
 
 Integer arithmetic throughout: no floating-point accumulation, so the score is bit-identical across languages.

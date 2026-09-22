@@ -825,7 +825,7 @@ Conformant parsers and validators MUST enforce the following:
 
 2. **Unknown field rejection.** Documents containing fields not defined in this specification at any nesting level MUST be rejected. This is the fail-closed principle applied to schema validation.
 
-3. **Version field.** The `hushspec` field MUST be present, MUST be a string matching `^0\.\d+\.\d+$`, and MUST name a supported minor version (Section 2.2).
+3. **Version field.** The `hushspec` field MUST be present, MUST be a string in the `MAJOR.MINOR.PATCH` form of Section 2.2, and MUST name a supported minor version (Section 2.2).
 
 4. **Type correctness.** All fields MUST conform to their declared types. A string where a boolean is expected MUST cause rejection.
 

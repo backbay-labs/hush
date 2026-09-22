@@ -162,7 +162,7 @@ def policy_identity_hash(spec, audit: dict, clock: datetime) -> str:
     trace. Hashed with this SDK's own receipt canonicalizer, so a disagreement
     means the policy identity our receipts would record -- name, version,
     spec_version, content_hash, extends_chain, signature -- differs from the
-    oracle's, independently of any one action.
+    bundle's expected value, independently of any one action.
     """
     return receipt_hash(
         DecisionReceipt(
@@ -228,9 +228,9 @@ def main() -> int:
         if not ok:
             rejection = {"status": "rejected", "phase": "parse", "message": str(parsed)}
         else:
-            # parse -> resolve -> validate -> evaluate, the same order the Rust
-            # oracle uses. The generator only emits `builtin:` references, which
-            # the default composite loader serves from the SDK's embedded rulesets.
+            # parse -> resolve -> validate -> evaluate, the order every SDK applies.
+            # The generator only emits `builtin:` references, which the default
+            # composite loader serves from the SDK's embedded rulesets.
             if parsed.extends is not None:
                 resolved_ok, resolved = resolve(parsed)
                 if not resolved_ok:

@@ -28,6 +28,7 @@
 import type { HushSpec } from './schema.js';
 import type { Condition, RuntimeContext } from './conditions.js';
 import { parseOrThrow } from './parse.js';
+import { PANIC_POLICY_YAML } from './builtin.js';
 import { compiledFor } from './compiled.js';
 
 /** `matched_rule` reported when the action type is unknown to the specification. */
@@ -562,46 +563,6 @@ export function punycodeEncode(input: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 let panicActive = false;
-const PANIC_POLICY_YAML = `hushspec: "1.0.0"
-name: "__hushspec_panic__"
-description: "Emergency deny-all policy. Activated by panic mode."
-
-rules:
-  forbidden_paths:
-    enabled: true
-    patterns:
-      - "**"
-    exceptions: []
-
-  egress:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    default: block
-
-  shell_commands:
-    enabled: true
-    forbidden_patterns:
-      - ".*"
-
-  tool_access:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    require_confirmation: []
-    default: block
-
-  computer_use:
-    enabled: true
-    mode: fail_closed
-    allowed_actions: []
-
-  input_injection:
-    enabled: true
-    allowed_types: []
-`;
 
 export function activatePanic(): void {
   panicActive = true;

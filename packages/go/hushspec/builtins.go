@@ -2,7 +2,10 @@
 
 package hushspec
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 var builtinRulesets = map[string]string{
 	"default":                         "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json\nhushspec: \"0.1.0\"\nname: default\ndescription: Default security rules for AI agent execution\n\nrules:\n  forbidden_paths:\n    patterns:\n      # SSH keys\n      - \"**/.ssh/**\"\n      - \"**/id_rsa*\"\n      - \"**/id_ed25519*\"\n      - \"**/id_ecdsa*\"\n      # Cloud/infra credentials\n      - \"**/.aws/**\"\n      - \"**/.gnupg/**\"\n      - \"**/.kube/**\"\n      - \"**/.docker/**\"\n      - \"**/.npmrc\"\n      # Environment files\n      - \"**/.env\"\n      - \"**/.env.*\"\n      # Git credentials\n      - \"**/.git-credentials\"\n      - \"**/.gitconfig\"\n      # Password stores\n      - \"**/.password-store/**\"\n      - \"**/pass/**\"\n      - \"**/.1password/**\"\n      # Unix system paths\n      - \"/etc/shadow\"\n      - \"/etc/passwd\"\n      - \"/etc/sudoers\"\n      # Windows credentials and registry hives\n      - \"**/AppData/Roaming/Microsoft/Credentials/**\"\n      - \"**/AppData/Local/Microsoft/Credentials/**\"\n      - \"**/AppData/Roaming/Microsoft/Vault/**\"\n      - \"**/NTUSER.DAT\"\n      - \"**/Windows/System32/config/SAM\"\n      - \"**/Windows/System32/config/SECURITY\"\n      - \"**/Windows/System32/config/SYSTEM\"\n    exceptions: []\n\n  egress:\n    allow:\n      - \"*.openai.com\"\n      - \"*.anthropic.com\"\n      - \"api.github.com\"\n      - \"github.com\"\n      - \"*.githubusercontent.com\"\n      - \"*.npmjs.org\"\n      - \"pypi.org\"\n      - \"files.pythonhosted.org\"\n      - \"crates.io\"\n      - \"static.crates.io\"\n    block: []\n    default: block\n\n  secret_patterns:\n    patterns:\n      - name: aws_access_key\n        pattern: \"(AKIA|ASIA)[0-9A-Z]{16}\"\n        severity: critical\n      - name: github_token\n        pattern: \"gh[opsur]_[A-Za-z0-9]{36}\"\n        severity: critical\n      - name: github_fine_grained_pat\n        pattern: \"github_pat_[0-9a-zA-Z_]{50,}\"\n        severity: critical\n      - name: openai_key\n        pattern: \"sk-[A-Za-z0-9]{48}\"\n        severity: critical\n      - name: openai_project_key\n        pattern: \"sk-proj-[A-Za-z0-9_]{20,}\"\n        severity: critical\n      - name: private_key\n        pattern: \"-----BEGIN[ \\\\t\\\\n\\\\r\\\\f]+(RSA[ \\\\t\\\\n\\\\r\\\\f]+)?PRIVATE[ \\\\t\\\\n\\\\r\\\\f]+KEY-----\"\n        severity: critical\n    skip_paths:\n      - \"**/test/**\"\n      - \"**/tests/**\"\n      - \"**/*_test.*\"\n      - \"**/*.test.*\"\n\n  patch_integrity:\n    max_additions: 1000\n    max_deletions: 500\n    require_balance: false\n    max_imbalance_ratio: 10.0\n    forbidden_patterns:\n      - \"(?i)disable[ \\\\t\\\\n\\\\r\\\\f_\\\\-]?(security|auth|ssl|tls)\"\n      - \"(?i)skip[ \\\\t\\\\n\\\\r\\\\f_\\\\-]?(verify|validation|check)\"\n      - \"(?i)rm[ \\\\t\\\\n\\\\r\\\\f]+-rf[ \\\\t\\\\n\\\\r\\\\f]+/\"\n      - \"(?i)chmod[ \\\\t\\\\n\\\\r\\\\f]+777\"\n\n  shell_commands:\n    forbidden_patterns:\n      - \"(?i)rm[ \\\\t\\\\n\\\\r\\\\f]+-rf[ \\\\t\\\\n\\\\r\\\\f]+/\"\n      - \"curl.*\\\\|.*sh\"\n      - \"wget.*\\\\|.*bash\"\n      - \"(?i)mkfs\"\n      - \"(?i)dd[ \\\\t\\\\n\\\\r\\\\f]+if=\"\n      - \"(?i)chmod[ \\\\t\\\\n\\\\r\\\\f]+777\"\n      - \"(?i)>[ \\\\t\\\\n\\\\r\\\\f]*/dev/sd\"\n\n  tool_access:\n    allow: []\n    block:\n      - shell_exec\n      - run_command\n      - raw_file_write\n      - raw_file_delete\n    require_confirmation:\n      - file_write\n      - file_delete\n      - git_push\n    default: allow\n    max_args_size: 1048576\n",
@@ -42,7 +45,9 @@ var BuiltinNames = []string{
 }
 
 // LoadBuiltin parses the built-in ruleset for name (with or without the
-// "builtin:" prefix) and reports whether the name was found.
+// "builtin:" prefix) and reports whether the name was found. An embedded
+// ruleset that does not parse panics: it is generated from rulesets/, so a
+// failure there is a broken build, not an unknown built-in.
 func LoadBuiltin(name string) (*HushSpec, bool) {
 	resolved := strings.TrimPrefix(name, "builtin:")
 	yaml, ok := builtinRulesets[resolved]
@@ -51,7 +56,7 @@ func LoadBuiltin(name string) (*HushSpec, bool) {
 	}
 	spec, err := Parse(yaml)
 	if err != nil {
-		return nil, false
+		panic(fmt.Sprintf("hushspec: built-in ruleset %q does not parse: %v", resolved, err))
 	}
 	return spec, true
 }

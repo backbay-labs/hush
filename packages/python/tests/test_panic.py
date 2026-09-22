@@ -102,11 +102,11 @@ class TestPanicPolicy:
 
 
 class TestPanicPolicyDriftGuard:
-    """Drift guard: PANIC_POLICY_YAML (evaluate.py) must stay in lockstep with
-    rulesets/panic.yaml. panic_policy() must deny every governed action type
-    on its own rules -- independent of the global panic-active short-circuit
-    tested above -- so a future edit that lets one of the two YAML copies
-    drift from the other is caught here rather than only in production.
+    """panic_policy() (PANIC_POLICY_YAML in builtins.py, generated from
+    rulesets/panic.yaml) must deny every governed action type on its own
+    rules -- independent of the global panic-active short-circuit tested
+    above -- so a block dropped from the emergency policy is caught here
+    rather than only in production.
     """
 
     GOVERNED_ACTIONS = [

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Compare normalized HushSpec outputs across Rust, TypeScript, Python, and Go."""
+"""Compare the canonical form of the shared corpus across Rust, TypeScript, Python and Go.
+
+Each SDK parses every document and prints its own canonical form (canonical
+spec 3); the four strings must be byte-identical. Nothing is projected through
+a model on this side, so a key one SDK emits and another omits is a divergence.
+"""
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 import tempfile
@@ -11,9 +15,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "packages" / "python"))
-
-from hushspec import HushSpec  # noqa: E402
 
 
 SDKS = {
@@ -31,7 +32,7 @@ def main() -> int:
     for path in corpus:
         baseline = None
         for sdk in SDKS:
-            normalized = canonicalize(run_sdk(sdk, path))
+            normalized = run_sdk(sdk, path)
             if baseline is None:
                 baseline = normalized
             elif normalized != baseline:
@@ -44,9 +45,9 @@ def main() -> int:
             # JSON is a YAML 1.2 document with every string quoted, so the
             # round trip cannot depend on how a YAML 1.1 dumper spells a scalar
             # such as "-08", which the SDKs' YAML 1.2 parsers read as a number.
-            roundtrip_path.write_text(json.dumps(baseline, indent=2) + "\n")
+            roundtrip_path.write_text(baseline + "\n")
             for sdk in SDKS:
-                normalized = canonicalize(run_sdk(sdk, roundtrip_path))
+                normalized = run_sdk(sdk, roundtrip_path)
                 if normalized != baseline:
                     raise SystemExit(
                         f"{path.relative_to(ROOT)} failed roundtrip equivalence in {sdk}"
@@ -92,11 +93,7 @@ def run_sdk(name: str, path: Path) -> dict:
     if name == "go":
         kwargs["cwd"] = ROOT / "packages" / "go"
     result = subprocess.run(cmd, **kwargs)
-    return json.loads(result.stdout)
-
-
-def canonicalize(raw: dict) -> dict:
-    return HushSpec.from_dict(raw).to_dict()
+    return result.stdout.strip()
 
 
 if __name__ == "__main__":

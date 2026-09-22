@@ -95,8 +95,9 @@ codes:
   - code: E011
     summary: "Invalid governance date"
     description: >-
-      A `metadata` date field (`expiry_date`, `next_review_date`, a
-      `changelog[].date`) is not an ISO 8601 calendar date (`YYYY-MM-DD`).
+      A `metadata` date field (`approval_date`, `effective_date`,
+      `expiry_date`, `next_review_date`, a `changelog[].date`) is not an
+      ISO 8601 calendar date (`YYYY-MM-DD`).
       Dates are compared as strings throughout the toolchain, so any other
       shape would compare wrong rather than fail, and an expired policy could
       read as current.

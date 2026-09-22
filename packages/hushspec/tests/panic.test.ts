@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { HUSHSPEC_VERSION } from '../src/version.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   evaluate,
   activatePanic,
@@ -12,6 +12,11 @@ import {
 } from '../src/evaluate.js';
 import { parseOrThrow } from '../src/parse.js';
 import type { HushSpec } from '../src/schema.js';
+
+const PANIC_SOURCE = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../rulesets/panic.yaml',
+);
 
 describe('panic mode', () => {
   let originalCwd: string;
@@ -83,7 +88,7 @@ describe('panic mode', () => {
 
   it('panicPolicy returns a valid HushSpec', () => {
     const spec = panicPolicy();
-    expect(spec.hushspec).toBe(HUSHSPEC_VERSION);
+    expect(spec).toEqual(parseOrThrow(readFileSync(PANIC_SOURCE, 'utf8')));
     expect(spec.name).toBe('__hushspec_panic__');
     expect(spec.rules).toBeDefined();
     expect(spec.rules!.forbidden_paths).toBeDefined();
@@ -121,8 +126,8 @@ describe('panic mode', () => {
     expect(result.decision).toBe('deny');
   });
 
-  // panicPolicy() is a YAML document (PANIC_POLICY_YAML in src/evaluate.ts,
-  // mirroring rulesets/panic.yaml), not a hardcoded decision like the global
+  // panicPolicy() is a YAML document (PANIC_POLICY_YAML in src/builtin.ts,
+  // generated from rulesets/panic.yaml), not a hardcoded decision like the global
   // activatePanic()/isPanicActive() switch above: it is only as deny-all as
   // the rule blocks it declares. A block dropped from it would leave its
   // action type with no rule configured, which evaluates to allow -- a hole

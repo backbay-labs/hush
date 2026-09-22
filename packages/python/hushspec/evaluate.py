@@ -45,47 +45,6 @@ UNKNOWN_ACTION_TYPE_RULE = "__unknown_action_type__"
 #: ``matched_rule`` reported when the emergency panic protocol is active.
 PANIC_RULE = "__hushspec_panic__"
 
-PANIC_POLICY_YAML = """hushspec: "0.1.0"
-name: "__hushspec_panic__"
-description: "Emergency deny-all policy. Activated by panic mode."
-
-rules:
-  forbidden_paths:
-    enabled: true
-    patterns:
-      - "**"
-    exceptions: []
-
-  egress:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    default: block
-
-  shell_commands:
-    enabled: true
-    forbidden_patterns:
-      - ".*"
-
-  tool_access:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    require_confirmation: []
-    default: block
-
-  computer_use:
-    enabled: true
-    mode: fail_closed
-    allowed_actions: []
-
-  input_injection:
-    enabled: true
-    allowed_types: []
-"""
-
 
 class Decision(str, Enum):
     ALLOW = "allow"
@@ -854,6 +813,7 @@ def is_panic_active() -> bool:
 
 
 def panic_policy() -> HushSpec:
+    from hushspec.builtins import PANIC_POLICY_YAML
     from hushspec.parse import parse_or_raise
 
     return parse_or_raise(PANIC_POLICY_YAML)
