@@ -992,8 +992,9 @@ fn precedence(reason: BundleReason) -> u8 {
     }
 }
 
-/// Whether a key whose `not_after` is `not_after` had already been retired
-/// when a bundle dated `created_at` was produced (bundle spec 5.2 check 2).
+/// Whether a key whose retirement instant is `not_after` had already been
+/// retired when a bundle dated `created_at` was produced (bundle spec 5.2
+/// check 2).
 ///
 /// Both timestamps are `YYYY-MM-DDTHH:MM:SS.sssZ` -- the keyring schema and
 /// [`Statement::check_shape`] admit no other form -- so an unparseable one is
