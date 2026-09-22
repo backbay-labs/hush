@@ -918,8 +918,11 @@ pub(super) fn check_empty_list_entries(
         .and_then(|extensions| extensions.origins.as_ref())
         .map(|origins| origins.profiles.as_slice())
         .unwrap_or_default();
-    for profile in profiles {
-        let prefix = format!("extensions.origins.profiles.{}", profile.id);
+    for (index, profile) in profiles.iter().enumerate() {
+        // `profiles` is a sequence, so the span map and every other origins
+        // finding address a profile by its index; a path built from the id is
+        // outside the document grammar and resolves to no span.
+        let prefix = format!("extensions.origins.profiles[{index}]");
         if let Some(overlay) = &profile.tool_access {
             report(format!("{prefix}.tool_access.allow"), &overlay.allow);
             report(format!("{prefix}.tool_access.block"), &overlay.block);
