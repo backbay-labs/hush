@@ -548,6 +548,34 @@ func TestGuardObserverSeesRedactedAction(t *testing.T) {
 	}
 }
 
+func TestGuardObservationCarriesTheEnforcementSummary(t *testing.T) {
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{Observer: observer})
+	decision, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "evil.example.com",
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if decision.Allowed() {
+		t.Fatal("the test policy must deny this egress")
+	}
+
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	if len(observer.evaluations) != 1 {
+		t.Fatalf("expected one observed evaluation, got %d", len(observer.evaluations))
+	}
+	enforcement := observer.evaluations[0].Enforcement
+	if enforcement == nil {
+		t.Fatal("an observed evaluation must say what the enforcement point did")
+	}
+	if enforcement.Mode != EnforcementModeEnforce ||
+		enforcement.Outcome != EnforcementOutcomeBlocked {
+		t.Fatalf("unexpected enforcement summary: %+v", enforcement)
+	}
+}
+
 func TestGuardIsSafeForConcurrentUse(t *testing.T) {
 	sink := &recordingSink{}
 	guard := newTestGuard(t, GuardOptions{Sink: sink})

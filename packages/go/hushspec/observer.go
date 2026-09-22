@@ -59,25 +59,57 @@ func (o PolicyLoadObservation) IsSwap() bool {
 type EvaluationObserver interface {
 	// OnPolicyLoaded reports the policy now in force.
 	OnPolicyLoaded(load PolicyLoadObservation)
-	// OnEvaluation reports one completed evaluation. action has its content
-	// stripped (receipts record only a hash and a size, and the observer
-	// stream must not be the place raw payloads leak). receipt is nil when the
-	// guard built none.
-	OnEvaluation(action *EvaluationAction, result EvaluationResult, receipt *DecisionReceipt, duration time.Duration)
+	// OnEvaluation reports one completed evaluation.
+	OnEvaluation(evaluation EvaluationObservation)
 	// OnError reports a failure the guard absorbed: a reload that would not
 	// verify, a sink that refused a receipt, a provider that could not load.
 	OnError(err error)
 }
 
-// redactedAction is the action as an observer may see it: everything the
-// receipt's action summary carries, and never the content itself.
-func redactedAction(action *EvaluationAction) *EvaluationAction {
-	if action == nil {
-		return nil
+// EvaluationObservation is one completed evaluation, as an observer sees it.
+//
+// It is the observer's whole view of a decision: the same members the
+// `evaluation.completed` event carries in every SDK.
+type EvaluationObservation struct {
+	// Action has its content stripped -- receipts record only a hash and a
+	// size (receipt spec 4.4), and the observer stream is held to the same
+	// rule. ContentRedacted says whether anything was stripped.
+	Action *EvaluationAction
+	// ContentRedacted reports that Action carried content and it was removed.
+	ContentRedacted bool
+	Result          EvaluationResult
+	// Enforcement is what the enforcement point did. Nil when the evaluation
+	// had none, as for [ObservableEvaluator.Evaluate].
+	Enforcement *EnforcementSummary
+	// Receipt is the audit record, nil when the guard built none.
+	Receipt  *DecisionReceipt
+	Duration time.Duration
+}
+
+// redact returns the observation with Action's content stripped, so no path to
+// an observer can carry a payload (receipt spec 4.4).
+func (o EvaluationObservation) redact() EvaluationObservation {
+	if o.Action == nil || o.Action.Content == nil {
+		return o
 	}
-	clone := *action
+	clone := *o.Action
 	clone.Content = nil
-	return &clone
+	o.Action = &clone
+	o.ContentRedacted = true
+	return o
+}
+
+// actionType is the action's type, falling back to the receipt's summary when
+// the observation carries no action.
+func (o EvaluationObservation) actionType() string {
+	switch {
+	case o.Action != nil:
+		return o.Action.Type
+	case o.Receipt != nil:
+		return o.Receipt.Action.Type
+	default:
+		return ""
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +171,11 @@ func (e *ObservableEvaluator) Observers() []EvaluationObserver {
 func (e *ObservableEvaluator) Evaluate(policy *CompiledPolicy, action *EvaluationAction) EvaluationResult {
 	start := time.Now()
 	result := policy.EvaluateWithDetection(action).Evaluation
-	e.OnEvaluation(redactedAction(action), result, nil, time.Since(start))
+	e.OnEvaluation(EvaluationObservation{
+		Action:   action,
+		Result:   result,
+		Duration: time.Since(start),
+	})
 	return result
 }
 
@@ -153,17 +189,14 @@ func (e *ObservableEvaluator) OnPolicyLoaded(load PolicyLoadObservation) {
 	}
 }
 
-// OnEvaluation forwards to every observer.
-func (e *ObservableEvaluator) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
+// OnEvaluation forwards to every observer, with the action redacted: no path
+// to an observer carries an action's content.
+func (e *ObservableEvaluator) OnEvaluation(evaluation EvaluationObservation) {
+	evaluation = evaluation.redact()
 	for _, observer := range e.Observers() {
 		func() {
 			defer recoverObserver(observer)
-			observer.OnEvaluation(action, result, receipt, duration)
+			observer.OnEvaluation(evaluation)
 		}()
 	}
 }
@@ -199,18 +232,21 @@ func recoverObserver(observer EvaluationObserver) {
 // ---------------------------------------------------------------------------
 
 // ObserverEvent is the JSON form of an observer notification, as written by
-// [JSONLineObserver] and posted by [WebhookObserver].
+// [JSONLineObserver] and posted by [WebhookObserver]. It is the same shape in
+// every SDK.
 //
-// Action carries the action summary a receipt would record -- type, target,
-// sizes -- and never the content payload.
+// Action is the evaluated action with its content stripped; ContentRedacted
+// records that it was there.
 type ObserverEvent struct {
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 
-	Action     *ActionSummary    `json:"action,omitempty"`
-	Result     *EvaluationResult `json:"result,omitempty"`
-	DurationUs *int64            `json:"duration_us,omitempty"`
-	Receipt    *DecisionReceipt  `json:"receipt,omitempty"`
+	Action          *EvaluationAction   `json:"action,omitempty"`
+	ContentRedacted bool                `json:"content_redacted,omitempty"`
+	Result          *EvaluationResult   `json:"result,omitempty"`
+	DurationUs      *int64              `json:"duration_us,omitempty"`
+	Enforcement     *EnforcementSummary `json:"enforcement,omitempty"`
+	Receipt         *DecisionReceipt    `json:"receipt,omitempty"`
 
 	PolicyName      *string         `json:"policy_name,omitempty"`
 	ContentHash     string          `json:"content_hash,omitempty"`
@@ -237,31 +273,20 @@ func policyLoadObserverEvent(load PolicyLoadObservation) ObserverEvent {
 	}
 }
 
-func evaluationObserverEvent(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) ObserverEvent {
-	event := ObserverEvent{
-		Type:      ObserverEventEvaluation,
-		Timestamp: FormatTimestamp(time.Now()),
-		Result:    &result,
-		Receipt:   receipt,
+func evaluationObserverEvent(evaluation EvaluationObservation) ObserverEvent {
+	evaluation = evaluation.redact()
+	result := evaluation.Result
+	micros := evaluation.Duration.Microseconds()
+	return ObserverEvent{
+		Type:            ObserverEventEvaluation,
+		Timestamp:       FormatTimestamp(time.Now()),
+		Action:          evaluation.Action,
+		ContentRedacted: evaluation.ContentRedacted,
+		Result:          &result,
+		DurationUs:      &micros,
+		Enforcement:     evaluation.Enforcement,
+		Receipt:         evaluation.Receipt,
 	}
-	micros := duration.Microseconds()
-	event.DurationUs = &micros
-	if action != nil {
-		// NewActionSummary is itself the redaction: it records the content's
-		// hash and size (receipt spec 4.4) and never the content. An action a
-		// guard already stripped simply has neither.
-		summary := NewActionSummary(action)
-		event.Action = &summary
-	} else if receipt != nil {
-		summary := receipt.Action
-		event.Action = &summary
-	}
-	return event
 }
 
 func errorObserverEvent(err error) ObserverEvent {
@@ -369,13 +394,8 @@ func (o *JSONLineObserver) OnPolicyLoaded(load PolicyLoadObservation) {
 }
 
 // OnEvaluation writes an `evaluation.completed` line.
-func (o *JSONLineObserver) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
-	o.write(evaluationObserverEvent(action, result, receipt, duration))
+func (o *JSONLineObserver) OnEvaluation(evaluation EvaluationObservation) {
+	o.write(evaluationObserverEvent(evaluation))
 }
 
 // OnError writes an `error` line.
@@ -438,25 +458,20 @@ func (o *StderrObserver) OnPolicyLoaded(load PolicyLoadObservation) {
 }
 
 // OnEvaluation reports one decision.
-func (o *StderrObserver) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
-	if o.DenyOnly && result.Decision != DecisionDeny {
+func (o *StderrObserver) OnEvaluation(evaluation EvaluationObservation) {
+	if o.DenyOnly && evaluation.Result.Decision != DecisionDeny {
 		return
 	}
 	actionType, target := "", ""
-	if action != nil {
-		actionType, target = action.Type, action.Target
-	} else if receipt != nil {
-		actionType, target = receipt.Action.Type, receipt.Action.Target
+	if evaluation.Action != nil {
+		actionType, target = evaluation.Action.Type, evaluation.Action.Target
+	} else if evaluation.Receipt != nil {
+		actionType, target = evaluation.Receipt.Action.Type, evaluation.Receipt.Action.Target
 	}
 	o.printf(
 		"%s %s %q -> %s (%s) in %dus",
-		ObserverEventEvaluation, actionType, target, result.Decision,
-		observedRule(result), duration.Microseconds(),
+		ObserverEventEvaluation, actionType, target, evaluation.Result.Decision,
+		observedRule(evaluation.Result), evaluation.Duration.Microseconds(),
 	)
 }
 
@@ -553,21 +568,11 @@ func (m *MetricsCollector) OnPolicyLoaded(load PolicyLoadObservation) {
 }
 
 // OnEvaluation counts one decision and records its latency.
-func (m *MetricsCollector) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
-	actionType := ""
-	switch {
-	case action != nil:
-		actionType = action.Type
-	case receipt != nil:
-		actionType = receipt.Action.Type
-	}
+func (m *MetricsCollector) OnEvaluation(evaluation EvaluationObservation) {
+	actionType := evaluation.actionType()
+	result := evaluation.Result
 
-	micros := duration.Microseconds()
+	micros := evaluation.Duration.Microseconds()
 	if micros < 0 {
 		micros = 0
 	}
@@ -921,16 +926,11 @@ func (o *WebhookObserver) OnPolicyLoaded(load PolicyLoadObservation) {
 }
 
 // OnEvaluation queues an evaluation event.
-func (o *WebhookObserver) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
-	if o.denyOnly && result.Decision != DecisionDeny {
+func (o *WebhookObserver) OnEvaluation(evaluation EvaluationObservation) {
+	if o.denyOnly && evaluation.Result.Decision != DecisionDeny {
 		return
 	}
-	o.enqueue(evaluationObserverEvent(action, result, receipt, duration))
+	o.enqueue(evaluationObserverEvent(evaluation))
 }
 
 // OnError queues an error event.

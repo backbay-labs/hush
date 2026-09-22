@@ -780,8 +780,16 @@ func (g *Guard) record(
 		}
 	}
 	if state.observer != nil {
+		enforcement := decision.Enforcement
+		observation := EvaluationObservation{
+			Action:      action,
+			Result:      decision.Result,
+			Enforcement: &enforcement,
+			Receipt:     decision.Receipt,
+			Duration:    duration,
+		}.redact()
 		notifyObserver(state.observer, func(observer EvaluationObserver) {
-			observer.OnEvaluation(redactedAction(action), decision.Result, decision.Receipt, duration)
+			observer.OnEvaluation(observation)
 		})
 		if sinkErr != nil {
 			notifyObserver(state.observer, func(observer EvaluationObserver) {

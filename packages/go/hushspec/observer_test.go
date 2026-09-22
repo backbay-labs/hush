@@ -14,10 +14,11 @@ import (
 
 // recordingObserver captures observer callbacks.
 type recordingObserver struct {
-	mu      sync.Mutex
-	loads   []PolicyLoadObservation
-	results []EvaluationResult
-	errs    []error
+	mu          sync.Mutex
+	loads       []PolicyLoadObservation
+	evaluations []EvaluationObservation
+	results     []EvaluationResult
+	errs        []error
 }
 
 func (o *recordingObserver) OnPolicyLoaded(load PolicyLoadObservation) {
@@ -26,18 +27,14 @@ func (o *recordingObserver) OnPolicyLoaded(load PolicyLoadObservation) {
 	o.loads = append(o.loads, load)
 }
 
-func (o *recordingObserver) OnEvaluation(
-	action *EvaluationAction,
-	result EvaluationResult,
-	receipt *DecisionReceipt,
-	duration time.Duration,
-) {
+func (o *recordingObserver) OnEvaluation(evaluation EvaluationObservation) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if action != nil && action.Content != nil {
+	if evaluation.Action != nil && evaluation.Action.Content != nil {
 		o.errs = append(o.errs, errors.New("observer saw raw action content"))
 	}
-	o.results = append(o.results, result)
+	o.evaluations = append(o.evaluations, evaluation)
+	o.results = append(o.results, evaluation.Result)
 }
 
 func (o *recordingObserver) OnError(err error) {
@@ -107,21 +104,21 @@ func TestRuleBlockOf(t *testing.T) {
 func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	metrics := NewMetricsCollector()
 	metrics.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:x"})
-	metrics.OnEvaluation(
-		&EvaluationAction{Type: "egress", Target: "evil.example.com"},
-		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
-		nil, 40*time.Microsecond,
-	)
-	metrics.OnEvaluation(
-		&EvaluationAction{Type: "egress", Target: "api.github.com"},
-		EvaluationResult{Decision: DecisionAllow, MatchedRule: "rules.egress.allow[0]"},
-		nil, 8*time.Microsecond,
-	)
-	metrics.OnEvaluation(
-		&EvaluationAction{Type: "tool_call", Target: "slow"},
-		EvaluationResult{Decision: DecisionAllow},
-		nil, 90*time.Millisecond,
-	)
+	metrics.OnEvaluation(EvaluationObservation{
+		Action:   &EvaluationAction{Type: "egress", Target: "evil.example.com"},
+		Result:   EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
+		Duration: 40 * time.Microsecond,
+	})
+	metrics.OnEvaluation(EvaluationObservation{
+		Action:   &EvaluationAction{Type: "egress", Target: "api.github.com"},
+		Result:   EvaluationResult{Decision: DecisionAllow, MatchedRule: "rules.egress.allow[0]"},
+		Duration: 8 * time.Microsecond,
+	})
+	metrics.OnEvaluation(EvaluationObservation{
+		Action:   &EvaluationAction{Type: "tool_call", Target: "slow"},
+		Result:   EvaluationResult{Decision: DecisionAllow},
+		Duration: 90 * time.Millisecond,
+	})
 	metrics.OnError(errors.New("sink down"))
 	metrics.OnError(&PolicyLoadError{Source: "policy.yaml", Err: errors.New("unreadable")})
 
@@ -201,11 +198,11 @@ func TestJSONLineObserverWritesEventsWithoutContent(t *testing.T) {
 		Name: strPtr("p"), ContentHash: "sha256:bb", PreviousContentHash: "sha256:aa",
 	})
 	content := "super secret"
-	observer.OnEvaluation(
-		&EvaluationAction{Type: "file_write", Target: "notes.txt", Content: &content},
-		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.forbidden_paths.paths[0]"},
-		nil, 12*time.Microsecond,
-	)
+	observer.OnEvaluation(EvaluationObservation{
+		Action:   &EvaluationAction{Type: "file_write", Target: "notes.txt", Content: &content},
+		Result:   EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.forbidden_paths.paths[0]"},
+		Duration: 12 * time.Microsecond,
+	})
 	observer.OnError(errors.New("reload failed"))
 
 	lines := strings.Split(strings.TrimSpace(buffer.String()), "\n")
@@ -231,8 +228,8 @@ func TestJSONLineObserverWritesEventsWithoutContent(t *testing.T) {
 	if evaluation.Type != ObserverEventEvaluation || evaluation.Action == nil {
 		t.Fatalf("unexpected evaluation event: %+v", evaluation)
 	}
-	if evaluation.Action.ContentHash == "" || evaluation.Action.ContentSize == nil {
-		t.Fatal("the action summary must still record the content hash and size")
+	if evaluation.Action.Content != nil || !evaluation.ContentRedacted {
+		t.Fatal("the event must carry the stripped action and say that it was stripped")
 	}
 	if evaluation.DurationUs == nil || *evaluation.DurationUs != 12 {
 		t.Fatalf("unexpected duration: %+v", evaluation.DurationUs)
@@ -257,11 +254,7 @@ type panickingObserver struct {
 }
 
 func (o *panickingObserver) OnPolicyLoaded(PolicyLoadObservation) { panic("boom") }
-func (o *panickingObserver) OnEvaluation(
-	*EvaluationAction, EvaluationResult, *DecisionReceipt, time.Duration,
-) {
-	panic("boom")
-}
+func (o *panickingObserver) OnEvaluation(EvaluationObservation)   { panic("boom") }
 
 func (o *panickingObserver) OnError(error) {
 	o.mu.Lock()
@@ -282,7 +275,10 @@ func TestObservableEvaluatorFansOutAndSurvivesPanics(t *testing.T) {
 	}
 
 	fanout.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p")})
-	fanout.OnEvaluation(&EvaluationAction{Type: "egress"}, EvaluationResult{Decision: DecisionAllow}, nil, 0)
+	fanout.OnEvaluation(EvaluationObservation{
+		Action: &EvaluationAction{Type: "egress"},
+		Result: EvaluationResult{Decision: DecisionAllow},
+	})
 	fanout.OnError(errors.New("boom"))
 
 	for _, observer := range []*recordingObserver{first, second} {
@@ -345,11 +341,11 @@ func TestWebhookObserverPostsEvents(t *testing.T) {
 	}
 	defer observer.Close()
 
-	observer.OnEvaluation(
-		&EvaluationAction{Type: "egress", Target: "evil.example.com"},
-		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
-		nil, time.Millisecond,
-	)
+	observer.OnEvaluation(EvaluationObservation{
+		Action:   &EvaluationAction{Type: "egress", Target: "evil.example.com"},
+		Result:   EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
+		Duration: time.Millisecond,
+	})
 
 	select {
 	case event := <-posted:
@@ -412,15 +408,17 @@ func TestStderrObserverDenyOnly(t *testing.T) {
 	var buffer bytes.Buffer
 	observer := NewWriterObserver(&buffer)
 	observer.DenyOnly = true
-	observer.OnEvaluation(&EvaluationAction{Type: "egress"}, EvaluationResult{Decision: DecisionAllow}, nil, 0)
+	observer.OnEvaluation(EvaluationObservation{
+		Action: &EvaluationAction{Type: "egress"},
+		Result: EvaluationResult{Decision: DecisionAllow},
+	})
 	if buffer.Len() != 0 {
 		t.Fatalf("deny_only must skip allows, got %q", buffer.String())
 	}
-	observer.OnEvaluation(
-		&EvaluationAction{Type: "egress", Target: "evil.example.com"},
-		EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
-		nil, 0,
-	)
+	observer.OnEvaluation(EvaluationObservation{
+		Action: &EvaluationAction{Type: "egress", Target: "evil.example.com"},
+		Result: EvaluationResult{Decision: DecisionDeny, MatchedRule: "rules.egress.block[0]"},
+	})
 	observer.OnPolicyLoaded(PolicyLoadObservation{Name: strPtr("p"), ContentHash: "sha256:aa"})
 	if !strings.Contains(buffer.String(), "evil.example.com") ||
 		!strings.Contains(buffer.String(), "policy loaded") {
