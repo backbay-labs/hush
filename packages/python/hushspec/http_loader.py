@@ -413,8 +413,20 @@ class _ReadBudget:
     _deadline: Optional[float] = None
 
     def start_read_budget(self, seconds: float) -> None:
+        """Start the budget now and set the timeout to it, so an operation
+        that runs before the first receive, the TLS handshake, draws on it too:
+        ``do_handshake`` applies the socket timeout as one deadline across its
+        own retries.
+        """
         self._budget_s = seconds
         self._deadline = time.monotonic() + seconds
+        self._spend()
+
+    def continue_read_budget(self, previous: "_ReadBudget") -> None:
+        """Carry the budget of the socket this one was wrapped over."""
+        self._budget_s = previous._budget_s
+        self._deadline = previous._deadline
+        self._spend()
 
     def _exhausted(self) -> TimeoutError:
         return TimeoutError(f"the read budget of {self._budget_s:g} s is exhausted")
@@ -496,11 +508,14 @@ def _connection_factory(target: _Target, config: HttpLoaderConfig):
             sock.connect((target.address, target.port))
             # Separate budgets: getting connected is not the same wait as
             # getting bytes, and a server that accepts and then stalls must not
-            # inherit the connect timeout's patience.
-            sock.settimeout(config.read_timeout_s)
-            if secure and context is not None:
-                sock = context.wrap_socket(sock, server_hostname=target.host)
+            # inherit the connect timeout's patience. From here on the TLS
+            # handshake, the status line, the headers and the body draw on one
+            # budget.
             sock.start_read_budget(config.read_timeout_s)
+            if secure and context is not None:
+                plain = sock
+                sock = context.wrap_socket(plain, server_hostname=target.host)
+                sock.continue_read_budget(plain)
             self.sock = sock
 
     return _PinnedConnection

@@ -856,8 +856,9 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   programmatically built document.
 - The Python HTTPS loader's read timeout is one budget for the whole response. It was a
   per-receive socket timeout, so a server delivering a byte just inside every interval could
-  hold a policy or signature load open indefinitely; the status line, headers and body now
-  share a deadline (core spec 2.6.4), as the other three loaders already enforce.
+  hold a policy or signature load open indefinitely; the TLS handshake, status line, headers
+  and body now share one deadline from the moment the connection is made (core spec 2.6.4), as
+  the other three loaders already enforce.
 - The Rust and Python HTTPS loaders ignore a proxy named in the environment (`HTTPS_PROXY`,
   `ALL_PROXY`). Through a proxy the connection is made by the proxy, which resolves the host a
   second time on its side, so the address the SSRF check approved was never the one dialled.

@@ -796,6 +796,39 @@ def test_the_read_budget_bounds_a_trickling_response(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("resolves_to_loopback")
+def test_the_read_budget_bounds_a_stalled_handshake(tmp_path: Path) -> None:
+    # The peer accepts the connection and never speaks TLS. The handshake draws
+    # on the same budget as the response, so the load fails within it rather
+    # than waiting on a per-operation timeout that a trickling peer resets.
+    class Stall(socketserver.BaseRequestHandler):
+        def handle(self) -> None:
+            time.sleep(5)
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Stall)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        certificate, _ = _self_signed(TLS_HOST)
+        trusted = tmp_path / "cert.pem"
+        trusted.write_bytes(certificate)
+        config = HttpLoaderConfig(
+            allow_insecure_loopback=True,
+            ssl_context=ssl.create_default_context(cafile=str(trusted)),
+            read_timeout_s=0.5,
+        )
+        started = time.monotonic()
+        with pytest.raises(HttpLoadError, match="timed out|read budget"):
+            create_http_loader(config)(
+                f"https://{TLS_HOST}:{server.server_address[1]}/base.yaml"
+            )
+        assert time.monotonic() - started < 3
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
 def test_a_certificate_for_another_name_is_refused(tmp_path: Path) -> None:
     # Same address, same trusted issuer, wrong name: the handshake has to fail.
     # If it did not, `server_hostname` would be carrying the dialled address
