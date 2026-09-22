@@ -49,17 +49,20 @@ PROFILE_ONLY_VECTORS = frozenset(
 #: Vectors whose refusal no JSON Schema can express: referential integrity
 #: between two members of a document, uniqueness by a field of a list entry, a
 #: lookup in the IANA time zone database, the HushSpec regex profile, a
-#: recursion depth bound, and which minor versions *this* engine implements --
-#: the schema states the shape of a version (core spec 2.2, appendix A), while
-#: acceptance is a property of the engine reading it (core spec 10.3). The
-#: SDKs check them after parsing. They are asserted to *pass* below, so a
-#: schema change that does become able to express one fails this module until
-#: the name is removed.
+#: recursion depth bound, the IEEE 754 safe-integer bound (canonical spec 4.3
+#: applies it to every integer a document writes, free-form values included),
+#: and which minor versions *this* engine implements -- the schema states the
+#: shape of a version (core spec 2.2, appendix A), while acceptance is a
+#: property of the engine reading it (core spec 10.3). The SDKs check them
+#: after parsing. They are asserted to *pass* below, so a schema change that
+#: does become able to express one fails this module until the name is
+#: removed.
 BEYOND_SCHEMA_VECTORS = frozenset(
     {
         "bad-initial.yaml",
         "duplicate-ids.yaml",
         "duplicate-pattern-names.yaml",
+        "integer-out-of-safe-range.yaml",
         "regex-comment-group.yaml",
         "regex-lookahead.yaml",
         "regex-mid-pattern-flag.yaml",

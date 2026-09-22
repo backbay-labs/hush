@@ -17,7 +17,7 @@ import re
 import yaml
 
 from hushspec.error_codes import ERROR_PARSE, ErrorMessage, code_of
-from hushspec.raw_validate import validate_raw_document
+from hushspec.raw_validate import unsafe_integer, validate_raw_document
 from hushspec.schema import HushSpec
 
 #: Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default).
@@ -190,6 +190,13 @@ def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
 
     if not isinstance(doc, dict):
         return False, _refused("HushSpec document must be a YAML mapping")
+
+    # Canonical spec 4.3 bounds integer syntax by the IEEE 754 safe range, and
+    # the decoded document is the last place integer syntax is still telling
+    # itself apart from float syntax.
+    unsafe = unsafe_integer(doc)
+    if unsafe is not None:
+        return False, _refused(f"YAML parse error: {unsafe}")
 
     depth, nodes = _measure(doc, 1)
     if depth > MAX_DOCUMENT_DEPTH:

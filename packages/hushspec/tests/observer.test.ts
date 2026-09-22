@@ -6,6 +6,7 @@ import type {
   ObserverEvent,
   EvaluationCompletedEvent,
   EvaluationObserver,
+  ObserverErrorEvent,
   SinkErrorEvent,
 } from '../src/observer.js';
 import {
@@ -159,6 +160,43 @@ describe('ObservableEvaluator', () => {
 
     expect(result.decision).toBe('allow');
     expect(safeObserver.events).toHaveLength(1);
+  });
+
+  it('hands a throwing observer its own failure as an error event', () => {
+    const evaluator = new ObservableEvaluator();
+    const events: ObserverEvent[] = [];
+    let thrown = 0;
+    const crashingObserver: EvaluationObserver = {
+      onEvent: (event) => {
+        events.push(event);
+        if (event.type !== 'error') {
+          thrown += 1;
+          throw new Error('observer crash');
+        }
+      },
+    };
+    evaluator.addObserver(crashingObserver);
+
+    evaluator.evaluate(minimalSpec(), { type: 'tool_call', target: 'test' });
+
+    expect(thrown).toBe(1);
+    const errors = events.filter((event) => event.type === 'error') as ObserverErrorEvent[];
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toContain('observer crash');
+    expect(errors[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('emits an error event for a failure the guard absorbed', () => {
+    const evaluator = new ObservableEvaluator();
+    const observer = new TestObserver();
+    evaluator.addObserver(observer);
+
+    evaluator.notifyError('reload failed', 'policy.yaml');
+
+    const event = observer.events[0] as ObserverErrorEvent;
+    expect(event.type).toBe('error');
+    expect(event.error).toBe('reload failed');
+    expect(event.source).toBe('policy.yaml');
   });
 
   it('removeObserver stops notifications', () => {

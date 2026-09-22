@@ -771,6 +771,29 @@ mod tests {
         );
     }
 
+    /// Canonical spec 4.3: Rust types integers apart from doubles, so a value
+    /// built in memory keeps the distinction the syntax carried and the bound
+    /// applies to it too. No valid document can hold such an integer.
+    #[test]
+    fn an_in_memory_integer_beyond_the_safe_range_is_refused() {
+        assert_eq!(
+            canonical_json_value(
+                &json!({"hushspec": "0.1.0", "metadata": {"policy_version": 9_007_199_254_740_992u64}})
+            ),
+            Err(CanonicalError::UnsafeInteger(
+                "9007199254740992".to_string()
+            ))
+        );
+        assert_eq!(
+            canonical_json_value(
+                &json!({"hushspec": "0.1.0", "metadata": {"policy_version": -9_007_199_254_740_992i64}})
+            ),
+            Err(CanonicalError::UnsafeInteger(
+                "-9007199254740992".to_string()
+            ))
+        );
+    }
+
     /// Canonical spec 4.3: an integer literal beyond the safe range is refused
     /// rather than rounded. `serde_yaml` refuses one that overflows `u64`
     /// outright, so the two literals are refused at different layers and the

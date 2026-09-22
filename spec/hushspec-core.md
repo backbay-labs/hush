@@ -799,6 +799,8 @@ A policy decision is what the evaluator computed; enforcement is what the enforc
 
 An enforcement point with no confirmation channel MUST treat `warn` as `deny` (Section 6). Whatever the configured mode, two decisions MUST always be enforced, and no override reaches them: a deny produced by panic mode (Section 6.3), and a deny produced because the enforcement point refused its policy after signature verification failed (`__hushspec_policy_unverified__`, Signing specification Section 6.5). The refused-policy state persists until a policy that verifies replaces it; every action in that state is denied and recorded.
 
+**A provider that cannot serve a policy.** An enforcement point MAY take the policy in force from a policy provider it asks at evaluation time, rather than from one that pushes each reload into it. Such an enforcement point has no policy to evaluate against when the provider has not loaded one yet, when it returns a document that still declares `extends`, or when asking it fails. In each of those cases the enforcement point MUST produce **deny** with `matched_rule` `__hushspec_policy_provider__` and a reason naming the failure, and MUST record that decision like any other: evaluating an unresolved document would silently drop every rule block its base declares, and allowing the action would enforce no policy at all. The deny is a policy decision like the rest, so the configured mode applies to it. An enforcement point whose provider pushes each reload into it instead keeps the policy already in force when a reload fails, and never reaches this state.
+
 Test vectors: `fixtures/receipts/expected/` (the `enforcement` member of every expected receipt).
 
 ### 6.3 Panic Mode

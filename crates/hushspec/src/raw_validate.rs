@@ -18,10 +18,70 @@
 //! A value the schema does not describe -- a `when.context` entry -- is a leaf:
 //! the null there is a value to compare against the runtime context, not a
 //! property of the document format.
+//!
+//! The safe-integer bound of canonical spec 4.3 is answered here for the same
+//! reason: it belongs to integer *syntax*, and the raw value tree is the last
+//! place a document still carries any.
 
 use crate::canonical::{SchemaSet, resolve_ref, schemas};
 use serde_json::Value as Schema;
 use serde_yaml::Value as Yaml;
+
+/// Largest integer an IEEE 754 double holds exactly (canonical spec 4.3).
+const MAX_SAFE_INTEGER: i64 = (1 << 53) - 1;
+
+/// Refuse an integer whose magnitude an IEEE 754 double cannot hold exactly,
+/// naming the first one found in document order (canonical spec 4.3).
+///
+/// The bound belongs to integer syntax: `10000000000000000` names an exact
+/// integer a double cannot hold, while `1.0e+16` names the double itself and
+/// is accepted whatever its magnitude. Applying it at parse time keeps a
+/// rounded integer out of a content hash, and refuses the document even for an
+/// engine that never hashes it. A literal past `u64` is already refused by the
+/// YAML decode, so every integer that reaches this walk fits one of the two
+/// 64-bit forms.
+///
+/// # Errors
+///
+/// The diagnostic for the offending value.
+pub(crate) fn reject_unsafe_integers(document: &Yaml) -> Result<(), String> {
+    walk_integers(document, "$")
+}
+
+fn walk_integers(value: &Yaml, path: &str) -> Result<(), String> {
+    match value {
+        Yaml::Number(number) => {
+            let unsafe_magnitude = match (number.as_i64(), number.as_u64()) {
+                (Some(signed), _) => !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&signed),
+                #[allow(clippy::cast_sign_loss)]
+                (None, Some(unsigned)) => unsigned > MAX_SAFE_INTEGER as u64,
+                // Float syntax carries no bound.
+                (None, None) => false,
+            };
+            if unsafe_magnitude {
+                return Err(format!(
+                    "{path}: integer {number} exceeds the safe range (2^53-1)"
+                ));
+            }
+            Ok(())
+        }
+        Yaml::Sequence(items) => {
+            for (index, item) in items.iter().enumerate() {
+                walk_integers(item, &format!("{path}[{index}]"))?;
+            }
+            Ok(())
+        }
+        Yaml::Mapping(mapping) => {
+            for (key, entry) in mapping {
+                let name = key.as_str().unwrap_or("?");
+                walk_integers(entry, &format!("{path}.{name}"))?;
+            }
+            Ok(())
+        }
+        Yaml::Tagged(tagged) => walk_integers(&tagged.value, path),
+        _ => Ok(()),
+    }
+}
 
 /// Refuse a `null` written for any value the schemas type, naming the first
 /// one found in document order.
@@ -240,6 +300,32 @@ mod tests {
             .contains(
                 "extensions.posture.states.standard.budgets.file_writes: invalid type: null, expected an integer"
             )
+        );
+    }
+
+    /// Canonical spec 4.3: integer syntax is bounded by the IEEE 754 safe
+    /// range wherever it appears, and float syntax is not bounded at all.
+    #[test]
+    fn an_integer_beyond_the_safe_range_is_refused() {
+        assert!(
+            refusal("hushspec: \"1.0.0\"\nmetadata:\n  policy_version: 9007199254740993\n")
+                .contains("metadata.policy_version: integer 9007199254740993 exceeds the safe range (2^53-1)")
+        );
+        assert!(
+            refusal(
+                "hushspec: \"1.0.0\"\nrules:\n  egress:\n    default: block\n    when:\n      context:\n        budget: -9007199254740993\n"
+            )
+            .contains("exceeds the safe range (2^53-1)")
+        );
+        assert!(
+            HushSpec::parse("hushspec: \"1.0.0\"\nmetadata:\n  policy_version: 9007199254740991\n")
+                .is_ok()
+        );
+        assert!(
+            HushSpec::parse(
+                "hushspec: \"1.0.0\"\nrules:\n  egress:\n    default: block\n    when:\n      context:\n        budget: 1.0e+21\n"
+            )
+            .is_ok()
         );
     }
 

@@ -79,7 +79,7 @@ entries:
   - id: __hushspec_policy_provider__
     kind: reserved_matched_rule
     summary: The enforcement point's policy provider could not serve a policy to evaluate against
-    spec: core 1.2
+    spec: core 6.2
   - id: detection
     kind: reserved_matched_rule
     summary: A decision produced by the detection pipeline

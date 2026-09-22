@@ -101,8 +101,8 @@ pub use governance::{
     validate_governance,
 };
 pub use guard::{
-    Denied, EnforcementConfig, GuardDecision, GuardError, HushGuard, HushGuardBuilder, WarnHandler,
-    matches_rule_path_prefix,
+    Denied, EnforcementConfig, GuardDecision, GuardError, HushGuard, HushGuardBuilder,
+    POLICY_PROVIDER_RULE, WarnHandler, matches_rule_path_prefix,
 };
 pub use log::{
     ChainedFileSink, EntryType, GENESIS_HASH, LOG_VERSION, LogEntry, LogError, LogSignature,

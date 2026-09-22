@@ -223,6 +223,8 @@ The bound is syntactic because the syntax is the only thing that distinguishes t
 
 A value handed to an implementation directly, as a number of the host language rather than as a document to parse, carries no syntax to read. Section 2.3 already requires such a value to have come from a valid document, so the bound has been applied by the parser that read it.
 
+A host language that types integers apart from doubles keeps the distinction the syntax carried, and an implementation written in one MAY apply the bound to such a value as well; an implementation whose only numeric type is a double cannot tell the two apart and emits the value. Neither choice changes the canonical form of any document: no valid document carries an integer past the bound, so the two agree wherever a document is what is being hashed.
+
 ### 4.4 Other values
 
 `true`, `false`, and `null` are emitted as those literals. Arrays are `[`, elements separated by `,`, `]`, with element order preserved.

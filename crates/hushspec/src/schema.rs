@@ -43,6 +43,13 @@ impl HushSpec {
             )));
         }
 
+        // Canonical spec 4.3 bounds integer syntax by the IEEE 754 safe range,
+        // and the raw value tree is the last place the document still tells
+        // integer syntax from float syntax.
+        if let Err(message) = crate::raw_validate::reject_unsafe_integers(&value) {
+            return Err(serde_yaml::Error::custom(message));
+        }
+
         // A written `null` deserializes into `None`, so the typed document
         // cannot tell one from an absent key; the raw value tree can, and a
         // document that writes one is not the document the typed parse below

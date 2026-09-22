@@ -707,9 +707,12 @@ function compareKeys(left: string, right: string): number {
  * `0`.
  *
  * Spec section 4.3 bounds integer *syntax* by the IEEE 754 safe range and
- * leaves float syntax unbounded. A `number` no longer carries that
+ * leaves float syntax unbounded. A JavaScript `number` does not carry that
  * distinction, so the bound is applied by `parse()`, which reads the literal;
- * every finite double that reaches here is emitted.
+ * every finite double that reaches here is emitted. An SDK whose host language
+ * types integers apart from doubles may also apply the bound to a value built
+ * in memory, which section 4.3 permits and which changes no document's
+ * canonical form.
  */
 function formatNumber(value: number): string {
   if (!Number.isFinite(value)) {

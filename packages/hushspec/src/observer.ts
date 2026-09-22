@@ -9,7 +9,8 @@ export interface EvaluationEvent {
     | 'policy.loaded'
     | 'policy.load_failed'
     | 'policy.reloaded'
-    | 'sink.error';
+    | 'sink.error'
+    | 'error';
   timestamp: string;
 }
 
@@ -58,12 +59,25 @@ export interface SinkErrorEvent extends EvaluationEvent {
   source?: string;
 }
 
+/**
+ * A failure the guard absorbed that is neither a policy load nor a sink: an
+ * observer that threw, say. The evaluation that produced the event stands --
+ * an observer is a bystander, never enforcement.
+ */
+export interface ObserverErrorEvent extends EvaluationEvent {
+  type: 'error';
+  error: string;
+  /** What failed, when the emitter can name it. */
+  source?: string;
+}
+
 export type ObserverEvent =
   | EvaluationCompletedEvent
   | PolicyLoadedEvent
   | PolicyLoadFailedEvent
   | PolicyReloadedEvent
-  | SinkErrorEvent;
+  | SinkErrorEvent
+  | ObserverErrorEvent;
 
 export interface EvaluationObserver {
   onEvent(event: ObserverEvent): void;
@@ -227,12 +241,42 @@ export class ObservableEvaluator {
     });
   }
 
+  /** Announce a failure the guard absorbed that is neither a load nor a sink. */
+  notifyError(error: string, source?: string): void {
+    this.emit({
+      type: 'error',
+      timestamp: new Date().toISOString(),
+      error,
+      source,
+    });
+  }
+
+  /**
+   * Fan one event out, absorbing a throw.
+   *
+   * An observer is a bystander: it never decides whether an action proceeds,
+   * so a throw in one must stop neither the evaluation that produced the event
+   * nor the rest of the fan-out. The failure is handed back to the same
+   * observer as an `error` event, because a failure nobody is told about is
+   * the one that goes unnoticed; an observer that throws reporting its own
+   * throw is dropped rather than retried.
+   */
   private emit(event: ObserverEvent): void {
     for (const observer of this.observers) {
       try {
         observer.onEvent(event);
-      } catch {
-        /* observers must not crash the evaluator */
+      } catch (thrown) {
+        if (event.type === 'error') continue;
+        const message = thrown instanceof Error ? thrown.message : String(thrown);
+        try {
+          observer.onEvent({
+            type: 'error',
+            timestamp: new Date().toISOString(),
+            error: `observer threw: ${message}`,
+          });
+        } catch {
+          /* best-effort: an observer that cannot be told is left alone */
+        }
       }
     }
   }

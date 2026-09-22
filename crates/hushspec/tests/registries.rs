@@ -15,8 +15,9 @@ use std::path::PathBuf;
 use hushspec::evaluate::{PANIC_RULE, UNKNOWN_ACTION_TYPE_RULE, evaluate_traced};
 use hushspec::{
     AuditConfig, AuditContext, CompiledPolicy, Condition, DetectionCategory, DetectorRegistry,
-    EvaluationAction, HushSpec, OriginContext, POLICY_UNVERIFIED_RULE, PanicState, RateComparison,
-    RateCondition, TimeWindowCondition, evaluate, evaluate_audited_spec,
+    EvaluationAction, HushSpec, OriginContext, POLICY_PROVIDER_RULE, POLICY_UNVERIFIED_RULE,
+    PanicState, RateComparison, RateCondition, TimeWindowCondition, evaluate,
+    evaluate_audited_spec,
 };
 use jsonschema::{Draft, JSONSchema};
 use serde_json::Value;
@@ -296,9 +297,10 @@ fn rule_paths_match_the_receipt_schema() {
         .collect();
     // Read off the constants the engine emits, so renaming one in the code
     // fails here rather than quietly leaving the registry describing a value
-    // no receipt carries any more. `__hushspec_policy_provider__` has no
-    // constant here: it is the denial a guard issues when its policy provider
-    // cannot serve a policy, which this crate's evaluator never reaches.
+    // no receipt carries any more. `POLICY_PROVIDER_RULE` is among them for
+    // the same reason even though this crate's guard never issues that denial:
+    // its policy provider pushes each reload in, so a failed reload leaves the
+    // policy already in force (core spec 6.2).
     assert_no_drift(
         "rule-paths",
         &reserved,
@@ -307,7 +309,7 @@ fn rule_paths_match_the_receipt_schema() {
             PANIC_RULE,
             UNKNOWN_ACTION_TYPE_RULE,
             POLICY_UNVERIFIED_RULE,
-            "__hushspec_policy_provider__",
+            POLICY_PROVIDER_RULE,
             "detection",
         ]),
     );

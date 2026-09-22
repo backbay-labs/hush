@@ -153,6 +153,40 @@ class TestObservableEvaluator:
         assert result.decision == Decision.ALLOW
         assert len(safe_observer.events) == 1
 
+    def test_a_raising_observer_is_handed_its_own_failure(self):
+        evaluator = ObservableEvaluator()
+
+        class CrashingObserver(EvaluationObserver):
+            def __init__(self) -> None:
+                self.events: list[dict] = []
+
+            def on_event(self, event):
+                self.events.append(event)
+                if event["type"] != "error":
+                    raise RuntimeError("observer crash")
+
+        observer = CrashingObserver()
+        evaluator.add_observer(observer)
+        evaluator.evaluate(
+            minimal_spec(), EvaluationAction(type="tool_call", target="test")
+        )
+
+        errors = [event for event in observer.events if event["type"] == "error"]
+        assert len(errors) == 1
+        assert "observer crash" in errors[0]["error"]
+
+    def test_emits_an_error_event_for_a_failure_the_guard_absorbed(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+
+        evaluator.notify_error("reload failed", "policy.yaml")
+
+        event = observer.events[0]
+        assert event["type"] == "error"
+        assert event["error"] == "reload failed"
+        assert event["source"] == "policy.yaml"
+
     def test_remove_observer_stops_notifications(self):
         evaluator = ObservableEvaluator()
         observer = EventCollector()

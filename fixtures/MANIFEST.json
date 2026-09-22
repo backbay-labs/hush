@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T00:10:19Z",
+  "generated_at": "2026-09-22T00:59:32Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -580,6 +580,20 @@
     {
       "path": "fixtures/core/invalid/float-version.yaml",
       "sha256": "5cf5800b15db7faa950a47ab619313896ecbb6cd693288884ad4a39621c0c412",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/integer-out-of-safe-range.expect.yaml",
+      "sha256": "11ec74fe63d24e1ea656908b2abdc028c8d3e3fe5edcb096251b0d2895126669",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/integer-out-of-safe-range.yaml",
+      "sha256": "ced23c8e2ad11c543c6d83b7870a51aeb5d2d25c5e3919e7921034db8191b8aa",
       "category": "invalid",
       "module": "core",
       "level": 1

@@ -134,7 +134,7 @@ export const POLICY_SIGNATURE_RULE: string = POLICY_UNVERIFIED_RULE;
 /**
  * `matched_rule` for every denial issued by a guard whose policy provider
  * cannot serve a policy to evaluate against: it has not loaded one, it handed
- * back an unresolved document, or it threw.
+ * back an unresolved document, or it threw (core spec 6.2).
  *
  * The reserved value `__hushspec_policy_provider__` of the rule-path registry
  * (`spec/registries/rule-paths.yaml`).

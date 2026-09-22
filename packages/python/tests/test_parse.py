@@ -1018,6 +1018,43 @@ class TestYamlProfile:
         assert ok is False
         assert "maximum depth" in err
 
+    def test_rejects_an_integer_beyond_the_safe_range(self):
+        # Canonical spec 4.3: an integer a double cannot hold exactly has no
+        # faithful canonical form, so it is refused rather than rounded.
+        ok, err = parse(
+            'hushspec: "0.2.0"\nmetadata:\n  policy_version: 9007199254740993\n'
+        )
+        assert ok is False
+        assert "exceeds the safe range (2^53-1)" in err
+        assert "metadata.policy_version" in err
+
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    default: block\n"
+            "    when:\n"
+            "      context:\n"
+            "        budget: -9007199254740993\n"
+        )
+        assert ok is False
+        assert "exceeds the safe range (2^53-1)" in err
+
+    def test_accepts_the_largest_safe_integer_and_any_float(self):
+        ok, _ = parse('hushspec: "0.2.0"\nmetadata:\n  policy_version: 9007199254740991\n')
+        assert ok is True
+        # Float syntax names the double itself, so it carries no bound.
+        ok, _ = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    default: block\n"
+            "    when:\n"
+            "      context:\n"
+            "        budget: 1.0e+21\n"
+        )
+        assert ok is True
+
 
 class TestVersionAcceptance:
     """Core spec 2.2: an engine supporting minor X.Y accepts every X.Y.Z."""

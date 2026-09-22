@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // recordingSink captures everything a guard records, so a test can assert on
@@ -609,4 +611,154 @@ func TestGuardFansOutThroughObservableEvaluator(t *testing.T) {
 	if !strings.Contains(buffer.String(), ObserverEventPolicyLoaded) {
 		t.Fatal("the JSON line stream did not record the policy load")
 	}
+}
+
+// adoptedProvider hands a guard a resolution that was built elsewhere, which
+// is what a control-plane provider does: the chain is already merged and the
+// source its signatures were checked against is gone.
+type adoptedProvider struct {
+	resolution *Resolution
+}
+
+func (p *adoptedProvider) Load() (*Resolution, error) { return p.resolution, nil }
+
+func (p *adoptedProvider) Source() string { return "adopted://policy.yaml" }
+
+// signedResolution is a one-hop resolution that carries a verified signature,
+// as a provider that verified its own load reports one.
+func signedResolution(t *testing.T, spec *HushSpec, source string) *Resolution {
+	t.Helper()
+	resolution := guardResolution(t, spec)
+	resolution.Chain[0].Source = source
+	resolution.Chain[0].Signature = &SignatureStatus{
+		Verified: true,
+		KeyID:    "sha256:" + strings.Repeat("a", 64),
+	}
+	resolution.Signature = resolution.Chain[0].Signature
+	return resolution
+}
+
+func TestGuardFromProviderRefusesUnprovenChain(t *testing.T) {
+	provider := &adoptedProvider{resolution: guardResolution(t, guardSpec())}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("a guard must refuse rather than fail to exist: %v", err)
+	}
+	refused, status := guard.Refused()
+	if !refused {
+		t.Fatal("an adopted resolution with no verified signature must refuse")
+	}
+	if status.Verified || status.Reason != ReasonMissingSignature {
+		t.Fatalf("expected a missing-signature status, got %+v", status)
+	}
+	decision, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "api.github.com",
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if decision.Allowed() {
+		t.Fatal("a refused policy must deny an action its rules would allow")
+	}
+	if decision.Result.MatchedRule != PolicyUnverifiedRule {
+		t.Fatalf("expected %q, got %q", PolicyUnverifiedRule, decision.Result.MatchedRule)
+	}
+}
+
+func TestGuardFromProviderAcceptsVerifiedChain(t *testing.T) {
+	provider := &adoptedProvider{
+		resolution: signedResolution(t, guardSpec(), "adopted://policy.yaml"),
+	}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	if refused, _ := guard.Refused(); refused {
+		t.Fatal("a chain whose every hop verified must not refuse")
+	}
+}
+
+func TestGuardFromProviderExemptsBuiltinHops(t *testing.T) {
+	resolution := guardResolution(t, guardSpec())
+	resolution.Chain[0].Source = "builtin:default"
+	provider := &adoptedProvider{resolution: resolution}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	if refused, _ := guard.Refused(); refused {
+		t.Fatal("a `builtin:` hop is embedded in the SDK and signs nothing")
+	}
+}
+
+func TestGuardSwapPolicyRejectsUnprovenChain(t *testing.T) {
+	guard, err := NewGuard(
+		signedResolution(t, guardSpec(), "adopted://policy.yaml"),
+		GuardOptions{RequireSignature: true},
+	)
+	if err != nil {
+		t.Fatalf("NewGuard: %v", err)
+	}
+	before := guard.Resolution().ContentHash
+
+	replacement := guardSpec()
+	replacement.Rules.Egress.Allow = []string{"api.github.com", "evil.example.com"}
+	err = guard.SwapPolicy(guardResolution(t, replacement))
+	var required *SignatureRequiredError
+	if !errors.As(err, &required) {
+		t.Fatalf("expected a signature requirement failure, got %v", err)
+	}
+	if required.Status.Reason != ReasonMissingSignature {
+		t.Fatalf("expected a missing-signature status, got %+v", required.Status)
+	}
+	if guard.Resolution().ContentHash != before {
+		t.Fatal("a rejected swap must leave the previous policy in force")
+	}
+	if refused, _ := guard.Refused(); refused {
+		t.Fatal("a rejected swap must not refuse the policy already in force")
+	}
+}
+
+func TestGuardSwapPolicyKeepsRefusalOnUnprovenChain(t *testing.T) {
+	provider := &adoptedProvider{resolution: guardResolution(t, guardSpec())}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	if err := guard.SwapPolicy(guardResolution(t, guardSpec())); err == nil {
+		t.Fatal("an unproven swap must be rejected")
+	}
+	if refused, _ := guard.Refused(); !refused {
+		t.Fatal("a rejected swap must not clear an existing refusal")
+	}
+}
+
+// TestPolicyProviderRuleMatchesTheRegistry pins the reserved `matched_rule`
+// against spec/registries/rule-paths.yaml, so renaming it in one place fails
+// here rather than quietly leaving the registry describing a value no receipt
+// carries. This guard never issues the denial itself -- its policy provider
+// pushes each reload into SwapPolicy, so a failed reload leaves the policy
+// already in force (core spec 6.2) -- but a reader of receipts an enforcement
+// point of the other kind emitted needs the spelling.
+func TestPolicyProviderRuleMatchesTheRegistry(t *testing.T) {
+	path := filepath.Join(fixtureRepoRoot(t), "spec", "registries", "rule-paths.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the rule-path registry: %v", err)
+	}
+	var registry struct {
+		Entries []struct {
+			ID   string `yaml:"id"`
+			Kind string `yaml:"kind"`
+		} `yaml:"entries"`
+	}
+	if err := yaml.Unmarshal(raw, &registry); err != nil {
+		t.Fatalf("parse the rule-path registry: %v", err)
+	}
+	for _, entry := range registry.Entries {
+		if entry.Kind == "reserved_matched_rule" && entry.ID == PolicyProviderRule {
+			return
+		}
+	}
+	t.Fatalf("%q is not a reserved matched_rule in %s", PolicyProviderRule, path)
 }

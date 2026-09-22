@@ -1,7 +1,9 @@
 import sys
 import time
+from pathlib import Path
 
 import pytest
+import yaml
 
 from hushspec import HushGuard, HushSpecDenied
 from hushspec.canonical import canonical_json_value
@@ -13,10 +15,15 @@ from hushspec.evaluate import (
 )
 from hushspec.middleware import HushGuard as HushGuardDirect
 from hushspec.adapters.langchain import hush_tool
-from hushspec.middleware import EnforcementConfig, matches_rule_path_prefix
+from hushspec.middleware import (
+    POLICY_PROVIDER_RULE,
+    POLICY_SIGNATURE_RULE,
+    EnforcementConfig,
+    matches_rule_path_prefix,
+)
 from hushspec.observer import EvaluationObserver
 from hushspec.sinks import ReceiptSink
-from hushspec.parse import parse_or_raise
+from hushspec.parse import CoreSafeLoader, parse_or_raise
 
 
 # Shared policies
@@ -861,3 +868,34 @@ class TestConcurrentPolicySwap:
             guard.evaluate(EvaluationAction(type="tool_call", target="x")).decision
             == Decision.DENY
         )
+
+
+class TestReservedMatchedRules:
+    """The reserved ``matched_rule`` values, against the published registry.
+
+    ``spec/registries/rule-paths.yaml`` is the normative list, so renaming a
+    constant here fails rather than quietly leaving the registry describing a
+    value no receipt carries.
+    """
+
+    @staticmethod
+    def _reserved() -> set[str]:
+        registry = Path(__file__).resolve().parents[3] / "spec/registries/rule-paths.yaml"
+        if not registry.is_file():
+            pytest.skip(f"{registry} is not available outside the repository")
+        document = yaml.load(registry.read_text(encoding="utf-8"), Loader=CoreSafeLoader)
+        return {
+            entry["id"]
+            for entry in document["entries"]
+            if entry.get("kind") == "reserved_matched_rule"
+        }
+
+    def test_the_refused_policy_rule_is_registered(self) -> None:
+        assert POLICY_SIGNATURE_RULE in self._reserved()
+
+    def test_the_provider_rule_is_registered(self) -> None:
+        # This guard never issues that denial itself: its policy provider
+        # pushes each reload into `swap_resolution`, so a failed reload leaves
+        # the policy already in force (core spec 6.2). A reader of receipts an
+        # enforcement point of the other kind emitted still needs the spelling.
+        assert POLICY_PROVIDER_RULE in self._reserved()

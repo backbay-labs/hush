@@ -70,6 +70,41 @@ from hushspec.generated_contract import (
 DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
 FRAMEWORK_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*$")
 
+#: Largest integer an IEEE 754 double holds exactly (canonical spec 4.3).
+MAX_SAFE_INTEGER = 2**53 - 1
+
+
+def unsafe_integer(value: Any, path: str = "$") -> str | None:
+    """The first integer past the IEEE 754 safe range, or ``None``.
+
+    The bound belongs to integer *syntax*: ``10000000000000000`` names an exact
+    integer a double cannot hold, while ``1.0e+16`` names the double itself and
+    is accepted whatever its magnitude. The decoded document is the last place
+    that distinction survives -- PyYAML hands integer-syntax scalars over as
+    ``int`` and float-syntax scalars as ``float`` -- so the bound is applied
+    here, which keeps a rounded integer out of a content hash and refuses the
+    document even for an engine that never hashes it.
+    """
+    if isinstance(value, bool):
+        # A YAML boolean is not an integer, whatever Python's type hierarchy says.
+        return None
+    if isinstance(value, int):
+        if value > MAX_SAFE_INTEGER or value < -MAX_SAFE_INTEGER:
+            return f"{path}: integer {value} exceeds the safe range (2^53-1)"
+        return None
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            found = unsafe_integer(item, f"{path}[{index}]")
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, dict):
+        for key, item in value.items():
+            found = unsafe_integer(item, f"{path}.{key}")
+            if found is not None:
+                return found
+    return None
+
 
 
 #: The declared members of a ``when`` condition, each with the type its value
