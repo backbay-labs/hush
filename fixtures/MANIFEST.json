@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T03:02:18Z",
+  "generated_at": "2026-09-22T03:09:55Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -818,6 +818,20 @@
     {
       "path": "fixtures/core/invalid/regex-mid-pattern-flag.yaml",
       "sha256": "150b62665af606f941c91a7b6e4b757b454220a0f2ecde0e53fc2adce4e5de46",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/regex-negated-class-shorthand.expect.yaml",
+      "sha256": "b3f4ffda09bac90e436946ebed4bba702dedeb72061d8c8706334f53bf65dc0c",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/regex-negated-class-shorthand.yaml",
+      "sha256": "f323dedc6a3351dbc49d623414306aed221b8b02d856674701ee552da60a0d22",
       "category": "invalid",
       "module": "core",
       "level": 1

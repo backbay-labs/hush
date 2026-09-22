@@ -204,7 +204,7 @@ Fixture: `fixtures/core/invalid/float-version.yaml`, `fixtures/core/valid/versio
 The profile is a subset of RE2 syntax. The grammar below is the accepted surface; the semantics (ASCII-only class escapes, end-of-text `$`, ASCII case folding under `i`) are defined in Core Section 3.14.3 and are not expressible in ABNF.
 
 ```abnf
-regex          = [ flags ] alternation
+regex          = *flags alternation
 flags          = "(?" 1*( "i" / "m" / "s" ) ")"
 alternation    = concatenation *( "|" concatenation )
 concatenation  = *piece
@@ -217,21 +217,22 @@ literal        = %x20-23 / %x25-27 / %x2C-2D / %x2F-3E / %x40-5A / %x5F-7A / %x7
 escape         = "\" ( "t" / "n" / "r" / "f" / "v" / punct / "x" 2HEXDIG )
 punct          = %x21-2F / %x3A-40 / %x5B-60 / %x7B-7E
 class-escape   = "\" ( "d" / "D" / "w" / "W" / "s" / "S" )
+class-member   = "\" ( "d" / "w" / "s" )   ; the negated forms are not set members
 any            = "."
 assertion      = "^" / "$" / "\b" / "\B"
 group          = "(" [ "?:" / named ] alternation ")"
 named          = ( "?P<" / "?<" ) group-name ">"
 group-name     = ( ALPHA / "_" ) *( ALPHA / DIGIT / "_" )
 bracket        = "[" [ "^" ] 1*bracket-item "]"
-bracket-item   = class-escape / bracket-range / bracket-atom
+bracket-item   = class-member / bracket-range / bracket-atom
 bracket-range  = bracket-atom "-" bracket-atom
 bracket-atom   = escape / %x20-5A / %x5E-D7FF / %xE000-10FFFF   ; any scalar value except "[", "]" and "\"
 ```
 
-Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences (named ones included), possessive quantifiers, atomic groups, conditionals, comment groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or flag groups after the first character; a quantified group whose body is itself unbounded is rejected, and a `bracket-range` endpoint outside the Basic Multilingual Plane is rejected. A pattern MUST NOT exceed 2048 bytes.
+Constraints the grammar cannot express, all normative in Core Section 3.14.3: no lookaround, backreferences (named ones included), possessive quantifiers, atomic groups, conditionals, comment groups, `\A`, `\z`, `\Z`, `\G`, `\p{...}`, or a flag group after the leading run; a quantified group whose body is itself unbounded is rejected, and a `bracket-range` endpoint outside the Basic Multilingual Plane is rejected. A pattern MUST NOT exceed 2048 bytes.
 
 - `+ (?i)ignore (all )?previous instructions`, `+ [0-9]{3}-[0-9]{2}-[0-9]{4}`, `+ \bsecret\b`
-- `- (?=rm)` (lookahead), `- (a+)+` (nested unbounded), `- foo(?i)bar` (mid-pattern flag), `- \p{L}` (property class), `- [[:alpha:]]` (POSIX bracket expression), `- a{,3}` (open lower bound)
+- `- (?=rm)` (lookahead), `- (a+)+` (nested unbounded), `- foo(?i)bar` (mid-pattern flag), `- \p{L}` (property class), `- [[:alpha:]]` (POSIX bracket expression), `- a{,3}` (open lower bound), `- [\D]` (negated shorthand inside a class)
 
 Fixture: `fixtures/core/evaluation/regex-dialect.test.yaml`, `fixtures/core/invalid/regex-*.yaml`.
 

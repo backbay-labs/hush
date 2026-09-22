@@ -19,7 +19,9 @@ Policies carry user-authored regular expressions in several rule blocks, and det
 
 Requirements: the regex profile (Core Section 3.14.3; Grammars Section 9) excludes backreferences, lookaround, and nested unbounded quantifiers, and caps pattern length, so every conforming pattern is matchable in time linear in the input on an RE2-class engine. Validators MUST reject non-conforming patterns; evaluators MUST deny when a pattern fails to compile at evaluation time, and an engine that bounds matching time MUST deny on timeout. Content scanned by `secret_patterns`, `patch_integrity`, `shell_commands`, and the detection pipeline is truncated to the configured byte budgets before matching.
 
-Residual risk: a host regex library that silently accepts a superset of the profile. The differential fuzzer and the regex-dialect vectors exist to catch such drift.
+The nested-quantifier rule is syntactic (Core Section 3.14.3): it refuses an unbounded-quantified group whose body holds another unbounded quantifier, not every pattern that can match one input many ways. The profile therefore bounds a pattern's structure, but an ambiguous pattern such as `(a|aa)*` conforms and can still run super-linearly on a backtracking engine -- JavaScript `RegExp` and Python `re` are backtracking. An engine built on one SHOULD bound matching time and deny on timeout, or match with a linear-time engine (RE2, the Rust `regex` crate) instead.
+
+Residual risk: a host regex library that silently accepts a superset of the profile, and super-linear matching of an ambiguous pattern on a backtracking engine that bounds no matching time. The differential fuzzer and the regex-dialect vectors exist to catch such drift.
 
 ## 3. Path Traversal and Normalization
 
