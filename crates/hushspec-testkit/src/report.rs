@@ -273,6 +273,9 @@ pub fn build(
         let entry = levels.get_mut("0").expect("level 0 exists");
         entry.passed = level_one.passed + level_one.failed - parse_failures;
         entry.failed = parse_failures;
+        // A document vector the run never attempted was never parsed either,
+        // so it is unattempted at Level 0 as well.
+        entry.skipped += level_one.skipped;
     }
 
     for (key, entry) in levels.iter_mut() {
