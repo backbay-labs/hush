@@ -267,6 +267,34 @@ function unknownSummaryKey(policy: unknown): string | undefined {
 }
 
 /**
+ * Why `value` is not a log entry, or `undefined`.
+ *
+ * The entry-level strictness of log spec 8, step 1: an unknown member anywhere
+ * the log-entry schema closes an object, and a payload member that is not a
+ * JSON object. An append runs it over the file's last line, so the tail this
+ * SDK is willing to continue is exactly the tail a verifier is willing to
+ * read.
+ */
+function logEntryProblem(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'expected a JSON object';
+  }
+  const entry = value as LogEntry;
+  for (const member of PAYLOAD_MEMBERS) {
+    const payload: unknown = entry[member];
+    if (payload != null && (typeof payload !== 'object' || Array.isArray(payload))) {
+      return `${member} is not a JSON object`;
+    }
+  }
+  const unknown =
+    unknownKey(entry, ENTRY_KEYS) ??
+    unknownPolicyEventKey(entry.policy_event) ??
+    unknownKey(entry.log_started, LOG_STARTED_KEYS) ??
+    unknownKey(entry.signature, SIGNATURE_KEYS);
+  return unknown === undefined ? undefined : `unknown field ${JSON.stringify(unknown)}`;
+}
+
+/**
  * Recompute the hash an entry should carry: `sha256:` over the RFC 8785
  * canonical form of the entry with `entry_hash` and `signature` removed.
  */
@@ -583,9 +611,12 @@ function lastEntry(filePath: string): LogEntry | undefined {
   }
   // Reading the head loosely would seed the chain from a malformed tail: a
   // `seq` that is not an integer or an `entry_hash` that is not a string would
-  // become the next entry's link and break the chain for every later verifier.
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new LogChainError(`last line of ${filePath} is not a log entry`);
+  // become the next entry's link and break the chain for every later verifier,
+  // and an unknown member would make a line this SDK extended one no verifier
+  // reads.
+  const problem = logEntryProblem(parsed);
+  if (problem !== undefined) {
+    throw new LogChainError(`last line of ${filePath} is not a log entry: ${problem}`);
   }
   const { seq, entry_hash: entryHash } = parsed as Record<string, unknown>;
   if (typeof seq !== 'number' || !Number.isInteger(seq)) {

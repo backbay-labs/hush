@@ -479,6 +479,23 @@ class TestMalformedEntriesAreRejectedNotRaised:
         with pytest.raises(LogError, match="is not an integer"):
             verify_log("log.jsonl", text)
 
+    def test_a_tail_with_an_unknown_member_is_refused(self, tmp_path: Path) -> None:
+        """Rust and Go parse the tail strictly before continuing it; a line this
+        SDK extended but a verifier refuses would leave an unreadable log."""
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        lines = [line for line in path.read_text().split("\n") if line.strip()]
+        last = json.loads(lines[-1])
+        for mutation in (
+            {"rogue": 1},
+            {"log_started": {"timestamp": "2026-09-15T12:00:00.000Z", "rogue": 1}},
+            {"receipt": "not an object"},
+        ):
+            lines[-1] = json.dumps({**last, **mutation})
+            path.write_text("\n".join(lines) + "\n")
+            with pytest.raises(SinkError, match="is not a log entry"):
+                ChainedFileSink.open(path)
+
     def test_a_malformed_tail_is_refused_rather_than_coerced(
         self, tmp_path: Path
     ) -> None:

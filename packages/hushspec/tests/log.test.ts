@@ -363,6 +363,24 @@ describe('ChainedFileSink', () => {
     expect(() => ChainedFileSink.open(first).rotate(second)).toThrow(LogChainError);
   });
 
+  it('refuses to continue a file whose tail carries an unknown member', () => {
+    // Rust and Go parse the tail strictly before continuing it; a line this
+    // SDK extended but a verifier refuses would leave an unreadable log.
+    const file = path.join(dir, 'log.jsonl');
+    writeBasic(file, false);
+    const lines = readFileSync(file, 'utf8').trimEnd().split('\n');
+    const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
+    for (const tail of [
+      { ...last, rogue: 1 },
+      { ...last, log_started: { timestamp: '2026-09-15T12:00:00.000Z', rogue: 1 } },
+      { ...last, receipt: 'not an object' },
+    ]) {
+      lines[lines.length - 1] = JSON.stringify(tail);
+      writeFileSync(file, `${lines.join('\n')}\n`);
+      expect(() => ChainedFileSink.open(file)).toThrow(LogChainError);
+    }
+  });
+
   it('refuses to continue a file whose tail has no usable chain head', () => {
     // A tail read loosely would seed the next entry from a `seq` that is not a
     // number or an `entry_hash` that is not a string, forking the chain.

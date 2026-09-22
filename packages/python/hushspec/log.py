@@ -416,6 +416,30 @@ def _unknown_policy_event_key(event: Any) -> Optional[str]:
     return _unknown_key(event.get("sdk"), _SDK_KEYS)
 
 
+def _log_entry_problem(entry: Any) -> Optional[str]:
+    """Why *entry* is not a log entry, or ``None``.
+
+    The entry-level strictness of log spec section 8, step 1: an unknown member
+    anywhere the log-entry schema closes an object, and a payload member that
+    is not a JSON object. An append runs it over the file's last line, so the
+    tail this SDK is willing to continue is exactly the tail a verifier is
+    willing to read.
+    """
+    if not isinstance(entry, dict):
+        return "expected a JSON object"
+    for member in ("receipt", "policy_event", "log_started", "signature"):
+        value = entry.get(member)
+        if value is not None and not isinstance(value, dict):
+            return f"{member} is not a JSON object"
+    unknown = (
+        _unknown_key(entry, _ENTRY_KEYS)
+        or _unknown_policy_event_key(entry.get("policy_event"))
+        or _unknown_key(entry.get("log_started"), _LOG_STARTED_KEYS)
+        or _unknown_key(entry.get("signature"), _ENTRY_SIGNATURE_KEYS)
+    )
+    return None if unknown is None else f"unknown field {unknown!r}"
+
+
 def _unknown_policy_summary_key(policy: Any) -> Optional[str]:
     """The first unknown member of a policy summary or of its own objects."""
     unknown = _unknown_key(policy, _POLICY_SUMMARY_KEYS)
@@ -754,7 +778,10 @@ def _last_entry_of(handle: BinaryIO, path: Path) -> Optional[dict[str, Any]]:
         entry = json.loads(last)
     except ValueError as exc:
         raise SinkError(f"last line of {path} is not a log entry: {exc}") from exc
-    if not isinstance(entry, dict) or "seq" not in entry or "entry_hash" not in entry:
+    problem = _log_entry_problem(entry)
+    if problem is not None:
+        raise SinkError(f"last line of {path} is not a log entry: {problem}")
+    if "seq" not in entry or "entry_hash" not in entry:
         raise SinkError(f"last line of {path} is not a log entry")
     seq, entry_hash = entry["seq"], entry["entry_hash"]
     # Coercing here would seed the chain from a malformed tail: `int("x")`
