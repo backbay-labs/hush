@@ -1017,10 +1017,13 @@ rules:
             })
         };
 
+        // A batch of one makes the worker send each entry as it arrives, so it
+        // is blocked on the stalled request from its first entry onward and
+        // the sender, not the worker, decides when the queue is full.
         let observer = Arc::new(Errors::default());
         let sink = OtlpSink::with_config(OtlpConfig {
             queue_capacity: 1,
-            batch_size: 1024,
+            batch_size: 1,
             flush_interval: Duration::from_secs(60),
             timeout: Duration::from_millis(500),
             max_retries: 0,
