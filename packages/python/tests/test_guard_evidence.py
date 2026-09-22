@@ -17,7 +17,7 @@ from hushspec.middleware import (
 )
 from hushspec.canonical import content_hash
 from hushspec.parse import parse_or_raise
-from hushspec.receipt import POLICY_UNVERIFIED_RULE, Actor
+from hushspec.receipt import POLICY_UNVERIFIED_RULE, Actor, TimeSource
 from hushspec.resolve import (
     ChainLink,
     PolicyVerificationError,
@@ -79,6 +79,27 @@ class TestReceiptShape:
         guard = HushGuard.from_yaml(POLICY, sink=sink, actor=actor)
         guard.gate(EvaluationAction(type="tool_call", target="anything"))
         assert collected[-1].actor == actor
+
+    def test_the_time_source_option_reaches_every_receipt(self) -> None:
+        collected, sink = _receipts()
+        guard = HushGuard.from_yaml(
+            POLICY, sink=sink, time_source=TimeSource.MONOTONIC_ADJUSTED
+        )
+        guard.gate(EvaluationAction(type="tool_call", target="anything"))
+        assert collected[-1].time_source == "monotonic_adjusted"
+
+    def test_the_default_time_source_is_system(self) -> None:
+        collected, sink = _receipts()
+        HushGuard.from_yaml(POLICY, sink=sink).gate(
+            EvaluationAction(type="tool_call", target="anything")
+        )
+        assert collected[-1].time_source == "system"
+
+    def test_a_time_source_outside_the_enum_is_refused(self) -> None:
+        # Receipt spec 3.3 closes the enum, so an unknown value is refused when
+        # the guard is built rather than written into receipts.
+        with pytest.raises(ValueError, match="invalid time_source"):
+            HushGuard.from_yaml(POLICY, time_source="approximate")
 
     def test_no_actor_means_no_actor_member(self) -> None:
         collected, sink = _receipts()
