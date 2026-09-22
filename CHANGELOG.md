@@ -855,6 +855,22 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `ALL_PROXY`). Through a proxy the connection is made by the proxy, which resolves the host a
   second time on its side, so the address the SSRF check approved was never the one dialled.
   Go already disabled proxies and Node's `https.request` never reads them.
+- A guard's re-check of an already-resolved chain accepts a hop the resolver proved by a
+  matching digest pin (signing spec 6.5), so a provider-backed guard under `require_signature`
+  no longer refuses a valid chain such as a signed leaf over an unsigned, pinned base.
+  `ChainLink` carries the pin as in-memory evidence in all four SDKs; it never reaches a
+  receipt or a bundle, and the wire formats are unchanged.
+- The TypeScript guard leaves its refused state when a policy that proves itself is accepted.
+  A guard built from an unverified policy under `requireSignature` kept denying every action
+  after a verified policy was swapped or reloaded in.
+- A reload the subscriber rejects no longer becomes what a TypeScript `PolicyPoller`,
+  `PolicyWatcher`, `FileProvider` or `HttpProvider` serves from `current()`. The previously
+  accepted snapshot stays in force, the failure is reported, and the next tick offers the
+  rejected document again instead of skipping it as already seen. The Rust, Python and Go
+  drivers already committed only after the callback returned.
+- A TypeScript guard that pulls its policy from a provider reports a rejected reload once per
+  rejected document, as a `policy.load_failed` observer event, and keeps the policy already in
+  force rather than latching into the refused state.
 
 **CLI and tooling**
 
