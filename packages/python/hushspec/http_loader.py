@@ -716,14 +716,27 @@ def fetch_signature(
     return result.body.encode("utf-8")
 
 
+def _split_query(source: str) -> tuple[str, str]:
+    """*source* split at its query or fragment, so a suffix is carried over
+    rather than having a sidecar name appended to it."""
+    cut = min((source.find(mark) for mark in "?#" if mark in source), default=-1)
+    return (source, "") if cut == -1 else (source[:cut], source[cut:])
+
+
+def _preferred_sidecar_url(source: str) -> str:
+    """The ``<source>.sig`` sidecar URL signing spec 7.1 prefers, with the
+    ``.sig`` on the path rather than on a query the URL may carry."""
+    base, suffix = _split_query(source)
+    return f"{base}.sig{suffix}"
+
+
 def _stem_sidecar_url(source: str) -> Optional[str]:
     """The ``<stem>.sig`` sidecar URL signing spec 7.1 also names, for a URL
     whose last path segment carries an extension: ``policy.yaml`` beside
     ``policy.sig``. ``None`` when there is no extension to replace, since the
     candidate would then be ``<source>.sig`` again.
     """
-    cut = min((source.find(mark) for mark in "?#" if mark in source), default=-1)
-    base, suffix = (source, "") if cut == -1 else (source[:cut], source[cut:])
+    base, suffix = _split_query(source)
     scheme = base.find("://")
     if scheme == -1 or base.find("/", scheme + 3) == -1:
         return None
@@ -743,7 +756,7 @@ def fetch_sidecar(
     signing spec 7.1 makes normative. ``None`` when neither exists.
     """
     settings = config or HttpLoaderConfig()
-    preferred = fetch_signature(f"{source}.sig", settings)
+    preferred = fetch_signature(_preferred_sidecar_url(source), settings)
     if preferred is not None:
         return preferred
     stem = _stem_sidecar_url(source)

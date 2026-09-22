@@ -674,15 +674,28 @@ func FetchSignature(rawURL string, config HTTPLoaderConfig) ([]byte, bool, error
 	return []byte(result.Body), true, nil
 }
 
+// splitQuery splits source at its query or fragment, so a suffix is carried
+// over rather than having a sidecar name appended to it.
+func splitQuery(source string) (string, string) {
+	if cut := strings.IndexAny(source, "?#"); cut != -1 {
+		return source[:cut], source[cut:]
+	}
+	return source, ""
+}
+
+// preferredSidecarURL is the `<source>.sig` sidecar URL signing spec 7.1
+// prefers, with the `.sig` on the path rather than on a query the URL may carry.
+func preferredSidecarURL(source string) string {
+	base, suffix := splitQuery(source)
+	return base + ".sig" + suffix
+}
+
 // stemSidecarURL is the `<stem>.sig` sidecar URL signing spec 7.1 also names,
 // for a URL whose last path segment carries an extension: `policy.yaml` beside
 // `policy.sig`. It reports false when there is no extension to replace, since
 // the candidate would then be `<source>.sig` again.
 func stemSidecarURL(source string) (string, bool) {
-	base, suffix := source, ""
-	if cut := strings.IndexAny(source, "?#"); cut != -1 {
-		base, suffix = source[:cut], source[cut:]
-	}
+	base, suffix := splitQuery(source)
 	scheme := strings.Index(base, "://")
 	if scheme == -1 || strings.Index(base[scheme+3:], "/") == -1 {
 		return "", false
@@ -700,7 +713,7 @@ func stemSidecarURL(source string) (string, bool) {
 // first, then the `<stem>.sig` sidecar of a 0.1 layout, the preference order
 // signing spec 7.1 makes normative. It reports not-found when neither exists.
 func FetchSidecar(source string, config HTTPLoaderConfig) ([]byte, bool, error) {
-	data, found, err := FetchSignature(source+".sig", config)
+	data, found, err := FetchSignature(preferredSidecarURL(source), config)
 	if err != nil || found {
 		return data, found, err
 	}

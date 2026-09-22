@@ -29,6 +29,7 @@ import {
   createHttpLoader,
   createSyncHttpLoader,
   fetchSidecar,
+  preferredSidecarUrl,
   fetchSignature,
   isBlockedAddress,
   resolveTarget,
@@ -382,6 +383,15 @@ describe('fetchSignature', () => {
     });
     expect(await fetchSidecar(`${server.origin}/policy.yaml`, testConfig())).toBe(envelope);
     expect(await fetchSidecar(`${server.origin}/absent.yaml`, testConfig())).toBeNull();
+  });
+
+  it('keeps a query after the preferred sidecar suffix', () => {
+    expect(preferredSidecarUrl('https://policies.example/policy.yaml?v=2')).toBe(
+      'https://policies.example/policy.yaml.sig?v=2',
+    );
+    expect(preferredSidecarUrl('https://policies.example/policy.yaml')).toBe(
+      'https://policies.example/policy.yaml.sig',
+    );
   });
 
   it('derives the stem sidecar from the last path segment only', () => {

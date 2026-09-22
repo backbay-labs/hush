@@ -1236,14 +1236,27 @@ pub mod http {
         Ok(Some(result.body.into_bytes()))
     }
 
+    /// `source` split at its query or fragment, so a suffix is carried over
+    /// rather than having a sidecar name appended to it.
+    fn split_query(source: &str) -> (&str, &str) {
+        source
+            .find(['?', '#'])
+            .map_or((source, ""), |at| source.split_at(at))
+    }
+
+    /// The `<source>.sig` sidecar URL signing spec 7.1 prefers, with the
+    /// `.sig` on the path rather than on a query the URL may carry.
+    fn preferred_sidecar_url(source: &str) -> String {
+        let (base, suffix) = split_query(source);
+        format!("{base}.sig{suffix}")
+    }
+
     /// The `<stem>.sig` sidecar URL signing spec 7.1 also names, for a URL
     /// whose last path segment carries an extension: `policy.yaml` beside
     /// `policy.sig`. `None` when there is no extension to replace, since the
     /// candidate would then be `<source>.sig` again.
     fn stem_sidecar_url(source: &str) -> Option<String> {
-        let (base, suffix) = source
-            .find(['?', '#'])
-            .map_or((source, ""), |at| source.split_at(at));
+        let (base, suffix) = split_query(source);
         let authority = base.find("://")? + 3;
         let path_start = authority + base[authority..].find('/')?;
         let segment_start = base[path_start..]
@@ -1269,7 +1282,7 @@ pub mod http {
         source: &str,
         config: &HttpLoaderConfig,
     ) -> Result<Option<Vec<u8>>, ResolveError> {
-        if let Some(envelope) = fetch_signature(&format!("{source}.sig"), config)? {
+        if let Some(envelope) = fetch_signature(&preferred_sidecar_url(source), config)? {
             return Ok(Some(envelope));
         }
         match stem_sidecar_url(source) {
@@ -1573,6 +1586,18 @@ pub mod http {
                 .expect_err("plain http should be refused")
                 .to_string();
             assert!(message.contains("only HTTPS URLs are allowed"));
+        }
+
+        #[test]
+        fn the_preferred_sidecar_keeps_a_query_after_the_suffix() {
+            assert_eq!(
+                preferred_sidecar_url("https://policies.example/policy.yaml?v=2"),
+                "https://policies.example/policy.yaml.sig?v=2"
+            );
+            assert_eq!(
+                preferred_sidecar_url("https://policies.example/policy.yaml"),
+                "https://policies.example/policy.yaml.sig"
+            );
         }
 
         #[test]

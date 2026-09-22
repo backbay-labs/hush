@@ -426,6 +426,17 @@ def test_falls_back_to_the_stem_sidecar(server: _Server, config: HttpLoaderConfi
     assert fetch_sidecar(f"{server.base}/absent.yaml", config) is None
 
 
+def test_the_preferred_sidecar_keeps_a_query_after_the_suffix() -> None:
+    from hushspec.http_loader import _preferred_sidecar_url
+
+    assert _preferred_sidecar_url("https://policies.example/policy.yaml?v=2") == (
+        "https://policies.example/policy.yaml.sig?v=2"
+    )
+    assert _preferred_sidecar_url("https://policies.example/policy.yaml") == (
+        "https://policies.example/policy.yaml.sig"
+    )
+
+
 def test_the_stem_sidecar_replaces_the_last_extension_only() -> None:
     from hushspec.http_loader import _stem_sidecar_url
 

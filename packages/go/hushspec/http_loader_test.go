@@ -446,6 +446,15 @@ func TestFetchSidecarFallsBackToTheStemSidecar(t *testing.T) {
 	}
 }
 
+func TestPreferredSidecarURLKeepsAQueryAfterTheSuffix(t *testing.T) {
+	if got := preferredSidecarURL("https://policies.example/policy.yaml?v=2"); got != "https://policies.example/policy.yaml.sig?v=2" {
+		t.Errorf("preferredSidecarURL with a query = %q", got)
+	}
+	if got := preferredSidecarURL("https://policies.example/policy.yaml"); got != "https://policies.example/policy.yaml.sig" {
+		t.Errorf("preferredSidecarURL = %q", got)
+	}
+}
+
 func TestStemSidecarURLReplacesTheLastExtensionOnly(t *testing.T) {
 	cases := map[string]string{
 		"https://policies.example/team/policy.yaml": "https://policies.example/team/policy.sig",

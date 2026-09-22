@@ -710,15 +710,31 @@ export function createSyncHttpLoader(
  * nothing about whether a signature exists.
  */
 /**
+ * `source` split at its query or fragment, so a suffix is carried over rather
+ * than having a sidecar name appended to it.
+ */
+function splitQuery(source: string): [string, string] {
+  const cut = source.search(/[?#]/);
+  return cut === -1 ? [source, ''] : [source.slice(0, cut), source.slice(cut)];
+}
+
+/**
+ * The `<source>.sig` sidecar URL signing spec 7.1 prefers, with the `.sig` on
+ * the path rather than on a query the URL may carry.
+ */
+export function preferredSidecarUrl(source: string): string {
+  const [base, suffix] = splitQuery(source);
+  return `${base}.sig${suffix}`;
+}
+
+/**
  * The `<stem>.sig` sidecar URL signing spec 7.1 also names, for a URL whose
  * last path segment carries an extension: `policy.yaml` beside `policy.sig`.
  * `null` when there is no extension to replace, since the candidate would
  * then be `<source>.sig` again.
  */
 export function stemSidecarUrl(source: string): string | null {
-  const cut = source.search(/[?#]/);
-  const base = cut === -1 ? source : source.slice(0, cut);
-  const suffix = cut === -1 ? '' : source.slice(cut);
+  const [base, suffix] = splitQuery(source);
   const scheme = base.indexOf('://');
   if (scheme === -1) return null;
   const pathStart = base.indexOf('/', scheme + 3);
@@ -736,7 +752,7 @@ export function stemSidecarUrl(source: string): string | null {
  * 7.1 makes normative. `null` when neither exists.
  */
 export async function fetchSidecar(source: string, config?: HttpLoaderConfig): Promise<string | null> {
-  const preferred = await fetchSignature(`${source}.sig`, config);
+  const preferred = await fetchSignature(preferredSidecarUrl(source), config);
   if (preferred !== null) return preferred;
   const stem = stemSidecarUrl(source);
   return stem === null ? null : fetchSignature(stem, config);
