@@ -339,8 +339,10 @@ describe('PolicyPoller', () => {
         return loadCount === 1 ? VALID_POLICY : UPDATED_POLICY;
       },
       intervalMs: 50,
-      onChange: () => {
-        throw new Error('subscriber blew up');
+      onChange: (spec) => {
+        if (spec.name !== 'test-policy') {
+          throw new Error('subscriber blew up');
+        }
       },
       onError: (error) => {
         errors.push(error);
@@ -353,6 +355,51 @@ describe('PolicyPoller', () => {
 
     expect(errors.map((error) => error.message)).toContain('subscriber blew up');
     expect(loadCount).toBeGreaterThan(1);
+  });
+
+  it('keeps serving the accepted policy when the subscriber rejects a reload', async () => {
+    const errors: Error[] = [];
+    let loadCount = 0;
+
+    poller = new PolicyPoller({
+      loader: async () => {
+        loadCount++;
+        return loadCount === 1 ? VALID_POLICY : UPDATED_POLICY;
+      },
+      intervalMs: 20,
+      onChange: (spec) => {
+        if (spec.name !== 'test-policy') {
+          throw new Error('the reloaded policy was refused');
+        }
+      },
+      onError: (error) => {
+        errors.push(error);
+      },
+    });
+
+    const started = await poller.start();
+    expect(started.name).toBe('test-policy');
+
+    await new Promise((r) => setTimeout(r, 200));
+    poller.stop();
+
+    // The rejected snapshot never became what `current()` serves, and it is
+    // offered again on every tick rather than skipped as already seen.
+    expect(poller.current()?.name).toBe('test-policy');
+    expect(errors.length).toBeGreaterThan(1);
+  });
+
+  it('refuses to start when the subscriber rejects the first load', async () => {
+    poller = new PolicyPoller({
+      loader: async () => VALID_POLICY,
+      intervalMs: 50,
+      onChange: () => {
+        throw new Error('the first policy was refused');
+      },
+    });
+
+    await expect(poller.start()).rejects.toThrow('the first policy was refused');
+    expect(poller.current()).toBeNull();
   });
 
   it('survives an onError handler that throws', async () => {

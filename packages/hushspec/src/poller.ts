@@ -138,19 +138,21 @@ export class PolicyPoller {
   }
 
   /**
-   * Hand the new policy to `onChange` without letting a throw from it escape.
+   * Offer the new policy to `onChange`, returning the error it refused with or
+   * `null` when it accepted.
    *
    * The callback belongs to the caller and runs on the poll timer, where an
    * escaping error is an unhandled rejection rather than something anyone can
-   * catch -- and it would take the poll loop with it. A callback that throws
-   * is reported through `onError`, which is where the caller already looks for
-   * a failed poll.
+   * catch -- and it would take the poll loop with it. A subscriber that throws
+   * has rejected the reload, so the caller decides what to report and what to
+   * keep serving.
    */
-  private notifyChange(spec: HushSpec, resolution?: Resolution): void {
+  private offerChange(spec: HushSpec, resolution?: Resolution): Error | null {
     try {
       this.options.onChange(spec, resolution);
+      return null;
     } catch (err) {
-      this.notifyError(err instanceof Error ? err : new Error(String(err)));
+      return err instanceof Error ? err : new Error(String(err));
     }
   }
 
@@ -245,12 +247,24 @@ export class PolicyPoller {
       return this.currentSpec!;
     }
 
+    // The subscriber accepts the reload before any of it is committed: a
+    // document the guard refuses must not become what `current()` serves, and
+    // leaving the hash unrecorded is what makes the next poll offer the same
+    // document again rather than skip it as already seen.
+    const rejected = this.offerChange(spec, resolution);
     this.latestAppliedLoadId = loadId;
+    if (rejected !== null) {
+      if (throwOnError && this.currentSpec == null) {
+        throw rejected;
+      }
+      this.notifyError(rejected);
+      return this.currentSpec ?? spec;
+    }
+
     this.currentSpec = spec;
     this.currentResolution = resolution ?? null;
     this.contentHash = hash;
     this.lastSuccessfulLoad = Date.now();
-    this.notifyChange(spec, resolution);
 
     return spec;
   }

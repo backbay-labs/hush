@@ -92,9 +92,11 @@ export class FileProvider implements PolicyProvider {
       debounceMs: this.debounceMs,
       resolveOptions: this.resolveOptions,
       onChange: (spec: HushSpec, resolution?: Resolution) => {
+        // The subscriber accepts the reload before the provider serves it: a
+        // document it rejects must never be what `current()` answers with.
+        onChange(spec, resolution);
         this.currentSpec = spec;
         this.currentResolution = resolution ?? null;
-        onChange(spec, resolution);
       },
       onError,
     };
@@ -199,9 +201,11 @@ export class HttpProvider implements PolicyProvider {
       },
       intervalMs: this.intervalMs,
       onChange: (spec: HushSpec, resolution?: Resolution) => {
+        // The subscriber accepts the reload before the provider serves it: a
+        // document it rejects must never be what `current()` answers with.
+        onChange(spec, resolution);
         this.currentSpec = spec;
         this.currentResolution = resolution ?? null;
-        onChange(spec, resolution);
       },
       onError,
       maxStaleMs: this.maxStaleMs,

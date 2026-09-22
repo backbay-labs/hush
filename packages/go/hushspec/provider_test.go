@@ -475,3 +475,48 @@ func TestFailedReloadIsItsOwnObserverEvent(t *testing.T) {
 		t.Fatalf("unexpected event: %+v", event)
 	}
 }
+
+// TestPollerKeepsTheAcceptedPolicyWhenTheGuardRejectsAReload: a reload the
+// guard will not put in force does not become the poller's current snapshot
+// either, so the next poll offers the same document again rather than finding
+// it already recorded (signing spec 6.5).
+func TestPollerKeepsTheAcceptedPolicyWhenTheGuardRejectsAReload(t *testing.T) {
+	accepted := signedResolution(t, guardSpec(), "stub://policy")
+	replacement := guardSpec()
+	replacement.Rules.Egress.Allow = []string{"api.github.com", "evil.example.com"}
+	unproven := guardResolution(t, replacement)
+
+	provider := &stubProvider{current: func() (*Resolution, error) { return accepted, nil }}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	var errs []error
+	poller, err := NewPolicyPoller(provider, ReloadOptions{
+		Guard:   guard,
+		OnError: func(err error) { errs = append(errs, err) },
+	})
+	if err != nil {
+		t.Fatalf("NewPolicyPoller: %v", err)
+	}
+
+	provider.current = func() (*Resolution, error) { return unproven, nil }
+	if changed, err := poller.CheckOnce(); changed || err == nil {
+		t.Fatalf("an unproven reload must be rejected: changed=%v err=%v", changed, err)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected the rejection to be reported once, got %d", len(errs))
+	}
+	if poller.Current().ContentHash != accepted.ContentHash {
+		t.Fatal("a rejected reload must not become the poller's current snapshot")
+	}
+	if guard.Resolution().ContentHash != accepted.ContentHash {
+		t.Fatal("a rejected reload must leave the previous policy in force")
+	}
+	if egressAllowed(t, guard, "evil.example.com") {
+		t.Fatal("the rejected policy is in force")
+	}
+	if refused, _ := guard.Refused(); refused {
+		t.Fatal("a rejected reload must not refuse the policy already in force")
+	}
+}

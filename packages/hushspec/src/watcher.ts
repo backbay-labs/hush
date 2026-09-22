@@ -84,9 +84,12 @@ export class PolicyWatcher {
   private handleChange(): void {
     try {
       const resolution = this.loadFromDisk();
+      // The subscriber accepts the reload before it becomes what `current()`
+      // serves: a document the guard refuses must not displace the one in
+      // force, and the next change offers it again.
+      this.options.onChange(resolution.spec, resolution);
       this.currentResolution = resolution;
       this.currentSpec = resolution.spec;
-      this.options.onChange(resolution.spec, resolution);
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.options.onError?.(error);
