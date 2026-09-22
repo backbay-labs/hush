@@ -317,8 +317,12 @@ pub type OnChange = dyn Fn(&Resolution) + Send + Sync;
 /// Called when a reload failed; the previous policy stays in force.
 pub type OnError = dyn Fn(&ProviderError) + Send + Sync;
 
-/// Default reload interval for both drivers.
-pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(30);
+/// How often a [`PolicyWatcher`] stats its file. The same value in every SDK.
+pub const DEFAULT_WATCH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How often a [`PolicyPoller`] reloads through its provider. The same value
+/// in every SDK.
+pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// What a running [`PolicyWatcher`] or [`PolicyPoller`] shares with its
 /// thread.
@@ -389,9 +393,11 @@ impl Drop for PolicyHandle {
 }
 
 /// The reload settings both drivers share.
-#[derive(Default)]
 struct Reload {
     interval: Option<Duration>,
+    /// The tick period when the caller set none: a watcher stats a file, a
+    /// poller reloads through a provider, and they are not the same cost.
+    default_interval: Duration,
     guard: Option<Arc<HushGuard>>,
     on_change: Option<Box<OnChange>>,
     on_error: Option<Box<OnError>>,
@@ -399,8 +405,19 @@ struct Reload {
 }
 
 impl Reload {
+    fn new(default_interval: Duration) -> Self {
+        Self {
+            interval: None,
+            default_interval,
+            guard: None,
+            on_change: None,
+            on_error: None,
+            sentinel: None,
+        }
+    }
+
     fn interval(&self) -> Duration {
-        self.interval.unwrap_or(DEFAULT_INTERVAL)
+        self.interval.unwrap_or(self.default_interval)
     }
 }
 
@@ -534,11 +551,11 @@ impl PolicyWatcher {
     pub fn with_provider(provider: Arc<FileProvider>) -> Self {
         Self {
             provider,
-            reload: Reload::default(),
+            reload: Reload::new(DEFAULT_WATCH_INTERVAL),
         }
     }
 
-    /// How often to check the file. Default: [`DEFAULT_INTERVAL`].
+    /// How often to check the file. Default: [`DEFAULT_WATCH_INTERVAL`].
     #[must_use]
     pub fn every(mut self, interval: Duration) -> Self {
         self.reload.interval = Some(interval);
@@ -669,11 +686,11 @@ impl PolicyPoller {
     pub fn new(provider: Arc<dyn PolicyProvider>) -> Self {
         Self {
             provider,
-            reload: Reload::default(),
+            reload: Reload::new(DEFAULT_POLL_INTERVAL),
         }
     }
 
-    /// How often to reload. Default: [`DEFAULT_INTERVAL`].
+    /// How often to reload. Default: [`DEFAULT_POLL_INTERVAL`].
     #[must_use]
     pub fn every(mut self, interval: Duration) -> Self {
         self.reload.interval = Some(interval);
@@ -1068,6 +1085,16 @@ rules:
             after,
             "dropping the handle stops the thread"
         );
+    }
+
+    #[test]
+    fn the_reload_defaults_are_the_shared_watch_and_poll_pair() {
+        assert_eq!(DEFAULT_WATCH_INTERVAL, Duration::from_secs(1));
+        assert_eq!(DEFAULT_POLL_INTERVAL, Duration::from_secs(60));
+        let watcher = PolicyWatcher::new("policy.yaml");
+        assert_eq!(watcher.reload.interval(), DEFAULT_WATCH_INTERVAL);
+        let poller = PolicyPoller::new(Arc::new(FileProvider::new("policy.yaml")));
+        assert_eq!(poller.reload.interval(), DEFAULT_POLL_INTERVAL);
     }
 
     #[test]

@@ -66,9 +66,11 @@ __all__ = [
 DEFAULT_PANIC_SENTINEL = ".hushspec_panic"
 
 #: A watcher tick is a ``stat`` unless the file moved, so it can be frequent.
+#: The same value in every SDK.
 DEFAULT_WATCH_INTERVAL_S = 1.0
 
-#: A poller tick is a full load -- possibly a remote one -- so it is not.
+#: A poller tick is a full load -- possibly a remote one -- so it is not. The
+#: same value in every SDK.
 DEFAULT_POLL_INTERVAL_S = 60.0
 
 ChangeHandler = Callable[[Resolution], None]
