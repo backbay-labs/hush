@@ -164,7 +164,10 @@ fn triggers(fail_on: FailOn, change_type: &str) -> bool {
     match fail_on {
         FailOn::Relaxed => relaxing,
         FailOn::Tightened => tightening,
-        FailOn::Any => relaxing || tightening,
+        // Any decision that changed, including a pair this build does not
+        // classify in either direction: `any` means any change, so a gate
+        // asking for it never opens on a label the matches above miss.
+        FailOn::Any => change_type != "unchanged",
     }
 }
 
@@ -816,8 +819,11 @@ mod tests {
     }
 
     #[test]
-    fn fail_on_any_covers_both_directions_but_not_unchanged() {
-        for change in ["relaxed", "demoted", "tightened", "escalated"] {
+    fn fail_on_any_covers_every_change_but_not_unchanged() {
+        // `changed` is the label `classify_change` falls back to for a
+        // decision pair it does not classify in either direction; `any` must
+        // gate on it too.
+        for change in ["relaxed", "demoted", "tightened", "escalated", "changed"] {
             assert!(triggers(FailOn::Any, change), "{change} should trigger");
         }
         assert!(!triggers(FailOn::Any, "unchanged"));
