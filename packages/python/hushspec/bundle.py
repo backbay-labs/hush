@@ -53,7 +53,7 @@ import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePath, PurePosixPath
+from pathlib import Path, PurePath
 from typing import Any
 
 from hushspec.canonical import (
@@ -822,10 +822,16 @@ def _subject_name(
 
 
 def _leaf_file_name(chain: Sequence[BundleChainLink]) -> str | None:
-    """The leaf's file name, for a policy that declares no ``name``."""
+    r"""The leaf's file name, for a policy that declares no ``name``.
+
+    The segment after the last separator of the source as written, with ``\``
+    read as a separator so a Windows path recorded in the chain yields its file
+    name too. A source that ends in a separator has no file name, and the
+    subject falls through to the next candidate.
+    """
     if not chain:
         return None
-    return PurePosixPath(chain[-1].source.replace("\\", "/")).name or None
+    return chain[-1].source.replace("\\", "/").rpartition("/")[2] or None
 
 
 # --------------------------------------------------------------------------- #

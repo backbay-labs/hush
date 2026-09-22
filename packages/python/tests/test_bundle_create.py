@@ -373,6 +373,36 @@ def test_a_policy_with_an_empty_name_bundles_under_its_file_name() -> None:
     assert result.policy_checked
 
 
+def test_a_source_is_normalized_before_it_is_made_relative() -> None:
+    """Every SDK records ``p.yaml`` here, so the payloads stay byte-identical
+    (spec section 4.4)."""
+    resolution = vector_resolution()
+    doctored = replace(
+        resolution, chain=[replace(resolution.chain[-1], source="/repo/sub/../p.yaml")]
+    )
+    statement = build_statement(
+        doctored, created_at=VECTOR_CREATED_AT, base_dir="/repo"
+    )
+    assert statement.predicate.chain[0].source == "p.yaml"
+
+
+def test_the_leaf_file_name_is_the_segment_after_the_last_separator() -> None:
+    resolution = vector_resolution()
+    unnamed = replace(resolution, spec=replace(resolution.spec, name=None))
+
+    def name_of(source: str) -> str:
+        doctored = replace(
+            unnamed, chain=[replace(resolution.chain[-1], source=source)]
+        )
+        return build_statement(doctored, created_at=VECTOR_CREATED_AT).subject[0].name
+
+    # ``\`` is a separator wherever the chain was built.
+    assert name_of("C:\\policies\\p.yaml") == "p.yaml"
+    # A source that ends in a separator names no file, so the subject falls
+    # through to the constant.
+    assert name_of("/repo/policies/") == "policy"
+
+
 def test_an_explicit_subject_name_wins() -> None:
     statement = build_statement(
         vector_resolution(),

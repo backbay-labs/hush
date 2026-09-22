@@ -43,7 +43,7 @@ use ed25519_dalek::{Signature, Signer};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The predicate format version this module produces and accepts.
 pub const BUNDLE_VERSION: &str = "0.1";
@@ -628,11 +628,15 @@ fn policy_identity(spec: &HushSpec, content_hash: &str) -> PolicyIdentity {
 }
 
 /// The leaf's file name, for a policy that declares no `name`.
+///
+/// The segment after the last separator of the source as written, with `\`
+/// read as a separator so a Windows path recorded in the chain yields its file
+/// name too. A source that ends in a separator has no file name, and the
+/// subject falls through to the next candidate.
 fn leaf_file_name(chain: &[ChainLink]) -> Option<String> {
-    let source = &chain.last()?.source;
-    Path::new(source)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
+    let source = chain.last()?.source.replace('\\', "/");
+    let name = source.rsplit('/').next().unwrap_or_default();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Record a filesystem source relative to `base` when it lies beneath it
@@ -645,11 +649,41 @@ fn relative_source(source: &str, base: Option<&Path>) -> String {
     if source.starts_with("builtin:") || source.contains("://") {
         return source.to_string();
     }
-    match Path::new(source).strip_prefix(base) {
+    match normalize_lexically(Path::new(source)).strip_prefix(normalize_lexically(base)) {
+        // The source is the base itself: there is nothing left to name.
+        Ok(relative) if relative.as_os_str().is_empty() => source.to_string(),
         // A bundle is JSON read on every platform, so the separator is `/`.
         Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
         Err(_) => source.to_string(),
     }
+}
+
+/// Resolve `.` and `..` inside `path` without touching the filesystem.
+///
+/// Every SDK compares a normalized source against a normalized base, so
+/// `/repo/sub/../p.yaml` under `/repo` is recorded as `p.yaml` in all four and
+/// the payloads stay byte-identical (bundle spec 4.4). Symlinks are
+/// deliberately left alone: resolving them would make the same policy reached
+/// through a symlinked base record a different `source` than one reached
+/// directly, and a chain link's `source` is a provenance label.
+fn normalize_lexically(path: &Path) -> PathBuf {
+    let mut parts: Vec<Component<'_>> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match parts.last() {
+                // A `..` above a root stays at the root.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                Some(Component::Normal(_)) => {
+                    parts.pop();
+                }
+                // Nothing to climb: the path keeps leaving its own base.
+                _ => parts.push(component),
+            },
+            other => parts.push(other),
+        }
+    }
+    parts.iter().collect()
 }
 
 /// Wrap a statement in an unsigned envelope.
@@ -1087,5 +1121,49 @@ mod tests {
             relative_source("/work/repo/p.yaml", None),
             "/work/repo/p.yaml"
         );
+    }
+
+    #[test]
+    fn a_source_is_normalized_before_it_is_made_relative() {
+        // Every SDK records `p.yaml` here; a lexical prefix match would record
+        // `sub/../p.yaml` and the payloads would stop being byte-identical.
+        assert_eq!(
+            relative_source("/repo/sub/../p.yaml", Some(Path::new("/repo"))),
+            "p.yaml"
+        );
+        assert_eq!(
+            relative_source("./repo/./p.yaml", Some(Path::new("repo"))),
+            "p.yaml"
+        );
+        // A relative base cannot contain an absolute source.
+        assert_eq!(
+            relative_source("/repo/p.yaml", Some(Path::new("repo"))),
+            "/repo/p.yaml"
+        );
+        // The source is the base itself: there is no name left to record.
+        assert_eq!(relative_source("/repo", Some(Path::new("/repo"))), "/repo");
+    }
+
+    #[test]
+    fn the_leaf_file_name_is_the_segment_after_the_last_separator() {
+        let link = |source: &str| {
+            vec![ChainLink {
+                source: source.to_string(),
+                content_hash: "sha256:00".to_string(),
+                signature: None,
+            }]
+        };
+        assert_eq!(
+            leaf_file_name(&link("/repo/policies/p.yaml")).as_deref(),
+            Some("p.yaml")
+        );
+        // `\\` is a separator wherever the chain was built.
+        assert_eq!(
+            leaf_file_name(&link("C:\\policies\\p.yaml")).as_deref(),
+            Some("p.yaml")
+        );
+        // A source that ends in a separator names no file.
+        assert_eq!(leaf_file_name(&link("/repo/policies/")), None);
+        assert_eq!(leaf_file_name(&[]), None);
     }
 }

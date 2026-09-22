@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -654,11 +653,10 @@ func bundleLeafFileName(chain []ChainLink) string {
 		return ""
 	}
 	source := strings.ReplaceAll(chain[len(chain)-1].Source, `\`, "/")
-	name := path.Base(source)
-	if name == "." || name == "/" {
-		return ""
+	if index := strings.LastIndex(source, "/"); index >= 0 {
+		return source[index+1:]
 	}
-	return name
+	return source
 }
 
 // --------------------------------------------------------------------------
