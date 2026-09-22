@@ -19,7 +19,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -219,18 +219,20 @@ class LogSignature:
 
     @classmethod
     def from_envelope(cls, envelope: Any) -> "LogSignature":
-        return cls(
-            key_id=envelope.key_id,
-            signed_at=envelope.signed_at,
-            content_hash=envelope.content_hash,
-            signature=envelope.signature,
-            format_version=envelope.format_version,
-            algorithm=envelope.algorithm,
-            expires_at=envelope.expires_at,
-            policy_version=envelope.policy_version,
-            policy_name=envelope.policy_name,
-            signer=envelope.signer,
-        )
+        """Carry a signing envelope into a log entry.
+
+        An entry signature is exactly an envelope, so the members are copied
+        by name and the two field sets have to match: a member added to one
+        and not the other would otherwise vanish on the way into the log.
+        """
+        members = {member.name for member in fields(cls)}
+        supplied = {member.name for member in fields(envelope)}
+        if members != supplied:
+            raise SinkError(
+                "a log entry signature and a signing envelope carry the same "
+                f"members; these differ by {sorted(members ^ supplied)}"
+            )
+        return cls(**{name: getattr(envelope, name) for name in members})
 
 
 @dataclass

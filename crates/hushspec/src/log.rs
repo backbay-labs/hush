@@ -449,7 +449,7 @@ impl ChainedFileSink {
                 };
                 let envelope = sign_content_hash(&entry.entry_hash, key, &options)
                     .map_err(|error| SinkError::Chain(error.to_string()))?;
-                entry.signature = Some(envelope_to_log_signature(&envelope));
+                entry.signature = Some(LogSignature::from(&envelope));
             }
 
             let mut line = serde_json::to_string(&entry)?;
@@ -532,35 +532,66 @@ impl ReceiptSink for ChainedFileSink {
     }
 }
 
+// An entry signature is exactly an envelope. Both conversions destructure
+// exhaustively, with no `..` rest pattern, so a member added to either type
+// stops the build here instead of vanishing on the way into or out of a log.
 #[cfg(feature = "signing")]
-fn envelope_to_log_signature(envelope: &Envelope) -> LogSignature {
-    LogSignature {
-        format_version: envelope.format_version.clone(),
-        algorithm: envelope.algorithm.clone(),
-        key_id: envelope.key_id.clone(),
-        signed_at: envelope.signed_at.clone(),
-        expires_at: envelope.expires_at.clone(),
-        policy_version: envelope.policy_version,
-        policy_name: envelope.policy_name.clone(),
-        content_hash: envelope.content_hash.clone(),
-        signer: envelope.signer.clone(),
-        signature: envelope.signature.clone(),
+impl From<&Envelope> for LogSignature {
+    fn from(envelope: &Envelope) -> Self {
+        let Envelope {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = envelope.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
     }
 }
 
 #[cfg(feature = "signing")]
-fn log_signature_to_envelope(signature: &LogSignature) -> Envelope {
-    Envelope {
-        format_version: signature.format_version.clone(),
-        algorithm: signature.algorithm.clone(),
-        key_id: signature.key_id.clone(),
-        signed_at: signature.signed_at.clone(),
-        expires_at: signature.expires_at.clone(),
-        policy_version: signature.policy_version,
-        policy_name: signature.policy_name.clone(),
-        content_hash: signature.content_hash.clone(),
-        signer: signature.signer.clone(),
-        signature: signature.signature.clone(),
+impl From<&LogSignature> for Envelope {
+    fn from(entry_signature: &LogSignature) -> Self {
+        let LogSignature {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = entry_signature.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
     }
 }
 
@@ -868,7 +899,7 @@ pub fn verify_logs(
                     {
                         match &options.keyring {
                             Some(keyring) => {
-                                let envelope = log_signature_to_envelope(signature);
+                                let envelope = Envelope::from(signature);
                                 let verify = options.verify.clone().unwrap_or_default();
                                 crate::signing::verify_content_hash(
                                     &envelope,
