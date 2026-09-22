@@ -374,6 +374,28 @@ impl DecisionReceipt {
             ));
         }
         push_timestamp_problem(&mut problems, "timestamp", &self.timestamp);
+        for (field, value) in [
+            ("matched_rule", &self.matched_rule),
+            ("origin_profile", &self.origin_profile),
+        ] {
+            if let Some(value) = value {
+                push_empty_problem(&mut problems, field, value);
+            }
+        }
+
+        // actor (receipt spec 4.1).
+        if let Some(actor) = &self.actor {
+            for (field, value) in [
+                ("actor.agent_id", &actor.agent_id),
+                ("actor.session_id", &actor.session_id),
+                ("actor.principal", &actor.principal),
+                ("actor.runtime", &actor.runtime),
+            ] {
+                if let Some(value) = value {
+                    push_empty_problem(&mut problems, field, value);
+                }
+            }
+        }
 
         // policy (receipt spec 4.2).
         if !is_spec_version(&self.policy.spec_version) {
@@ -421,6 +443,13 @@ impl DecisionReceipt {
                     "rule_trace[{index}].rule_block {:?} is outside the closed enum",
                     entry.rule_block
                 ));
+            }
+            if let Some(rule_path) = &entry.rule_path {
+                push_empty_problem(
+                    &mut problems,
+                    &format!("rule_trace[{index}].rule_path"),
+                    rule_path,
+                );
             }
         }
 

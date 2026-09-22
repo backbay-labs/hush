@@ -19,7 +19,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -219,18 +219,20 @@ class LogSignature:
 
     @classmethod
     def from_envelope(cls, envelope: Any) -> "LogSignature":
-        return cls(
-            key_id=envelope.key_id,
-            signed_at=envelope.signed_at,
-            content_hash=envelope.content_hash,
-            signature=envelope.signature,
-            format_version=envelope.format_version,
-            algorithm=envelope.algorithm,
-            expires_at=envelope.expires_at,
-            policy_version=envelope.policy_version,
-            policy_name=envelope.policy_name,
-            signer=envelope.signer,
-        )
+        """Carry a signing envelope into a log entry.
+
+        An entry signature is exactly an envelope, so the members are copied
+        by name and the two field sets have to match: a member added to one
+        and not the other would otherwise vanish on the way into the log.
+        """
+        members = {member.name for member in fields(cls)}
+        supplied = {member.name for member in fields(envelope)}
+        if members != supplied:
+            raise SinkError(
+                "a log entry signature and a signing envelope carry the same "
+                f"members; these differ by {sorted(members ^ supplied)}"
+            )
+        return cls(**{name: getattr(envelope, name) for name in members})
 
 
 @dataclass
@@ -414,6 +416,30 @@ def _unknown_policy_event_key(event: Any) -> Optional[str]:
     return _unknown_key(event.get("sdk"), _SDK_KEYS)
 
 
+def _log_entry_problem(entry: Any) -> Optional[str]:
+    """Why *entry* is not a log entry, or ``None``.
+
+    The entry-level strictness of log spec section 8, step 1: an unknown member
+    anywhere the log-entry schema closes an object, and a payload member that
+    is not a JSON object. An append runs it over the file's last line, so the
+    tail this SDK is willing to continue is exactly the tail a verifier is
+    willing to read.
+    """
+    if not isinstance(entry, dict):
+        return "expected a JSON object"
+    for member in ("receipt", "policy_event", "log_started", "signature"):
+        value = entry.get(member)
+        if value is not None and not isinstance(value, dict):
+            return f"{member} is not a JSON object"
+    unknown = (
+        _unknown_key(entry, _ENTRY_KEYS)
+        or _unknown_policy_event_key(entry.get("policy_event"))
+        or _unknown_key(entry.get("log_started"), _LOG_STARTED_KEYS)
+        or _unknown_key(entry.get("signature"), _ENTRY_SIGNATURE_KEYS)
+    )
+    return None if unknown is None else f"unknown field {unknown!r}"
+
+
 def _unknown_policy_summary_key(policy: Any) -> Optional[str]:
     """The first unknown member of a policy summary or of its own objects."""
     unknown = _unknown_key(policy, _POLICY_SUMMARY_KEYS)
@@ -518,16 +544,24 @@ class ChainedFileSink:
         continuing past it would leave a second, unlinked chain in the file.
         """
         with self._lock:
-            return self._append_locked(payload)
+            entry = self._append_to(self._path, self._seq, self._prev_hash, payload)
+            self._seq, self._prev_hash = entry.seq, entry.entry_hash
+            return entry
 
-    def _append_locked(
+    def _append_to(
         self,
+        path: Path,
+        cached_seq: int,
+        cached_prev_hash: str,
         payload: Union[DecisionReceipt, PolicyEvent, LogStarted],
     ) -> LogEntry:
-        """:meth:`append` with the chain head already taken, so a caller with
-        more to do under the same lock -- :meth:`rotate`, which must make its
-        ``log_started`` record the first entry of the new file -- can append
-        without releasing it."""
+        """Write one entry to *path*, continuing from *cached_seq* and
+        *cached_prev_hash* when the file holds no entry of its own, and return
+        it without touching the chain head.
+
+        The caller commits the head, so an append that fails leaves the sink
+        describing the file it was describing before.
+        """
         if isinstance(payload, DecisionReceipt):
             entry_type = EntryType.RECEIPT.value
         elif isinstance(payload, PolicyEvent):
@@ -541,13 +575,13 @@ class ChainedFileSink:
         else:
             raise SinkError(f"cannot append {type(payload).__name__} to a log")
 
-        with _locked_for_append(self._path) as handle:
+        with _locked_for_append(path) as handle:
             # A missing or empty file means a fresh log, or a rotation whose
             # ``log_started`` entry is about to seed the new file; both
             # continue from the head this sink carries.
-            head = _last_entry_of(handle, self._path)
+            head = _last_entry_of(handle, path)
             if head is None:
-                seq, prev_hash = self._seq, self._prev_hash
+                seq, prev_hash = cached_seq, cached_prev_hash
             else:
                 seq, prev_hash = head["seq"], head["entry_hash"]
 
@@ -573,10 +607,7 @@ class ChainedFileSink:
                 entry.signature = LogSignature.from_envelope(envelope)
 
             line = json.dumps(entry.to_dict(), separators=(",", ":")) + "\n"
-            _write_line(handle, self._path, line)
-
-            self._seq = entry.seq
-            self._prev_hash = entry.entry_hash
+            _write_line(handle, path, line)
             return entry
 
     def send(self, receipt: DecisionReceipt) -> None:
@@ -593,6 +624,11 @@ class ChainedFileSink:
 
         Sequence numbers restart at 1 in the new file; ``prev_hash`` carries
         over. The new file must not already exist.
+
+        The switch is committed only once that entry is on disk. A rotation
+        that cannot write it leaves the sink on the old file, still linked and
+        still verifiable, rather than on a new one whose first receipt would
+        continue nothing.
         """
         new_path = Path(new_path)
         if new_path.exists():
@@ -605,9 +641,10 @@ class ChainedFileSink:
             # would leak the writer's layout for no verification benefit.
             previous_file = self._path.name or str(self._path)
             previous_hash = self._prev_hash
-            self._path = new_path
-            self._seq = 0
-            return self._append_locked(
+            entry = self._append_to(
+                new_path,
+                0,
+                previous_hash,
                 LogStarted(
                     timestamp=format_timestamp(self._now()),
                     previous_file=previous_file,
@@ -616,8 +653,11 @@ class ChainedFileSink:
                     # against the previous file's last hash, and an omitted
                     # member is not that hash.
                     previous_entry_hash=previous_hash,
-                )
+                ),
             )
+            self._path = new_path
+            self._seq, self._prev_hash = entry.seq, entry.entry_hash
+            return entry
 
 
 @contextmanager
@@ -738,7 +778,10 @@ def _last_entry_of(handle: BinaryIO, path: Path) -> Optional[dict[str, Any]]:
         entry = json.loads(last)
     except ValueError as exc:
         raise SinkError(f"last line of {path} is not a log entry: {exc}") from exc
-    if not isinstance(entry, dict) or "seq" not in entry or "entry_hash" not in entry:
+    problem = _log_entry_problem(entry)
+    if problem is not None:
+        raise SinkError(f"last line of {path} is not a log entry: {problem}")
+    if "seq" not in entry or "entry_hash" not in entry:
         raise SinkError(f"last line of {path} is not a log entry")
     seq, entry_hash = entry["seq"], entry["entry_hash"]
     # Coercing here would seed the chain from a malformed tail: `int("x")`

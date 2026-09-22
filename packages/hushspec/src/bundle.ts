@@ -510,11 +510,19 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value === undefined || value === '' ? undefined : value;
 }
 
-/** The leaf's file name, for a policy that declares no `name`. */
+/**
+ * The leaf's file name, for a policy that declares no `name`.
+ *
+ * The segment after the last separator of the source as written, with `\` read
+ * as a separator so a Windows path recorded in the chain yields its file name
+ * too. A source that ends in a separator has no file name, and the subject
+ * falls through to the next candidate.
+ */
 function leafFileName(chain: ChainLink[]): string | undefined {
   const source = chain[chain.length - 1]?.source;
-  const base = source?.split(/[/\\]/).pop();
-  return base === undefined || base === '' ? undefined : base;
+  if (source === undefined) return undefined;
+  const name = source.replace(/\\/g, '/').split('/').pop();
+  return name === undefined || name === '' ? undefined : name;
 }
 
 // --------------------------------------------------------------------------

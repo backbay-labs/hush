@@ -9,6 +9,14 @@
 //! Entries wrap a [`DecisionReceipt`] or a [`PolicyEvent`] (which policy was
 //! loaded or swapped in, with its provenance) so the log proves not only what
 //! was decided but what was in force when.
+//!
+//! Writers exclude each other through the `<path>.lock` sentinel of log spec 4
+//! alone. The advisory `flock` the same section recommends underneath it needs
+//! a platform binding this crate does not carry: the library parses, hashes and
+//! verifies with no operating-system dependency, and a kernel lock bought at
+//! the price of one would trade a property every platform has for a property
+//! only some do. The sentinel is the lock all four SDKs share, so it is the one
+//! that decides who may write.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -368,25 +376,40 @@ impl ChainedFileSink {
     /// [`SinkError::Chain`].
     pub fn append(&self, payload: Payload) -> Result<LogEntry, SinkError> {
         let mut state = self.state_mut()?;
-        self.append_locked(&mut state, payload)
+        let entry = self.append_to(
+            &state.path.clone(),
+            (state.seq, state.prev_hash.clone()),
+            payload,
+        )?;
+        state.seq = entry.seq;
+        state.prev_hash.clone_from(&entry.entry_hash);
+        Ok(entry)
     }
 
-    /// [`ChainedFileSink::append`] with the chain head already taken, so a
-    /// caller with more to do under the same lock -- [`ChainedFileSink::rotate`],
-    /// which must make its `log_started` record the first entry of the new
-    /// file -- can append without releasing it.
-    fn append_locked(
+    /// Write one entry to `path`, continuing from `cached` when the file holds
+    /// no entry of its own, and return it without touching the chain head.
+    ///
+    /// The caller commits the head, so an append that fails leaves the sink
+    /// describing the file it was describing before.
+    fn append_to(
         &self,
-        state: &mut ChainState,
+        path: &Path,
+        cached: (u64, String),
         payload: Payload,
     ) -> Result<LogEntry, SinkError> {
-        let path = state.path.clone();
-        let cached = (state.seq, state.prev_hash.clone());
-        let entry = with_file_lock(&path, || {
+        // The lock file lives next to the log, so the directory has to exist
+        // for the lock itself to be creatable.
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+        with_file_lock(path, || {
             // A missing or empty file means a fresh log, or a rotation whose
             // `log_started` entry is about to seed the new file; both continue
             // from the head this sink carries.
-            let (seq, prev_hash) = match last_entry(&path)? {
+            let (seq, prev_hash) = match last_entry(path)? {
                 Some(head) => (head.seq, head.entry_hash),
                 None => cached,
             };
@@ -426,20 +449,16 @@ impl ChainedFileSink {
                 };
                 let envelope = sign_content_hash(&entry.entry_hash, key, &options)
                     .map_err(|error| SinkError::Chain(error.to_string()))?;
-                entry.signature = Some(envelope_to_log_signature(&envelope));
+                entry.signature = Some(LogSignature::from(&envelope));
             }
 
             let mut line = serde_json::to_string(&entry)?;
             line.push('\n');
-            let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
             file.write_all(line.as_bytes())?;
             file.sync_all()?;
             Ok(entry)
-        })?;
-
-        state.seq = entry.seq;
-        state.prev_hash.clone_from(&entry.entry_hash);
-        Ok(entry)
+        })
     }
 
     /// Record a policy-in-effect event (log spec 6).
@@ -454,6 +473,11 @@ impl ChainedFileSink {
     /// Start writing to `new_path`, whose first entry is a `log_started`
     /// record naming the file this chain continues from and its last hash.
     /// Sequence numbers restart at 1 in the new file; `prev_hash` carries over.
+    ///
+    /// The switch is committed only once that entry is on disk. A rotation
+    /// that cannot write it leaves the sink on the old file, still linked and
+    /// still verifiable, rather than on a new one whose first receipt would
+    /// continue nothing.
     ///
     /// # Errors
     ///
@@ -478,10 +502,9 @@ impl ChainedFileSink {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| state.path.display().to_string());
         let previous_entry_hash = state.prev_hash.clone();
-        state.path = new_path;
-        state.seq = 0;
-        self.append_locked(
-            &mut state,
+        let entry = self.append_to(
+            &new_path,
+            (0, previous_entry_hash.clone()),
             Payload::LogStarted(LogStarted {
                 timestamp: format_timestamp(self.now()),
                 previous_file: Some(previous_file),
@@ -490,7 +513,11 @@ impl ChainedFileSink {
                 // file's last hash, and an omitted member is not that hash.
                 previous_entry_hash: Some(previous_entry_hash),
             }),
-        )
+        )?;
+        state.path = new_path;
+        state.seq = entry.seq;
+        state.prev_hash.clone_from(&entry.entry_hash);
+        Ok(entry)
     }
 }
 
@@ -505,35 +532,66 @@ impl ReceiptSink for ChainedFileSink {
     }
 }
 
+// An entry signature is exactly an envelope. Both conversions destructure
+// exhaustively, with no `..` rest pattern, so a member added to either type
+// stops the build here instead of vanishing on the way into or out of a log.
 #[cfg(feature = "signing")]
-fn envelope_to_log_signature(envelope: &Envelope) -> LogSignature {
-    LogSignature {
-        format_version: envelope.format_version.clone(),
-        algorithm: envelope.algorithm.clone(),
-        key_id: envelope.key_id.clone(),
-        signed_at: envelope.signed_at.clone(),
-        expires_at: envelope.expires_at.clone(),
-        policy_version: envelope.policy_version,
-        policy_name: envelope.policy_name.clone(),
-        content_hash: envelope.content_hash.clone(),
-        signer: envelope.signer.clone(),
-        signature: envelope.signature.clone(),
+impl From<&Envelope> for LogSignature {
+    fn from(envelope: &Envelope) -> Self {
+        let Envelope {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = envelope.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
     }
 }
 
 #[cfg(feature = "signing")]
-fn log_signature_to_envelope(signature: &LogSignature) -> Envelope {
-    Envelope {
-        format_version: signature.format_version.clone(),
-        algorithm: signature.algorithm.clone(),
-        key_id: signature.key_id.clone(),
-        signed_at: signature.signed_at.clone(),
-        expires_at: signature.expires_at.clone(),
-        policy_version: signature.policy_version,
-        policy_name: signature.policy_name.clone(),
-        content_hash: signature.content_hash.clone(),
-        signer: signature.signer.clone(),
-        signature: signature.signature.clone(),
+impl From<&LogSignature> for Envelope {
+    fn from(entry_signature: &LogSignature) -> Self {
+        let LogSignature {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = entry_signature.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
     }
 }
 
@@ -841,7 +899,7 @@ pub fn verify_logs(
                     {
                         match &options.keyring {
                             Some(keyring) => {
-                                let envelope = log_signature_to_envelope(signature);
+                                let envelope = Envelope::from(signature);
                                 let verify = options.verify.clone().unwrap_or_default();
                                 crate::signing::verify_content_hash(
                                     &envelope,

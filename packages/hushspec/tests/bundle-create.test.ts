@@ -340,6 +340,41 @@ describe('buildBundleStatement', () => {
     expect(statement.predicate.policy.name).toBeUndefined();
   });
 
+  it('normalizes a source before recording it relative to baseDir', () => {
+    // Every SDK records `p.yaml` here, so the payloads stay byte-identical
+    // (bundle spec 4.4).
+    const resolution = resolveVectorPolicy();
+    const leaf = resolution.chain[resolution.chain.length - 1]!;
+    const doctored: Resolution = {
+      ...resolution,
+      chain: [{ ...leaf, source: '/repo/sub/../p.yaml' }],
+    };
+    const statement = buildBundleStatement(doctored, {
+      createdAt: vectorCreatedAt,
+      baseDir: '/repo',
+    });
+    expect(statement.predicate.chain[0]?.source).toBe('p.yaml');
+  });
+
+  it('reads the leaf file name as the segment after the last separator', () => {
+    const resolution = resolveVectorPolicy();
+    const leaf = resolution.chain[resolution.chain.length - 1]!;
+    const withSource = (source: string): Resolution => ({
+      ...resolution,
+      spec: { ...resolution.spec, name: undefined },
+      chain: [{ ...leaf, source }],
+    });
+    const nameOf = (source: string): string | undefined =>
+      buildBundleStatement(withSource(source), { createdAt: vectorCreatedAt }).subject[0]
+        ?.name;
+
+    // `\\` is a separator wherever the chain was built.
+    expect(nameOf('C:\\policies\\p.yaml')).toBe('p.yaml');
+    // A source that ends in a separator names no file, so the subject falls
+    // through to the constant.
+    expect(nameOf('/repo/policies/')).toBe('policy');
+  });
+
   it('honours an explicit subject name', () => {
     const statement = buildBundleStatement(resolveVectorPolicy(), {
       createdAt: vectorCreatedAt,

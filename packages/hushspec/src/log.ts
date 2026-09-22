@@ -32,6 +32,12 @@ import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from './version.js';
  * Entries wrap a {@link DecisionReceipt} or a {@link PolicyEvent} (which
  * policy was loaded or swapped in, with its provenance) so the log proves not
  * only what was decided but what was in force when.
+ *
+ * Writers exclude each other through the `<path>.lock` sentinel of log spec 4
+ * alone. The advisory `flock` the same section recommends underneath it has no
+ * counterpart in Node's `fs` module, and a native addon bought to get one
+ * would cost this package its dependency-free install. The sentinel is the
+ * lock all four SDKs share, so it is the one that decides who may write.
  */
 
 /** The log-entry format this module writes and verifies. */
@@ -261,6 +267,34 @@ function unknownSummaryKey(policy: unknown): string | undefined {
 }
 
 /**
+ * Why `value` is not a log entry, or `undefined`.
+ *
+ * The entry-level strictness of log spec 8, step 1: an unknown member anywhere
+ * the log-entry schema closes an object, and a payload member that is not a
+ * JSON object. An append runs it over the file's last line, so the tail this
+ * SDK is willing to continue is exactly the tail a verifier is willing to
+ * read.
+ */
+function logEntryProblem(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return 'expected a JSON object';
+  }
+  const entry = value as LogEntry;
+  for (const member of PAYLOAD_MEMBERS) {
+    const payload: unknown = entry[member];
+    if (payload != null && (typeof payload !== 'object' || Array.isArray(payload))) {
+      return `${member} is not a JSON object`;
+    }
+  }
+  const unknown =
+    unknownKey(entry, ENTRY_KEYS) ??
+    unknownPolicyEventKey(entry.policy_event) ??
+    unknownKey(entry.log_started, LOG_STARTED_KEYS) ??
+    unknownKey(entry.signature, SIGNATURE_KEYS);
+  return unknown === undefined ? undefined : `unknown field ${JSON.stringify(unknown)}`;
+}
+
+/**
  * Recompute the hash an entry should carry: `sha256:` over the RFC 8785
  * canonical form of the entry with `entry_hash` and `signature` removed.
  */
@@ -447,17 +481,36 @@ export class ChainedFileSink implements ReceiptSink {
    * line is not a log entry.
    */
   append(payload: Payload): LogEntry {
-    const target = this.logPath;
+    const entry = this.appendTo(this.logPath, this.seq, this.prevHash, payload);
+    this.seq = entry.seq;
+    this.prevHash = entry.entry_hash;
+    return entry;
+  }
+
+  /**
+   * Write one entry to `target`, continuing from `cachedSeq` and
+   * `cachedPrevHash` when the file holds no entry of its own, and return it
+   * without touching the chain head.
+   *
+   * The caller commits the head, so an append that fails leaves the sink
+   * describing the file it was describing before.
+   */
+  private appendTo(
+    target: string,
+    cachedSeq: number,
+    cachedPrevHash: string,
+    payload: Payload,
+  ): LogEntry {
     // Before the lock: the lock file lives next to the log, so the directory
     // has to exist for the lock itself to be creatable.
     mkdirSync(path.dirname(target), { recursive: true });
-    const entry = withFileLock(target, () => {
+    return withFileLock(target, () => {
       // A missing or empty file means a fresh log, or a rotation whose
       // `log_started` entry is about to seed the new file; both continue from
       // the head this sink carries.
       const head = lastEntry(target);
-      const seq = head === undefined ? this.seq : head.seq;
-      const prevHash = head === undefined ? this.prevHash : head.entry_hash;
+      const seq = head === undefined ? cachedSeq : head.seq;
+      const prevHash = head === undefined ? cachedPrevHash : head.entry_hash;
       // Member order is fixed (log spec 4), so two writers appending the same
       // chain produce byte-identical files. The hash itself is over the
       // canonical form and does not depend on it.
@@ -489,10 +542,6 @@ export class ChainedFileSink implements ReceiptSink {
       }
       return written;
     });
-
-    this.seq = entry.seq;
-    this.prevHash = entry.entry_hash;
-    return entry;
   }
 
   /** {@link ReceiptSink.send}: append a receipt entry. */
@@ -510,6 +559,11 @@ export class ChainedFileSink implements ReceiptSink {
    * naming the file this chain continues from and its last hash. Sequence
    * numbers restart at 1 in the new file; `prev_hash` carries over.
    *
+   * The switch is committed only once that entry is on disk. A rotation that
+   * cannot write it leaves the sink on the old file, still linked and still
+   * verifiable, rather than on a new one whose first receipt would continue
+   * nothing.
+   *
    * @throws {LogChainError} when `newPath` already exists -- appending a
    * fresh chain onto an existing file would leave two unlinked chains in it.
    */
@@ -522,9 +576,7 @@ export class ChainedFileSink implements ReceiptSink {
     // the writer's layout for no verification benefit.
     const previousFile = path.basename(this.logPath);
     const previousEntryHash = this.prevHash;
-    this.logPath = resolved;
-    this.seq = 0;
-    return this.append({
+    const entry = this.appendTo(resolved, 0, previousEntryHash, {
       logStarted: {
         timestamp: formatTimestamp(this.now()),
         previous_file: previousFile,
@@ -534,6 +586,10 @@ export class ChainedFileSink implements ReceiptSink {
         previous_entry_hash: previousEntryHash,
       },
     });
+    this.logPath = resolved;
+    this.seq = entry.seq;
+    this.prevHash = entry.entry_hash;
+    return entry;
   }
 }
 
@@ -555,9 +611,12 @@ function lastEntry(filePath: string): LogEntry | undefined {
   }
   // Reading the head loosely would seed the chain from a malformed tail: a
   // `seq` that is not an integer or an `entry_hash` that is not a string would
-  // become the next entry's link and break the chain for every later verifier.
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new LogChainError(`last line of ${filePath} is not a log entry`);
+  // become the next entry's link and break the chain for every later verifier,
+  // and an unknown member would make a line this SDK extended one no verifier
+  // reads.
+  const problem = logEntryProblem(parsed);
+  if (problem !== undefined) {
+    throw new LogChainError(`last line of ${filePath} is not a log entry: ${problem}`);
   }
   const { seq, entry_hash: entryHash } = parsed as Record<string, unknown>;
   if (typeof seq !== 'number' || !Number.isInteger(seq)) {

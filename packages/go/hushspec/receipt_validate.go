@@ -107,7 +107,47 @@ var (
 // document is the JSON it was read from, which is the only place an explicit
 // null still shows.
 func documentProblems(document any, receipt *DecisionReceipt) []string {
-	return append(nullMembers(document, ""), receipt.structuralProblems()...)
+	problems := append(nullMembers(document, ""), emptyMembers(document)...)
+	return append(problems, receipt.structuralProblems()...)
+}
+
+// emptyMembers reports every optional string member that the schema gives
+// `minLength: 1` and that the document sets to "".
+//
+// These are read from the document rather than from the receipt because Go
+// unmarshals an omitted member and an empty one to the same zero value, while
+// the schema accepts the first and refuses the second.
+func emptyMembers(document any) []string {
+	object, ok := document.(map[string]any)
+	if !ok {
+		return nil
+	}
+	var problems []string
+	report := func(container map[string]any, key, label string) {
+		if text, ok := container[key].(string); ok && text == "" {
+			problems = append(problems, label+" is empty")
+		}
+	}
+	// $.matched_rule and $.origin_profile.
+	report(object, "matched_rule", "matched_rule")
+	report(object, "origin_profile", "origin_profile")
+	// $defs.Actor (receipt spec 4.1).
+	if actor, ok := object["actor"].(map[string]any); ok {
+		for _, key := range []string{"agent_id", "session_id", "principal", "runtime"} {
+			report(actor, key, "actor."+key)
+		}
+	}
+	// $defs.RuleEvaluation.rule_path (receipt spec 4.3).
+	if trace, ok := object["rule_trace"].([]any); ok {
+		for index, raw := range trace {
+			entry, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			report(entry, "rule_path", fmt.Sprintf("rule_trace[%d].rule_path", index))
+		}
+	}
+	return problems
 }
 
 // nullMembers reports every member of document that is explicitly null.

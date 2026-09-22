@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-21T23:49:23Z",
+  "generated_at": "2026-09-22T00:10:19Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -4241,6 +4241,13 @@
     {
       "path": "fixtures/receipts/invalid/bare-hex-content-hash.json",
       "sha256": "eb0c6dcca5b84d1d2cfa7ebbd0cae75f317e909f1a880164cc88a9e121e28b70",
+      "category": "receipt",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/invalid/empty-matched-rule.json",
+      "sha256": "da270b91dc79214f039b4ca6ae9b5251198624823c02d9cbae1bc6fec653e087",
       "category": "receipt",
       "module": "receipts",
       "level": 4

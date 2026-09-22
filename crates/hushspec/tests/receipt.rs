@@ -787,7 +787,7 @@ fn invalid_receipt_vectors_are_rejected() {
         count += 1;
     }
     assert!(
-        count >= 14,
-        "expected at least 14 invalid vectors, found {count}"
+        count >= 15,
+        "expected at least 15 invalid vectors, found {count}"
     );
 }

@@ -334,12 +334,51 @@ describe('ChainedFileSink', () => {
     expect(both.entries).toBe(2);
   });
 
+  it('keeps writing the old file when a rotation cannot be written', () => {
+    const first = path.join(dir, 'log-1.jsonl');
+    const sink = writeBasic(first, false);
+    const head = sink.head();
+
+    // A regular file where the new log's directory would be: neither the file
+    // nor its lock can be created there.
+    const blocker = path.join(dir, 'not-a-directory');
+    writeFileSync(blocker, '');
+    expect(() => sink.rotate(path.join(blocker, 'log-2.jsonl'))).toThrow();
+
+    expect(sink.path).toBe(first);
+    expect(sink.head()).toEqual(head);
+
+    // The old file is still current, so the next receipt continues its chain.
+    sink.send(evaluateAudited(resolution(), actions()[0], CONFIG, ctx(9)));
+    const report = verifyLogFiles([first]);
+    expect(report.ok, JSON.stringify(report.break)).toBe(true);
+    expect(report.entries).toBe(5);
+  });
+
   it('refuses to rotate into a file that already exists', () => {
     const first = path.join(dir, 'log-1.jsonl');
     const second = path.join(dir, 'log-2.jsonl');
     writeBasic(first, false);
     writeBasic(second, false);
     expect(() => ChainedFileSink.open(first).rotate(second)).toThrow(LogChainError);
+  });
+
+  it('refuses to continue a file whose tail carries an unknown member', () => {
+    // Rust and Go parse the tail strictly before continuing it; a line this
+    // SDK extended but a verifier refuses would leave an unreadable log.
+    const file = path.join(dir, 'log.jsonl');
+    writeBasic(file, false);
+    const lines = readFileSync(file, 'utf8').trimEnd().split('\n');
+    const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
+    for (const tail of [
+      { ...last, rogue: 1 },
+      { ...last, log_started: { timestamp: '2026-09-15T12:00:00.000Z', rogue: 1 } },
+      { ...last, receipt: 'not an object' },
+    ]) {
+      lines[lines.length - 1] = JSON.stringify(tail);
+      writeFileSync(file, `${lines.join('\n')}\n`);
+      expect(() => ChainedFileSink.open(file)).toThrow(LogChainError);
+    }
   });
 
   it('refuses to continue a file whose tail has no usable chain head', () => {

@@ -188,7 +188,7 @@ describe('receipt schema vectors', () => {
 
   it('walks both directories', () => {
     expect(jsonFiles(validDir).length).toBeGreaterThanOrEqual(12);
-    expect(jsonFiles(invalidDir).length).toBeGreaterThanOrEqual(13);
+    expect(jsonFiles(invalidDir).length).toBeGreaterThanOrEqual(15);
   });
 
   it('validates the receipts this SDK emits against the published schema', () => {

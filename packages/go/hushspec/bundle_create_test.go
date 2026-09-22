@@ -408,6 +408,66 @@ func TestBuildBundleStatementFallsBackToTheLeafFileName(t *testing.T) {
 	}
 }
 
+// TestBuildBundleStatementNormalizesASourceBeforeRelativizing covers the one
+// spelling every SDK has to agree on: `p.yaml`, not `sub/../p.yaml`. A bundle's
+// payload is byte-identical across bundlers only if the chain sources are
+// (bundle spec 4.4).
+func TestBuildBundleStatementNormalizesASourceBeforeRelativizing(t *testing.T) {
+	resolution := bundleVectorResolution(t)
+	leaf := resolution.Chain[len(resolution.Chain)-1]
+	leaf.Source = "/repo/sub/../p.yaml"
+	options := bundleVectorOptions(t, "")
+	options.BaseDir = "/repo"
+	statement, err := BuildBundleStatement(
+		&Resolution{
+			Spec:        resolution.Spec,
+			ContentHash: resolution.ContentHash,
+			Chain:       []ChainLink{leaf},
+		},
+		options,
+	)
+	if err != nil {
+		t.Fatalf("BuildBundleStatement: %v", err)
+	}
+	if got := statement.Predicate.Chain[0].Source; got != "p.yaml" {
+		t.Errorf("chain[0].source = %q, want %q", got, "p.yaml")
+	}
+}
+
+// TestBundleLeafFileNameIsTheSegmentAfterTheLastSeparator pins the rule all
+// four SDKs share: `\` counts as a separator wherever the chain was built, and
+// a source that ends in one names no file.
+func TestBundleLeafFileNameIsTheSegmentAfterTheLastSeparator(t *testing.T) {
+	resolution := bundleVectorResolution(t)
+	unnamed := *resolution.Spec
+	unnamed.Name = nil
+	nameOf := func(source string) string {
+		leaf := resolution.Chain[len(resolution.Chain)-1]
+		leaf.Source = source
+		statement, err := BuildBundleStatement(
+			&Resolution{
+				Spec:        &unnamed,
+				ContentHash: resolution.ContentHash,
+				Chain:       []ChainLink{leaf},
+			},
+			bundleVectorOptions(t, ""),
+		)
+		if err != nil {
+			t.Fatalf("BuildBundleStatement: %v", err)
+		}
+		return statement.Subject[0].Name
+	}
+
+	if got := nameOf(`C:\policies\p.yaml`); got != "p.yaml" {
+		t.Errorf("subject name = %q, want %q", got, "p.yaml")
+	}
+	// A source that ends in a separator names no file, so the subject falls
+	// through to the constant.
+	if got := nameOf("/repo/policies/"); got != "policy" {
+		t.Errorf("subject name = %q, want %q", got, "policy")
+	}
+}
+
 // TestBundlingAPolicyWhoseNameIsEmpty covers a name the bundle schema will not
 // accept: `subject[0].name` and `predicate.policy.name` both need at least one
 // character, while the 0.x document format places no such constraint on
