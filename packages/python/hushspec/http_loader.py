@@ -43,6 +43,7 @@ import ipaddress
 import socket
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -238,7 +239,9 @@ class HttpLoaderConfig:
 
     #: Seconds to wait for the TCP connection.
     connect_timeout_s: float = DEFAULT_CONNECT_TIMEOUT_S
-    #: Seconds to wait for response bytes once connected.
+    #: Seconds allowed for the whole response once connected. The status
+    #: line, the headers and the body share this budget, so a peer that
+    #: delivers a byte just inside every timeout cannot hold the load open.
     read_timeout_s: float = DEFAULT_READ_TIMEOUT_S
     #: Largest response body accepted, in bytes.
     max_size: int = DEFAULT_MAX_SIZE
@@ -269,6 +272,9 @@ class HttpLoaderConfig:
     allow_insecure_loopback: bool = False
     #: TLS context. ``None`` uses the default verifying context. A test that
     #: serves HTTPS from a self-signed certificate passes its own.
+    #: The loader sets its ``sslsocket_class`` so every receive draws on the
+    #: read budget; a context that already names another socket type is
+    #: refused.
     ssl_context: Optional[ssl.SSLContext] = None
 
 
@@ -394,6 +400,74 @@ class _RefuseRedirects(urllib.request.HTTPRedirectHandler):
         )
 
 
+class _ReadBudget:
+    """A socket whose receives share one deadline.
+
+    Before each receive the timeout is set to the time left, so a peer that
+    delivers a byte just inside every timeout cannot hold the read open past
+    the budget (core spec 2.6.4). Until :meth:`start_read_budget` is called
+    the socket behaves as a plain one.
+    """
+
+    _budget_s: Optional[float] = None
+    _deadline: Optional[float] = None
+
+    def start_read_budget(self, seconds: float) -> None:
+        self._budget_s = seconds
+        self._deadline = time.monotonic() + seconds
+
+    def _exhausted(self) -> TimeoutError:
+        return TimeoutError(f"the read budget of {self._budget_s:g} s is exhausted")
+
+    def _spend(self) -> None:
+        if self._deadline is None:
+            return
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise self._exhausted()
+        self.settimeout(remaining)  # type: ignore[attr-defined]
+
+    def recv(self, *args: Any, **kwargs: Any) -> bytes:
+        self._spend()
+        try:
+            return super().recv(*args, **kwargs)  # type: ignore[misc]
+        except TimeoutError as exc:
+            raise (self._exhausted() if self._deadline is not None else exc) from exc
+
+    def recv_into(self, *args: Any, **kwargs: Any) -> int:
+        self._spend()
+        try:
+            return super().recv_into(*args, **kwargs)  # type: ignore[misc]
+        except TimeoutError as exc:
+            raise (self._exhausted() if self._deadline is not None else exc) from exc
+
+
+class _BudgetedSocket(_ReadBudget, socket.socket):
+    pass
+
+
+class _BudgetedSSLSocket(_ReadBudget, ssl.SSLSocket):
+    pass
+
+
+def _budgeted_context(context: Optional[ssl.SSLContext]) -> ssl.SSLContext:
+    """*context*, or a default one, wrapping sockets in :class:`_BudgetedSSLSocket`.
+
+    ``sslsocket_class`` is the documented hook for the socket type a context
+    creates. A context that already names another type is refused rather than
+    silently given a read budget it may not honour.
+    """
+    context = context or ssl.create_default_context()
+    if context.sslsocket_class is ssl.SSLSocket:
+        context.sslsocket_class = _BudgetedSSLSocket
+    elif context.sslsocket_class is not _BudgetedSSLSocket:
+        raise HttpLoadError(
+            "ssl_context.sslsocket_class must be ssl.SSLSocket; the loader wraps "
+            "sockets in its own subclass to bound the read"
+        )
+    return context
+
+
 def _connection_factory(target: _Target, config: HttpLoaderConfig):
     """An ``http.client`` connection class that dials the validated address.
 
@@ -404,7 +478,7 @@ def _connection_factory(target: _Target, config: HttpLoaderConfig):
     """
     secure = target.scheme == "https"
     base = http.client.HTTPSConnection if secure else http.client.HTTPConnection
-    context = config.ssl_context or (ssl.create_default_context() if secure else None)
+    context = _budgeted_context(config.ssl_context) if secure else None
 
     class _PinnedConnection(base):  # type: ignore[valid-type,misc]
         def __init__(self, host: str, **kwargs: Any) -> None:
@@ -416,15 +490,18 @@ def _connection_factory(target: _Target, config: HttpLoaderConfig):
             super().__init__(host, **kwargs)
 
         def connect(self) -> None:
-            self.sock = socket.create_connection(
-                (target.address, target.port), timeout=config.connect_timeout_s
-            )
+            family = socket.AF_INET6 if ":" in target.address else socket.AF_INET
+            sock: Any = _BudgetedSocket(family, socket.SOCK_STREAM)
+            sock.settimeout(config.connect_timeout_s)
+            sock.connect((target.address, target.port))
             # Separate budgets: getting connected is not the same wait as
             # getting bytes, and a server that accepts and then stalls must not
             # inherit the connect timeout's patience.
-            self.sock.settimeout(config.read_timeout_s)
+            sock.settimeout(config.read_timeout_s)
             if secure and context is not None:
-                self.sock = context.wrap_socket(self.sock, server_hostname=target.host)
+                sock = context.wrap_socket(sock, server_hostname=target.host)
+            sock.start_read_budget(config.read_timeout_s)
+            self.sock = sock
 
     return _PinnedConnection
 

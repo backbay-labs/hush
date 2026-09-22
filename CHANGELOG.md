@@ -847,6 +847,10 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   file's `log_started` naming a hash the old file no longer ended with, and a verifier given both
   files rejected the rotation. The old file is now locked, its head re-read, and the lock held
   until the new file's first entry is written (log spec 5).
+- The Python HTTPS loader's read timeout is one budget for the whole response. It was a
+  per-receive socket timeout, so a server delivering a byte just inside every interval could
+  hold a policy or signature load open indefinitely; the status line, headers and body now
+  share a deadline (core spec 2.6.4), as the other three loaders already enforce.
 - The Rust and Python HTTPS loaders ignore a proxy named in the environment (`HTTPS_PROXY`,
   `ALL_PROXY`). Through a proxy the connection is made by the proxy, which resolves the host a
   second time on its side, so the address the SSRF check approved was never the one dialled.

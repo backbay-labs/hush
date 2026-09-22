@@ -28,6 +28,7 @@ import socket
 import socketserver
 import ssl
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator, Optional
@@ -663,7 +664,9 @@ def _self_signed(common_name: str) -> tuple[bytes, bytes]:
 class _TlsServer:
     """A loopback HTTPS server serving one policy under a minted certificate."""
 
-    def __init__(self, certificate: bytes, key: bytes, directory: Path) -> None:
+    def __init__(
+        self, certificate: bytes, key: bytes, directory: Path, trickle: bool = False
+    ) -> None:
         chain = directory / "chain.pem"
         chain.write_bytes(certificate + key)
         self.certificate_path = directory / "cert.pem"
@@ -680,7 +683,18 @@ class _TlsServer:
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if not trickle:
+                    self.wfile.write(body)
+                    return
+                # One byte at a time, each well inside any per-receive timeout,
+                # for longer than any read budget a test configures.
+                try:
+                    for byte in body:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(0.05)
+                except OSError:
+                    pass
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(chain)
@@ -761,6 +775,24 @@ def test_a_proxy_in_the_environment_is_ignored(
     monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
     loaded = create_http_loader(tls_server.client_config())(tls_server.url())
     assert loaded.spec.name == "remote-base"
+
+
+@pytest.mark.usefixtures("resolves_to_loopback")
+def test_the_read_budget_bounds_a_trickling_response(tmp_path: Path) -> None:
+    # The server delivers a byte every 50 ms, so a timeout that restarted with
+    # every receive would never fire; the budget is one deadline for the whole
+    # response.
+    certificate, key = _self_signed(TLS_HOST)
+    server = _TlsServer(certificate, key, tmp_path, trickle=True)
+    try:
+        config = server.client_config()
+        config.read_timeout_s = 0.5
+        started = time.monotonic()
+        with pytest.raises(HttpLoadError, match="read budget"):
+            create_http_loader(config)(server.url())
+        assert time.monotonic() - started < 3
+    finally:
+        server.stop()
 
 
 @pytest.mark.usefixtures("resolves_to_loopback")
