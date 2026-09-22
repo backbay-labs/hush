@@ -33,6 +33,19 @@ pub fn run_conformance(fixtures: &[TestFixture]) -> Vec<TestResult> {
     let mut merge_fixtures = Vec::new();
 
     for fixture in fixtures {
+        // A vector that could not be read is a failure of the run, never an
+        // empty document that an `invalid/` category would score as a
+        // correct rejection.
+        if let Some(error) = &fixture.read_error {
+            results.push(TestResult {
+                fixture_path: fixture.path.display().to_string(),
+                category: fixture.category,
+                passed: false,
+                message: format!("Failed to read fixture: {error}"),
+            });
+            continue;
+        }
+
         let result = match fixture.category {
             FixtureCategory::ValidCore
             | FixtureCategory::PostureValid

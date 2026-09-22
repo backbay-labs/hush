@@ -7,6 +7,10 @@ pub struct TestFixture {
     pub path: PathBuf,
     pub category: FixtureCategory,
     pub content: String,
+    /// Set when the file could not be read. A vector nobody opened is never
+    /// scored against its category; the runner fails it on this message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,7 +111,10 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
             if crate::expect::is_sidecar(&path) {
                 continue;
             }
-            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let (content, read_error) = match std::fs::read_to_string(&path) {
+                Ok(content) => (content, None),
+                Err(error) => (String::new(), Some(error.to_string())),
+            };
             let mut cat = *category;
 
             // Categorize merge fixtures more specifically.
@@ -124,10 +131,39 @@ pub fn discover_fixtures(fixtures_dir: &Path) -> Vec<TestFixture> {
                 path,
                 category: cat,
                 content,
+                read_error,
             });
         }
     }
 
     fixtures.sort_by(|a, b| a.path.cmp(&b.path));
     fixtures
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fixture whose bytes are not UTF-8 cannot be read into a document.
+    /// Discovery records the read failure instead of substituting an empty
+    /// document, and the runner scores it as a failure rather than letting an
+    /// `invalid/` vector pass for a file it never opened.
+    #[test]
+    fn unreadable_fixture_is_recorded_and_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let invalid_dir = dir.path().join("core/invalid");
+        std::fs::create_dir_all(&invalid_dir).expect("create dir");
+        std::fs::write(invalid_dir.join("unreadable.yaml"), [0xff, 0xfe, 0xfd])
+            .expect("write fixture");
+
+        let fixtures = discover_fixtures(dir.path());
+        assert_eq!(fixtures.len(), 1);
+        assert!(fixtures[0].read_error.is_some());
+        assert!(fixtures[0].content.is_empty());
+
+        let results = crate::runner::run_conformance(&fixtures);
+        assert_eq!(results.len(), 1);
+        assert!(!results[0].passed, "{}", results[0].message);
+        assert!(results[0].message.contains("Failed to read fixture"));
+    }
 }
