@@ -159,8 +159,9 @@ h2h lint policy.yaml --dry-run
 | `--fix` | Apply decision-neutral auto-fixes in place. Refused for `-`. |
 | `--dry-run` | Show what `--fix` would change without writing. |
 
-Exit: `0` clean · `1` findings (or a parse error) · `2` a write failed, `--out`
-was combined with `--format text`, or `--fix` was pointed at stdin.
+Exit: `0` clean · `1` findings (or a parse error) · `2` a file was missing or
+unreadable, a write failed, the report could not be serialized, `--out` was
+combined with `--format text`, or `--fix` was pointed at stdin.
 
 > `--fix` rewrites the file through the canonical formatter, which does not
 > preserve comments. Run it on documents whose comments you can afford to lose,
@@ -227,7 +228,7 @@ rows.
 |---|---|---|---|
 | `E000` | error | file-unreadable | The path does not exist, or the file is not readable UTF-8. Nothing was linted. |
 | `E001` | error | parse-error | YAML parsing or deserialization failed. HushSpec rejects unknown keys, so a typo in a field name lands here rather than being silently ignored. |
-| `E002` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
+| `E010` | error | unresolvable-extends | A base could not be loaded, the chain is circular or too deep, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint. |
 | `L001` | warning | empty-rule-block | The block is enabled but declares nothing to allow or deny, so it makes no decision. A block that looks like enforcement and is not is worse than an absent one. |
 | `L002` | warning | overlapping-patterns | Sampled synthetic targets matched two patterns in the same list. Overlap is not itself a defect, but a redundant pair is dead weight. |
 | `L003` | warning | shadowed-exception | A `forbidden_paths` exception re-permits a path that nothing denies, so it has no effect. |

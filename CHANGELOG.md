@@ -16,6 +16,13 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
   its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
   never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
   warnings.
+- `h2h lint` exits `2` for a file that is missing or unreadable, matching `validate` and `fmt` and
+  the documented exit-code table; it exited `1`, the code for a document that failed the check. A
+  JSON or SARIF report that cannot be serialized now also exits `2` with the error on stderr instead
+  of printing nothing and exiting `0`.
+- `h2h lint` reports an unresolvable `extends` chain as `E010`, the code
+  `spec/registries/error-codes.yaml` reserves for an extends failure. It emitted `E002`, which the
+  same registry reserves for an unsupported `hushspec` version.
 - `h2h receipts verify` replays a receipt under the posture state the receipt records, and fails the
   `decision` check when a recorded `action.origin` or `action.context` will not deserialize. The
   replay dropped both and always ran from the policy's initial posture state, then printed the check

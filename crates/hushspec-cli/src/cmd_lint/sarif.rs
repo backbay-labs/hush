@@ -63,7 +63,7 @@ pub(super) const RULES: &[RuleDoc] = &[
         level: "error",
     },
     RuleDoc {
-        id: "E002",
+        id: "E010",
         name: "unresolvable-extends",
         short: "The `extends` chain could not be resolved.",
         full: "A base policy could not be loaded, the chain is circular, exceeds the maximum depth, or a pinned digest did not match. Lint reports the resolved document, so an unresolvable chain leaves nothing to lint.",
