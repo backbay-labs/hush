@@ -679,7 +679,7 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `key_retired`; vectors `revoked-key`, `retired-key`); every receipt parser validates the 0.2
   structure and refuses an explicit `null`; a leap second is refused (vector
   `leap-second-signed-at`); log writers share one lock protocol (the `<path>.lock` sentinel,
-  with `flock` held underneath where the platform has it, and a bounded wait), always record
+  with `flock` held underneath in Python and Go, and a bounded wait in every SDK), always record
   `previous_entry_hash`, rotate under one lock and refuse a corrupt tail; the Python refusal
   receipt carries the refused document's real content hash; TypeScript and Python record
   `missing_signature` when verification was attempted; a claimed `key_id` is recorded only when

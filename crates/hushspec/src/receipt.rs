@@ -1022,7 +1022,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "signing")]
     #[test]
     fn a_millisecond_timestamp_is_a_real_instant() {
         assert!(is_millisecond_timestamp("2026-09-15T12:00:00.000Z"));
