@@ -637,6 +637,27 @@ fn generate_vectors() -> Vec<(String, String)> {
         malformed_receipt,
     ));
 
+    // Two payloads that are not the payloads the log-entry schema describes,
+    // each in a chain relinked around it so the first break is the payload
+    // (log spec 8, step 1) rather than a hash the edit invalidated.
+    let mut empty_started = entries_of(&fs::read_to_string(&rotated_2).unwrap());
+    empty_started[0]["log_started"] = serde_json::json!({});
+    relink(&mut empty_started, GENESIS_HASH);
+    files.push((
+        "invalid/empty-log-started-line-1.jsonl".to_string(),
+        json_lines(&empty_started),
+    ));
+    let mut without_sdk = entries_of(&basic_text);
+    without_sdk[0]["policy_event"]
+        .as_object_mut()
+        .unwrap()
+        .remove("sdk");
+    relink(&mut without_sdk, GENESIS_HASH);
+    files.push((
+        "invalid/policy-event-without-sdk-line-1.jsonl".to_string(),
+        json_lines(&without_sdk),
+    ));
+
     let signed_lines: Vec<&str> = signed_text.lines().collect();
     let mut bad_sig: serde_json::Value = serde_json::from_str(signed_lines[3]).unwrap();
     let sig = bad_sig["signature"]["signature"]
@@ -661,6 +682,33 @@ fn generate_vectors() -> Vec<(String, String)> {
     ));
     let _ = fs::remove_dir_all(&dir);
     files
+}
+
+/// The entries of a log file, as the raw JSON each line holds.
+fn entries_of(text: &str) -> Vec<serde_json::Value> {
+    text.lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// Relink `entries` onto `prev_hash`, restoring every `entry_hash` over the
+/// entry that now carries it, so the only break a vector holds is the one it
+/// was built to carry.
+fn relink(entries: &mut [serde_json::Value], prev_hash: &str) {
+    let mut previous = prev_hash.to_string();
+    for entry in entries.iter_mut() {
+        entry["prev_hash"] = serde_json::json!(previous);
+        previous = value_entry_hash(entry);
+        entry["entry_hash"] = serde_json::json!(previous);
+    }
+}
+
+/// `entries` as a JSON Lines file.
+fn json_lines(entries: &[serde_json::Value]) -> String {
+    entries
+        .iter()
+        .map(|entry| entry.to_string() + "\n")
+        .collect()
 }
 
 /// The `entry_hash` an entry held as raw JSON should carry: the digest of its
@@ -738,9 +786,23 @@ fn log_vectors_are_current_and_behave() {
         count += 1;
     }
     assert!(
-        count >= 6,
-        "expected at least 6 invalid vectors, found {count}"
+        count >= 8,
+        "expected at least 8 invalid vectors, found {count}"
     );
+
+    // The two payload vectors are hash-consistent throughout, so nothing but
+    // the payload itself can reject them (log spec 8, step 1).
+    for (name, missing) in [
+        ("invalid/empty-log-started-line-1.jsonl", "timestamp"),
+        ("invalid/policy-event-without-sdk-line-1.jsonl", "sdk"),
+    ] {
+        let text = fs::read_to_string(vectors_dir().join(name)).unwrap();
+        let error = verify_log(name, &text, &signed_options).unwrap_err();
+        assert!(
+            error.message.contains(missing),
+            "{name} must name the member it lacks: {error}"
+        );
+    }
 }
 
 /// Whether the caller asked for the committed vectors to be regenerated.

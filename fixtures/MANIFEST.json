@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T13:51:04Z",
+  "generated_at": "2026-09-22T15:04:19Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1825,7 +1825,7 @@
     },
     {
       "path": "fixtures/log/README.md",
-      "sha256": "7708bf24dc3f95594f8d98854932411e65790031ed9f6cf22cb4adf372e38b52",
+      "sha256": "f57a339f7ba4a840ad6d05c40b4fb580c6df449cb51a70d923648f1ee5099eb1",
       "category": "doc",
       "module": "log",
       "level": 0
@@ -1852,8 +1852,22 @@
       "level": 5
     },
     {
+      "path": "fixtures/log/invalid/empty-log-started-line-1.jsonl",
+      "sha256": "c879ba71fb41812506f8ab08e30934608504c57e1d92a64602c3c7742519e792",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
       "path": "fixtures/log/invalid/malformed-receipt-line-2.jsonl",
       "sha256": "786b78a814671a1e7a5ee7197857b0b391fa8847a4d58e2665569a062fac839d",
+      "category": "log",
+      "module": "log",
+      "level": 5
+    },
+    {
+      "path": "fixtures/log/invalid/policy-event-without-sdk-line-1.jsonl",
+      "sha256": "83707e2b62983c4e02a83a24be3f879425f0cce40a0d0190e9c906cc5d823af4",
       "category": "log",
       "module": "log",
       "level": 5
