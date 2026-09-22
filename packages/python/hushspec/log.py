@@ -518,16 +518,24 @@ class ChainedFileSink:
         continuing past it would leave a second, unlinked chain in the file.
         """
         with self._lock:
-            return self._append_locked(payload)
+            entry = self._append_to(self._path, self._seq, self._prev_hash, payload)
+            self._seq, self._prev_hash = entry.seq, entry.entry_hash
+            return entry
 
-    def _append_locked(
+    def _append_to(
         self,
+        path: Path,
+        cached_seq: int,
+        cached_prev_hash: str,
         payload: Union[DecisionReceipt, PolicyEvent, LogStarted],
     ) -> LogEntry:
-        """:meth:`append` with the chain head already taken, so a caller with
-        more to do under the same lock -- :meth:`rotate`, which must make its
-        ``log_started`` record the first entry of the new file -- can append
-        without releasing it."""
+        """Write one entry to *path*, continuing from *cached_seq* and
+        *cached_prev_hash* when the file holds no entry of its own, and return
+        it without touching the chain head.
+
+        The caller commits the head, so an append that fails leaves the sink
+        describing the file it was describing before.
+        """
         if isinstance(payload, DecisionReceipt):
             entry_type = EntryType.RECEIPT.value
         elif isinstance(payload, PolicyEvent):
@@ -541,13 +549,13 @@ class ChainedFileSink:
         else:
             raise SinkError(f"cannot append {type(payload).__name__} to a log")
 
-        with _locked_for_append(self._path) as handle:
+        with _locked_for_append(path) as handle:
             # A missing or empty file means a fresh log, or a rotation whose
             # ``log_started`` entry is about to seed the new file; both
             # continue from the head this sink carries.
-            head = _last_entry_of(handle, self._path)
+            head = _last_entry_of(handle, path)
             if head is None:
-                seq, prev_hash = self._seq, self._prev_hash
+                seq, prev_hash = cached_seq, cached_prev_hash
             else:
                 seq, prev_hash = head["seq"], head["entry_hash"]
 
@@ -573,10 +581,7 @@ class ChainedFileSink:
                 entry.signature = LogSignature.from_envelope(envelope)
 
             line = json.dumps(entry.to_dict(), separators=(",", ":")) + "\n"
-            _write_line(handle, self._path, line)
-
-            self._seq = entry.seq
-            self._prev_hash = entry.entry_hash
+            _write_line(handle, path, line)
             return entry
 
     def send(self, receipt: DecisionReceipt) -> None:
@@ -593,6 +598,11 @@ class ChainedFileSink:
 
         Sequence numbers restart at 1 in the new file; ``prev_hash`` carries
         over. The new file must not already exist.
+
+        The switch is committed only once that entry is on disk. A rotation
+        that cannot write it leaves the sink on the old file, still linked and
+        still verifiable, rather than on a new one whose first receipt would
+        continue nothing.
         """
         new_path = Path(new_path)
         if new_path.exists():
@@ -605,9 +615,10 @@ class ChainedFileSink:
             # would leak the writer's layout for no verification benefit.
             previous_file = self._path.name or str(self._path)
             previous_hash = self._prev_hash
-            self._path = new_path
-            self._seq = 0
-            return self._append_locked(
+            entry = self._append_to(
+                new_path,
+                0,
+                previous_hash,
                 LogStarted(
                     timestamp=format_timestamp(self._now()),
                     previous_file=previous_file,
@@ -616,8 +627,11 @@ class ChainedFileSink:
                     # against the previous file's last hash, and an omitted
                     # member is not that hash.
                     previous_entry_hash=previous_hash,
-                )
+                ),
             )
+            self._path = new_path
+            self._seq, self._prev_hash = entry.seq, entry.entry_hash
+            return entry
 
 
 @contextmanager

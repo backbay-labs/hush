@@ -349,26 +349,43 @@ func (s *ChainedFileSink) now() time.Time {
 func (s *ChainedFileSink) Append(payload LogPayload) (*LogEntry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.appendLocked(payload)
+	entry, err := s.appendTo(s.path, s.seq, s.prevHash, payload)
+	if err != nil {
+		return nil, err
+	}
+	s.seq, s.prevHash = entry.Seq, entry.EntryHash
+	return entry, nil
 }
 
-// appendLocked is [ChainedFileSink.Append] with mu already held, so a caller
-// that has more to do under the same lock -- [ChainedFileSink.Rotate], which
-// must make its `log_started` record the first entry of the new file -- can
-// append without releasing it.
-func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
+// appendTo writes one entry to path, continuing from cachedSeq and
+// cachedPrevHash when the file holds no entry of its own, and returns it
+// without touching the chain head.
+//
+// The caller commits the head, so an append that fails leaves the sink
+// describing the file it was describing before.
+func (s *ChainedFileSink) appendTo(
+	path string, cachedSeq uint64, cachedPrevHash string, payload LogPayload,
+) (*LogEntry, error) {
 	entryType, err := payload.entryType()
 	if err != nil {
 		return nil, fmt.Errorf("log: %w", err)
 	}
 
-	file, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
+	// The lock file lives next to the log, so the directory has to exist for
+	// the lock itself to be creatable.
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("log: cannot create %s: %w", dir, err)
+		}
+	}
+
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("log: cannot open %s: %w", s.path, err)
+		return nil, fmt.Errorf("log: cannot open %s: %w", path, err)
 	}
 	defer file.Close()
 
-	unlock, err := lockLogFile(file, s.path)
+	unlock, err := lockLogFile(file, path)
 	if err != nil {
 		return nil, err
 	}
@@ -377,8 +394,8 @@ func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 	// A missing or empty file means a fresh log, or a rotation whose
 	// `log_started` entry is about to seed the new file; both continue from
 	// the head this sink carries.
-	seq, prevHash := s.seq, s.prevHash
-	head, err := lastLogEntryIn(file, s.path)
+	seq, prevHash := cachedSeq, cachedPrevHash
+	head, err := lastLogEntryIn(file, path)
 	if err != nil {
 		return nil, err
 	}
@@ -414,11 +431,9 @@ func (s *ChainedFileSink) appendLocked(payload LogPayload) (*LogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("log: cannot serialize entry %d: %w", entry.Seq, err)
 	}
-	if err := writeLine(file, s.path, append(line, '\n')); err != nil {
+	if err := writeLine(file, path, append(line, '\n')); err != nil {
 		return nil, err
 	}
-
-	s.seq, s.prevHash = entry.Seq, entry.EntryHash
 	return entry, nil
 }
 
@@ -440,7 +455,10 @@ func (s *ChainedFileSink) RecordPolicyEvent(event *PolicyEvent) error {
 // (log spec 5). Sequence numbers restart at 1 in the new file; `prev_hash`
 // carries over, so a verifier given both files in order sees one chain.
 //
-// The new file must not already exist.
+// The new file must not already exist. The switch is committed only once that
+// entry is on disk: a rotation that cannot write it leaves the sink on the old
+// file, still linked and still verifiable, rather than on a new one whose
+// first receipt would continue nothing.
 func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	if _, err := os.Stat(newPath); err == nil {
 		return nil, fmt.Errorf("log: cannot rotate into the existing file %s", newPath)
@@ -458,7 +476,6 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	// the writer's layout for no verification benefit.
 	previousFile := filepath.Base(s.path)
 	previousHash := s.prevHash
-	s.path, s.seq = newPath, 0
 	// The link is always recorded, the genesis value included (log spec 5): a
 	// verifier given both files compares it against the previous file's last
 	// hash, and an omitted member is not that hash.
@@ -468,7 +485,13 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 		PreviousEntryHash: previousHash,
 	}
 
-	return s.appendLocked(LogPayload{LogStarted: started})
+	entry, err := s.appendTo(newPath, 0, previousHash, LogPayload{LogStarted: started})
+	if err != nil {
+		return nil, err
+	}
+	s.path = newPath
+	s.seq, s.prevHash = entry.Seq, entry.EntryHash
+	return entry, nil
 }
 
 // lastLogEntry reads the last non-empty line of path as an entry, or nil for a

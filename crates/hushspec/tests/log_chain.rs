@@ -343,6 +343,48 @@ fn a_chain_rotated_at_genesis_verifies() {
 }
 
 #[test]
+fn a_rotation_that_cannot_be_written_leaves_the_sink_on_the_old_file() {
+    let dir = temp_dir("rotate-unwritable");
+    let first = dir.join("log-1.jsonl");
+    let sink = write_basic(&first, false);
+    let head = sink.head();
+
+    // A regular file where the new log's directory would be: the rotation
+    // cannot create the file or its lock.
+    let blocker = dir.join("not-a-directory");
+    fs::write(&blocker, "").unwrap();
+    let second = blocker.join("log-2.jsonl");
+    sink.rotate(&second)
+        .expect_err("the new file cannot be written");
+
+    assert_eq!(sink.path(), first, "the sink still writes the old file");
+    assert_eq!(sink.head(), head, "the chain head is unchanged");
+
+    // The old file is still current, so the next receipt continues its chain.
+    sink.send(&evaluate_audited(
+        &resolution(),
+        &actions()[0],
+        &config(),
+        &ctx(9),
+    ))
+    .unwrap();
+    let report = verify_log_files(&[&first], &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.entries, 5);
+}
+
+#[test]
+fn a_log_is_created_together_with_its_parent_directory() {
+    let dir = temp_dir("missing-parent");
+    let path = dir.join("logs").join("audit.jsonl");
+    let sink = ChainedFileSink::open(&path).unwrap().with_clock(clock());
+    sink.record_policy_event(&loaded_event(&resolution()))
+        .unwrap();
+
+    let report = verify_log_files(&[&path], &LogVerifyOptions::default()).unwrap();
+    assert_eq!(report.entries, 1);
+}
+
+#[test]
 fn tampering_is_detected_at_the_first_broken_line() {
     let dir = temp_dir("tamper");
     let path = dir.join("log.jsonl");

@@ -485,6 +485,68 @@ func TestRotateRefusesAnExistingFile(t *testing.T) {
 	}
 }
 
+// TestRotationThatCannotBeWrittenKeepsTheOldFile covers the failure the switch
+// has to survive: the sink may move to the new file only once the log_started
+// entry that links it is on disk, or the next receipt becomes line 1 of a file
+// that continues nothing.
+func TestRotationThatCannotBeWrittenKeepsTheOldFile(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "log-1.jsonl")
+	sink := writeVectorChain(t, first, false)
+	seqBefore, headBefore := sink.Head()
+
+	// A regular file where the new log's directory would be: neither the file
+	// nor its lock can be created there.
+	blocker := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o644); err != nil {
+		t.Fatalf("cannot create the file: %v", err)
+	}
+	if _, err := sink.Rotate(filepath.Join(blocker, "log-2.jsonl")); err == nil {
+		t.Fatal("a rotation whose entry cannot be written must fail")
+	}
+
+	if sink.Path() != first {
+		t.Errorf("the sink must still write the old file, got %q", sink.Path())
+	}
+	if seq, head := sink.Head(); seq != seqBefore || head != headBefore {
+		t.Errorf("the chain head must be unchanged, got (%d, %s)", seq, head)
+	}
+
+	resolution := vectorResolution(t)
+	receipt, err := EvaluateAudited(resolution, vectorActions()[0], expectedReceiptConfig(),
+		expectedReceiptContext(9))
+	if err != nil {
+		t.Fatalf("cannot build the receipt: %v", err)
+	}
+	if err := sink.Send(&receipt); err != nil {
+		t.Fatalf("cannot append the receipt: %v", err)
+	}
+	if _, err := VerifyLogFiles([]string{first}, nil); err != nil {
+		t.Fatalf("the old file must still verify: %v", err)
+	}
+}
+
+// TestAppendCreatesTheParentDirectory covers opening a log in a workspace that
+// does not have the directory yet: the sentinel lock lives next to the file, so
+// the directory has to exist before the first append takes it.
+func TestAppendCreatesTheParentDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "logs", "audit.jsonl")
+	sink, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	if err := sink.RecordPolicyEvent(vectorPolicyEvent(t, vectorResolution(t))); err != nil {
+		t.Fatalf("cannot append the policy event: %v", err)
+	}
+	report, err := VerifyLogFiles([]string{path}, nil)
+	if err != nil {
+		t.Fatalf("the log must verify: %v", err)
+	}
+	if report.Entries != 1 {
+		t.Errorf("expected one entry, got %d", report.Entries)
+	}
+}
+
 // TestChainedSinkContinuesAnExistingChain locks in that reopening a log picks
 // up where it left off rather than restarting the sequence.
 func TestChainedSinkContinuesAnExistingChain(t *testing.T) {

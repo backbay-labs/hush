@@ -447,17 +447,36 @@ export class ChainedFileSink implements ReceiptSink {
    * line is not a log entry.
    */
   append(payload: Payload): LogEntry {
-    const target = this.logPath;
+    const entry = this.appendTo(this.logPath, this.seq, this.prevHash, payload);
+    this.seq = entry.seq;
+    this.prevHash = entry.entry_hash;
+    return entry;
+  }
+
+  /**
+   * Write one entry to `target`, continuing from `cachedSeq` and
+   * `cachedPrevHash` when the file holds no entry of its own, and return it
+   * without touching the chain head.
+   *
+   * The caller commits the head, so an append that fails leaves the sink
+   * describing the file it was describing before.
+   */
+  private appendTo(
+    target: string,
+    cachedSeq: number,
+    cachedPrevHash: string,
+    payload: Payload,
+  ): LogEntry {
     // Before the lock: the lock file lives next to the log, so the directory
     // has to exist for the lock itself to be creatable.
     mkdirSync(path.dirname(target), { recursive: true });
-    const entry = withFileLock(target, () => {
+    return withFileLock(target, () => {
       // A missing or empty file means a fresh log, or a rotation whose
       // `log_started` entry is about to seed the new file; both continue from
       // the head this sink carries.
       const head = lastEntry(target);
-      const seq = head === undefined ? this.seq : head.seq;
-      const prevHash = head === undefined ? this.prevHash : head.entry_hash;
+      const seq = head === undefined ? cachedSeq : head.seq;
+      const prevHash = head === undefined ? cachedPrevHash : head.entry_hash;
       // Member order is fixed (log spec 4), so two writers appending the same
       // chain produce byte-identical files. The hash itself is over the
       // canonical form and does not depend on it.
@@ -489,10 +508,6 @@ export class ChainedFileSink implements ReceiptSink {
       }
       return written;
     });
-
-    this.seq = entry.seq;
-    this.prevHash = entry.entry_hash;
-    return entry;
   }
 
   /** {@link ReceiptSink.send}: append a receipt entry. */
@@ -510,6 +525,11 @@ export class ChainedFileSink implements ReceiptSink {
    * naming the file this chain continues from and its last hash. Sequence
    * numbers restart at 1 in the new file; `prev_hash` carries over.
    *
+   * The switch is committed only once that entry is on disk. A rotation that
+   * cannot write it leaves the sink on the old file, still linked and still
+   * verifiable, rather than on a new one whose first receipt would continue
+   * nothing.
+   *
    * @throws {LogChainError} when `newPath` already exists -- appending a
    * fresh chain onto an existing file would leave two unlinked chains in it.
    */
@@ -522,9 +542,7 @@ export class ChainedFileSink implements ReceiptSink {
     // the writer's layout for no verification benefit.
     const previousFile = path.basename(this.logPath);
     const previousEntryHash = this.prevHash;
-    this.logPath = resolved;
-    this.seq = 0;
-    return this.append({
+    const entry = this.appendTo(resolved, 0, previousEntryHash, {
       logStarted: {
         timestamp: formatTimestamp(this.now()),
         previous_file: previousFile,
@@ -534,6 +552,10 @@ export class ChainedFileSink implements ReceiptSink {
         previous_entry_hash: previousEntryHash,
       },
     });
+    this.logPath = resolved;
+    this.seq = entry.seq;
+    this.prevHash = entry.entry_hash;
+    return entry;
   }
 }
 

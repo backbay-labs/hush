@@ -227,6 +227,38 @@ class TestChainedFileSink:
             verify_log("log.jsonl", json.dumps(first))
         assert "rogue" in caught.value.message
 
+    def test_a_rotation_that_cannot_be_written_keeps_the_old_file(
+        self, tmp_path: Path
+    ) -> None:
+        """The sink may move to the new file only once the ``log_started``
+        entry that links it is on disk, or the next receipt becomes line 1 of a
+        file that continues nothing."""
+        first = tmp_path / "log-1.jsonl"
+        sink = _write_basic(first)
+        head = sink.head()
+
+        # A regular file where the new log's directory would be: neither the
+        # file nor its lock can be created there.
+        blocker = tmp_path / "not-a-directory"
+        blocker.write_text("")
+        with pytest.raises(SinkError):
+            sink.rotate(blocker / "log-2.jsonl")
+
+        assert sink.path == first
+        assert sink.head() == head
+
+        # The old file is still current, so the next receipt continues it.
+        sink.send(evaluate_audited(_resolution(), _actions()[0], _config(), _context(9)))
+        assert verify_log_files([first]).entries == 5
+
+    def test_a_log_is_created_together_with_its_parent_directory(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "logs" / "audit.jsonl"
+        sink = ChainedFileSink.open(path).with_clock(CLOCK)
+        sink.send(evaluate_audited(_resolution(), _actions()[0], _config(), _context(0)))
+        assert verify_log_files([path]).entries == 1
+
     def test_rotating_into_an_existing_file_is_refused(self, tmp_path: Path) -> None:
         first, second = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
         sink = _write_basic(first)
