@@ -401,11 +401,21 @@ export class HushGuard {
    */
   private compiledValue: CompiledPolicy;
   /**
-   * Set when verification was required and did not pass. The guard still holds
-   * the document it was handed -- so `resolution` and the policy hash report
-   * what was loaded -- but every action is denied against it.
+   * Set when the policy the guard was *built* with needed verification and did
+   * not pass. The guard still holds the document it was handed -- so
+   * `resolution` and the policy hash report what was loaded -- but every
+   * action is denied against it until a policy that does prove itself is
+   * accepted (Signing section 6.5).
    */
   private refusal: { source: string; status: SignatureStatus } | null = null;
+  /**
+   * The document a provider was serving when the guard last rejected it, with
+   * the content hash it resolved to. A rejected reload is offered again on
+   * every action, so it is recognized here rather than re-verified and
+   * re-reported each time; a provider that moves on to a different document
+   * gets a fresh check.
+   */
+  private rejectedReload: { policy: HushSpec; contentHash: string } | null = null;
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
@@ -600,12 +610,11 @@ export class HushGuard {
    * pre-resolved, which is exactly the fail-open the requirement exists to
    * prevent.
    *
-   * `builtin:` hops are exempt, as they are during resolution: they are
-   * embedded in the SDK, not loaded from anywhere signable. Every other hop
-   * proves itself by a verified signature on its link. A hop proved by a
-   * digest pin cannot be re-checked from a resolution -- the chain records the
-   * hash each hop had, not the digest its child pinned it to -- so an adopted
-   * chain has to carry signatures.
+   * A hop proves itself exactly as it does during resolution (Signing section
+   * 6.5): `builtin:` hops are exempt, since they are embedded in the SDK
+   * rather than loaded from anywhere signable; a hop the resolver found
+   * pinned by a matching digest needs no envelope; every other hop needs a
+   * verified signature on its link.
    */
   private unprovenHop(
     resolution: Resolution,
@@ -613,6 +622,7 @@ export class HushGuard {
     if (this.resolveOptions.requireSignature !== true) return undefined;
     for (const link of resolution.chain) {
       if (link.source.startsWith('builtin:')) continue;
+      if (link.pinned === true) continue;
       if (link.signature?.verified === true) continue;
       return {
         source: link.source,
@@ -901,10 +911,10 @@ export class HushGuard {
   swapPolicy(newPolicy: HushSpec, resolution?: Resolution): void {
     // Hot-reload is a policy load like any other: an unresolved or unverified
     // document is rejected here rather than swapped in. The throw propagates
-    // to the provider's `onError`, leaving the previously resolved policy in
-    // force -- which is why this path never enters the refused state: the
-    // policy already in force was verified, and keeping it is strictly safer
-    // than replacing it with one that was not.
+    // to the provider's `onError`, leaving the policy already in force
+    // untouched -- which is why this path never *enters* the refused state:
+    // keeping a policy that did verify is strictly safer than replacing it
+    // with one that did not.
     const next =
       resolution !== undefined && resolution.spec === newPolicy
         ? resolution
@@ -925,6 +935,10 @@ export class HushGuard {
     this.resolutionValue = next;
     this.compiledValue = compiledForResolution(next);
     this.policyHash = next.content_hash;
+    // A policy that proved itself leaves the refused state: the document now
+    // in force is one this guard was able to check (Signing section 6.5).
+    this.refusal = null;
+    this.rejectedReload = null;
     if (this.observableEvaluator) {
       this.observableEvaluator.notifyPolicyReloaded(
         resolved.name,
@@ -970,58 +984,38 @@ export class HushGuard {
 
   /**
    * The resolution every action is evaluated against, or the deny that stands
-   * in for it when there is none: a policy that did not verify (signing spec
-   * 6.5) or a provider that cannot serve one.
+   * in for it when there is none: a policy that did not verify (Signing
+   * section 6.5) or a provider that cannot serve one.
    */
   private activeResolution(): Resolution | EvaluationResult {
+    const unavailable = this.pullFromProvider();
+    if (unavailable !== undefined) {
+      return unavailable;
+    }
     if (this.refusal != null) {
       return this.signatureRefusal(this.refusal);
     }
-    if (this.provider == null) {
-      return this.resolutionValue;
-    }
+    return this.resolutionValue;
+  }
 
+  /**
+   * Adopt what the provider is serving, when it has moved on from the policy
+   * in force. Returns the deny that stands in for a provider that cannot serve
+   * a policy at all, or `undefined` when the guard's own state answers.
+   *
+   * A reload is a policy load like any other, so the requirement the guard was
+   * given is re-applied to it (Signing section 6.5). A reload that cannot
+   * prove itself is rejected: the policy already in force stays, and the
+   * failure is reported once per rejected document rather than on every
+   * action.
+   */
+  private pullFromProvider(): EvaluationResult | undefined {
+    const provider = this.provider;
+    if (provider == null) return undefined;
+
+    let current: HushSpec | null;
     try {
-      const current = this.provider.current();
-      if (current == null) {
-        return {
-          decision: 'deny',
-          matched_rule: POLICY_PROVIDER_RULE,
-          reason: 'policy provider has not loaded a policy yet',
-        };
-      }
-      if (current.extends != null) {
-        // Defense in depth: the built-in providers resolve on load and on
-        // reload, so this only fires for a third-party provider that hands
-        // back a leaf document. Evaluating it would silently drop every rule
-        // block its base declares -- deny instead.
-        return {
-          decision: 'deny',
-          matched_rule: POLICY_PROVIDER_RULE,
-          reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
-        };
-      }
-      if (current !== this.policy) {
-        // A provider that reloaded without notifying the guard: adopt its own
-        // resolution when it has one for exactly this document, otherwise
-        // re-derive the identity so receipts never name a stale hash.
-        const next = resolutionFor(this.provider, current) ?? resolutionFromResolved(current);
-        // A reload is a policy load like any other, so the requirement the
-        // guard was given is re-applied to it (signing spec 6.5). A reload
-        // that cannot prove itself never becomes the policy in force: the
-        // guard latches into the refused state instead of evaluating against
-        // a document it could not verify.
-        const unproven = this.unprovenHop(next);
-        if (unproven !== undefined) {
-          this.refusal = unproven;
-          return this.signatureRefusal(unproven);
-        }
-        this.policy = current;
-        this.resolutionValue = next;
-        this.compiledValue = compiledForResolution(next);
-        this.policyHash = next.content_hash;
-      }
-      return this.resolutionValue;
+      current = provider.current();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
@@ -1030,6 +1024,75 @@ export class HushGuard {
         reason: `policy provider unavailable: ${message}`,
       };
     }
+    if (current == null) {
+      return {
+        decision: 'deny',
+        matched_rule: POLICY_PROVIDER_RULE,
+        reason: 'policy provider has not loaded a policy yet',
+      };
+    }
+    if (current === this.policy || current === this.rejectedReload?.policy) {
+      return undefined;
+    }
+    if (current.extends != null) {
+      // Defense in depth: the built-in providers resolve on load and on
+      // reload, so this only fires for a third-party provider that hands back
+      // a leaf document. Evaluating it would silently drop every rule block
+      // its base declares -- deny instead.
+      return {
+        decision: 'deny',
+        matched_rule: POLICY_PROVIDER_RULE,
+        reason: `policy provider returned an unresolved policy (extends: ${current.extends})`,
+      };
+    }
+    try {
+      // Adopt the provider's own resolution when it has one for exactly this
+      // document, otherwise re-derive the identity so receipts never name a
+      // stale hash.
+      const next = resolutionFor(provider, current) ?? resolutionFromResolved(current);
+      const unproven = this.unprovenHop(next);
+      if (unproven !== undefined) {
+        this.rejectReload(current, next, unproven);
+        return undefined;
+      }
+      const compiled = compiledForResolution(next);
+      this.policy = current;
+      this.resolutionValue = next;
+      this.compiledValue = compiled;
+      this.policyHash = next.content_hash;
+      this.refusal = null;
+      this.rejectedReload = null;
+      return undefined;
+    } catch (error) {
+      // A document that cannot be hashed or compiled is not a policy: deny
+      // rather than evaluate against the one it was meant to replace.
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        decision: 'deny',
+        matched_rule: POLICY_PROVIDER_RULE,
+        reason: `policy provider unavailable: ${message}`,
+      };
+    }
+  }
+
+  /**
+   * Record a reload the guard would not put in force and announce it once, as
+   * a `policy.load_failed` event: the guard is the one that noticed, so it is
+   * the one that has to say so.
+   */
+  private rejectReload(
+    policy: HushSpec,
+    resolution: Resolution,
+    unproven: { source: string; status: SignatureStatus },
+  ): void {
+    const announced = this.rejectedReload?.contentHash === resolution.content_hash;
+    this.rejectedReload = { policy, contentHash: resolution.content_hash };
+    if (announced) return;
+    this.observableEvaluator?.notifyPolicyLoadFailed(
+      `the reloaded policy carries no verified signature and this guard requires one: ` +
+        `${unproven.status.reason ?? 'unverified'}`,
+      unproven.source,
+    );
   }
 }
 

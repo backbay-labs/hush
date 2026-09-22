@@ -329,18 +329,20 @@ func NewGuardFromProvider(provider PolicyProvider, options GuardOptions) (*Guard
 // RequireSignature would be dropped by handing the policy in pre-resolved,
 // which is exactly the fail-open the requirement exists to prevent.
 //
-// `builtin:` hops are exempt, as they are during resolution: they are embedded
-// in the SDK, not loaded from anywhere signable. Every other hop proves itself
-// by a verified signature on its link. A hop proved by a digest pin cannot be
-// re-checked from a resolution -- the chain records the hash each hop had, not
-// the digest its child pinned it to -- so an adopted chain has to carry
-// signatures.
+// A hop proves itself exactly as it does during resolution (signing spec 6.5):
+// `builtin:` hops are exempt, since they are embedded in the SDK rather than
+// loaded from anywhere signable; a hop the resolver found pinned by a matching
+// digest needs no envelope; every other hop needs a verified signature on its
+// link.
 func unprovenHop(resolution *Resolution, requireSignature bool) *GuardRefusal {
 	if !requireSignature || resolution == nil {
 		return nil
 	}
 	for _, link := range resolution.Chain {
 		if strings.HasPrefix(link.Source, "builtin:") {
+			continue
+		}
+		if link.Pinned {
 			continue
 		}
 		if link.Signature != nil && link.Signature.Verified {

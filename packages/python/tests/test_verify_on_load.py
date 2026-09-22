@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from hushspec.canonical import content_hash
-from hushspec.evaluate import Decision
+from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.middleware import (
     POLICY_SIGNATURE_RULE,
     EnforcementConfig,
@@ -398,7 +398,64 @@ def test_a_matching_pin_satisfies_require_signature_for_that_hop(tmp_path: Path)
     # satisfies the requirement without turning into a signature.
     assert resolution.chain[0].signature.verified is False
     assert resolution.chain[0].signature.reason == "missing_signature"
+    assert resolution.chain[0].pinned is True
     assert resolution.signature.verified is True
+
+
+def test_a_guard_adopts_a_signed_leaf_over_a_pinned_base(tmp_path: Path) -> None:
+    write(tmp_path, "base.yaml", BASE)
+    leaf = pin_leaf(tmp_path, base_digest())
+    sign_file(leaf)
+    pinned = resolve_with_options_or_raise(
+        parse_or_raise(leaf.read_text()),
+        source=str(leaf),
+        loader=create_composite_loader(),
+        options=keyring_options(require_signature=True),
+    )
+
+    # The matching pin proves the base on its own, so the re-check of the
+    # adopted chain accepts exactly what resolution accepted (signing spec 6.5).
+    guard = HushGuard(pinned, require_signature=True)
+    assert guard.refusal is None
+
+    # The same chain unpinned: the base proves nothing and the guard refuses.
+    unpinned_leaf = write(tmp_path, "unpinned.yaml", LEAF_OF_BASE)
+    sign_file(unpinned_leaf)
+    unpinned = resolve_with_options_or_raise(
+        parse_or_raise(unpinned_leaf.read_text()),
+        source=str(unpinned_leaf),
+        loader=create_composite_loader(),
+        options=keyring_options(),
+    )
+    refusing = HushGuard(unpinned, require_signature=True)
+    assert refusing.refusal is not None
+    assert refusing.refusal.reason == REASON_MISSING_SIGNATURE
+
+
+def test_a_pinned_chain_leaves_no_pin_evidence_in_a_receipt(tmp_path: Path) -> None:
+    write(tmp_path, "base.yaml", BASE)
+    leaf = pin_leaf(tmp_path, base_digest())
+    resolution = resolve_with_options_or_raise(
+        parse_or_raise(leaf.read_text()),
+        source=str(leaf),
+        loader=create_composite_loader(),
+    )
+    assert resolution.chain[0].pinned is True
+
+    receipts: list = []
+    guard = HushGuard(resolution, sink=CallbackSink(receipts.append))
+    guard.gate(EvaluationAction(type="tool_call", target="read_file"))
+
+    wire = receipts[0].to_dict()
+    chain = wire["policy"]["extends_chain"]
+    assert [sorted(link) for link in chain] == [["content_hash", "source"]] * len(chain)
+    jsonschema = pytest.importorskip(
+        "jsonschema", reason="schema validation needs the `dev` extra"
+    )
+    jsonschema.validate(
+        wire,
+        json.loads((REPO_ROOT / "schemas" / "hushspec-receipt.v1.schema.json").read_text()),
+    )
 
 
 def test_require_signature_refuses_a_signature_from_an_untrusted_key(tmp_path: Path) -> None:

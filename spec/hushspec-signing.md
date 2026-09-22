@@ -205,6 +205,8 @@ An enforcement point not configured to require signatures MAY verify opportunist
 
 A hop satisfied by a matching digest pin needs no envelope; when an envelope is nevertheless present it MAY be verified opportunistically and its outcome recorded.
 
+**Re-checking a resolved chain.** An enforcement point handed a chain someone else resolved -- a policy provider's load, a hot reload -- MUST hold it to its own requirement rather than trust the options it was resolved under. A hop passes that re-check when it is a `builtin:` source, when the resolver proved it by a matching digest pin, or when it carries a signature that verified; nothing else passes. A reload that does not pass MUST be rejected: the policy already in force stays in force, the enforcement point reports the failure, and the source of the reload MUST NOT record the rejected document as the one it is serving. An enforcement point that has never had a policy pass the check refuses every action (the paragraph above) until one does.
+
 An enforcement point configured to require signatures but given no keyring verifies nothing, so every unpinned hop is refused: one whose envelope was found records `no_keyring`, and one with no envelope records `missing_signature`. A runtime with no cryptographic backend records `signing_unavailable` for every hop it attempted, whether or not that hop was required to prove itself. A reason outside this set and the Section 6.4 set is not one an implementation records; a reader that encounters one MUST treat it as `missing_signature`, the outcome that proves nothing.
 
 ---

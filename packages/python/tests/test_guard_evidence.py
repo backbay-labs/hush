@@ -295,6 +295,50 @@ class TestAdoptedChain:
 
         assert guard.refusal is None
 
+    def test_a_pinned_base_proves_itself(self) -> None:
+        signed = SignatureStatus(verified=True, key_id="sha256:" + "a" * 64)
+        resolution = self._chain(
+            ChainLink(
+                source="base.yaml",
+                content_hash="sha256:" + "0" * 64,
+                pinned=True,
+            ),
+            ChainLink(
+                source="leaf.yaml",
+                content_hash="sha256:" + "1" * 64,
+                signature=signed,
+            ),
+        )
+        guard = HushGuard(resolution, require_signature=True)
+
+        assert guard.refusal is None
+        outcome = guard.gate(EvaluationAction(type="tool_call", target="anything"))
+        assert outcome.proceed is True
+
+    def test_a_verified_swap_leaves_the_refused_state(self) -> None:
+        signed = SignatureStatus(verified=True, key_id="sha256:" + "a" * 64)
+        guard = HushGuard(
+            self._chain(ChainLink(source="leaf.yaml", content_hash="sha256:" + "1" * 64)),
+            require_signature=True,
+        )
+        assert guard.refusal is not None
+        refused = guard.gate(EvaluationAction(type="tool_call", target="anything"))
+        assert refused.proceed is False
+        assert refused.result.matched_rule == POLICY_UNVERIFIED_RULE
+
+        guard.swap_resolution(
+            self._chain(
+                ChainLink(
+                    source="leaf.yaml",
+                    content_hash="sha256:" + "1" * 64,
+                    signature=signed,
+                )
+            )
+        )
+
+        assert guard.refusal is None
+        assert guard.gate(EvaluationAction(type="tool_call", target="anything")).proceed is True
+
     def test_a_swap_refuses_an_unproven_base(self) -> None:
         signed = SignatureStatus(verified=True, key_id="sha256:" + "a" * 64)
         guard = HushGuard(

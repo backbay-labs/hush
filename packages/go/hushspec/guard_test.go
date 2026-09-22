@@ -813,3 +813,91 @@ func TestPolicyProviderRuleMatchesTheRegistry(t *testing.T) {
 	}
 	t.Fatalf("%q is not a reserved matched_rule in %s", PolicyProviderRule, path)
 }
+
+// TestGuardAcceptsASignedLeafOverAPinnedBase: a hop the child pinned by digest
+// proves itself without an envelope (signing spec 6.5), and the guard's
+// re-check of an adopted chain accepts exactly what resolution accepted.
+func TestGuardAcceptsASignedLeafOverAPinnedBase(t *testing.T) {
+	dir := policyDir(t)
+	basePath := filepath.Join(dir, "base.yaml")
+	writeFixtureFile(t, basePath, `
+hushspec: "0.2.0"
+name: pinned-base
+rules:
+  tool_access:
+    allow: [read_file]
+    default: block
+`)
+	childBody := `
+hushspec: "0.2.0"
+name: pinned-child
+extends: base.yaml%s
+rules:
+  egress:
+    allow: [api.github.com]
+    default: block
+`
+	childPath := filepath.Join(dir, "child.yaml")
+	writeFixtureFile(t, childPath, strings.Replace(childBody, "%s", "#"+ownHashOf(t, basePath), 1))
+	signSidecar(t, childPath, resolveNow(t, childPath), testSigningKeyPEM(t))
+
+	options := GuardOptions{RequireSignature: true, Keyring: testKeyring(t)}
+	provider := NewFileProvider(childPath, ResolveOptions{
+		RequireSignature: true,
+		Keyring:          testKeyring(t),
+	})
+	guard, err := NewGuardFromProvider(provider, options)
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	if refused, status := guard.Refused(); refused {
+		t.Fatalf("a matching pin proves the base on its own, got %+v", status)
+	}
+	if !egressAllowed(t, guard, "api.github.com") {
+		t.Fatal("the pinned chain is not in force")
+	}
+
+	// The same chain without the pin: the base proves nothing.
+	writeFixtureFile(t, childPath, strings.Replace(childBody, "%s", "", 1))
+	signSidecar(t, childPath, resolveNow(t, childPath), testSigningKeyPEM(t))
+	unpinned, err := ResolveFileWithOptions(childPath, ResolveOptions{Keyring: testKeyring(t)})
+	if err != nil {
+		t.Fatalf("resolve the unpinned chain: %v", err)
+	}
+	refusing, err := NewGuardFromProvider(&adoptedProvider{resolution: unpinned}, options)
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	refused, status := refusing.Refused()
+	if !refused {
+		t.Fatal("an unpinned, unsigned base must refuse when signatures are required")
+	}
+	if status.Verified || status.Reason != ReasonMissingSignature {
+		t.Fatalf("expected a missing-signature status, got %+v", status)
+	}
+}
+
+// TestGuardSwapPolicyLeavesTheRefusedState: a guard built refused evaluates
+// again the moment a policy that proves itself is swapped in (signing spec
+// 6.5).
+func TestGuardSwapPolicyLeavesTheRefusedState(t *testing.T) {
+	provider := &adoptedProvider{resolution: guardResolution(t, guardSpec())}
+	guard, err := NewGuardFromProvider(provider, GuardOptions{RequireSignature: true})
+	if err != nil {
+		t.Fatalf("NewGuardFromProvider: %v", err)
+	}
+	if refused, _ := guard.Refused(); !refused {
+		t.Fatal("an adopted chain with no verified signature must refuse")
+	}
+
+	verified := signedResolution(t, guardSpec(), "adopted://policy.yaml")
+	if err := guard.SwapPolicy(verified); err != nil {
+		t.Fatalf("a verified policy must be accepted: %v", err)
+	}
+	if refused, _ := guard.Refused(); refused {
+		t.Fatal("a verified policy must leave the refused state")
+	}
+	if !egressAllowed(t, guard, "api.github.com") {
+		t.Fatal("the swapped policy is not in force")
+	}
+}

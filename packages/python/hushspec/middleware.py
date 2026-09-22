@@ -534,17 +534,18 @@ class HushGuard:
     ) -> Optional[tuple[str, SignatureStatus]]:
         """The first hop of an adopted chain that has not proved itself.
 
-        ``builtin:`` hops are exempt, as they are during resolution: they are
-        embedded in the SDK, not loaded from anywhere signable. Every other hop
-        proves itself by a verified signature on its link. A hop proved by a
-        digest pin cannot be re-checked from a resolution -- the chain records
-        the hash each hop had, not the digest its child pinned it to -- so an
-        adopted chain has to carry signatures.
+        A hop proves itself exactly as it does during resolution (signing spec
+        6.5): ``builtin:`` hops are exempt, since they are embedded in the SDK
+        rather than loaded from anywhere signable; a hop the resolver found
+        pinned by a matching digest needs no envelope; every other hop needs a
+        verified signature on its link.
         """
         if not self._resolve_options.require_signature:
             return None
         for link in resolution.chain:
             if link.source.startswith("builtin:"):
+                continue
+            if link.pinned:
                 continue
             if link.signature is not None and link.signature.verified:
                 continue

@@ -129,6 +129,32 @@ describe('HushGuard receipts', () => {
     expect(receipt.policy.content_hash).toBe(guard.resolution.content_hash);
     expect(schemaErrors(receiptSchema, wire(receipt))).toEqual([]);
   });
+
+  it('keeps the digest-pin evidence of a chain out of the receipt', () => {
+    const pinDir = mkdtempSync(path.join(tmpdir(), 'hushspec-guard-pin-'));
+    try {
+      const basePolicy = 'hushspec: "0.1.0"\nname: base\n';
+      writeFileSync(path.join(pinDir, 'base.yaml'), basePolicy);
+      const pin = contentHash(parseOrThrow(basePolicy)).slice('sha256:'.length);
+      const leafPath = path.join(pinDir, 'leaf.yaml');
+      writeFileSync(
+        leafPath,
+        `hushspec: "0.1.0"\nextends: base.yaml#sha256:${pin}\nname: leaf\n`,
+      );
+
+      const sink = recorder();
+      const guard = HushGuard.fromFile(leafPath, { sink });
+      expect(guard.resolution.chain[0]!.pinned).toBe(true);
+      guard.gate({ type: 'tool_call', target: 'read_file' });
+
+      const receipt = sink.receipts[0]!;
+      const serialized = wire(receipt);
+      expect(JSON.stringify(serialized)).not.toContain('pinned');
+      expect(schemaErrors(receiptSchema, serialized)).toEqual([]);
+    } finally {
+      rmSync(pinDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('HushGuard policy events', () => {

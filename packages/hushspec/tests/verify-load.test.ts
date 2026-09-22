@@ -664,7 +664,7 @@ name: pinned
     expect(guard.check(ACTION)).toBe(true);
   });
 
-  it('refuses a provider reload that cannot prove itself', async () => {
+  it('rejects a provider reload that cannot prove itself and keeps the last good policy', async () => {
     const leafPath = write('leaf.yaml', ROOT_POLICY);
     signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
     const verified = resolveFromFileWithOptions(leafPath, {
@@ -678,6 +678,7 @@ name: pinned
       {},
     );
 
+    const events: string[] = [];
     let current = verified;
     const guard = await HushGuard.fromProvider(
       {
@@ -687,18 +688,100 @@ name: pinned
         current: () => current.spec,
         resolution: () => current,
       },
-      { requireSignature: true, keyring: TRUSTED_KEYRING },
+      {
+        requireSignature: true,
+        keyring: TRUSTED_KEYRING,
+        observer: { onEvent: (event) => events.push(event.type) },
+      },
     );
     expect(guard.check(ACTION)).toBe(true);
 
     current = unproven;
-    const result = guard.evaluate(ACTION);
-    expect(result.decision).toBe('deny');
-    expect(result.matched_rule).toBe(POLICY_SIGNATURE_RULE);
-    expect(result.reason).toMatch(/missing_signature/);
-    // The refused document never became the policy in force.
+    // The policy that did verify stays in force, so the action still decides
+    // against it rather than against the document the guard would not take.
+    expect(guard.evaluate(ACTION).decision).toBe('allow');
+    expect(guard.resolution?.content_hash).toBe(verified.content_hash);
+    expect(events.filter((type) => type === 'policy.load_failed')).toHaveLength(1);
+
+    // The same rejected document is offered on every action; it is reported
+    // once, not once per evaluation.
+    expect(guard.evaluate(ACTION).decision).toBe('allow');
+    expect(guard.evaluate(ACTION).decision).toBe('allow');
+    expect(events.filter((type) => type === 'policy.load_failed')).toHaveLength(1);
+  });
+
+  it('accepts a signed leaf over a digest-pinned unsigned base, and refuses it unpinned', async () => {
+    const basePath = write('base.yaml', ROOT_POLICY);
+    const baseHash = contentHash(parseOrThrow(ROOT_POLICY)).slice('sha256:'.length);
+    const pinnedLeaf = `
+hushspec: "0.1.0"
+extends: base.yaml#sha256:${baseHash}
+name: leaf
+rules:
+  egress:
+    allow: [api.example.com]
+    default: block
+`;
+    const leafPath = write('leaf.yaml', pinnedLeaf);
+    signTo(`${leafPath}.sig`, resolveFromFileWithOptions(leafPath, {}).spec);
+    const pinned = resolveFromFileWithOptions(leafPath, {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    expect(pinned.chain[0]?.pinned).toBe(true);
+
+    const provider = (resolution: Resolution) => ({
+      load: async () => resolution.spec,
+      watch: () => {},
+      stop: () => {},
+      current: () => resolution.spec,
+      resolution: () => resolution,
+    });
+
+    // A matching pin proves the base on its own (signing spec 6.5), so the
+    // chain is complete and every action decides against the policy.
+    const guard = await HushGuard.fromProvider(provider(pinned), {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    expect(guard.check(ACTION)).toBe(true);
+
+    // The same chain without the pin: the base proves nothing, so the guard
+    // refuses it.
+    const unpinnedPath = write('unpinned.yaml', pinnedLeaf.replace(`#sha256:${baseHash}`, ''));
+    signTo(`${unpinnedPath}.sig`, resolveFromFileWithOptions(unpinnedPath, {}).spec);
+    const unpinned = resolveFromFileWithOptions(unpinnedPath, { keyring: TRUSTED_KEYRING });
+    const refusing = await HushGuard.fromProvider(provider(unpinned), {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    const refused = refusing.evaluate(ACTION);
+    expect(refused.decision).toBe('deny');
+    expect(refused.matched_rule).toBe(POLICY_SIGNATURE_RULE);
+    expect(refused.reason).toMatch(new RegExp(path.basename(basePath)));
+  });
+
+  it('leaves the refused state when a verified policy is swapped in', () => {
+    const leafPath = write('leaf.yaml', ROOT_POLICY);
+    const guard = HushGuard.fromFile(leafPath, {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    const refused = guard.evaluate(ACTION);
+    expect(refused.decision).toBe('deny');
+    expect(refused.matched_rule).toBe(POLICY_SIGNATURE_RULE);
+
+    signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
+    const verified = resolveFromFileWithOptions(leafPath, {
+      requireSignature: true,
+      keyring: TRUSTED_KEYRING,
+    });
+    guard.swapPolicy(verified.spec, verified);
+
+    expect(guard.evaluate(ACTION).decision).toBe('allow');
     expect(guard.resolution?.content_hash).toBe(verified.content_hash);
   });
+
 
   it('still resolves relative extends against an explicit baseDir', () => {
     const elsewhere = mkdtempSync(path.join(os.tmpdir(), 'hushspec-basedir-'));
