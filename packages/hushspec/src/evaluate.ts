@@ -55,8 +55,6 @@ export interface EvaluationAction {
    * absent, conditions see an empty context and the engine clock.
    */
   context?: RuntimeContext;
-  /** Set on the redacted copy emitted to observers when content is stripped. */
-  content_redacted?: boolean;
 }
 
 export interface OriginContext {

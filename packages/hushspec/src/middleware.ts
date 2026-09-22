@@ -619,7 +619,7 @@ export class HushGuard {
       const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
       this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
-        this.observerAction(action),
+        action,
         active,
         0,
         undefined,
@@ -631,7 +631,7 @@ export class HushGuard {
       const { result, durationUs, receipt } = this.runEvaluation(active, action);
       this.send(receipt);
       this.observableEvaluator?.notifyEvaluationCompleted(
-        this.observerAction(action),
+        action,
         result,
         durationUs,
         undefined,
@@ -640,12 +640,11 @@ export class HushGuard {
       return result;
     }
     if (this.observableEvaluator) {
-      // Route through runEvaluation() (not ObservableEvaluator.evaluate(),
-      // which calls the plain evaluate()) so a policy's detection extension
-      // is honored here too, then emit through the same public notification
-      // ObservableEvaluator.evaluate() would otherwise have sent.
+      // Through runEvaluation(), which carries the guard's enforcement mode
+      // and audit settings, then out on the same notification
+      // ObservableEvaluator.evaluate() sends.
       const { result, durationUs } = this.runEvaluation(active, action);
-      this.observableEvaluator.notifyEvaluationCompleted(this.observerAction(action), result, durationUs);
+      this.observableEvaluator.notifyEvaluationCompleted(action, result, durationUs);
       return result;
     }
     return this.runEvaluation(active, action).result;
@@ -855,26 +854,12 @@ export class HushGuard {
       this.send(receipt);
     }
     this.observableEvaluator?.notifyEvaluationCompleted(
-      this.observerAction(action),
+      action,
       result,
       durationUs,
       enforcement,
       receipt,
     );
-  }
-
-  /**
-   * Redact an action for observer emission the way a receipt does: content is
-   * never carried (receipt spec 4.4 records only its hash and size), so it is
-   * stripped here too and the redacted flag is set -- raw content must not
-   * leak into the observer stream either.
-   */
-  private observerAction(action: EvaluationAction): EvaluationAction {
-    if (action.content != null) {
-      const { content: _content, ...rest } = action;
-      return { ...rest, content_redacted: true };
-    }
-    return action;
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {

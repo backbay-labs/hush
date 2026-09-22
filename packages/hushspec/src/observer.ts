@@ -1,7 +1,7 @@
 import type { EvaluationAction, EvaluationResult, Decision } from './evaluate.js';
 import type { DecisionReceipt, EnforcementSummary } from './receipt.js';
 import type { HushSpec } from './schema.js';
-import { evaluate } from './evaluate.js';
+import { evaluateWithDetection } from './detection.js';
 
 export interface EvaluationEvent {
   type:
@@ -16,7 +16,15 @@ export interface EvaluationEvent {
 
 export interface EvaluationCompletedEvent extends EvaluationEvent {
   type: 'evaluation.completed';
+  /** The action with `content` stripped (receipt spec 4.4). */
   action: EvaluationAction;
+  /**
+   * True when `action.content` was present and removed. The flag sits on the
+   * event rather than on the action because `EvaluationAction` is a closed
+   * wire type -- an SDK reading the event back rejects a member it does not
+   * declare.
+   */
+  content_redacted?: boolean;
   result: EvaluationResult;
   duration_us: number;
   receipt?: DecisionReceipt;
@@ -168,18 +176,22 @@ export class ObservableEvaluator {
     this.observers = this.observers.filter(o => o !== observer);
   }
 
-  evaluate(
-    spec: HushSpec,
-    action: EvaluationAction,
-    observedAction?: EvaluationAction,
-  ): EvaluationResult {
+  /**
+   * Evaluate `action` against `spec`, time it, and announce the outcome.
+   *
+   * Routes through the detection pipeline, as every other evaluation surface
+   * does: for a policy carrying an `extensions.detection` block an escalated
+   * decision must not come back as an allow simply because the caller went
+   * through an observer (detection spec section 4).
+   */
+  evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {
     const start = performance.now();
-    const result = evaluate(spec, action);
+    const result = evaluateWithDetection(spec, action).evaluation;
     const duration_us = Math.round((performance.now() - start) * 1000);
     this.emit({
       type: 'evaluation.completed',
       timestamp: new Date().toISOString(),
-      action: observedAction ?? action,
+      action,
       result,
       duration_us,
     });
@@ -260,8 +272,14 @@ export class ObservableEvaluator {
    * observer as an `error` event, because a failure nobody is told about is
    * the one that goes unnoticed; an observer that throws reporting its own
    * throw is dropped rather than retried.
+   *
+   * An `evaluation.completed` event is redacted here, so no path to an
+   * observer can carry an action's `content` (receipt spec 4.4).
    */
   private emit(event: ObserverEvent): void {
+    if (event.type === 'evaluation.completed') {
+      event = redactCompleted(event);
+    }
     for (const observer of this.observers) {
       try {
         observer.onEvent(event);
@@ -280,4 +298,16 @@ export class ObservableEvaluator {
       }
     }
   }
+}
+
+/**
+ * The event with `action.content` stripped, flagged on the event itself.
+ *
+ * Evidence records an action's content by hash and size, never by its bytes
+ * (receipt spec 4.4), and an observer stream is held to the same rule.
+ */
+function redactCompleted(event: EvaluationCompletedEvent): EvaluationCompletedEvent {
+  if (event.action.content == null) return event;
+  const { content: _content, ...action } = event.action;
+  return { ...event, action, content_redacted: true };
 }
