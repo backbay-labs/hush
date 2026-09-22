@@ -354,7 +354,8 @@ func TestRotationCarriesTheChain(t *testing.T) {
 	if started.PrevHash != headBefore {
 		t.Errorf("prev_hash must carry over: expected %s, got %s", headBefore, started.PrevHash)
 	}
-	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash != headBefore {
+	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash == nil ||
+		*started.LogStarted.PreviousEntryHash != headBefore {
 		t.Errorf("log_started must repeat the previous hash, got %+v", started.LogStarted)
 	}
 	// Only the file name: a path would leak the writer's layout for no
@@ -407,7 +408,8 @@ func TestRotateAtGenesisVerifies(t *testing.T) {
 	if started.PrevHash != GenesisHash {
 		t.Errorf("expected the genesis hash, got %s", started.PrevHash)
 	}
-	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash != GenesisHash {
+	if started.LogStarted == nil || started.LogStarted.PreviousEntryHash == nil ||
+		*started.LogStarted.PreviousEntryHash != GenesisHash {
 		t.Fatalf("log_started must record the link even at genesis, got %+v", started.LogStarted)
 	}
 
@@ -544,6 +546,31 @@ func TestAppendCreatesTheParentDirectory(t *testing.T) {
 	}
 	if report.Entries != 1 {
 		t.Errorf("expected one entry, got %d", report.Entries)
+	}
+}
+
+// TestEmptyPreviousEntryHashIsNotAnAbsentLink pins the distinction the pointer
+// makes: `"previous_entry_hash": ""` names no hash, so a first file that
+// carries one links to nothing and must be refused, as it is in every SDK.
+func TestEmptyPreviousEntryHashIsNotAnAbsentLink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	empty := ""
+	sink, err := OpenChainedFileSink(path)
+	if err != nil {
+		t.Fatalf("cannot open the log: %v", err)
+	}
+	clock := logVectorClock(t)
+	sink.WithClock(func() time.Time { return clock })
+	if _, err := sink.Append(LogPayload{LogStarted: &LogStarted{
+		Timestamp:         FormatTimestamp(clock),
+		PreviousFile:      "log-0.jsonl",
+		PreviousEntryHash: &empty,
+	}}); err != nil {
+		t.Fatalf("cannot append the log_started entry: %v", err)
+	}
+
+	if _, err := VerifyLogFiles([]string{path}, nil); err == nil {
+		t.Fatal("an empty previous_entry_hash must break the chain")
 	}
 }
 

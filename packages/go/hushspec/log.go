@@ -148,8 +148,10 @@ type LogStarted struct {
 	Timestamp    string `json:"timestamp"`
 	PreviousFile string `json:"previous_file,omitempty"`
 	// PreviousEntryHash is the last `entry_hash` of the previous file; it
-	// equals this entry's `prev_hash`.
-	PreviousEntryHash string `json:"previous_entry_hash,omitempty"`
+	// equals this entry's `prev_hash`. It is a pointer because an absent
+	// member and an empty one are different documents: an empty string names
+	// no hash, so a file that carries one links to nothing.
+	PreviousEntryHash *string `json:"previous_entry_hash,omitempty"`
 }
 
 // LogSignature is an entry signature: the 0.2 signature envelope (signing spec
@@ -482,7 +484,7 @@ func (s *ChainedFileSink) Rotate(newPath string) (*LogEntry, error) {
 	started := &LogStarted{
 		Timestamp:         FormatTimestamp(s.now()),
 		PreviousFile:      previousFile,
-		PreviousEntryHash: previousHash,
+		PreviousEntryHash: &previousHash,
 	}
 
 	entry, err := s.appendTo(newPath, 0, previousHash, LogPayload{LogStarted: started})
@@ -734,7 +736,8 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 				if entry.LogStarted == nil {
 					return nil, fail("a continued file must start with a log_started entry")
 				}
-				if entry.LogStarted.PreviousEntryHash != carriedHash {
+				if entry.LogStarted.PreviousEntryHash == nil ||
+					*entry.LogStarted.PreviousEntryHash != carriedHash {
 					return nil, fail(
 						"log_started.previous_entry_hash does not match the previous file's last hash")
 				}
@@ -743,8 +746,8 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			// verifier was not given; its prev_hash must then be that file's
 			// last hash, which it carries in log_started.
 			if expectedSeq == 1 && index == 0 && entry.LogStarted != nil &&
-				entry.LogStarted.PreviousEntryHash != "" {
-				prevHash = entry.LogStarted.PreviousEntryHash
+				entry.LogStarted.PreviousEntryHash != nil {
+				prevHash = *entry.LogStarted.PreviousEntryHash
 			}
 			// 6. The link itself.
 			if entry.PrevHash != prevHash {
