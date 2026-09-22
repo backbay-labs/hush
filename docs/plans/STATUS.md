@@ -72,6 +72,8 @@ Adapter mapping remains supplemental SDK-integration evidence, not a core confor
 
 The first hosted attempt exposed two test-fixture races, not a passing qualification. Their deterministic replacements, preserved assertions, and independent review are recorded in the [CI fixture follow-up](../reviews/2026-09-22-ci-fixture-review.md). This revision requires fresh hosted checks; predecessor failures are not erased by local passes.
 
+The final workflow audit also corrected Rust feature selection: hosted clippy, tests, coverage, and the MSRV build now enable all features, including the optional HTTP loader. The separate no-default-features compile gate remains. All 294 core tests passed locally under all-feature LLVM coverage, and the locked all-feature workspace build passed on Rust 1.88. Earlier default-feature hosted results do not qualify the optional loader repairs.
+
 ### Resolver availability boundary
 
 System DNS calls cannot generally be cancelled. Rust and Python cap detached/daemon resolver workers at eight per process; a stalled call retains its slot until it returns. TypeScript caps pending native/custom lookups at 32, but native `dns.lookup` still shares Node's worker pool and can occupy that pool after its caller times out. Go uses its standard context-aware resolver and native concurrency limit. Exhaustion fails closed; it is not a guarantee of uninterrupted availability or native resolver isolation.

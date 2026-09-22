@@ -102,10 +102,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-features -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
 
       - name: Build without the signing backend
         run: cargo check -p hushspec --no-default-features
@@ -638,7 +638,7 @@ jobs:
           rustc --version
 
       - name: Build the workspace on the MSRV toolchain
-        run: cargo build --workspace --locked
+        run: cargo build --workspace --all-features --locked
 
   # ── Coverage ───────────────────────────────────────────────────────
   coverage:
@@ -681,8 +681,8 @@ jobs:
       - name: Rust coverage
         run: |
           mkdir -p coverage-out
-          cargo llvm-cov --workspace --lcov --output-path coverage-out/rust-lcov.info
-          cargo llvm-cov report --json --summary-only --output-path rust-summary.json
+          cargo llvm-cov --workspace --all-features --lcov --output-path coverage-out/rust-lcov.info
+          cargo llvm-cov report --all-features --json --summary-only --output-path rust-summary.json
           {
             echo '## Coverage'
             echo

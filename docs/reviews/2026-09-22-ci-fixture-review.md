@@ -39,3 +39,11 @@ Pass for committing these fixture repairs and rerunning exact-commit qualificati
 The direct run on `295022c` completed with 22 of 24 jobs passing: TypeScript and Coverage failed on the same TypeScript fixture. The PR run additionally exposed the Rust watcher fixture race under coverage. Those failures remain recorded; they are not treated as successful qualification.
 
 Before the fixture commit, Node 20.20.2 and Node 24.16.0 each passed the TypeScript build, lint, all 2,328 tests, and coverage. Rust passed all 294 core tests and clippy. The revised watcher passed 50 consecutive executions, and all 10 default-feature provider tests passed under LLVM coverage instrumentation. Clean package verification and fresh exact-commit CI remain separate post-commit gates.
+
+## Rust feature-selection correction
+
+The final workflow audit found that workspace tests and coverage selected default features, while the Rust library declares an empty default set. Workspace consumers enabled signing, but those jobs did not exercise the optional HTTP loader or OTLP exporter. Local all-feature results therefore did not establish hosted coverage of the DNS repairs.
+
+CI now selects all features for workspace clippy, tests, LLVM coverage and its summary report, and the locked Rust 1.88 MSRV build. The separate no-default-features compile check remains intact. No production source, dependency, assertion, or timeout changed in this follow-up.
+
+Local verification passed all 294 core tests with all features under LLVM coverage instrumentation and the locked all-feature workspace build on Rust 1.88. Independent review checked the command selection, coverage report option, retained no-default-features gate, workflow lint, and these terminal results without finding a blocker. These local checks do not replace fresh exact-commit hosted qualification of the workflow correction.
