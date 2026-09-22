@@ -535,6 +535,12 @@ pub enum DivergenceKind {
     /// the evidence, which is what an auditor keeps and a log chains.
     Receipt,
     MissingCase,
+    /// One side, or both, failed to produce a verdict at all. An `Error` is a
+    /// harness or engine failure rather than a policy outcome, so two of them
+    /// are agreement only when they say the same thing: an SDK that fails for
+    /// a wholly different reason -- or on every case -- is a finding, not a
+    /// match.
+    HarnessError,
     /// The harness answered for a case key the reference (and therefore the
     /// bundle) never produced. Both the reference and every SDK evaluate the
     /// identical bundle, so this should be geometrically impossible for a
@@ -884,7 +890,12 @@ fn verdict_divergence(
         (CaseVerdict::Rejected { phase: left, .. }, CaseVerdict::Rejected { phase: right, .. }) => {
             (left != right).then_some(DivergenceKind::Acceptance)
         }
-        (CaseVerdict::Error { .. }, CaseVerdict::Error { .. }) => None,
+        (CaseVerdict::Error { message: left }, CaseVerdict::Error { message: right }) => {
+            (left != right).then_some(DivergenceKind::HarnessError)
+        }
+        (CaseVerdict::Error { .. }, _) | (_, CaseVerdict::Error { .. }) => {
+            Some(DivergenceKind::HarnessError)
+        }
         _ => Some(DivergenceKind::Acceptance),
     }
 }
@@ -2173,6 +2184,72 @@ mod tests {
             ]
         );
         assert!(divergences.iter().all(|divergence| divergence.sdk == "go"));
+    }
+
+    #[test]
+    fn two_errors_agree_only_when_they_say_the_same_thing() {
+        let oracle = report_of(
+            "rust",
+            &[
+                (
+                    "same",
+                    CaseVerdict::Error {
+                        message: "invalid action".to_string(),
+                    },
+                ),
+                (
+                    "different",
+                    CaseVerdict::Error {
+                        message: "invalid action".to_string(),
+                    },
+                ),
+            ],
+        );
+        let observed = report_of(
+            "go",
+            &[
+                (
+                    "same",
+                    CaseVerdict::Error {
+                        message: "invalid action".to_string(),
+                    },
+                ),
+                (
+                    "different",
+                    CaseVerdict::Error {
+                        message: "harness panicked".to_string(),
+                    },
+                ),
+            ],
+        );
+        let divergences = compare_reports(&oracle, &observed, &CompareOptions::default());
+        let kinds: Vec<(String, DivergenceKind)> = divergences
+            .iter()
+            .map(|divergence| (divergence.case_key.clone(), divergence.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![("different".to_string(), DivergenceKind::HarnessError)]
+        );
+    }
+
+    /// An SDK that could not produce a verdict at all did not agree with one
+    /// that did.
+    #[test]
+    fn an_error_against_a_verdict_is_a_harness_error() {
+        let oracle = report_of("rust", &[("k", ok_verdict("allow", None, None))]);
+        let observed = report_of(
+            "py",
+            &[(
+                "k",
+                CaseVerdict::Error {
+                    message: "receipt has no canonical form".to_string(),
+                },
+            )],
+        );
+        let divergences = compare_reports(&oracle, &observed, &CompareOptions::default());
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, DivergenceKind::HarnessError);
     }
 
     #[test]
