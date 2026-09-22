@@ -6,6 +6,8 @@ import { describe, expect, it, afterEach, vi } from 'vitest';
 import { PolicyWatcher } from '../src/watcher.js';
 import { PolicyPoller } from '../src/poller.js';
 import { FileProvider, HttpProvider } from '../src/policy-provider.js';
+import { deactivatePanic, isPanicActive } from '../src/evaluate.js';
+import { parseOrThrow } from '../src/parse.js';
 import type { HttpLoaderConfig } from '../src/http-loader.js';
 import { loadKeyring } from '../src/signing.js';
 import { startTestServer, type Handler, type TestServer } from './helpers/https-server.js';
@@ -218,6 +220,43 @@ describe('PolicyPoller', () => {
       poller.stop();
       poller = null;
     }
+  });
+
+  it('arms the kill switch from the sentinel on every tick', async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), 'hushspec-panic-'));
+    const sentinel = path.join(directory, '.hushspec_panic');
+    deactivatePanic();
+    try {
+      poller = new PolicyPoller({
+        loader: async () => VALID_POLICY,
+        onChange: () => {},
+        panicSentinel: sentinel,
+      });
+      await poller.start();
+      expect(isPanicActive()).toBe(false);
+
+      writeFileSync(sentinel, '');
+      await poller.reload();
+      expect(isPanicActive()).toBe(true);
+    } finally {
+      deactivatePanic();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a snapshot that still declares extends', async () => {
+    const errors: Error[] = [];
+    poller = new PolicyPoller({
+      loader: async () => ({
+        spec: parseOrThrow('hushspec: "0.1.0"\nname: leaf\nextends: "builtin:default"\n'),
+      }),
+      onChange: () => {},
+      onError: (error) => errors.push(error),
+    });
+
+    await expect(poller.start()).rejects.toThrow(/still declares 'extends/);
+    expect(poller.current()).toBeNull();
+    expect(errors).toHaveLength(0);
   });
 
   it('loads initial policy on start', async () => {

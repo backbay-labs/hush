@@ -191,6 +191,8 @@ export {
   deactivatePanic,
   isPanicActive,
   panicPolicy,
+  checkPanicSentinel,
+  DEFAULT_PANIC_SENTINEL,
   normalizeHost,
   normalizePath,
   hostPatternMatches,
@@ -379,12 +381,18 @@ export {
   type DetectorLevel,
 } from './detection.js';
 export { PolicyWatcher, type WatcherOptions } from './watcher.js';
-export { PolicyPoller, type PollerOptions, type PolicySnapshot } from './poller.js';
+export {
+  PolicyPoller,
+  DEFAULT_POLL_INTERVAL_MS,
+  type PollerOptions,
+  type PolicySnapshot,
+} from './poller.js';
 export {
   type PolicyProvider,
   type ProviderResolveOptions,
   FileProvider,
   HttpProvider,
+  DEFAULT_WATCH_INTERVAL_MS,
 } from './policy-provider.js';
 export {
   ObservableEvaluator,

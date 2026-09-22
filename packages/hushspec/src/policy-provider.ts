@@ -1,6 +1,7 @@
 import type { HushSpec } from './schema.js';
+import { checkPanicSentinel } from './evaluate.js';
 import { PolicyWatcher, type WatcherOptions } from './watcher.js';
-import { PolicyPoller, type PollerOptions } from './poller.js';
+import { PolicyPoller, DEFAULT_POLL_INTERVAL_MS, type PollerOptions } from './poller.js';
 import type { ResolveOptions, Resolution } from './resolve.js';
 import {
   createBuiltinLoader,
@@ -29,10 +30,20 @@ export interface PolicyProvider {
   resolution?(): Resolution | null;
 }
 
+/** How often a watching {@link FileProvider} checks the panic sentinel. */
+export const DEFAULT_WATCH_INTERVAL_MS = 1_000;
+
 /** Verification options shared by the built-in providers. */
 export interface ProviderResolveOptions {
   /** Verification policy applied on every load and reload. */
   resolveOptions?: ResolveOptions;
+  /**
+   * Sentinel file consulted on every tick while the provider is watching. The
+   * kill switch has to be reachable from a running reload loop, so it is
+   * checked whether or not the policy changed, and it fails closed: a sentinel
+   * whose absence cannot be proven arms panic mode.
+   */
+  panicSentinel?: string;
 }
 
 export class FileProvider implements PolicyProvider {
@@ -42,11 +53,23 @@ export class FileProvider implements PolicyProvider {
   private currentSpec: HushSpec | null = null;
   private currentResolution: Resolution | null = null;
   private readonly resolveOptions: ResolveOptions;
+  private readonly panicSentinel?: string;
+  private readonly sentinelIntervalMs: number;
+  private sentinelTimer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(path: string, options?: { debounceMs?: number } & ProviderResolveOptions) {
+  constructor(
+    path: string,
+    options?: {
+      debounceMs?: number;
+      /** How often the panic sentinel is checked while watching. */
+      sentinelIntervalMs?: number;
+    } & ProviderResolveOptions,
+  ) {
     this.path = path;
     this.debounceMs = options?.debounceMs ?? 300;
     this.resolveOptions = options?.resolveOptions ?? {};
+    this.panicSentinel = options?.panicSentinel;
+    this.sentinelIntervalMs = options?.sentinelIntervalMs ?? DEFAULT_WATCH_INTERVAL_MS;
   }
 
   async load(): Promise<HushSpec> {
@@ -80,9 +103,32 @@ export class FileProvider implements PolicyProvider {
     const spec = this.watcher.start();
     this.currentSpec = spec;
     this.currentResolution = this.watcher.resolution();
+    this.startSentinel();
+  }
+
+  /**
+   * Check the kill switch on its own tick.
+   *
+   * A file watcher wakes on a change to the policy; the sentinel is a
+   * different file, and the switch has to be reachable whether or not the
+   * policy is changing.
+   */
+  private startSentinel(): void {
+    if (this.panicSentinel === undefined) return;
+    const sentinel = this.panicSentinel;
+    checkPanicSentinel(sentinel);
+    this.sentinelTimer = setInterval(() => {
+      checkPanicSentinel(sentinel);
+    }, this.sentinelIntervalMs);
+    // A kill-switch check must never be the reason a process stays alive.
+    this.sentinelTimer.unref?.();
   }
 
   stop(): void {
+    if (this.sentinelTimer != null) {
+      clearInterval(this.sentinelTimer);
+      this.sentinelTimer = null;
+    }
     if (this.watcher != null) {
       this.watcher.stop();
       this.watcher = null;
@@ -106,6 +152,7 @@ export class HttpProvider implements PolicyProvider {
   private currentSpec: HushSpec | null = null;
   private currentResolution: Resolution | null = null;
   private readonly resolveOptions: ResolveOptions;
+  private readonly panicSentinel?: string;
   private readonly httpLoader: ReturnType<typeof createHttpLoader>;
 
   constructor(url: string, options?: {
@@ -113,8 +160,9 @@ export class HttpProvider implements PolicyProvider {
     maxStaleMs?: number;
   } & HttpLoaderConfig & ProviderResolveOptions) {
     this.url = url;
-    this.intervalMs = options?.intervalMs ?? 60_000;
+    this.intervalMs = options?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.maxStaleMs = options?.maxStaleMs ?? Infinity;
+    this.panicSentinel = options?.panicSentinel;
     // Every rule the HTTPS loader enforces (core spec 2.6.4) is configured
     // where the loader is, so a provider cannot quietly relax one.
     this.httpLoader = createHttpLoader(options);
@@ -157,6 +205,7 @@ export class HttpProvider implements PolicyProvider {
       },
       onError,
       maxStaleMs: this.maxStaleMs,
+      panicSentinel: this.panicSentinel,
     };
 
     this.poller = new PolicyPoller(pollerOptions);
