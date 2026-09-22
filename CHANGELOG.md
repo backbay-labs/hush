@@ -43,6 +43,19 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 - `h2h report --format oscal` carries the chain's status in `metadata`, the `result` and every
   `finding` as a `chain-verified` prop, and reports no control `satisfied` when the hash chain did
   not verify. An export made with `--unverified` over a broken chain read as clean evidence.
+- The conformance runner never scores a vector it did not read or run. A fixture that could not be
+  read stood in as an empty document, so an `invalid/` vector nobody opened was scored as correctly
+  rejected; a vector the discovery pass missed was absent from the report while the level still read
+  `pass` against the manifest digest it cited; an `invalid/` receipt vector passed when only one of
+  the schema and the typed parser refused it; a merge directory's malformed `fixture.yaml` read as
+  absent, so a vector marked `reject: true` was expected to be accepted; and a bundle case whose
+  policy would not resolve reported `policy_mismatch` regardless of what the bundle verifier
+  returned.
+- The differential runner reports a `harness_error` divergence when the SDKs do not both produce a
+  verdict. Two `Error` verdicts compared as agreement whatever they said, so an SDK failing for a
+  wholly different reason, or on every case, was normalized away.
+- An emitted differential regression fixture declares `hushspec_test: 0.2.0` when it pins
+  `expect.rule_trace` or `expect.receipt`, the members that format defines.
 
 ## [1.0.0] - 2026-09-15
 
