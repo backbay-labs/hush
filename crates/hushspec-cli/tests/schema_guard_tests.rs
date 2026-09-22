@@ -36,15 +36,18 @@ const PROFILE_ONLY_VECTORS: [&str; 4] = [
 /// vocabulary has no keyword for: referential integrity between two members
 /// of a document, uniqueness by a field of a list entry, a lookup in the IANA
 /// time zone database, the HushSpec regex profile, a recursion depth bound,
-/// and the set of minor versions an engine supports (the schema admits every
-/// `1.y.z`; core spec 2.2 makes acceptance the engine's decision). They are
-/// validated by the SDKs after parsing; here they are asserted to *pass*, so
-/// that a schema change which does become able to express one fails this
-/// test until the name is removed.
-const BEYOND_SCHEMA_VECTORS: [&str; 15] = [
+/// the IEEE 754 safe-integer bound (canonical spec 4.3 applies it to every
+/// integer a document writes, free-form values included), and the set of
+/// minor versions an engine supports (the schema admits every `1.y.z`; core
+/// spec 2.2 makes acceptance the engine's decision). They are validated by the
+/// SDKs after parsing; here they are asserted to *pass*, so that a schema
+/// change which does become able to express one fails this test until the name
+/// is removed.
+const BEYOND_SCHEMA_VECTORS: [&str; 16] = [
     "bad-initial.yaml",
     "duplicate-ids.yaml",
     "duplicate-pattern-names.yaml",
+    "integer-out-of-safe-range.yaml",
     "regex-comment-group.yaml",
     "regex-lookahead.yaml",
     "regex-mid-pattern-flag.yaml",
