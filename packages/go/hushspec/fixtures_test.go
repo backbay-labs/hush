@@ -464,12 +464,15 @@ func fixtureRepoRoot(t *testing.T) string {
 	return root
 }
 
+// fixtureFiles lists the vectors of one listed fixture directory. A directory
+// that is absent, or that holds no vector, is a corpus that moved out from
+// under this runner, so the run fails rather than reporting a green zero.
 func fixtureFiles(t *testing.T, repoRoot, subdir string) []string {
 	t.Helper()
 	dir := filepath.Join(repoRoot, "fixtures", subdir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil
+		t.Fatalf("fixture directory %s cannot be read: %v", subdir, err)
 	}
 
 	files := make([]string, 0, len(entries))
@@ -481,6 +484,9 @@ func fixtureFiles(t *testing.T, repoRoot, subdir string) []string {
 		if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") {
 			files = append(files, filepath.Join(dir, name))
 		}
+	}
+	if len(files) == 0 {
+		t.Fatalf("fixture directory %s contributes no vectors", subdir)
 	}
 	slices.Sort(files)
 	return files

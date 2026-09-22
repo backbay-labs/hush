@@ -482,9 +482,12 @@ describe('evaluateWithContext', () => {
     expect(result.decision).toBe('deny');
   });
 
+  // The target is on the block list, so the window decides the outcome: an
+  // allowlisted target would answer `allow` whether or not the condition was
+  // applied at all.
   it('tool access with time window condition', () => {
     const spec = makeToolAccessSpec();
-    const action = { type: 'tool_call', target: 'deploy' };
+    const action = { type: 'tool_call', target: 'danger_tool' };
     const conditions: Record<string, Condition> = {
       tool_access: {
         time_window: {
@@ -497,23 +500,34 @@ describe('evaluateWithContext', () => {
 
     const ctxInside: RuntimeContext = { current_time: '2026-01-14T10:00:00Z' };
     const resultInside = evaluateWithContext(spec, action, ctxInside, conditions);
-    expect(resultInside.decision).toBe('allow');
+    expect(resultInside.decision).toBe('deny');
 
     const ctxOutside: RuntimeContext = { current_time: '2026-01-14T20:00:00Z' };
     const resultOutside = evaluateWithContext(spec, action, ctxOutside, conditions);
     expect(resultOutside.decision).toBe('allow');
   });
 
+  // A context field the engine did not supply makes the predicate false, so
+  // the block is inert and the blocked target is not denied. The supplied
+  // context is asserted beside it, because a target the policy allows anyway
+  // would answer `allow` either way.
   it('missing context fails closed', () => {
     const spec = makeEgressSpec();
-    const action = { type: 'egress', target: 'api.openai.com' };
-    const ctx: RuntimeContext = {};
+    const action = { type: 'egress', target: 'evil.example.com' };
     const conditions: Record<string, Condition> = {
       egress: { context: { environment: 'production' } },
     };
 
-    const result = evaluateWithContext(spec, action, ctx, conditions);
-    expect(result.decision).toBe('allow');
+    const missing = evaluateWithContext(spec, action, {}, conditions);
+    expect(missing.decision).toBe('allow');
+
+    const supplied = evaluateWithContext(
+      spec,
+      action,
+      { environment: 'production' },
+      conditions,
+    );
+    expect(supplied.decision).toBe('deny');
   });
 
   it('compound condition', () => {
@@ -657,6 +671,43 @@ describe('fixed-offset timezone grammar', () => {
   it('rejects one-digit fields, a missing colon and a doubled sign', () => {
     for (const zone of ['+5', '+0530', '+5:0', '++5', '+05:3', '+ 5:30', '+05:30 ']) {
       expect(timezoneIsKnown(zone), zone).toBe(false);
+    }
+  });
+});
+
+describe('rate predicate', () => {
+  const gte: Condition = {
+    rate: { counter: 'shell_commands', threshold: 5, comparison: 'gte' },
+  };
+
+  it('compares at the threshold', () => {
+    expect(evaluateCondition(gte, { counters: { shell_commands: 4 } })).toBe(false);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 5 } })).toBe(true);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 6 } })).toBe(true);
+  });
+
+  it('holds when the engine supplied no such counter', () => {
+    expect(evaluateCondition(gte, {})).toBe(true);
+    expect(evaluateCondition(gte, { counters: { egress_calls: 9 } })).toBe(true);
+  });
+
+  // A counter is a non-negative integer (core spec 3.13). Anything else is not
+  // a counter the engine supplied, so the predicate is unevaluable and the
+  // block stays active rather than being switched off by a malformed value.
+  it('holds when the counter is not a non-negative integer', () => {
+    const malformed: unknown[] = [
+      5.5,
+      -1,
+      -0.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '6',
+      true,
+      null,
+    ];
+    for (const value of malformed) {
+      const context = { counters: { shell_commands: value } } as unknown as RuntimeContext;
+      expect(evaluateCondition(gte, context), String(value)).toBe(true);
     }
   });
 });

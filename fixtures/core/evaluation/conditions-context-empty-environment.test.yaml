@@ -1,0 +1,38 @@
+hushspec_test: "0.1.0"
+description: "when.context.environment: an engine-supplied empty string is a value that compares, not an absent field (core spec 3.13)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      when:
+        context:
+          environment: ""
+      block: ["evil.example.com"]
+      default: allow
+cases:
+  - description: "a supplied empty environment equals the empty string the document wrote, so the block is active"
+    context:
+      environment: ""
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block
+  - description: "an environment the engine did not supply fails the predicate closed, so the block is inert"
+    context:
+      user:
+        role: admin
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: allow
+  - description: "a non-empty environment does not equal the empty string, so the block is inert"
+    context:
+      environment: production
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: allow

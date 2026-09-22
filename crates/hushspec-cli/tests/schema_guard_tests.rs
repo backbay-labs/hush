@@ -43,7 +43,7 @@ const PROFILE_ONLY_VECTORS: [&str; 4] = [
 /// SDKs after parsing; here they are asserted to *pass*, so that a schema
 /// change which does become able to express one fails this test until the name
 /// is removed.
-const BEYOND_SCHEMA_VECTORS: [&str; 16] = [
+const BEYOND_SCHEMA_VECTORS: [&str; 17] = [
     "bad-initial.yaml",
     "duplicate-ids.yaml",
     "duplicate-pattern-names.yaml",
@@ -51,6 +51,7 @@ const BEYOND_SCHEMA_VECTORS: [&str; 16] = [
     "regex-comment-group.yaml",
     "regex-lookahead.yaml",
     "regex-mid-pattern-flag.yaml",
+    "regex-negated-class-shorthand.yaml",
     "regex-open-lower-bound.yaml",
     "regex-posix-bracket.yaml",
     "version-unsupported-minor.yaml",

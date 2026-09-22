@@ -2,7 +2,6 @@ package hushspec
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -91,8 +90,13 @@ type Condition struct {
 
 // RuntimeContext is the runtime context provided by the enforcement engine.
 type RuntimeContext struct {
-	User        map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
-	Environment string         `yaml:"environment,omitempty" json:"environment,omitempty"`
+	User map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
+	// Environment is the deployment environment a `when.context.environment`
+	// entry is compared against. It is a *string because presence is part of
+	// the contract: an engine that supplies "" has supplied a value, which
+	// compares equal to a written "", while a nil pointer is a field the
+	// engine did not supply and fails the predicate closed (core spec 3.13).
+	Environment *string        `yaml:"environment,omitempty" json:"environment,omitempty"`
 	Deployment  map[string]any `yaml:"deployment,omitempty" json:"deployment,omitempty"`
 	Agent       map[string]any `yaml:"agent,omitempty" json:"agent,omitempty"`
 	Session     map[string]any `yaml:"session,omitempty" json:"session,omitempty"`
@@ -343,28 +347,33 @@ func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) condition
 	return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes)
 }
 
+// parseHHMM reads a `time_window` bound, which is exactly two ASCII digits per
+// component (schemas/hushspec-core.v1.schema.json $defs.TimeWindow). "9:05",
+// "09:5", "009:05" and "+9:00" are all outside that shape, so they are not
+// times: validation refuses them and an evaluator that meets one leaves the
+// window unevaluable and the rule block active (core spec 3.13).
 func parseHHMM(s string) (int, int, bool) {
 	parts := strings.Split(s, ":")
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
-	// Require pure ASCII digits in each component. strconv.Atoi would
-	// otherwise accept a leading sign (e.g. "+9:00"), which the other engines
-	// reject; the same token would then be a live window here and unevaluable
-	// there. A non-digit component fails to parse, and the window is
-	// unevaluable in every engine.
-	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
+	hour, ok := twoDigitField(parts[0])
+	if !ok || hour > 23 {
 		return 0, 0, false
 	}
-	hour, err := strconv.Atoi(parts[0])
-	if err != nil || hour < 0 || hour > 23 {
-		return 0, 0, false
-	}
-	minute, err := strconv.Atoi(parts[1])
-	if err != nil || minute < 0 || minute > 59 {
+	minute, ok := twoDigitField(parts[1])
+	if !ok || minute > 59 {
 		return 0, 0, false
 	}
 	return hour, minute, true
+}
+
+// twoDigitField reads exactly two ASCII digits as a number.
+func twoDigitField(s string) (int, bool) {
+	if len(s) != 2 || !isASCIIDigits(s) {
+		return 0, false
+	}
+	return int(s[0]-'0')*10 + int(s[1]-'0'), true
 }
 
 func dayAbbreviationCond(day int) string {
@@ -687,10 +696,10 @@ func resolveContextValue(path string, context *RuntimeContext) any {
 
 	switch topLevel {
 	case "environment":
-		if context.Environment == "" {
+		if context.Environment == nil {
 			return nil
 		}
-		return context.Environment
+		return *context.Environment
 	case "user":
 		if rest != "" {
 			return mapGet(context.User, rest)
@@ -734,11 +743,9 @@ func mapGet(m map[string]any, key string) any {
 }
 
 // valuesEqual compares two scalars, and only scalars. String is exact, bool is
-// exact (a bool is never numeric), and numbers keep the int-vs-float
-// distinction the JSON value model draws: an integer-shaped expected value
-// matches ONLY an integer-typed actual, while a float-shaped expected value
-// matches an integer or float actual by numeric value. Any other actual shape,
-// or a type mismatch, is not equal.
+// exact (a bool is never numeric), and numbers compare by value alone, so the
+// integer 5 and the float 5.0 are the same number whichever side spelled which
+// (core spec 3.13). Any other actual shape, or a type mismatch, is not equal.
 func valuesEqual(actual, expected any) bool {
 	switch ev := expected.(type) {
 	case string:

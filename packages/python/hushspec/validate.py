@@ -511,39 +511,6 @@ def _validate_detection(
             )
 
 
-# Pattern that detects regex features outside the RE2 subset.
-#
-# HushSpec requires all regex patterns to be RE2-compatible to prevent ReDoS
-# attacks. Python's ``re`` module uses a backtracking engine that is vulnerable
-# to catastrophic backtracking with certain pattern constructs.  By restricting
-# patterns to the RE2 subset we ensure safe O(mn) evaluation across all SDKs.
-#
-# Disallowed features:
-# - Backreferences: \1, \2, ..., \k<name>
-# - Lookahead: (?=...), (?!...)
-# - Lookbehind: (?<=...), (?<!...)
-# - Atomic groups: (?>...)
-# - Conditional patterns: (?(...)...|...)
-# - Recursive patterns: (?R), (?1), (?2), ...
-# - Named backreferences: (?P=name)
-# - Subroutine calls: \g<name>
-#
-# Possessive quantifiers (*+, ++, ?+, and possessive braces {n}+/{n,}+/
-# {n,m}+), \Z/\z end-of-string anchors, and empty character classes ([],
-# [^]) are also disallowed for cross-SDK portability (see
-# `_disallowed_regex_feature` below), but are intentionally NOT part of this
-# substring regex: a raw substring match over-rejects those constructs when
-# they appear inside a character class (`[*+]`, `[?+]`), as an escaped
-# backslash followed by a literal Z/z rather than the real anchor (`\\Z`,
-# written in a pattern string as an escaped `\` then `Z`), etc. The
-# escape-aware, character-class-aware scanner below distinguishes these
-# cases correctly.
-_RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
-    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
-)
-
-
 # Shared rejection message for possessive quantifiers. The wording is part of
 # the contract, so it must read the same in every SDK.
 _POSSESSIVE_MESSAGE = (
@@ -644,28 +611,20 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
 
 
 def is_safe_regex(pattern: str) -> bool:
-    """Check whether a regex pattern is safe for evaluation across all SDKs.
+    """Whether *pattern* is accepted by the HushSpec regex profile (core spec
+    3.14.3): the pattern a policy may carry, which every HushSpec engine
+    compiles to the same language and matches with the same semantics.
 
-    Returns ``True`` only if the pattern is safe on every HushSpec engine.
-    Returns ``False`` if the pattern contains backreferences, lookaround,
-    atomic groups, possessive quantifiers (including possessive braces like
-    ``{2,}+``), the ``{,n}`` quantifier, ``\\Z``/``\\z`` anchors, empty
-    character classes (``[]``, ``[^]``), or other non-RE2 features, OR a
-    nested unbounded quantifier (e.g. ``(a+)+``) that catastrophically
-    backtracks on the backtracking engines (JavaScript ``RegExp``, Python
-    ``re``).
+    It answers by compiling under the profile, so it accepts exactly what
+    :func:`validate` accepts and what the evaluator can run -- the portability
+    pre-check, the nested-quantifier refusal, the RE2 subset, the ASCII class
+    escapes, leading-only flag groups and the 2048-byte bound included.
     """
-    # Portability pre-check first: possessive quantifiers, \Z/\z anchors,
-    # {,n} and empty character classes, via the escape/class-aware scanner.
-    if _disallowed_regex_feature(pattern) is not None:
+    try:
+        compile_profile_regex(pattern)
+    except ValueError:
         return False
-    # RE2-feature check second: backreferences, lookaround, atomic groups,
-    # conditional/recursive patterns -- Python's `re` compiles these, unlike
-    # RE2, so they must be rejected explicitly via substring match.
-    if _RE2_DISALLOWED.search(pattern) is not None:
-        return False
-    # Nested-quantifier check third.
-    return not _has_nested_quantifier(pattern)
+    return True
 
 
 def _has_nested_quantifier(pattern: str) -> bool:

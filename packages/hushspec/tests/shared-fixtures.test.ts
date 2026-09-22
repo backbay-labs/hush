@@ -9,7 +9,14 @@ import { validate } from '../src/validate.js';
 import { evaluateWithDetection } from '../src/detection.js';
 import type { EvaluationAction } from '../src/evaluate.js';
 import type { RuntimeContext } from '../src/conditions.js';
-import { resolveWithOptions, resolutionFromResolved, type Loader } from '../src/resolve.js';
+import {
+  createCompositeLoader,
+  resolve,
+  resolveWithOptions,
+  resolutionFromResolved,
+  type Loader,
+  type ResolveResult,
+} from '../src/resolve.js';
 import type { HushSpec } from '../src/schema.js';
 import {
   deterministicUuidV7,
@@ -183,7 +190,7 @@ const mergeDirs = [
 
 describe('shared fixture corpus', () => {
   for (const dir of validDirs) {
-    for (const fixturePath of listYamlFiles(dir)) {
+    for (const fixturePath of requireYamlFiles(dir)) {
       it(`accepts ${path.relative(fixturesRoot, fixturePath)}`, () => {
         const result = parse(readFileSync(fixturePath, 'utf8'));
         expect(result.ok).toBe(true);
@@ -194,7 +201,7 @@ describe('shared fixture corpus', () => {
   }
 
   for (const dir of invalidDirs) {
-    for (const fixturePath of listYamlFiles(dir)) {
+    for (const fixturePath of requireYamlFiles(dir)) {
       const relative = path.relative(fixturesRoot, fixturePath);
       it(`rejects ${relative}`, () => {
         const refusal = refuse(fixturePath);
@@ -218,16 +225,20 @@ describe('shared fixture corpus', () => {
   }
 
   for (const dir of mergeDirs) {
-    for (const fixtureDir of mergeFixtureDirs(path.join(fixturesRoot, dir))) {
+    const fixtureDirs = mergeFixtureDirs(requireFixtureDir(dir));
+    if (fixtureDirs.length === 0) {
+      throw new Error(`fixture directory ${dir} contributes no merge vectors`);
+    }
+    for (const fixtureDir of fixtureDirs) {
       runMergeFixtures(fixtureDir);
     }
   }
 
   for (const dir of evaluationDirs) {
-    for (const fixturePath of listYamlFiles(dir)) {
+    for (const fixturePath of requireYamlFiles(dir)) {
       const raw = YAML.parse(readFileSync(fixturePath, 'utf8')) as EvaluationFixture;
       const policyYaml = YAML.stringify(raw.policy);
-      const parsed = parse(policyYaml);
+      const parsed = resolveEmbeddedPolicy(policyYaml, fixturePath);
 
       it(`validates evaluator fixture ${path.relative(fixturesRoot, fixturePath)}`, () => {
         expect(SUPPORTED_TEST_VERSIONS).toContain(raw.hushspec_test);
@@ -326,8 +337,38 @@ function refuse(fixturePath: string): { code: string; message: string } | undefi
   return { code: result.errors[0].code, message: result.errors[0].message };
 }
 
-function listYamlFiles(subdir: string): string[] {
-  return listYamlFilesIn(path.join(fixturesRoot, subdir));
+/**
+ * An evaluation fixture's embedded policy, with `extends` resolved before it
+ * runs: a bare leaf would drop every block its base declares, so its cases
+ * would pass for the wrong reason.
+ */
+function resolveEmbeddedPolicy(policyYaml: string, fixturePath: string): ResolveResult {
+  const parsed = parse(policyYaml);
+  if (!parsed.ok) return { ok: false, error: parsed.error, code: 'E010' };
+  if (parsed.value.extends == null) return parsed;
+  return resolve(parsed.value, { source: fixturePath, loader: createCompositeLoader() });
+}
+
+/**
+ * The directory a listed fixture set lives in. A set that is absent is a
+ * corpus that moved out from under this harness, so the run fails instead of
+ * reporting a green zero.
+ */
+function requireFixtureDir(subdir: string): string {
+  const dir = path.join(fixturesRoot, subdir);
+  if (!existsSync(dir)) {
+    throw new Error(`fixture directory ${subdir} does not exist`);
+  }
+  return dir;
+}
+
+/** The vectors of a listed fixture set, which must hold at least one. */
+function requireYamlFiles(subdir: string): string[] {
+  const files = listYamlFilesIn(requireFixtureDir(subdir));
+  if (files.length === 0) {
+    throw new Error(`fixture directory ${subdir} contributes no vectors`);
+  }
+  return files;
 }
 
 function listYamlFilesIn(dir: string): string[] {

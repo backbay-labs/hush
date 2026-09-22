@@ -259,6 +259,8 @@ func TestProfileLibraryPatternsStillMatch(t *testing.T) {
 
 func TestProfileRejectsRE2UnsafePatterns(t *testing.T) {
 	assertRejectContains(t, "(a+)+", "nested unbounded quantifier")
+	assertRejectContains(t, "(?=foo)bar", "group form")
+	assertRejectContains(t, `(foo)\1`, "profile escape")
 	assertRejectContains(t, "a*+", "possessive")
 }
 

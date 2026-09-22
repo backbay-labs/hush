@@ -7,64 +7,6 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
-### Fixed
-
-- **An observed evaluation is decided by the same pipeline as every other one.**
-  TypeScript's `ObservableEvaluator.evaluate()` evaluated without the detection pipeline, so a
-  policy whose `extensions.detection` block escalates a payload to a deny reported an allow to
-  every observer (detection spec section 4).
-- **No path to an observer carries an action's `content`.** TypeScript redacted at the guard's
-  call sites and not in the fan-out, so an event raised anywhere else carried the payload; Python
-  offered `ObservableEvaluator(redact_content=False)` (and an `AuditConfig.redact_content` field
-  behind it) to turn redaction off altogether. Both are gone: every SDK strips `content` inside
-  the fan-out and records that it happened with the event's `content_redacted` flag (receipt spec
-  4.4).
-- **Monitor mode requires somewhere a shadow decision is actually recorded.** A guard with
-  monitor mode, a receipt sink and `audit(enabled: false)` built cleanly and then recorded
-  nothing, because no receipt is produced with auditing off. All four SDKs now count a sink as
-  observability only when auditing is enabled.
-- **The OTLP sink reports every failure it absorbs.** The Rust worker thread never saw the
-  observer installed by `OtlpSink::with_observer`, so an exhausted retry, a rejected payload and
-  a batch that would not serialize were counted and discarded while the other SDKs reported each
-  one through their error callback.
-- **An OTLP endpoint that already points at the signal is not rewritten.** Rust appended
-  `/v1/logs` unconditionally, producing `.../v1/logs/v1/logs`.
-- **An unusable OTLP endpoint is refused when the sink is configured.** Rust and TypeScript
-  accepted an endpoint with no host, and Rust accepted any scheme, so a `file:` endpoint built a
-  sink that could never export.
-- **The panic sentinel is reachable from a TypeScript reload loop.** The TypeScript SDK had no
-  sentinel check at all, so the kill switch the other three consult before every reload could not
-  be armed from a running loop.
-- **A policy snapshot that still declares `extends` is refused.** `PolicyPoller` accepted one
-  from a loader that skipped resolution and served the leaf from `current()`, silently dropping
-  every block its base declares -- the raw-YAML branch already refused it.
-
-### Changed
-
-- **One `evaluation.completed` wire shape in all four SDKs**: the redacted `EvaluationAction`, a
-  `content_redacted` flag when it applied, the result, `duration_us`, and `enforcement` and
-  `receipt` when the guard produced them. Go serialized the action as an `ActionSummary` and
-  carried no enforcement summary; its `EvaluationObserver.OnEvaluation` now takes one
-  `EvaluationObservation` rather than four positional arguments, which is what makes the
-  enforcement summary reachable from an observer.
-- **One Prometheus series set in all four SDKs.** TypeScript and Python exposed
-  `hushspec_<event_type>_total` counters with `_avg` and `_p99` gauges; they now render
-  `hushspec_evaluate_total` (`decision`, `action_type`), a `hushspec_evaluate_duration_us`
-  histogram labelled by `action_type`, `hushspec_rule_match_total` and
-  `hushspec_policy_load_total`, as Rust and Go do. Go's latency buckets are the shared bounds
-  (10, 25, 50, 100, 250, 500, 1000, 5000, 10000 microseconds) per action type rather than a
-  shorter unlabelled list. TypeScript and Python export `DURATION_BUCKETS_US` and
-  `ruleBlockOf`/`rule_block_of`.
-- **The TypeScript metrics collector bounds its percentile window** at `DURATION_WINDOW` samples,
-  as Python does, so a long-lived guard no longer grows without limit and its percentile
-  describes recent traffic rather than all time.
-- **One reload interval pair in all four SDKs**: 1 second for a watcher, 60 seconds for a poller.
-  Rust's `DEFAULT_INTERVAL` is replaced by `DEFAULT_WATCH_INTERVAL` and `DEFAULT_POLL_INTERVAL`,
-  and Go's `DefaultWatchInterval` moves from 2 seconds to 1.
-- **One OTLP batch size and retry backoff in all four SDKs**: 64 entries per request, and a first
-  retry delay of 100ms doubling per attempt. `OtlpConfig::logs_url` returns a `Result`, since it
-  now validates the endpoint.
-
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
@@ -580,6 +522,53 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - Built without the `signing` feature, the Rust resolver records `signing_unavailable` on a hop it
   attempted to verify instead of recording nothing.
 
+- **One `evaluation.completed` wire shape in all four SDKs**: the redacted `EvaluationAction`, a
+  `content_redacted` flag when it applied, the result, `duration_us`, and `enforcement` and
+  `receipt` when the guard produced them. Go serialized the action as an `ActionSummary` and
+  carried no enforcement summary; its `EvaluationObserver.OnEvaluation` now takes one
+  `EvaluationObservation` rather than four positional arguments, which is what makes the
+  enforcement summary reachable from an observer.
+- **One Prometheus series set in all four SDKs.** TypeScript and Python exposed
+  `hushspec_<event_type>_total` counters with `_avg` and `_p99` gauges; they now render
+  `hushspec_evaluate_total` (`decision`, `action_type`), a `hushspec_evaluate_duration_us`
+  histogram labelled by `action_type`, `hushspec_rule_match_total` and
+  `hushspec_policy_load_total`, as Rust and Go do. Go's latency buckets are the shared bounds
+  (10, 25, 50, 100, 250, 500, 1000, 5000, 10000 microseconds) per action type rather than a
+  shorter unlabelled list. TypeScript and Python export `DURATION_BUCKETS_US` and
+  `ruleBlockOf`/`rule_block_of`.
+- **The TypeScript metrics collector bounds its percentile window** at `DURATION_WINDOW` samples,
+  as Python does, so a long-lived guard no longer grows without limit and its percentile
+  describes recent traffic rather than all time.
+- **One reload interval pair in all four SDKs**: 1 second for a watcher, 60 seconds for a poller.
+  Rust's `DEFAULT_INTERVAL` is replaced by `DEFAULT_WATCH_INTERVAL` and `DEFAULT_POLL_INTERVAL`,
+  and Go's `DefaultWatchInterval` moves from 2 seconds to 1.
+- **One OTLP batch size and retry backoff in all four SDKs**: 64 entries per request, and a first
+  retry delay of 100ms doubling per attempt. `OtlpConfig::logs_url` returns a `Result`, since it
+  now validates the endpoint.
+
+- **Go `RuntimeContext.Environment` is now `*string`.** A plain `string` made an engine-supplied
+  empty environment indistinguishable from an absent one, so `when: {context: {environment: ""}}`
+  was false in Go and true in the other three SDKs. `nil` is now "the engine supplied none" and
+  fails the predicate closed; a supplied `""` compares like any other value (core spec 3.13).
+  Vector: `fixtures/core/evaluation/conditions-context-empty-environment.test.yaml`.
+- **`isSafeRegex` (TypeScript) and `is_safe_regex` (Python) answer from the profile compiler.**
+  They previously reported "safe on every HushSpec engine" from a partial RE2-feature scan and
+  returned `true` for patterns the profile refuses (`\p{L}`, `[[:alpha:]]`, `(?i:foo)`, a
+  non-leading flag group, a pattern past 2048 bytes). They now accept exactly what validation
+  accepts and what the evaluator can run.
+- **A `time_window` bound is exactly two ASCII digits per component** in all four SDKs, the shape
+  the schema has always stated, so `9:05`, `09:5` and `009:05` are refused instead of validating
+  (core spec 3.13). Vectors: `fixtures/core/invalid/when-time-window-short-hour.yaml`,
+  `fixtures/core/invalid/when-time-window-long-hour.yaml`.
+- **A runtime `counters` entry that is not a non-negative integer is read as absent** in
+  TypeScript and Python, which makes the `rate` predicate unevaluable and leaves the rule block
+  active rather than switching a control off on a malformed value (core spec 3.13). Rust and Go
+  already refused such a value at the type level.
+- **Go host normalization folds case with the full Unicode lowercase mapping.** A label holding
+  U+0130 reduced to the ASCII host `i` under the simple mapping while the other SDKs encode the
+  punycode A-label; a word-final sigma diverged the same way (core spec 3.14.2). Vector:
+  `fixtures/core/evaluation/egress-host-case-folding.test.yaml`.
+
 **Rust**
 
 - The HTTPS `extends` loader (`hushspec::resolve::http`, the `http` feature) enforces the full
@@ -689,6 +678,16 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 
 ### Removed
 
+**Go**
+
+- **Go: the generated contract no longer exports the object key sets Go does not consult**
+  (`ConditionKeys`, `TimeWindowKeys`, `OriginToolAccessOverlayKeys`, `OriginEgressOverlayKeys` and
+  the rest). Go refuses an unknown member during the typed decode, so those names were exported
+  and never read; `RuleKeys`, `ExtensionKeys`, `ControlMappingKeys`, `ChangelogEntryKeys` and
+  `RateConditionKeys` remain. `generated/sdk-contract.json` still carries every set, and the
+  TypeScript, Python and Rust bindings are unchanged.
+
+
 **CLI**
 
 - **Lint rule `L005` is retired.** It reported a permissive default as information and only when
@@ -794,6 +793,50 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - A built-in ruleset that does not parse is reported, never mistaken for an unknown name: the
   TypeScript `loadBuiltin` throws and the Go `LoadBuiltin` panics, matching Python; an embedded
   document is generated from `rulesets/`, so a failure there is a broken build.
+
+- **An observed evaluation is decided by the same pipeline as every other one.**
+  TypeScript's `ObservableEvaluator.evaluate()` evaluated without the detection pipeline, so a
+  policy whose `extensions.detection` block escalates a payload to a deny reported an allow to
+  every observer (detection spec section 4).
+- **No path to an observer carries an action's `content`.** TypeScript redacted at the guard's
+  call sites and not in the fan-out, so an event raised anywhere else carried the payload; Python
+  offered `ObservableEvaluator(redact_content=False)` (and an `AuditConfig.redact_content` field
+  behind it) to turn redaction off altogether. Both are gone: every SDK strips `content` inside
+  the fan-out and records that it happened with the event's `content_redacted` flag (receipt spec
+  4.4).
+- **Monitor mode requires somewhere a shadow decision is actually recorded.** A guard with
+  monitor mode, a receipt sink and `audit(enabled: false)` built cleanly and then recorded
+  nothing, because no receipt is produced with auditing off. All four SDKs now count a sink as
+  observability only when auditing is enabled.
+- **The OTLP sink reports every failure it absorbs.** The Rust worker thread never saw the
+  observer installed by `OtlpSink::with_observer`, so an exhausted retry, a rejected payload and
+  a batch that would not serialize were counted and discarded while the other SDKs reported each
+  one through their error callback.
+- **An OTLP endpoint that already points at the signal is not rewritten.** Rust appended
+  `/v1/logs` unconditionally, producing `.../v1/logs/v1/logs`.
+- **An unusable OTLP endpoint is refused when the sink is configured.** Rust and TypeScript
+  accepted an endpoint with no host, and Rust accepted any scheme, so a `file:` endpoint built a
+  sink that could never export.
+- **The panic sentinel is reachable from a TypeScript reload loop.** The TypeScript SDK had no
+  sentinel check at all, so the kill switch the other three consult before every reload could not
+  be armed from a running loop.
+- **A policy snapshot that still declares `extends` is refused.** `PolicyPoller` accepted one
+  from a loader that skipped resolution and served the leaf from `current()`, silently dropping
+  every block its base declares -- the raw-YAML branch already refused it.
+
+- **The nested-quantifier refusal reads the same in Go as elsewhere**: it now carries the shared
+  message and the `<path> must be a valid regular expression: ` prefix.
+- **The regex profile's nested-quantifier rule is stated as the syntactic check it is** (core spec
+  3.14.3). `(a|aa)*` is no longer listed as refused -- it conforms and compiles in all four SDKs --
+  and Security specification section 2 now says what that leaves to the engine: the profile bounds
+  a pattern's structure, not its ambiguity, so an engine on a backtracking matcher SHOULD bound
+  matching time or use a linear-time matcher.
+- **The grammar matches the SDKs**: leading flag groups are a run (`*flags`), and only `\d`, `\w`
+  and `\s` are bracket-class members, with the negated shorthands joining the core MUST NOT list.
+  Vector: `fixtures/core/invalid/regex-negated-class-shorthand.yaml`.
+- **The TypeScript and Python fixture harnesses resolve `extends`** before evaluating, as the Rust
+  and Go runners do, and a listed fixture directory that is absent or holds no vector now fails the
+  TypeScript and Go runs instead of contributing zero cases to a green suite.
 
 **CLI and tooling**
 

@@ -538,8 +538,8 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 
 | Field      | Type            | Required | Default   | Description                                                   |
 |------------|-----------------|----------|-----------|---------------------------------------------------------------|
-| `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
-| `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
+| `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, exactly two ASCII digits per component.     |
+| `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, exactly two ASCII digits per component.     |
 | `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset (grammar below).  |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
 
@@ -561,7 +561,7 @@ minute = %x30-35 DIGIT                     ; 00-59, always two digits
 | `threshold`  | integer | REQUIRED | Non-negative.                                                                                |
 | `comparison` | string  | REQUIRED | `gte` (true when `counter >= threshold`) or `lt` (true when `counter < threshold`).          |
 
-The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation.
+The engine owns the counter and its window (per session, per minute, per agent -- whatever it measures); HushSpec never stores state and never increments anything. A `rate` condition is a pure comparison of the value the engine supplied for this evaluation. A counter is a non-negative integer, so a `counters` entry that is not one -- a fraction, a negative, a non-finite number, a value of any other type -- is not a counter the engine supplied: the predicate reading it is unevaluable and the block stays active, rather than comparing a malformed value and switching a control off.
 
 **Capability condition.** `capability` names a posture capability (Posture specification, Section 3). It is true when the effective posture state -- the state the engine resolves for this evaluation after origins profile selection and the action's posture input, exactly the state the posture guard uses -- lists that capability, and false when the state does not list it or is unknown. When the policy has no posture extension the predicate is unevaluable (see Evaluation below).
 
@@ -589,7 +589,7 @@ Equivalently: an expected array matches when at least one of its elements matche
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
-- has a `time_window` whose `start` or `end` is not `HH:MM` with `00 <= HH <= 23` and `00 <= MM <= 59`;
+- has a `time_window` whose `start` or `end` is not two ASCII digits, a colon and two ASCII digits with `00 <= HH <= 23` and `00 <= MM <= 59` (`9:05`, `09:5` and `009:05` are all refused);
 - has a `timezone` that is neither an IANA identifier known to the engine nor a fixed offset;
 - lists a `days` entry outside the seven abbreviations;
 - has a `capability` or a `rate.counter` that does not match the identifier grammar;
@@ -599,13 +599,13 @@ Equivalently: an expected array matches when at least one of its elements matche
 **Evaluation (fail-closed toward enforcement).** A condition evaluates to one of three values: `true`, `false`, or **unevaluable**. A block is inert only when its condition evaluates to `false`; `true` and unevaluable both leave the block active. An unevaluable condition MUST NOT switch a security control off.
 - A `context` key that is absent from the runtime context makes the condition `false`.
 - A `time_window` the engine cannot evaluate -- because its time-zone database lacks the `timezone` identifier, or the runtime context's `current_time` does not parse -- is unevaluable: the block stays active, not inert.
-- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context, are unevaluable: the block stays active.
+- A `capability` predicate on a policy with no posture extension, and a `rate` predicate whose counter is absent from the runtime context -- or present as a value that is not a non-negative integer -- are unevaluable: the block stays active.
 - Unevaluable propagates through the combinators instead of collapsing to a boolean. `not` of an unevaluable condition is unevaluable. `all_of` is `false` when any member is `false`, otherwise unevaluable when any member is unevaluable, otherwise `true`; the fields of one condition object combine the same way. `any_of` is `true` when any member is `true`, otherwise unevaluable when any member is unevaluable, otherwise `false`. A `not` over a missing counter or an absent posture extension therefore leaves the block active rather than switching it off.
 - Conditions are evaluated before the block's own semantics; an inert block contributes nothing to Section 6.1 aggregation. Because `capability` depends on the effective posture state, engines resolve posture (and the origins profile it may come from) before evaluating conditions.
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`, `fixtures/core/evaluation/conditions-context-empty-environment.test.yaml`.
 
 ### 3.14 Pattern Matching
 
@@ -671,11 +671,13 @@ Test vectors: `fixtures/core/evaluation/egress-normalization.test.yaml`, `fixtur
 
 Regular expressions in HushSpec documents MUST conform to the **HushSpec regex profile**, a portable subset of RE2 syntax with fixed semantics. Version 0.1.0 said engines SHOULD support "PCRE2-compatible syntax"; that text is withdrawn.
 
-**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )`, non-capturing `(?: )`, and named groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and a single leading flag group `(?flags)` where `flags` is a non-empty subset of `i`, `m`, `s`.
+**Syntax.** A pattern MAY use: literal characters and escapes (`\t`, `\n`, `\r`, `\f`, `\v`, `\xHH`, and `\` before any punctuation); `.`; bracket classes `[...]` and `[^...]` with ranges; the class escapes `\d`, `\D`, `\w`, `\W`, `\s`, `\S`; the assertions `^`, `$`, `\b`, `\B`; alternation `|`; capturing `( )`, non-capturing `(?: )`, and named groups; the quantifiers `?`, `*`, `+`, `{n}`, `{n,}`, `{n,m}` and their lazy forms; and one or more consecutive leading flag groups `(?flags)`, each with `flags` a non-empty subset of `i`, `m`, `s`.
 
 A named group is written `(?<name>...)` or `(?P<name>...)`; the two spellings are equivalent, and `name` is one or more ASCII letters, digits, and underscores that does not start with a digit. Group names carry no matching semantics in HushSpec: a decision depends only on whether the pattern matched.
 
-A pattern MUST NOT use: lookahead or lookbehind; backreferences, named ones included; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; comment groups `(?#...)`; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); an unescaped `[` inside a bracket class, which excludes POSIX bracket expressions such as `[[:alpha:]]`; a bracket-class range with an endpoint outside the Basic Multilingual Plane; the `{,n}` quantifier, which some engines read as `{0,n}` and others as literal text; or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `(a|aa)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
+A pattern MUST NOT use: lookahead or lookbehind; backreferences, named ones included; possessive quantifiers or atomic groups; conditionals, recursion, or subroutine calls; comment groups `(?#...)`; the assertions `\A`, `\z`, `\Z`, `\G`; inline flag groups anywhere other than the very start, or the `x` and `u` flags; Unicode property classes (`\p{...}`); an unescaped `[` inside a bracket class, which excludes POSIX bracket expressions such as `[[:alpha:]]`; a negated class escape (`\D`, `\W`, `\S`) or a boundary assertion (`\b`, `\B`) inside a bracket class, neither of which is a set of scalar values; a bracket-class range with an endpoint outside the Basic Multilingual Plane; the `{,n}` quantifier, which some engines read as `{0,n}` and others as literal text; or a quantified group whose body is itself unbounded (`(a+)+`, `(a*)*`, `((ab)+)*`). A pattern MUST NOT exceed 2048 bytes. Validators MUST reject any document containing a non-conforming pattern.
+
+The nested-quantifier rule is syntactic and engines MUST apply it exactly as written: a group is refused when an unbounded quantifier (`*`, `+`, `{n,}`) follows the group and another appears somewhere in its body. It is not a test for ambiguity, so a pattern whose alternation can match one input many ways -- `(a|aa)*`, `(a?){1000}` -- conforms and compiles. Section 2 of the Security specification states what that leaves to the engine.
 
 **Semantics.** Every engine MUST match with these semantics regardless of its host regex library:
 - The subject is a sequence of Unicode scalar values; `.` and negated classes consume exactly one scalar value.

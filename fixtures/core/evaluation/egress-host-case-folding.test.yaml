@@ -1,0 +1,32 @@
+hushspec_test: "0.1.0"
+description: "Host normalization folds case with the full Unicode lowercase mapping before IDNA encoding (core spec 3.14.2)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - "xn--i-9bb.example"
+        - "xn--pxavbm.example"
+      default: block
+cases:
+  - description: "U+0130 lowercases to `i` plus a combining dot, not to ASCII `i`"
+    action:
+      type: egress
+      target: "İ.example"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "the simple mapping's ASCII `i` is a different host"
+    action:
+      type: egress
+      target: "i.example"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a word-final sigma lowercases to U+03C2"
+    action:
+      type: egress
+      target: "ΟΔΟΣ.example"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow

@@ -1,53 +1,25 @@
-/**
- * Pattern that detects regex features outside the RE2 subset.
- *
- * HushSpec requires every policy regex to stay inside the RE2 subset (core
- * spec 3.14.3). JavaScript's `RegExp` is a backtracking engine, and certain
- * constructs make it backtrack catastrophically; the subset keeps evaluation
- * O(mn) whichever engine a conformant SDK is built on.
- *
- * Disallowed features:
- * - Backreferences: \1, \2, ..., \k<name>
- * - Lookahead: (?=...), (?!...)
- * - Lookbehind: (?<=...), (?<!...)
- * - Atomic groups: (?>...)
- * - Conditional patterns: (?(...)...|...)
- * - Recursive patterns: (?R), (?1), (?2), ...
- * - Named backreferences: (?P=name)
- * - Subroutine calls: \g<name>
- *
- * Possessive quantifiers (`*+`, `++`, `?+`, `{n}+`, `{n,}+`, `{n,m}+`), the
- * `\Z` / `\z` end-of-string anchors, the `{,n}` quantifier and empty character
- * classes (`[]`, `[^]`) are disallowed too, but are intentionally NOT part of
- * this substring regex: a raw substring match over-rejects those constructs
- * when they appear inside a character class (`[*+]`, `[?+]`), as an escaped
- * backslash followed by a literal Z/z rather than the real anchor (`\\Z`), and
- * so on. `disallowedRegexFeature` below distinguishes those cases with an
- * escape- and class-aware scan, and names which construct it refused.
- */
-const RE2_DISALLOWED = /\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g</;
-
 export interface CompiledPolicyRegex {
   source: string;
   regex: RegExp;
 }
 
+/**
+ * Whether `pattern` is accepted by the HushSpec regex profile (core spec
+ * 3.14.3): the pattern a policy may carry, which every HushSpec engine
+ * compiles to the same language and matches with the same semantics.
+ *
+ * It answers by compiling under the profile, so it accepts exactly what
+ * `validate` accepts and what the evaluator can run -- the portability
+ * pre-check, the nested-quantifier refusal, the RE2 subset, the ASCII class
+ * escapes, leading-only flag groups and the 2048-byte bound included.
+ */
 export function isSafeRegex(pattern: string): boolean {
-  // Portability pre-check first: possessive quantifiers, `\Z`/`\z` anchors,
-  // `{,n}` and empty character classes, via the escape/class-aware scanner.
-  if (disallowedRegexFeature(pattern) !== undefined) {
+  try {
+    compileProfileRegex(pattern);
+    return true;
+  } catch {
     return false;
   }
-  // RE2-feature check second: backreferences, lookaround, atomic groups,
-  // conditional and recursive patterns. On an RE2-backed engine this alone is
-  // enough for the linear-time guarantee.
-  if (RE2_DISALLOWED.test(pattern)) {
-    return false;
-  }
-  // Nested-quantifier check last: RE2 tolerates shapes like `(a+)+` that
-  // catastrophically backtrack on a backtracking engine, so they are rejected
-  // here too and the accepted set is the same whatever the engine.
-  return !hasNestedQuantifier(pattern);
 }
 
 /** Shared rejection message for possessive quantifiers. */

@@ -290,6 +290,16 @@ class TestSharedFixtures:
                 policy_yaml = yaml.safe_dump(raw["policy"], sort_keys=False)
                 ok, spec = parse(policy_yaml)
                 assert ok, f"{fixture_path}: {spec}"
+                # An embedded policy that extends is resolved before it runs:
+                # a bare leaf would drop every block its base declares, so the
+                # cases would pass for the wrong reason.
+                if spec.extends is not None:
+                    ok, spec = resolve(
+                        spec,
+                        source=str(fixture_path),
+                        loader=create_composite_loader(),
+                    )
+                    assert ok, f"{fixture_path}: {spec}"
                 validation = validate(spec)
                 assert validation.is_valid, f"{fixture_path}: {validation.errors}"
 
