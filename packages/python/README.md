@@ -302,9 +302,10 @@ sink.close()      # flushes what is queued
 | resource | `service.name`, `hushspec.sdk`, `hushspec.sdk.version`, `hushspec.spec_version` |
 
 Export runs on a daemon thread: `send()` never blocks on I/O, batches are
-retried with backoff on network errors and `5xx`, and when the bounded queue
-(`max_queue`) fills, records are dropped, counted in `sink.dropped`, and
-reported through `on_error` -- telemetry is never allowed to stall enforcement.
+retried with backoff on network errors and on `429`, `502`, `503` and `504`
+(every other status is final), and when the bounded queue (`max_queue`) fills,
+records are dropped, counted in `sink.dropped`, and reported through
+`on_error` -- telemetry is never allowed to stall enforcement.
 The same mapping ships in all four SDKs.
 
 ### Evidence chain

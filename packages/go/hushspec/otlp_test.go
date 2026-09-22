@@ -356,8 +356,8 @@ func TestOTLPSinkBatches(t *testing.T) {
 	}
 }
 
-func TestOTLPSinkRetriesServerErrors(t *testing.T) {
-	c := &collector{status: []int{http.StatusServiceUnavailable, http.StatusInternalServerError}}
+func TestOTLPSinkRetriesABusyCollector(t *testing.T) {
+	c := &collector{status: []int{http.StatusServiceUnavailable, http.StatusTooManyRequests}}
 	server := startCollector(t, c)
 
 	// OnError is called from the exporter goroutine, so the slice it appends to
@@ -399,6 +399,61 @@ func TestOTLPSinkRetriesServerErrors(t *testing.T) {
 	}
 	if sink.Exported() != 1 {
 		t.Fatalf("expected one exported record, got %d", sink.Exported())
+	}
+}
+
+func TestOTLPSinkRetriesOnlyTheSharedStatuses(t *testing.T) {
+	want := []int{429, 502, 503, 504}
+	if len(RetryableStatuses) != len(want) {
+		t.Fatalf("unexpected retryable set: %v", RetryableStatuses)
+	}
+	for i, status := range want {
+		if RetryableStatuses[i] != status {
+			t.Fatalf("unexpected retryable set: %v", RetryableStatuses)
+		}
+	}
+
+	// A 503 is the collector saying "not now": the same bytes are worth
+	// sending again. A 500 is not in the set, so it is a final failure.
+	for _, testCase := range []struct {
+		name     string
+		status   int
+		requests int
+		exported uint64
+	}{
+		{"retried", http.StatusServiceUnavailable, 2, 1},
+		{"final", http.StatusInternalServerError, 1, 0},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			c := &collector{status: []int{testCase.status}}
+			server := startCollector(t, c)
+
+			sink, err := NewOTLPReceiptSink(OTLPOptions{
+				Endpoint:      server.URL,
+				FlushInterval: time.Minute,
+				RetryBackoff:  time.Millisecond,
+				MaxRetries:    3,
+				Client:        server.Client(),
+				OnError:       func(error) {},
+			})
+			if err != nil {
+				t.Fatalf("NewOTLPReceiptSink: %v", err)
+			}
+			defer sink.Close()
+
+			if err := sink.Send(otlpTestReceipt(t, DecisionAllow)); err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if err := sink.Flush(context.Background()); err != nil {
+				t.Fatalf("Flush: %v", err)
+			}
+			if got := len(c.requests()); got != testCase.requests {
+				t.Fatalf("expected %d requests, got %d", testCase.requests, got)
+			}
+			if got := sink.Exported(); got != testCase.exported {
+				t.Fatalf("expected %d exported, got %d", testCase.exported, got)
+			}
+		})
 	}
 }
 

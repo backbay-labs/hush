@@ -18,6 +18,7 @@ from hushspec.canonical import canonical_json_value
 from hushspec.evaluate import Decision
 from hushspec.log import PolicyEvent, policy_event_to_dict
 from hushspec.otlp import (
+    RETRYABLE_STATUSES,
     OtlpExportError,
     OtlpQueueFullError,
     OtlpReceiptSink,
@@ -431,7 +432,7 @@ class TestRetry:
             collector.close()
 
     def test_gives_up_after_max_retries_and_reports(self):
-        collector = _Collector(statuses=[500, 500, 500])
+        collector = _Collector(statuses=[503, 503, 503])
         try:
             errors: list[Exception] = []
             sink = OtlpReceiptSink(
@@ -449,8 +450,55 @@ class TestRetry:
             assert len(collector.requests) == 3  # 1 attempt + 2 retries
             assert len(errors) == 1
             assert isinstance(errors[0], OtlpExportError)
-            assert errors[0].status == 500
+            assert errors[0].status == 503
             assert errors[0].records == 1
+            assert sink.failed == 1
+        finally:
+            collector.close()
+
+    def test_only_the_shared_retryable_statuses_are_retried(self):
+        assert RETRYABLE_STATUSES == frozenset({429, 502, 503, 504})
+
+        # A 503 is the collector saying "not now": the same bytes are worth
+        # sending again.
+        collector = _Collector(statuses=[503, 200])
+        try:
+            errors: list[Exception] = []
+            sink = OtlpReceiptSink(
+                collector.endpoint,
+                batch_size=1,
+                flush_interval_s=0.05,
+                retry_backoff_s=0.01,
+                on_error=errors.append,
+            )
+            sink.send(_receipt())
+            assert sink.flush(5.0)
+            sink.close()
+
+            assert len(collector.requests) == 2
+            assert errors == []
+            assert sink.exported == 1
+        finally:
+            collector.close()
+
+        # A 500 is not in the retryable set: it is a final failure.
+        collector = _Collector(statuses=[500])
+        try:
+            errors = []
+            sink = OtlpReceiptSink(
+                collector.endpoint,
+                batch_size=1,
+                flush_interval_s=0.05,
+                retry_backoff_s=0.01,
+                on_error=errors.append,
+            )
+            sink.send(_receipt())
+            assert sink.flush(5.0)
+            sink.close()
+
+            assert len(collector.requests) == 1
+            assert len(errors) == 1
+            assert errors[0].status == 500
             assert sink.failed == 1
         finally:
             collector.close()

@@ -357,9 +357,11 @@ the attribute.
   entry is dropped rather than blocking the evaluation that produced it. Every
   drop increments `OtlpSink::dropped()`, returns an error from `send()`, and --
   with `with_observer()` -- raises a `sink.error` observer event.
-- **Retries.** A `5xx` or a transport error is retried with exponential
-  backoff. A `4xx` is not: the collector rejected the payload, and resending
-  the same bytes will not help.
+- **Retries.** A transport error and the four statuses OTLP/HTTP names as
+  retryable -- `429`, `502`, `503` and `504` -- are retried with exponential
+  backoff. Every other status is final: the collector will answer the same
+  bytes the same way, so resending them only delays the report. The same rule
+  in every SDK.
 - **Flush.** The worker exports when the batch fills or the flush interval
   elapses. `flush()` blocks until the queue is exported, and dropping the sink
   flushes and joins the worker -- so a process exiting right after a denial

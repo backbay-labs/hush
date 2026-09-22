@@ -65,12 +65,14 @@
 //!   than blocking the evaluation that produced it. Every drop increments
 //!   [`OtlpSink::dropped`], returns an error from `send()`, and -- with
 //!   [`OtlpSink::with_observer`] -- raises a `sink.error` observer event.
-//! - **Retries.** A `5xx` or a transport error is retried up to
+//! - **Retries.** A transport error and the four statuses OTLP/HTTP names as
+//!   retryable -- `429`, `502`, `503` and `504` -- are retried up to
 //!   [`OtlpConfig::max_retries`] times, backing off from [`RETRY_BACKOFF`] and
-//!   doubling per attempt. A `4xx` is not: the collector rejected the payload
-//!   and resending it will not help. An export that gives up, and a batch that
-//!   will not serialize, are reported through
-//!   [`OtlpSink::with_observer`]'s observer as `sink.error`.
+//!   doubling per attempt. Every other status is final: the collector will
+//!   answer the same bytes the same way, so resending them only delays the
+//!   report. An export that gives up, and a batch that will not serialize, are
+//!   reported through [`OtlpSink::with_observer`]'s observer as `sink.error`.
+//!   The same rule in every SDK.
 //! - **Flush.** The worker exports when the batch reaches
 //!   [`OtlpConfig::batch_size`] or [`OtlpConfig::flush_interval`] elapses.
 //!   [`OtlpSink::flush`] blocks until the queue is exported, and dropping the
@@ -101,6 +103,17 @@ pub const DEFAULT_BATCH_SIZE: usize = 64;
 /// same value in every SDK.
 pub const RETRY_BACKOFF: Duration = Duration::from_millis(100);
 
+/// The HTTP statuses an export is retried after, as OTLP/HTTP names them: the
+/// collector is busy or a gateway between it and the sink is, and the same
+/// bytes will be accepted once it is not. The same set in every SDK.
+pub const RETRYABLE_STATUSES: &[u16] = &[429, 502, 503, 504];
+
+/// Whether an export that came back with `status` is worth another attempt.
+#[must_use]
+fn is_retryable(status: u16) -> bool {
+    RETRYABLE_STATUSES.contains(&status)
+}
+
 /// How to reach the collector and how hard to try.
 #[derive(Clone, Debug)]
 pub struct OtlpConfig {
@@ -119,7 +132,7 @@ pub struct OtlpConfig {
     pub timeout: Duration,
     /// How many entries may wait to be exported before the newest is dropped.
     pub queue_capacity: usize,
-    /// Retries after a `5xx` or a transport error.
+    /// Retries after a transport error or a [`RETRYABLE_STATUSES`] response.
     pub max_retries: u32,
     /// The `service.name` resource attribute.
     pub service_name: String,
@@ -520,14 +533,16 @@ fn export(
                 counters.exported.fetch_add(count, Ordering::Relaxed);
                 return;
             }
-            // The collector rejected the payload itself. Resending the same
-            // bytes cannot make it acceptable, so give up rather than burn
-            // retries on a permanent failure.
-            Ok(response) if response.status().is_client_error() => {
-                failure = format!("rejected with HTTP {}", response.status().as_u16());
-                break;
+            Ok(response) => {
+                let status = response.status().as_u16();
+                if !is_retryable(status) {
+                    // The collector answered for good: the same bytes get the
+                    // same answer, so report now rather than burn retries.
+                    failure = format!("rejected with HTTP {status}");
+                    break;
+                }
+                failure = format!("HTTP {status}");
             }
-            Ok(response) => failure = format!("HTTP {}", response.status().as_u16()),
             Err(error) => failure = error.to_string(),
         }
 
@@ -1069,8 +1084,8 @@ rules:
     }
 
     #[test]
-    fn retries_a_5xx_and_gives_up_on_a_4xx() {
-        let collector = Collector::start(vec![503, 500]);
+    fn retries_a_busy_collector_and_gives_up_on_a_rejection() {
+        let collector = Collector::start(vec![503, 429]);
         let sink = OtlpSink::with_config(OtlpConfig::new(&collector.endpoint).with_batch_size(1))
             .expect("builds");
         sink.send(&receipt("evil.test")).expect("queued");
@@ -1090,6 +1105,31 @@ rules:
             1,
             "a rejected payload is not worth resending"
         );
+        assert_eq!(sink.failed(), 1);
+        assert_eq!(sink.exported(), 0);
+    }
+
+    #[test]
+    fn only_the_shared_retryable_statuses_are_retried() {
+        // A 503 is the collector saying "not now": the same bytes are worth
+        // sending again.
+        let collector = Collector::start(vec![503]);
+        let sink = OtlpSink::with_config(OtlpConfig::new(&collector.endpoint).with_batch_size(1))
+            .expect("builds");
+        sink.send(&receipt("evil.test")).expect("queued");
+        assert!(sink.flush());
+        assert_eq!(collector.requests(), 2, "a 503 is retried");
+        assert_eq!(sink.exported(), 1);
+        assert_eq!(sink.failed(), 0);
+        drop(sink);
+
+        // A 500 is not in the retryable set: it is a final failure.
+        let collector = Collector::start(vec![500]);
+        let sink = OtlpSink::with_config(OtlpConfig::new(&collector.endpoint).with_batch_size(1))
+            .expect("builds");
+        sink.send(&receipt("evil.test")).expect("queued");
+        assert!(sink.flush());
+        assert_eq!(collector.requests(), 1, "a 500 is not retried");
         assert_eq!(sink.failed(), 1);
         assert_eq!(sink.exported(), 0);
     }
