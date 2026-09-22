@@ -10,7 +10,7 @@ Hush has a credible policy language and evidence substrate. The next investment 
 
 The milestone is one independently implemented engine and one real guarded agent workflow using pinned policy semantics, producing evidence that an outside security/assurance practitioner can inspect against explicitly scoped objectives. Implementation independence, an external adopter, and an external assessor are different gates. A second adapter around the reference evaluator satisfies none of them by itself.
 
-Provisional pilot: a coding agent using host-controlled MCP tools on synthetic, non-regulated repository data. The user has not yet selected an adopter or host. Keep that choice replaceable; do not make Chio integration or an external organization's cooperation an implicit dependency of local repair work.
+Selected pilot (confirmed by the user on 2026-09-22): a coding agent using host-controlled MCP tools on synthetic, non-regulated repository data. The specific host and external adopter remain unselected. Keep those choices replaceable; do not make Chio integration or an external organization's cooperation an implicit dependency of local repair work. This workflow selection does not approve the separate first-project design or authorize implementation.
 
 ## Approaches considered
 
