@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.log import ChainedFileSink, EntryType, verify_log
 from hushspec.middleware import (
@@ -16,6 +18,12 @@ from hushspec.middleware import (
 from hushspec.canonical import content_hash
 from hushspec.parse import parse_or_raise
 from hushspec.receipt import POLICY_UNVERIFIED_RULE, Actor
+from hushspec.resolve import (
+    ChainLink,
+    PolicyVerificationError,
+    Resolution,
+    SignatureStatus,
+)
 from hushspec.sinks import CallbackSink
 
 POLICY = """
@@ -197,3 +205,97 @@ class TestRefusedPolicy:
             sink=ChainedFileSink.open(path),
         )
         assert not path.exists() or path.read_text() == ""
+
+
+class TestAdoptedChain:
+    """A resolution produced elsewhere is held to this guard's requirement.
+
+    Signing spec 6.5 asks every non-``builtin:`` hop to prove itself, so a
+    guard that adopts a provider's resolution re-checks the whole chain: a
+    signed leaf on an unsigned base is not a proven policy.
+    """
+
+    @staticmethod
+    def _chain(*links: ChainLink) -> Resolution:
+        spec = parse_or_raise(POLICY)
+        return Resolution(
+            spec=spec,
+            content_hash=content_hash(spec),
+            chain=list(links),
+            signature=links[-1].signature,
+        )
+
+    def test_a_signed_leaf_on_an_unsigned_base_is_refused(self) -> None:
+        resolution = self._chain(
+            ChainLink(source="base.yaml", content_hash="sha256:" + "0" * 64),
+            ChainLink(
+                source="leaf.yaml",
+                content_hash="sha256:" + "1" * 64,
+                signature=SignatureStatus(verified=True, key_id="sha256:" + "a" * 64),
+            ),
+        )
+        guard = HushGuard(resolution, require_signature=True)
+
+        assert guard.refusal is not None
+        assert guard.refusal.verified is False
+        assert guard.refusal.reason == "missing_signature"
+        outcome = guard.gate(EvaluationAction(type="tool_call", target="anything"))
+        assert outcome.proceed is False
+        assert outcome.result.matched_rule == POLICY_UNVERIFIED_RULE
+
+    def test_a_fully_signed_chain_is_adopted(self) -> None:
+        signed = SignatureStatus(verified=True, key_id="sha256:" + "a" * 64)
+        resolution = self._chain(
+            ChainLink(
+                source="base.yaml",
+                content_hash="sha256:" + "0" * 64,
+                signature=signed,
+            ),
+            ChainLink(
+                source="leaf.yaml",
+                content_hash="sha256:" + "1" * 64,
+                signature=signed,
+            ),
+        )
+        guard = HushGuard(resolution, require_signature=True)
+
+        assert guard.refusal is None
+
+    def test_a_builtin_base_signs_nothing(self) -> None:
+        resolution = self._chain(
+            ChainLink(source="builtin:default", content_hash="sha256:" + "0" * 64),
+            ChainLink(
+                source="leaf.yaml",
+                content_hash="sha256:" + "1" * 64,
+                signature=SignatureStatus(verified=True, key_id="sha256:" + "a" * 64),
+            ),
+        )
+        guard = HushGuard(resolution, require_signature=True)
+
+        assert guard.refusal is None
+
+    def test_a_swap_refuses_an_unproven_base(self) -> None:
+        signed = SignatureStatus(verified=True, key_id="sha256:" + "a" * 64)
+        guard = HushGuard(
+            self._chain(
+                ChainLink(
+                    source="leaf.yaml",
+                    content_hash="sha256:" + "1" * 64,
+                    signature=signed,
+                )
+            ),
+            require_signature=True,
+        )
+        assert guard.refusal is None
+
+        with pytest.raises(PolicyVerificationError):
+            guard.swap_resolution(
+                self._chain(
+                    ChainLink(source="base.yaml", content_hash="sha256:" + "0" * 64),
+                    ChainLink(
+                        source="leaf.yaml",
+                        content_hash="sha256:" + "1" * 64,
+                        signature=signed,
+                    ),
+                )
+            )

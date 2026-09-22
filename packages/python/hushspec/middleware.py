@@ -459,31 +459,52 @@ class HushGuard:
         A provider resolves under its own :class:`~hushspec.resolve.ResolveOptions`,
         so the guard re-checks the two things it would otherwise have proved
         itself: that the document is actually resolved, and -- when this guard
-        was built with ``require_signature`` -- that the leaf verified. Without
-        the second check a signature requirement would be silently dropped by
-        passing the policy in pre-resolved, which is precisely the fail-open the
-        requirement exists to prevent.
+        was built with ``require_signature`` -- that every hop proved itself.
+        Without the second check a signature requirement would be silently
+        dropped by passing the policy in pre-resolved, which is precisely the
+        fail-open the requirement exists to prevent.
         """
         if resolution.spec.extends is not None:
             raise ValueError(
                 "provider returned an unresolved policy "
                 f"('extends: {resolution.spec.extends}')"
             )
-        if self._resolve_options.require_signature:
-            signature = resolution.signature
-            if signature is None or not signature.verified:
-                status = signature or SignatureStatus(
-                    verified=False, reason="missing_signature"
-                )
-                leaf = resolution.chain[-1].source if resolution.chain else "<memory>"
-                raise PolicyVerificationError(
-                    "policy was resolved without a verified signature, but this "
-                    "guard requires one",
-                    source=leaf,
-                    status=status,
-                    resolution=resolution,
-                )
+        unproven = self._unproven_hop(resolution)
+        if unproven is not None:
+            source, status = unproven
+            raise PolicyVerificationError(
+                "policy was resolved without a verified signature, but this "
+                "guard requires one",
+                source=source,
+                status=status,
+                resolution=resolution,
+            )
         return resolution
+
+    def _unproven_hop(
+        self, resolution: Resolution
+    ) -> Optional[tuple[str, SignatureStatus]]:
+        """The first hop of an adopted chain that has not proved itself.
+
+        ``builtin:`` hops are exempt, as they are during resolution: they are
+        embedded in the SDK, not loaded from anywhere signable. Every other hop
+        proves itself by a verified signature on its link. A hop proved by a
+        digest pin cannot be re-checked from a resolution -- the chain records
+        the hash each hop had, not the digest its child pinned it to -- so an
+        adopted chain has to carry signatures.
+        """
+        if not self._resolve_options.require_signature:
+            return None
+        for link in resolution.chain:
+            if link.source.startswith("builtin:"):
+                continue
+            if link.signature is not None and link.signature.verified:
+                continue
+            status = link.signature or SignatureStatus(
+                verified=False, reason="missing_signature"
+            )
+            return link.source, status
+        return None
 
     @classmethod
     def from_provider(
