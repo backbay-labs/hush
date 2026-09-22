@@ -228,6 +228,18 @@ def test_null_written_for_a_declared_property_is_refused() -> None:
         canonical_json({"hushspec": "0.1.0", "name": None})
 
 
+def test_null_written_for_a_resolution_field_is_refused() -> None:
+    """Spec section 3.1 step 2: a resolution field is removed, not a null one.
+
+    Stripping it would hash the document as though the property had never been
+    written, and no valid document carries it.
+    """
+    with pytest.raises(CanonicalError, match=r"\$\.extends is null"):
+        canonical_json({"hushspec": "0.1.0", "extends": None})
+    with pytest.raises(CanonicalError, match=r"\$\.merge_strategy is null"):
+        canonical_json({"hushspec": "0.1.0", "merge_strategy": None})
+
+
 def test_null_inside_a_free_form_value_is_an_ordinary_leaf() -> None:
     text = canonical_json(
         {"hushspec": "0.1.0", "rules": {"egress": {"when": {"context": {"a": None}}}}}

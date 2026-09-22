@@ -54,6 +54,11 @@ const maxSafeInteger int64 = 1<<53 - 1
 // with no whitespace, byte order mark, or trailing newline.
 //
 // The document must already be resolved; a non-empty Extends is an error.
+//
+// Canonical spec 3.1 step 2 also refuses a `null` written for a resolution
+// field. A nil Extends here is an absent one: gopkg.in/yaml.v3 decodes a
+// written null into the same nil pointer, so the distinction lives in the raw
+// document and [Parse] is where it is answered.
 func CanonicalJSON(spec *HushSpec) (string, error) {
 	if spec == nil {
 		return "", fmt.Errorf("cannot canonicalize a nil HushSpec document")

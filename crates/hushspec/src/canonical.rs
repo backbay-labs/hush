@@ -242,9 +242,16 @@ fn load_schemas() -> Result<SchemaSet, (String, String)> {
 // --------------------------------------------------------------------------
 
 fn project(document: &Map<String, Value>) -> Result<Value, CanonicalError> {
-    // A written `extends: null` is an absent base, as it is to the typed
-    // model and to the other SDKs.
-    if document.get("extends").is_some_and(|base| !base.is_null()) {
+    // Canonical spec 3.1 step 2: the resolution fields are removed, but a
+    // `null` written for one is refused first. Stripping it would hash the
+    // document as though the property had never been written, and no valid
+    // document carries it -- a parser refuses it (canonical spec 3.2 rule 2).
+    for field in RESOLUTION_FIELDS {
+        if document.get(field).is_some_and(Value::is_null) {
+            return Err(CanonicalError::NullProperty(format!("$.{field}")));
+        }
+    }
+    if document.contains_key("extends") {
         return Err(CanonicalError::Unresolved);
     }
     let schemas = schemas()?;
@@ -762,12 +769,18 @@ mod tests {
         assert!(canonical(&free_form).contains(r#""context":{"a":null}"#));
     }
 
-    /// A written `extends: null` names no base, so the document is resolved.
+    /// Canonical spec 3.1 step 2: a `null` written for a resolution field is
+    /// refused rather than stripped, exactly as it is for every other
+    /// declared property (3.2 rule 2). A parser refuses such a document too.
     #[test]
-    fn a_null_extends_is_an_absent_base() {
+    fn a_null_resolution_field_is_refused() {
         assert_eq!(
-            canonical(&json!({"hushspec": "0.1.0", "extends": null})),
-            r#"{"hushspec":"0.1.0"}"#
+            canonical_json_value(&json!({"hushspec": "0.1.0", "extends": null})),
+            Err(CanonicalError::NullProperty("$.extends".to_string()))
+        );
+        assert_eq!(
+            canonical_json_value(&json!({"hushspec": "0.1.0", "merge_strategy": null})),
+            Err(CanonicalError::NullProperty("$.merge_strategy".to_string()))
         );
     }
 

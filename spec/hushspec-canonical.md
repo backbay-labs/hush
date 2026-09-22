@@ -74,7 +74,7 @@ The canonical projection is computed by walking the resolved document alongside 
 ### 3.1 Top level
 
 1. Start from the resolved document as a JSON object.
-2. Remove `extends` and `merge_strategy` if present. These are resolution fields (Core Section 2.3). Their schema defaults are **not** materialized: `merge_strategy` has the default `deep_merge` in the schema, but it MUST NOT appear in the canonical projection.
+2. Remove `extends` and `merge_strategy` if present. These are resolution fields (Core Section 2.3). A `null` written for either is refused before the removal, as Section 3.2 rule 2 refuses a `null` written for any declared property: removal takes out a value the document wrote, and is not a licence to accept one no valid document carries. Their schema defaults are **not** materialized: `merge_strategy` has the default `deep_merge` in the schema, but it MUST NOT appear in the canonical projection.
 3. If `metadata.signature` is present, remove it (Signing Section 7). This field is reserved for an inline signature and MUST NOT be covered by the hash it signs.
 4. Project the remaining object against the core schema's top-level `properties` per Section 3.2, except that the `extensions` value is projected per Section 3.4.
 

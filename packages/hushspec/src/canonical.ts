@@ -620,16 +620,26 @@ function project(spec: HushSpec): JsonValue {
   if (!isPlainObject(spec)) {
     throw new CanonicalError('document must be a mapping');
   }
+  // Spec section 3.1 step 2: the resolution fields are removed, but a `null`
+  // written for one is refused first. Stripping it would hash the document as
+  // though the property had never been written, and no valid document carries
+  // it -- a parser refuses it (spec section 3.2 rule 2).
+  const raw = spec as Record<string, unknown>;
+  for (const field of RESOLUTION_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(raw, field) && raw[field] === null) {
+      throw new CanonicalError(`$.${field} is null; no property is nullable`);
+    }
+  }
   // Spec section 2.1: the canonical form identifies the policy that is
   // enforced, so an unresolved document has none.
-  if (spec.extends != null) {
+  if (spec.extends !== undefined) {
     throw new CanonicalError(
       `cannot canonicalize an unresolved document (extends: ${String(spec.extends)}); ` +
         'resolve the extends chain first',
     );
   }
 
-  const document: Record<string, unknown> = { ...(spec as Record<string, unknown>) };
+  const document: Record<string, unknown> = { ...raw };
   for (const field of RESOLUTION_FIELDS) {
     delete document[field];
   }

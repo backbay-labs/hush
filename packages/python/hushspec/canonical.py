@@ -439,7 +439,14 @@ def project(spec: Any) -> dict[str, Any]:
     document = _as_document(spec)
     doc = dict(document)
 
-    if doc.get("extends") is not None:
+    # Spec section 3.1 step 2: the resolution fields are removed, but a ``null``
+    # written for one is refused first. Stripping it would hash the document as
+    # though the property had never been written, and no valid document carries
+    # it -- a parser refuses it (spec section 3.2 rule 2).
+    for field in _RESOLUTION_FIELDS:
+        if field in doc and doc[field] is None:
+            raise CanonicalError(f"$.{field} is null; no property is nullable")
+    if "extends" in doc:
         raise CanonicalError(
             f"cannot canonicalize an unresolved document (extends: {doc['extends']!r}); "
             "resolve the extends chain first (spec section 2.1)"

@@ -198,12 +198,17 @@ def project(document: dict) -> dict:
     if not isinstance(document, dict):
         raise CanonicalError("document must be a mapping")
     doc = copy.deepcopy(document)
+    # Section 3.1 step 2: the resolution fields are removed, but a written
+    # `null` is refused first. Stripping it would hash the document as though
+    # the property had never been written, and no valid document carries it
+    # (section 3.2 rule 2).
+    for field in RESOLUTION_FIELDS:
+        if field in doc and doc[field] is None:
+            raise CanonicalError(f"$.{field} is null; no property is nullable")
     # Section 2.1: the canonical form identifies the policy that is enforced,
     # so a document that still names a base has none. Resolve it first, for
     # example with `h2h resolve --format json`.
-    # A written `extends: null` is an absent base, as it is to every SDK's
-    # typed model.
-    if doc.get("extends") is not None:
+    if "extends" in doc:
         raise CanonicalError(
             "cannot canonicalize an unresolved document (extends: "
             f"{doc['extends']!r}); resolve the extends chain first"

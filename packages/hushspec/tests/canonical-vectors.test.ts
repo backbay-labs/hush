@@ -155,6 +155,17 @@ describe('canonicalJson', () => {
     );
   });
 
+  it('refuses a null written for a resolution field (section 3.1)', () => {
+    // Stripping it would hash the document as though the property had never
+    // been written, and no valid document carries it.
+    expect(() =>
+      canonicalJson({ hushspec: '0.1.0', extends: null } as unknown as HushSpec),
+    ).toThrow(/\$\.extends is null/);
+    expect(() =>
+      canonicalJson({ hushspec: '0.1.0', merge_strategy: null } as unknown as HushSpec),
+    ).toThrow(/\$\.merge_strategy is null/);
+  });
+
   it('keeps a null inside a free-form value (section 2.2)', () => {
     const document = {
       hushspec: '0.1.0',
