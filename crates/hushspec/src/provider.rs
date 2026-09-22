@@ -170,6 +170,9 @@ pub struct HttpProvider {
     url: String,
     config: crate::resolve::http::HttpLoaderConfig,
     options: ResolveOptions,
+    /// A locator the caller installed, held behind an `Arc` so every load can
+    /// be given it without moving it out of [`HttpProvider::options`].
+    locator: Option<Arc<crate::resolve::SignatureLocator>>,
 }
 
 #[cfg(feature = "http")]
@@ -179,6 +182,7 @@ impl std::fmt::Debug for HttpProvider {
             .field("url", &self.url)
             .field("config", &self.config)
             .field("options", &self.options)
+            .field("signature_locator", &self.locator.is_some())
             .finish()
     }
 }
@@ -192,6 +196,7 @@ impl HttpProvider {
             url: url.into(),
             config: crate::resolve::http::HttpLoaderConfig::default(),
             options: ResolveOptions::default(),
+            locator: None,
         }
     }
 
@@ -204,7 +209,8 @@ impl HttpProvider {
 
     /// Verify on every load with these options.
     #[must_use]
-    pub fn with_options(mut self, options: ResolveOptions) -> Self {
+    pub fn with_options(mut self, mut options: ResolveOptions) -> Self {
+        self.locator = options.signature_locator.take().map(Arc::from);
         self.options = options;
         self
     }
@@ -239,16 +245,20 @@ impl HttpProvider {
     /// default locator knows no URL sources, so without this a signed remote
     /// policy could never satisfy `require_signature`.
     fn resolve_options(&self) -> ResolveOptions {
+        let locator: Box<crate::resolve::SignatureLocator> = match &self.locator {
+            Some(caller) => {
+                let caller = Arc::clone(caller);
+                Box::new(move |source: &str| caller(source))
+            }
+            None => crate::resolve::http::signature_locator(self.config.clone()),
+        };
         ResolveOptions {
             require_signature: self.options.require_signature,
             #[cfg(feature = "signing")]
             keyring: self.options.keyring.clone(),
             #[cfg(feature = "signing")]
             verify: self.options.verify.clone(),
-            signature_locator: match &self.options.signature_locator {
-                Some(_) => None,
-                None => Some(crate::resolve::http::signature_locator(self.config.clone())),
-            },
+            signature_locator: Some(locator),
         }
     }
 }
@@ -257,13 +267,7 @@ impl HttpProvider {
 impl PolicyProvider for HttpProvider {
     fn load(&self) -> Result<Resolution, ProviderError> {
         let loaded = crate::resolve::http::load_from_https(&self.url, &self.config)?;
-        let configured;
-        let options = if self.options.signature_locator.is_some() {
-            &self.options
-        } else {
-            configured = self.resolve_options();
-            &configured
-        };
+        let options = self.resolve_options();
         let extends = loaded.spec.extends.clone();
         // Builtin-only loader: `source` is the URL, so the default locator
         // looks for `<url>.sig`.
@@ -284,14 +288,19 @@ impl PolicyProvider for HttpProvider {
             };
             Ok(crate::resolve::LoadedSpec { source, spec })
         };
-        crate::resolve::resolve_with_options(&loaded.spec, Some(&loaded.source), &builtins, options)
-            .map_err(|error| match extends {
-                Some(reference) => ProviderError::Other(format!(
-                    "failed to resolve policy 'extends: {reference}' from {}: {error}",
-                    self.url
-                )),
-                None => ProviderError::Resolve(error),
-            })
+        crate::resolve::resolve_with_options(
+            &loaded.spec,
+            Some(&loaded.source),
+            &builtins,
+            &options,
+        )
+        .map_err(|error| match extends {
+            Some(reference) => ProviderError::Other(format!(
+                "failed to resolve policy 'extends: {reference}' from {}: {error}",
+                self.url
+            )),
+            None => ProviderError::Resolve(error),
+        })
     }
 
     fn source(&self) -> &str {
@@ -844,9 +853,14 @@ rules:
                 ..ResolveOptions::default()
             },
         );
-        assert!(
-            supplied.options.signature_locator.is_some(),
-            "a caller's locator is kept as given"
+        let supplied_options = supplied.resolve_options();
+        let locate = supplied_options
+            .signature_locator
+            .as_ref()
+            .expect("a caller's locator is kept as given");
+        assert_eq!(
+            locate("policy.yaml").expect("the caller's locator answers"),
+            Some(b"envelope".to_vec())
         );
     }
 
