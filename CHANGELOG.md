@@ -7,6 +7,35 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
+### Changed
+
+- **Every `extends` fragment is read as a digest pin** (core spec 2.3). A reference whose text
+  after the last `#` is not exactly `sha256:` followed by 64 lowercase hex digits is rejected with
+  `invalid_pin` in all four SDKs, rather than being loaded as though the fragment were part of the
+  reference. `#SHA256:<64 hex>` was previously passed through unpinned by Python, and
+  `#notes`-style fragments by TypeScript, Python and Go. Vectors:
+  `fixtures/core/resolve/pin-uppercase-algorithm.yaml`, `pin-short-digest.yaml`,
+  `pin-non-digest-fragment.yaml`.
+- **`no_keyring` is recorded for a hop whose envelope has nothing to check it against**
+  (signing spec 6.5). TypeScript and Python now resolve with `require_signature` and no keyring
+  instead of failing up front, recording `no_keyring` on the hop where an envelope was found and
+  `missing_signature` where there was none -- the outcome Rust and Go already reported. Vector:
+  `fixtures/core/resolve/require-signature-without-a-keyring.yaml`.
+- **The load-time reason set is the five codes signing spec 6.5 names**, plus the section 6.4
+  envelope checks. TypeScript's `LoadReasonCode` no longer rewrites `no_keyring`,
+  `signing_unavailable` or `invalid_pin` to `missing_signature`; Python exposes
+  `LOAD_REASON_CODES` and `load_reason_of`, and Go `LoadReasonCodes` and `LoadReasonOf`.
+- A TypeScript guard built with `requireSignature` now re-checks a policy its provider reloaded
+  underneath it, and enters the refused state rather than evaluating one that cannot prove itself
+  (signing spec 6.5).
+- Built without the `signing` feature, the Rust resolver records `signing_unavailable` on a hop it
+  attempted to verify instead of recording nothing.
+
+### Added
+
+- The Python `HushGuard` accepts a `time_source` and records it in every receipt (receipt spec
+  3.3), matching the Rust, TypeScript and Go guards.
+
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version

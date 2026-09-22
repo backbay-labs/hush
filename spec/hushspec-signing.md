@@ -205,6 +205,8 @@ An enforcement point not configured to require signatures MAY verify opportunist
 
 A hop satisfied by a matching digest pin needs no envelope; when an envelope is nevertheless present it MAY be verified opportunistically and its outcome recorded.
 
+An enforcement point configured to require signatures but given no keyring verifies nothing, so every unpinned hop is refused: one whose envelope was found records `no_keyring`, and one with no envelope records `missing_signature`. A runtime with no cryptographic backend records `signing_unavailable` for every hop it attempted, whether or not that hop was required to prove itself. A reason outside this set and the Section 6.4 set is not one an implementation records; a reader that encounters one MUST treat it as `missing_signature`, the outcome that proves nothing.
+
 ---
 
 ## 7. Detached and inline signatures
