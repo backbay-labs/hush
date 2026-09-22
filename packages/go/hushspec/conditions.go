@@ -91,8 +91,13 @@ type Condition struct {
 
 // RuntimeContext is the runtime context provided by the enforcement engine.
 type RuntimeContext struct {
-	User        map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
-	Environment string         `yaml:"environment,omitempty" json:"environment,omitempty"`
+	User map[string]any `yaml:"user,omitempty" json:"user,omitempty"`
+	// Environment is the deployment environment a `when.context.environment`
+	// entry is compared against. It is a *string because presence is part of
+	// the contract: an engine that supplies "" has supplied a value, which
+	// compares equal to a written "", while a nil pointer is a field the
+	// engine did not supply and fails the predicate closed (core spec 3.13).
+	Environment *string        `yaml:"environment,omitempty" json:"environment,omitempty"`
 	Deployment  map[string]any `yaml:"deployment,omitempty" json:"deployment,omitempty"`
 	Agent       map[string]any `yaml:"agent,omitempty" json:"agent,omitempty"`
 	Session     map[string]any `yaml:"session,omitempty" json:"session,omitempty"`
@@ -687,10 +692,10 @@ func resolveContextValue(path string, context *RuntimeContext) any {
 
 	switch topLevel {
 	case "environment":
-		if context.Environment == "" {
+		if context.Environment == nil {
 			return nil
 		}
-		return context.Environment
+		return *context.Environment
 	case "user":
 		if rest != "" {
 			return mapGet(context.User, rest)

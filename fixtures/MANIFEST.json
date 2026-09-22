@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T02:55:12Z",
+  "generated_at": "2026-09-22T02:55:59Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -90,6 +90,13 @@
     {
       "path": "fixtures/core/evaluation/conditions-capability.test.yaml",
       "sha256": "244aa62c527d5174ecdf7819b198dca059dab1fdd9d1993e2a745bac3cd855a4",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/conditions-context-empty-environment.test.yaml",
+      "sha256": "3a8ff2d369b21655de4dfb2e9fefa66175d16d33decf0aa4bb9c1ee7e006e982",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -2211,6 +2218,27 @@
     {
       "path": "fixtures/receipts/expected/core/conditions-capability/2.json",
       "sha256": "ef4dd29bc87db41406b08a0cee67a9fb5a523714d853800bf41fbd3c3d2d06d0",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-empty-environment/0.json",
+      "sha256": "715351e6cd9d6a33d2377d9a85f263e585e71d9575d9d0e59cb21c413ff2ed41",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-empty-environment/1.json",
+      "sha256": "a8c9ec161ad08a85b0dd3538542e850b7fdcb9d306777137da9e5872b5c3e47b",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/conditions-context-empty-environment/2.json",
+      "sha256": "c36fe887caf89d420b13e0aac7fb2bf434c9c4f0967e6c0a3301ad4c3f39c006",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

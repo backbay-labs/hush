@@ -6,7 +6,7 @@ import (
 )
 
 func ctxWithEnv(env string) *RuntimeContext {
-	return &RuntimeContext{Environment: env}
+	return &RuntimeContext{Environment: &env}
 }
 
 func ctxWithTimeStr(t string) *RuntimeContext {
@@ -350,7 +350,7 @@ func TestAllOfRequiresAllConditions(t *testing.T) {
 	}
 
 	fullCtx := &RuntimeContext{
-		Environment: "production",
+		Environment: strPtr("production"),
 		User:        map[string]any{"role": "admin"},
 	}
 	if !EvaluateCondition(cond, fullCtx) {
@@ -417,7 +417,7 @@ func TestNestedCompoundConditions(t *testing.T) {
 	}
 
 	ctx := &RuntimeContext{
-		Environment: "production",
+		Environment: strPtr("production"),
 		CurrentTime: "2026-01-14T10:00:00Z",
 		User:        map[string]any{"role": "admin"},
 	}
@@ -426,7 +426,7 @@ func TestNestedCompoundConditions(t *testing.T) {
 	}
 
 	ctxViewer := &RuntimeContext{
-		Environment: "production",
+		Environment: strPtr("production"),
 		CurrentTime: "2026-01-14T10:00:00Z",
 		User:        map[string]any{"role": "viewer"},
 	}
@@ -515,7 +515,7 @@ func TestValidateConditionsWalksEveryRuleBlock(t *testing.T) {
 func TestEvaluateWithContextPassesWhenConditionMet(t *testing.T) {
 	spec := makeEgressSpecForCond()
 	action := &EvaluationAction{Type: "egress", Target: "api.openai.com"}
-	ctx := &RuntimeContext{Environment: "production"}
+	ctx := &RuntimeContext{Environment: strPtr("production")}
 	conditions := map[string]*Condition{
 		"egress": {Context: map[string]any{"environment": "production"}},
 	}
@@ -529,7 +529,7 @@ func TestEvaluateWithContextPassesWhenConditionMet(t *testing.T) {
 func TestEvaluateWithContextSkipsRuleWhenConditionFails(t *testing.T) {
 	spec := makeEgressSpecForCond()
 	action := &EvaluationAction{Type: "egress", Target: "evil.example.com"}
-	ctx := &RuntimeContext{Environment: "staging"}
+	ctx := &RuntimeContext{Environment: strPtr("staging")}
 	conditions := map[string]*Condition{
 		"egress": {Context: map[string]any{"environment": "production"}},
 	}
@@ -543,7 +543,7 @@ func TestEvaluateWithContextSkipsRuleWhenConditionFails(t *testing.T) {
 func TestEvaluateWithContextEnforcesRuleWhenConditionMet(t *testing.T) {
 	spec := makeEgressSpecForCond()
 	action := &EvaluationAction{Type: "egress", Target: "evil.example.com"}
-	ctx := &RuntimeContext{Environment: "production"}
+	ctx := &RuntimeContext{Environment: strPtr("production")}
 	conditions := map[string]*Condition{
 		"egress": {Context: map[string]any{"environment": "production"}},
 	}
@@ -593,7 +593,7 @@ func TestEvaluateWithContextCompoundCondition(t *testing.T) {
 	}
 
 	fullCtx := &RuntimeContext{
-		Environment: "production",
+		Environment: strPtr("production"),
 		User:        map[string]any{"role": "admin"},
 	}
 	result := EvaluateWithContext(spec, action, fullCtx, conditions)
@@ -601,7 +601,7 @@ func TestEvaluateWithContextCompoundCondition(t *testing.T) {
 		t.Errorf("expected deny, got %s", result.Decision)
 	}
 
-	partialCtx := &RuntimeContext{Environment: "production"}
+	partialCtx := &RuntimeContext{Environment: strPtr("production")}
 	result2 := EvaluateWithContext(spec, action, partialCtx, conditions)
 	if result2.Decision != DecisionAllow {
 		t.Errorf("expected allow (partial condition fails), got %s", result2.Decision)
