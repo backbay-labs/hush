@@ -533,3 +533,108 @@ class TestMalformedEntriesAreRejectedNotRaised:
         # chain for every later verifier.
         with pytest.raises(SinkError, match="non-string entry_hash"):
             ChainedFileSink.open(path)
+
+
+class TestPayloadStructure:
+    """Every payload an entry carries is the payload the log-entry schema
+    describes (log spec section 8, step 1).
+
+    The entry hash covers whatever JSON the line held, so a hash-consistent
+    line can still carry a policy event with no SDK or a ``log_started`` with
+    no timestamp.
+    """
+
+    #: Each case mutates the first entry's policy event and names the break.
+    CASES = [
+        ("sdk", lambda e: e.pop("sdk"), "policy_event.sdk is missing"),
+        (
+            "spec-version",
+            lambda e: e.pop("spec_version"),
+            "policy_event.spec_version is missing",
+        ),
+        (
+            "timestamp-type",
+            lambda e: e.update(timestamp=17),
+            "policy_event.timestamp is not a string",
+        ),
+        (
+            "enforcement-mode",
+            lambda e: e.update(enforcement_mode="advisory"),
+            "policy_event.enforcement_mode is not one of enforce, monitor",
+        ),
+        (
+            "null-timestamp",
+            lambda e: e.update(timestamp=None),
+            "policy_event.timestamp must not be null",
+        ),
+        (
+            "sdk-version",
+            lambda e: e["sdk"].pop("version"),
+            "policy_event.sdk.version is missing",
+        ),
+        (
+            "content-hash",
+            lambda e: e["policy"].pop("content_hash"),
+            "policy_event.policy.content_hash is missing",
+        ),
+        (
+            "policy-version",
+            lambda e: e["policy"].update(version=-1),
+            "policy_event.policy.version is not a non-negative integer",
+        ),
+        (
+            "chain-link",
+            lambda e: e["policy"].update(
+                extends_chain=[{"content_hash": "sha256:" + "1" * 64}]
+            ),
+            "policy_event.policy.extends_chain[0].source is missing",
+        ),
+        (
+            "signature-status",
+            lambda e: e["policy"].update(signature={"reason": "unsigned"}),
+            "policy_event.policy.signature.verified is missing",
+        ),
+    ]
+
+    def _event_line(self, tmp_path: Path, mutate) -> str:
+        """The first entry of a basic chain, mutated and re-hashed, so nothing
+        but its payload can reject it."""
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        entry = json.loads(path.read_text().split("\n")[0])
+        mutate(entry["policy_event"])
+        entry["entry_hash"] = compute_entry_hash(entry)
+        return json.dumps(entry) + "\n"
+
+    @pytest.mark.parametrize(
+        "mutate,message",
+        [(case[1], case[2]) for case in CASES],
+        ids=[case[0] for case in CASES],
+    )
+    def test_a_malformed_policy_event_is_rejected(
+        self, tmp_path: Path, mutate, message: str
+    ) -> None:
+        text = self._event_line(tmp_path, mutate)
+        with pytest.raises(LogError) as caught:
+            verify_log("log.jsonl", text)
+        assert caught.value.line == 1
+        assert caught.value.message == f"not a log entry: {message}"
+
+    def test_an_optional_member_set_to_null_reads_as_absent(
+        self, tmp_path: Path
+    ) -> None:
+        text = self._event_line(
+            tmp_path, lambda e: e.update(previous_content_hash=None)
+        )
+        assert verify_log("log.jsonl", text).entries == 1
+
+    def test_a_tail_with_a_malformed_payload_is_refused(self, tmp_path: Path) -> None:
+        path = tmp_path / "log.jsonl"
+        _write_basic(path)
+        lines = [line for line in path.read_text().split("\n") if line.strip()]
+        last = json.loads(lines[-1])
+        last.pop("receipt")
+        lines[-1] = json.dumps({**last, "entry_type": "log_started", "log_started": {}})
+        path.write_text("\n".join(lines) + "\n")
+        with pytest.raises(SinkError, match="log_started.timestamp is missing"):
+            ChainedFileSink.open(path)

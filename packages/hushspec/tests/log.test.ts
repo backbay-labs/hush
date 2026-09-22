@@ -519,6 +519,121 @@ describe('verifyLog', () => {
     expect(report.break!.message).toContain('payload');
   });
 
+  describe('payload structure', () => {
+    /**
+     * The first entry of `basic.jsonl` (a `policy_loaded`) with `mutate`
+     * applied and its hash restored, so nothing but the payload can reject it.
+     */
+    function rewrittenEvent(mutate: (event: Record<string, unknown>) => void): string {
+      const file = path.join(dir, 'log.jsonl');
+      writeBasic(file, false);
+      const first = readFileSync(file, 'utf8').split('\n')[0]!;
+      const entry = JSON.parse(first) as LogEntry;
+      mutate(entry.policy_event as unknown as Record<string, unknown>);
+      entry.entry_hash = computeEntryHash(entry);
+      return JSON.stringify(entry);
+    }
+
+    const cases: ReadonlyArray<
+      readonly [string, (event: Record<string, unknown>) => void, string]
+    > = [
+      [
+        'a policy event with no sdk',
+        (event) => delete event.sdk,
+        'policy_event.sdk is missing',
+      ],
+      [
+        'a policy event with no spec_version',
+        (event) => delete event.spec_version,
+        'policy_event.spec_version is missing',
+      ],
+      [
+        'a timestamp that is not a string',
+        (event) => {
+          event.timestamp = 17;
+        },
+        'policy_event.timestamp is not a string',
+      ],
+      [
+        'an enforcement mode outside the enum',
+        (event) => {
+          event.enforcement_mode = 'advisory';
+        },
+        'policy_event.enforcement_mode is not one of enforce, monitor',
+      ],
+      [
+        'a required member set to null',
+        (event) => {
+          event.timestamp = null;
+        },
+        'policy_event.timestamp must not be null',
+      ],
+      [
+        'an sdk record with no version',
+        (event) => delete (event.sdk as Record<string, unknown>).version,
+        'policy_event.sdk.version is missing',
+      ],
+      [
+        'a policy identity with no content_hash',
+        (event) => delete (event.policy as Record<string, unknown>).content_hash,
+        'policy_event.policy.content_hash is missing',
+      ],
+      [
+        'a policy version that is not an index',
+        (event) => {
+          (event.policy as Record<string, unknown>).version = -1;
+        },
+        'policy_event.policy.version is not a non-negative integer',
+      ],
+      [
+        'an extends chain link with no source',
+        (event) => {
+          (event.policy as Record<string, unknown>).extends_chain = [
+            { content_hash: `sha256:${'1'.repeat(64)}` },
+          ];
+        },
+        'policy_event.policy.extends_chain[0].source is missing',
+      ],
+      [
+        'a signature status with no verdict',
+        (event) => {
+          (event.policy as Record<string, unknown>).signature = { reason: 'unsigned' };
+        },
+        'policy_event.policy.signature.verified is missing',
+      ],
+    ];
+    for (const [what, mutate, message] of cases) {
+      it(`rejects ${what}`, () => {
+        const report = verifyLog('t', rewrittenEvent(mutate));
+        expect(report.ok, `${what} must be rejected`).toBe(false);
+        expect(report.break!.line).toBe(1);
+        expect(report.break!.message).toBe(`not a log entry: ${message}`);
+      });
+    }
+
+    it('accepts an optional member set to null, as an absent one', () => {
+      const text = rewrittenEvent((event) => {
+        event.previous_content_hash = null;
+      });
+      expect(verifyLog('t', text).ok).toBe(true);
+    });
+
+    it('refuses to continue a log whose last entry has a malformed payload', () => {
+      const file = path.join(dir, 'log.jsonl');
+      writeBasic(file, false);
+      const lines = readFileSync(file, 'utf8').trimEnd().split('\n');
+      const last = JSON.parse(lines[lines.length - 1]!) as Record<string, unknown>;
+      lines[lines.length - 1] = JSON.stringify({
+        ...last,
+        receipt: undefined,
+        entry_type: 'log_started',
+        log_started: {},
+      });
+      writeFileSync(file, `${lines.join('\n')}\n`);
+      expect(() => ChainedFileSink.open(file)).toThrow(LogChainError);
+    });
+  });
+
   it('rejects a receipt that is not format 0.2', () => {
     const file = path.join(dir, 'log.jsonl');
     writeBasic(file, false);
