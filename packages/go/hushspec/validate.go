@@ -742,7 +742,7 @@ func validateRegex(pattern, path string, result *ValidationResult) {
 	}
 	if hasNestedQuantifier(pattern) {
 		result.addError("INVALID_REGEX",
-			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
+			fmt.Sprintf("%s must be a valid regular expression: %s", path, nestedQuantifierMessage))
 		return
 	}
 	// CompileProfileRegex is the exact call the evaluator makes: it repeats the
