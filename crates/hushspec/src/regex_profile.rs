@@ -689,7 +689,8 @@ mod tests {
     #[test]
     fn digit_shorthand_is_ascii_only() {
         assert!(matches(r"key\d{3}", "key123"));
-        // Arabic-Indic digits: Rust's Unicode `\d` used to match these.
+        // Arabic-Indic digits are digits to a Unicode-aware `\d`, but not to
+        // the profile.
         assert!(!matches(r"key\d{3}", "key\u{661}\u{662}\u{663}"));
     }
 

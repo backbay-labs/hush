@@ -743,11 +743,9 @@ func mapGet(m map[string]any, key string) any {
 }
 
 // valuesEqual compares two scalars, and only scalars. String is exact, bool is
-// exact (a bool is never numeric), and numbers keep the int-vs-float
-// distinction the JSON value model draws: an integer-shaped expected value
-// matches ONLY an integer-typed actual, while a float-shaped expected value
-// matches an integer or float actual by numeric value. Any other actual shape,
-// or a type mismatch, is not equal.
+// exact (a bool is never numeric), and numbers compare by value alone, so the
+// integer 5 and the float 5.0 are the same number whichever side spelled which
+// (core spec 3.13). Any other actual shape, or a type mismatch, is not equal.
 func valuesEqual(actual, expected any) bool {
 	switch ev := expected.(type) {
 	case string:

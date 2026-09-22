@@ -7,11 +7,9 @@ import (
 	"strings"
 )
 
-// [SDKName] is this package's own identity, as a receipt log's `sdk` member
-// records it (spec/hushspec-log.md section 6) -- distinct from [Version],
-// which is the *specification* version the engine implements.
-
-// Version is the HushSpec version this engine writes by default.
+// Version is the HushSpec version this engine writes by default. It is the
+// *specification* version the engine implements, distinct from [SDKName],
+// which is this package's own identity.
 const Version = "1.0.0"
 
 // SupportedMinors lists the minor versions this engine accepts, as "X.Y"

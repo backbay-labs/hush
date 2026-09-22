@@ -942,8 +942,10 @@ func evaluateInputInjection(rule *InputInjectionRule, target string) blockDecisi
 type builtinCredentialPattern struct {
 	name    string
 	pattern string
-	// re is the pattern compiled under the regex profile, or nil when it does
-	// not compile -- a built-in that will not compile is skipped, never a deny.
+	// re is the pattern compiled under the regex profile. The patterns are
+	// constants of this package, so one that does not compile is a defect in
+	// the package and panics at load rather than detecting nothing; every
+	// entry of builtinCredentialPatterns therefore carries a compiled regex.
 	re *regexp.Regexp
 }
 
@@ -1009,7 +1011,7 @@ func (c *compiledBrowserAutomation) evaluate(action *EvaluationAction) blockDeci
 		content := action.ContentOrEmpty()
 		for index := range builtinCredentialPatterns {
 			builtin := &builtinCredentialPatterns[index]
-			if builtin.re != nil && builtin.re.MatchString(content) {
+			if builtin.re.MatchString(content) {
 				return denyDecision(
 					"rules.browser_automation.credential_detection",
 					fmt.Sprintf("typed input matched built-in credential detector '%s'", builtin.name),
