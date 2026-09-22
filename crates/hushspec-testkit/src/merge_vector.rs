@@ -345,8 +345,11 @@ mod tests {
     #[test]
     fn a_malformed_fixture_manifest_is_an_error() {
         let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(dir.path().join(FIXTURE_MANIFEST), "reject: true\n  bad: [\n")
-            .expect("write manifest");
+        std::fs::write(
+            dir.path().join(FIXTURE_MANIFEST),
+            "reject: true\n  bad: [\n",
+        )
+        .expect("write manifest");
 
         let error = expects_reject(dir.path()).expect_err("a malformed manifest is an error");
         assert!(error.contains(FIXTURE_MANIFEST), "{error}");
