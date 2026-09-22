@@ -65,7 +65,7 @@ pub struct EvalArgs {
 
     /// Runtime context for `when` conditions: an inline JSON object, or
     /// @PATH to read a YAML/JSON file
-    #[arg(long, value_name = "JSON|@PATH")]
+    #[arg(long, value_name = "JSON|@PATH", conflicts_with_all = ["action_json", "action_file"])]
     context: Option<String>,
 
     /// Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id,
