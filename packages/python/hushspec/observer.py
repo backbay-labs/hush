@@ -249,14 +249,42 @@ class ObservableEvaluator:
             "previous_hash": previous_hash,
         })
 
+    def notify_error(self, error: str, source: Optional[str] = None) -> None:
+        """Announce a failure the guard absorbed.
+
+        Neither a policy load nor a sink: an observer that raised, say. The
+        evaluation that produced the event stands -- an observer is a
+        bystander, never enforcement.
+        """
+        self._emit({
+            "type": "error",
+            "timestamp": _iso_now(),
+            "error": error,
+            "source": source,
+        })
+
     def _emit(self, event: dict[str, Any]) -> None:
         # Over a snapshot: an observer that registers another one while being
         # notified must not mutate the list this loop is walking.
         for observer in tuple(self._observers):
             try:
                 observer.on_event(event)
-            except Exception:  # noqa: BLE001 - an observer is never fatal
-                pass
+            except Exception as exc:  # noqa: BLE001 - an observer is never fatal
+                if event.get("type") == "error":
+                    continue
+                # The failure goes back to the observer that raised it: one
+                # nobody is told about is the one that goes unnoticed. An
+                # observer that raises reporting its own failure is dropped
+                # rather than retried.
+                try:
+                    observer.on_event({
+                        "type": "error",
+                        "timestamp": _iso_now(),
+                        "error": f"observer raised: {exc}",
+                        "source": None,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _decision_name(decision: Any) -> str:
