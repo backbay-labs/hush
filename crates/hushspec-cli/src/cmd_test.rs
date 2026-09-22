@@ -683,15 +683,6 @@ fn run_fixture_file(
             .collect();
         let actual = traced.evaluation;
 
-        if let Some(path) = &actual.matched_rule {
-            coverage.record(path);
-        }
-        for entry in &trace {
-            if let Some(path) = &entry.rule_path {
-                coverage.record(path);
-            }
-        }
-
         let mut mismatch = compare_expected(&case.expect, &actual);
         if mismatch.is_none()
             && let Some(expected_trace) = &case.expect.rule_trace
@@ -715,6 +706,20 @@ fn run_fixture_file(
                     e.to_string(),
                 )),
             };
+        }
+
+        // Only a case that passed is evidence for the rule paths it touched:
+        // coverage is what a run can show a control was exercised by, and a
+        // failing case showed the opposite.
+        if mismatch.is_none() {
+            if let Some(path) = &actual.matched_rule {
+                coverage.record(path);
+            }
+            for entry in &trace {
+                if let Some(path) = &entry.rule_path {
+                    coverage.record(path);
+                }
+            }
         }
 
         case_results.push(CaseResult {

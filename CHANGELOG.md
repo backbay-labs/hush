@@ -16,6 +16,9 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
   its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
   never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
   warnings.
+- `h2h test` credits rule coverage only from cases that passed. A failing case still credited its
+  `matched_rule` and rule-trace paths, so a JUnit or JSON artifact could report full coverage from
+  cases that did not pass.
 - `h2h lint` exits `2` for a file that is missing or unreadable, matching `validate` and `fmt` and
   the documented exit-code table; it exited `1`, the code for a document that failed the check. A
   JSON or SARIF report that cannot be serialized now also exits `2` with the error on stderr instead

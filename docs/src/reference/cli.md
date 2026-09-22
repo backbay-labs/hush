@@ -398,8 +398,10 @@ document produces under the fixed inputs of
 
 **Rule coverage.** Every run compares the rule paths each policy under test
 *declares* -- every rule block of the resolved document, plus every named
-secret pattern -- with the paths any case *hit*, through `matched_rule` and
-through each `rule_trace` entry's `rule_path`. A path inside a block credits
+secret pattern -- with the paths a *passing* case hit, through `matched_rule`
+and through each `rule_trace` entry's `rule_path`. A failing case credits
+nothing: coverage says a control was exercised, and a case that failed showed
+the opposite. A path inside a block credits
 the block, so `rules.egress.allow` covers `rules.egress` and
 `rules.secret_patterns.patterns.ssn` covers both the block and that pattern.
 The table prints after the run; `--fail-on-uncovered` turns a gap into a

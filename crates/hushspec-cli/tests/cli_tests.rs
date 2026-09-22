@@ -371,6 +371,52 @@ cases:
         .success();
 }
 
+/// A failing case is not evidence that the rule paths it touched were
+/// exercised, so it credits no coverage.
+#[test]
+fn test_a_failing_case_credits_no_coverage() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("failing.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.1.0"
+description: "the only case fails"
+policy:
+  hushspec: "0.1.0"
+  name: failing
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "an allowed domain the fixture expects to be denied"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: deny
+"#,
+    )
+    .unwrap();
+
+    let output = h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("json")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["failed"], 1);
+    assert_eq!(
+        report["coverage"]["covered"], 0,
+        "a failing case credits nothing: {report}"
+    );
+}
+
 /// The 0.2 assertions are enforced, not merely parsed.
 #[test]
 fn test_rule_trace_and_receipt_assertions_are_checked() {
