@@ -234,6 +234,15 @@ describe('the safe-integer bound (section 4.3)', () => {
       '"context":{"a":10000000000000000,"b":1e+21,"c":1.5e+300,"d":0}',
     );
   });
+
+  // A `number` built in memory carries no syntax, and 2**53 is the same double
+  // as the float-syntax literals above. Section 4.3 leaves the bound to the
+  // parser here, so the serializer emits it; no valid document can hold such a
+  // value, which is why that costs no cross-SDK agreement.
+  it('emits a whole double past the range that no integer literal could write', () => {
+    expect(canonicalizeValue({ budget: 2 ** 53 })).toBe('{"budget":9007199254740992}');
+    expect(canonicalizeValue({ budget: -(2 ** 53) })).toBe('{"budget":-9007199254740992}');
+  });
 });
 
 // ---------------------------------------------------------------------------
