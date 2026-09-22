@@ -39,6 +39,10 @@ import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from './version.js';
  * queue drops the incoming entry, counts it ({@link OtlpReceiptSink.dropped})
  * and reports it through `onError` -- evidence is never traded for latency in
  * the evaluation path, and a silent loss is never acceptable either.
+ *
+ * A transport error and the statuses in {@link RETRYABLE_STATUSES} are retried
+ * with the shared backoff; every other status is final, because the collector
+ * will answer the same bytes the same way, and is reported through `onError`.
  */
 
 // --------------------------------------------------------------------------
@@ -103,7 +107,7 @@ export interface OtlpReceiptSinkOptions {
   timeoutMs?: number;
   /** Bounded queue depth. Default 2048. */
   maxQueue?: number;
-  /** Retries after the first attempt, for 5xx/429/network failures. Default 3. */
+  /** Retries after the first attempt, for a transport error or a retryable status. Default 3. */
   maxRetries?: number;
   /** First backoff delay in milliseconds; doubles per attempt. Default 100, as in every SDK. */
   retryBackoffMs?: number;
@@ -292,9 +296,16 @@ interface PostResult {
   body: string;
 }
 
-/** Statuses worth another attempt: the collector is busy, not unhappy. */
+/**
+ * The HTTP statuses an export is retried after, as OTLP/HTTP names them: the
+ * collector is busy or a gateway between it and the sink is, and the same
+ * bytes will be accepted once it is not. The same set in every SDK.
+ */
+export const RETRYABLE_STATUSES: readonly number[] = [429, 502, 503, 504];
+
+/** Whether an export that came back with `status` is worth another attempt. */
 function retryableStatus(status: number): boolean {
-  return status === 408 || status === 429 || status >= 500;
+  return RETRYABLE_STATUSES.includes(status);
 }
 
 export class OtlpReceiptSink implements ReceiptSink {

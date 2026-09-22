@@ -350,6 +350,7 @@ export {
   receiptLogRecord,
   policyEventLogRecord,
   logsEndpoint,
+  RETRYABLE_STATUSES,
   type OtlpReceiptSinkOptions,
   type OtlpLogsPayload,
   type OtlpLogRecord,

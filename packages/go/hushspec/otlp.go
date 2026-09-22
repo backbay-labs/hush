@@ -80,8 +80,8 @@ type OTLPOptions struct {
 	MaxQueue int
 	// OnError is told about every drop and every export that failed.
 	OnError func(error)
-	// MaxRetries is how many times a retriable failure (a network error, a
-	// 429 or a 5xx) is retried. Zero means [DefaultOTLPMaxRetries].
+	// MaxRetries is how many times a retriable failure (a network error or one
+	// of [RetryableStatuses]) is retried. Zero means [DefaultOTLPMaxRetries].
 	MaxRetries int
 	// RetryBackoff is the first retry delay, doubling per attempt. Zero means
 	// [DefaultOTLPRetryBackoff].
@@ -387,9 +387,31 @@ func (s *OTLPReceiptSink) export(batch []otlpLogRecord) []otlpLogRecord {
 	}
 }
 
+// RetryableStatuses are the HTTP statuses an export is retried after, as
+// OTLP/HTTP names them: the collector is busy or a gateway between it and the
+// sink is, and the same bytes will be accepted once it is not. The same set in
+// every SDK.
+var RetryableStatuses = []int{
+	http.StatusTooManyRequests,
+	http.StatusBadGateway,
+	http.StatusServiceUnavailable,
+	http.StatusGatewayTimeout,
+}
+
+// retryableStatus reports whether an export that came back with status is
+// worth another attempt.
+func retryableStatus(status int) bool {
+	for _, retryable := range RetryableStatuses {
+		if status == retryable {
+			return true
+		}
+	}
+	return false
+}
+
 // post sends one request and reports whether a failure is worth retrying: a
-// network error, a 429, or a 5xx. A 4xx is the collector rejecting the payload
-// and retrying it would only repeat the rejection.
+// network error, or one of [RetryableStatuses]. Every other status is final --
+// the collector will answer the same bytes the same way.
 func (s *OTLPReceiptSink) post(body []byte) (retriable bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 	defer cancel()
@@ -409,14 +431,11 @@ func (s *OTLPReceiptSink) post(body []byte) (retriable bool, err error) {
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
 
-	switch {
-	case response.StatusCode < 300:
+	if response.StatusCode < 300 {
 		return false, nil
-	case response.StatusCode == http.StatusTooManyRequests, response.StatusCode >= 500:
-		return true, fmt.Errorf("collector returned %d", response.StatusCode)
-	default:
-		return false, fmt.Errorf("collector returned %d", response.StatusCode)
 	}
+	return retryableStatus(response.StatusCode),
+		fmt.Errorf("collector returned %d", response.StatusCode)
 }
 
 // ---------------------------------------------------------------------------

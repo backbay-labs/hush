@@ -61,9 +61,13 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 - **One reload interval pair in all four SDKs**: 1 second for a watcher, 60 seconds for a poller.
   Rust's `DEFAULT_INTERVAL` is replaced by `DEFAULT_WATCH_INTERVAL` and `DEFAULT_POLL_INTERVAL`,
   and Go's `DefaultWatchInterval` moves from 2 seconds to 1.
-- **One OTLP batch size and retry backoff in all four SDKs**: 64 entries per request, and a first
-  retry delay of 100ms doubling per attempt. `OtlpConfig::logs_url` returns a `Result`, since it
-  now validates the endpoint.
+- **One OTLP batch size, retry backoff and retry predicate in all four SDKs**: 64 entries per
+  request, a first retry delay of 100ms doubling per attempt, and a retry after a transport error
+  or one of the four statuses OTLP/HTTP names as retryable -- `429`, `502`, `503` and `504`.
+  Every other status is now a final failure reported as `sink.error`: Rust and Python retried
+  every `5xx`, and TypeScript also retried `408`, so the same collector response cost a different
+  number of requests per SDK. `OtlpConfig::logs_url` returns a `Result`, since it now validates
+  the endpoint.
 
 ## [1.0.0] - 2026-09-15
 

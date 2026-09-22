@@ -278,8 +278,9 @@ One `logRecord` per entry, with the wire mapping every HushSpec SDK emits:
 
 `send()` never blocks and never throws: entries go onto a bounded queue and
 leave on a background chain, batched by size or by timer, retried with
-exponential backoff on 5xx, 429 and network failures. A full queue drops the
-incoming entry, counts it (`sink.dropped`) and reports it through `onError` --
+exponential backoff on a network failure and on 429, 502, 503 and 504. Every
+other status is final. A full queue drops the incoming entry, counts it
+(`sink.dropped`) and reports it through `onError` --
 latency is never paid for in the evaluation path, and a lost receipt is never
 silent. Pair it with `MultiSink` and a `ChainedFileSink` when the collector is
 a convenience and the file is the evidence.

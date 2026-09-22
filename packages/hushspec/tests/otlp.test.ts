@@ -9,6 +9,7 @@ import {
   OtlpExportError,
   OtlpQueueOverflowError,
   OtlpReceiptSink,
+  RETRYABLE_STATUSES,
   logsEndpoint,
   nowUnixNano,
   policyEventLogRecord,
@@ -398,7 +399,7 @@ describe('OtlpReceiptSink batching', () => {
 // ---------------------------------------------------------------------------
 
 describe('OtlpReceiptSink retries', () => {
-  it('retries a 5xx with backoff and succeeds', async () => {
+  it('retries a 503 with backoff and succeeds', async () => {
     const collector = await startCollector(n => ({ status: n < 3 ? 503 : 200 }));
     const errors: Error[] = [];
     const sink = new OtlpReceiptSink({
@@ -419,7 +420,7 @@ describe('OtlpReceiptSink retries', () => {
   });
 
   it('gives up after maxRetries and reports the failure', async () => {
-    const collector = await startCollector(() => ({ status: 500, body: 'boom' }));
+    const collector = await startCollector(() => ({ status: 503, body: 'boom' }));
     const errors: Error[] = [];
     const sink = new OtlpReceiptSink({
       endpoint: collector.endpoint,
@@ -436,13 +437,51 @@ describe('OtlpReceiptSink retries', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(OtlpExportError);
     expect((errors[0] as OtlpExportError).entries).toBe(1);
-    expect(errors[0].message).toContain('500');
+    expect(errors[0].message).toContain('503');
 
     await sink.close();
     await collector.close();
   });
 
-  it('does not retry a 4xx', async () => {
+  it('retries only the shared retryable statuses', async () => {
+    expect([...RETRYABLE_STATUSES]).toEqual([429, 502, 503, 504]);
+
+    // A 503 is the collector saying "not now": the same bytes are worth
+    // sending again.
+    const busy = await startCollector(n => ({ status: n < 2 ? 503 : 200 }));
+    const busyErrors: Error[] = [];
+    const busySink = new OtlpReceiptSink({
+      endpoint: busy.endpoint,
+      flushIntervalMs: 0,
+      retryBackoffMs: 1,
+      onError: error => busyErrors.push(error),
+    });
+    busySink.send(makeReceipt('deny'));
+    await busySink.flush();
+    expect(busy.captures).toHaveLength(2);
+    expect(busyErrors).toEqual([]);
+    await busySink.close();
+    await busy.close();
+
+    // A 500 is not in the retryable set: it is a final failure.
+    const broken = await startCollector(() => ({ status: 500, body: 'boom' }));
+    const brokenErrors: Error[] = [];
+    const brokenSink = new OtlpReceiptSink({
+      endpoint: broken.endpoint,
+      flushIntervalMs: 0,
+      retryBackoffMs: 1,
+      onError: error => brokenErrors.push(error),
+    });
+    brokenSink.send(makeReceipt('deny'));
+    await brokenSink.flush();
+    expect(broken.captures).toHaveLength(1);
+    expect(brokenErrors).toHaveLength(1);
+    expect(brokenErrors[0].message).toContain('500');
+    await brokenSink.close();
+    await broken.close();
+  });
+
+  it('does not retry a 4xx the collector will answer the same way', async () => {
     const collector = await startCollector(() => ({ status: 400, body: 'bad request' }));
     const errors: Error[] = [];
     const sink = new OtlpReceiptSink({

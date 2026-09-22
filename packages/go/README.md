@@ -518,8 +518,9 @@ guard, err := hushspec.NewGuardFromFile("policy.yaml", hushspec.GuardOptions{
 ```
 
 Export happens on a background goroutine, batched and retried with backoff on a
-429, a 5xx or a network error. `Send` never blocks an evaluation: a full queue
-drops the record, counts it in `Dropped()` and reports through `OnError`.
+network error or one of 429, 502, 503 and 504; every other status is final.
+`Send` never blocks an evaluation: a full queue drops the record, counts it in
+`Dropped()` and reports through `OnError`.
 `Flush(ctx)` waits for what is queued, and `Close()` flushes and stops.
 
 ### Panic mode

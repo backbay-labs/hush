@@ -50,10 +50,16 @@ __all__ = [
     "OtlpExportError",
     "OtlpQueueFullError",
     "OtlpReceiptSink",
+    "RETRYABLE_STATUSES",
 ]
 
 #: The OTLP/HTTP logs path appended to a base endpoint.
 LOGS_PATH = "/v1/logs"
+
+#: The HTTP statuses an export is retried after, as OTLP/HTTP names them: the
+#: collector is busy or a gateway between it and the sink is, and the same bytes
+#: will be accepted once it is not. The same set in every SDK.
+RETRYABLE_STATUSES: frozenset[int] = frozenset({429, 502, 503, 504})
 
 _DEFAULT_BATCH_SIZE = 64
 _DEFAULT_FLUSH_INTERVAL_S = 5.0
@@ -246,11 +252,12 @@ class OtlpReceiptSink(ReceiptSink):
 
     Records queue up to ``max_queue`` and are posted in batches of at most
     ``batch_size``, or after ``flush_interval_s``, whichever comes first.
-    Delivery is retried with exponential backoff on network errors, ``429`` and
-    ``5xx``; a ``4xx`` is a configuration mistake the collector will keep
-    refusing, so the batch is dropped and reported rather than retried forever.
-    :meth:`flush` waits for what is queued; :meth:`close` flushes and stops the
-    thread. Both are safe to call more than once.
+    Delivery is retried with exponential backoff on a network error and on the
+    statuses in :data:`RETRYABLE_STATUSES`; every other status is final,
+    because the collector will answer the same bytes the same way, so the batch
+    is dropped and reported rather than retried forever. :meth:`flush` waits for
+    what is queued; :meth:`close` flushes and stops the thread. Both are safe to
+    call more than once.
     """
 
     def __init__(
@@ -510,7 +517,9 @@ class OtlpReceiptSink(ReceiptSink):
                 with self._lock:
                     self.exported += len(records)
                 return
-            retryable = status is None or status == 429 or status >= 500
+            # A transport error (no status at all) is worth another attempt;
+            # so are the statuses that say the collector is merely busy.
+            retryable = status is None or status in RETRYABLE_STATUSES
             if not retryable or attempt > self._max_retries:
                 with self._lock:
                     self.failed += len(records)
