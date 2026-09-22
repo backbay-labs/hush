@@ -12,6 +12,13 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 - `h2h test` exits `2` when an argument names neither a file nor a directory. Such a path was
   dropped silently, so a run with a mistyped suite reported a green summary for the suites that
   did resolve.
+- `h2h lint --dry-run` reports the document on disk. It re-linted the mutated in-memory model, so
+  its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
+  never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
+  warnings.
+- `h2h report --format oscal` carries the chain's status in `metadata`, the `result` and every
+  `finding` as a `chain-verified` prop, and reports no control `satisfied` when the hash chain did
+  not verify. An export made with `--unverified` over a broken chain read as clean evidence.
 
 ## [1.0.0] - 2026-09-15
 
