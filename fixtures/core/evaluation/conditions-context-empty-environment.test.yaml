@@ -19,7 +19,7 @@ cases:
     expect:
       decision: deny
       matched_rule: rules.egress.block
-  - description: "an environment the engine did not supply fails the predicate closed, so the block is inert"
+  - description: "an environment the engine did not supply makes the predicate false, so the block is inert"
     context:
       user:
         role: admin

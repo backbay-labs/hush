@@ -147,13 +147,16 @@ func (p *HTTPProvider) Load() (*Resolution, error) {
 // policy fetched over the network cannot pull a base from a second location.
 func builtinOnlyLoader() ResolveLoader {
 	return func(reference string, _ string) (*LoadedSpec, error) {
-		spec, ok := LoadBuiltin(reference)
-		if ok {
+		spec, err := LoadBuiltin(reference)
+		if err == nil {
 			source := reference
 			if !strings.HasPrefix(reference, "builtin:") {
 				source = "builtin:" + reference
 			}
 			return &LoadedSpec{Source: source, Spec: spec}, nil
+		}
+		if !errors.Is(err, ErrUnknownBuiltin) {
+			return nil, err
 		}
 		if strings.HasPrefix(reference, "builtin:") {
 			return nil, &NotFoundError{Reference: reference, Message: "unknown builtin ruleset"}

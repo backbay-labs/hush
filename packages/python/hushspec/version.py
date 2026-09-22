@@ -51,9 +51,10 @@ def major_version(version: str) -> Optional[int]:
         return None
     if not all(_is_digits(part) for part in parts):
         return None
-    if len(parts[0]) > 10:
+    digits = parts[0].lstrip("0") or "0"
+    if len(digits) > 10:
         return None
-    major = int(parts[0])
+    major = int(digits)
     return major if major <= 0xFFFF_FFFF else None
 
 

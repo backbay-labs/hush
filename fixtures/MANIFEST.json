@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T03:44:23Z",
+  "generated_at": "2026-09-22T13:51:04Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -96,7 +96,7 @@
     },
     {
       "path": "fixtures/core/evaluation/conditions-context-empty-environment.test.yaml",
-      "sha256": "3a8ff2d369b21655de4dfb2e9fefa66175d16d33decf0aa4bb9c1ee7e006e982",
+      "sha256": "e5a344cd032cf865d16d3b70c4614ae0d583636b39b0c78b5bd4b0e47e89f6b3",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1482,7 +1482,7 @@
     },
     {
       "path": "fixtures/core/resolve/require-signature-without-a-keyring.yaml",
-      "sha256": "915c35598bc6d16f62b8eace2ccaeb46086af1ceefbd9575ab2a6d31a7c4376e",
+      "sha256": "ca44596a1c306db88af9c279f76e9119a22f53eb346bdbeed9f382155d14e068",
       "category": "resolve",
       "module": "core",
       "level": 4

@@ -30,8 +30,12 @@ export interface PolicyProvider {
   resolution?(): Resolution | null;
 }
 
-/** How often a watching {@link FileProvider} checks the panic sentinel. */
-export const DEFAULT_WATCH_INTERVAL_MS = 1_000;
+/**
+ * How often a watching {@link FileProvider} checks the panic sentinel. The
+ * policy file itself is watched through file-system events, so this SDK has
+ * no interval at which the file is re-read.
+ */
+export const DEFAULT_SENTINEL_INTERVAL_MS = 1_000;
 
 /** Verification options shared by the built-in providers. */
 export interface ProviderResolveOptions {
@@ -69,7 +73,7 @@ export class FileProvider implements PolicyProvider {
     this.debounceMs = options?.debounceMs ?? 300;
     this.resolveOptions = options?.resolveOptions ?? {};
     this.panicSentinel = options?.panicSentinel;
-    this.sentinelIntervalMs = options?.sentinelIntervalMs ?? DEFAULT_WATCH_INTERVAL_MS;
+    this.sentinelIntervalMs = options?.sentinelIntervalMs ?? DEFAULT_SENTINEL_INTERVAL_MS;
   }
 
   async load(): Promise<HushSpec> {

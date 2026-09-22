@@ -658,15 +658,11 @@ func (g *Guard) runEvaluation(
 // nothing to monitor against, and letting monitor mode wave the action through
 // would be exactly the fail-open the spec forbids.
 func (g *Guard) refuse(state guardState, action *EvaluationAction) GuardDecision {
-	reason := state.refusal.Status.Reason
-	if reason == "" {
-		reason = "unverified"
-	}
 	result := EvaluationResult{
 		Decision:    DecisionDeny,
 		MatchedRule: PolicyUnverifiedRule,
 		Reason: fmt.Sprintf("policy signature verification failed for %s: %s",
-			state.refusal.Source, reason),
+			state.refusal.Source, LoadReasonOf(&state.refusal.Status)),
 	}
 	enforcement := EnforcementSummary{
 		Mode:    EnforcementModeEnforce,

@@ -185,9 +185,9 @@ func lineFromVectorName(t *testing.T, name string) int {
 // `default` builtin, already resolved, recorded under its builtin source.
 func vectorResolution(t *testing.T) *Resolution {
 	t.Helper()
-	spec, ok := LoadBuiltin("builtin:default")
-	if !ok {
-		t.Fatal("the default builtin is missing")
+	spec, err := LoadBuiltin("builtin:default")
+	if err != nil {
+		t.Fatalf("the default builtin is missing: %v", err)
 	}
 	resolution, err := NewResolutionFromResolved(spec, "builtin:default")
 	if err != nil {

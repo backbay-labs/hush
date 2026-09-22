@@ -585,12 +585,15 @@ func locatorForScheme(source string) (SignatureLocator, bool) {
 func createCompositeLoader() ResolveLoader {
 	return func(reference string, from string) (*LoadedSpec, error) {
 		if strings.HasPrefix(reference, "builtin:") {
-			spec, ok := LoadBuiltin(reference)
-			if !ok {
+			spec, err := LoadBuiltin(reference)
+			if errors.Is(err, ErrUnknownBuiltin) {
 				return nil, &NotFoundError{
 					Reference: reference,
 					Message:   "unknown builtin ruleset",
 				}
+			}
+			if err != nil {
+				return nil, err
 			}
 			return &LoadedSpec{Source: reference, Spec: spec}, nil
 		}
@@ -610,8 +613,12 @@ func createCompositeLoader() ResolveLoader {
 		}
 
 		if !strings.ContainsAny(reference, `/\.`) {
-			if spec, ok := LoadBuiltin(reference); ok {
+			spec, err := LoadBuiltin(reference)
+			if err == nil {
 				return &LoadedSpec{Source: "builtin:" + reference, Spec: spec}, nil
+			}
+			if !errors.Is(err, ErrUnknownBuiltin) {
+				return nil, err
 			}
 		}
 

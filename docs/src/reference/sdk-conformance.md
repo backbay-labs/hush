@@ -100,7 +100,7 @@ The main CI workflow publishes the evidence this table relies on:
 - [`rust`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), [`typescript`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), [`python`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml), and [`go`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) run each SDK's native unit and package tests, including every evidence-chain vector listed above.
 - [`shared-fixtures`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs the same conformance fixture corpus against Rust, TypeScript, Python, and Go.
 - [`cross-sdk-roundtrip`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) parses the shared corpus with all four SDKs and compares each document's canonical form byte for byte (`scripts/check_cross_sdk_roundtrip.py`).
-- [`differential-fuzz`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the Rust oracle on decision, `matched_rule`, `reason`, recorded rule trace, canonical `content_hash` **and** receipt hash.
+- [`differential-fuzz`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the in-process evaluator on decision, `matched_rule`, `reason`, recorded rule trace, canonical `content_hash` **and** receipt hash.
 - [`smoke-snippets`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) executes the marked README and getting-started examples directly from the markdown source.
 - [`docs`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) builds the mdBook site.
 

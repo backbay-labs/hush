@@ -165,7 +165,8 @@ pub fn build_regression_fixture(
         );
         // `expect.rule_trace` and `expect.receipt` are 0.2.0 members, so a
         // fixture that pins either declares the format that defines them.
-        let version = if expect.contains_key("rule_trace") || expect.contains_key("receipt") {
+        let pins = |member: &str| expect.get(member).is_some_and(|value| !value.is_null());
+        let version = if pins("rule_trace") || pins("receipt") {
             "0.2.0"
         } else {
             "0.1.0"

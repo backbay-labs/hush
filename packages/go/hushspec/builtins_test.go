@@ -1,6 +1,7 @@
 package hushspec
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -46,23 +47,23 @@ func TestResolveUnknownBuiltinErrors(t *testing.T) {
 }
 
 func TestLoadBuiltin(t *testing.T) {
-	if _, ok := LoadBuiltin("builtin:nope"); ok {
-		t.Fatal("expected LoadBuiltin to return false for an unknown name")
+	if _, err := LoadBuiltin("builtin:nope"); !errors.Is(err, ErrUnknownBuiltin) {
+		t.Fatal("expected LoadBuiltin to report ErrUnknownBuiltin for an unknown name")
 	}
-	if spec, ok := LoadBuiltin("strict"); !ok || spec == nil || stringValue(spec.Name) != "strict" {
-		t.Fatalf("expected LoadBuiltin to find strict, got ok=%v spec=%v", ok, spec)
+	if spec, err := LoadBuiltin("strict"); err != nil || spec == nil || stringValue(spec.Name) != "strict" {
+		t.Fatalf("expected LoadBuiltin to find strict, got err=%v spec=%v", err, spec)
 	}
-	if spec, ok := LoadBuiltin("builtin:default"); !ok || spec == nil || stringValue(spec.Name) != "default" {
-		t.Fatalf("expected LoadBuiltin to find default, got ok=%v spec=%v", ok, spec)
+	if spec, err := LoadBuiltin("builtin:default"); err != nil || spec == nil || stringValue(spec.Name) != "default" {
+		t.Fatalf("expected LoadBuiltin to find default, got err=%v spec=%v", err, spec)
 	}
 }
 
 // The vertical library is embedded under `library/<vertical>/<name>`, so a
 // policy can extend it with no file system.
 func TestLoadBuiltinLibrary(t *testing.T) {
-	spec, ok := LoadBuiltin("builtin:library/healthcare/hipaa-base")
-	if !ok || spec == nil {
-		t.Fatal("expected the library to be embedded as a builtin")
+	spec, err := LoadBuiltin("builtin:library/healthcare/hipaa-base")
+	if err != nil || spec == nil {
+		t.Fatalf("expected the library to be embedded as a builtin, got %v", err)
 	}
 	// The prefix is a location, not a rename: the document keeps its own name.
 	if stringValue(spec.Name) != "hipaa-base" {
@@ -97,9 +98,9 @@ func TestBuiltinNamesAreAllLoadable(t *testing.T) {
 	}
 	library := 0
 	for _, name := range BuiltinNames {
-		spec, ok := LoadBuiltin(name)
-		if !ok || spec == nil {
-			t.Fatalf("builtin %q does not load", name)
+		spec, err := LoadBuiltin(name)
+		if err != nil || spec == nil {
+			t.Fatalf("builtin %q does not load: %v", name, err)
 		}
 		want := name[strings.LastIndex(name, "/")+1:]
 		if stringValue(spec.Name) != want {
@@ -120,9 +121,9 @@ func TestBuiltinNamesAreAllLoadable(t *testing.T) {
 func TestBuiltinsPassValidation(t *testing.T) {
 	for _, name := range BuiltinNames {
 		t.Run(name, func(t *testing.T) {
-			spec, ok := LoadBuiltin(name)
-			if !ok {
-				t.Fatalf("builtin %q does not load", name)
+			spec, err := LoadBuiltin(name)
+			if err != nil {
+				t.Fatalf("builtin %q does not load: %v", name, err)
 			}
 			if result := Validate(spec); !result.IsValid() {
 				t.Errorf("builtin %q does not validate: %+v", name, result.Errors)

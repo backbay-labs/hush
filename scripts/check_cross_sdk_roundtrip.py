@@ -82,7 +82,7 @@ def collect_corpus() -> list[Path]:
     return corpus
 
 
-def run_sdk(name: str, path: Path) -> dict:
+def run_sdk(name: str, path: Path) -> str:
     cmd = SDKS[name] + [str(path)]
     kwargs = {
         "cwd": ROOT,

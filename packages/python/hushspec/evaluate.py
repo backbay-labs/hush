@@ -823,19 +823,19 @@ def check_panic_sentinel(path: str) -> bool:
     """Activate panic mode if the sentinel file at *path* exists.
 
     This is a kill switch, so it **fails closed**: if the file's existence
-    cannot be determined (a permission or other I/O error from ``os.stat``),
-    the sentinel is treated as present and panic mode is activated. Only a
-    definitive "not found" (``FileNotFoundError`` / ``NotADirectoryError``)
-    counts as absent. (``os.path.isfile`` is unusable here: it silently
-    returns ``False`` on any stat error, which would let the kill switch fail
-    open.)
+    cannot be determined (a permission error, a path component that is not a
+    directory, or any other I/O error from ``os.stat``), the sentinel is
+    treated as present and panic mode is activated. Only a definitive "not
+    found" (``FileNotFoundError``) counts as absent, the reading every SDK
+    applies. (``os.path.isfile`` is unusable here: it silently returns
+    ``False`` on any stat error, which would let the kill switch fail open.)
     """
     import os
 
     try:
         os.stat(path)
         present = True
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
         present = False
     except OSError:
         # Could not prove the sentinel is absent (e.g. PermissionError);

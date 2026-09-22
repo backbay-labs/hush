@@ -89,6 +89,7 @@ mod tests {
         assert_eq!(major_version("0.2.7"), Some(0));
         assert_eq!(major_version("+1.0.0"), None);
         assert_eq!(major_version("4294967295.0.0"), Some(u32::MAX));
+        assert_eq!(major_version("00000000001.0.0"), Some(1));
         assert_eq!(major_version("4294967296.0.0"), None);
         assert_eq!(major_version(&format!("{}.0.0", "9".repeat(5000))), None);
         assert_eq!(major_version("v1.0.0"), None);

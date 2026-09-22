@@ -626,7 +626,11 @@ func (m *MetricsCollector) OnError(err error) {
 func (m *MetricsCollector) Snapshot() MetricsSnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.snapshotLocked()
+}
 
+// snapshotLocked is [MetricsCollector.Snapshot] with the lock already held.
+func (m *MetricsCollector) snapshotLocked() MetricsSnapshot {
 	snapshot := MetricsSnapshot{
 		Evaluations: make(map[EvaluationMetricKey]uint64, len(m.evaluations)),
 		RuleMatches: make(map[RuleMetricKey]uint64, len(m.ruleMatches)),
@@ -666,9 +670,7 @@ func (m *MetricsCollector) Snapshot() MetricsSnapshot {
 
 // durationSeries copies the bucket bounds and the per-action-type histograms,
 // so the exposition renders from a consistent set.
-func (m *MetricsCollector) durationSeries() ([]float64, map[string]durationHistogram) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *MetricsCollector) durationSeriesLocked() ([]float64, map[string]durationHistogram) {
 	bounds := append([]float64(nil), m.buckets...)
 	series := make(map[string]durationHistogram, len(m.durations))
 	for actionType, histogram := range m.durations {
@@ -699,8 +701,12 @@ func (m *MetricsCollector) Reset() {
 //
 // Series are sorted, so the output of two identical snapshots is byte-equal.
 func (m *MetricsCollector) RenderPrometheus() string {
-	snapshot := m.Snapshot()
-	buckets, durations := m.durationSeries()
+	// One lock for the counters and the histograms, so the exposition describes
+	// a single instant.
+	m.mu.Lock()
+	snapshot := m.snapshotLocked()
+	buckets, durations := m.durationSeriesLocked()
+	m.mu.Unlock()
 	durationKeys := make([]string, 0, len(durations))
 	for actionType := range durations {
 		durationKeys = append(durationKeys, actionType)

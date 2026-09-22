@@ -292,12 +292,13 @@ fn verify(args: ReceiptsVerifyArgs) -> i32 {
                 outcomes.len()
             );
         }
-        OutputFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&outcomes).unwrap_or_default()
-            );
-        }
+        OutputFormat::Json => match serde_json::to_string_pretty(&outcomes) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("error: cannot serialize the report: {error}");
+                return 2;
+            }
+        },
     }
     if all_ok { 0 } else { 1 }
 }

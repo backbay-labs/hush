@@ -3,6 +3,7 @@
 package hushspec
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -44,19 +45,23 @@ var BuiltinNames = []string{
 	"library/healthcare/hipaa-base",
 }
 
+// ErrUnknownBuiltin reports a name that is not an embedded policy.
+var ErrUnknownBuiltin = errors.New("unknown built-in ruleset")
+
 // LoadBuiltin parses the built-in ruleset for name (with or without the
-// "builtin:" prefix) and reports whether the name was found. An embedded
-// ruleset that does not parse panics: it is generated from rulesets/, so a
-// failure there is a broken build, not an unknown built-in.
-func LoadBuiltin(name string) (*HushSpec, bool) {
+// "builtin:" prefix). An unknown name wraps [ErrUnknownBuiltin]; an embedded
+// ruleset that does not parse reports its parse error, since the document is
+// generated from rulesets/ and a failure there is a broken build, not an
+// unknown built-in.
+func LoadBuiltin(name string) (*HushSpec, error) {
 	resolved := strings.TrimPrefix(name, "builtin:")
 	yaml, ok := builtinRulesets[resolved]
 	if !ok {
-		return nil, false
+		return nil, fmt.Errorf("%w: %s", ErrUnknownBuiltin, resolved)
 	}
 	spec, err := Parse(yaml)
 	if err != nil {
-		panic(fmt.Sprintf("hushspec: built-in ruleset %q does not parse: %v", resolved, err))
+		return nil, fmt.Errorf("built-in ruleset %q does not parse: %w", resolved, err)
 	}
-	return spec, true
+	return spec, nil
 }

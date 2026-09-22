@@ -110,7 +110,7 @@ fn definitions() -> Vec<Definition> {
     ])
     .chain([Definition {
         name: "require-signature-without-a-keyring",
-        description: "signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature",
+        description: "signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature; a runtime with no signing backend records signing_unavailable for it instead",
         yaml: "hushspec: \"0.1.0\"\nname: unkeyed\nrules:\n  egress:\n    allow: [\"api.example.com\"]\n    default: block\n".to_string(),
         rejects: Some("no_keyring"),
         load: Some(ResolveLoad {

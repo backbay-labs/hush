@@ -74,7 +74,7 @@ pub fn run(args: ValidateArgs) -> i32 {
                 continue;
             }
             Err(crate::input::ReadError::Io(e)) => {
-                any_invalid = true;
+                any_not_found = true;
                 let result = FileResult {
                     file: display.clone(),
                     valid: false,
@@ -139,10 +139,14 @@ pub fn run(args: ValidateArgs) -> i32 {
         });
     }
 
-    if matches!(args.format, OutputFormat::Json)
-        && let Ok(json) = serde_json::to_string_pretty(&results)
-    {
-        println!("{json}");
+    if matches!(args.format, OutputFormat::Json) {
+        match serde_json::to_string_pretty(&results) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("error: cannot serialize the report: {error}");
+                return 2;
+            }
+        }
     }
 
     if any_not_found {

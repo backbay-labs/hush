@@ -96,6 +96,9 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Build without the signing backend
+        run: cargo check -p hushspec --no-default-features
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest

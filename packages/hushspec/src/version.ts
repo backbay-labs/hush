@@ -59,8 +59,9 @@ export function majorVersion(version: string): number | undefined {
   if (!parts.every(part => DIGITS.test(part))) return undefined;
   // A major that does not fit an unsigned 32-bit integer names no format any
   // SDK could support, and every SDK applies the same bound.
-  if (parts[0]!.length > 10) return undefined;
-  const major = Number(parts[0]);
+  const digits = parts[0]!.replace(/^0+(?=\d)/, '');
+  if (digits.length > 10) return undefined;
+  const major = Number(digits);
   return major <= 0xffff_ffff ? major : undefined;
 }
 

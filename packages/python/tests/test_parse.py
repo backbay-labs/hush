@@ -1140,6 +1140,7 @@ def test_major_version_is_bounded_to_an_unsigned_32_bit_integer() -> None:
     from hushspec.version import major_version
 
     assert major_version("4294967295.0.0") == 4294967295
+    assert major_version("00000000001.0.0") == 1
     assert major_version("4294967296.0.0") is None
     # Never converted: a digit string this long would exceed the interpreter's
     # conversion limit and raise instead of answering.

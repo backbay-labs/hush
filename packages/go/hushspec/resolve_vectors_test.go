@@ -189,9 +189,9 @@ func TestPinsSatisfyASignatureRequirementForThatHop(t *testing.T) {
 
 func ownHashOfBuiltin(t *testing.T, name string) string {
 	t.Helper()
-	spec, ok := LoadBuiltin("builtin:" + name)
-	if !ok {
-		t.Fatalf("unknown builtin %q", name)
+	spec, err := LoadBuiltin("builtin:" + name)
+	if err != nil {
+		t.Fatalf("unknown builtin %q: %v", name, err)
 	}
 	hash, err := OwnContentHash(spec)
 	if err != nil {

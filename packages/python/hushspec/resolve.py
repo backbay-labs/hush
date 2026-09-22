@@ -127,9 +127,10 @@ RESOLVE_REASON_CODES = (
     REASON_SIGNING_UNAVAILABLE,
 )
 
-#: Alias of :data:`RESOLVE_REASON_CODES` under the name signing spec section
-#: 6.5 gives the set.
-LOAD_REASON_CODES = RESOLVE_REASON_CODES
+#: The closed set a verification on load records on a hop: the five load-time
+#: conditions of signing spec section 6.5 plus the envelope checks of section
+#: 6.4. A reason outside it is not one a receipt may carry.
+LOAD_REASON_CODES = RESOLVE_REASON_CODES + tuple(REASON_CODES)
 
 #: A reference no loader could serve.
 REJECT_NOT_FOUND = "not_found"
@@ -159,7 +160,7 @@ def load_reason_of(status: "SignatureStatus | None") -> str:
     caller can act on.
     """
     reason = status.reason if status is not None else None
-    if reason is not None and (reason in LOAD_REASON_CODES or reason in REASON_CODES):
+    if reason is not None and reason in LOAD_REASON_CODES:
         return reason
     return REASON_MISSING_SIGNATURE
 
@@ -329,12 +330,7 @@ class PolicyVerificationError(ResolveRejected):
         status: SignatureStatus,
         resolution: "Resolution | None" = None,
     ) -> None:
-        reason = status.reason
-        # The load-time codes of signing spec 6.5 are reported as themselves;
-        # anything else -- a section 6.4 envelope failure, or no reason at all
-        # -- is a hop that proved nothing, which is all a caller can act on.
-        code = reason if reason in LOAD_REASON_CODES else REASON_MISSING_SIGNATURE
-        super().__init__(message, code=code)
+        super().__init__(message, code=load_reason_of(status))
         #: The hop that failed, as the loader reported it.
         self.source = source
         #: Why, in the form a receipt records (``verified`` is always false).
@@ -780,10 +776,11 @@ def _verify_envelope(
             last_seen_version=prepared.verify.last_seen_version,
         )
     except SigningUnavailable:
-        # Unreachable under `require_signature` (the backend was probed in
-        # `_prepare`); opportunistically, an envelope that cannot be checked is
-        # recorded as unverified rather than raised, since the load was never
-        # gated on it.
+        # Unreachable under `require_signature`: `_prepare` probes the backend
+        # when a keyring is configured, and without one `_verify_hop` records
+        # `no_keyring` before reaching this call. Opportunistically, an envelope
+        # that cannot be checked is recorded as unverified rather than raised,
+        # since the load was never gated on it.
         if prepared.require_signature:
             raise
         return SignatureStatus(

@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-from generator_support import rustfmt
+from generator_support import gofmt, rustfmt
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -909,17 +907,7 @@ def render_go() -> str:
         lines.extend(render_go_init(struct, needs_init))
 
     content = "\n".join(lines).rstrip() + "\n"
-    gofmt = shutil.which("gofmt")
-    if gofmt is None:
-        return content
-    result = subprocess.run(
-        [gofmt],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return gofmt(content)
 
 
 def write_or_check(path: Path, content: str, check: bool) -> list[str]:

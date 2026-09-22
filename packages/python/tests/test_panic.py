@@ -169,3 +169,17 @@ class TestPanicSentinel:
         monkeypatch.setattr(os, "stat", _raise_not_found)
         assert not check_panic_sentinel("/does/not/exist")
         assert not is_panic_active()
+
+
+def test_a_sentinel_path_through_a_file_counts_as_present(tmp_path) -> None:
+    from hushspec import check_panic_sentinel, deactivate_panic, is_panic_active
+
+    # A path component that is not a directory is not a definite "not found":
+    # the switch fails closed on it, as every SDK does.
+    file = tmp_path / "file"
+    file.write_text("")
+    try:
+        assert check_panic_sentinel(str(file / "sentinel")) is True
+        assert is_panic_active()
+    finally:
+        deactivate_panic()

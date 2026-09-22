@@ -83,3 +83,20 @@ def rustfmt(content: str) -> str:
             f"rustfmt failed (exit {result.returncode}):\n{result.stderr.strip()}"
         )
     return result.stdout
+
+
+def gofmt(content: str) -> str:
+    """`content` formatted by gofmt, the form every generated Go file is
+    committed in. As with :func:`rustfmt`, a missing binary or a formatting
+    failure ends the run with the reason instead of writing a file that
+    `--check` would report as out of date forever.
+    """
+    binary = shutil.which("gofmt")
+    if binary is None:
+        raise SystemExit("gofmt is not on PATH; install Go to generate formatted sources")
+    result = subprocess.run([binary], input=content, text=True, capture_output=True)
+    if result.returncode != 0:
+        raise SystemExit(
+            f"gofmt failed (exit {result.returncode}):\n{result.stderr.strip()}"
+        )
+    return result.stdout

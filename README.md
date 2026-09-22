@@ -119,7 +119,7 @@ For the same resolved policy, all four produce the same decision, the same
 canonical bytes, the same `content_hash`, and — under the fixed inputs of
 `fixtures/receipts/expected/README.md` — byte-identical receipts after RFC 8785.
 That is checked per commit by `hushspec-difftest` over 500 generated policy
-groups, comparing every port against the Rust oracle on decision, rule trace,
+groups, comparing every port against the in-process evaluator on decision, rule trace,
 `content_hash` and receipt hash.
 
 ## Installation

@@ -782,7 +782,6 @@ rules:
     expect(guard.resolution?.content_hash).toBe(verified.content_hash);
   });
 
-
   it('still resolves relative extends against an explicit baseDir', () => {
     const elsewhere = mkdtempSync(path.join(os.tmpdir(), 'hushspec-basedir-'));
     try {

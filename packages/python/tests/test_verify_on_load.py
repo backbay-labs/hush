@@ -924,3 +924,13 @@ def test_require_signature_without_cryptography_fails_closed(tmp_path: Path) -> 
     )
     assert done.returncode == 0, f"stdout={done.stdout}\nstderr={done.stderr}"
     assert done.stdout.strip().endswith("ok")
+
+
+def test_the_load_reason_set_covers_the_envelope_codes() -> None:
+    from hushspec.resolve import LOAD_REASON_CODES, SignatureStatus, load_reason_of
+
+    assert "no_keyring" in LOAD_REASON_CODES
+    assert "key_revoked" in LOAD_REASON_CODES
+    revoked = SignatureStatus(verified=False, reason="key_revoked")
+    assert load_reason_of(revoked) == "key_revoked"
+    assert load_reason_of(SignatureStatus(verified=False, reason="elsewhere")) == "missing_signature"

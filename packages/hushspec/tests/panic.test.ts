@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   evaluate,
   activatePanic,
+  checkPanicSentinel,
   deactivatePanic,
   isPanicActive,
   panicPolicy,
@@ -84,6 +85,20 @@ describe('panic mode', () => {
     deactivatePanic();
     result = evaluate(spec, action);
     expect(result.decision).toBe('allow');
+  });
+
+  it('treats a sentinel path that runs through a file as present', () => {
+    // A path component that is not a directory is not a definite "not found":
+    // the switch fails closed on it, as every SDK does.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hush-sentinel-'));
+    try {
+      const file = path.join(dir, 'file');
+      writeFileSync(file, '');
+      expect(checkPanicSentinel(path.join(file, 'sentinel'))).toBe(true);
+      expect(isPanicActive()).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('panicPolicy returns a valid HushSpec', () => {

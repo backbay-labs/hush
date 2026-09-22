@@ -553,7 +553,8 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - **Go `RuntimeContext.Environment` is now `*string`.** A plain `string` made an engine-supplied
   empty environment indistinguishable from an absent one, so `when: {context: {environment: ""}}`
   was false in Go and true in the other three SDKs. `nil` is now "the engine supplied none" and
-  fails the predicate closed; a supplied `""` compares like any other value (core spec 3.13).
+  makes the predicate false and the block inert; a supplied `""` compares like any other value
+  (core spec 3.13).
   Vector: `fixtures/core/evaluation/conditions-context-empty-environment.test.yaml`.
 - **`isSafeRegex` (TypeScript) and `is_safe_regex` (Python) answer from the profile compiler.**
   They previously reported "safe on every HushSpec engine" from a partial RE2-feature scan and
@@ -588,6 +589,10 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `connect_timeout_ms` and `read_timeout_ms`, and `fetch_signature` / `signature_locator` fetch
   `<url>.sig` under the identical rules. `is_blocked_address`, `validate_url` and `HttpTarget`
   are public, as they are in the Python and Go SDKs.
+- `resolve::ChainLink` gains `pinned`, set by the resolver when the hop's digest pin matched and
+  never serialized, so a caller re-checking a chain under a signature requirement can tell a
+  pinned hop from an unproven one, as the other three SDKs do. A struct literal that names every
+  field has to add it.
 
 **TypeScript**
 
@@ -787,21 +792,24 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   `observedTimeUnixNano` and `severityNumber`; Go's metrics count only load failures as failed
   loads.
 
-- The emergency panic policy is generated from `rulesets/panic.yaml` for every SDK
-  (`PANIC_POLICY_YAML` in the generated built-ins module). The TypeScript copy had drifted to
+- The TypeScript and Python panic policies are generated from `rulesets/panic.yaml`
+  (`PANIC_POLICY_YAML` in each generated built-ins module), as Rust's `PANIC_YAML` already was;
+  Go denies under panic without loading a policy. The TypeScript copy had drifted to
   `hushspec: "1.0.0"`, so a receipt emitted under panic mode named a different policy content
   hash there than in the other SDKs.
 - Rust's serializer omits an empty collection the document did not write, as the other three
   SDKs do, so `HushSpec::to_yaml` and the typed model's JSON no longer differ from theirs by
   `[]` entries. The canonical form and content hash are unchanged.
 - A built-in ruleset that does not parse is reported, never mistaken for an unknown name: the
-  TypeScript `loadBuiltin` throws and the Go `LoadBuiltin` panics, matching Python; an embedded
+  TypeScript `loadBuiltin` throws, Python raises, and the Go `LoadBuiltin` returns the parse error,
+  with `ErrUnknownBuiltin` for a name that is not embedded (it returned a bare `bool`); an embedded
   document is generated from `rulesets/`, so a failure there is a broken build.
-
 - **An observed evaluation is decided by the same pipeline as every other one.**
   TypeScript's `ObservableEvaluator.evaluate()` evaluated without the detection pipeline, so a
   policy whose `extensions.detection` block escalates a payload to a deny reported an allow to
   every observer (detection spec section 4).
+  `ObservableEvaluator.evaluate` no longer takes a separate observed action: the action it
+  evaluates is the one it reports, redacted.
 - **No path to an observer carries an action's `content`.** TypeScript redacted at the guard's
   call sites and not in the fan-out, so an event raised anywhere else carried the payload; Python
   offered `ObservableEvaluator(redact_content=False)` (and an `AuditConfig.redact_content` field
@@ -934,6 +942,9 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   the documented exit-code table; it exited `1`, the code for a document that failed the check. A
   JSON or SARIF report that cannot be serialized now also exits `2` with the error on stderr instead
   of printing nothing and exiting `0`.
+- `h2h lint` L022 names an origin profile by its index (`extensions.origins.profiles[<index>]`),
+  the spelling the span map and every other check use, so its findings carry a span and its SARIF
+  logical location stays inside the document grammar; it named the profile by id.
 - `h2h lint` reports an unresolvable `extends` chain as `E010`, the code
   `spec/registries/error-codes.yaml` reserves for an extends failure. It emitted `E002`, which the
   same registry reserves for an unsupported `hushspec` version.

@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
-import { HUSHSPEC_SUPPORTED_MINORS, HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION, isSupported, majorVersion, supportedMinor } from '../src/version.js';
+import {
+  HUSHSPEC_SUPPORTED_MINORS,
+  HUSHSPEC_VERSION,
+  SDK_NAME,
+  SDK_VERSION,
+  isSupported,
+  majorVersion,
+  supportedMinor,
+} from '../src/version.js';
 import { evaluate } from '../src/evaluate.js';
 import { parse } from '../src/parse.js';
 import { validate } from '../src/validate.js';
@@ -94,6 +102,7 @@ describe('SDK identity', () => {
 describe('majorVersion', () => {
   it('is bounded to an unsigned 32-bit integer in every SDK', () => {
     expect(majorVersion('4294967295.0.0')).toBe(4294967295);
+    expect(majorVersion('00000000001.0.0')).toBe(1);
     expect(majorVersion('4294967296.0.0')).toBeUndefined();
     expect(majorVersion(`${'9'.repeat(5000)}.0.0`)).toBeUndefined();
   });

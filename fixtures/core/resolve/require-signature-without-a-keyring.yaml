@@ -1,5 +1,5 @@
 hushspec_resolve: 0.1.0
-description: 'signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature'
+description: 'signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature; a runtime with no signing backend records signing_unavailable for it instead'
 policy:
   hushspec: 0.1.0
   name: unkeyed

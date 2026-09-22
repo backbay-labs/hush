@@ -395,7 +395,7 @@ export {
   type ProviderResolveOptions,
   FileProvider,
   HttpProvider,
-  DEFAULT_WATCH_INTERVAL_MS,
+  DEFAULT_SENTINEL_INTERVAL_MS,
 } from './policy-provider.js';
 export {
   ObservableEvaluator,

@@ -5,12 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-from generator_support import rustfmt
+from generator_support import gofmt, rustfmt
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -224,18 +222,7 @@ def render_go() -> str:
         lines.extend(["}", ""])
 
     content = "\n".join(lines).rstrip() + "\n"
-    gofmt = shutil.which("gofmt")
-    if gofmt is None:
-        return content
-
-    result = subprocess.run(
-        [gofmt],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return gofmt(content)
 
 
 def render_rust() -> str:
