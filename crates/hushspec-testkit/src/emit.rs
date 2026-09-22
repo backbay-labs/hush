@@ -163,8 +163,15 @@ pub fn build_regression_fixture(
             "expect".to_string(),
             serde_json::Value::Object(expect.clone()),
         );
+        // `expect.rule_trace` and `expect.receipt` are 0.2.0 members, so a
+        // fixture that pins either declares the format that defines them.
+        let version = if expect.contains_key("rule_trace") || expect.contains_key("receipt") {
+            "0.2.0"
+        } else {
+            "0.1.0"
+        };
         serde_json::json!({
-            "hushspec_test": "0.1.0",
+            "hushspec_test": version,
             "description": format!(
                 "auto-minimized differential regression (sdk {}, seed {seed}, kind {kind_slug})",
                 min.sdk
@@ -203,15 +210,14 @@ pub fn build_regression_fixture(
 
     let fixture = render(&expect);
 
-    // The evaluator accepts any string as `action.type`, silently falling
-    // through to Allow for ones it doesn't recognize (see
-    // `hushspec::evaluate`). The fuzz generator can and does produce such
-    // actions, so a divergence can be reproduced with an action the reference
-    // happily evaluated but that the evaluator-test schema -- a closed enum
-    // of known action types -- rejects. Emitting that fixture anyway would
-    // hand the caller a fixture that is permanently red for a reason
-    // unrelated to the real regression. Validate against the exact schema
-    // the conformance runner uses and fail closed instead of emitting.
+    // The evaluator-test schema closes every object with
+    // `additionalProperties: false`, so a case or `expect` carrying a member
+    // the schema does not define is rejected outright. The fuzz generator can
+    // produce a case the evaluators all handled but whose emitted shape the
+    // schema refuses; emitting it anyway would hand the caller a fixture that
+    // is permanently red for a reason unrelated to the real regression.
+    // Validate against the exact schema the conformance runner uses and fail
+    // closed instead of emitting.
     if let Err(message) = crate::runner::validate_evaluator_schema(&fixture) {
         return Err(DiffError::Config(format!(
             "refusing to emit a fixture that would fail the evaluator-test schema: {message}"
@@ -376,6 +382,24 @@ mod tests {
             .get("g0001/a0001")
             .expect("case present")
             .clone()
+    }
+
+    /// `expect.rule_trace` and `expect.receipt` are 0.2.0 members, so a
+    /// fixture that pins either declares 0.2.0 and never mislabels itself as
+    /// the format that has nowhere to put them.
+    #[test]
+    fn an_emitted_fixture_declares_the_version_its_assertions_need() {
+        let min = minimized();
+        let verdict = oracle_verdict(&min);
+        let (_, yaml) = build_regression_fixture(&min, &verdict, 1729).expect("fixture builds");
+        let fixture: serde_json::Value = serde_yaml::from_str(&yaml).expect("fixture parses");
+        let expect = &fixture["cases"][0]["expect"];
+        let pins_evidence = !expect["rule_trace"].is_null() || !expect["receipt"].is_null();
+        assert_eq!(
+            fixture["hushspec_test"],
+            if pins_evidence { "0.2.0" } else { "0.1.0" },
+            "{yaml}"
+        );
     }
 
     #[test]
