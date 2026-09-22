@@ -862,6 +862,10 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - Python's typed validation refuses a negative `detection.prompt_injection.heuristics.min_score`
   as the raw validator and the other SDKs already did; only the upper bound was checked on a
   programmatically built document.
+- The HTTPS signature locator of every SDK looks for both sidecar names signing spec 7.1
+  requires, `policy.yaml.sig` first and then the `policy.sig` of a 0.1 layout; it requested only
+  the first and read its absence as unsigned, so a guard requiring signatures refused a validly
+  signed remote policy kept in the older layout.
 - The Python HTTPS loader's read timeout is one budget for the whole response. It was a
   per-receive socket timeout, so a server delivering a byte just inside every interval could
   hold a policy or signature load open indefinitely; the TLS handshake, status line, headers

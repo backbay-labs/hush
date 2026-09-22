@@ -241,6 +241,9 @@ func newHTTPTestServer(t *testing.T) *httpTestServer {
 	mux.HandleFunc("/base.yaml.sig", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, httpTestSignature)
 	})
+	mux.HandleFunc("/stem.sig", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, httpTestSignature)
+	})
 	mux.HandleFunc("/extends-builtin.yaml", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, httpTestExtendsBuiltin)
 	})
@@ -423,6 +426,40 @@ func TestFetchSignature(t *testing.T) {
 	data, found, err := FetchSignature(server.URL+"/base.yaml.sig", server.config())
 	if err != nil || !found || string(data) != httpTestSignature {
 		t.Fatalf("FetchSignature = (%q, %v, %v), want the sidecar", data, found, err)
+	}
+}
+
+// TestFetchSidecarFallsBackToTheStemSidecar covers the 0.1 layout that keeps
+// `policy.sig` beside `policy.yaml`; the preferred `policy.yaml.sig` is tried
+// first (signing spec 7.1).
+func TestFetchSidecarFallsBackToTheStemSidecar(t *testing.T) {
+	server := newHTTPTestServer(t)
+	data, found, err := FetchSidecar(server.URL+"/stem.yaml", server.config())
+	if err != nil || !found || string(data) != httpTestSignature {
+		t.Fatalf("FetchSidecar = (%q, %v, %v), want the stem sidecar", data, found, err)
+	}
+	if _, found, err := FetchSidecar(server.URL+"/absent.yaml", server.config()); err != nil || found {
+		t.Fatalf("expected no sidecar for an unsigned policy, got found=%v err=%v", found, err)
+	}
+	if _, found, err := HTTPSignatureLocator(server.config())(server.URL + "/stem.yaml"); err != nil || !found {
+		t.Fatalf("the locator must find the stem sidecar, got found=%v err=%v", found, err)
+	}
+}
+
+func TestStemSidecarURLReplacesTheLastExtensionOnly(t *testing.T) {
+	cases := map[string]string{
+		"https://policies.example/team/policy.yaml": "https://policies.example/team/policy.sig",
+		"https://policies.example/policy.yaml?v=2":  "https://policies.example/policy.sig?v=2",
+	}
+	for source, want := range cases {
+		if got, ok := stemSidecarURL(source); !ok || got != want {
+			t.Errorf("stemSidecarURL(%q) = (%q, %v), want %q", source, got, ok, want)
+		}
+	}
+	for _, source := range []string{"https://policies.example/policy", "https://policies.example"} {
+		if got, ok := stemSidecarURL(source); ok {
+			t.Errorf("stemSidecarURL(%q) = %q, want none", source, got)
+		}
 	}
 }
 

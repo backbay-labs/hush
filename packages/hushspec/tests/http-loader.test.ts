@@ -28,9 +28,11 @@ import {
   classifyStatus,
   createHttpLoader,
   createSyncHttpLoader,
+  fetchSidecar,
   fetchSignature,
   isBlockedAddress,
   resolveTarget,
+  stemSidecarUrl,
   type HttpLoaderConfig,
 } from '../src/http-loader.js';
 import { TEST_TLS_CERT } from './helpers/tls-cert.js';
@@ -366,6 +368,31 @@ describe('fetchSignature', () => {
     const server = await serve((_req, res) => res.end(envelope));
     const found = await fetchSignature(`${server.origin}/policy.yaml.sig`, testConfig());
     expect(found).toBe(envelope);
+  });
+
+  it('falls back to the stem sidecar of a 0.1 layout', async () => {
+    const envelope = '{"format_version": "0.2"}';
+    const server = await serve((req, res) => {
+      if (req.url === '/policy.sig') {
+        res.end(envelope);
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    expect(await fetchSidecar(`${server.origin}/policy.yaml`, testConfig())).toBe(envelope);
+    expect(await fetchSidecar(`${server.origin}/absent.yaml`, testConfig())).toBeNull();
+  });
+
+  it('derives the stem sidecar from the last path segment only', () => {
+    expect(stemSidecarUrl('https://policies.example/team/policy.yaml')).toBe(
+      'https://policies.example/team/policy.sig',
+    );
+    expect(stemSidecarUrl('https://policies.example/policy.yaml?v=2')).toBe(
+      'https://policies.example/policy.sig?v=2',
+    );
+    expect(stemSidecarUrl('https://policies.example/policy')).toBeNull();
+    expect(stemSidecarUrl('https://policies.example')).toBeNull();
   });
 
   it('reads a missing sidecar as unsigned, not as a failure', async () => {

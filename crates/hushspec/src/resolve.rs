@@ -1236,16 +1236,59 @@ pub mod http {
         Ok(Some(result.body.into_bytes()))
     }
 
-    /// A [`SignatureLocator`] for URL sources: `<source>.sig`, or `None` when
-    /// there is none, which is what the resolver reads as `missing_signature`.
-    /// A non-URL source is left to the caller's other locators.
+    /// The `<stem>.sig` sidecar URL signing spec 7.1 also names, for a URL
+    /// whose last path segment carries an extension: `policy.yaml` beside
+    /// `policy.sig`. `None` when there is no extension to replace, since the
+    /// candidate would then be `<source>.sig` again.
+    fn stem_sidecar_url(source: &str) -> Option<String> {
+        let (base, suffix) = source
+            .find(['?', '#'])
+            .map_or((source, ""), |at| source.split_at(at));
+        let authority = base.find("://")? + 3;
+        let path_start = authority + base[authority..].find('/')?;
+        let segment_start = base[path_start..]
+            .rfind('/')
+            .map_or(path_start, |at| path_start + at + 1);
+        let segment = &base[segment_start..];
+        let dot = segment.rfind('.').filter(|&at| at > 0)?;
+        Some(format!(
+            "{}{}.sig{suffix}",
+            &base[..segment_start],
+            &segment[..dot]
+        ))
+    }
+
+    /// Fetch the detached envelope beside a policy URL: `<source>.sig` first,
+    /// then the `<stem>.sig` sidecar of a 0.1 layout, the preference order
+    /// signing spec 7.1 makes normative. `None` when neither exists.
+    ///
+    /// # Errors
+    ///
+    /// As [`fetch_signature`].
+    pub fn fetch_sidecar(
+        source: &str,
+        config: &HttpLoaderConfig,
+    ) -> Result<Option<Vec<u8>>, ResolveError> {
+        if let Some(envelope) = fetch_signature(&format!("{source}.sig"), config)? {
+            return Ok(Some(envelope));
+        }
+        match stem_sidecar_url(source) {
+            Some(url) => fetch_signature(&url, config),
+            None => Ok(None),
+        }
+    }
+
+    /// A [`SignatureLocator`] for URL sources: the sidecar [`fetch_sidecar`]
+    /// finds, or `None` when there is none, which is what the resolver reads
+    /// as `missing_signature`. A non-URL source is left to the caller's other
+    /// locators.
     #[must_use]
     pub fn signature_locator(config: HttpLoaderConfig) -> Box<SignatureLocator> {
         Box::new(move |source: &str| {
             if !source.starts_with("https://") {
                 return Ok(None);
             }
-            fetch_signature(&format!("{source}.sig"), &config)
+            fetch_sidecar(source, &config)
         })
     }
 
@@ -1530,6 +1573,21 @@ pub mod http {
                 .expect_err("plain http should be refused")
                 .to_string();
             assert!(message.contains("only HTTPS URLs are allowed"));
+        }
+
+        #[test]
+        fn the_stem_sidecar_replaces_the_last_extension_only() {
+            assert_eq!(
+                stem_sidecar_url("https://policies.example/team/policy.yaml").as_deref(),
+                Some("https://policies.example/team/policy.sig")
+            );
+            assert_eq!(
+                stem_sidecar_url("https://policies.example/policy.yaml?v=2").as_deref(),
+                Some("https://policies.example/policy.sig?v=2")
+            );
+            assert_eq!(stem_sidecar_url("https://policies.example/policy"), None);
+            assert_eq!(stem_sidecar_url("https://policies.example"), None);
+            assert_eq!(stem_sidecar_url("https://policies.example/.yaml"), None);
         }
 
         #[test]

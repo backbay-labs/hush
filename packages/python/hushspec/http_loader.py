@@ -716,18 +716,52 @@ def fetch_signature(
     return result.body.encode("utf-8")
 
 
+def _stem_sidecar_url(source: str) -> Optional[str]:
+    """The ``<stem>.sig`` sidecar URL signing spec 7.1 also names, for a URL
+    whose last path segment carries an extension: ``policy.yaml`` beside
+    ``policy.sig``. ``None`` when there is no extension to replace, since the
+    candidate would then be ``<source>.sig`` again.
+    """
+    cut = min((source.find(mark) for mark in "?#" if mark in source), default=-1)
+    base, suffix = (source, "") if cut == -1 else (source[:cut], source[cut:])
+    scheme = base.find("://")
+    if scheme == -1 or base.find("/", scheme + 3) == -1:
+        return None
+    segment_start = base.rfind("/") + 1
+    segment = base[segment_start:]
+    dot = segment.rfind(".")
+    if dot <= 0:
+        return None
+    return f"{base[:segment_start]}{segment[:dot]}.sig{suffix}"
+
+
+def fetch_sidecar(
+    source: str, config: Optional[HttpLoaderConfig] = None
+) -> Optional[bytes]:
+    """Fetch the detached envelope beside a policy URL: ``<source>.sig`` first,
+    then the ``<stem>.sig`` sidecar of a 0.1 layout, the preference order
+    signing spec 7.1 makes normative. ``None`` when neither exists.
+    """
+    settings = config or HttpLoaderConfig()
+    preferred = fetch_signature(f"{source}.sig", settings)
+    if preferred is not None:
+        return preferred
+    stem = _stem_sidecar_url(source)
+    return None if stem is None else fetch_signature(stem, settings)
+
+
 def signature_locator(
     config: Optional[HttpLoaderConfig] = None,
 ):
     """A :data:`~hushspec.resolve.SignatureLocator` for URL sources.
 
-    Looks for ``<source>.sig`` and returns ``None`` when there is none, which
-    is what the resolver reads as `missing_signature`.
+    Returns the sidecar :func:`fetch_sidecar` finds, or ``None`` when there is
+    none, which is what the resolver reads as `missing_signature`.
     """
     settings = config or HttpLoaderConfig()
 
     def _locate(source: str) -> Optional[bytes]:
-        return fetch_signature(f"{source}.sig", settings)
+        return fetch_sidecar(source, settings)
 
     return _locate
 

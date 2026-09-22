@@ -40,13 +40,15 @@ from hushspec.http_loader import (
     CLOUD_METADATA_ADDRESSES,
     DEFAULT_MAX_SIZE,
     EtagCache,
-    HttpLoaderConfig,
     HttpLoadError,
+    HttpLoaderConfig,
     create_default_loader,
     create_http_loader,
+    fetch_sidecar,
     fetch_signature,
     install_https_loader,
     is_blocked_address,
+    signature_locator,
     validate_url,
 )
 from hushspec.canonical import content_hash
@@ -281,6 +283,8 @@ class _Server:
                     self._send(200, EXTENDS_REMOTE.encode())
                 elif self.path == "/base.yaml.sig":
                     self._send(200, SIGNATURE.encode())
+                elif self.path == "/stem.sig":
+                    self._send(200, SIGNATURE.encode())
                 elif self.path == "/oversized.yaml":
                     self._send(200, b"x" * (DEFAULT_MAX_SIZE + 10))
                 elif self.path == "/redirect.yaml":
@@ -412,6 +416,27 @@ def test_the_auth_header_is_sent(server: _Server) -> None:
 
 def test_fetches_the_sidecar_signature(server: _Server, config: HttpLoaderConfig) -> None:
     assert fetch_signature(f"{server.base}/base.yaml.sig", config) == SIGNATURE.encode()
+
+
+def test_falls_back_to_the_stem_sidecar(server: _Server, config: HttpLoaderConfig) -> None:
+    # The 0.1 layout keeps `policy.sig` beside `policy.yaml`; the preferred
+    # `policy.yaml.sig` is tried first (signing spec 7.1).
+    assert fetch_sidecar(f"{server.base}/stem.yaml", config) == SIGNATURE.encode()
+    assert signature_locator(config)(f"{server.base}/stem.yaml") == SIGNATURE.encode()
+    assert fetch_sidecar(f"{server.base}/absent.yaml", config) is None
+
+
+def test_the_stem_sidecar_replaces_the_last_extension_only() -> None:
+    from hushspec.http_loader import _stem_sidecar_url
+
+    assert _stem_sidecar_url("https://policies.example/team/policy.yaml") == (
+        "https://policies.example/team/policy.sig"
+    )
+    assert _stem_sidecar_url("https://policies.example/policy.yaml?v=2") == (
+        "https://policies.example/policy.sig?v=2"
+    )
+    assert _stem_sidecar_url("https://policies.example/policy") is None
+    assert _stem_sidecar_url("https://policies.example") is None
 
 
 def test_a_missing_signature_is_none_not_an_error(

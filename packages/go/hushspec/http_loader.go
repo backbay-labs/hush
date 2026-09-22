@@ -674,12 +674,49 @@ func FetchSignature(rawURL string, config HTTPLoaderConfig) ([]byte, bool, error
 	return []byte(result.Body), true, nil
 }
 
-// HTTPSignatureLocator is a [SignatureLocator] for URL sources: it looks for
-// `<source>.sig` and reports not-found when there is none, which is what the
-// resolver reads as `missing_signature`.
+// stemSidecarURL is the `<stem>.sig` sidecar URL signing spec 7.1 also names,
+// for a URL whose last path segment carries an extension: `policy.yaml` beside
+// `policy.sig`. It reports false when there is no extension to replace, since
+// the candidate would then be `<source>.sig` again.
+func stemSidecarURL(source string) (string, bool) {
+	base, suffix := source, ""
+	if cut := strings.IndexAny(source, "?#"); cut != -1 {
+		base, suffix = source[:cut], source[cut:]
+	}
+	scheme := strings.Index(base, "://")
+	if scheme == -1 || strings.Index(base[scheme+3:], "/") == -1 {
+		return "", false
+	}
+	segmentStart := strings.LastIndex(base, "/") + 1
+	segment := base[segmentStart:]
+	dot := strings.LastIndex(segment, ".")
+	if dot <= 0 {
+		return "", false
+	}
+	return base[:segmentStart] + segment[:dot] + ".sig" + suffix, true
+}
+
+// FetchSidecar fetches the detached envelope beside a policy URL: `<source>.sig`
+// first, then the `<stem>.sig` sidecar of a 0.1 layout, the preference order
+// signing spec 7.1 makes normative. It reports not-found when neither exists.
+func FetchSidecar(source string, config HTTPLoaderConfig) ([]byte, bool, error) {
+	data, found, err := FetchSignature(source+".sig", config)
+	if err != nil || found {
+		return data, found, err
+	}
+	stem, ok := stemSidecarURL(source)
+	if !ok {
+		return nil, false, nil
+	}
+	return FetchSignature(stem, config)
+}
+
+// HTTPSignatureLocator is a [SignatureLocator] for URL sources: it returns the
+// sidecar [FetchSidecar] finds and reports not-found when there is none, which
+// is what the resolver reads as `missing_signature`.
 func HTTPSignatureLocator(config HTTPLoaderConfig) SignatureLocator {
 	return func(source string) ([]byte, bool, error) {
-		return FetchSignature(source+".sig", config)
+		return FetchSidecar(source, config)
 	}
 }
 

@@ -5,7 +5,7 @@ import { merge } from './merge.js';
 import { parse } from './parse.js';
 import { loadBuiltin } from './builtin.js';
 import { contentHash } from './canonical.js';
-import { fetchSignature } from './http-loader.js';
+import { fetchSidecar } from './http-loader.js';
 import {
   verifyPolicy,
   type Keyring,
@@ -883,10 +883,13 @@ export function defaultSignatureLocator(source: string): string | null {
   return readSidecar(source);
 }
 
-/** {@link defaultSignatureLocator} plus `<url>.sig` for `https:` sources. */
+/**
+ * {@link defaultSignatureLocator} plus the `<url>.sig` and `<stem>.sig`
+ * sidecars for `https:` sources.
+ */
 export async function defaultAsyncSignatureLocator(source: string): Promise<string | null> {
   if (isBuiltinSource(source) || source === MEMORY_SOURCE) return null;
-  if (/^https?:\/\//i.test(source)) return fetchSignature(`${source}.sig`);
+  if (/^https?:\/\//i.test(source)) return fetchSidecar(source);
   return readSidecar(source);
 }
 

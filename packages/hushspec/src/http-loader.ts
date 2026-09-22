@@ -709,6 +709,39 @@ export function createSyncHttpLoader(
  * failure (a 500, a redirect, an oversized body) throws, because those say
  * nothing about whether a signature exists.
  */
+/**
+ * The `<stem>.sig` sidecar URL signing spec 7.1 also names, for a URL whose
+ * last path segment carries an extension: `policy.yaml` beside `policy.sig`.
+ * `null` when there is no extension to replace, since the candidate would
+ * then be `<source>.sig` again.
+ */
+export function stemSidecarUrl(source: string): string | null {
+  const cut = source.search(/[?#]/);
+  const base = cut === -1 ? source : source.slice(0, cut);
+  const suffix = cut === -1 ? '' : source.slice(cut);
+  const scheme = base.indexOf('://');
+  if (scheme === -1) return null;
+  const pathStart = base.indexOf('/', scheme + 3);
+  if (pathStart === -1) return null;
+  const segmentStart = base.lastIndexOf('/') + 1;
+  const segment = base.slice(segmentStart);
+  const dot = segment.lastIndexOf('.');
+  if (dot <= 0) return null;
+  return `${base.slice(0, segmentStart)}${segment.slice(0, dot)}.sig${suffix}`;
+}
+
+/**
+ * Fetch the detached envelope beside a policy URL: `<source>.sig` first, then
+ * the `<stem>.sig` sidecar of a 0.1 layout, the preference order signing spec
+ * 7.1 makes normative. `null` when neither exists.
+ */
+export async function fetchSidecar(source: string, config?: HttpLoaderConfig): Promise<string | null> {
+  const preferred = await fetchSignature(`${source}.sig`, config);
+  if (preferred !== null) return preferred;
+  const stem = stemSidecarUrl(source);
+  return stem === null ? null : fetchSignature(stem, config);
+}
+
 export async function fetchSignature(
   url: string,
   config?: HttpLoaderConfig,
@@ -733,5 +766,5 @@ export async function fetchSignature(
 export function httpSignatureLocator(
   config?: HttpLoaderConfig,
 ): (source: string) => Promise<string | null> {
-  return (source: string) => fetchSignature(`${source}.sig`, config);
+  return (source: string) => fetchSidecar(source, config);
 }
