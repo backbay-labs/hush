@@ -63,6 +63,7 @@ const BEYOND_SCHEMA_VECTORS = new Set([
   'regex-comment-group.yaml',
   'regex-lookahead.yaml',
   'regex-mid-pattern-flag.yaml',
+  'regex-negated-class-shorthand.yaml',
   'regex-open-lower-bound.yaml',
   'regex-posix-bracket.yaml',
   'version-unsupported-minor.yaml',
