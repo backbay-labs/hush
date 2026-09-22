@@ -252,6 +252,56 @@ fn dry_run_never_writes_and_previews_what_fix_would_do() {
     );
 }
 
+/// `--dry-run` writes nothing, so its report and exit code must describe the
+/// file on disk: the findings it still holds, and no applied fixes.
+#[test]
+fn dry_run_reports_the_document_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("dupe.yaml");
+    std::fs::write(
+        &policy,
+        "hushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n",
+    )
+    .unwrap();
+
+    let dry_run = Command::cargo_bin("h2h")
+        .unwrap()
+        .args([
+            "lint",
+            policy.to_str().unwrap(),
+            "--dry-run",
+            "--format",
+            "json",
+            "--fail-on-warnings",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        dry_run.status.code(),
+        Some(1),
+        "the unwritten document still holds the warning"
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&dry_run.stdout).expect("json lint report");
+    let file = &report[0];
+    assert_eq!(
+        file["fixed"].as_array().map(Vec::len),
+        Some(0),
+        "nothing was written, so nothing was fixed: {file}"
+    );
+    let codes: Vec<&str> = file["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter_map(|finding| finding["code"].as_str())
+        .collect();
+    assert!(
+        codes.contains(&"L008"),
+        "the duplicate is still in the file: {codes:?}"
+    );
+}
+
 #[test]
 fn fix_and_dry_run_are_mutually_exclusive() {
     let dir = tempfile::tempdir().unwrap();

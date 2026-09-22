@@ -435,13 +435,21 @@ pub fn run(args: LintArgs) -> i32 {
                             );
                         }
                     }
-                } else if matches!(args.format, LintOutputFormat::Text) {
+                } else {
                     // --dry-run: never write, just show what would change.
-                    let original_normalized = crate::cmd_fmt::normalize_trailing_newline(&content);
-                    println!(
-                        "{}",
-                        crate::cmd_fmt::compute_diff(&original_normalized, &formatted, path)
-                    );
+                    if matches!(args.format, LintOutputFormat::Text) {
+                        let original_normalized =
+                            crate::cmd_fmt::normalize_trailing_newline(&content);
+                        println!(
+                            "{}",
+                            crate::cmd_fmt::compute_diff(&original_normalized, &formatted, path)
+                        );
+                    }
+                    // The report and the exit code describe the document on
+                    // disk, which still holds every finding: nothing was
+                    // written, so nothing was fixed.
+                    findings = pre_fix_findings;
+                    fixed_codes = Vec::new();
                 }
             } else if args.dry_run && matches!(args.format, LintOutputFormat::Text) {
                 println!("{} {display} nothing to fix", "ok".green());
