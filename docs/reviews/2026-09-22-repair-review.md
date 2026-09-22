@@ -162,3 +162,7 @@ Scoped verdict: ready to commit the DNS follow-up and proceed to exact-commit ho
 The coordinator's full Rust workspace run passed 1,028 tests with zero failures and one ignored benchmark. Four additional DNS tests were then included in the final 294-test core run and a workspace recheck: 1,031 passed, zero failed, one ignored, with only the already-passing 295-second CLI policy-neutrality test filtered from that repeat. TypeScript passed all 2,328 tests, build, lint, and coverage; Python passed 3,031 with the same four intentional pre-document skips; Go passed its full suite, vet, and race-enabled deadline regressions. MSRV 1.88, all-features clippy, no-default-features, generators, formatting, workflow lint, and documentation checks passed.
 
 Both full and runtime-only npm audits remain clean after the Vitest upgrade. Clean workspace packaging passed on `341675a`; the DNS follow-up still requires its own clean committed package check and exact-commit hosted qualification. No registry upload was performed.
+
+## Hosted qualification follow-up
+
+Clean packaging subsequently passed on `295022c`. Its hosted runs exposed two test-fixture races; the preserved failures, deterministic test-only repairs, and independent review are recorded in the [CI fixture follow-up](2026-09-22-ci-fixture-review.md). That follow-up includes local Node 20 execution and instrumented Rust tests, and requires a new exact-commit hosted qualification.

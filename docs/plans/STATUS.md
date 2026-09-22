@@ -56,12 +56,12 @@
 | Log schema enforcement | Locally tested | Four SDK log checks and schema-vector generation pass. | Exact-commit hosted CI. |
 | Strict runtime timestamps | Locally tested | Four SDK condition checks pass. | Exact-commit hosted CI. |
 | MCP mapping and argument size | Locally tested | TypeScript, Python, and Go adapter-contract checks pass. | Hosted CI. |
-| First-release Rust package qualification | Locally tested | `cargo package --workspace --locked` verified all three archives on clean repair commit `341675a`; CI/Publish enforce the same command for each candidate. | Requalify the DNS follow-up's exact commit, then authorized merge/tag/publication. |
+| First-release Rust package qualification | Locally tested | `cargo package --workspace --locked` verified all three archives on clean repair commits `341675a` and `295022c`; CI/Publish enforce the same command for each candidate. | Qualify each final candidate, then authorized merge/tag/publication. |
 
 ### Local verification record
 
 - Rust: the workspace suite and final 294-test core rerun passed with zero failures; one benchmark is intentionally ignored. All-features clippy and the no-default-features build passed.
-- TypeScript: 2,328 tests plus build, lint, and V8 coverage passed after upgrading Vitest and its coverage provider to 4.1.11. Full and runtime-only npm audits report zero vulnerabilities. These local runs used Node 24; CI separately exercises Node 20.
+- TypeScript: 2,328 tests plus build, lint, and V8 coverage passed after upgrading Vitest and its coverage provider to 4.1.11. Full and runtime-only npm audits report zero vulnerabilities. Local verification passed on both Node 20.20.2 and Node 24.16.0; hosted CI remains a separate gate.
 - Python: 3,031 passed with four intentional YAML pre-document skips. Go full suite, `go vet`, and race-enabled DNS regressions passed.
 - Cross-SDK: 86 raw cases in all four SDKs, 25 runtime-time cases, 471 log-schema cases, and 500 differential groups/2,000 actions with zero mismatches passed.
 - Documentation: 35 documents × 4 SDK round-trip checks and eight executable snippets passed. MSRV 1.88 build passed.
@@ -69,6 +69,8 @@
 - Generated artifacts, schema guards, formatting, comment hygiene, workflow lint, documentation build, Cargo audit/deny, and 206 library cases with 129/129 rule coverage passed.
 
 Adapter mapping remains supplemental SDK-integration evidence, not a core conformance level. Hosted CI records results against its exact commit; this ledger does not duplicate or predict that state.
+
+The first hosted attempt exposed two test-fixture races, not a passing qualification. Their deterministic replacements, preserved assertions, and independent review are recorded in the [CI fixture follow-up](../reviews/2026-09-22-ci-fixture-review.md). This revision requires fresh hosted checks; predecessor failures are not erased by local passes.
 
 ### Resolver availability boundary
 

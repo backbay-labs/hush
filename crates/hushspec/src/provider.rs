@@ -905,23 +905,48 @@ rules:
         );
         assert!(guard.check(&action("api.example.com")).allowed());
 
+        let (changes_tx, changes_rx) = std::sync::mpsc::channel();
         let handle = PolicyWatcher::new(&path)
             .every(Duration::from_millis(20))
             .swapping_into(guard.clone())
+            .on_change(move |resolution| {
+                changes_tx
+                    .send(resolution.spec.name.clone())
+                    .expect("receiver alive");
+            })
             .start()
             .expect("starts");
+        assert_eq!(
+            changes_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("initial policy")
+                .as_deref(),
+            Some("allowing")
+        );
 
-        // A fresh mtime: some filesystems have coarse timestamps, and a
-        // same-second rewrite of the same length would otherwise look
-        // unchanged.
-        std::thread::sleep(Duration::from_millis(50));
-        write(&path, BLOCKING);
+        // Publish a complete replacement. Truncating the watched file first
+        // permits a legitimate parse refusal between create and write_all.
+        let mut replacement = tempfile::NamedTempFile::new_in(dir.path()).expect("replacement");
+        replacement.write_all(BLOCKING.as_bytes()).expect("writes");
+        replacement.as_file().sync_all().expect("syncs");
+        replacement.persist(&path).expect("atomic replacement");
 
-        eventually("the guard to follow the file", || {
-            !guard.check(&action("api.example.com")).allowed()
-        });
+        // The callback follows both the guard swap and handle publication.
+        assert_eq!(
+            changes_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("replacement policy")
+                .as_deref(),
+            Some("blocking")
+        );
+        assert!(!guard.check(&action("api.example.com")).allowed());
         assert!(handle.generation() >= 2);
-        assert_eq!(handle.errors(), 0);
+        assert_eq!(
+            handle.errors(),
+            0,
+            "unexpected refusal: {:?}",
+            handle.last_error()
+        );
         assert_eq!(handle.current().spec.name.as_deref(), Some("blocking"));
     }
 

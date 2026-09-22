@@ -23,7 +23,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import https from 'node:https';
+import net from 'node:net';
 import path from 'node:path';
+import type { AddressInfo } from 'node:net';
 import {
   CLOUD_METADATA_ADDRESSES,
   classifyStatus,
@@ -254,6 +256,24 @@ function testConfig(extra?: HttpLoaderConfig): HttpLoaderConfig {
   return { allowInsecureLoopback: true, tlsCa: TEST_TLS_CERT, ...extra };
 }
 
+/** A real IPv4 listener that deliberately never completes TLS. */
+async function startStalledTcpServer(): Promise<{ origin: string; close: () => Promise<void> }> {
+  const sockets = new Set<net.Socket>();
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    origin: `https://localhost:${port}`,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
 describe('http loader transport', () => {
   it('bounds a hung DNS lookup by the default connect budget', async () => {
     vi.useFakeTimers();
@@ -314,10 +334,7 @@ describe('http loader transport', () => {
   });
 
   it('spends DNS time from the same connect budget used by the pinned socket', async () => {
-    const server = await serve((_req, res) => {
-      // The connection timeout, rather than a response, is the behavior under test.
-      void res;
-    });
+    const server = await startStalledTcpServer();
     vi.useFakeTimers();
     try {
       let release!: (addresses: { address: string; family: number }[]) => void;
@@ -336,6 +353,7 @@ describe('http loader transport', () => {
       await rejected;
     } finally {
       vi.useRealTimers();
+      await server.close();
     }
   });
 
