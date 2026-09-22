@@ -95,7 +95,7 @@ export interface OtlpReceiptSinkOptions {
   headers?: Record<string, string>;
   /** `service.name` resource attribute. Default `hushspec`. */
   serviceName?: string;
-  /** Entries per export request. Default 32. */
+  /** Entries per export request. Default 64, as in every SDK. */
   batchSize?: number;
   /** Idle flush period in milliseconds. Default 5000; 0 disables the timer. */
   flushIntervalMs?: number;
@@ -105,19 +105,19 @@ export interface OtlpReceiptSinkOptions {
   maxQueue?: number;
   /** Retries after the first attempt, for 5xx/429/network failures. Default 3. */
   maxRetries?: number;
-  /** First backoff delay in milliseconds; doubles per attempt. Default 200. */
+  /** First backoff delay in milliseconds; doubles per attempt. Default 100, as in every SDK. */
   retryBackoffMs?: number;
   /** Export failures and queue overflow are reported here, never thrown. */
   onError?: (error: Error) => void;
 }
 
 const DEFAULT_SERVICE_NAME = 'hushspec';
-const DEFAULT_BATCH_SIZE = 32;
+const DEFAULT_BATCH_SIZE = 64;
 const DEFAULT_FLUSH_INTERVAL_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_QUEUE = 2_048;
 const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_RETRY_BACKOFF_MS = 200;
+const DEFAULT_RETRY_BACKOFF_MS = 100;
 
 /** Severity numbers from the OpenTelemetry log data model. */
 const SEVERITY_INFO = 9;
@@ -256,9 +256,30 @@ export function otlpLogsPayload(
   };
 }
 
-/** `<endpoint>/v1/logs`, without doubling a path the caller already gave. */
+/**
+ * `<endpoint>/v1/logs`, without doubling a path the caller already gave.
+ *
+ * Anything that is not HTTP(S) with a host is refused: a sink that quietly
+ * accepted a `file:` endpoint would turn a misconfiguration into evidence
+ * nobody is looking at.
+ */
 export function logsEndpoint(endpoint: string): string {
-  const trimmed = endpoint.replace(/\/+$/, '');
+  const trimmed = endpoint.trim().replace(/\/+$/, '');
+  if (trimmed === '') {
+    throw new Error('OTLP endpoint is required');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(`OTLP endpoint is not a URL: '${endpoint}'`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`OTLP endpoint must be http or https, got '${parsed.protocol}'`);
+  }
+  if (parsed.hostname === '') {
+    throw new Error(`OTLP endpoint has no host: '${endpoint}'`);
+  }
   return trimmed.endsWith('/v1/logs') ? trimmed : `${trimmed}/v1/logs`;
 }
 
@@ -297,9 +318,6 @@ export class OtlpReceiptSink implements ReceiptSink {
 
   constructor(options: OtlpReceiptSinkOptions) {
     this.url = new URL(logsEndpoint(options.endpoint));
-    if (this.url.protocol !== 'http:' && this.url.protocol !== 'https:') {
-      throw new Error(`OTLP endpoint must be http or https, got '${this.url.protocol}'`);
-    }
     this.headers = { ...(options.headers ?? {}) };
     this.serviceName = options.serviceName ?? DEFAULT_SERVICE_NAME;
     this.batchSize = Math.max(1, options.batchSize ?? DEFAULT_BATCH_SIZE);

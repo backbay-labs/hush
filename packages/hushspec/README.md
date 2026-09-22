@@ -253,7 +253,7 @@ const sink = new OtlpReceiptSink({
   endpoint: 'http://localhost:4318',
   headers: { authorization: `Bearer ${process.env.OTEL_TOKEN}` },
   serviceName: 'deploy-bot',
-  batchSize: 32,
+  batchSize: 64,
   flushIntervalMs: 5_000,
   maxQueue: 2_048,
   onError: err => console.error('[hushspec] receipt export failed', err),

@@ -55,12 +55,12 @@ __all__ = [
 #: The OTLP/HTTP logs path appended to a base endpoint.
 LOGS_PATH = "/v1/logs"
 
-_DEFAULT_BATCH_SIZE = 100
+_DEFAULT_BATCH_SIZE = 64
 _DEFAULT_FLUSH_INTERVAL_S = 5.0
 _DEFAULT_TIMEOUT_S = 10.0
 _DEFAULT_MAX_QUEUE = 2048
 _DEFAULT_MAX_RETRIES = 3
-_DEFAULT_RETRY_BACKOFF_S = 0.5
+_DEFAULT_RETRY_BACKOFF_S = 0.1
 
 #: Severity text and number per decision, as the OpenTelemetry logs data model
 #: numbers them: an allow is routine, a warn is worth a look, a denial is an

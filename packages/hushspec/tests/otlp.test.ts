@@ -144,6 +144,13 @@ describe('logsEndpoint', () => {
 
   it('rejects a non-http endpoint', () => {
     expect(() => new OtlpReceiptSink({ endpoint: 'ftp://collector' })).toThrow(/http or https/);
+    expect(() => logsEndpoint('file:///tmp/receipts')).toThrow(/http or https/);
+  });
+
+  it('rejects an endpoint with no host and an empty one', () => {
+    expect(() => logsEndpoint('')).toThrow(/required/);
+    expect(() => logsEndpoint('   ')).toThrow(/required/);
+    expect(() => logsEndpoint('collector:4318')).toThrow(/http or https|not a URL/);
   });
 });
 

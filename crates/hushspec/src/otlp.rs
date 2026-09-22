@@ -66,15 +66,18 @@
 //!   [`OtlpSink::dropped`], returns an error from `send()`, and -- with
 //!   [`OtlpSink::with_observer`] -- raises a `sink.error` observer event.
 //! - **Retries.** A `5xx` or a transport error is retried up to
-//!   [`OtlpConfig::max_retries`] times with exponential backoff. A `4xx` is
-//!   not: the collector rejected the payload and resending it will not help.
+//!   [`OtlpConfig::max_retries`] times, backing off from [`RETRY_BACKOFF`] and
+//!   doubling per attempt. A `4xx` is not: the collector rejected the payload
+//!   and resending it will not help. An export that gives up, and a batch that
+//!   will not serialize, are reported through
+//!   [`OtlpSink::with_observer`]'s observer as `sink.error`.
 //! - **Flush.** The worker exports when the batch reaches
 //!   [`OtlpConfig::batch_size`] or [`OtlpConfig::flush_interval`] elapses.
 //!   [`OtlpSink::flush`] blocks until the queue is exported, and dropping the
 //!   sink flushes and joins the worker.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -90,12 +93,21 @@ use crate::version::HUSHSPEC_VERSION;
 /// The `hushspec.sdk` resource attribute this SDK reports.
 pub const SDK_NAME: &str = "hushspec-rust";
 
+/// Entries per export request, unless [`OtlpConfig::batch_size`] says
+/// otherwise. The same value in every SDK.
+pub const DEFAULT_BATCH_SIZE: usize = 64;
+
+/// The first retry delay, doubling per attempt to a five-second ceiling. The
+/// same value in every SDK.
+pub const RETRY_BACKOFF: Duration = Duration::from_millis(100);
+
 /// How to reach the collector and how hard to try.
 #[derive(Clone, Debug)]
 pub struct OtlpConfig {
-    /// Collector base URL. `/v1/logs` is appended; a trailing slash is fine.
-    /// Plain `http` is accepted -- a collector is usually a sidecar on
-    /// loopback -- so use `https` when it is not.
+    /// Collector base URL. `/v1/logs` is appended unless the endpoint already
+    /// points at the signal; a trailing slash is fine. It must be `http` or
+    /// `https` with a host, and plain `http` is accepted -- a collector is
+    /// usually a sidecar on loopback -- so use `https` when it is not.
     pub endpoint: String,
     /// Extra request headers (an API key, a tenant id).
     pub headers: Vec<(String, String)>,
@@ -114,15 +126,15 @@ pub struct OtlpConfig {
 }
 
 impl OtlpConfig {
-    /// Defaults for `endpoint`: 64-entry batches, a 5-second flush interval, a
-    /// 10-second timeout, a 2048-entry queue, 3 retries, `service.name` of
-    /// `hushspec`.
+    /// Defaults for `endpoint`: [`DEFAULT_BATCH_SIZE`]-entry batches, a
+    /// 5-second flush interval, a 10-second timeout, a 2048-entry queue, 3
+    /// retries, `service.name` of `hushspec`.
     #[must_use]
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
             headers: Vec::new(),
-            batch_size: 64,
+            batch_size: DEFAULT_BATCH_SIZE,
             flush_interval: Duration::from_secs(5),
             timeout: Duration::from_secs(10),
             queue_capacity: 2048,
@@ -159,11 +171,48 @@ impl OtlpConfig {
         self
     }
 
-    /// The URL entries are posted to.
-    #[must_use]
-    pub fn logs_url(&self) -> String {
-        format!("{}/v1/logs", self.endpoint.trim_end_matches('/'))
+    /// The URL entries are posted to: the endpoint with `/v1/logs` appended,
+    /// unless it already points at the signal.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError::Io`] when the endpoint is empty, will not parse, is not
+    /// `http`/`https`, or names no host. A sink that quietly accepted a
+    /// `file:` endpoint would turn a misconfiguration into evidence nobody is
+    /// looking at.
+    pub fn logs_url(&self) -> Result<String, SinkError> {
+        let endpoint = self.endpoint.trim();
+        if endpoint.is_empty() {
+            return Err(endpoint_error("OTLP endpoint is required"));
+        }
+        let parsed = url::Url::parse(endpoint)
+            .map_err(|error| endpoint_error(format!("OTLP endpoint {endpoint:?}: {error}")))?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(endpoint_error(format!(
+                "OTLP endpoint must be http:// or https://, got {endpoint:?}"
+            )));
+        }
+        if parsed.host().is_none() {
+            return Err(endpoint_error(format!(
+                "OTLP endpoint has no host: {endpoint:?}"
+            )));
+        }
+        let trimmed = endpoint.trim_end_matches('/');
+        if trimmed.ends_with(LOGS_PATH) {
+            return Ok(trimmed.to_string());
+        }
+        Ok(format!("{trimmed}{LOGS_PATH}"))
     }
+}
+
+/// The signal path an OTLP/HTTP logs exporter posts to.
+const LOGS_PATH: &str = "/v1/logs";
+
+fn endpoint_error(message: impl Into<String>) -> SinkError {
+    SinkError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        message.into(),
+    ))
 }
 
 /// One thing to export, stamped with the moment the sink took it.
@@ -199,9 +248,24 @@ enum Message {
 pub struct OtlpSink {
     sender: Option<mpsc::SyncSender<Message>>,
     counters: Arc<Counters>,
-    observer: Option<Arc<dyn EvaluationObserver>>,
+    observer: SharedObserver,
     endpoint: String,
     worker: Option<std::thread::JoinHandle<()>>,
+}
+
+/// The observer the sink and its worker thread both report through. Shared
+/// because [`OtlpSink::with_observer`] is called after the worker is running.
+type SharedObserver = Arc<Mutex<Option<Arc<dyn EvaluationObserver>>>>;
+
+/// Raise a `sink.error` event for a failure the sink absorbed, naming the
+/// endpoint that could not take the entries.
+fn report(observer: &SharedObserver, endpoint: &str, error: impl Into<String>) {
+    let Ok(slot) = observer.lock() else {
+        return;
+    };
+    if let Some(observer) = slot.as_ref() {
+        observer.on_error(&ErrorEvent::sink_error(error, Some(endpoint.to_string())));
+    }
 }
 
 #[derive(Debug, Default)]
@@ -226,8 +290,9 @@ impl OtlpSink {
     ///
     /// # Errors
     ///
-    /// [`SinkError::Io`] when the HTTP client or the worker thread cannot be
-    /// created.
+    /// [`SinkError::Io`] when the endpoint is not a usable URL (see
+    /// [`OtlpConfig::logs_url`]), or when the HTTP client or the worker thread
+    /// cannot be created.
     pub fn new(endpoint: impl Into<String>) -> Result<Self, SinkError> {
         Self::with_config(OtlpConfig::new(endpoint))
     }
@@ -238,24 +303,38 @@ impl OtlpSink {
     ///
     /// As [`OtlpSink::new`].
     pub fn with_config(config: OtlpConfig) -> Result<Self, SinkError> {
+        // Before the worker exists: an endpoint that cannot be posted to is a
+        // configuration error the caller sees, not a thread that fails forever.
+        let url = config.logs_url()?;
         let client = reqwest::blocking::Client::builder()
             .timeout(config.timeout)
             .build()
             .map_err(|error| SinkError::Io(std::io::Error::other(error)))?;
 
         let counters = Arc::new(Counters::default());
+        let observer: SharedObserver = Arc::new(Mutex::new(None));
         let (sender, receiver) = mpsc::sync_channel::<Message>(config.queue_capacity.max(1));
         let endpoint = config.endpoint.clone();
         let worker_counters = counters.clone();
+        let worker_observer = observer.clone();
         let worker = std::thread::Builder::new()
             .name("hushspec-otlp".to_string())
-            .spawn(move || run_worker(&receiver, &client, &config, &worker_counters))
+            .spawn(move || {
+                run_worker(
+                    &receiver,
+                    &client,
+                    &config,
+                    &url,
+                    &worker_counters,
+                    &worker_observer,
+                );
+            })
             .map_err(SinkError::Io)?;
 
         Ok(Self {
             sender: Some(sender),
             counters,
-            observer: None,
+            observer,
             endpoint,
             worker: Some(worker),
         })
@@ -264,8 +343,10 @@ impl OtlpSink {
     /// Report dropped batches and failed exports to `observer` as `sink.error`
     /// events.
     #[must_use]
-    pub fn with_observer(mut self, observer: Arc<dyn EvaluationObserver>) -> Self {
-        self.observer = Some(observer);
+    pub fn with_observer(self, observer: Arc<dyn EvaluationObserver>) -> Self {
+        if let Ok(mut slot) = self.observer.lock() {
+            *slot = Some(observer);
+        }
         self
     }
 
@@ -314,12 +395,11 @@ impl OtlpSink {
         // produced this entry. The counter and the observer make the gap
         // visible; the return value tells the caller this one is gone.
         let dropped = self.counters.dropped.fetch_add(1, Ordering::Relaxed) + 1;
-        if let Some(observer) = self.observer.as_ref() {
-            observer.on_error(&ErrorEvent::sink_error(
-                format!("OTLP queue full: {dropped} entries dropped"),
-                Some(self.endpoint.clone()),
-            ));
-        }
+        report(
+            &self.observer,
+            &self.endpoint,
+            format!("OTLP queue full: {dropped} entries dropped"),
+        );
         Err(SinkError::Io(std::io::Error::new(
             std::io::ErrorKind::WouldBlock,
             "OTLP export queue is full; entry dropped",
@@ -357,9 +437,10 @@ fn run_worker(
     receiver: &mpsc::Receiver<Message>,
     client: &reqwest::blocking::Client,
     config: &OtlpConfig,
+    url: &str,
     counters: &Counters,
+    observer: &SharedObserver,
 ) {
-    let url = config.logs_url();
     let mut batch: Vec<Entry> = Vec::with_capacity(config.batch_size);
     let mut deadline = Instant::now() + config.flush_interval;
 
@@ -369,7 +450,7 @@ fn run_worker(
             Ok(Message::Entry(entry)) => {
                 batch.push(*entry);
                 if batch.len() >= config.batch_size.max(1) {
-                    export(client, &url, config, counters, &mut batch);
+                    export(client, url, config, counters, observer, &mut batch);
                     deadline = Instant::now() + config.flush_interval;
                 }
             }
@@ -379,16 +460,16 @@ fn run_worker(
                 while let Ok(Message::Entry(entry)) = receiver.try_recv() {
                     batch.push(*entry);
                 }
-                export(client, &url, config, counters, &mut batch);
+                export(client, url, config, counters, observer, &mut batch);
                 deadline = Instant::now() + config.flush_interval;
                 let _ = ack.send(());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                export(client, &url, config, counters, &mut batch);
+                export(client, url, config, counters, observer, &mut batch);
                 deadline = Instant::now() + config.flush_interval;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                export(client, &url, config, counters, &mut batch);
+                export(client, url, config, counters, observer, &mut batch);
                 return;
             }
         }
@@ -400,6 +481,7 @@ fn export(
     url: &str,
     config: &OtlpConfig,
     counters: &Counters,
+    observer: &SharedObserver,
     batch: &mut Vec<Entry>,
 ) {
     if batch.is_empty() {
@@ -409,12 +491,21 @@ fn export(
     let payload = request_body(batch, config);
     batch.clear();
 
-    let Ok(body) = serde_json::to_vec(&payload) else {
-        counters.failed.fetch_add(count, Ordering::Relaxed);
-        return;
+    let body = match serde_json::to_vec(&payload) {
+        Ok(body) => body,
+        Err(error) => {
+            counters.failed.fetch_add(count, Ordering::Relaxed);
+            report(
+                observer,
+                &config.endpoint,
+                format!("OTLP export of {count} entries could not be serialized: {error}"),
+            );
+            return;
+        }
     };
 
-    let mut backoff = Duration::from_millis(100);
+    let mut backoff = RETRY_BACKOFF;
+    let mut failure = String::new();
     for attempt in 0..=config.max_retries {
         let mut request = client
             .post(url)
@@ -432,8 +523,12 @@ fn export(
             // The collector rejected the payload itself. Resending the same
             // bytes cannot make it acceptable, so give up rather than burn
             // retries on a permanent failure.
-            Ok(response) if response.status().is_client_error() => break,
-            Ok(_) | Err(_) => {}
+            Ok(response) if response.status().is_client_error() => {
+                failure = format!("rejected with HTTP {}", response.status().as_u16());
+                break;
+            }
+            Ok(response) => failure = format!("HTTP {}", response.status().as_u16()),
+            Err(error) => failure = error.to_string(),
         }
 
         if attempt < config.max_retries {
@@ -442,6 +537,11 @@ fn export(
         }
     }
     counters.failed.fetch_add(count, Ordering::Relaxed);
+    report(
+        observer,
+        &config.endpoint,
+        format!("OTLP export of {count} entries failed: {failure}"),
+    );
 }
 
 // --------------------------------------------------------------------------
@@ -611,6 +711,16 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::Mutex;
+
+    /// Records every `sink.error` it is told about.
+    #[derive(Default)]
+    struct Errors(Mutex<Vec<String>>);
+
+    impl EvaluationObserver for Errors {
+        fn on_error(&self, event: &ErrorEvent) {
+            self.0.lock().expect("lock").push(event.error.clone());
+        }
+    }
 
     /// A one-request-at-a-time HTTP stub that records each body it is posted.
     struct Collector {
@@ -985,15 +1095,24 @@ rules:
     }
 
     #[test]
-    fn a_full_queue_drops_rather_than_blocking_the_evaluation() {
-        #[derive(Default)]
-        struct Errors(Mutex<Vec<String>>);
-        impl EvaluationObserver for Errors {
-            fn on_error(&self, event: &ErrorEvent) {
-                self.0.lock().expect("lock").push(event.error.clone());
-            }
-        }
+    fn an_export_the_collector_rejects_reaches_the_observer() {
+        let collector = Collector::start(vec![400]);
+        let observer = Arc::new(Errors::default());
+        let sink = OtlpSink::with_config(OtlpConfig::new(&collector.endpoint).with_batch_size(1))
+            .expect("builds")
+            .with_observer(observer.clone());
 
+        sink.send(&receipt("evil.test")).expect("queued");
+        assert!(sink.flush());
+        assert_eq!(sink.failed(), 1);
+
+        let errors = observer.0.lock().expect("lock");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("HTTP 400"), "{}", errors[0]);
+    }
+
+    #[test]
+    fn a_full_queue_drops_rather_than_blocking_the_evaluation() {
         // The collector accepts every connection and never answers, so the
         // worker is held on its first request for the whole of the send loop
         // and the one-entry queue stays full however the threads are scheduled.
@@ -1074,13 +1193,49 @@ rules:
     #[test]
     fn the_logs_url_tolerates_a_trailing_slash() {
         assert_eq!(
-            OtlpConfig::new("http://collector:4318/").logs_url(),
+            OtlpConfig::new("http://collector:4318/")
+                .logs_url()
+                .expect("a collector base is a valid endpoint"),
             "http://collector:4318/v1/logs"
         );
         assert_eq!(
-            OtlpConfig::new("https://collector.example.com").logs_url(),
+            OtlpConfig::new("https://collector.example.com")
+                .logs_url()
+                .expect("a collector base is a valid endpoint"),
             "https://collector.example.com/v1/logs"
         );
+    }
+
+    #[test]
+    fn the_logs_url_is_not_appended_twice() {
+        for endpoint in [
+            "http://collector:4318/v1/logs",
+            "http://collector:4318/v1/logs/",
+        ] {
+            assert_eq!(
+                OtlpConfig::new(endpoint)
+                    .logs_url()
+                    .expect("an endpoint pointing at the signal is valid"),
+                "http://collector:4318/v1/logs",
+                "{endpoint}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_endpoint_that_is_not_http_is_refused() {
+        for endpoint in [
+            "",
+            "   ",
+            "file:///tmp/receipts",
+            "collector:4318",
+            "http://",
+        ] {
+            let error = OtlpSink::with_config(OtlpConfig::new(endpoint))
+                .err()
+                .unwrap_or_else(|| panic!("{endpoint:?} must not build a sink"));
+            assert!(matches!(error, SinkError::Io(_)), "{endpoint:?}: {error:?}");
+        }
     }
 
     #[test]
