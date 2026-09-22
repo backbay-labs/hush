@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T00:59:32Z",
+  "generated_at": "2026-09-22T02:55:12Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -160,6 +160,13 @@
     {
       "path": "fixtures/core/evaluation/egress-default-fail-closed.test.yaml",
       "sha256": "f5e79ef9ec17d37b691287df4ee5ea1f04b79f378cee774fd9711f456f7fa1f5",
+      "category": "evaluation",
+      "module": "core",
+      "level": 3
+    },
+    {
+      "path": "fixtures/core/evaluation/egress-host-case-folding.test.yaml",
+      "sha256": "c048b2f9d565558a9440b901cbf411c7bdc9f99e43ab31a00ea6b897aac7d5b1",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -2582,6 +2589,27 @@
     {
       "path": "fixtures/receipts/expected/core/egress-default-fail-closed/2.json",
       "sha256": "e2b23fcd5b21947f7e05c0cebbf89d53d4646aae8bbae0170137262a4dc59b94",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-case-folding/0.json",
+      "sha256": "bc4a01f2e103e645070e3e18e8886e207f938a57fdba58f58c32cdcc86d28aa4",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-case-folding/1.json",
+      "sha256": "5bf943e7ea237e1be5e378e98f933594ce9bb12187c2ef02cedc1e8cc1b9e4cb",
+      "category": "receipt-expected",
+      "module": "receipts",
+      "level": 4
+    },
+    {
+      "path": "fixtures/receipts/expected/core/egress-host-case-folding/2.json",
+      "sha256": "73cbb2755f448e147a7f7f8630a2b8c18007a743da75442c0f62862d09b21363",
       "category": "receipt-expected",
       "module": "receipts",
       "level": 4

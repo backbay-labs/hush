@@ -21,6 +21,8 @@ import (
 	"slices"
 	"strings"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -1497,14 +1499,24 @@ func isASCIIString(s string) bool {
 	return true
 }
 
+// unicodeLower applies the full Unicode lowercase mapping -- the one that
+// expands U+0130 to `i` plus a combining dot and writes a word-final sigma as
+// U+03C2 -- rather than the per-rune simple mapping of strings.ToLower. Host
+// normalization (core spec 3.14.2) folds case before punycode encoding, so the
+// mapping has to be the one every HushSpec SDK applies or the same target
+// reduces to a different host here than elsewhere.
+func unicodeLower(s string) string {
+	return cases.Lower(language.Und).String(s)
+}
+
 // normalizeHostLabel normalizes one host label: ASCII lowercase, or the IDNA
 // A-label (punycode) of the NFC-normalized, lowercased label when it is not
 // ASCII. No UTS-46 mapping is applied -- this is RFC 3492 punycode over NFC.
 func normalizeHostLabel(label string) (string, bool) {
 	if isASCIIString(label) {
-		return strings.ToLower(label), true
+		return asciiLower(label), true
 	}
-	folded := norm.NFC.String(strings.ToLower(label))
+	folded := norm.NFC.String(unicodeLower(label))
 	if isASCIIString(folded) {
 		return folded, true
 	}
@@ -1532,7 +1544,7 @@ func normalizeHostPattern(pattern string) string {
 		if normalized, ok := normalizeHostLabel(label); ok {
 			labels[index] = normalized
 		} else {
-			labels[index] = strings.ToLower(label)
+			labels[index] = unicodeLower(label)
 		}
 	}
 	return strings.Join(labels, ".")
