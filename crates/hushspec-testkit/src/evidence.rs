@@ -163,18 +163,31 @@ pub fn run_receipt_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
             results.push(fail(name, "receipt", 4, "unreadable".to_string()));
             continue;
         };
+        // Both layers must refuse: a receipt the schema rejects is still
+        // admitted into an engine by a parser that accepts it, and the
+        // conformance point is that the vector is refused, not that one of
+        // the two happened to catch it.
         let schema_ok = serde_json::from_str::<serde_json::Value>(&text)
             .is_ok_and(|value| schema.validate(&value).is_ok());
         let parse_ok = DecisionReceipt::parse(&text).is_ok();
-        if schema_ok && parse_ok {
+        let accepted_by: Vec<&str> = [("the schema", schema_ok), ("the parser", parse_ok)]
+            .into_iter()
+            .filter_map(|(layer, accepted)| accepted.then_some(layer))
+            .collect();
+        if accepted_by.is_empty() {
+            results.push(pass(
+                name,
+                "receipt",
+                4,
+                "refused by the schema and the parser".to_string(),
+            ));
+        } else {
             results.push(fail(
                 name,
                 "receipt",
                 4,
-                "accepted by both the schema and the parser".to_string(),
+                format!("accepted by {}", accepted_by.join(" and ")),
             ));
-        } else {
-            results.push(pass(name, "receipt", 4, "correctly rejected".to_string()));
         }
     }
 
