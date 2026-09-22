@@ -88,6 +88,13 @@ def matches_rule_path_prefix(matched_rule: str, key: str) -> bool:
 
 
 def _validate_enforcement_config(config: EnforcementConfig, observable: bool) -> None:
+    """Reject a configuration an operator would misread.
+
+    *observable* says whether a shadow decision is recorded anywhere: monitor
+    mode without an observer, or without a sink that auditing actually writes
+    receipts to, is refused, because it would silently allow everything the
+    policy denies.
+    """
     if config.mode not in _ENFORCEMENT_MODES:
         raise ValueError(f"invalid enforcement mode: {config.mode!r}")
     monitor_reachable = config.mode == "monitor"
@@ -279,13 +286,17 @@ class HushGuard:
         actor: Optional["Actor"] = None,
     ) -> None:
         config = enforcement or EnforcementConfig()
-        _validate_enforcement_config(config, observer is not None or sink is not None)
-        self._enforcement_mode = config.mode
-        self._enforcement_overrides = dict(config.overrides)
-        self._sink = sink
         if audit is None:
             from hushspec.receipt import AuditConfig
             audit = AuditConfig()
+        # A sink only counts as observability when auditing is on: with
+        # ``enabled=False`` no receipt is built, so the sink is handed nothing
+        # and the shadow decision leaves no trace at all.
+        observable = (sink is not None and audit.enabled) or observer is not None
+        _validate_enforcement_config(config, observable)
+        self._enforcement_mode = config.mode
+        self._enforcement_overrides = dict(config.overrides)
+        self._sink = sink
         self._audit = audit
         #: Who the guard evaluates for (receipt spec 4.1). Every receipt it
         #: emits carries it; an empty actor is omitted from receipts.

@@ -268,6 +268,14 @@ export function matchesRulePathPrefix(matchedRule: string, key: string): boolean
   return matchedRule.startsWith(key + '.') || matchedRule.startsWith(key + '[');
 }
 
+/**
+ * Reject a configuration an operator would misread.
+ *
+ * `observable` says whether a shadow decision is recorded anywhere: monitor
+ * mode without an observer, or without a sink that auditing actually writes
+ * receipts to, is refused, because it would silently allow everything the
+ * policy denies.
+ */
 function validateEnforcementConfig(config: EnforcementConfig, observable: boolean): void {
   const mode = config.mode ?? 'enforce';
   if (!ENFORCEMENT_MODES.has(mode)) {
@@ -401,14 +409,18 @@ export class HushGuard {
 
   constructor(policy: HushSpec, options?: HushGuardOptions) {
     const enforcementConfig = options?.enforcement ?? {};
+    const audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
+    // A sink only counts as observability when auditing is on: with
+    // `enabled: false` no receipt is built, so the sink is handed nothing and
+    // the shadow decision leaves no trace at all.
     validateEnforcementConfig(
       enforcementConfig,
-      options?.observer != null || options?.sink != null,
+      options?.observer != null || (options?.sink != null && audit.enabled),
     );
     this.enforcementMode = enforcementConfig.mode ?? 'enforce';
     this.enforcementOverrides = { ...(enforcementConfig.overrides ?? {}) };
     this.sink = options?.sink ?? null;
-    this.audit = options?.audit ?? DEFAULT_AUDIT_CONFIG;
+    this.audit = audit;
     this.actor = options?.actor;
     this.timeSource = options?.timeSource ?? 'system';
     this.resolveOptions = {

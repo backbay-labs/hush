@@ -10,6 +10,7 @@ import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
 import { activatePanic, deactivatePanic } from '../src/evaluate.js';
 import type { DecisionReceipt } from '../src/receipt.js';
+import { NullSink } from '../src/sinks.js';
 import type { ObserverEvent, EvaluationCompletedEvent } from '../src/observer.js';
 import type { EvaluationResult } from '../src/evaluate.js';
 
@@ -512,6 +513,27 @@ describe('enforcement config validation', () => {
     expect(() =>
       HushGuard.fromYaml(ALLOW_ALL_POLICY, { enforcement: { mode: 'monitor' } }),
     ).toThrow('monitor mode requires an observer or a receipt sink');
+  });
+
+  it('rejects monitor mode with a sink but no auditing', () => {
+    // With auditing off no receipt is built, so the sink is handed nothing and
+    // the shadow decision leaves no trace at all.
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        enforcement: { mode: 'monitor' },
+        sink: new NullSink(),
+        audit: { enabled: false, includeRuleTrace: false, recordDuration: false },
+      }),
+    ).toThrow('monitor mode requires an observer or a receipt sink');
+
+    // An observer still reports every decision, whatever auditing records.
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        enforcement: { mode: 'monitor' },
+        observer: noopObserver,
+        audit: { enabled: false, includeRuleTrace: false, recordDuration: false },
+      }),
+    ).not.toThrow();
   });
 
   it('rejects unknown rule names in override keys', () => {

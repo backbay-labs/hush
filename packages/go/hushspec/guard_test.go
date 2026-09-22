@@ -181,6 +181,29 @@ func TestGuardMonitorModeRequiresObservability(t *testing.T) {
 	}
 }
 
+func TestGuardMonitorModeRefusesASinkWithAuditingOff(t *testing.T) {
+	// With auditing off no receipt is built, so the sink is handed nothing and
+	// the shadow decision leaves no trace at all.
+	off := AuditConfig{Enabled: false}
+	_, err := NewGuard(guardResolution(t, guardSpec()), GuardOptions{
+		EnforcementMode: EnforcementModeMonitor,
+		Sink:            &recordingSink{},
+		Audit:           &off,
+	})
+	if err == nil || !strings.Contains(err.Error(), "monitor mode requires") {
+		t.Fatalf("an unrecorded shadow decision must not build, got %v", err)
+	}
+
+	// An observer still reports every decision, whatever auditing records.
+	if _, err := NewGuard(guardResolution(t, guardSpec()), GuardOptions{
+		EnforcementMode: EnforcementModeMonitor,
+		Observer:        &recordingObserver{},
+		Audit:           &off,
+	}); err != nil {
+		t.Fatalf("monitor mode with an observer must be accepted: %v", err)
+	}
+}
+
 func TestGuardMonitorModeRecordsWouldBlock(t *testing.T) {
 	sink := &recordingSink{}
 	guard := newTestGuard(t, GuardOptions{EnforcementMode: EnforcementModeMonitor, Sink: sink})

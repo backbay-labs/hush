@@ -22,7 +22,8 @@ from hushspec.middleware import (
     matches_rule_path_prefix,
 )
 from hushspec.observer import EvaluationObserver
-from hushspec.sinks import ReceiptSink
+from hushspec.receipt import AuditConfig
+from hushspec.sinks import NullSink, ReceiptSink
 from hushspec.parse import CoreSafeLoader, parse_or_raise
 
 
@@ -322,6 +323,25 @@ class TestEnforcementConfigValidation:
     def test_rejects_monitor_mode_without_observer_or_sink(self):
         with pytest.raises(ValueError, match="monitor mode requires an observer or a receipt sink"):
             HushGuard.from_yaml(ALLOW_ALL_POLICY, enforcement=EnforcementConfig(mode="monitor"))
+
+    def test_rejects_monitor_mode_with_a_sink_but_no_auditing(self):
+        # With auditing off no receipt is built, so the sink is handed nothing
+        # and the shadow decision leaves no trace at all.
+        with pytest.raises(ValueError, match="monitor mode requires an observer or a receipt sink"):
+            HushGuard.from_yaml(
+                ALLOW_ALL_POLICY,
+                enforcement=EnforcementConfig(mode="monitor"),
+                sink=NullSink(),
+                audit=AuditConfig(enabled=False),
+            )
+
+        # An observer still reports every decision, whatever auditing records.
+        HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            enforcement=EnforcementConfig(mode="monitor"),
+            observer=_NoopObserver(),
+            audit=AuditConfig(enabled=False),
+        )
 
     def test_rejects_unknown_rule_names_in_override_keys(self):
         with pytest.raises(ValueError, match="unknown rule in enforcement override 'rules.egres'"):

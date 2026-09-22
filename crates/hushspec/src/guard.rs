@@ -128,9 +128,10 @@ impl EnforcementConfig {
 
     /// Reject a configuration an operator would misread.
     ///
-    /// `observable` says whether a sink or observer is configured: monitor
-    /// mode without one is refused, because it would silently allow
-    /// everything the policy denies.
+    /// `observable` says whether a shadow decision is recorded anywhere:
+    /// monitor mode without an observer, or without a sink that auditing
+    /// actually writes receipts to, is refused, because it would silently
+    /// allow everything the policy denies.
     fn validate(&self, observable: bool) -> Result<(), GuardError> {
         let mut monitor_reachable = self.mode == EnforcementMode::Monitor;
         for (key, mode) in &self.overrides {
@@ -510,7 +511,10 @@ impl HushGuardBuilder {
     }
 
     fn finish(self, policy: GuardPolicy, panic: PanicState) -> Result<HushGuard, GuardError> {
-        let observable = self.sink.is_some() || !self.observers.is_empty();
+        // A sink only counts when auditing is on: with `enabled: false` no
+        // receipt is built, so the sink is handed nothing and the shadow
+        // decision leaves no trace at all.
+        let observable = (self.sink.is_some() && self.audit.enabled) || !self.observers.is_empty();
         self.enforcement.validate(observable)?;
 
         let Self {
@@ -1200,6 +1204,36 @@ rules:
             .sink(Box::new(NullSink))
             .build_from_policy(policy(EGRESS_POLICY))
             .expect("a sink makes monitoring observable");
+    }
+
+    #[test]
+    fn monitor_mode_with_a_sink_but_no_auditing_is_refused() {
+        // With auditing off no receipt is built, so the sink is handed nothing
+        // and the shadow decision leaves no trace at all.
+        let error = HushGuard::builder()
+            .enforcement_mode(EnforcementMode::Monitor)
+            .sink(Box::new(NullSink))
+            .audit(AuditConfig {
+                enabled: false,
+                ..AuditConfig::default()
+            })
+            .build_from_policy(policy(EGRESS_POLICY))
+            .expect_err("an unrecorded shadow decision must not build");
+        assert!(
+            matches!(&error, GuardError::Enforcement(message) if message.contains("observer")),
+            "{error}"
+        );
+
+        // An observer still reports every decision, whatever auditing records.
+        HushGuard::builder()
+            .enforcement_mode(EnforcementMode::Monitor)
+            .observer(Arc::new(MetricsCollector::new()))
+            .audit(AuditConfig {
+                enabled: false,
+                ..AuditConfig::default()
+            })
+            .build_from_policy(policy(EGRESS_POLICY))
+            .expect("an observer makes monitoring observable");
     }
 
     #[test]
