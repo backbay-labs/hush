@@ -177,6 +177,37 @@ Adapters for OpenAI (`map_openai_tool_call`), MCP (`map_mcp_tool_call`),
 LangChain (`hush_tool`) and CrewAI (`secure_tool`) ship alongside it. None of
 them import their SDK: blocks and calls are read structurally.
 
+`hush_tool` and `secure_tool` treat an ordinary function as a `tool_call`: the
+tool name is the target and `args_size` is the canonical JSON size of the
+actual positional and keyword arguments, after binding defaults and excluding a
+bound method's receiver. A function that performs a command,
+file, or network operation must say how its invocation maps to that action;
+the decorators do not guess from its Python name. The mapper receives
+`(args, kwargs)` and returns an `EvaluationAction`; a missing or malformed
+mapper stops the call before its body runs.
+
+```python
+from hushspec.adapters import secure_tool
+from hushspec.evaluate import EvaluationAction
+
+@secure_tool(
+    guard,
+    action_type="shell_command",
+    action_mapper=lambda args, kwargs: EvaluationAction(
+        type="shell_command", target=args[0]
+    ),
+)
+def run_command(command: str) -> str:
+    return command
+```
+
+MCP uses the explicit contract in `fixtures/adapters/mcp-contract.json` across
+the TypeScript, Python, and Go SDKs. It accepts the documented aliases (for
+example `read_file`, `readFile`, and `cat`) and their path/content/command/URL
+keys. Alias normalization lowercases and retains only ASCII letters and digits;
+an unknown name stays a `tool_call` under the original name. Every MCP
+call whose arguments have a canonical JSON representation records `args_size`.
+
 ## Features
 
 ### Evaluation

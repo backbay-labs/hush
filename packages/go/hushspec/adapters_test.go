@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -173,49 +175,49 @@ func TestMapMCPToolCall(t *testing.T) {
 			name:      "read_file",
 			tool:      "read_file",
 			arguments: map[string]any{"path": "/etc/shadow"},
-			want:      EvaluationAction{Type: "file_read", Target: "/etc/shadow"},
+			want:      EvaluationAction{Type: "file_read", Target: "/etc/shadow", ArgsSize: intPtr(22)},
 		},
 		{
 			name:      "list_directory",
 			tool:      "list_directory",
 			arguments: map[string]any{"path": "/srv"},
-			want:      EvaluationAction{Type: "file_read", Target: "/srv"},
+			want:      EvaluationAction{Type: "file_read", Target: "/srv", ArgsSize: intPtr(15)},
 		},
 		{
 			name:      "write_file carries its payload",
 			tool:      "write_file",
 			arguments: map[string]any{"path": "/tmp/x", "content": "AKIA0123"},
-			want:      EvaluationAction{Type: "file_write", Target: "/tmp/x", Content: strPtr("AKIA0123")},
+			want:      EvaluationAction{Type: "file_write", Target: "/tmp/x", Content: strPtr("AKIA0123"), ArgsSize: intPtr(38)},
 		},
 		{
 			name:      "run_command",
 			tool:      "run_command",
 			arguments: map[string]any{"command": "curl evil.example.com"},
-			want:      EvaluationAction{Type: "shell_command", Target: "curl evil.example.com"},
+			want:      EvaluationAction{Type: "shell_command", Target: "curl evil.example.com", ArgsSize: intPtr(35)},
 		},
 		{
 			name:      "execute",
 			tool:      "execute",
 			arguments: map[string]any{"command": "make"},
-			want:      EvaluationAction{Type: "shell_command", Target: "make"},
+			want:      EvaluationAction{Type: "shell_command", Target: "make", ArgsSize: intPtr(18)},
 		},
 		{
 			name:      "fetch is egress against the host",
 			tool:      "fetch",
 			arguments: map[string]any{"url": "https://api.github.com/repos"},
-			want:      EvaluationAction{Type: "egress", Target: "api.github.com"},
+			want:      EvaluationAction{Type: "egress", Target: "api.github.com", ArgsSize: intPtr(38)},
 		},
 		{
 			name:      "http_request with a port",
 			tool:      "http_request",
 			arguments: map[string]any{"url": "http://internal.example.com:8080/x"},
-			want:      EvaluationAction{Type: "egress", Target: "internal.example.com"},
+			want:      EvaluationAction{Type: "egress", Target: "internal.example.com", ArgsSize: intPtr(44)},
 		},
 		{
 			name:      "a malformed url is kept verbatim",
 			tool:      "fetch",
 			arguments: map[string]any{"url": "not a url"},
-			want:      EvaluationAction{Type: "egress", Target: "not a url"},
+			want:      EvaluationAction{Type: "egress", Target: "not a url", ArgsSize: intPtr(19)},
 		},
 		{
 			name:      "unknown tools are tool calls",
@@ -246,6 +248,41 @@ func TestMapMCPToolCall(t *testing.T) {
 			got := MapMCPToolCall(c.tool, c.arguments)
 			if !actionsEqual(got, c.want) {
 				t.Fatalf("got %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestMCPMappingContract(t *testing.T) {
+	// The cross-SDK adapter contract is intentionally literal: changing an
+	// alias, extraction key, or unknown-tool branch must break this test.
+	bytes, err := os.ReadFile(filepath.Join("..", "..", "..", "fixtures", "adapters", "mcp-contract.json"))
+	if err != nil {
+		t.Fatalf("read MCP mapping contract: %v", err)
+	}
+	var cases []struct {
+		Name      string         `json:"name"`
+		Tool      string         `json:"tool"`
+		Arguments map[string]any `json:"arguments"`
+		Expect    struct {
+			Type     string  `json:"type"`
+			Target   string  `json:"target"`
+			Content  *string `json:"content"`
+			ArgsSize *int    `json:"args_size"`
+		} `json:"expect"`
+	}
+	if err := json.Unmarshal(bytes, &cases); err != nil {
+		t.Fatalf("parse MCP mapping contract: %v", err)
+	}
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			got := MapMCPToolCall(c.Tool, c.Arguments)
+			want := EvaluationAction{
+				Type: c.Expect.Type, Target: c.Expect.Target,
+				Content: c.Expect.Content, ArgsSize: c.Expect.ArgsSize,
+			}
+			if !actionsEqual(got, want) {
+				t.Fatalf("got %+v, want %+v", got, want)
 			}
 		})
 	}

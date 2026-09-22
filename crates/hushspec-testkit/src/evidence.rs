@@ -39,6 +39,7 @@ fn pass(path: String, category: &str, level: u8, message: String) -> VectorResul
         level: Some(level),
         status: Status::Pass,
         message: Some(message),
+        parser_failure: false,
     }
 }
 
@@ -49,6 +50,7 @@ fn fail(path: String, category: &str, level: u8, message: String) -> VectorResul
         level: Some(level),
         status: Status::Fail,
         message: Some(message),
+        parser_failure: false,
     }
 }
 
@@ -819,11 +821,13 @@ pub fn run_signed_receipt_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
 /// Every Level 4 and Level 5 vector, in corpus order.
 pub fn run_evidence(fixtures_dir: &Path) -> Vec<VectorResult> {
     let mut results = Vec::new();
+    results.extend(crate::raw_yaml::run_raw_yaml_vectors(fixtures_dir));
     results.extend(run_receipt_vectors(fixtures_dir));
     results.extend(run_expected_receipts(fixtures_dir));
     results.extend(run_signing_vectors(fixtures_dir));
     results.extend(run_signed_receipt_vectors(fixtures_dir));
     results.extend(run_log_vectors(fixtures_dir));
+    results.extend(crate::log_schema::run_log_schema_vectors(fixtures_dir));
     results.extend(run_bundle_vectors(fixtures_dir));
     results
 }

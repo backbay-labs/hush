@@ -1,11 +1,13 @@
 # RFC 07: Conditional Rules and Vertical Policy Library
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Authors:** HushSpec Core Team
 **Date:** 2026-03-15
 **HushSpec Version:** 0.1.0 (proposed additions targeting 0.2.0)
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). Conditions and eight control-tagged library policies are implemented on the open stack. The larger vertical catalog and policy-registry ambitions remain explicit deferrals; current candidate qualification is pending.
 
 ## 1. Executive Summary
 

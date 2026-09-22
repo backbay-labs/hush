@@ -26,6 +26,42 @@ use hushspec::{EvaluationAction, HushSpec, Resolution};
 
 const CLOCK_MILLIS: u64 = 1_789_473_600_000; // 2026-09-15T12:00:00.000Z
 
+#[test]
+fn schema_derived_log_entries() {
+    let vectors: serde_json::Value =
+        serde_json::from_str(include_str!("../../../fixtures/log/schema-vectors.json")).unwrap();
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../schemas/hushspec-log-entry.v1.schema.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::JSONSchema::options()
+        .with_draft(jsonschema::Draft::Draft202012)
+        .should_validate_formats(true)
+        .compile(&schema)
+        .unwrap();
+    let mut failures = Vec::new();
+    for vector in vectors.as_array().unwrap() {
+        let entry = &vector["entry"];
+        let valid = vector["valid"].as_bool().unwrap();
+        let id = vector["id"].as_str().unwrap();
+        assert_eq!(validator.is_valid(entry), valid, "schema oracle: {id}");
+        let mut unsigned = entry.clone();
+        unsigned.as_object_mut().unwrap().remove("entry_hash");
+        unsigned.as_object_mut().unwrap().remove("signature");
+        let canonical = hushspec::canonical::serialize_jcs(&unsigned).unwrap();
+        assert_eq!(
+            hushspec::canonical::digest(&canonical),
+            entry["entry_hash"],
+            "hash: {id}"
+        );
+        let result = verify_log(id, &entry.to_string(), &LogVerifyOptions::default());
+        if result.is_ok() != valid {
+            failures.push(format!("{id}: {result:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 fn repo_root() -> PathBuf {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../..")).to_path_buf()
 }

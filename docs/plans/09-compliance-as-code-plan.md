@@ -1,12 +1,14 @@
 # RFC 09: Compliance-as-Code Plan (v0.2 → v1.0)
 
-**Status:** Proposed
+**Status:** Implementation in progress; release qualification pending
 **Date:** 2026-09-14
 **HushSpec Version:** 0.1.1 → 1.0.0
 **Affects:** Specification, schemas, all four SDKs, h2h CLI, testkit, fixtures, library, CI
 **Source:** Findings from the 2026-09-14 full-repo review (spec/schema, Rust core, cross-SDK parity, tooling, evidence chain). Every item below traces to a verified finding.
 
 ---
+
+> **Current delivery status:** RFC 09 implementation is in progress on open PRs #5-10, not `main`; its reviewed baseline is `wave-6` `a0637cb`. This repair revision has a complete local verification record in [the delivery ledger](STATUS.md). Hosted CI records qualification against the exact commit. The spec/source may be declared Stable 1.0 while its release remains unmerged, untagged, and unpublished.
 
 ## 1. Goal
 
@@ -28,6 +30,17 @@ Make "agentic compliance as code" technically true: a HushSpec policy declares c
 | **M2 Evidence** | 0.3.0 | JCS `content_hash` identical across four SDKs for every fixture. Receipt v0.2. Chained log with `h2h log verify`. Signing in four SDKs with verify-on-load. `metadata.controls` in schema and library. |
 | **M3 Provable** | 0.4.0 | Versioned conformance bundle published on release with manifest. Levels 0–5 defined with report schema. `h2h report`, JUnit, SARIF. Library test suites in CI. |
 | **M4 Flagship** | 1.0.0 | Spec frozen with registries, grammars, security considerations. Parity matrix all-yes or explicitly out of scope. All packages published and resolvable. |
+
+### Milestone evidence and remaining gates (2026-09-22)
+
+The phase tables describe intended work packages. They do not turn source presence or a historical green run into milestone closure. This repair revision has a complete local verification record; milestone/release closure still requires exact-commit hosted qualification and any required merge/publication.
+
+| Milestone | Source evidence on the open stack | Why it remains open |
+|---|---|---|
+| M1 Fail-closed | Four evaluators, raw-source corpus, and strict runtime-time repairs are locally verified; `docs/src/reference/sdk-conformance.md` names the runner paths. | M1 requires the relevant packages to merge and exact-commit hosted qualification. |
+| M2 Evidence | Canonical, receipt, signing, log, and verify-on-load source/tests are present. The schema-derived log corpus is locally verified in all four SDKs. | Exact-commit hosted qualification must be recorded. |
+| M3 Provable | Raw/log corpora are scored by testkit integration tests; adapter/provider repairs and an L5 conformance report are locally verified. The [post-repair review](../reviews/2026-09-22-repair-review.md) supplements the preserved audit snapshot. | M3 still requires a versioned conformance bundle publication; hosted CI remains pending. |
+| M4 Flagship | Spec/registry/grammar/security artifacts and release workflow repairs are present; a dirty-worktree package gate verified all three archives. | PRs #5-10 are open; the clean package command, hosted CI, merge, tag, and registry publication are required. |
 
 ---
 
@@ -171,14 +184,16 @@ Rust lands first in each SDK-touching package because the testkit and difftest u
 
 ## 12. Definition of "flagship"
 
-- [ ] No fail-open path: unknown action, eval-time regex failure, unresolvable extends, unverified signature, unknown condition block all deny.
-- [ ] Spec and reference evaluator agree on every MUST; each MUST has a published vector.
-- [ ] Same policy → same `content_hash` in Rust, TypeScript, Python, Go.
-- [ ] Receipt carries policy hash, chain hashes, signature status, actor, recorded rule trace, detection trace, enforcement disposition.
-- [ ] Log is tamper-evident and verifiable offline with `h2h log verify`.
-- [ ] Policies are signed, verified on load in all SDKs, and pinned by digest across `extends`.
-- [ ] Controls are structured metadata; `h2h report` produces per-control evidence from receipts.
-- [ ] Library policies each have a control-tagged test suite that runs in CI.
-- [ ] Conformance bundle, levels 0–5, and report schema published on every release; testkit on crates.io.
-- [ ] Every SDK is installable from its registry from a clean environment; Go module resolves.
-- [ ] Spec 1.0 frozen with grammars, registries, security considerations, and a change process.
+All boxes deliberately remain blank. The pointers below show related source and test work, not acceptance evidence. A checkbox may be checked only by the change that records the repaired exact candidate, its hosted qualification, and any required publication state in [the delivery ledger](STATUS.md).
+
+- [ ] No fail-open path: unknown action, eval-time regex failure, unresolvable extends, unverified signature, unknown condition block all deny. Related source: `crates/hushspec/src/guard.rs`, `packages/hushspec/src/policy-provider.ts`; provider recovery/panic has a local verification record but still needs hosted qualification.
+- [ ] Spec and reference evaluator agree on every MUST; each MUST has a published vector. Related runners: `crates/hushspec-testkit/src/runner.rs`, `packages/hushspec/tests/shared-fixtures.test.ts`; raw-byte YAML and invalid-time vectors have a local verification record, with hosted coverage pending.
+- [ ] Same policy → same `content_hash` in Rust, TypeScript, Python, Go. Related vectors: `fixtures/core/hash/`; claim remains gated on exact-candidate cross-SDK evidence.
+- [ ] Receipt carries policy hash, chain hashes, signature status, actor, recorded rule trace, detection trace, enforcement disposition. Related source: `crates/hushspec/src/log.rs` and `crates/hushspec/src/guard.rs`; schema-invalid log payload refusal has a local verification record, with hosted qualification pending.
+- [ ] Log is tamper-evident and verifiable offline with `h2h log verify`. Related tests: `crates/hushspec/tests/log_chain.rs`, `packages/hushspec/tests/log.test.ts`; schema-derived refusal has a local verification record, not closure.
+- [ ] Policies are signed, verified on load in all SDKs, and pinned by digest across `extends`. Related vectors: `fixtures/signing/vectors.yaml` and each SDK's verify-on-load tests; hosted exact-candidate qualification remains required.
+- [ ] Controls are structured metadata; `h2h report` produces per-control evidence from receipts. Related source: `crates/hushspec/src/report.rs`; report and controls must be qualified with the repaired candidate.
+- [ ] Library policies each have a control-tagged test suite that runs in CI. Related corpus: `fixtures/library/`; CI must be run and recorded for the exact candidate.
+- [ ] Conformance bundle, levels 0–5, and report schema published on every release; testkit on crates.io. Related source does not substitute for a released bundle or crate publication.
+- [ ] Every SDK is installable from its registry from a clean environment; Go module resolves. No 1.0 artifact is published. The repair revision changes first-release prepublication verification to `cargo package --workspace --locked`; that command and post-publication installation checks remain required.
+- [ ] Spec 1.0 frozen with grammars, registries, security considerations, and a change process. Source artifacts exist, but stack merge, exact-SHA qualification, tag, and authorized release are required.

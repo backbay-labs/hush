@@ -507,12 +507,39 @@ fn day_abbreviation(day: u32) -> &'static str {
 /// Returns `(hour, minute, day_of_week)` where day_of_week is 0=Mon..6=Sun.
 fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Option<(u8, u8, u32)> {
     use chrono::{Datelike, FixedOffset, NaiveDateTime, Timelike, Utc};
+    use regex::Regex;
     use std::str::FromStr;
 
     let utc_now = if let Some(ref time_str) = context.current_time {
+        let parts = Regex::new(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):([0-9]{2}))?$")
+            .ok()?
+            .captures(time_str)?;
+        let year = parts.get(1)?.as_str().parse::<i32>().ok()?;
+        let hour = parts.get(4)?.as_str().parse::<u32>().ok()?;
+        let minute = parts.get(5)?.as_str().parse::<u32>().ok()?;
+        let second = parts.get(6)?.as_str().parse::<u32>().ok()?;
+        if year < 1
+            || hour > 23
+            || minute > 59
+            || second > 59
+            || parts.get(7).is_some_and(|hours| {
+                hours
+                    .as_str()
+                    .parse::<u32>()
+                    .map_or(true, |value| value > 23)
+            })
+            || parts.get(8).is_some_and(|minutes| {
+                minutes
+                    .as_str()
+                    .parse::<u32>()
+                    .map_or(true, |value| value > 59)
+            })
+        {
+            return None;
+        }
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(time_str) {
             dt.with_timezone(&Utc)
-        } else if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S") {
+        } else if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S%.f") {
             dt.and_utc()
         } else {
             return None;
@@ -520,6 +547,9 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
     } else {
         Utc::now()
     };
+    if utc_now.year() < 1 || utc_now.year() > 9999 {
+        return None;
+    }
 
     let tz = timezone.unwrap_or("UTC");
     let adjusted = if let Ok(tz) = chrono_tz::Tz::from_str(tz) {
@@ -529,6 +559,9 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
         let offset = FixedOffset::east_opt(offset_minutes.saturating_mul(60))?;
         utc_now.with_timezone(&offset)
     };
+    if adjusted.year() < 1 || adjusted.year() > 9999 {
+        return None;
+    }
     let hour = adjusted.hour() as u8;
     let minute = adjusted.minute() as u8;
     let day_of_week = adjusted.weekday().num_days_from_monday();

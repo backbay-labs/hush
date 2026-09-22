@@ -43,6 +43,9 @@ A Level 0 implementation can:
 - Parse valid HushSpec YAML documents into a structured representation
 - Reject syntactically invalid YAML, and input violating the YAML profile of core spec 2.4 (aliases, merge keys, duplicate keys, multi-document streams, `yes`/`no` booleans)
 - Reject documents missing the required `hushspec` field
+- Meets every raw YAML parse-acceptance assertion in
+  `fixtures/core/raw-yaml/scalars.json`; a missing or malformed raw corpus
+  cannot establish a passing parser result
 
 This is the minimum bar for any tool that reads HushSpec documents.
 
@@ -57,6 +60,8 @@ A Level 1 implementation additionally:
 - Validates numeric constraints (non-negative integers, positive ratios)
 - Validates regex syntax in pattern fields against the profile of core spec 3.14
 - Validates `when` conditions
+- Decodes each accepted `fixtures/core/raw-yaml/scalars.json` value without
+  rewriting the YAML source before it reaches the parser
 - Rejects every `invalid/` vector, with the error code its `.expect.yaml`
   sidecar names -- and any `message_contains` substring it names -- if the
   implementation reports codes at all
@@ -105,6 +110,8 @@ A Level 3 implementation additionally:
 - Produces a correct structured evaluation result containing at least a final `allow`, `warn`, or `deny` decision, under the semantics of core spec sections 3, 5 and 6 -- including the normalization and matching algorithms of section 3.14
 - Implements aggregation and precedence per core spec 6.1 (`deny` > `warn` > `allow`) and denies unknown action types per section 5
 - Passes every vector under `fixtures/<module>/evaluation/`: for each case the decision, plus each of `matched_rule`, `reason`, `origin_profile` and `posture` the case states. The vector format is `hushspec-evaluator-test.v1.schema.json`
+- Reproduces the fixed `example.com`/`requests: 9` decision in each raw-YAML
+  vector that declares one
 
 This is the full engine level. All four HushSpec SDKs pass it, and go on to
 Levels 4 and 5; Clawdstrike is a Level 3 implementation.
@@ -129,6 +136,8 @@ A Level 4 implementation additionally:
   `fixtures/receipts/invalid/` one
 - Resolves `extends` with chain provenance and digest pinning, passing
   `fixtures/core/resolve/`
+- Reproduces canonical JSON and content hashes for raw-YAML cases that declare
+  a canonical output
 
 Given a Level 4 receipt and the policy it names, a third party can recompute
 the hash, replay the trace, and get the same answer.
@@ -148,6 +157,8 @@ A Level 5 implementation additionally:
   `receipt.policy.signature`
 - Verifies a hash-linked log, identifying *which line* first breaks the chain
   for every `fixtures/log/invalid/` vector
+- Refuses every schema-derived invalid entry in
+  `fixtures/log/schema-vectors.json`
 - Signs and verifies receipts (`fixtures/receipts/signed/`)
 - Verifies policy bundles (`fixtures/bundle/vectors.yaml`)
 
@@ -195,6 +206,7 @@ fill in later. Paths are relative to
 | Content scanning on `egress` and `tool_call` | 3.4 | `core/evaluation/content-scan-egress-tool` | 3 |
 | Version acceptance (`X.Y.*`) | 10 | `core/valid/version-patch-accept`; invalid: `core/invalid/float-version` | 1 |
 | YAML profile | 2.4 | `core/invalid/yaml-alias`, `yaml-merge-key`, `yaml-duplicate-key`, `yaml-multi-doc`, `yaml-bool-yes` | 1 |
+| Raw YAML scalar spelling and decoding | 2.4, canonical 4.3 | `core/raw-yaml/scalars.json` | 0 (parse acceptance), 1 (value), 3 (decision), 4 (canonical/hash) |
 | Expected error codes on refusal | 8 (Level 1) | every `*/invalid/<name>.expect.yaml` sidecar | 1 |
 
 ### Merge and resolution

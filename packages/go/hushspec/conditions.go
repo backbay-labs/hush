@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ const MaxNestingDepth = 8
 
 // DayAbbreviations are the day names accepted in time_window.days.
 var DayAbbreviations = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+
+var runtimeTimestampPattern = regexp.MustCompile(`^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$`)
 
 // TimeWindowCondition holds a rule block active only inside a daily window,
 // optionally restricted to named days (core spec 3.13). A window the engine
@@ -560,6 +563,9 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 	var t time.Time
 
 	if context.CurrentTime != "" {
+		if !isStrictRuntimeTimestamp(context.CurrentTime) {
+			return nil
+		}
 		parsed, err := time.Parse(time.RFC3339, context.CurrentTime)
 		if err != nil {
 			// Try alternate format
@@ -570,6 +576,9 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 			parsed = parsed.UTC()
 		}
 		t = parsed.UTC()
+		if t.Year() < 1 || t.Year() > 9999 {
+			return nil
+		}
 	} else {
 		t = time.Now().UTC()
 	}
@@ -585,6 +594,9 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 		return nil
 	}
 	t = t.In(location)
+	if t.Year() < 1 || t.Year() > 9999 {
+		return nil
+	}
 
 	hour := t.Hour()
 	minute := t.Minute()
@@ -597,6 +609,58 @@ func resolveCurrentTimeForCondition(context *RuntimeContext, tz *string) []int {
 	}
 
 	return []int{hour, minute, dayOfWeek}
+}
+
+// isStrictRuntimeTimestamp checks the runtime-context timestamp before the Go
+// parser can normalize an invalid offset into a different instant. The
+// zoneless form remains supported and is interpreted as UTC below.
+func isStrictRuntimeTimestamp(value string) bool {
+	parts := runtimeTimestampPattern.FindStringSubmatch(value)
+	if parts == nil {
+		return false
+	}
+	year := fourDigits(parts[1])
+	month := twoDigits(parts[2])
+	day := twoDigits(parts[3])
+	hour := twoDigits(parts[4])
+	minute := twoDigits(parts[5])
+	second := twoDigits(parts[6])
+	return year >= 1 && month >= 1 && month <= 12 &&
+		day >= 1 && day <= daysInRuntimeMonth(year, month) &&
+		hour <= 23 && minute <= 59 && second <= 59 &&
+		validRuntimeOffset(value)
+}
+
+func twoDigits(value string) int {
+	return int(value[0]-'0')*10 + int(value[1]-'0')
+}
+
+func fourDigits(value string) int {
+	return int(value[0]-'0')*1000 + int(value[1]-'0')*100 + int(value[2]-'0')*10 + int(value[3]-'0')
+}
+
+func daysInRuntimeMonth(year, month int) int {
+	if month == 2 {
+		if year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+			return 29
+		}
+		return 28
+	}
+	if month == 4 || month == 6 || month == 9 || month == 11 {
+		return 30
+	}
+	return 31
+}
+
+func validRuntimeOffset(value string) bool {
+	if len(value) < 6 {
+		return true
+	}
+	offset := value[len(value)-6:]
+	if offset[0] != '+' && offset[0] != '-' {
+		return true
+	}
+	return offset[3] == ':' && twoDigits(offset[1:3]) <= 23 && twoDigits(offset[4:6]) <= 59
 }
 
 var fixedTimezoneOffsets = map[string]int{

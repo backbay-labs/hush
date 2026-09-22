@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -520,8 +521,7 @@ def _member_problem(
 ) -> Optional[str]:
     """The first way *container* departs from *members*, or ``None``.
 
-    A member the schema makes optional may be absent or ``null``; one it
-    requires may be neither.
+    Optional means absent; no declared member admits an explicit ``null``.
     """
     for member in members:
         where = f"{path}.{member.name}"
@@ -531,9 +531,7 @@ def _member_problem(
             continue
         value = container[member.name]
         if value is None:
-            if member.required:
-                return f"{where} must not be null"
-            continue
+            return f"{where} must not be null"
         if member.kind == "string":
             if not isinstance(value, str):
                 return f"{where} is not a string"
@@ -563,6 +561,19 @@ def _payload_problem(entry: dict[str, Any]) -> Optional[str]:
     whatever JSON the line held, so a hash-consistent line can still carry a
     payload missing a member an auditor reads.
     """
+    scalar_problem = _log_scalar_problem(entry)
+    if scalar_problem is not None:
+        return scalar_problem
+    if entry.get("signature") is not None:
+        problem = _member_problem(entry["signature"], (
+            _Member("format_version", "string", True, ("0.2",)),
+            _Member("algorithm", "string", True, ("ed25519",)),
+            *(_Member(name, "string", True) for name in ("key_id", "signed_at", "content_hash", "signature")),
+            *(_Member(name, "string", False) for name in ("expires_at", "policy_name", "signer")),
+            _Member("policy_version", "index", False),
+        ), "signature")
+        if problem is not None:
+            return problem
     started = entry.get("log_started")
     if isinstance(started, dict):
         problem = _member_problem(started, _LOG_STARTED_MEMBERS, "log_started")
@@ -578,6 +589,45 @@ def _payload_problem(entry: dict[str, Any]) -> Optional[str]:
     if problem is not None:
         return problem
     return _policy_summary_problem(event["policy"], "policy_event.policy")
+
+
+def _log_scalar_problem(value: Any, path: str = "") -> Optional[str]:
+    """Log-schema scalars over the original document; receipts validate separately."""
+    if value is None:
+        return f"{path} must not be null"
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if not path and key == "receipt" and child is not None:
+                continue
+            problem = _log_scalar_problem(child, f"{path}.{key}" if path else key)
+            if problem is not None:
+                return problem
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            problem = _log_scalar_problem(child, f"{path}[{index}]")
+            if problem is not None:
+                return problem
+    elif isinstance(value, str):
+        key = path.rsplit(".", 1)[-1]
+        valid = True
+        if key in ("prev_hash", "entry_hash", "content_hash", "previous_content_hash", "previous_entry_hash", "key_id"):
+            valid = re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+        elif key in ("timestamp", "signed_at", "expires_at", "verified_at"):
+            valid = re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", value) is not None
+            if valid:
+                try:
+                    datetime.fromisoformat(value[:-1] + "+00:00")
+                except ValueError:
+                    valid = False
+        elif key == "spec_version":
+            valid = re.fullmatch(r"(0|1)\.[0-9]+\.[0-9]+", value) is not None
+        elif path == "signature.signature":
+            valid = re.fullmatch(r"[A-Za-z0-9_-]{86}", value) is not None
+        elif key in ("source", "previous_file", "policy_name", "signer") or path.startswith("policy_event.sdk."):
+            valid = bool(value)
+        if not valid:
+            return f"{path} does not satisfy the log-entry schema"
+    return None
 
 
 def _policy_summary_problem(policy: dict[str, Any], path: str) -> Optional[str]:

@@ -66,12 +66,20 @@ CATEGORY_RULES: list[tuple[re.Pattern[str], str, int]] = [
     (re.compile(r"^fixtures/library/.+\.test\.yaml$"), "library-suite", 3),
     (re.compile(rf"^fixtures/(?:{MODULES})/evaluation/"), "evaluation", 3),
     (re.compile(r"^fixtures/core/hash/"), "canonical", 4),
+    # The raw source-string corpus exercises parser/value decoding. Its
+    # optional evaluator and canonical assertions are reported separately by
+    # the testkit at Levels 3 and 4.
+    (re.compile(r"^fixtures/core/raw-yaml/"), "raw-yaml", 1),
     (re.compile(r"^fixtures/receipts/expected/"), "receipt-expected", 4),
     (re.compile(r"^fixtures/receipts/signed/"), "receipt-signed", 5),
     (re.compile(r"^fixtures/receipts/"), "receipt", 4),
+    (re.compile(r"^fixtures/log/schema-vectors\.json$"), "log-schema", 5),
     (re.compile(r"^fixtures/log/"), "log", 5),
     (re.compile(r"^fixtures/signing/"), "signing", 5),
     (re.compile(r"^fixtures/bundle/"), "bundle", 5),
+    # Framework action mapping is supplemental SDK integration evidence, not
+    # a core-engine conformance requirement. It is inventoried but unscored.
+    (re.compile(r"^fixtures/adapters/"), "integration", 0),
     # Evidence-report vectors: a synthetic log and the report
     # h2h report must produce from it; Level 4 material (receipts, canonical hashes).
     (re.compile(r"^fixtures/report/"), "report", 4),

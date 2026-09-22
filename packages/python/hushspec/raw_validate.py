@@ -192,16 +192,7 @@ def _validate_top_level(obj: dict[str, Any], errors: list[str]) -> None:
         # to call unsupported.
         errors.append("hushspec: invalid type, expected a string")
     elif not isinstance(obj["hushspec"], str):
-        # Present but not a version string at all -- `hushspec: 0.1` is a YAML
-        # float, not `"0.1.0"`. The reference reports that as an unsupported
-        # version rather than as a shape error.
-        errors.append(
-            ErrorMessage(
-                "unsupported hushspec version: the `hushspec` field must be a "
-                f"three-part version string, got {obj['hushspec']!r}",
-                ERROR_UNSUPPORTED_VERSION,
-            )
-        )
+        errors.append("hushspec: invalid type, expected a version string")
     _validate_optional_string(obj, "name", errors, "name")
     _validate_optional_string(obj, "description", errors, "description")
     _validate_optional_string(obj, "extends", errors, "extends")

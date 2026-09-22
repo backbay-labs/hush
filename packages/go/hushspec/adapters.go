@@ -99,22 +99,21 @@ func MapOpenAIToolCall(name string, arguments string) EvaluationAction {
 // `run_command` and `execute` (shell_command), and `fetch` and `http_request`
 // (egress against the URL's host). Everything else is a `tool_call`.
 func MapMCPToolCall(name string, arguments map[string]any) EvaluationAction {
-	switch name {
-	case "read_file", "list_directory":
-		return EvaluationAction{Type: "file_read", Target: stringField(arguments, "path")}
-	case "write_file":
-		action := EvaluationAction{Type: "file_write", Target: stringField(arguments, "path")}
-		if content, ok := optionalStringField(arguments, "content"); ok {
+	fields := arguments
+	action := EvaluationAction{Type: "tool_call", Target: name}
+	switch normalizeMCPToolName(name) {
+	case "readfile", "read", "cat", "view", "viewfile", "listdirectory", "listdir", "ls":
+		action = EvaluationAction{Type: "file_read", Target: firstStringField(fields, "path", "filePath", "file_path", "file", "filename", "directory")}
+	case "writefile", "write", "createfile", "editfile", "edit", "appendfile", "strreplace":
+		action = EvaluationAction{Type: "file_write", Target: firstStringField(fields, "path", "filePath", "file_path", "file", "filename", "directory")}
+		if content, ok := firstOptionalStringField(fields, "content", "contents", "text", "data", "new_str", "newStr"); ok {
 			action.Content = &content
 		}
-		return action
-	case "run_command", "execute":
-		return EvaluationAction{Type: "shell_command", Target: stringField(arguments, "command")}
-	case "fetch", "http_request":
-		return EvaluationAction{Type: "egress", Target: ExtractDomain(stringField(arguments, "url"))}
+	case "bash", "sh", "shell", "exec", "execute", "executecommand", "runcommand", "terminal":
+		action = EvaluationAction{Type: "shell_command", Target: firstStringField(fields, "command", "cmd", "script")}
+	case "fetch", "webfetch", "http", "httprequest", "httpfetch", "request", "apicall":
+		action = EvaluationAction{Type: "egress", Target: ExtractDomain(firstStringField(fields, "url", "endpoint", "uri", "href"))}
 	}
-
-	action := EvaluationAction{Type: "tool_call", Target: name}
 	if arguments != nil {
 		// The caller passes a live Go map, so it goes through JSON first and
 		// is then measured canonically: `max_args_size` must mean the same
@@ -124,6 +123,16 @@ func MapMCPToolCall(name string, arguments map[string]any) EvaluationAction {
 		}
 	}
 	return action
+}
+
+func normalizeMCPToolName(name string) string {
+	var normalized strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			normalized.WriteRune(r)
+		}
+	}
+	return normalized.String()
 }
 
 // ExtractDomain is the host a URL names, reduced as the evaluator reduces an
@@ -219,6 +228,20 @@ func optionalStringField(fields map[string]any, key string) (string, bool) {
 	}
 	value, ok := fields[key].(string)
 	return value, ok
+}
+
+func firstStringField(fields map[string]any, keys ...string) string {
+	value, _ := firstOptionalStringField(fields, keys...)
+	return value
+}
+
+func firstOptionalStringField(fields map[string]any, keys ...string) (string, bool) {
+	for _, key := range keys {
+		if value, ok := optionalStringField(fields, key); ok {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 // ---------------------------------------------------------------------------

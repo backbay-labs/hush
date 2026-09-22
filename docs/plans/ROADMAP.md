@@ -1,69 +1,42 @@
 # HushSpec Master Roadmap
 
-**Version:** 1.3
-**Date:** 2026-09-15
-**Status:** Active
+**Version:** 1.3 (historical roadmap)
+**Date:** 2026-09-15; reconciled 2026-09-22
+**Status:** Historical planning record; current delivery state is [STATUS.md](STATUS.md)
 **Maintainer:** HushSpec Core Team
 
-> Verified against code on 2026-09-15, after RFC 09 Waves 0-5. Remaining work is tracked in RFC 09 (`09-compliance-as-code-plan.md`).
+> This document preserves the original RFC planning scope and older assessments. It is not a current release statement. Use [the delivery ledger](STATUS.md) for implemented-on-branch, locally tested, hosted-qualified, merged, and published states; use [RFC 09](09-compliance-as-code-plan.md) for active work packages.
 
 ---
 
-## 0. Status after RFC 09 Waves 0-5 (2026-09-15)
+## 0. Delivery status after the 2026-09-22 reconciliation
 
-**HushSpec 1.0.0 was declared on 2026-09-15.** Every specification document is Stable at 1.0.0 with the stability guarantee in `spec/versioning.md`; the `.v1.` schema lineage is canonical and the `.v0.` files are frozen; engines accept minors 0.1, 0.2, and 1.0; nine registries with drift tests, formal grammars, and a security-considerations document accompany the specs. The git tag and registry publishing remain release actions.
+**The specification/source was declared Stable 1.0; the 1.0 release is not
+merged, tagged, or published.** The reviewed baseline is `wave-6` at `a0637cb`;
+it is an open PR #10 stack above open PRs #5-9, while `main` remains `5227b89`.
+No hosted CI run existed for that baseline at review. No predecessor result
+qualifies this repair revision; hosted status belongs to checks attached to the
+eventual exact commit.
 
-Waves 0 through 5 of [RFC 09](./09-compliance-as-code-plan.md) have landed. That
-plan, not this document, is the source of truth for what remains; this section
-records where the code stands so the phases below can be read against it.
+This repair revision has a local verification record for the seven review
+findings and the cross-SDK/documentation checks in [STATUS.md](STATUS.md). The
+complete Rust workspace suite also passed. Hosted CI records its status against
+the exact commit. Merge, tag, and publication
+remain separate release gates.
 
-**Shipped in Waves 0-5:**
-
-- **The specification, declared 1.0.0.** Twelve rule blocks, three
-  extension modules, and six normative conformance levels (core spec section 8)
-  -- Levels 4 (Auditor) and 5 (Attested) are now written down rather than
-  forward-referenced. Companion
-  specifications for canonical form, decision receipts, policy signing, the
-  hash-linked log and policy bundles. The ratified conditions and guards, including
-  `when.capability`, `when.rate`, and the normative `heuristic_injection@1`
-  detector.
-- **All four SDKs at Level 5.** Rust, TypeScript, Python and Go each run the
-  whole vector corpus, including the canonical-hash, resolution, expected-receipt,
-  signing, log, receipt-signing and bundle vectors, and each asserts the
-  registered error code on every `invalid/` vector. See
-  [`docs/src/reference/sdk-conformance.md`](../src/reference/sdk-conformance.md)
-  for the per-vector evidence.
-- **The evidence chain end to end.** Canonical form (RFC 8785) and a portable
-  `content_hash`; receipt format 0.2 with a recorded rule trace; verify-on-load
-  with digest pinning; a hash-linked log that names the line it breaks on;
-  receipt signing; and DSSE/in-toto policy bundles.
-- **Runtime integration at parity.** The enforcement point (`HushGuard`, spelled
-  `Guard` in Go), enforcement modes with per-rule overrides, the refused state,
-  observers with Prometheus exposition, providers with watch/poll hot reload, an
-  OTLP receipt sink, and framework adapters in three SDKs.
-- **Tooling.** 22 `h2h` subcommands, a published conformance program
-  (`fixtures/MANIFEST.json`, the conformance-report schema, the release bundle,
-  the statement template), a GitHub Action, pre-commit hooks and a container
-  image, the eight-policy vertical library with 198 control-tagged evaluation
-  cases, and `h2h report` for compliance evidence over a window of receipts.
-
-**Not yet done:** the
-first tagged release and package-registry publication, cloud-storage policy
-loaders, and published Prometheus recording rules and alert examples. Each is
-called out in Section 8 below.
-
-**Naming note.** The CLI is `h2h`; the name `hushspec` in older sections of this
-document refers to the same binary before the rename.
+The following former "Waves 0-5" release summary was removed because it
+collapsed the source/spec Stable declaration, source presence, historical CI,
+merge, and publication into one "declared", "landed", "shipped", and
+"parity" claim. Historical phase and scope material below is retained as a
+requirements record, not current release evidence.
 
 ---
 
-This document is the single entry point for understanding the HushSpec development roadmap. It synthesizes eight RFC documents into a unified plan with phasing, dependencies, milestones, and gap coverage.
+## 1. Historical vision and gap analysis
 
----
+> **Historical snapshot:** The assertions and checkboxes in Sections 1-8 were authored for earlier planning snapshots. They are retained to preserve the original requirements, but they do not supersede the current ledger or make a release claim. In particular, a checked historical item means an artifact was reported at that time, not that the open stack is corrected, exact-SHA hosted-qualified, merged, or published.
 
-## 1. Vision Statement
-
-### Where We Are (v0.1.0)
+### Where We Were Assessing (v0.1.0)
 
 HushSpec v0.1.0 is a draft specification with four SDK implementations (Rust, TypeScript, Python, Go) that can:
 
@@ -98,7 +71,7 @@ A production-readiness assessment identified 16 gaps between HushSpec v0.1.0 and
 
 ---
 
-## 2. Gap Coverage Matrix
+## 2. Historical Gap Coverage Matrix
 
 > **Historical record, assessed 2026-09-14.** The statuses below describe the tree
 > as of that assessment and are not updated in place. Section 0 records where the
@@ -192,13 +165,13 @@ graph TD
 
 ---
 
-## 4. Phased Roadmap
+## 4. Historical Phased Roadmap
 
 > **Historical record, assessed 2026-09-14.** The phase tables below describe the
 > tree as of that assessment and are not updated in place. Section 0 records where
 > the code stands.
 
-### Phase 0: Foundation (Weeks 1-4) -- Complete
+### Phase 0: Foundation (Weeks 1-4) -- Historical assessment
 
 **Goal:** Establish the two foundational capabilities that all other work depends on: formalized extends resolution and a cross-SDK evaluation engine.
 
@@ -232,7 +205,7 @@ graph TD
 
 ---
 
-### Phase 1: Core Capabilities (Weeks 5-10) -- Complete
+### Phase 1: Core Capabilities (Weeks 5-10) -- Historical assessment
 
 **Goal:** Deliver the audit trail specification, the first CLI commands, and ReDoS protection -- the minimum capabilities needed for teams to start using HushSpec in staging environments.
 
@@ -270,7 +243,7 @@ graph TD
 
 ---
 
-### Phase 2: Developer Experience (Weeks 11-16) -- Complete
+### Phase 2: Developer Experience (Weeks 11-16) -- Historical assessment
 
 **Goal:** Complete the CLI toolchain, ship runtime integration adapters for major frameworks, and enable remote policy loading from cloud storage.
 
@@ -313,7 +286,7 @@ graph TD
 
 ---
 
-### Phase 3: Security Hardening (Weeks 17-22) -- Complete
+### Phase 3: Security Hardening (Weeks 17-22) -- Historical assessment
 
 **Goal:** Add cryptographic policy signing, emergency override capabilities, and the detection reference implementation -- making HushSpec suitable for security-critical deployments.
 
@@ -351,7 +324,7 @@ graph TD
 
 ---
 
-### Phase 4: Enterprise Features (Weeks 23-30) -- Partial
+### Phase 4: Enterprise Features (Weeks 23-30) -- Historical assessment
 
 **Goal:** Deliver enterprise governance capabilities, detection across all SDKs, conditional rules, and the initial vertical policy library.
 
@@ -430,7 +403,9 @@ graph TD
 
 ---
 
-## 5. Completed Deliverables
+## 5. Historical Deliverables Inventory
+
+> The tables below identify artifacts described by the prior plan. They are not a current "completed" ledger: refer to [STATUS.md](STATUS.md) for implementation, qualification, merge, and release states, including the unresolved defects that narrow several of these claims.
 
 ### Phase 0 -- Foundation
 
@@ -526,9 +501,9 @@ graph TD
 
 ---
 
-## 8. Success Criteria
+## 8. Historical Success Criteria
 
-HushSpec is **production-ready** when all of the following criteria are met:
+This is the original aspirational checklist, not a present-tense production-readiness declaration. Its historical checks must be read with the Section 0 boundary: current release closure requires repaired acceptance findings, hosted exact-SHA qualification, merge, and authorized publication as recorded in [STATUS.md](STATUS.md). RFC 09's flagship checklist remains deliberately blank until those gates are met.
 
 ### Specification
 

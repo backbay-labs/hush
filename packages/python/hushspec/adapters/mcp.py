@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from hushspec.evaluate import EvaluationAction, EvaluationResult, args_size_of, normalize_host
 from hushspec.middleware import HushGuard
@@ -22,39 +22,42 @@ def extract_domain(url: str) -> str:
     return normalize_host(url) or url
 
 
-def _path_action(action_type: str) -> Callable[[dict], EvaluationAction]:
-    return lambda args: EvaluationAction(
-        type=action_type, target=args.get("path", "")
+_FILE_READ_TOOLS = frozenset((
+    "readfile", "read", "cat", "view", "viewfile", "listdirectory", "listdir", "ls",
+))
+_FILE_WRITE_TOOLS = frozenset((
+    "writefile", "write", "createfile", "editfile", "edit", "appendfile", "strreplace",
+))
+_SHELL_TOOLS = frozenset((
+    "bash", "sh", "shell", "exec", "execute", "executecommand", "runcommand", "terminal",
+))
+_EGRESS_TOOLS = frozenset((
+    "fetch", "webfetch", "http", "httprequest", "httpfetch", "request", "apicall",
+))
+_PATH_KEYS = ("path", "filePath", "file_path", "file", "filename", "directory")
+_CONTENT_KEYS = ("content", "contents", "text", "data", "new_str", "newStr")
+_COMMAND_KEYS = ("command", "cmd", "script")
+_URL_KEYS = ("url", "endpoint", "uri", "href")
+
+
+def _normalize_tool_name(tool_name: str) -> str:
+    return "".join(
+        char for char in tool_name.lower()
+        if char.isascii() and char.isalnum()
     )
 
 
-def _command_action(args: dict) -> EvaluationAction:
-    return EvaluationAction(type="shell_command", target=args.get("command", ""))
+def _first_string(args: dict[str, Any], keys: tuple[str, ...]) -> str:
+    value = _first_optional_string(args, keys)
+    return "" if value is None else value
 
 
-def _fetch_action(args: dict) -> EvaluationAction:
-    return EvaluationAction(type="egress", target=extract_domain(args.get("url", "")))
-
-
-def _write_action(args: dict) -> EvaluationAction:
-    return EvaluationAction(
-        type="file_write",
-        target=args.get("path", ""),
-        content=args.get("content"),
-    )
-
-
-#: The MCP tools whose calls are a specific action rather than an opaque tool
-#: call. Built once: this is the tool-call hot path.
-_MAPPINGS: dict[str, Callable[[dict], EvaluationAction]] = {
-    "read_file": _path_action("file_read"),
-    "write_file": _write_action,
-    "list_directory": _path_action("file_read"),
-    "run_command": _command_action,
-    "execute": _command_action,
-    "fetch": _fetch_action,
-    "http_request": _fetch_action,
-}
+def _first_optional_string(args: dict[str, Any], keys: tuple[str, ...]) -> Optional[str]:
+    for key in keys:
+        value = args.get(key)
+        if isinstance(value, str):
+            return value
+    return None
 
 
 def map_mcp_tool_call(
@@ -62,19 +65,25 @@ def map_mcp_tool_call(
     args: Optional[dict[str, Any]] = None,
 ) -> EvaluationAction:
     """Map one MCP tool call onto the action a policy evaluates."""
-    mapper = _MAPPINGS.get(tool_name)
-    if mapper is not None:
-        return mapper(args or {})
-
-    return EvaluationAction(
-        type="tool_call",
-        target=tool_name,
-        # Core spec 3.7: the UTF-8 byte length of the canonical JSON. A call
-        # that carries an empty `arguments` object still carries arguments --
-        # `{}` is two bytes -- and only a call with no `arguments` member at
-        # all goes unmeasured, as it does in the TypeScript and Go adapters.
-        args_size=None if args is None else args_size_of(args),
-    )
+    fields = args or {}
+    name = _normalize_tool_name(tool_name)
+    size = None if args is None else args_size_of(args)
+    if name in _FILE_READ_TOOLS:
+        action = EvaluationAction(type="file_read", target=_first_string(fields, _PATH_KEYS))
+    elif name in _FILE_WRITE_TOOLS:
+        action = EvaluationAction(
+            type="file_write",
+            target=_first_string(fields, _PATH_KEYS),
+            content=_first_optional_string(fields, _CONTENT_KEYS),
+        )
+    elif name in _SHELL_TOOLS:
+        action = EvaluationAction(type="shell_command", target=_first_string(fields, _COMMAND_KEYS))
+    elif name in _EGRESS_TOOLS:
+        action = EvaluationAction(type="egress", target=extract_domain(_first_string(fields, _URL_KEYS)))
+    else:
+        action = EvaluationAction(type="tool_call", target=tool_name)
+    action.args_size = size
+    return action
 
 
 def create_mcp_guard(

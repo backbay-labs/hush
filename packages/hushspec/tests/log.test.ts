@@ -53,6 +53,17 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const vectorsDir = path.join(repoRoot, 'fixtures/log');
 const keysDir = path.join(repoRoot, 'fixtures/signing/keys');
 
+describe('schema-derived log entries with correct hashes', () => {
+  const cases = JSON.parse(readFileSync(path.join(vectorsDir, 'schema-vectors.json'), 'utf8')) as
+    { id: string; valid: boolean; entry: LogEntry }[];
+  for (const vector of cases) {
+    it(vector.id, () => {
+      expect(computeEntryHash(vector.entry)).toBe(vector.entry.entry_hash);
+      expect(verifyLog(vector.id, JSON.stringify(vector.entry)).ok).toBe(vector.valid);
+    });
+  }
+});
+
 const CLOCK_MILLIS = 1_789_473_600_000; // 2026-09-15T12:00:00.000Z
 const clock = () => new Date(CLOCK_MILLIS);
 
@@ -437,12 +448,11 @@ describe('verifyLog', () => {
     expect(broken.break!.line).toBe(2);
     expect(broken.break!.message).toContain('payload');
 
-    // `signature` is outside the entry hash, so a null one is simply an
-    // unsigned entry.
+    // Being outside the hash does not exempt a signature from the schema.
     const unsigned = lines.map((line) => JSON.stringify({ ...(JSON.parse(line) as object), signature: null }));
     const report = verifyLog('t', unsigned.join('\n'));
-    expect(report.ok, JSON.stringify(report.break)).toBe(true);
-    expect(report.signed).toBe(0);
+    expect(report.ok).toBe(false);
+    expect(report.break!.message).toContain('signature must not be null');
   });
 
   it('rejects an unknown field inside a policy event', () => {
@@ -611,11 +621,11 @@ describe('verifyLog', () => {
       });
     }
 
-    it('accepts an optional member set to null, as an absent one', () => {
+    it('rejects an optional member set to null', () => {
       const text = rewrittenEvent((event) => {
         event.previous_content_hash = null;
       });
-      expect(verifyLog('t', text).ok).toBe(true);
+      expect(verifyLog('t', text).ok).toBe(false);
     });
 
     it('refuses to continue a log whose last entry has a malformed payload', () => {

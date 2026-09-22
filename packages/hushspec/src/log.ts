@@ -323,8 +323,7 @@ const SIGNATURE_STATUS_MEMBERS: readonly Member[] = [
 /**
  * The first way `container` departs from `members`, or `undefined`.
  *
- * A member the schema makes optional may be absent or `null`; one it requires
- * may be neither.
+ * Optional means absent; no declared member admits an explicit `null`.
  */
 function memberProblem(
   container: Record<string, unknown>,
@@ -339,8 +338,7 @@ function memberProblem(
       continue;
     }
     if (value === null) {
-      if (member.required) return `${where} must not be null`;
-      continue;
+      return `${where} must not be null`;
     }
     switch (member.type) {
       case 'string':
@@ -380,6 +378,18 @@ function memberProblem(
  * still carry a payload missing a member an auditor reads.
  */
 function payloadProblem(entry: LogEntry): string | undefined {
+  const scalars = logScalarProblem(entry);
+  if (scalars !== undefined) return scalars;
+  if (entry.signature != null) {
+    const signature = memberProblem(entry.signature as unknown as Record<string, unknown>, [
+      { name: 'format_version', type: 'string', required: true, values: ['0.2'] },
+      { name: 'algorithm', type: 'string', required: true, values: ['ed25519'] },
+      ...['key_id', 'signed_at', 'content_hash', 'signature'].map(name => ({ name, type: 'string' as const, required: true })),
+      ...['expires_at', 'policy_name', 'signer'].map(name => ({ name, type: 'string' as const, required: false })),
+      { name: 'policy_version', type: 'index', required: false },
+    ], 'signature');
+    if (signature !== undefined) return signature;
+  }
   const started: unknown = entry.log_started;
   if (started != null) {
     const problem = memberProblem(
@@ -401,6 +411,43 @@ function payloadProblem(entry: LogEntry): string | undefined {
   );
   if (sdk !== undefined) return sdk;
   return policySummaryProblem(record.policy as Record<string, unknown>, 'policy_event.policy');
+}
+
+/** Scalar constraints from the log schema, over the actual hashed document.
+ * Receipt internals are opaque here and checked by parseReceipt separately.
+ */
+function logScalarProblem(value: unknown, path = ''): string | undefined {
+  if (value === null) return `${path} must not be null`;
+  if (Array.isArray(value)) {
+    for (const [index, child] of value.entries()) {
+      const problem = logScalarProblem(child, `${path}[${index}]`);
+      if (problem !== undefined) return problem;
+    }
+  } else if (typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if (path === '' && key === 'receipt' && child !== null) continue;
+      const problem = logScalarProblem(child, path ? `${path}.${key}` : key);
+      if (problem !== undefined) return problem;
+    }
+  } else if (typeof value === 'string') {
+    const key = path.split('.').at(-1)!;
+    let valid = true;
+    if (['prev_hash', 'entry_hash', 'content_hash', 'previous_content_hash', 'previous_entry_hash', 'key_id'].includes(key)) {
+      valid = /^sha256:[0-9a-f]{64}$/.test(value) && value.length === 71;
+    } else if (['timestamp', 'signed_at', 'expires_at', 'verified_at'].includes(key)) {
+      const instant = new Date(value);
+      valid = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+        && Number.isFinite(instant.getTime()) && instant.toISOString() === value;
+    } else if (key === 'spec_version') {
+      valid = /^(0|1)\.[0-9]+\.[0-9]+$/.test(value) && !value.endsWith('\n');
+    } else if (path === 'signature.signature') {
+      valid = /^[A-Za-z0-9_-]{86}$/.test(value) && value.length === 86;
+    } else if (['source', 'previous_file', 'policy_name', 'signer'].includes(key) || path.startsWith('policy_event.sdk.')) {
+      valid = value.length > 0;
+    }
+    if (!valid) return `${path} does not satisfy the log-entry schema`;
+  }
+  return undefined;
 }
 
 /** Why a policy identity is not a `PolicySummary`, or `undefined`. */

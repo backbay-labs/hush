@@ -97,8 +97,9 @@ fn main() {
     let failed = results.iter().filter(|r| !r.passed).count();
     let passed = results.iter().filter(|r| r.passed).count();
 
-    // The evidence-chain vectors (Levels 4 and 5) are only run when a report
-    // is asked for: they are what the report scores those levels on, and the
+    // Report mode also runs the JSON case corpora the default document walk
+    // cannot discover: raw YAML cases score Levels 1, 3, and 4, while the
+    // evidence-chain and schema-derived log cases score Levels 4 and 5. The
     // default run stays the document corpus it has always been.
     let mut report_failed = 0;
     if cli.report.is_some() {

@@ -583,6 +583,8 @@ fn scaffolded_files_carry_schema_modelines() {
             .success();
 
         let policy = fs::read_to_string(tmp.path().join(".hushspec/policy.yaml")).unwrap();
+        let parsed_policy = hushspec::HushSpec::parse(&policy).unwrap();
+        assert_eq!(parsed_policy.hushspec, env!("CARGO_PKG_VERSION"));
         assert!(
             policy.starts_with(CORE_MODELINE),
             "{preset} policy.yaml should start with the core schema modeline:\n{policy}"
@@ -590,6 +592,11 @@ fn scaffolded_files_carry_schema_modelines() {
 
         let test_content =
             fs::read_to_string(tmp.path().join(".hushspec/tests/policy.test.yaml")).unwrap();
+        let starter: serde_yaml::Value = serde_yaml::from_str(&test_content).unwrap();
+        assert_eq!(
+            starter["policy"]["hushspec"].as_str(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
         assert!(
             test_content.starts_with(TEST_MODELINE),
             "{preset} starter test should start with the evaluator-test schema modeline:\n{test_content}"

@@ -44,6 +44,9 @@ cargo clippy --workspace -- -D warnings   # lint (warnings are errors)
 
 ### TypeScript
 
+Use Node.js 20.19+ (CI uses the latest 20.x), 22.12+, or 24+ for the development toolchain.
+Vitest 4 requires a newer Node version than the SDK's Node.js 18 runtime minimum.
+
 ```bash
 npm install     # install dependencies
 npm run build   # build all packages
@@ -154,13 +157,29 @@ for the full list and directory layout). To add a new one:
 
 ## Releasing
 
-The three Rust crates depend on each other by path and by version. Package and verify them together so the path dependencies resolve locally:
+The three Rust crates depend on each other by path and by version. From a clean
+checkout, package and build their extracted archives together:
 
 ```bash
-cargo package --workspace --allow-dirty
+cargo package --workspace --locked
 ```
 
-Packaging `hushspec-cli` or `hushspec-testkit` on its own resolves `hushspec` against crates.io and fails until the library at the same version has been published; the publish workflow publishes the library first and waits for the index before publishing the CLI and the testkit. Tag the release as `v<version>` (and `packages/go/v<version>` for the Go module) only after the workflow's dry run is green.
+The CI gate and the Publish workflow's Rust dry run use this same command.
+It verifies unpublished sibling crates together without uploading them. Separate
+`cargo publish --dry-run` commands for the dependent crates cannot qualify a new
+version before the core library is available on crates.io.
+
+For an authorized publication, the Publish workflow publishes the core library
+first, waits for the registry index, then publishes the testkit and CLI. A green
+dry run is pre-publication evidence, not proof that registry installation works.
+After publication, verify installation from clean environments in every registry.
+
+Create release tags `v<version>` and `packages/go/v<version>` only after the exact
+candidate has passed CI and the Publish dry run, and publication is approved.
+The Release workflow resolves its existing tag to a commit once, runs CI on that
+commit, and builds the CLI and evidence bundles from the same commit. It does not
+substitute a green run on `main` or an earlier branch revision. CI runs on pull
+requests targeting any branch, including the stacked wave PRs.
 
 ## Reporting Bugs and Security Issues
 

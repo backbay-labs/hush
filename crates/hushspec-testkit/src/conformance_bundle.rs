@@ -161,12 +161,12 @@ vectors are the manifest entries whose `level` is at or below it.
 
 | Level | Name | What to run |
 |---|---|---|
-| 0 | Parser | every `valid/` document parses; every `invalid/` one is refused |
-| 1 | Validator | plus validation, and the error code in each `<name>.expect.yaml` |
+| 0 | Parser | every `valid/` document parses; every `invalid/` one is refused; raw-YAML parse acceptance matches `core/raw-yaml/scalars.json` |
+| 1 | Validator | plus validation, error-code sidecars, and raw-YAML decoded-value cases |
 | 2 | Merger | `*/merge/`: `base.yaml` + `child-*.yaml` must produce `expected-*.yaml` |
-| 3 | Evaluator | `*/evaluation/*.test.yaml`: every case's decision, matched rule, reason |
-| 4 | Auditor | `core/hash/`, `core/resolve/`, `receipts/` including `receipts/expected/` |
-| 5 | Attested | `signing/`, `log/`, `bundle/`, `receipts/signed/` |
+| 3 | Evaluator | `*/evaluation/*.test.yaml` plus raw-YAML decision cases |
+| 4 | Auditor | `core/hash/`, raw-YAML canonical/hash cases, `core/resolve/`, `receipts/` including `receipts/expected/` |
+| 5 | Attested | `signing/`, `log/` including `log/schema-vectors.json`, `bundle/`, `receipts/signed/` |
 
 The file formats are schema'd: evaluator tests by
 `hushspec-evaluator-test.v1.schema.json`, canonical-form vectors by

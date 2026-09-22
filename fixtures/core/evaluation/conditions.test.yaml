@@ -17,6 +17,21 @@ policy:
           timezone: "UTC"
       block: [deploy]
       default: allow
+    egress:
+      when:
+        time_window:
+          start: "09:00"
+          end: "17:00"
+          timezone: "America/New_York"
+      block: [overflow.example]
+      default: allow
+    forbidden_paths:
+      when:
+        time_window:
+          start: "09:00"
+          end: "17:00"
+          timezone: "Asia/Tokyo"
+      patterns: [/app/tz-overflow]
 cases:
   - description: "context matches: the shell block is active and denies"
     context:
@@ -59,3 +74,177 @@ cases:
       target: deploy
     expect:
       decision: allow
+  - description: "an impossible runtime calendar date is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-02-30T20:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "an out-of-range runtime offset is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14T20:00:00+24:00"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "an out-of-range runtime clock value is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14T24:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a valid leap-day instant outside the window leaves the tool block inert"
+    context:
+      current_time: "2024-02-29T20:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "a valid runtime offset is converted to the UTC window"
+    context:
+      current_time: "2026-01-14T20:00:00+05:30"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a valid zoneless runtime time remains UTC and can leave the window inert"
+    context:
+      current_time: "2026-01-14T20:00:00"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "a date-only runtime value is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a space-separated runtime value is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14 20:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a runtime value without seconds is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14T20:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a lowercase runtime separator or UTC marker is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14t20:00:00z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a leap-second runtime value is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14T20:00:60Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a runtime offset with sixty minutes is unevaluable, so the tool block stays active"
+    context:
+      current_time: "2026-01-14T20:00:00+00:60"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a year-zero runtime value is unevaluable, so the tool block stays active"
+    context:
+      current_time: "0000-01-14T20:00:00Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a long fractional runtime value is a valid instant outside the window"
+    context:
+      current_time: "2026-01-14T20:00:00.123456789Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "a zoneless fractional runtime value remains UTC and can leave the window inert"
+    context:
+      current_time: "2026-01-14T20:00:00.123"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "a runtime value with more than nine fractional digits is a valid instant outside the window"
+    context:
+      current_time: "2026-01-14T20:00:00.123456789123Z"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "a runtime offset below the supported UTC range is unevaluable, so the tool block stays active"
+    context:
+      current_time: "0001-01-01T00:00:00+01:00"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a runtime offset above the supported UTC range is unevaluable, so the tool block stays active"
+    context:
+      current_time: "9999-12-31T23:00:00-02:00"
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "a configured westward timezone below the supported range is unevaluable, so the egress block stays active"
+    context:
+      current_time: "0001-01-01T00:00:00Z"
+    action:
+      type: egress
+      target: overflow.example
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block
+  - description: "a configured eastward timezone above the supported range is unevaluable, so the path block stays active"
+    context:
+      current_time: "9999-12-31T23:00:00Z"
+    action:
+      type: file_read
+      target: /app/tz-overflow
+    expect:
+      decision: deny

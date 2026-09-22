@@ -48,6 +48,89 @@ pub(crate) fn reject_unsafe_integers(document: &Yaml) -> Result<(), String> {
     walk_integers(document, "$")
 }
 
+/// JSON Schema integer properties accept integral doubles within the portable
+/// integer range. Free-form context and number properties retain their doubles.
+pub(crate) fn normalize_integer_fields(document: &mut Yaml) -> Result<(), String> {
+    let schemas = schemas().map_err(|error| error.to_string())?;
+    if let Some(mapping) = document.as_mapping_mut() {
+        for (key, value) in mapping {
+            let Some(key) = key.as_str() else { continue };
+            if key == "extensions" {
+                if let Some(blocks) = value.as_mapping_mut() {
+                    for (name, block) in blocks {
+                        if let Some((_, _, schema)) = schemas
+                            .extensions
+                            .iter()
+                            .find(|(key, _, _)| Some(*key) == name.as_str())
+                        {
+                            normalize_integer_node(
+                                block,
+                                schema,
+                                schema,
+                                &format!("extensions.{}", name.as_str().unwrap()),
+                            )?;
+                        }
+                    }
+                }
+            } else if let Some(property) = schemas.core.get("properties").and_then(|p| p.get(key)) {
+                normalize_integer_node(value, property, &schemas.core, key)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn normalize_integer_node(
+    value: &mut Yaml,
+    schema: &Schema,
+    root: &Schema,
+    path: &str,
+) -> Result<(), String> {
+    let (schema, _) = resolve_ref(root, schema, 0).map_err(|error| error.to_string())?;
+    if schema.get("type").and_then(Schema::as_str) == Some("integer") {
+        if let Yaml::Number(number) = value
+            && number.is_f64()
+        {
+            let number = number.as_f64().unwrap();
+            if !number.is_finite() || number.abs() > MAX_SAFE_INTEGER as f64 {
+                return Err(format!(
+                    "{path}: integer field exceeds the safe range (2^53-1)"
+                ));
+            }
+            if number.fract() == 0.0 {
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    *value = Yaml::Number((number as i64).into());
+                }
+            }
+        }
+        return Ok(());
+    }
+    match value {
+        Yaml::Mapping(mapping) => {
+            for (key, child) in mapping {
+                let Some(key) = key.as_str() else { continue };
+                let property = schema
+                    .get("properties")
+                    .and_then(|p| p.get(key))
+                    .or_else(|| schema.get("additionalProperties").filter(|p| p.is_object()));
+                if let Some(property) = property {
+                    normalize_integer_node(child, property, root, &format!("{path}.{key}"))?;
+                }
+            }
+        }
+        Yaml::Sequence(items) => {
+            if let Some(item_schema) = schema.get("items") {
+                for (index, child) in items.iter_mut().enumerate() {
+                    normalize_integer_node(child, item_schema, root, &format!("{path}[{index}]"))?;
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn walk_integers(value: &Yaml, path: &str) -> Result<(), String> {
     match value {
         Yaml::Number(number) => {

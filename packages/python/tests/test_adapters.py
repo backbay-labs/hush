@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import inspect
+import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -11,8 +14,9 @@ from hushspec.adapters.anthropic import (
 from hushspec.adapters.openai import map_openai_tool_call, create_openai_guard
 from hushspec.adapters.mcp import map_mcp_tool_call, extract_domain, create_mcp_guard
 from hushspec.adapters.crewai import secure_tool
+from hushspec.adapters.langchain import hush_tool
 from hushspec.canonical import canonical_json_value
-from hushspec.evaluate import Decision
+from hushspec.evaluate import Decision, EvaluationAction
 from hushspec.middleware import HushGuard, HushSpecDenied
 
 
@@ -137,6 +141,18 @@ class TestCreateOpenAIGuard:
 
 
 class TestMapMCPToolCall:
+    def test_matches_the_shared_mcp_mapping_contract(self):
+        """Changing an alias, key, or unknown-tool branch breaks portability."""
+        corpus = json.loads(
+            (Path(__file__).parents[3] / "fixtures/adapters/mcp-contract.json").read_text()
+        )
+        for case in corpus:
+            action = map_mcp_tool_call(case["tool"], case["arguments"])
+            assert action.type == case["expect"]["type"], case["name"]
+            assert action.target == case["expect"]["target"], case["name"]
+            assert action.content == case["expect"].get("content"), case["name"]
+            assert action.args_size == case["expect"].get("args_size"), case["name"]
+
     def test_maps_read_file_to_file_read(self):
         action = map_mcp_tool_call("read_file", {"path": "/etc/hosts"})
         assert action.type == "file_read"
@@ -353,15 +369,186 @@ class TestSecureTool:
         wrapped = secure_tool(guard)(original)
         assert wrapped.__wrapped__ is original  # type: ignore[attr-defined]
 
-    def test_custom_action_type(self):
+    def test_custom_action_maps_real_positional_command_before_the_body_runs(self):
+        """Replacing the mapper with the configured function name must fail this test."""
         guard = HushGuard.from_yaml(DENY_POLICY)
+        calls: list[str] = []
 
-        @secure_tool(guard, tool_name="rm -rf /", action_type="shell_command")
-        def dangerous():
-            return "should not run"
+        @secure_tool(
+            guard,
+            action_type="shell_command",
+            action_mapper=lambda args, kwargs: EvaluationAction(
+                type="shell_command", target=args[0]
+            ),
+        )
+        def run_command(command: str) -> str:
+            calls.append(command)
+            return "ran"
 
         with pytest.raises(HushSpecDenied):
-            dangerous()
+            run_command("rm -rf /harmless")
+        assert calls == []
+
+    def test_custom_action_maps_real_keyword_path_before_the_body_runs(self):
+        """Replacing keyword binding with a function name must fail this test."""
+        guard = HushGuard.from_yaml(DENY_POLICY)
+        calls: list[str] = []
+
+        @secure_tool(
+            guard,
+            action_type="file_read",
+            action_mapper=lambda args, kwargs: EvaluationAction(
+                type="file_read", target=kwargs["path"]
+            ),
+        )
+        def read_config(*, path: str) -> str:
+            calls.append(path)
+            return "read"
+
+        with pytest.raises(HushSpecDenied):
+            read_config(path="/home/user/.ssh/id_rsa")
+        assert calls == []
+
+    def test_rejects_a_custom_action_without_an_explicit_mapper_before_the_body_runs(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+        calls: list[str] = []
+
+        @secure_tool(guard, action_type="shell_command")
+        def run_command(command: str) -> str:
+            calls.append(command)
+            return "ran"
+
+        with pytest.raises(ValueError, match="action_mapper"):
+            run_command("echo harmless")
+        assert calls == []
+
+    def test_rejects_a_malformed_custom_mapping_before_the_body_runs(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+        calls: list[str] = []
+
+        @secure_tool(
+            guard,
+            action_type="shell_command",
+            action_mapper=lambda args, kwargs: "not an action",
+        )
+        def run_command(command: str) -> str:
+            calls.append(command)
+            return "ran"
+
+        with pytest.raises(ValueError, match="EvaluationAction"):
+            run_command("echo harmless")
+        assert calls == []
+
+    def test_rejects_a_custom_mapping_without_a_target_before_the_body_runs(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+        calls: list[str] = []
+
+        @secure_tool(
+            guard,
+            action_type="shell_command",
+            action_mapper=lambda args, kwargs: EvaluationAction(type="shell_command"),
+        )
+        def run_command(command: str) -> str:
+            calls.append(command)
+            return "ran"
+
+        with pytest.raises(ValueError, match="non-empty action target"):
+            run_command("echo harmless")
+        assert calls == []
+
+    def test_preserves_async_function_semantics_while_denials_prevent_the_body(self):
+        guard = HushGuard.from_yaml(DENY_POLICY)
+        calls: list[str] = []
+
+        @secure_tool(
+            guard,
+            action_type="shell_command",
+            action_mapper=lambda args, kwargs: EvaluationAction(
+                type="shell_command", target=args[0]
+            ),
+        )
+        async def run_command(command: str) -> str:
+            calls.append(command)
+            return "ran"
+
+        assert inspect.iscoroutinefunction(run_command)
+        with pytest.raises(HushSpecDenied):
+            asyncio.run(run_command("rm -rf /harmless"))
+        assert calls == []
+
+
+class TestHushTool:
+    def test_tool_calls_measure_real_positional_and_keyword_arguments(self):
+        guard = HushGuard.from_yaml(
+            """\
+hushspec: "0.1.0"
+rules:
+  tool_access:
+    default: allow
+    max_args_size: 1
+"""
+        )
+        calls: list[tuple[str, str]] = []
+
+        @hush_tool(guard, tool_name="safe_tool")
+        def search(query: str, *, source: str) -> str:
+            calls.append((query, source))
+            return "searched"
+
+        with pytest.raises(HushSpecDenied):
+            search("needle", source="docs")
+        assert calls == []
+
+    def test_rejects_an_unmeasurable_tool_call_before_the_body_runs(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+        calls: list[object] = []
+
+        @hush_tool(guard, tool_name="safe_tool")
+        def use_value(value: object) -> str:
+            calls.append(value)
+            return "used"
+
+        with pytest.raises(ValueError, match="canonical JSON"):
+            use_value(object())
+        assert calls == []
+
+    def test_allows_a_decorated_bound_method_without_serializing_its_receiver(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+
+        class SearchTool:
+            @hush_tool(guard, tool_name="safe_tool")
+            def search(self, query: str, *, source: str = "docs") -> str:
+                return f"{source}:{query}"
+
+        assert SearchTool().search("needle") == "docs:needle"
+
+    def test_allows_a_decorated_classmethod_without_serializing_its_receiver(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+
+        class SearchTool:
+            @classmethod
+            @hush_tool(guard, tool_name="safe_tool")
+            def search(cls, query: str) -> str:
+                return f"{cls.__name__}:{query}"
+
+        assert SearchTool.search("needle") == "SearchTool:needle"
+
+    def test_keeps_the_first_argument_of_static_and_free_functions(self):
+        guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
+
+        @hush_tool(guard, tool_name="safe_tool")
+        def free(value: dict[str, str]) -> str:
+            return value["query"]
+
+        class SearchTool:
+            @staticmethod
+            @hush_tool(guard, tool_name="safe_tool")
+            def static(value: dict[str, str]) -> str:
+                return value["query"]
+
+        argument = {"query": "needle"}
+        assert free(argument) == "needle"
+        assert SearchTool.static(argument) == "needle"
 
 
 

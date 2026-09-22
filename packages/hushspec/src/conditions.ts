@@ -16,6 +16,8 @@
  * - **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
  */
 
+import { parseRuntimeTimestamp } from './runtime-timestamp.js';
+
 /** Maximum allowed nesting depth for compound conditions (core spec 3.13). */
 export const MAX_NESTING_DEPTH = 8;
 
@@ -353,13 +355,9 @@ function resolveCurrentTime(
     // A zoneless ISO datetime (no trailing 'Z' or +/-HH:MM offset) is read as
     // UTC rather than as the host's local time, so the same context evaluates
     // the same way wherever the engine runs.
-    const raw = context.current_time;
-    const hasTimezone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw);
-    const normalized = !hasTimezone && raw.includes('T') ? `${raw}Z` : raw;
-    date = new Date(normalized);
-    if (isNaN(date.getTime())) {
-      return undefined;
-    }
+    const parsed = parseRuntimeTimestamp(context.current_time);
+    if (parsed == null) return undefined;
+    date = parsed;
   } else {
     date = new Date();
   }
@@ -394,6 +392,8 @@ function resolveViaIntl(date: Date, tz: string): [number, number, number] | unde
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz,
+      year: 'numeric',
+      era: 'short',
       hour: '2-digit',
       minute: '2-digit',
       weekday: 'short',
@@ -402,8 +402,13 @@ function resolveViaIntl(date: Date, tz: string): [number, number, number] | unde
 
     const hour = parseInt(parts.find((part) => part.type === 'hour')?.value ?? '', 10);
     const minute = parseInt(parts.find((part) => part.type === 'minute')?.value ?? '', 10);
+    const year = parseInt(parts.find((part) => part.type === 'year')?.value ?? '', 10);
+    const era = parts.find((part) => part.type === 'era')?.value;
     const weekday = parts.find((part) => part.type === 'weekday')?.value.toLowerCase().slice(0, 3);
-    if (Number.isNaN(hour) || Number.isNaN(minute) || weekday == null) {
+    if (
+      Number.isNaN(hour) || Number.isNaN(minute) ||
+      era !== 'AD' || year < 1 || year > 9999 || weekday == null
+    ) {
       return undefined;
     }
 
@@ -418,7 +423,9 @@ function resolveViaIntl(date: Date, tz: string): [number, number, number] | unde
   }
 }
 
-function utcDateParts(date: Date): [number, number, number] {
+function utcDateParts(date: Date): [number, number, number] | undefined {
+  const year = date.getUTCFullYear();
+  if (Number.isNaN(date.getTime()) || year < 1 || year > 9999) return undefined;
   const jsDay = date.getUTCDay();
   const dayOfWeek = jsDay === 0 ? 6 : jsDay - 1;
   return [date.getUTCHours(), date.getUTCMinutes(), dayOfWeek];

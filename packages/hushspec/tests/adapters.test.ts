@@ -6,6 +6,7 @@ import { mapOpenAIToolCall, createOpenAIGuard } from '../src/adapters/openai.js'
 import { mapMCPToolCall, extractDomain, createMCPGuard } from '../src/adapters/mcp.js';
 import { argsSize, mapWellKnownTool } from '../src/adapters/tool-mapping.js';
 import { utf8ByteLength } from '../src/utf8.js';
+import { readFileSync } from 'node:fs';
 
 // ---------------------------------------------------------------------------
 // Shared policies
@@ -124,6 +125,21 @@ describe('createOpenAIGuard', () => {
 // ---------------------------------------------------------------------------
 
 describe('mapMCPToolCall', () => {
+  it('matches the shared MCP mapping contract', () => {
+    const corpus = JSON.parse(
+      readFileSync(new URL('../../../fixtures/adapters/mcp-contract.json', import.meta.url), 'utf8'),
+    ) as Array<{
+      name: string;
+      tool: string;
+      arguments: Record<string, unknown>;
+      expect: { type: string; target: string; content?: string; args_size?: number };
+    }>;
+    for (const testCase of corpus) {
+      const action = mapMCPToolCall(testCase.tool, testCase.arguments);
+      expect(action, testCase.name).toMatchObject(testCase.expect);
+      expect(action.args_size, testCase.name).toBe(testCase.expect.args_size);
+    }
+  });
   it('maps read_file to file_read', () => {
     const action = mapMCPToolCall('read_file', { path: '/etc/hosts' });
     expect(action.type).toBe('file_read');

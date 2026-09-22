@@ -835,6 +835,9 @@ pub fn verify_logs(
                     entry.entry_type
                 )));
             }
+            if let Some(problem) = log_scalar_problem(&document, "") {
+                return Err(fail(format!("not a log entry: {problem}")));
+            }
             if expected_seq == 1 && index > 0 {
                 let Some(started) = &entry.log_started else {
                     return Err(fail(
@@ -961,9 +964,78 @@ pub fn verify_logs(
     Ok(report)
 }
 
+/// Scalar constraints that typed deserialization cannot enforce. Validate the
+/// original document because deserialization collapses optional nulls to None.
+/// Receipt internals are opaque to this schema and checked separately.
+fn log_scalar_problem(value: &serde_json::Value, path: &str) -> Option<String> {
+    use serde_json::Value;
+    match value {
+        Value::Null => return Some(format!("{path} must not be null")),
+        Value::Object(members) => {
+            for (key, child) in members {
+                if path.is_empty() && key == "receipt" && !child.is_null() {
+                    continue;
+                }
+                let where_ = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                if let Some(problem) = log_scalar_problem(child, &where_) {
+                    return Some(problem);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                if let Some(problem) = log_scalar_problem(child, &format!("{path}[{index}]")) {
+                    return Some(problem);
+                }
+            }
+        }
+        Value::String(text) => {
+            let key = path.rsplit('.').next().unwrap_or(path);
+            let valid = match key {
+                "prev_hash"
+                | "entry_hash"
+                | "content_hash"
+                | "previous_content_hash"
+                | "previous_entry_hash"
+                | "key_id" => crate::receipt::is_content_hash(text),
+                "timestamp" | "signed_at" | "expires_at" | "verified_at" => {
+                    crate::receipt::is_millisecond_timestamp(text)
+                }
+                "spec_version" => {
+                    let parts: Vec<_> = text.split('.').collect();
+                    parts.len() == 3
+                        && matches!(parts[0], "0" | "1")
+                        && parts[1..].iter().all(|part| {
+                            !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                        })
+                }
+                "source" | "previous_file" | "policy_name" | "signer" => !text.is_empty(),
+                _ if path == "signature.format_version" => text == "0.2",
+                _ if path == "signature.algorithm" => text == "ed25519",
+                _ if path == "signature.signature" => {
+                    text.len() == 86
+                        && text
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                }
+                _ if path.starts_with("policy_event.sdk.") => !text.is_empty(),
+                _ => true,
+            };
+            if !valid {
+                return Some(format!("{path} does not satisfy the log-entry schema"));
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 /// The `entry_hash` one line should carry: `sha256:` over the RFC 8785
-/// canonical form of the object with `entry_hash` and `signature` removed
-/// (log spec 4).
+/// canonical form of the object with `entry_hash` and `signature` removed.
 fn entry_hash_of_document(document: &serde_json::Value) -> Result<String, CanonicalError> {
     let mut document = document.clone();
     if let Some(object) = document.as_object_mut() {

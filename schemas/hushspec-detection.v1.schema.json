@@ -51,7 +51,8 @@
           "type": "integer",
           "minimum": 1,
           "default": 200000,
-          "description": "Maximum input size to scan, in bytes."
+          "description": "Maximum input size to scan, in bytes.",
+          "maximum": 9007199254740991
         },
         "heuristics": {
           "$ref": "#/$defs/PromptInjectionHeuristics"
@@ -105,7 +106,8 @@
           "type": "integer",
           "minimum": 1,
           "default": 200000,
-          "description": "Maximum input size to scan, in bytes."
+          "description": "Maximum input size to scan, in bytes.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -125,8 +127,8 @@
         },
         "similarity_threshold": {
           "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
+          "minimum": 0,
+          "maximum": 1,
           "default": 0.7,
           "description": "Minimum similarity score (0.0-1.0) for a pattern match to be considered a finding."
         },
@@ -134,7 +136,8 @@
           "type": "integer",
           "minimum": 1,
           "default": 5,
-          "description": "Number of top matches to include in evaluation evidence."
+          "description": "Number of top matches to include in evaluation evidence.",
+          "maximum": 9007199254740991
         }
       }
     }

@@ -23,6 +23,9 @@ jobs:
   # ── Gate: run full CI first ──────────────────────────────────────────
   ci:
     name: CI Gate
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/ci.yml
 
   # ── Rust: publish hushspec then hushspec-cli to crates.io ──────────
@@ -40,13 +43,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Packaging the workspace resolves unpublished sibling crates together
+      # and builds their extracted archives without uploading anything.
+      - name: Verify Rust packages together
+        if: inputs.dry_run
+        run: cargo package --workspace --locked
+
       - name: Publish hushspec (library)
+        if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            cargo publish -p hushspec --dry-run
-          elif cargo publish -p hushspec 2>publish_err.log; then
+          if cargo publish -p hushspec --locked 2>publish_err.log; then
             cat publish_err.log
           elif grep -qiE "already (uploaded|exists)" publish_err.log; then
             cat publish_err.log
@@ -66,12 +74,11 @@ jobs:
       # vectors. Same already-published tolerance as hushspec above, so a rerun
       # for a partially published version does not fail the job.
       - name: Publish hushspec-testkit (conformance runner)
+        if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            cargo publish -p hushspec-testkit --dry-run
-          elif cargo publish -p hushspec-testkit 2>publish_err.log; then
+          if cargo publish -p hushspec-testkit --locked 2>publish_err.log; then
             cat publish_err.log
           elif grep -qiE "already (uploaded|exists)" publish_err.log; then
             cat publish_err.log
@@ -86,12 +93,11 @@ jobs:
       # for an already-published version does not fail the job at its last
       # step.
       - name: Publish hushspec-cli (h2h binary)
+        if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            cargo publish -p hushspec-cli --dry-run
-          elif cargo publish -p hushspec-cli 2>publish_err.log; then
+          if cargo publish -p hushspec-cli --locked 2>publish_err.log; then
             cat publish_err.log
           elif grep -qiE "already (uploaded|exists)" publish_err.log; then
             cat publish_err.log

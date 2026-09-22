@@ -1,11 +1,13 @@
 # RFC-08: Extends Resolution and Remote Policy Loading
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Authors:** Architecture Team
 **Date:** 2026-03-15
 **HushSpec Version:** 0.1.0
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). File, builtin, and HTTPS resolution/loading artifacts are implemented on the open stack. Cloud/Vault/Git/registry providers, push reload, and shared caching remain deferred; the TypeScript watch-bootstrap lifecycle repair has a local verification record, with hosted qualification pending.
 
 ## 1. Executive Summary
 

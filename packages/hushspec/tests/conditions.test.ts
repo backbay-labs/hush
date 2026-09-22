@@ -317,6 +317,13 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, { current_time: 'not-a-timestamp' })).toBe(true);
     });
 
+    it('keeps the block active when current_time has an impossible calendar date', () => {
+      const cond: Condition = {
+        time_window: { start: '09:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, { current_time: '2026-02-30T20:00:00Z' })).toBe(true);
+    });
+
     it('keeps the block active for a malformed HH:MM that escaped validation', () => {
       const cond: Condition = {
         time_window: { start: '25:00', end: '17:00', timezone: 'UTC' },

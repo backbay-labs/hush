@@ -883,13 +883,15 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "integer",
           "minimum": 0,
           "default": 1000,
-          "description": "Maximum number of added lines permitted."
+          "description": "Maximum number of added lines permitted.",
+          "maximum": 9007199254740991
         },
         "max_deletions": {
           "type": "integer",
           "minimum": 0,
           "default": 500,
-          "description": "Maximum number of deleted lines permitted."
+          "description": "Maximum number of deleted lines permitted.",
+          "maximum": 9007199254740991
         },
         "forbidden_patterns": {
           "type": "array",
@@ -908,7 +910,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "max_imbalance_ratio": {
           "type": "number",
           "exclusiveMinimum": 0,
-          "default": 10.0,
+          "default": 10,
           "description": "Maximum ratio of additions to deletions (or vice versa)."
         }
       }
@@ -988,7 +990,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "max_args_size": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum argument payload size in bytes."
+          "description": "Maximum argument payload size in bytes.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -1183,12 +1186,14 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "max_execution_time_ms": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum execution time in milliseconds."
+          "description": "Maximum execution time in milliseconds.",
+          "maximum": 9007199254740991
         },
         "max_scan_bytes": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum bytes of code to scan for module detection."
+          "description": "Maximum bytes of code to scan for module detection.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -1251,7 +1256,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "threshold": {
           "type": "integer",
           "minimum": 0,
-          "description": "Non-negative threshold."
+          "description": "Non-negative threshold.",
+          "maximum": 9007199254740991
         },
         "comparison": {
           "type": "string",
@@ -1370,7 +1376,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "policy_version": {
           "type": "integer",
           "minimum": 1,
-          "description": "Monotonically increasing policy version counter."
+          "description": "Monotonically increasing policy version counter.",
+          "maximum": 9007199254740991
         },
         "effective_date": {
           "type": "string",
@@ -1538,7 +1545,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
               "description": "Budget limits keyed by budget key. Standard keys: file_writes, egress_calls, shell_commands, tool_calls, patches, custom_calls.",
               "additionalProperties": {
                 "type": "integer",
-                "minimum": 0
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             }
           }
@@ -1768,7 +1776,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             "max_args_size": {
               "type": "integer",
               "minimum": 1,
-              "description": "Maximum argument payload size in bytes. The smaller of base and origin applies."
+              "description": "Maximum argument payload size in bytes. The smaller of base and origin applies.",
+              "maximum": 9007199254740991
             }
           }
         },
@@ -1831,17 +1840,20 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             "tool_calls": {
               "type": "integer",
               "minimum": 0,
-              "description": "Maximum number of tool/MCP invocations."
+              "description": "Maximum number of tool/MCP invocations.",
+              "maximum": 9007199254740991
             },
             "egress_calls": {
               "type": "integer",
               "minimum": 0,
-              "description": "Maximum number of outbound network requests."
+              "description": "Maximum number of outbound network requests.",
+              "maximum": 9007199254740991
             },
             "shell_commands": {
               "type": "integer",
               "minimum": 0,
-              "description": "Maximum number of shell command executions."
+              "description": "Maximum number of shell command executions.",
+              "maximum": 9007199254740991
             }
           }
         },
@@ -1966,7 +1978,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
               "type": "integer",
               "minimum": 1,
               "default": 200000,
-              "description": "Maximum input size to scan, in bytes."
+              "description": "Maximum input size to scan, in bytes.",
+              "maximum": 9007199254740991
             },
             "heuristics": {
               "$ref": "#/$defs/PromptInjectionHeuristics"
@@ -2020,7 +2033,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
               "type": "integer",
               "minimum": 1,
               "default": 200000,
-              "description": "Maximum input size to scan, in bytes."
+              "description": "Maximum input size to scan, in bytes.",
+              "maximum": 9007199254740991
             }
           }
         },
@@ -2040,8 +2054,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
             },
             "similarity_threshold": {
               "type": "number",
-              "minimum": 0.0,
-              "maximum": 1.0,
+              "minimum": 0,
+              "maximum": 1,
               "default": 0.7,
               "description": "Minimum similarity score (0.0-1.0) for a pattern match to be considered a finding."
             },
@@ -2049,7 +2063,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
               "type": "integer",
               "minimum": 1,
               "default": 5,
-              "description": "Number of top matches to include in evaluation evidence."
+              "description": "Number of top matches to include in evaluation evidence.",
+              "maximum": 9007199254740991
             }
           }
         }
@@ -2114,7 +2129,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "integer",
           "minimum": 1,
           "default": 200000,
-          "description": "Maximum input size to scan, in bytes."
+          "description": "Maximum input size to scan, in bytes.",
+          "maximum": 9007199254740991
         },
         "heuristics": {
           "$ref": "#/$defs/PromptInjectionHeuristics"
@@ -2168,7 +2184,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "integer",
           "minimum": 1,
           "default": 200000,
-          "description": "Maximum input size to scan, in bytes."
+          "description": "Maximum input size to scan, in bytes.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -2188,8 +2205,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "similarity_threshold": {
           "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0,
+          "minimum": 0,
+          "maximum": 1,
           "default": 0.7,
           "description": "Minimum similarity score (0.0-1.0) for a pattern match to be considered a finding."
         },
@@ -2197,7 +2214,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "type": "integer",
           "minimum": 1,
           "default": 5,
-          "description": "Number of top matches to include in evaluation evidence."
+          "description": "Number of top matches to include in evaluation evidence.",
+          "maximum": 9007199254740991
         }
       }
     }
@@ -3400,7 +3418,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "max_args_size": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum argument payload size in bytes. The smaller of base and origin applies."
+          "description": "Maximum argument payload size in bytes. The smaller of base and origin applies.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -3463,17 +3482,20 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "tool_calls": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of tool/MCP invocations."
+          "description": "Maximum number of tool/MCP invocations.",
+          "maximum": 9007199254740991
         },
         "egress_calls": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of outbound network requests."
+          "description": "Maximum number of outbound network requests.",
+          "maximum": 9007199254740991
         },
         "shell_commands": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of shell command executions."
+          "description": "Maximum number of shell command executions.",
+          "maximum": 9007199254740991
         }
       }
     },
@@ -3603,7 +3625,8 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "description": "Budget limits keyed by budget key. Standard keys: file_writes, egress_calls, shell_commands, tool_calls, patches, custom_calls.",
           "additionalProperties": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         }
       }

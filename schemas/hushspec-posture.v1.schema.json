@@ -52,7 +52,8 @@
           "description": "Budget limits keyed by budget key. Standard keys: file_writes, egress_calls, shell_commands, tool_calls, patches, custom_calls.",
           "additionalProperties": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
         }
       }

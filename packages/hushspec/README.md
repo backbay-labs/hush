@@ -324,11 +324,11 @@ sees file, shell and egress actions rather than an opaque tool name. All of
 them are structurally typed -- no adapter imports the framework it adapts, so
 none of them is a dependency.
 
-| Framework | Mapping | Enforcement |
+| Framework | Mapping | Integration |
 |---|---|---|
-| Anthropic | `mapClaudeToolToAction(name, input)` | `createSecureToolHandler(guard)` |
-| OpenAI | `mapOpenAIToolCall(name, args)` | `createOpenAIGuard(guard)` |
-| MCP | `mapMCPToolCall(name, args)` | `createMCPGuard(guard)` |
+| Anthropic | `mapClaudeToolToAction(name, input)` | `createSecureToolHandler(guard)` returns an evaluation decision |
+| OpenAI | `mapOpenAIToolCall(name, args)` | `createOpenAIGuard(guard)` returns an evaluation decision |
+| MCP | `mapMCPToolCall(name, args)` | `createMCPGuard(guard)` returns an evaluation decision |
 | Vercel AI SDK | `mapVercelToolCall(toolCall)` | `createVercelGuard(guard).wrapTools(tools)` |
 | LangChain.js | `mapLangChainToolCall(name, input)` | `wrapLangChainTool(tool, guard)`, `createLangChainCallbackHandler(guard)` |
 
@@ -338,6 +338,13 @@ import { HushGuard, mapClaudeToolToAction } from '@hushspec/core';
 const guard = HushGuard.fromFile('./policy.yaml');
 guard.enforce(mapClaudeToolToAction(block.name, block.input));
 ```
+
+`createSecureToolHandler`, `createOpenAIGuard`, and `createMCPGuard` do not
+execute or wrap a tool body: they return an `EvaluationResult` for a dispatch
+loop to inspect. Before executing a real side effect, that loop must call
+`guard.enforce(...)`, use `guard.gate(...)`, or apply equivalent denial
+handling. `createVercelGuard(...).wrapTools(...)` and the LangChain wrappers
+below are execution wrappers and enforce before their tool bodies run.
 
 **Vercel AI SDK.** `wrapTools` returns the tool set with each tool's `execute`
 gated: the guard runs before the tool body, a denial throws `HushSpecDenied`
@@ -370,12 +377,17 @@ const tools = [readFileTool, bashTool].map(tool => wrapLangChainTool(tool, guard
 await executor.invoke({ input }, { callbacks: [createLangChainCallbackHandler(guard)] });
 ```
 
-Recognized tool names (`readFile`, `write_file`, `bash`, `fetch`, ...) map onto
-`file_read`, `file_write`, `shell_command` and `egress`; anything else is a
-`tool_call` against the tool's own name, with `args_size` recorded so a receipt
-carries the payload's size and not the payload. The adapters guess only where
-the mapping is unambiguous: a wrong action type would consult the wrong rule
-block.
+Recognized tool names (`read_file`, `readFile`, `cat`, `writeFile`, `bash`,
+`runCommand`, `fetch`, ...) map onto `file_read`, `file_write`,
+`shell_command` and `egress`; their documented path/content/command/URL keys
+are extracted before evaluation. Anything else is a `tool_call` against the
+original tool name. Every call whose arguments have a canonical JSON
+representation records `args_size` so a receipt carries the payload's size and
+not the payload. Names normalize by lowercasing and retaining only ASCII
+letters and digits. The same literal cases live in
+`fixtures/adapters/mcp-contract.json` and are run by the TypeScript, Python,
+and Go SDKs. The adapters guess only where the mapping is explicit: a wrong
+action type would consult the wrong rule block.
 
 ### Hot Reload
 

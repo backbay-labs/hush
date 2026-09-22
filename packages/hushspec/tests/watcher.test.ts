@@ -3,11 +3,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, afterEach, vi } from 'vitest';
+import { HushGuard } from '../src/middleware.js';
 import { PolicyWatcher } from '../src/watcher.js';
 import { PolicyPoller } from '../src/poller.js';
 import { FileProvider, HttpProvider } from '../src/policy-provider.js';
 import { deactivatePanic, isPanicActive } from '../src/evaluate.js';
 import { parseOrThrow } from '../src/parse.js';
+import { resolutionFromResolved, type Resolution } from '../src/resolve.js';
 import type { HttpLoaderConfig } from '../src/http-loader.js';
 import { loadKeyring } from '../src/signing.js';
 import { startTestServer, type Handler, type TestServer } from './helpers/https-server.js';
@@ -34,6 +36,23 @@ rules:
 const INVALID_POLICY = `
 not_a_hushspec: true
 `;
+
+const STRICTER_POLICY = `
+hushspec: "0.1.0"
+name: stricter-policy
+rules:
+  tool_access:
+    allow: [read_file]
+    default: block
+`;
+
+async function waitFor(check: () => boolean, message: string, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 // ---------------------------------------------------------------------------
 // PolicyWatcher
@@ -537,6 +556,28 @@ describe('PolicyPoller', () => {
     await expect(poller.start()).rejects.toThrow('connection refused');
   });
 
+  // Break caught: a failed initial start used to return before the interval
+  // existed, leaving a transient outage with no retry path at all.
+  it('keeps retrying after an initial load failure', async () => {
+    let attempts = 0;
+    poller = new PolicyPoller({
+      intervalMs: 20,
+      loader: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('connection refused');
+        return VALID_POLICY;
+      },
+      onChange: () => {},
+    });
+
+    await expect(poller.start()).rejects.toThrow('connection refused');
+    await waitFor(
+      () => poller!.current()?.name === 'test-policy',
+      'poller did not retry its failed initial load',
+    );
+    expect(attempts).toBeGreaterThanOrEqual(2);
+  });
+
   it('throws on initial load if content is invalid and no fallback', async () => {
     poller = new PolicyPoller({
       loader: async () => INVALID_POLICY,
@@ -720,6 +761,254 @@ describe('HttpProvider', () => {
   it('current() returns null before load', () => {
     provider = new HttpProvider('https://policies.example.com/policy.yaml');
     expect(provider.current()).toBeNull();
+  });
+
+  // Break caught: constructing a fresh poller after a successful provider
+  // load discards that policy, so one transient bootstrap failure prevents all
+  // later refreshes and sentinel checks.
+  it.each(['enforce', 'monitor'] as const)(
+    'keeps the loaded policy, recovers refreshes, and observes panic in %s mode',
+    async (mode) => {
+      const sentinelDir = mkdtempSync(path.join(os.tmpdir(), 'hushspec-http-panic-'));
+      const sentinel = path.join(sentinelDir, '.hushspec_panic');
+      let requests = 0;
+      const errors: Error[] = [];
+      const origin = await serve((_req, res) => {
+        requests += 1;
+        if (requests === 2 || requests >= 4) {
+          res.writeHead(503);
+          res.end('temporary outage');
+          return;
+        }
+        res.end(requests >= 3 ? STRICTER_POLICY : VALID_POLICY);
+      });
+
+      deactivatePanic();
+      try {
+        provider = new HttpProvider(`${origin}/policy.yaml`, {
+          ...options(),
+          intervalMs: 25,
+          maxStaleMs: 500,
+          panicSentinel: sentinel,
+        });
+        const initial = await provider.load();
+        const guard = new HushGuard(initial, {
+          provider,
+          enforcement: { mode },
+          observer: { onEvent: () => {} },
+        });
+        provider.watch(
+          (spec, resolution) => guard.swapPolicy(spec, resolution),
+          (error) => errors.push(error),
+        );
+
+        await waitFor(
+          () => requests >= 3 && provider!.resolution()?.spec.name === 'stricter-policy',
+          'HTTP provider did not recover after its transient refresh failure',
+        );
+        expect(errors.some((error) => error.message.includes('returned status 503'))).toBe(true);
+
+        const refreshed = guard.gate({ type: 'tool_call', target: 'write_file' });
+        expect(refreshed.proceed).toBe(mode === 'monitor');
+        expect(refreshed.enforcement).toEqual({
+          mode,
+          outcome: mode === 'monitor' ? 'would_block' : 'blocked',
+        });
+
+        writeFileSync(sentinel, 'panic\n');
+        await waitFor(() => isPanicActive(), 'HTTP provider did not observe the panic sentinel');
+        const panicked = guard.gate({ type: 'tool_call', target: 'read_file' });
+        expect(panicked.proceed).toBe(false);
+        expect(panicked.enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
+
+        rmSync(sentinel, { force: true });
+        deactivatePanic();
+        await waitFor(
+          () =>
+            guard.gate({ type: 'tool_call', target: 'read_file' }).result.matched_rule ===
+            '__hushspec_policy_provider__',
+          'HTTP provider did not fail closed after its refreshed policy became stale',
+          5_000,
+        );
+        const stale = guard.gate({ type: 'tool_call', target: 'read_file' });
+        expect(stale.result.matched_rule).toBe('__hushspec_policy_provider__');
+        expect(stale.proceed).toBe(mode === 'monitor');
+
+        provider.stop();
+      } finally {
+        deactivatePanic();
+        rmSync(sentinelDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Break caught: retaining a stopped poller makes current() ignore a later
+  // load, so a provider cannot be stopped, loaded, and watched again safely.
+  it('uses a newly loaded policy after stop', async () => {
+    let requests = 0;
+    const origin = await serve((_req, res) => {
+      requests += 1;
+      res.end(requests === 1 ? VALID_POLICY : STRICTER_POLICY);
+    });
+
+    provider = new HttpProvider(`${origin}/policy.yaml`, {
+      ...options(),
+      intervalMs: 60_000,
+    });
+    expect((await provider.load()).name).toBe('test-policy');
+    provider.watch(() => {});
+    provider.stop();
+
+    expect((await provider.load()).name).toBe('stricter-policy');
+    expect(provider.current()?.name).toBe('stricter-policy');
+    expect(provider.resolution()?.spec.name).toBe('stricter-policy');
+  });
+
+  // Break caught: rewatching a stale policy used to give its seeded poller a
+  // fresh Date.now() timestamp, making the stale policy temporarily usable.
+  it('does not reset policy staleness when watch restarts', async () => {
+    vi.useFakeTimers();
+    try {
+      const resolution = resolutionFromResolved(
+        parseOrThrow(VALID_POLICY),
+        'https://policy.example.test',
+      );
+      provider = new HttpProvider('https://policy.example.test/policy.yaml', {
+        intervalMs: 60_000,
+        maxStaleMs: 10,
+      });
+      type ProviderInternals = { loadRemoteSpec: () => Promise<Resolution> };
+      (provider as unknown as ProviderInternals).loadRemoteSpec = async () => resolution;
+
+      await provider.load();
+      await vi.advanceTimersByTimeAsync(11);
+      provider.watch(() => {});
+      expect(() => provider!.current()).toThrow('Policy is stale');
+
+      provider.watch(() => {});
+      expect(() => provider!.current()).toThrow('Policy is stale');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Break caught: unchanged successful polls refresh the poller's age, but a
+  // rewatch used the provider's original load time and made that fresh policy
+  // look stale again.
+  it('keeps unchanged successful poll freshness across watch restart', async () => {
+    vi.useFakeTimers();
+    try {
+      const resolution = resolutionFromResolved(
+        parseOrThrow(VALID_POLICY),
+        'https://policy.example.test',
+      );
+      provider = new HttpProvider('https://policy.example.test/policy.yaml', {
+        intervalMs: 20,
+        maxStaleMs: 50,
+      });
+      type ProviderInternals = { loadRemoteSpec: () => Promise<Resolution> };
+      (provider as unknown as ProviderInternals).loadRemoteSpec = async () => resolution;
+
+      await provider.load();
+      provider.watch(() => {});
+      await vi.advanceTimersByTimeAsync(100);
+      expect(() => provider!.current()).not.toThrow();
+
+      provider.watch(() => {});
+      expect(() => provider!.current()).not.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Break caught: a throwing startup onError handler escaped the detached
+  // watch-start promise even though the poller treats reporter failures as
+  // non-fatal and continues retrying.
+  it('recovers when the initial watch error reporter throws', async () => {
+    let attempts = 0;
+    const resolution = resolutionFromResolved(
+      parseOrThrow(VALID_POLICY),
+      'https://policy.example.test',
+    );
+    provider = new HttpProvider('https://policy.example.test/policy.yaml', { intervalMs: 20 });
+    type ProviderInternals = { loadRemoteSpec: () => Promise<Resolution> };
+    (provider as unknown as ProviderInternals).loadRemoteSpec = async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('initial outage');
+      return resolution;
+    };
+
+    provider.watch(
+      () => {},
+      () => {
+        throw new Error('reporter failed');
+      },
+    );
+
+    await waitFor(
+      () => provider!.current()?.name === 'test-policy',
+      'HTTP provider did not retry after its startup error reporter failed',
+    );
+    expect(attempts).toBeGreaterThanOrEqual(2);
+  });
+
+  // Break caught: an initial watch load that completed after stop() used the
+  // provider's unguarded start().then() continuation to resurrect a policy.
+  it('does not publish a deferred watch load after stop or into a restart', async () => {
+    let releaseStopped!: (value: Resolution) => void;
+    const stoppedLoad = new Promise<Resolution>((resolve) => {
+      releaseStopped = resolve;
+    });
+    const stoppedProvider = new HttpProvider('https://policy.example.test/policy.yaml');
+    type ProviderInternals = { loadRemoteSpec: () => Promise<Resolution> };
+    (stoppedProvider as unknown as ProviderInternals).loadRemoteSpec = () => stoppedLoad;
+    stoppedProvider.watch(() => {});
+    stoppedProvider.stop();
+    releaseStopped(resolutionFromResolved(parseOrThrow(VALID_POLICY), 'https://policy.example.test'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(stoppedProvider.current()).toBeNull();
+    expect(stoppedProvider.resolution()).toBeNull();
+
+    let releaseFirst!: (value: Resolution) => void;
+    let releaseSecond!: (value: Resolution) => void;
+    const first = new Promise<Resolution>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<Resolution>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const snapshots = [first, second];
+    let loads = 0;
+    const changes: string[] = [];
+
+    provider = new HttpProvider('https://policy.example.test/policy.yaml', { intervalMs: 60_000 });
+    (provider as unknown as ProviderInternals).loadRemoteSpec = () => {
+      const snapshot = snapshots[loads];
+      loads += 1;
+      if (snapshot === undefined) throw new Error('unexpected remote load');
+      return snapshot;
+    };
+
+    provider.watch((spec) => changes.push(spec.name ?? 'unnamed'));
+    expect(loads).toBe(1);
+    provider.stop();
+    provider.watch((spec) => changes.push(spec.name ?? 'unnamed'));
+    expect(loads).toBe(2);
+
+    releaseSecond(resolutionFromResolved(parseOrThrow(STRICTER_POLICY), 'https://policy.example.test'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(provider.current()?.name).toBe('stricter-policy');
+    expect(provider.resolution()?.spec.name).toBe('stricter-policy');
+
+    releaseFirst(resolutionFromResolved(parseOrThrow(VALID_POLICY), 'https://policy.example.test'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(provider.current()?.name).toBe('stricter-policy');
+    expect(provider.resolution()?.spec.name).toBe('stricter-policy');
+    expect(changes).toEqual(['stricter-policy']);
+
+    provider.stop();
+    expect(provider.current()?.name).toBe('stricter-policy');
+    expect(provider.resolution()?.spec.name).toBe('stricter-policy');
   });
 
   // The published signing vectors, served over HTTPS: a signed remote policy

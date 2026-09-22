@@ -157,6 +157,7 @@ export class HttpProvider implements PolicyProvider {
   private poller: PolicyPoller | null = null;
   private currentSpec: HushSpec | null = null;
   private currentResolution: Resolution | null = null;
+  private currentLoadedAt: number = 0;
   private readonly resolveOptions: ResolveOptions;
   private readonly panicSentinel?: string;
   private readonly httpLoader: ReturnType<typeof createHttpLoader>;
@@ -187,6 +188,7 @@ export class HttpProvider implements PolicyProvider {
     const resolution = await this.loadRemoteSpec();
     this.currentResolution = resolution;
     this.currentSpec = resolution.spec;
+    this.currentLoadedAt = Date.now();
     return resolution.spec;
   }
 
@@ -203,6 +205,16 @@ export class HttpProvider implements PolicyProvider {
         // is exactly the "did it change" fingerprint the poller wants.
         return { spec: resolution.spec, resolution, fingerprint: resolution.content_hash };
       },
+      ...(this.currentSpec == null
+        ? {}
+        : {
+            initialSnapshot: {
+              spec: this.currentSpec,
+              resolution: this.currentResolution ?? undefined,
+              fingerprint: this.currentResolution?.content_hash,
+              loadedAt: this.currentLoadedAt,
+            },
+          }),
       intervalMs: this.intervalMs,
       onChange: (spec: HushSpec, resolution?: Resolution) => {
         // The subscriber accepts the reload before the provider serves it: a
@@ -210,24 +222,36 @@ export class HttpProvider implements PolicyProvider {
         onChange(spec, resolution);
         this.currentSpec = spec;
         this.currentResolution = resolution ?? null;
+        this.currentLoadedAt = Date.now();
       },
       onError,
       maxStaleMs: this.maxStaleMs,
       panicSentinel: this.panicSentinel,
     };
 
-    this.poller = new PolicyPoller(pollerOptions);
-    void this.poller.start().then((spec) => {
+    const poller = new PolicyPoller(pollerOptions);
+    this.poller = poller;
+    void poller.start().then((spec) => {
+      // A stopped or replaced watcher must not publish the completion of its
+      // old asynchronous start. PolicyPoller guards its own callback, while
+      // this identity check closes the provider-level continuation too.
+      if (this.poller !== poller) return;
       this.currentSpec = spec;
     }).catch((err) => {
-      if (onError) {
+      if (this.poller !== poller || !onError) return;
+      try {
         onError(err instanceof Error ? err : new Error(String(err)));
+      } catch {
+        // The detached watcher has no caller to report a failed reporter to;
+        // match PolicyPoller's error-channel resilience and keep retrying.
       }
     });
   }
 
   stop(): void {
     if (this.poller != null) {
+      const loadedAt = this.poller.lastSuccessfulLoadAt();
+      if (loadedAt > 0) this.currentLoadedAt = loadedAt;
       this.poller.stop();
       this.poller = null;
     }

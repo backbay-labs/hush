@@ -1,0 +1,56 @@
+[
+  {
+    "name": "snake-case file read",
+    "tool": "read_file",
+    "arguments": { "path": "/app/.env" },
+    "expect": { "type": "file_read", "target": "/app/.env", "args_size": 20 }
+  },
+  {
+    "name": "camel-case file read",
+    "tool": "readFile",
+    "arguments": { "filePath": "/app/.env" },
+    "expect": { "type": "file_read", "target": "/app/.env", "args_size": 24 }
+  },
+  {
+    "name": "cat reads a file key",
+    "tool": "cat",
+    "arguments": { "file": "/app/.env" },
+    "expect": { "type": "file_read", "target": "/app/.env", "args_size": 20 }
+  },
+  {
+    "name": "camel-case file write carries newStr",
+    "tool": "writeFile",
+    "arguments": { "filePath": "/app/.env", "newStr": "TOKEN=redacted" },
+    "expect": { "type": "file_write", "target": "/app/.env", "content": "TOKEN=redacted", "args_size": 50 }
+  },
+  {
+    "name": "file write preserves explicitly empty content",
+    "tool": "write_file",
+    "arguments": { "path": "/tmp/empty", "content": "" },
+    "expect": { "type": "file_write", "target": "/tmp/empty", "content": "", "args_size": 34 }
+  },
+  {
+    "name": "camel-case command uses cmd",
+    "tool": "runCommand",
+    "arguments": { "cmd": "blocked-command" },
+    "expect": { "type": "shell_command", "target": "blocked-command", "args_size": 25 }
+  },
+  {
+    "name": "camel-case HTTP request uses endpoint",
+    "tool": "httpRequest",
+    "arguments": { "endpoint": "https://blocked.example.test/v1" },
+    "expect": { "type": "egress", "target": "blocked.example.test", "args_size": 46 }
+  },
+  {
+    "name": "unknown tools remain tool calls with canonical size",
+    "tool": "custom_search",
+    "arguments": { "query": "test" },
+    "expect": { "type": "tool_call", "target": "custom_search", "args_size": 16 }
+  },
+  {
+    "name": "ASCII normalization removes non-ASCII characters from aliases",
+    "tool": "readéfile",
+    "arguments": { "path": "/app/.env" },
+    "expect": { "type": "file_read", "target": "/app/.env", "args_size": 20 }
+  }
+]

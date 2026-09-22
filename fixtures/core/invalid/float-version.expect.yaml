@@ -2,4 +2,4 @@
 # Registry: spec/registries/error-codes.yaml
 # Schema:   schemas/hushspec-error-codes.v1.schema.json#/$defs/ExpectedError
 reject: true
-code: "E002"
+code: "E001"

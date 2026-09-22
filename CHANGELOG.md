@@ -7,14 +7,44 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
-## [1.0.0] - 2026-09-15
+### Fixed
 
-HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
+- Raw YAML scalar interpretation across the four SDKs, with source-preserving
+  conformance vectors for numeric forms, quoting, and non-finite values.
+- Python LangChain/CrewAI decorators now evaluate actual invocation arguments.
+  Non-tool actions require an explicit `action_mapper`; code relying on the old
+  function-name mapping must supply one before invoking the tool.
+- Shared MCP action mappings and canonical argument measurement across
+  TypeScript, Python, and Go.
+- HTTP policy polling recovery and panic-sentinel observation after transient
+  reload failures; the TypeScript HTTP deadline now includes DNS resolution.
+- Log-entry schema constraints are checked across payload families in every SDK,
+  backed by independently schema-derived, hash-consistent negative vectors.
+- Invalid runtime timestamps cannot silently disable conditional rule blocks.
+- CI covers stacked PR targets; Rust package dry runs verify unpublished sibling
+  crates together; release qualification and artifact builds use one pinned SHA.
+- CLI policy scaffolds declare the current 1.0.0 source version.
+- Development tests and coverage use patched Vitest 4.1.11, addressing
+  GHSA-82fw-gwwq-j7x9 without changing the SDK's runtime dependencies.
+
+### Clarified
+
+- Integer-typed policy fields use the portable safe-integer range, including
+  values written with whole-number float syntax. Generic context numbers and
+  number-typed fields retain finite binary64 semantics.
+- The delivery ledger separates branch implementation, local testing, hosted
+  qualification, merge, and publication. Original plans retain explicit deferred
+  scope; the 1.0.0 source declaration is not a published package release.
+
+## 1.0.0 source declaration - 2026-09-15 (not yet released)
+
+HushSpec 1.0.0 is the intended first stable release. Every specification in the family carries version
 1.0.0 with status Stable, and the document format, evaluation semantics, canonical form, wire
 formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series
 (`spec/versioning.md` section 5). A `1.0.z` document is evaluated exactly as a `0.2.z` document,
 and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was developed in the
-0.x series and ships for the first time in this release.
+0.x series and is intended for the first tagged 1.0 release. Registry publication
+and merge remain pending; see the [delivery ledger](docs/plans/STATUS.md).
 
 ### Added
 
@@ -83,10 +113,11 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
 - **The `.v1.` schema lineage.** The sixteen document-format schemas are published as
   `hushspec-<name>.v1.schema.json` under `https://hushspec.dev/schemas/`, and every SDK, the CLI,
   the testkit, the fixture modelines, and the docs reference them. `hushspec-core.v1.schema.json`
-  differs from its `.v0.` predecessor in exactly two keywords: `hushspec` matches
+  initially differed from its `.v0.` predecessor in two keywords: `hushspec` matches
   `^(0|1)\.\d+\.\d+$` and `name` carries `minLength: 1`. The receipt, log-entry, and report
   schemas widen their `spec_version` patterns the same way, so a receipt for a `1.0.z` policy
-  validates; every other `.v1.` file is its `.v0.` predecessor under a new `$id`. The `.v0.` files are frozen for documents that declare a 0.x
+  validates. Later pre-release portability clarifications are listed under
+  Unreleased above. The `.v0.` files are frozen for documents that declare a 0.x
   version: each carries a `$comment` saying so, `schemas/frozen-v0.json` records their digests,
   and a test fails when one changes. The seven registry schemas keep the `.v0.` name.
   `h2h schema core` prints the v1 file; `h2h schema core.v0` prints the frozen one.

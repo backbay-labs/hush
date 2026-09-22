@@ -280,18 +280,17 @@ func TestValidateRejectsNonFiniteMaxImbalanceRatio(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec, err := Parse(`
+			_, err := Parse(`
 hushspec: "0.1.0"
 rules:
   patch_integrity:
     max_imbalance_ratio: ` + tc.yaml + `
 `)
-			if err != nil {
-				t.Fatalf("unexpected parse error: %v", err)
+			if err == nil {
+				t.Fatal("expected non-finite scalar to fail parsing")
 			}
-			if spec.Rules == nil || spec.Rules.PatchIntegrity == nil || spec.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
-				t.Fatal("expected max_imbalance_ratio to parse")
-			}
+			value := map[string]float64{"nan": math.NaN(), "positive infinity": math.Inf(1), "negative infinity": math.Inf(-1)}[tc.name]
+			spec := &HushSpec{HushSpecVersion: "0.1.0", Rules: &Rules{PatchIntegrity: &PatchIntegrityRule{MaxImbalanceRatio: &value}}}
 			result := Validate(spec)
 			if result.IsValid() {
 				t.Fatalf("expected max_imbalance_ratio: %s to fail validation", tc.yaml)

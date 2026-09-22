@@ -1,11 +1,13 @@
 # RFC-05: Runtime Integration Patterns
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Date:** 2026-03-15
 **Authors:** Platform Engineering
 **Spec Version:** HushSpec 0.1.0
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). Guards, providers, and adapters are implemented on the open stack. Actual argument binding, shared adapter mapping, and provider recovery have a local verification record, but hosted qualification is pending; the broader secured-client and agent-loop scope remains deferred.
 
 ## 1. Executive Summary
 

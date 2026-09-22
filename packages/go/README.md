@@ -468,9 +468,14 @@ action = hushspec.MapOpenAIToolCall("get_weather", arguments)  // tool_call + ar
 its payload as content), `computer`, and `web_fetch`; an
 `mcp__<server>__<tool>` name is evaluated under the inner tool name, so a
 policy names the tool rather than the transport. `MapMCPToolCall` recognizes
-the file, command and fetch tools. Anything unrecognized is a `tool_call`
-against the tool's own name: guessing wrong would consult the wrong rule block,
-which is worse than not guessing.
+the explicit file, command and fetch aliases and their path/content/command/URL
+keys (for example, `read_file`, `readFile`, and `cat` all read a file). Every
+call whose arguments have a canonical JSON representation records `ArgsSize`.
+Names normalize by lowercasing and retaining only ASCII letters and digits.
+Anything unrecognized is a `tool_call` against the original tool name: guessing
+wrong would consult the wrong rule block, which is worse than not guessing. The
+literal contract is shared with TypeScript and Python in
+`fixtures/adapters/mcp-contract.json`.
 
 `GuardedToolHandler` (and the per-runtime `CreateSecureToolHandler`,
 `GuardedOpenAIToolHandler`, `GuardedMCPToolHandler`) wraps a handler so the

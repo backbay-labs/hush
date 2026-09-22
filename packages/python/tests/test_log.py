@@ -51,6 +51,22 @@ CLOCK_MILLIS = 1_789_473_600_000
 CLOCK = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.mark.parametrize("vector", json.loads((VECTORS / "schema-vectors.json").read_text()), ids=lambda v: v["id"])
+def test_schema_derived_log_entries(vector):
+    from jsonschema import Draft202012Validator, FormatChecker
+
+    schema = json.loads((REPO_ROOT / "schemas/hushspec-log-entry.v1.schema.json").read_text())
+    checker = FormatChecker()
+    assert "date-time" in checker.checkers, "install jsonschema[format]"
+    assert Draft202012Validator(schema, format_checker=checker).is_valid(vector["entry"]) == vector["valid"]
+    assert compute_entry_hash(vector["entry"]) == vector["entry"]["entry_hash"]
+    if vector["valid"]:
+        assert verify_log(vector["id"], json.dumps(vector["entry"])).entries == 1
+    else:
+        with pytest.raises(LogError):
+            verify_log(vector["id"], json.dumps(vector["entry"]))
+
+
 def _keyring():
     return load_keyring((KEYS / "keyring.json").read_text())
 
@@ -620,13 +636,14 @@ class TestPayloadStructure:
         assert caught.value.line == 1
         assert caught.value.message == f"not a log entry: {message}"
 
-    def test_an_optional_member_set_to_null_reads_as_absent(
+    def test_an_optional_member_set_to_null_is_rejected(
         self, tmp_path: Path
     ) -> None:
         text = self._event_line(
             tmp_path, lambda e: e.update(previous_content_hash=None)
         )
-        assert verify_log("log.jsonl", text).entries == 1
+        with pytest.raises(LogError, match="previous_content_hash must not be null"):
+            verify_log("log.jsonl", text)
 
     def test_a_tail_with_a_malformed_payload_is_refused(self, tmp_path: Path) -> None:
         path = tmp_path / "log.jsonl"

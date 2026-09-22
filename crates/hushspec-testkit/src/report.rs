@@ -40,6 +40,11 @@ pub struct VectorResult {
     pub status: Status,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// True when this result proves the implementation did not meet a parse
+    /// acceptance assertion. This is report-internal metadata, deliberately
+    /// absent from the published JSON schema.
+    #[serde(skip)]
+    pub parser_failure: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,6 +137,10 @@ impl From<&TestResult> for VectorResult {
                 Status::Fail
             },
             message: Some(result.message.clone()),
+            // The older document runner records only a diagnostic string.
+            // New runners carry this classification directly instead.
+            parser_failure: !result.passed
+                && result.message.contains(crate::runner::PARSE_FAILURE_PREFIX),
         }
     }
 }
@@ -156,7 +165,7 @@ fn level_note(level: u8, skipped: u32) -> Option<String> {
 /// file. The evidence categories are driven by their own vector manifests and
 /// list their inputs -- keys, signatures, bundles, logs -- beside the vectors
 /// that consume them, so they are not comparable file for file.
-const SCORED_CATEGORIES: [&str; 7] = [
+const SCORED_CATEGORIES: [&str; 9] = [
     "valid",
     "invalid",
     "merge",
@@ -164,6 +173,8 @@ const SCORED_CATEGORIES: [&str; 7] = [
     "canonical",
     "resolve",
     "library-suite",
+    "raw-yaml",
+    "log-schema",
 ];
 
 /// Every scored vector the manifest lists that the run did not report on.
@@ -207,6 +218,7 @@ fn unattempted(manifest: &Manifest, results: &[VectorResult]) -> Vec<VectorResul
             message: Some(
                 "the manifest lists this vector and the run did not attempt it".to_string(),
             ),
+            parser_failure: false,
         })
         .collect()
 }
@@ -254,20 +266,16 @@ pub fn build(
         }
     }
 
-    // Level 0 is parsing: a document vector that got as far as a decision
-    // proves the parser ran, so Level 0 passes when Level 1 was attempted at
-    // all and nothing failed to parse. The runner reports a parse failure as a
-    // Level 1 failure whose message says so.
+    // Level 0 is parsing: a vector that met its parse acceptance assertion
+    // proves the parser ran. Level 1 additionally covers decoded values and
+    // validation. New case runners carry `parser_failure` explicitly, so an
+    // advanced assertion cannot accidentally affect Level 0.
     let level_one = levels["1"].clone();
     if level_one.passed + level_one.failed > 0 {
         let parse_failures = results
             .iter()
             .filter(|result| {
-                result.level == Some(1)
-                    && result.status == Status::Fail
-                    && result.message.as_deref().is_some_and(|message| {
-                        message.contains(crate::runner::PARSE_FAILURE_PREFIX)
-                    })
+                result.level == Some(1) && result.status == Status::Fail && result.parser_failure
             })
             .count() as u32;
         let entry = levels.get_mut("0").expect("level 0 exists");
@@ -441,6 +449,83 @@ mod tests {
         assert_eq!(highest, Some(2));
     }
 
+    /// A raw corpus case that was required to parse but did not is a parser
+    /// failure as well as a Level 1 conformance failure. In contrast, a value
+    /// assertion after a successful parse remains a Level 1-only failure.
+    #[test]
+    fn raw_yaml_acceptance_failure_stops_level_zero_but_value_failure_does_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let raw_dir = dir.path().join("core/raw-yaml");
+        std::fs::create_dir_all(&raw_dir).expect("create raw corpus directory");
+        std::fs::write(
+            raw_dir.join("scalars.json"),
+            r#"[{"id":"must-parse","yaml":"hushspec: [","accept":true}]"#,
+        )
+        .expect("write mutated raw case");
+        std::fs::write(
+            dir.path().join("MANIFEST.json"),
+            r#"{
+  "manifest_version":"0.1",
+  "fixtures_version":"1.0.0",
+  "generated_at":"2026-09-22T00:00:00Z",
+  "files":[{
+    "path":"fixtures/core/raw-yaml/scalars.json",
+    "sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+    "category":"raw-yaml",
+    "module":"core",
+    "level":1
+  }]
+}"#,
+        )
+        .expect("write manifest");
+
+        let parse_results = crate::raw_yaml::run_raw_yaml_vectors(dir.path());
+        let parse_report = build(
+            reference_implementation(),
+            dir.path(),
+            &[],
+            &parse_results,
+            "2026-09-22T00:00:00Z".to_string(),
+        )
+        .expect("build parse-failure report");
+        assert_eq!(parse_report.levels["1"].status, Status::Fail);
+        assert_eq!(parse_report.levels["0"].status, Status::Fail);
+        assert_eq!(parse_report.highest_level, None);
+
+        std::fs::write(raw_dir.join("scalars.json"), "not JSON")
+            .expect("write malformed raw corpus");
+        let corpus_results = crate::raw_yaml::run_raw_yaml_vectors(dir.path());
+        let corpus_report = build(
+            reference_implementation(),
+            dir.path(),
+            &[],
+            &corpus_results,
+            "2026-09-22T00:00:00Z".to_string(),
+        )
+        .expect("build malformed-corpus report");
+        assert_eq!(corpus_report.levels["1"].status, Status::Fail);
+        assert_eq!(corpus_report.levels["0"].status, Status::Fail);
+        assert_eq!(corpus_report.highest_level, None);
+
+        let value_report = build(
+            reference_implementation(),
+            dir.path(),
+            &[],
+            &[VectorResult {
+                path: "fixtures/core/raw-yaml/scalars.json#value".to_string(),
+                category: "raw-yaml".to_string(),
+                level: Some(1),
+                status: Status::Fail,
+                message: Some("value mismatch after parsing".to_string()),
+                parser_failure: false,
+            }],
+            "2026-09-22T00:00:00Z".to_string(),
+        )
+        .expect("build value-failure report");
+        assert_eq!(value_report.levels["0"].status, Status::Pass);
+        assert_eq!(value_report.levels["1"].status, Status::Fail);
+    }
+
     /// Every scored vector the manifest lists is reported on, so the corpus a
     /// report cites by digest is the corpus it actually ran.
     #[test]
@@ -453,6 +538,92 @@ mod tests {
             .map(|result| result.path.as_str())
             .collect();
         assert!(skipped.is_empty(), "not attempted: {skipped:?}");
+    }
+
+    /// Raw YAML scalar spelling and schema-derived log entries are case
+    /// vectors, not SDK-only regression tests. The published report must name
+    /// each case and score its expected refusal rather than silently omitting
+    /// either corpus.
+    #[test]
+    fn the_reference_report_scores_raw_yaml_and_log_schema_cases() {
+        let report = full_report();
+
+        let raw: Vec<&VectorResult> = report
+            .results
+            .iter()
+            .filter(|result| result.category == "raw-yaml")
+            .collect();
+        let expected_raw: Vec<serde_json::Value> = serde_json::from_str(
+            &std::fs::read_to_string(fixtures_dir().join("core/raw-yaml/scalars.json"))
+                .expect("raw YAML corpus reads"),
+        )
+        .expect("raw YAML corpus parses");
+        assert_eq!(raw.len(), expected_raw.len());
+        assert!(raw.iter().all(|result| result.level == Some(1)));
+        assert!(raw.iter().all(|result| result.status == Status::Pass));
+
+        let expected_canonical = expected_raw
+            .iter()
+            .filter(|vector| vector.get("canonical").is_some())
+            .count();
+        let canonical = report
+            .results
+            .iter()
+            .filter(|result| result.category == "raw-yaml-canonical")
+            .collect::<Vec<_>>();
+        assert_eq!(canonical.len(), expected_canonical);
+        assert!(canonical.iter().all(|result| result.level == Some(4)));
+        assert!(canonical.iter().all(|result| result.status == Status::Pass));
+
+        let expected_evaluation = expected_raw
+            .iter()
+            .filter(|vector| vector.get("decision").is_some())
+            .count();
+        let evaluation = report
+            .results
+            .iter()
+            .filter(|result| result.category == "raw-yaml-evaluation")
+            .collect::<Vec<_>>();
+        assert_eq!(evaluation.len(), expected_evaluation);
+        assert!(evaluation.iter().all(|result| result.level == Some(3)));
+        assert!(
+            evaluation
+                .iter()
+                .all(|result| result.status == Status::Pass)
+        );
+
+        let log_schema: Vec<&VectorResult> = report
+            .results
+            .iter()
+            .filter(|result| result.category == "log-schema")
+            .collect();
+        let expected_log: Vec<serde_json::Value> = serde_json::from_str(
+            &std::fs::read_to_string(fixtures_dir().join("log/schema-vectors.json"))
+                .expect("log schema corpus reads"),
+        )
+        .expect("log schema corpus parses");
+        assert_eq!(log_schema.len(), expected_log.len());
+        assert!(log_schema.iter().all(|result| result.level == Some(5)));
+        assert!(
+            log_schema
+                .iter()
+                .all(|result| result.status == Status::Pass)
+        );
+
+        let expected_rejections = expected_log
+            .iter()
+            .filter(|vector| vector["valid"] == false)
+            .count();
+        let reported_rejections = log_schema
+            .iter()
+            .filter(|result| {
+                result
+                    .message
+                    .as_deref()
+                    .is_some_and(|message| message.starts_with("correctly rejected:"))
+            })
+            .count();
+        assert_eq!(reported_rejections, expected_rejections);
     }
 
     /// A vector the discovery pass misses is recorded as `not_attempted`

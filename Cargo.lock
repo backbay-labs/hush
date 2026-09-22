@@ -945,6 +945,7 @@ dependencies = [
  "rand 0.8.7",
  "regex",
  "reqwest",
+ "saphyr-parser",
  "serde",
  "serde_json",
  "serde_yaml",

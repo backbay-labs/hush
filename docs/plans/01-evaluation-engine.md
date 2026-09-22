@@ -1,10 +1,12 @@
 # RFC 01: SDK-Level Evaluation Engine
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Date:** 2026-03-15
 **Authors:** HushSpec Core Team
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). The original RFC scope is retained below for traceability. Four evaluator implementations exist on the open RFC 09 stack; raw-YAML and invalid-runtime-time repairs have a local verification record, not hosted, merge, or release qualification.
 
 ## Critique Log
 

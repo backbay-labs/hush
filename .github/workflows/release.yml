@@ -21,7 +21,34 @@ env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - name: Validate tag format
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - name: Pin release candidate
+        id: candidate
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: candidate
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.candidate.outputs.sha }}
+
   build:
+    needs: [candidate, ci]
     strategy:
       fail-fast: true
       matrix:
@@ -39,7 +66,7 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -77,6 +104,7 @@ jobs:
   # produced them (spec/hushspec-bundle.md). Consumers of library/ and
   # rulesets/ can then verify what they are enforcing without re-resolving.
   bundles:
+    needs: [candidate, ci]
     runs-on: ubuntu-latest
     steps:
       - name: Validate tag format
@@ -85,7 +113,7 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build h2h
@@ -195,16 +223,30 @@ jobs:
           retention-days: 3
 
   release:
-    needs: [build, bundles]
+    needs: [candidate, ci, build, bundles]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
+      - name: Confirm tag still identifies the qualified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+        run: |
+          actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          [ "$actual_sha" = "$CANDIDATE_SHA" ] || { echo "::error::release tag moved after qualification"; exit 1; }
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: policy-bundles
+      - uses: actions/download-artifact@v4
+        with:
+          name: conformance-bundle
       - name: Stage policy bundles
         shell: bash
         run: |
@@ -261,12 +303,15 @@ jobs:
         run: gh release upload "$TAG" h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json --repo "$GITHUB_REPOSITORY" --clobber
 
   homebrew:
-    needs: release
+    needs: [candidate, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
       - name: Regenerate checksums locally
         run: sha256sum h2h-*.tar.gz > SHA256SUMS
@@ -288,15 +333,18 @@ jobs:
             --title "h2h ${TAG}" --body "Automated formula update for ${TAG}."
 
   npm-cli:
-    needs: release
+    needs: [candidate, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
       - uses: actions/setup-node@v4
         with:
@@ -312,7 +360,7 @@ jobs:
           (cd out/cli && npm publish --access public --provenance)
 
   docker:
-    needs: release
+    needs: [candidate, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -321,7 +369,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.candidate.outputs.sha }}
 
       - uses: docker/setup-buildx-action@v3
 

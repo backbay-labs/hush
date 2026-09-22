@@ -144,6 +144,19 @@ func TestTimeWindowRejectsOutsideHours(t *testing.T) {
 	}
 }
 
+func TestTimeWindowHoldsForInvalidRuntimeOffset(t *testing.T) {
+	cond := &Condition{
+		TimeWindow: &TimeWindowCondition{
+			Start:    "09:00",
+			End:      "17:00",
+			Timezone: strPtr("UTC"),
+		},
+	}
+	if !EvaluateCondition(cond, ctxWithTimeStr("2026-01-14T20:00:00+24:00")) {
+		t.Error("expected an invalid runtime offset to leave the condition active")
+	}
+}
+
 func TestTimeWindowDayFilter(t *testing.T) {
 	// 2026-01-14 is a Wednesday
 	ctx := ctxWithTimeStr("2026-01-14T10:00:00Z")

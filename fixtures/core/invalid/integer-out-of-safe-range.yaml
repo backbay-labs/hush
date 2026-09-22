@@ -1,7 +1,7 @@
 # Canonical spec 4.3 bounds integer syntax by the IEEE 754 safe range: an
 # integer literal a double cannot hold exactly has no faithful canonical form,
 # so the parser refuses it rather than letting a rounded value reach a content
-# hash. Float syntax carries no such bound.
+# hash. Integer-typed policy fields also enforce the bound for float syntax.
 hushspec: "1.0.0"
 name: integer-out-of-safe-range
 extensions:

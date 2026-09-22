@@ -57,11 +57,16 @@ func Parse(yamlStr string) (*HushSpec, error) {
 	if err := enforceYAMLProfile(yamlStr); err != nil {
 		return nil, parseError("failed to parse HushSpec YAML: %s", err.Error())
 	}
+	coreYAML, err := normalizeCoreYAML(yamlStr)
+	if err != nil {
+		return nil, parseError("failed to parse HushSpec YAML: %s", normalizeDecoderMessage(err.Error()))
+	}
+	yamlStr = coreYAML
 
 	var spec HushSpec
 	decoder := yaml.NewDecoder(strings.NewReader(yamlStr))
 	decoder.KnownFields(true)
-	err := decoder.Decode(&spec)
+	err = decoder.Decode(&spec)
 	if err != nil {
 		return nil, parseError("failed to parse HushSpec YAML: %s", normalizeDecoderMessage(err.Error()))
 	}

@@ -12,6 +12,7 @@ tokens stay plain strings and are rejected wherever a boolean is required.
 from __future__ import annotations
 
 import collections.abc
+import math
 import re
 
 import yaml
@@ -30,6 +31,12 @@ MAX_NODE_COUNT = 100_000
 #: YAML 1.2 Core schema boolean forms. YAML 1.1's `yes`/`no`/`on`/`off` are
 #: deliberately absent -- under the profile they are plain strings.
 _CORE_BOOL = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$")
+_CORE_INT = re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$")
+_CORE_FLOAT = re.compile(
+    r"^(?:[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?"
+    r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$"
+)
+_CORE_NULL = re.compile(r"^(?:~|null|Null|NULL|)$")
 
 
 class _ProfileError(yaml.YAMLError):
@@ -55,6 +62,10 @@ class _StrictSafeLoader(yaml.SafeLoader):
                 "(YAML profile)"
             )
         event = self.peek_event()
+        if isinstance(event, yaml.events.ScalarEvent) and event.tag == "!":
+            # YAML's non-specific scalar tag means string, irrespective of
+            # the plain spelling. PyYAML otherwise applies implicit resolution.
+            event.tag = "tag:yaml.org,2002:str"
         if getattr(event, "anchor", None) is not None:
             raise _ProfileError(
                 f"line {event.start_mark.line + 1}: anchors are not allowed "
@@ -100,29 +111,63 @@ class _StrictSafeLoader(yaml.SafeLoader):
         return mapping
 
 
-def _install_core_bool_resolver(loader: type[yaml.SafeLoader]) -> None:
-    """Narrow the implicit boolean resolver to the YAML 1.2 Core forms.
-
-    ``yaml_implicit_resolvers`` is a first-character index; PyYAML registers
-    the 1.1 boolean pattern under ``y n Y N t f T F o O`` (plus the empty
-    key). Rebuilding the table drops ``yes``/``no``/``on``/``off`` -- they
-    resolve as plain strings, so ``enabled: yes`` fails the boolean check in
-    ``raw_validate`` instead of silently meaning ``true``.
-    """
-    bool_tag = "tag:yaml.org,2002:bool"
-    resolvers: dict[str, list] = {}
-    for first_char, entries in yaml.SafeLoader.yaml_implicit_resolvers.items():
-        kept = [(tag, regex) for tag, regex in entries if tag != bool_tag]
-        resolvers[first_char] = kept
-    for first_char in "tTfF":
-        resolvers.setdefault(first_char, [])
-        resolvers[first_char] = [(bool_tag, _CORE_BOOL)] + resolvers[first_char]
-    loader.yaml_implicit_resolvers = {
-        key: list(value) for key, value in resolvers.items() if value
-    }
+def _construct_core_int(loader, node):
+    text = loader.construct_scalar(node)
+    if not _CORE_INT.fullmatch(text):
+        raise _ProfileError(f"invalid YAML 1.2 Core integer: {text!r}")
+    # Bound before int() so huge literals cannot hit Python's digit limit.
+    digits = text.lstrip("+-").lstrip("0") or "0"
+    base = 10
+    if text.startswith(("0o", "0x")):
+        base = 8 if text[1] == "o" else 16
+        digits = text[2:].lstrip("0") or "0"
+    if len(digits) > 1000:
+        raise _ProfileError("integer exceeds the safe range (2^53-1)")
+    return int(digits, base) * (-1 if text.startswith("-") else 1)
 
 
-_install_core_bool_resolver(_StrictSafeLoader)
+def _construct_core_float(loader, node):
+    text = loader.construct_scalar(node)
+    if not _CORE_FLOAT.fullmatch(text):
+        raise _ProfileError(f"invalid YAML 1.2 Core float: {text!r}")
+    special = text.lstrip("+-").lower()
+    value = float(text.replace(".", "", 1)) if special in (".inf", ".nan") else float(text)
+    return value
+
+
+def _construct_core_bool(loader, node):
+    text = loader.construct_scalar(node)
+    if not _CORE_BOOL.fullmatch(text):
+        raise _ProfileError(f"invalid YAML 1.2 Core boolean: {text!r}")
+    return text.lower() == "true"
+
+
+def _construct_core_null(loader, node):
+    text = loader.construct_scalar(node)
+    if not _CORE_NULL.fullmatch(text):
+        raise _ProfileError(f"invalid YAML 1.2 Core null: {text!r}")
+    return None
+
+
+# Replace every YAML 1.1 resolver, including timestamps, sexagesimal numbers,
+# binary and underscore-bearing integers. Keep merge detection for the profile.
+_StrictSafeLoader.yaml_implicit_resolvers = {}
+for _tag, _pattern, _first in (
+    ("bool", _CORE_BOOL, "tTfF"),
+    ("int", _CORE_INT, "-+0123456789"),
+    ("float", _CORE_FLOAT, "-+0123456789."),
+    ("null", _CORE_NULL, ["~", "n", "N", ""]),
+    ("merge", re.compile(r"^(?:<<)$"), "<"),
+):
+    _StrictSafeLoader.add_implicit_resolver(f"tag:yaml.org,2002:{_tag}", _pattern, _first)
+_StrictSafeLoader.add_constructor("tag:yaml.org,2002:int", _construct_core_int)
+_StrictSafeLoader.add_constructor("tag:yaml.org,2002:float", _construct_core_float)
+_StrictSafeLoader.add_constructor("tag:yaml.org,2002:bool", _construct_core_bool)
+_StrictSafeLoader.add_constructor("tag:yaml.org,2002:null", _construct_core_null)
+_StrictSafeLoader.yaml_constructors = {
+    tag: constructor for tag, constructor in _StrictSafeLoader.yaml_constructors.items()
+    if tag is None or tag in {f"tag:yaml.org,2002:{kind}" for kind in ("str", "int", "float", "bool", "null", "seq", "map")}
+}
 
 #: Public alias: the YAML 1.2 Core, profile-enforcing loader. Exposed so tools
 #: that read HushSpec-adjacent YAML (evaluator fixtures, bundles) resolve
@@ -152,6 +197,41 @@ def _measure(value, depth: int) -> tuple[int, int]:
             nodes += key_nodes + item_nodes
         return max_depth, nodes
     return depth, 1
+
+
+def _nonfinite_number(value, path: str = "$") -> str | None:
+    if isinstance(value, float) and not math.isfinite(value):
+        return f"{path}: non-finite numbers are not allowed"
+    entries = value.items() if isinstance(value, dict) else enumerate(value) if isinstance(value, list) else ()
+    for key, child in entries:
+        found = _nonfinite_number(child, f"{path}.{key}")
+        if found:
+            return found
+    return None
+
+
+def _normalize_policy_integers(value, path: tuple[str, ...] = ()):
+    """Keep free-form context and number fields as doubles, normalize integers.
+
+    The two number-typed properties are the ratio and similarity threshold;
+    all other numeric policy properties are integers. Unknown fields are still
+    refused by validate_raw_document after this scalar pass.
+    """
+    if path[-1:] == ("context",) and isinstance(value, dict):
+        return value
+    if isinstance(value, dict):
+        return {key: _normalize_policy_integers(child, (*path, str(key))) for key, child in value.items()}
+    if isinstance(value, list):
+        return [_normalize_policy_integers(child, (*path, str(index))) for index, child in enumerate(value)]
+    if isinstance(value, float) and path[-2:] not in (
+        ("patch_integrity", "max_imbalance_ratio"),
+        ("threat_intel", "similarity_threshold"),
+    ):
+        if abs(value) > 2**53 - 1:
+            raise _ProfileError(f"{'.'.join(path)}: integer field exceeds the safe range (2^53-1)")
+        if value.is_integer():
+            return int(value)
+    return value
 
 
 def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
@@ -197,6 +277,15 @@ def parse(yaml_str: str) -> tuple[bool, HushSpec | str]:
     unsafe = unsafe_integer(doc)
     if unsafe is not None:
         return False, _refused(f"YAML parse error: {unsafe}")
+
+    nonfinite = _nonfinite_number(doc)
+    if nonfinite is not None:
+        return False, _refused(f"YAML parse error: {nonfinite}")
+
+    try:
+        doc = _normalize_policy_integers(doc)
+    except _ProfileError as error:
+        return False, _refused(f"YAML parse error: {error}")
 
     depth, nodes = _measure(doc, 1)
     if depth > MAX_DOCUMENT_DEPTH:

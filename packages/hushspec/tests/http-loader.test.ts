@@ -253,6 +253,23 @@ function testConfig(extra?: HttpLoaderConfig): HttpLoaderConfig {
 }
 
 describe('http loader transport', () => {
+  // Break caught: beginning the timeout only after DNS lets a resolver stall
+  // forever even when the caller supplied timeoutMs for the request.
+  it('bounds a DNS lookup by the request deadline', async () => {
+    const hungLookup = () => new Promise<never>(() => {});
+    const loader = createHttpLoader({
+      timeoutMs: 50,
+      allowedHosts: ['policy.example.test'],
+      lookup: hungLookup,
+    });
+    const startedAt = Date.now();
+
+    await expect(loader('https://policy.example.test/policy.yaml')).rejects.toThrow(
+      'timed out after 50 ms',
+    );
+    expect(Date.now() - startedAt).toBeLessThan(500);
+  });
+
   it('refuses loopback unless the test-only exemption is set', async () => {
     const server = await serve((_req, res) => res.end(POLICY));
     const loader = createHttpLoader({ tlsCa: TEST_TLS_CERT });

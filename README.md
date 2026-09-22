@@ -48,6 +48,9 @@ and wire formats are frozen for the 1.x series. See the
 [versioning policy](spec/versioning.md) and [SDK conformance matrix](docs/src/reference/sdk-conformance.md)
 for the contracts and their test coverage.
 
+The 1.0 SDK release is not yet published. See the [delivery status](docs/plans/STATUS.md)
+for implementation, qualification, and release evidence.
+
 ## Quickstart
 
 Build the `h2h` CLI from this checkout:
@@ -179,14 +182,17 @@ Rust requires the `signing` feature and Python the `signing` extra.
 One policy language across four SDKs. The shared corpus checks evaluation,
 canonical bytes, policy hashes, and receipt formats across implementations.
 
-| SDK | Install | Reference |
+Until 1.0 is published, use this source checkout. The registry commands below
+are for the upcoming release, not currently available 1.0 packages.
+
+| SDK | Registry install after publication | Reference |
 | :--- | :--- | :--- |
 | Rust | `cargo add hushspec` | [Crate](crates/hushspec/README.md) |
 | TypeScript | `npm install @hushspec/core` | [Package](packages/hushspec/README.md) |
 | Python | `pip install hushspec` | [Package](packages/python/README.md) |
 | Go | `go get github.com/backbay-labs/hush/packages/go@v1.0.0` | [Module](packages/go/README.md) |
 
-The Go SDK uses the nested `packages/go/v1.0.0` release tag.
+The Go SDK release will use the nested `packages/go/v1.0.0` tag.
 For signing, use `hushspec = { version = "1.0", features = ["signing"] }` in Rust
 or `pip install "hushspec[signing]"` in Python.
 

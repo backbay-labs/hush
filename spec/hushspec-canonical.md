@@ -219,6 +219,8 @@ A number written with **integer syntax** -- digits with an optional sign, no fra
 
 A number written with **float syntax** -- a fraction, an exponent, or both -- carries no such bound. It denotes a double, and the algorithm above emits it at any magnitude: `1.0e+16` → `10000000000000000`, `1.0e+21` → `1e+21`, `1.5e+300` → `1.5e+300`.
 
+This float-syntax exception applies to `number` properties and free-form condition context. A policy property declared as `integer` has the additional portable field bound of 2^53 - 1 in absolute value, regardless of source spelling (Core specification, Section 2.4). Integral float spellings within that bound, such as `10.0` and `1e1`, are accepted and normalize to the same integer value; `9007199254740992.0` is refused in an integer property but remains a valid double in condition context. Tighter schema bounds still apply.
+
 The bound is syntactic because the syntax is the only thing that distinguishes the two cases: `10000000000000000` and `1.0e+16` denote the same double, and only the way each was written says whether the author meant an exact integer, which 2^53 − 1 bounds, or a double, which it does not. An implementation therefore applies the bound where the distinction still exists -- in its parser, which sees the literal -- rather than in its serializer, which sees a number.
 
 A value handed to an implementation directly, as a number of the host language rather than as a document to parse, carries no syntax to read. Section 2.3 already requires such a value to have come from a valid document, so the bound has been applied by the parser that read it.
@@ -315,4 +317,3 @@ The security considerations for the whole specification family, including the sh
 ## Appendix A. Changes from 0.1
 
 HushSpec 0.1 defined no canonical form. Each SDK hashed its own serialization of the parsed document, so identical policies produced four different `content_hash` values. This specification replaces all of those with one definition and moves the wire form from bare hex to `sha256:`-prefixed hex.
-

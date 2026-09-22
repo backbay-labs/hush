@@ -1,13 +1,15 @@
 //! Document parsing under the HushSpec YAML profile (core spec 2.4).
 //!
-//! `serde_yaml` already parses with the YAML 1.2 Core schema (so `yes`/`no`
-//! are strings), rejects duplicate mapping keys for `deny_unknown_fields`
+//! Scalar token resolution follows YAML 1.2 Core before `serde_yaml`
+//! deserialization. `serde_yaml` rejects duplicate keys for `deny_unknown_fields`
 //! structs, and rejects tab indentation. The profile additionally forbids
 //! anchors, aliases, merge keys, and multi-document streams, and bounds the
 //! input size, nesting depth, and node count; those checks live here.
 
 pub use crate::generated_models::{HushSpec, MergeStrategy};
+use saphyr_parser::{Event, Parser, ScalarStyle};
 use serde::de::Error as _;
+use std::sync::LazyLock;
 
 /// Maximum accepted document size in bytes (core spec 2.4, RECOMMENDED default).
 pub const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
@@ -27,10 +29,14 @@ impl HushSpec {
         if let Some(message) = yaml_profile_violation(yaml) {
             return Err(serde_yaml::Error::custom(message));
         }
+        let source = yaml;
+        let normalized = normalize_core_scalars(yaml)?;
+        let yaml = normalized.as_str();
 
         // Bound depth and node count before the typed parse; anchors and
         // aliases are already rejected above, so this cannot blow up.
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+        let mut value: serde_yaml::Value = serde_yaml::from_str(yaml)?;
+        strip_non_specific_tags(&mut value);
         let (depth, nodes) = measure(&value, 1);
         if depth > MAX_DOCUMENT_DEPTH {
             return Err(serde_yaml::Error::custom(format!(
@@ -58,11 +64,221 @@ impl HushSpec {
             return Err(serde_yaml::Error::custom(message));
         }
 
-        serde_yaml::from_str(yaml)
+        crate::raw_validate::normalize_integer_fields(&mut value)
+            .map_err(serde_yaml::Error::custom)?;
+        serde_yaml::from_value(value).map_err(|error| positioned_type_error(source, yaml, error))
     }
 
     pub fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
         serde_yaml::to_string(self)
+    }
+}
+
+/// Value-tree decoding enforces the resolved scalar types, but loses source
+/// positions. Recover an original-source diagnostic only when the native
+/// typed parser reports the same refusal. In particular, its earlier refusal
+/// of valid integral float syntax must never replace the checked-tree error.
+fn positioned_type_error(
+    source: &str,
+    normalized: &str,
+    error: serde_yaml::Error,
+) -> serde_yaml::Error {
+    let reason = error.to_string();
+    // serde's value deserializer calls a negative-to-unsigned failure an
+    // invalid value; its text deserializer calls that same failure a type error.
+    let comparable = if reason.starts_with("invalid value: integer `-") {
+        reason.replacen("invalid value:", "invalid type:", 1)
+    } else {
+        reason
+    };
+    if let Err(positioned) = serde_yaml::from_str::<HushSpec>(source)
+        && let Some(location) = positioned.location()
+    {
+        let message = positioned.to_string();
+        let suffix = format!(" at line {} column {}", location.line(), location.column());
+        let message = message.strip_suffix(&suffix).unwrap_or(&message);
+        // The same scalar text can fail at two different fields. Require
+        // the original and normalized parses to identify the same path,
+        // so an earlier legacy numeric failure cannot supply its location.
+        if (message == comparable || message.ends_with(&format!(": {comparable}")))
+            && let Err(normalized_error) = serde_yaml::from_str::<HushSpec>(normalized)
+            && let Some(normalized_location) = normalized_error.location()
+        {
+            let normalized_message = normalized_error.to_string();
+            let suffix = format!(
+                " at line {} column {}",
+                normalized_location.line(),
+                normalized_location.column()
+            );
+            if normalized_message.strip_suffix(&suffix) == Some(message) {
+                return positioned;
+            }
+        }
+    }
+    error
+}
+
+/// Resolve plain scalar tokens while their style is still available. A value
+/// tree cannot tell `010` from quoted `"010"`, and serde_yaml's numeric resolver
+/// is not Core-conformant. Preserve all structure for the existing strict decode.
+fn normalize_core_scalars(source: &str) -> Result<String, serde_yaml::Error> {
+    let mut parser = Parser::new_from_str(source);
+    let mut output = String::with_capacity(source.len());
+    // saphyr markers count Unicode scalars, not UTF-8 bytes.
+    let mut offsets: Vec<usize> = source.char_indices().map(|(offset, _)| offset).collect();
+    offsets.push(source.len());
+    let mut cursor = 0;
+    let mut depth = 0usize;
+    let mut nodes = 0usize;
+    while let Some(event) = parser.next_event() {
+        let (event, span) = event.map_err(serde_yaml::Error::custom)?;
+        match event {
+            Event::SequenceStart(_, tag) | Event::MappingStart(_, tag) => {
+                if let Some(tag) = tag
+                    && (tag.handle != "tag:yaml.org,2002:"
+                        || !matches!(tag.suffix.as_str(), "seq" | "map"))
+                {
+                    return Err(serde_yaml::Error::custom("unsupported non-Core YAML tag"));
+                }
+                depth += 1;
+                nodes += 1;
+            }
+            Event::SequenceEnd | Event::MappingEnd => depth = depth.saturating_sub(1),
+            Event::Scalar(value, style, _, tag) => {
+                nodes += 1;
+                let core_tag = tag
+                    .as_ref()
+                    .filter(|tag| tag.handle == "tag:yaml.org,2002:");
+                let non_specific = tag
+                    .as_ref()
+                    .is_some_and(|tag| tag.handle.is_empty() && tag.suffix == "!");
+                if let Some(tag) = &tag {
+                    if !non_specific
+                        && (tag.handle != "tag:yaml.org,2002:"
+                            || !matches!(
+                                tag.suffix.as_str(),
+                                "str" | "int" | "float" | "bool" | "null"
+                            ))
+                    {
+                        return Err(serde_yaml::Error::custom("unsupported non-Core YAML tag"));
+                    }
+                    if tag.suffix == "float" && value.parse::<f64>().is_err() {
+                        return Err(serde_yaml::Error::custom("invalid YAML 1.2 Core float"));
+                    }
+                }
+                let tagged_number = core_tag.is_some_and(|tag| {
+                    matches!(tag.suffix.as_str(), "int" | "float" | "bool" | "null")
+                });
+                if ((style == ScalarStyle::Plain && tag.is_none()) || tagged_number || non_specific)
+                    && !value.is_empty()
+                {
+                    let start = offsets[span.start.index()];
+                    let end = offsets[span.end.index()];
+                    output.push_str(&source[cursor..start]);
+                    let scalar = if non_specific {
+                        serde_json::to_string(value.as_ref()).map_err(serde_yaml::Error::custom)?
+                    } else {
+                        core_scalar(&value)?
+                    };
+                    if let Some(tag) = core_tag {
+                        let resolved: serde_yaml::Value = serde_yaml::from_str(&scalar)?;
+                        crate::raw_validate::reject_unsafe_integers(&resolved)
+                            .map_err(serde_yaml::Error::custom)?;
+                        let valid = match tag.suffix.as_str() {
+                            "int" => resolved.as_i64().is_some(),
+                            "float" => resolved.is_number(),
+                            "bool" => resolved.is_bool(),
+                            "null" => resolved.is_null(),
+                            _ => false,
+                        };
+                        if !valid {
+                            return Err(serde_yaml::Error::custom(format!(
+                                "invalid YAML 1.2 Core {} scalar",
+                                tag.suffix
+                            )));
+                        }
+                    }
+                    output.push_str(&scalar);
+                    cursor = end;
+                }
+            }
+            _ => {}
+        }
+        if depth > MAX_DOCUMENT_DEPTH {
+            return Err(serde_yaml::Error::custom(
+                "document nesting exceeds the maximum depth",
+            ));
+        }
+        if nodes > MAX_NODE_COUNT {
+            return Err(serde_yaml::Error::custom(
+                "document exceeds the maximum node count",
+            ));
+        }
+    }
+    output.push_str(&source[cursor..]);
+    Ok(output)
+}
+
+fn core_scalar(text: &str) -> Result<String, serde_yaml::Error> {
+    static INT: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$").unwrap());
+    static FLOAT: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$").unwrap()
+    });
+    if INT.is_match(text) {
+        let parsed = if let Some(digits) = text.strip_prefix("0o") {
+            i64::from_str_radix(digits, 8)
+        } else if let Some(digits) = text.strip_prefix("0x") {
+            i64::from_str_radix(digits, 16)
+        } else {
+            text.parse::<i64>()
+        };
+        return match parsed {
+            // Keep representable integer syntax for the raw-tree range check,
+            // which can report the complete policy path of the bad value.
+            Ok(value) => Ok(value.to_string()),
+            _ => Err(serde_yaml::Error::custom(
+                "integer exceeds the safe range (2^53-1)",
+            )),
+        };
+    }
+    if FLOAT.is_match(text) {
+        let value = text.parse::<f64>().map_err(serde_yaml::Error::custom)?;
+        if !value.is_finite() {
+            return Err(serde_yaml::Error::custom(
+                "non-finite numbers are not allowed",
+            ));
+        }
+        return Ok(format!("{value:e}"));
+    }
+    match text {
+        "true" | "True" | "TRUE" => Ok("true".into()),
+        "false" | "False" | "FALSE" => Ok("false".into()),
+        "~" | "null" | "Null" | "NULL" => Ok("null".into()),
+        ".nan" | ".NaN" | ".NAN" | ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF"
+        | "-.inf" | "-.Inf" | "-.INF" => Err(serde_yaml::Error::custom(
+            "non-finite numbers are not allowed",
+        )),
+        _ => serde_json::to_string(text).map_err(serde_yaml::Error::custom),
+    }
+}
+
+// serde_yaml represents the non-specific `!` as an application enum tag;
+// its scalar was already forced to a quoted string by the token resolver.
+fn strip_non_specific_tags(value: &mut serde_yaml::Value) {
+    if let serde_yaml::Value::Tagged(tagged) = value
+        && tagged.tag == "!"
+    {
+        *value = std::mem::take(&mut tagged.value);
+    }
+    match value {
+        serde_yaml::Value::Sequence(items) => items.iter_mut().for_each(strip_non_specific_tags),
+        serde_yaml::Value::Mapping(mapping) => {
+            for (_, child) in mapping {
+                strip_non_specific_tags(child);
+            }
+        }
+        _ => {}
     }
 }
 

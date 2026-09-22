@@ -4,8 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_call:
+    inputs:
+      ref:
+        description: Exact commit to qualify when called by the release workflow
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
 
 # Read-only by default; the jobs that need more widen it themselves.
@@ -21,12 +26,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - run: python3 -m pip install pyyaml
+      - run: python3 -m pip install pyyaml 'jsonschema[format]>=4.0'
 
       - uses: actions/setup-go@v5
         with:
@@ -72,6 +79,8 @@ jobs:
       # signer as well as a staleness guard.
       - name: Check derived bundle vectors
         run: python3 scripts/generate_bundle_vectors.py --check
+      - name: Check schema-derived log vectors
+        run: python3 scripts/generate_log_schema_vectors.py --check
       - name: Comment hygiene
         run: python3 scripts/check_comment_hygiene.py --check
 
@@ -80,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -99,11 +110,16 @@ jobs:
       - name: Build without the signing backend
         run: cargo check -p hushspec --no-default-features
 
+      - name: Verify publishable Rust workspace
+        run: cargo package --workspace --locked
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -124,6 +140,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -138,6 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
@@ -155,6 +175,8 @@ jobs:
         sdk: [rust, typescript, python, go]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         if: matrix.sdk == 'rust'
@@ -188,7 +210,15 @@ jobs:
 
       - name: Rust shared fixtures
         if: matrix.sdk == 'rust'
-        run: cargo run --bin hushspec-testkit -- --fixtures fixtures
+        run: cargo run --bin hushspec-testkit -- --fixtures fixtures --report target/conformance-report.json
+
+      - name: Upload reference conformance report
+        if: always() && matrix.sdk == 'rust'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-conformance-report
+          path: target/conformance-report.json
+          if-no-files-found: error
 
       - name: TypeScript shared fixtures
         if: matrix.sdk == 'typescript'
@@ -210,6 +240,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -243,6 +275,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -276,6 +310,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -304,9 +340,11 @@ jobs:
         run: pip install -e "packages/python[dev]"
 
       - name: Run differential fuzz (PR budget, deterministic per commit)
+        env:
+          CANDIDATE_SHA: ${{ inputs.ref || github.sha }}
         run: |
           cargo run --release -p hushspec-testkit --bin hushspec-difftest -- \
-            --seed-from-string "$GITHUB_SHA" \
+            --seed-from-string "$CANDIDATE_SHA" \
             --groups 500 --actions-per-group 4 \
             --report target/difftest/report.json
 
@@ -326,6 +364,8 @@ jobs:
       HUSHSPEC_BENCH_BUDGET_DISABLED_US: '5'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -342,6 +382,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: peaceiris/actions-mdbook@v2
         with:
@@ -373,6 +415,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -429,6 +473,7 @@ jobs:
         # the rest (a repo with code scanning disabled, an API hiccup).
         if: >-
           always() &&
+          (inputs.ref == '' || inputs.ref == github.sha) &&
           (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         continue-on-error: true
@@ -442,6 +487,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -493,6 +540,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -508,6 +557,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -523,6 +574,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -540,6 +593,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -563,6 +618,8 @@ jobs:
       MSRV: '1.88'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       # 1.88 is the floor both for the sources (let-chains) and for the
       # versions pinned in Cargo.lock (`time` 0.3.53). Edition 2024 alone
@@ -589,6 +646,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -694,6 +753,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -718,6 +779,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: docker/setup-buildx-action@v3
 

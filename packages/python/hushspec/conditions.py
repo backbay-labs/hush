@@ -22,6 +22,7 @@ way only. :func:`evaluate_with_context` defers its import to call time.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta, tzinfo
 from enum import Enum
@@ -58,6 +59,11 @@ RUNTIME_CONTEXT_KEYS = frozenset(
         "counters",
         "current_time",
     )
+)
+
+_RUNTIME_TIMESTAMP = re.compile(
+    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})"
+    r"(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):([0-9]{2}))?$"
 )
 
 
@@ -755,14 +761,9 @@ def _resolve_current_time(
 ) -> Optional[tuple[int, int, int]]:
     """Returns (hour, minute, day_of_week) where day_of_week is 0=Mon..6=Sun."""
     if context.current_time is not None:
-        try:
-            dt = datetime.fromisoformat(context.current_time.replace("Z", "+00:00"))
-        except (ValueError, TypeError, AttributeError):
+        dt = _parse_runtime_timestamp(context.current_time)
+        if dt is None:
             return None
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        else:
-            dt = dt.astimezone(timezone.utc)
     else:
         dt = datetime.now(timezone.utc)
 
@@ -770,13 +771,49 @@ def _resolve_current_time(
     resolved_timezone = _resolve_timezone(tz_name)
     if resolved_timezone is None:
         return None
-    adjusted = dt.astimezone(resolved_timezone)
+    try:
+        adjusted = dt.astimezone(resolved_timezone)
+    except OverflowError:
+        return None
+    if adjusted.year < 1 or adjusted.year > 9999:
+        return None
 
     hour = adjusted.hour
     minute = adjusted.minute
     day_of_week = adjusted.weekday()
 
     return (hour, minute, day_of_week)
+
+
+def _parse_runtime_timestamp(value: object) -> Optional[datetime]:
+    """Parse the portable `current_time` grammar without normalizing input.
+
+    The runtime context accepts RFC 3339 date-times with uppercase separators,
+    plus the established zoneless form that is interpreted as UTC. Python's
+    ``fromisoformat`` intentionally accepts several broader ISO spellings and
+    normalizes invalid offsets, so its result is used only after this shape and
+    range check.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _RUNTIME_TIMESTAMP.fullmatch(value)
+    if match is None:
+        return None
+    year, month, day, hour, minute, second = (int(match.group(index)) for index in range(1, 7))
+    if (
+        year < 1
+        or not 1 <= month <= 12
+        or hour > 23
+        or minute > 59
+        or second > 59
+        or (match.group(7) is not None and (int(match.group(7)) > 23 or int(match.group(8)) > 59))
+    ):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    except (OverflowError, ValueError):
+        return None
 
 
 _FIXED_TIMEZONE_OFFSETS: dict[str, int] = {

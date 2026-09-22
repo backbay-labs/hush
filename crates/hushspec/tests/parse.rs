@@ -68,6 +68,39 @@ rules:
 }
 
 #[test]
+fn parse_refusal_keeps_original_source_location() {
+    let yaml = "# editor modeline\nhushspec: '1.0.0'\ndescription: folded\n  text\nname: café-😀\nbogus_field: true\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    assert!(error.to_string().contains("unknown field `bogus_field`"));
+    assert_eq!(error.location().unwrap().line(), 6);
+}
+
+#[test]
+fn normalized_integer_refusal_is_not_replaced_by_an_earlier_float_error() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  patch_integrity:\n    max_additions: 10.0\n    bogus_field: true\n";
+    let error = HushSpec::parse(yaml).unwrap_err().to_string();
+    assert!(error.contains("unknown field `bogus_field`"), "{error}");
+    assert!(!error.contains("floating point"), "{error}");
+}
+
+#[test]
+fn identical_scalar_refusal_does_not_report_an_earlier_fields_location() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  patch_integrity:\n    max_additions: 010\n    max_deletions: '010'\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    if let Some(location) = error.location() {
+        assert_eq!(location.line(), 5, "{error}");
+    }
+}
+
+#[test]
+fn negative_rate_threshold_keeps_the_positioned_type_refusal() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      rate: {counter: requests, threshold: -1, comparison: lt}\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    assert!(error.to_string().contains("invalid type"), "{error}");
+    assert_eq!(error.location().unwrap().line(), 5);
+}
+
+#[test]
 fn validate_unsupported_version() {
     let yaml = r#"
 hushspec: "99.0.0"
@@ -172,7 +205,9 @@ rules:
   patch_integrity:
     max_imbalance_ratio: .nan
 "#;
-    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(HushSpec::parse(yaml).is_err());
+    // Directly constructed models must also fail validation.
+    let spec: HushSpec = serde_yaml::from_str(yaml).unwrap();
     assert!(
         spec.rules
             .as_ref()
@@ -206,7 +241,8 @@ extensions:
     threat_intel:
       similarity_threshold: .inf
 "#;
-    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(HushSpec::parse(yaml).is_err());
+    let spec: HushSpec = serde_yaml::from_str(yaml).unwrap();
     let result = validate(&spec);
     assert!(!result.is_valid());
     assert!(

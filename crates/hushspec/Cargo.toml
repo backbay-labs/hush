@@ -13,6 +13,7 @@ categories = ["config", "parser-implementations"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+saphyr-parser = "0.0.12"
 serde_json = "1"
 thiserror = "2"
 regex = "1"

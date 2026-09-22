@@ -298,10 +298,10 @@ good.
 |---|---|---|---|---|---|---|
 | Anthropic / Claude | -- | `mapClaudeToolToAction`, `createSecureToolHandler` | `adapters.map_claude_tool_to_action`, `adapters.create_secure_tool_handler` | `MapClaudeToolToAction`, `CreateSecureToolHandler` | Maps a `tool_use` block onto the action a policy evaluates: `bash` to `shell_command`, text editor to `file_read` / `file_write`, `computer` to `computer_use`, `web_fetch` to `egress` on the host, `mcp__server__tool` to the inner tool name | No adapter imports the framework it adapts -- blocks are read structurally |
 | OpenAI | -- | `mapOpenAIToolCall`, `createOpenAIGuard` | `adapters.map_openai_tool_call`, `adapters.create_openai_guard` | `MapOpenAIToolCall`, `GuardedOpenAIToolHandler` | | |
-| MCP | -- | `mapMCPToolCall`, `extractDomain`, `createMCPGuard` | `adapters.map_mcp_tool_call`, `adapters.extract_domain`, `adapters.create_mcp_guard` | `MapMCPToolCall`, `ExtractDomain`, `GuardedMCPToolHandler` | | |
+| MCP | -- | `mapMCPToolCall`, `extractDomain`, `createMCPGuard` | `adapters.map_mcp_tool_call`, `adapters.extract_domain`, `adapters.create_mcp_guard` | `MapMCPToolCall`, `ExtractDomain`, `GuardedMCPToolHandler` | Explicit shared aliases and extraction keys map file, command and egress calls; unknown names remain `tool_call` under the original name, and canonical-JSON arguments record `args_size` | `fixtures/adapters/mcp-contract.json` is run by all three SDKs |
 | Vercel AI SDK | -- | `mapVercelToolCall`, `createVercelGuard` | -- | -- | Gates each tool's `execute` | |
-| LangChain | -- | `mapLangChainToolCall`, `wrapLangChainTool`, `createLangChainCallbackHandler` | `adapters.hush_tool` | -- | | TS wraps with a proxy, so the tool keeps its prototype, fields and `instanceof` |
-| CrewAI | -- | -- | `adapters.secure_tool` | -- | | |
+| LangChain | -- | `mapLangChainToolCall`, `wrapLangChainTool`, `createLangChainCallbackHandler` | `adapters.hush_tool` | -- | Python `tool_call` decorators measure the actual positional and keyword arguments; another action type requires `action_mapper(args, kwargs)` | TS wraps with a proxy, so the tool keeps its prototype, fields and `instanceof` |
+| CrewAI | -- | -- | `adapters.secure_tool` | -- | Python `tool_call` decorators measure the actual positional and keyword arguments; another action type requires `action_mapper(args, kwargs)` | A missing or malformed mapper stops the body before it runs |
 | Generic | -- | -- | -- | `ToolActionMapper[T]`, `ToolHandler[T]`, `GuardedToolHandler[T]` | | Go's adapters are one generic wrapper plus three mappers |
 
 Rust has no adapter module. Its analogue is the worked example

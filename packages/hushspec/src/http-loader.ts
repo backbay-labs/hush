@@ -65,7 +65,10 @@ export interface HttpLoaderConfig {
   connectTimeoutMs?: number;
   /** Milliseconds to wait for response bytes once connected. */
   readTimeoutMs?: number;
-  /** Sets both budgets at once, for callers that have only one number. */
+  /**
+   * Sets an overall deadline for DNS, connection, response and body handling,
+   * while also supplying the default connect and read budgets.
+   */
   timeoutMs?: number;
   /** Largest response body accepted, in bytes. */
   maxSize?: number;
@@ -98,30 +101,88 @@ export interface HttpLoaderConfig {
    * valid for the hostname the policy named.
    */
   tlsCa?: string | string[];
+  /**
+   * Optional DNS boundary for controlled environments and tests. Every result
+   * still passes the normal SSRF checks and is pinned before connection.
+   */
+  lookup?: (host: string) => Promise<LookupAddress[]>;
 }
 
 interface Settings {
   connectTimeoutMs: number;
   readTimeoutMs: number;
+  /** A whole-request deadline, present only when the caller set timeoutMs. */
+  deadlineMs?: number;
   maxSize: number;
   authHeader?: string;
   allowedHosts?: string[];
   cacheDir?: string;
   allowInsecureLoopback: boolean;
   tlsCa?: string | string[];
+  lookup?: (host: string) => Promise<LookupAddress[]>;
 }
 
 function settingsFrom(config?: HttpLoaderConfig): Settings {
   return {
     connectTimeoutMs: config?.connectTimeoutMs ?? config?.timeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS,
     readTimeoutMs: config?.readTimeoutMs ?? config?.timeoutMs ?? DEFAULT_READ_TIMEOUT_MS,
+    deadlineMs: config?.timeoutMs,
     maxSize: config?.maxSize ?? DEFAULT_MAX_SIZE,
     authHeader: config?.authHeader,
     allowedHosts: config?.allowedHosts,
     cacheDir: config?.cacheDir,
     allowInsecureLoopback: config?.allowInsecureLoopback ?? false,
     tlsCa: config?.tlsCa,
+    lookup: config?.lookup,
   };
+}
+
+interface Deadline {
+  expiresAt: number;
+  timeoutMs: number;
+}
+
+function deadlineFor(settings: Settings): Deadline | undefined {
+  return settings.deadlineMs === undefined
+    ? undefined
+    : { expiresAt: Date.now() + settings.deadlineMs, timeoutMs: settings.deadlineMs };
+}
+
+function deadlineError(url: string, deadline: Deadline): Error {
+  return new Error(`HTTP request to '${url}' timed out after ${deadline.timeoutMs} ms`);
+}
+
+function remainingDeadlineMs(deadline: Deadline): number {
+  return Math.max(0, deadline.expiresAt - Date.now());
+}
+
+function assertBeforeDeadline(url: string, deadline?: Deadline): void {
+  if (deadline !== undefined && remainingDeadlineMs(deadline) === 0) {
+    throw deadlineError(url, deadline);
+  }
+}
+
+function withinDeadline<T>(
+  url: string,
+  deadline: Deadline | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (deadline === undefined) return operation();
+  const remaining = remainingDeadlineMs(deadline);
+  if (remaining === 0) return Promise.reject(deadlineError(url, deadline));
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(deadlineError(url, deadline)), remaining);
+    void operation().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 // --------------------------------------------------------------------------
@@ -368,6 +429,15 @@ function checkUrl(urlStr: string, settings: Settings): URL {
  */
 export async function resolveTarget(urlStr: string, config?: HttpLoaderConfig): Promise<HttpTarget> {
   const settings = settingsFrom(config);
+  const deadline = deadlineFor(settings);
+  return withinDeadline(urlStr, deadline, () => resolveTargetWithSettings(urlStr, settings, deadline));
+}
+
+async function resolveTargetWithSettings(
+  urlStr: string,
+  settings: Settings,
+  deadline?: Deadline,
+): Promise<HttpTarget> {
   const url = checkUrl(urlStr, settings);
   const host = url.hostname.replace(/^\[|\]$/g, '');
 
@@ -378,11 +448,14 @@ export async function resolveTarget(urlStr: string, config?: HttpLoaderConfig): 
     resolved = [{ address: host, family: literal }];
   } else {
     try {
-      resolved = await dnsLookup(host, { all: true });
+      resolved = await (settings.lookup?.(host) ?? dnsLookup(host, { all: true }));
     } catch (err) {
       throw new Error(`failed to resolve host '${host}': ${err}`);
     }
   }
+  // DNS cannot be cancelled by Node's resolver API, but it must never be
+  // allowed to open a socket after the caller's deadline has elapsed.
+  assertBeforeDeadline(urlStr, deadline);
   if (resolved.length === 0) {
     throw new Error(`host '${host}' did not resolve to any addresses`);
   }
@@ -457,6 +530,7 @@ function fetchTarget(
   settings: Settings,
   etag: string | null,
   missingIsNone: boolean,
+  deadline?: Deadline,
 ): Promise<FetchResult> {
   return new Promise<FetchResult>((resolve, reject) => {
     const headers: Record<string, string> = {
@@ -491,9 +565,17 @@ function fetchTarget(
     // bytes, and a server that accepts and then stalls must not inherit the
     // connect timeout's patience.
     let settled = false;
+    const timeoutFor = (limitMs: number): number =>
+      deadline === undefined ? limitMs : Math.min(limitMs, remainingDeadlineMs(deadline));
+    const timeoutMessage = (phase: 'connect' | 'read', limitMs: number): string =>
+      deadline !== undefined && remainingDeadlineMs(deadline) === 0
+        ? deadlineError(target.url, deadline).message
+        : phase === 'connect'
+          ? `connect to '${target.url}' timed out after ${limitMs} ms`
+          : `HTTP request to '${target.url}' timed out after ${limitMs} ms`;
     let timer: NodeJS.Timeout = setTimeout(
-      () => fail(`connect to '${target.url}' timed out after ${settings.connectTimeoutMs} ms`),
-      settings.connectTimeoutMs,
+      () => fail(timeoutMessage('connect', settings.connectTimeoutMs)),
+      timeoutFor(settings.connectTimeoutMs),
     );
 
     function fail(message: string): void {
@@ -516,8 +598,8 @@ function fetchTarget(
         if (settled) return;
         clearTimeout(timer);
         timer = setTimeout(
-          () => fail(`HTTP request to '${target.url}' timed out after ${settings.readTimeoutMs} ms`),
-          settings.readTimeoutMs,
+          () => fail(timeoutMessage('read', settings.readTimeoutMs)),
+          timeoutFor(settings.readTimeoutMs),
         );
       });
     });
@@ -641,30 +723,34 @@ export function createHttpLoader(
   const settings = settingsFrom(config);
 
   return async (reference: string, _from?: string): Promise<LoadedSpec> => {
-    const target = await resolveTarget(reference, config);
-    const cached = settings.cacheDir ? readCache(settings.cacheDir, reference) : null;
-    const result = await fetchTarget(target, settings, cached?.etag ?? null, false);
+    const deadline = deadlineFor(settings);
+    return withinDeadline(reference, deadline, async () => {
+      const target = await resolveTargetWithSettings(reference, settings, deadline);
+      const cached = settings.cacheDir ? readCache(settings.cacheDir, reference) : null;
+      const result = await fetchTarget(target, settings, cached?.etag ?? null, false, deadline);
 
-    let body: string;
-    if (result.revalidated) {
-      if (cached == null) {
-        throw new Error(
-          `HTTP request to '${reference}' returned status 304 without a cached response to revalidate`,
-        );
+      let body: string;
+      if (result.revalidated) {
+        if (cached == null) {
+          throw new Error(
+            `HTTP request to '${reference}' returned status 304 without a cached response to revalidate`,
+          );
+        }
+        body = cached.body;
+      } else {
+        body = result.body;
+        if (result.etag && settings.cacheDir) {
+          writeCache(settings.cacheDir, reference, result.etag, body);
+        }
       }
-      body = cached.body;
-    } else {
-      body = result.body;
-      if (result.etag && settings.cacheDir) {
-        writeCache(settings.cacheDir, reference, result.etag, body);
-      }
-    }
 
-    const parsed = parse(body);
-    if (!parsed.ok) {
-      throw new Error(`failed to parse HushSpec at ${reference}: ${parsed.error}`);
-    }
-    return { source: reference, spec: parsed.value };
+      assertBeforeDeadline(reference, deadline);
+      const parsed = parse(body);
+      if (!parsed.ok) {
+        throw new Error(`failed to parse HushSpec at ${reference}: ${parsed.error}`);
+      }
+      return { source: reference, spec: parsed.value };
+    });
   };
 }
 
@@ -763,9 +849,13 @@ export async function fetchSignature(
   config?: HttpLoaderConfig,
 ): Promise<string | null> {
   const settings = settingsFrom(config);
-  const target = await resolveTarget(url, config);
-  const result = await fetchTarget(target, settings, null, true);
-  return result.missing ? null : result.body;
+  const deadline = deadlineFor(settings);
+  return withinDeadline(url, deadline, async () => {
+    const target = await resolveTargetWithSettings(url, settings, deadline);
+    const result = await fetchTarget(target, settings, null, true, deadline);
+    assertBeforeDeadline(url, deadline);
+    return result.missing ? null : result.body;
+  });
 }
 
 /**

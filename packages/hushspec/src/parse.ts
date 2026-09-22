@@ -56,10 +56,21 @@ export function parse(yaml: string): ParseResult {
   // the key; this records it so the diagnostic can say which one.
   let duplicateKey: string | undefined;
   try {
-    doc = YAML.parse(yaml, {
+    const parsed = YAML.parseDocument(yaml, {
       version: '1.2',
       schema: 'core',
       intAsBigInt: true,
+      resolveKnownTags: false,
+      customTags: [{
+        tag: 'tag:yaml.org,2002:float',
+        default: false,
+        resolve(text: string, onError: (message: string) => void) {
+          if (!/^[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$/.test(text)) {
+            onError('invalid YAML 1.2 Core float');
+          }
+          return Number(text);
+        },
+      }],
       uniqueKeys: (a, b) => {
         const equal = a === b || (isScalar(a) && isScalar(b) && a.value === b.value);
         if (equal && duplicateKey === undefined) {
@@ -69,9 +80,12 @@ export function parse(yaml: string): ParseResult {
       },
       // Anchors and aliases are rejected by the pre-scan above; refuse to
       // expand any that slip past it rather than silently duplicating nodes.
-      maxAliasCount: 0,
       merge: false,
     });
+    if (parsed.errors.length > 0) throw parsed.errors[0];
+    const tagError = parsed.warnings.find((warning) => warning.code === 'TAG_RESOLVE_FAILED');
+    if (tagError !== undefined) throw tagError;
+    doc = parsed.toJS({ maxAliasCount: 0 });
   } catch (error) {
     return parseError(describeYamlError(error, duplicateKey));
   }
@@ -93,6 +107,9 @@ export function parse(yaml: string): ParseResult {
     return parseError(`document exceeds the maximum node count of ${MAX_NODE_COUNT}`);
   }
 
+  if (typeof doc === 'object' && doc !== null && 'hushspec' in doc && typeof doc.hushspec !== 'string') {
+    return parseError('hushspec: invalid type, expected a version string');
+  }
   const result = validateForParse(doc);
   if (!result.valid) {
     const first = result.errors[0];
@@ -103,7 +120,36 @@ export function parse(yaml: string): ParseResult {
     };
   }
 
+  const integerViolation = policyIntegerViolation(doc);
+  if (integerViolation !== undefined) return parseError(integerViolation);
+
   return { ok: true, value: doc as HushSpec };
+}
+
+/** Integer properties have the portable range even when written with float
+ * syntax. The ratio/similarity number fields and arbitrary condition context
+ * retain finite doubles beyond this range (canonical 4.3).
+ */
+function policyIntegerViolation(value: unknown, path: string[] = []): string | undefined {
+  const tail = path.slice(-2).join('.');
+  if (path.at(-1) === 'context' && typeof value === 'object' && value !== null && !Array.isArray(value)) return undefined;
+  if (typeof value === 'number') {
+    if (tail !== 'patch_integrity.max_imbalance_ratio' && tail !== 'threat_intel.similarity_threshold'
+        && !Number.isSafeInteger(value)) {
+      return `${path.join('.')}: integer field exceeds the safe range (2^53-1)`;
+    }
+  } else if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      const issue = policyIntegerViolation(value[index], [...path, String(index)]);
+      if (issue !== undefined) return issue;
+    }
+  } else if (typeof value === 'object' && value !== null) {
+    for (const [key, child] of Object.entries(value)) {
+      const issue = policyIntegerViolation(child, [...path, key]);
+      if (issue !== undefined) return issue;
+    }
+  }
+  return undefined;
 }
 
 /** Throwing variant of `parse()`. */
@@ -149,6 +195,9 @@ class UnsafeIntegerError extends Error {}
  * content hash, and the rest of the SDK works with plain numbers.
  */
 function narrowIntegers(value: unknown, path: string): unknown {
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new UnsafeIntegerError(`${path}: non-finite numbers are not allowed`);
+  }
   if (typeof value === 'bigint') {
     if (value > MAX_SAFE_INTEGER || value < -MAX_SAFE_INTEGER) {
       throw new UnsafeIntegerError(

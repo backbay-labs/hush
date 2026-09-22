@@ -39,6 +39,13 @@ names the implementation, pins the corpus by the SHA-256 of
 every vector it ran. `highest_level` is the largest N for which levels 0..=N
 all pass; a level with any unattempted vector is never a pass.
 
+Reports also run the JSON case corpora that SDK unit tests consume:
+`core/raw-yaml/scalars.json` records parse acceptance at Level 0, decoded
+values at Level 1, optional decisions at Level 3, and optional canonical/hash
+assertions at Level 4;
+`log/schema-vectors.json` records one Level 5 verifier result per entry. A
+missing or malformed corpus is a failure, not an empty successful category.
+
 ## The conformance bundle
 
 ```bash

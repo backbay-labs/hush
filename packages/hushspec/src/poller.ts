@@ -47,6 +47,8 @@ export interface PolicySnapshot {
   fingerprint?: string;
   /** The verified resolution behind `spec`, when the loader produced one. */
   resolution?: Resolution;
+  /** Time the caller successfully loaded this snapshot, in milliseconds. */
+  loadedAt?: number;
 }
 
 /** How often a {@link PolicyPoller} reloads, in milliseconds. */
@@ -54,6 +56,11 @@ export const DEFAULT_POLL_INTERVAL_MS = 60_000;
 
 export interface PollerOptions {
   loader: () => Promise<string | PolicySnapshot>;
+  /**
+   * A policy the caller already loaded and verified before it began polling.
+   * It becomes the baseline without being offered to `onChange` again.
+   */
+  initialSnapshot?: PolicySnapshot;
   /** Tick period in milliseconds. Default {@link DEFAULT_POLL_INTERVAL_MS}. */
   intervalMs?: number;
   onChange: (spec: HushSpec, resolution?: Resolution) => void;
@@ -80,16 +87,47 @@ export class PolicyPoller {
   private contentHash: string | null = null;
   private nextLoadId: number = 0;
   private latestAppliedLoadId: number = 0;
+  /** Invalidates an in-flight timer load when polling is stopped. */
+  private lifecycle: number = 0;
 
   constructor(options: PollerOptions) {
     this.options = options;
+    const initial = options.initialSnapshot;
+    if (initial !== undefined) {
+      // A provider may have loaded the policy before it starts watching. Keep
+      // that accepted state rather than requiring a second successful remote
+      // request merely to install the poll timer.
+      this.currentSpec = initial.spec;
+      this.currentResolution = initial.resolution ?? null;
+      const fingerprintSource = initial.fingerprint ?? JSON.stringify(initial.spec);
+      this.contentHash = createHash('sha256').update(fingerprintSource).digest('hex');
+      this.lastSuccessfulLoad = initial.loadedAt ?? Date.now();
+    }
   }
 
   async start(): Promise<HushSpec> {
-    const spec = await this.doLoad(true);
+    const lifecycle = this.lifecycle;
+    try {
+      const spec = this.currentSpec ?? await this.doLoad(true);
+      if (lifecycle === this.lifecycle) this.startTimer();
+      return spec;
+    } catch (error) {
+      // A first load can be transient. Keep the retry loop alive so the
+      // provider can recover (and still check the panic sentinel) instead of
+      // permanently stopping after the rejected start promise.
+      if (lifecycle === this.lifecycle) this.startTimer();
+      throw error;
+    }
+  }
 
+  private startTimer(): void {
+    if (this.timer != null) return;
     const intervalMs = this.options.intervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+    const lifecycle = this.lifecycle;
     this.timer = setInterval(() => {
+      // A callback queued just before stop() must not begin a new reload after
+      // polling has been stopped.
+      if (lifecycle !== this.lifecycle) return;
       // A poll runs with nobody awaiting it, so a rejection here would be an
       // unhandled rejection rather than something a caller can catch. The
       // callbacks report their own failures, so anything reaching this point
@@ -100,11 +138,10 @@ export class PolicyPoller {
     if (this.timer && typeof this.timer === 'object' && 'unref' in this.timer) {
       (this.timer as { unref(): void }).unref();
     }
-
-    return spec;
   }
 
   stop(): void {
+    this.lifecycle += 1;
     if (this.timer != null) {
       clearInterval(this.timer);
       this.timer = null;
@@ -135,6 +172,11 @@ export class PolicyPoller {
   /** The chain and signature outcome behind the policy `current()` returns. */
   resolution(): Resolution | null {
     return this.currentResolution;
+  }
+
+  /** When the policy currently served by this poller last loaded successfully. */
+  lastSuccessfulLoadAt(): number {
+    return this.lastSuccessfulLoad;
   }
 
   /**
@@ -177,6 +219,7 @@ export class PolicyPoller {
   }
 
   private async doLoad(throwOnError: boolean): Promise<HushSpec> {
+    const lifecycle = this.lifecycle;
     this.checkPanicSentinel();
     const loadId = ++this.nextLoadId;
     let loaded: string | PolicySnapshot;
@@ -184,6 +227,10 @@ export class PolicyPoller {
       loaded = await this.options.loader();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
+      if (lifecycle !== this.lifecycle) {
+        if (this.currentSpec != null) return this.currentSpec;
+        throw error;
+      }
       if (throwOnError && this.currentSpec == null) {
         throw error;
       }
@@ -235,6 +282,10 @@ export class PolicyPoller {
       resolution = loaded.resolution;
       fingerprintSource = loaded.fingerprint ?? JSON.stringify(loaded.spec);
     }
+
+    // stop() may run while the loader is doing I/O. Do not let that old tick
+    // publish a policy or refresh staleness after polling was stopped.
+    if (lifecycle !== this.lifecycle) return this.currentSpec ?? spec;
 
     if (loadId < this.latestAppliedLoadId) {
       return this.currentSpec ?? spec;

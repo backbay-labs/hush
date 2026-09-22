@@ -52,6 +52,37 @@ func logVectorClock(t *testing.T) time.Time {
 // Vectors
 // --------------------------------------------------------------------------
 
+func TestSchemaDerivedLogEntries(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(logFixtureDir(t, ""), "schema-vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vectors []struct {
+		ID    string         `json:"id"`
+		Valid bool           `json:"valid"`
+		Entry map[string]any `json:"entry"`
+	}
+	if err := json.Unmarshal(data, &vectors); err != nil {
+		t.Fatal(err)
+	}
+	for _, vector := range vectors {
+		t.Run(vector.ID, func(t *testing.T) {
+			hash, err := entryHashOfObject(vector.Entry)
+			if err != nil || hash != vector.Entry["entry_hash"] {
+				t.Fatalf("hash mismatch: %s %v", hash, err)
+			}
+			line, err := json.Marshal(vector.Entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = VerifyLog(vector.ID, string(line), nil)
+			if (err == nil) != vector.Valid {
+				t.Fatalf("expected valid=%v, got %v", vector.Valid, err)
+			}
+		})
+	}
+}
+
 func TestValidLogVectorsVerify(t *testing.T) {
 	dir := logFixtureDir(t, "valid")
 	keyring := testKeyring(t)
@@ -968,16 +999,12 @@ func TestAMalformedPolicyEventIsRejected(t *testing.T) {
 	}
 }
 
-// TestAnOptionalMemberSetToNullReadsAsAbsent pins the one place null is not a
-// break: the schema's optional members, which every SDK reads as absent.
-func TestAnOptionalMemberSetToNullReadsAsAbsent(t *testing.T) {
+// Optional means absent; the published schema does not admit null.
+func TestAnOptionalMemberSetToNullIsRejected(t *testing.T) {
 	line := eventLine(t, func(e map[string]any) { e["previous_content_hash"] = nil })
-	report, err := VerifyLog("log.jsonl", line, nil)
-	if err != nil {
-		t.Fatalf("an optional null must read as absent: %v", err)
-	}
-	if report.Entries != 1 {
-		t.Errorf("expected one entry, got %d", report.Entries)
+	_, err := VerifyLog("log.jsonl", line, nil)
+	if err == nil || !strings.Contains(err.Error(), "previous_content_hash must not be null") {
+		t.Fatalf("expected schema rejection, got %v", err)
 	}
 }
 

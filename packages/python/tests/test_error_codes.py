@@ -72,7 +72,7 @@ class TestParseCodes:
             ("- not\n- a mapping\n", ERROR_PARSE),
             ("{{{{ invalid yaml", ERROR_PARSE),
             ('hushspec: "0.1.0"\nbogus: 1\n', ERROR_PARSE),
-            ("hushspec: 0.1\n", ERROR_UNSUPPORTED_VERSION),
+            ("hushspec: 0.1\n", ERROR_PARSE),
             (
                 'hushspec: "0.1.0"\nrules:\n  secret_patterns:\n    patterns:\n'
                 '      - {name: a, pattern: "x", severity: critical}\n'
@@ -100,7 +100,7 @@ class TestParseCodes:
     def test_the_code_rides_on_the_raising_form_too(self) -> None:
         with pytest.raises(ValueError) as caught:
             parse_or_raise("hushspec: 0.1\n")
-        assert caught.value.code == ERROR_UNSUPPORTED_VERSION
+        assert caught.value.code == ERROR_PARSE
 
 
 class TestValidationCodes:
@@ -153,7 +153,7 @@ class TestIoAndResolveCodes:
         path.write_text("hushspec: 0.1\n")
         ok, err = resolve_file(path)
         assert ok is False
-        assert err.code == ERROR_UNSUPPORTED_VERSION
+        assert err.code == ERROR_PARSE
 
     def test_every_resolution_refusal_is_e010(self) -> None:
         # The specific `code` names which resolve check failed; `error_code` is

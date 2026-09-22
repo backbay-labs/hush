@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -947,8 +948,7 @@ var (
 
 // memberProblem is the first way container departs from members, or "".
 //
-// A member the schema makes optional may be absent or null; one it requires
-// may be neither.
+// Optional means absent; no declared member admits an explicit null.
 func memberProblem(container map[string]any, members []logMember, path string) string {
 	for _, member := range members {
 		where := path + "." + member.name
@@ -960,10 +960,7 @@ func memberProblem(container map[string]any, members []logMember, path string) s
 			continue
 		}
 		if value == nil {
-			if member.required {
-				return where + " must not be null"
-			}
-			continue
+			return where + " must not be null"
 		}
 		switch member.kind {
 		case logMemberString:
@@ -1005,6 +1002,26 @@ func memberProblem(container map[string]any, members []logMember, path string) s
 // unmarshalling collapses an absent member into the zero value of the member
 // it was meant to fill.
 func logPayloadProblem(object map[string]any) string {
+	if problem := logScalarProblem(object, ""); problem != "" {
+		return problem
+	}
+	if signature, ok := object["signature"].(map[string]any); ok {
+		members := []logMember{
+			{name: "format_version", kind: logMemberString, required: true, values: []string{"0.2"}},
+			{name: "algorithm", kind: logMemberString, required: true, values: []string{"ed25519"}},
+			{name: "key_id", kind: logMemberString, required: true},
+			{name: "signed_at", kind: logMemberString, required: true},
+			{name: "content_hash", kind: logMemberString, required: true},
+			{name: "signature", kind: logMemberString, required: true},
+			{name: "expires_at", kind: logMemberString},
+			{name: "policy_name", kind: logMemberString},
+			{name: "signer", kind: logMemberString},
+			{name: "policy_version", kind: logMemberIndex},
+		}
+		if problem := memberProblem(signature, members, "signature"); problem != "" {
+			return problem
+		}
+	}
 	if started, ok := object["log_started"].(map[string]any); ok {
 		if problem := memberProblem(started, logStartedMembers, "log_started"); problem != "" {
 			return problem
@@ -1050,9 +1067,66 @@ func policySummaryProblem(policy map[string]any, path string) string {
 	return memberProblem(signature, signatureStatusMembers, path+".signature")
 }
 
-// entryObjectOfLine reads one JSON Lines record as the object the line holds,
-// which is what both the entry hash and the receipt payload check read: the
-// typed entry cannot answer for members it does not model.
+var logHashPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+var logSignaturePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{86}$`)
+
+// Scalar constraints of the log-entry schema over the original document.
+// Receipt internals have their own schema and are validated separately.
+func logScalarProblem(value any, path string) string {
+	if value == nil {
+		return path + " must not be null"
+	}
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			if path == "" && key == "receipt" && child != nil {
+				continue
+			}
+			where := key
+			if path != "" {
+				where = path + "." + key
+			}
+			if problem := logScalarProblem(child, where); problem != "" {
+				return problem
+			}
+		}
+	case []any:
+		for index, child := range value {
+			if problem := logScalarProblem(child, fmt.Sprintf("%s[%d]", path, index)); problem != "" {
+				return problem
+			}
+		}
+	case string:
+		parts := strings.Split(path, ".")
+		key := parts[len(parts)-1]
+		valid := true
+		switch key {
+		case "prev_hash", "entry_hash", "content_hash", "previous_content_hash", "previous_entry_hash", "key_id":
+			valid = logHashPattern.MatchString(value)
+		case "timestamp", "signed_at", "expires_at", "verified_at":
+			_, err := time.Parse("2006-01-02T15:04:05.000Z", value)
+			valid = receiptTimestampPattern.MatchString(value) && err == nil
+		case "spec_version":
+			valid = receiptSpecVersionPattern.MatchString(value)
+		case "source", "previous_file", "policy_name", "signer":
+			valid = value != ""
+		default:
+			if path == "signature.signature" {
+				valid = logSignaturePattern.MatchString(value)
+			}
+			if strings.HasPrefix(path, "policy_event.sdk.") {
+				valid = value != ""
+			}
+		}
+		if !valid {
+			return path + " does not satisfy the log-entry schema"
+		}
+	}
+	return ""
+}
+
+// entryObjectOfLine reads the original object for hashing and schema checks;
+// the typed entry cannot distinguish absent members from explicit nulls.
 func entryObjectOfLine(line string) (map[string]any, error) {
 	var object map[string]any
 	if err := json.Unmarshal([]byte(line), &object); err != nil {
