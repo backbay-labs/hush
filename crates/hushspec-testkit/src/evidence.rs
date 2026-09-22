@@ -560,23 +560,31 @@ pub fn run_bundle_vectors(fixtures_dir: &Path) -> Vec<VectorResult> {
                 continue;
             }
         };
-        // A policy that will not resolve has nothing to compare, which is
-        // check 4's own failure and never a panic.
-        let resolution = case.policy.as_deref().map(|policy| {
-            resolve_path_with_options(root.join(policy), &ResolveOptions::default()).ok()
-        });
-        let policy_missing = matches!(resolution, Some(None));
+        // A case that names a policy states the policy check 4 compares
+        // against. One that will not resolve leaves the case unrunnable: the
+        // vector fails on the resolution error rather than standing in for a
+        // verdict the verifier never produced.
+        let resolution = match case.policy.as_deref() {
+            Some(policy) => {
+                match resolve_path_with_options(root.join(policy), &ResolveOptions::default()) {
+                    Ok(resolution) => Some(resolution),
+                    Err(error) => {
+                        results.push(fail(name, "bundle", 5, format!("{policy}: {error}")));
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
         let outcome = match DsseEnvelope::parse(&text) {
             Ok(envelope) => {
-                verify_bundle(&envelope, &keyring, resolution.flatten().as_ref(), &options)
-                    .map(|_| ())
+                verify_bundle(&envelope, &keyring, resolution.as_ref(), &options).map(|_| ())
             }
             Err(error) => Err(error),
         };
-        let actual = match (&outcome, policy_missing) {
-            (_, true) => "policy_mismatch".to_string(),
-            (Ok(()), _) => "valid".to_string(),
-            (Err(error), _) => error.reason_code().to_string(),
+        let actual = match &outcome {
+            Ok(()) => "valid".to_string(),
+            Err(error) => error.reason_code().to_string(),
         };
         let expected = case.expect.as_str();
         if actual == expected {
@@ -862,5 +870,43 @@ mod tests {
     #[test]
     fn bundle_vectors_pass() {
         assert_all_pass(&run_bundle_vectors(&fixtures_dir()), "bundle vectors");
+    }
+
+    /// A case whose `policy` will not resolve cannot exercise check 4, so it
+    /// fails on the resolution error instead of reporting `policy_mismatch`
+    /// for a verdict the bundle verifier never reached.
+    #[test]
+    fn bundle_case_with_an_unresolvable_policy_fails() {
+        let real = fixtures_dir().canonicalize().expect("fixtures dir");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let bundle_dir = dir.path().join("bundle");
+        std::fs::create_dir_all(&bundle_dir).expect("create dir");
+        let manifest = format!(
+            concat!(
+                "hushspec_bundle_vectors: 0.1.0\n",
+                "defaults:\n",
+                "  keyring: {keyring}\n",
+                "  now: '2026-09-15T12:00:00.000Z'\n",
+                "cases:\n",
+                "- name: unresolvable-policy\n",
+                "  bundle: {bundle}\n",
+                "  policy: {policy}\n",
+                "  expect:\n",
+                "    invalid: policy_mismatch\n",
+            ),
+            keyring = real.join("signing/keys/keyring.json").display(),
+            bundle = real.join("bundle/bundles/valid.bundle.json").display(),
+            policy = dir.path().join("no-such-policy.yaml").display(),
+        );
+        std::fs::write(bundle_dir.join("vectors.yaml"), manifest).expect("write manifest");
+
+        let results = run_bundle_vectors(dir.path());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, Status::Fail);
+        let message = results[0].message.as_deref().unwrap_or_default();
+        assert!(
+            message.contains("no-such-policy.yaml"),
+            "unexpected message: {message}"
+        );
     }
 }
