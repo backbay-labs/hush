@@ -1,0 +1,16 @@
+hushspec_resolve: 0.1.0
+description: 'signing 6.5: a hop whose envelope cannot be checked against anything records no_keyring, never missing_signature'
+policy:
+  hushspec: 0.1.0
+  name: unkeyed
+  rules:
+    egress:
+      allow:
+      - api.example.com
+      default: block
+load:
+  require_signature: true
+  signature: present
+expect:
+  resolves: false
+  rejects: no_keyring

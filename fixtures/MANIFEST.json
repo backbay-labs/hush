@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T00:59:32Z",
+  "generated_at": "2026-09-22T03:04:54Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1397,8 +1397,36 @@
       "level": 4
     },
     {
+      "path": "fixtures/core/resolve/pin-non-digest-fragment.yaml",
+      "sha256": "4add82a54d1defd3573a66666dc279381e05329195d427757e15cf3539b693c7",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/pin-short-digest.yaml",
+      "sha256": "2c34568bfe231447bb1207d24e3367fd4125956c0e88604e5dc5e375a2db776f",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/pin-uppercase-algorithm.yaml",
+      "sha256": "dd1cacfea38480a967fb394feabb9d7998557cc036518a5814366352cdcb022e",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
       "path": "fixtures/core/resolve/pin-valid.yaml",
       "sha256": "252843a42f9b12395a4c14881fa8797fee05776d80d5c88144e2d2650e0fa429",
+      "category": "resolve",
+      "module": "core",
+      "level": 4
+    },
+    {
+      "path": "fixtures/core/resolve/require-signature-without-a-keyring.yaml",
+      "sha256": "915c35598bc6d16f62b8eace2ccaeb46086af1ceefbd9575ab2a6d31a7c4376e",
       "category": "resolve",
       "module": "core",
       "level": 4

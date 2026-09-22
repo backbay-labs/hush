@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { parseOrThrow } from '../src/parse.js';
 import {
   MEMORY_SOURCE,
+  PolicyVerificationError,
+  type ResolveOptions,
   createCompositeLoader,
   resolveErrorReason,
   resolveWithOptions,
@@ -34,12 +36,38 @@ interface Vector {
   hushspec_resolve: string;
   description: string;
   policy: unknown;
+  /**
+   * The load-time configuration to resolve under (signing spec 6.5). Absent
+   * means the defaults: nothing required, nothing verified. No vector
+   * configures a keyring -- they carry no key material -- so what a vector
+   * with this block pins down is the outcome recorded when there is none.
+   */
+  load?: {
+    require_signature?: boolean;
+    signature?: 'absent' | 'present';
+  };
   expect: {
     resolves?: boolean;
     content_hash?: string;
     chain?: Link[];
     rejects?: string;
   };
+}
+
+/**
+ * The placeholder envelope a vector's locator serves for `signature: present`.
+ * No vector configures a keyring, so the outcome is decided before these bytes
+ * are ever parsed.
+ */
+const VECTOR_ENVELOPE = '{}';
+
+function optionsOf(vector: Vector): ResolveOptions {
+  if (vector.load === undefined) return {};
+  const options: ResolveOptions = { requireSignature: vector.load.require_signature === true };
+  if (vector.load.signature === 'present') {
+    options.signatureLocator = (source) => (source.startsWith('builtin:') ? null : VECTOR_ENVELOPE);
+  }
+  return options;
 }
 
 function vectorFiles(): string[] {
@@ -52,7 +80,7 @@ describe('resolve vectors', () => {
   const files = vectorFiles();
 
   it('finds the committed vectors', () => {
-    expect(files.length).toBeGreaterThanOrEqual(7);
+    expect(files.length).toBeGreaterThanOrEqual(11);
   });
 
   for (const file of files) {
@@ -62,11 +90,12 @@ describe('resolve vectors', () => {
       expect(vector.hushspec_resolve).toBe('0.1.0');
       const spec = parseOrThrow(YAML.stringify(vector.policy));
       const loader = createCompositeLoader();
+      const options = optionsOf(vector);
 
       if (vector.expect.rejects !== undefined) {
         let thrown: unknown;
         try {
-          resolveWithOptions(spec, { loader });
+          resolveWithOptions(spec, { loader, options });
         } catch (error) {
           thrown = error;
         }
@@ -75,7 +104,7 @@ describe('resolve vectors', () => {
         return;
       }
 
-      const resolution = resolveWithOptions(spec, { loader });
+      const resolution = resolveWithOptions(spec, { loader, options });
       expect(resolution.content_hash).toBe(vector.expect.content_hash);
       expect(
         resolution.chain.map((link) => ({
@@ -92,18 +121,23 @@ describe('resolve vectors', () => {
 
 describe('digest pins under requireSignature', () => {
   it('lets a matching pin vouch for a builtin hop but still refuses the leaf', () => {
-    // Mirrors the Rust `pins_satisfy_a_signature_requirement_for_that_hop`
-    // test: a pinned hop needs no envelope, but the memory leaf cannot prove
-    // itself, so the load fails closed on it.
+    // A pinned hop needs no envelope (signing spec 6.5), but the memory leaf
+    // cannot prove itself, so the load fails closed on it.
     const pinned = YAML.parse(
       readFileSync(path.join(vectorsDir, 'pin-valid.yaml'), 'utf8'),
     ) as Vector;
     const spec = parseOrThrow(YAML.stringify(pinned.policy));
-    expect(() =>
+    let thrown: unknown;
+    try {
       resolveWithOptions(spec, {
         loader: createCompositeLoader(),
         options: { requireSignature: true, keyring: undefined },
-      }),
-    ).toThrow(/requireSignature needs a keyring/);
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(PolicyVerificationError);
+    expect((thrown as PolicyVerificationError).source).toBe(MEMORY_SOURCE);
+    expect(resolveErrorReason(thrown)).toBe('missing_signature');
   });
 });

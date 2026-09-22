@@ -71,6 +71,51 @@ const ReasonMissingSignature = "missing_signature"
 // keyring was configured to check it against (signing spec section 6.5).
 const ReasonNoKeyring = "no_keyring"
 
+// ReasonSigningUnavailable is recorded when the runtime lacks the
+// cryptographic backend needed to verify (signing spec section 6.5). Ed25519
+// is in Go's standard library, so this SDK never records it; it is part of the
+// closed set because a receipt written by a sibling SDK may carry it.
+const ReasonSigningUnavailable = "signing_unavailable"
+
+// LoadReasonCodes is the closed set of reasons a verification on load records
+// on a hop: the five load-time conditions of signing spec section 6.5 plus the
+// envelope checks of section 6.4. A reason outside it is not one a receipt may
+// carry.
+func LoadReasonCodes() []string {
+	return []string{
+		ReasonMissingSignature,
+		ReasonNoKeyring,
+		ReasonSigningUnavailable,
+		ReasonDigestMismatch,
+		ReasonInvalidPin,
+		ReasonMalformedEnvelope,
+		ReasonUnsupportedFormatVersion,
+		ReasonUnsupportedAlgorithm,
+		ReasonUnknownKeyID,
+		ReasonKeyRevoked,
+		ReasonKeyRetired,
+		ReasonSignedAtInFuture,
+		ReasonExpired,
+		ReasonSignatureMismatch,
+		ReasonContentHashMismatch,
+		ReasonPolicyVersionRollback,
+	}
+}
+
+// LoadReasonOf reports the reason an unverified status names, as a member of
+// [LoadReasonCodes]. A status that names none, or one outside the set, reads as
+// [ReasonMissingSignature]: the hop proved nothing, and that is all a caller
+// can act on.
+func LoadReasonOf(status *SignatureStatus) string {
+	if status == nil || status.Reason == "" {
+		return ReasonMissingSignature
+	}
+	if slices.Contains(LoadReasonCodes(), status.Reason) {
+		return status.Reason
+	}
+	return ReasonMissingSignature
+}
+
 // ResolveLoader loads a HushSpec referenced by an extends field.
 // reference is the extends value with any digest pin already stripped; from is
 // the source of the referencing document.
@@ -821,28 +866,23 @@ func resolvedDocument(spec *HushSpec) *HushSpec {
 	return &own
 }
 
-var (
-	// digestPinPattern is a content hash as spec/hushspec-canonical.md
-	// section 5 defines it -- the same value the pin fragment carries.
-	digestPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-	// digestPinFragmentPattern matches anything shaped like an
-	// `<algorithm>:<digest>` fragment. A fragment that looks like a pin but is
-	// not a well-formed sha256 one is an error, never a filename: guessing
-	// would drop the pin the author asked for.
-	digestPinFragmentPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*:[0-9A-Za-z]+$`)
-)
+// digestPinPattern is a content hash as spec/hushspec-canonical.md section 5
+// defines it -- the same value the pin fragment carries.
+var digestPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // splitDigestPin separates an extends reference from its optional digest pin:
 // `base.yaml#sha256:<64 hex>` becomes ("base.yaml", "sha256:<64 hex>").
+//
+// Every fragment is read as a pin. Core spec 2.3 requires a malformed fragment
+// to be rejected, so anything after the last "#" that is not exactly
+// "sha256:" followed by 64 lowercase hex digits refuses the load: guessing that
+// it is part of the path would drop the pin the author asked for.
 func splitDigestPin(reference string) (string, string, error) {
 	index := strings.LastIndex(reference, "#")
 	if index < 0 {
 		return reference, "", nil
 	}
 	ref, fragment := reference[:index], reference[index+1:]
-	if !digestPinFragmentPattern.MatchString(fragment) {
-		return reference, "", nil
-	}
 	if !digestPinPattern.MatchString(fragment) {
 		return "", "", &InvalidPinError{
 			Reference: reference,

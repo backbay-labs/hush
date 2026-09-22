@@ -344,11 +344,30 @@ rules:
     expect(resolution.chain.map((link) => link.signature?.verified)).toEqual([true, true]);
   });
 
-  it('is a configuration error without a keyring', () => {
+  it('refuses every unpinned hop without a keyring, recording why', () => {
+    // Signing spec 6.5: a hop whose envelope cannot be checked against
+    // anything records `no_keyring`, and one with no envelope at all records
+    // `missing_signature`. Both refuse; neither is silently admitted.
     const leafPath = write('leaf.yaml', ROOT_POLICY);
-    expect(() => resolveFromFileWithOptions(leafPath, { requireSignature: true })).toThrow(
-      /requireSignature needs a keyring/,
-    );
+    let unsigned: unknown;
+    try {
+      resolveFromFileWithOptions(leafPath, { requireSignature: true });
+    } catch (error) {
+      unsigned = error;
+    }
+    expect(unsigned).toBeInstanceOf(PolicyVerificationError);
+    expect((unsigned as PolicyVerificationError).reason).toBe('missing_signature');
+
+    signTo(`${leafPath}.sig`, parseOrThrow(ROOT_POLICY));
+    let unkeyed: unknown;
+    try {
+      resolveFromFileWithOptions(leafPath, { requireSignature: true });
+    } catch (error) {
+      unkeyed = error;
+    }
+    expect(unkeyed).toBeInstanceOf(PolicyVerificationError);
+    expect((unkeyed as PolicyVerificationError).reason).toBe('no_keyring');
+    expect((unkeyed as PolicyVerificationError).status.verified).toBe(false);
   });
 
   it('refuses a policy whose content changed after signing', () => {

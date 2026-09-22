@@ -28,8 +28,44 @@ pub struct ResolveVector {
     pub description: String,
     /// The leaf document, inline.
     pub policy: serde_yaml::Value,
+    /// The load-time configuration the chain is resolved under. Absent means
+    /// the defaults: nothing required, nothing verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load: Option<ResolveLoad>,
     pub expect: ResolveExpect,
 }
+
+/// The load-time configuration of a vector (signing spec 6.5).
+///
+/// No keyring is ever configured: the resolve vectors carry no key material,
+/// so what they pin down is the outcome an enforcement point records when it
+/// has none.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveLoad {
+    /// Whether every non-`builtin:` hop must prove itself.
+    #[serde(default)]
+    pub require_signature: bool,
+    /// Whether the signature locator finds a detached envelope for a hop.
+    #[serde(default)]
+    pub signature: VectorEnvelope,
+}
+
+/// What a vector's signature locator reports for a non-`builtin:` hop.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorEnvelope {
+    /// The hop has no detached envelope.
+    #[default]
+    Absent,
+    /// The hop has a detached envelope. Its bytes are
+    /// [`VECTOR_ENVELOPE_BYTES`], which no vector configures a keyring for, so
+    /// the outcome is decided before anything is parsed.
+    Present,
+}
+
+/// The placeholder envelope a vector's locator serves for `signature: present`.
+pub const VECTOR_ENVELOPE_BYTES: &str = "{}";
 
 /// What resolving a vector's `policy` must produce.
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,14 +102,19 @@ pub struct ResolveLink {
 /// caller reports that as a failure rather than inventing a code, so a vector
 /// can never pass by producing something nobody expected.
 #[must_use]
-pub fn reason_code(error: &ResolveError) -> Option<&'static str> {
+pub fn reason_code(error: &ResolveError) -> Option<&str> {
     match error {
         ResolveError::DigestMismatch { .. } => Some("digest_mismatch"),
         ResolveError::InvalidPin { .. } => Some("invalid_pin"),
         ResolveError::Cycle { .. } => Some("cycle"),
         ResolveError::MaxDepth => Some("max_depth"),
         ResolveError::NotFound { .. } => Some("not_found"),
-        ResolveError::SignatureRequired { .. } => Some("missing_signature"),
+        // The hop's own load-time reason (signing spec 6.5): `no_keyring` and
+        // `signing_unavailable` are refusals of their own, not a missing
+        // signature, and a receipt records whichever one was reached.
+        ResolveError::SignatureRequired { status, .. } => {
+            Some(status.reason.as_deref().unwrap_or("missing_signature"))
+        }
         ResolveError::Read { .. }
         | ResolveError::Parse { .. }
         | ResolveError::Http { .. }
@@ -99,8 +140,28 @@ pub fn resolve_vector_policy(
         &spec,
         None,
         &create_composite_loader(),
-        &ResolveOptions::default(),
+        &vector_options(vector.load.as_ref()),
     ))
+}
+
+/// The resolver options a vector's `load` block asks for.
+fn vector_options(load: Option<&ResolveLoad>) -> ResolveOptions {
+    let Some(load) = load else {
+        return ResolveOptions::default();
+    };
+    let mut options = ResolveOptions {
+        require_signature: load.require_signature,
+        ..ResolveOptions::default()
+    };
+    if load.signature == VectorEnvelope::Present {
+        options.signature_locator = Some(Box::new(|source: &str| {
+            if source.starts_with("builtin:") {
+                return Ok(None);
+            }
+            Ok(Some(VECTOR_ENVELOPE_BYTES.as_bytes().to_vec()))
+        }));
+    }
+    options
 }
 
 /// Run one vector against the resolver, returning a one-line description of
