@@ -434,7 +434,7 @@ def _validate_detection(
         if (
             heuristics is not None
             and heuristics.min_score is not None
-            and heuristics.min_score > 100
+            and not 0 <= heuristics.min_score <= 100
         ):
             errors.append(
                 ValidationError(

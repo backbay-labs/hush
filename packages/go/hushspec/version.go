@@ -49,11 +49,13 @@ func MajorVersion(version string) (int, bool) {
 			return 0, false
 		}
 	}
-	major, err := strconv.Atoi(parts[0])
+	// A major that does not fit an unsigned 32-bit integer names no format any
+	// SDK could support, and every SDK applies the same bound.
+	major, err := strconv.ParseUint(parts[0], 10, 32)
 	if err != nil {
 		return 0, false
 	}
-	return major, true
+	return int(major), true
 }
 
 // SupportedMinor returns the "X.Y" minor of a well-formed, supported version

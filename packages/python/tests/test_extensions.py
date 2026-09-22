@@ -798,3 +798,17 @@ extensions:
         )
         injection = merge(base, child).extensions.detection.prompt_injection
         assert injection.heuristics.min_score == 55
+
+
+def test_a_negative_heuristic_floor_fails_typed_validation() -> None:
+    from hushspec import parse, validate
+
+    ok, spec = parse(
+        'hushspec: "1.0.0"\nname: floor\nextensions:\n  detection:\n'
+        "    prompt_injection:\n      heuristics:\n        min_score: 5\n"
+    )
+    assert ok
+    spec.extensions.detection.prompt_injection.heuristics.min_score = -1
+    result = validate(spec)
+    assert not result.is_valid
+    assert any("min_score must be between 0 and 100" in error.message for error in result.errors)

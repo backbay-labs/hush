@@ -40,7 +40,9 @@ def major_version(version: str) -> Optional[int]:
     differs from 0.x only in the constraints it places on a document (core spec
     10), so a constraint introduced with 1.0 is gated on this rather than on
     the minor an engine happens to support. Returns ``None`` when *version* is
-    not a well-formed ``X.Y.Z`` string.
+    not a well-formed ``X.Y.Z`` string, or when its major does not fit an
+    unsigned 32-bit integer, the bound every SDK applies; a digit string that
+    long is never converted at all.
     """
     if not isinstance(version, str):
         return None
@@ -49,7 +51,10 @@ def major_version(version: str) -> Optional[int]:
         return None
     if not all(_is_digits(part) for part in parts):
         return None
-    return int(parts[0])
+    if len(parts[0]) > 10:
+        return None
+    major = int(parts[0])
+    return major if major <= 0xFFFF_FFFF else None
 
 
 def supported_minor(version: str) -> Optional[str]:

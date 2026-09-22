@@ -847,6 +847,13 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   file's `log_started` naming a hash the old file no longer ended with, and a verifier given both
   files rejected the rotation. The old file is now locked, its head re-read, and the lock held
   until the new file's first entry is written (log spec 5).
+- A `hushspec` major that does not fit an unsigned 32-bit integer is read as no major in every
+  SDK, so an absurdly long version string is reported as unsupported rather than converted:
+  Python raised on the conversion past the interpreter's digit limit, TypeScript read it as an
+  unbounded float, and Go accepted anything that fit a 64-bit integer.
+- Python's typed validation refuses a negative `detection.prompt_injection.heuristics.min_score`
+  as the raw validator and the other SDKs already did; only the upper bound was checked on a
+  programmatically built document.
 - The Python HTTPS loader's read timeout is one budget for the whole response. It was a
   per-receive socket timeout, so a server delivering a byte just inside every interval could
   hold a policy or signature load open indefinitely; the status line, headers and body now

@@ -29,7 +29,9 @@ pub fn is_supported(version: &str) -> bool {
 /// The document format is versioned by its major component: the 1.0 format
 /// differs from 0.x only in the constraints it places on a document (core spec
 /// 10), so a constraint introduced with 1.0 is gated on this rather than on the
-/// minor an engine happens to support.
+/// minor an engine happens to support. A major that does not fit an unsigned
+/// 32-bit integer names no format any SDK could support, and every SDK
+/// applies the same bound.
 #[must_use]
 pub fn major_version(version: &str) -> Option<u32> {
     let mut parts = version.split('.');
@@ -86,6 +88,9 @@ mod tests {
         assert_eq!(major_version("1.0.0"), Some(1));
         assert_eq!(major_version("0.2.7"), Some(0));
         assert_eq!(major_version("+1.0.0"), None);
+        assert_eq!(major_version("4294967295.0.0"), Some(u32::MAX));
+        assert_eq!(major_version("4294967296.0.0"), None);
+        assert_eq!(major_version(&format!("{}.0.0", "9".repeat(5000))), None);
         assert_eq!(major_version("v1.0.0"), None);
         assert_eq!(major_version("1.0"), None);
         assert_eq!(major_version("1.0.0.0"), None);

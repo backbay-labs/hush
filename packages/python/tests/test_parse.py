@@ -1134,3 +1134,26 @@ rules:
         assert result.errors[0].kind == "unsupported_version"
         # And the registry code the shared `invalid/` sidecars pin.
         assert result.errors[0].code == "E002"
+
+
+def test_major_version_is_bounded_to_an_unsigned_32_bit_integer() -> None:
+    from hushspec.version import major_version
+
+    assert major_version("4294967295.0.0") == 4294967295
+    assert major_version("4294967296.0.0") is None
+    # Never converted: a digit string this long would exceed the interpreter's
+    # conversion limit and raise instead of answering.
+    assert major_version("9" * 5000 + ".0.0") is None
+
+
+def test_an_oversized_major_with_an_empty_name_is_a_version_error() -> None:
+    from hushspec import validate
+
+    # Validation answers with the version error rather than raising on the
+    # conversion; the unreadable version is also held to the current format's
+    # name constraint, so that error is reported beside it.
+    ok, spec = parse('hushspec: "' + "9" * 5000 + '.0.0"\nname: ""\n')
+    assert ok
+    result = validate(spec)
+    assert not result.is_valid
+    assert any(error.code == "E002" for error in result.errors)
