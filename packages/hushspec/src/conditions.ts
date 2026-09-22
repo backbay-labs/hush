@@ -241,9 +241,11 @@ function evaluateConditionDepth(
 
 /**
  * The counter the engine supplied under `name`, or `undefined` when it
- * supplied none. A value that is not a finite number is read as absent: the
- * predicate is then unevaluable and holds, which leaves the block active
- * (core spec 3.13) rather than switching a control off on malformed input.
+ * supplied none. A counter is a whole number of events, so a value that is not
+ * a non-negative integer -- a fraction, a negative, a non-finite float, a
+ * non-number -- is read as absent: the predicate is then unevaluable and
+ * holds, which leaves the block active (core spec 3.13) rather than switching
+ * a control off on malformed input.
  */
 function counterValue(context: RuntimeContext, name: string): number | undefined {
   const counters = context.counters;
@@ -251,7 +253,9 @@ function counterValue(context: RuntimeContext, name: string): number | undefined
     return undefined;
   }
   const value = counters[name];
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : undefined;
 }
 
 function rateHolds(rate: RateCondition, count: number): boolean {

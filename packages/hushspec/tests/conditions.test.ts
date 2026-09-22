@@ -660,3 +660,40 @@ describe('fixed-offset timezone grammar', () => {
     }
   });
 });
+
+describe('rate predicate', () => {
+  const gte: Condition = {
+    rate: { counter: 'shell_commands', threshold: 5, comparison: 'gte' },
+  };
+
+  it('compares at the threshold', () => {
+    expect(evaluateCondition(gte, { counters: { shell_commands: 4 } })).toBe(false);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 5 } })).toBe(true);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 6 } })).toBe(true);
+  });
+
+  it('holds when the engine supplied no such counter', () => {
+    expect(evaluateCondition(gte, {})).toBe(true);
+    expect(evaluateCondition(gte, { counters: { egress_calls: 9 } })).toBe(true);
+  });
+
+  // A counter is a non-negative integer (core spec 3.13). Anything else is not
+  // a counter the engine supplied, so the predicate is unevaluable and the
+  // block stays active rather than being switched off by a malformed value.
+  it('holds when the counter is not a non-negative integer', () => {
+    const malformed: unknown[] = [
+      5.5,
+      -1,
+      -0.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '6',
+      true,
+      null,
+    ];
+    for (const value of malformed) {
+      const context = { counters: { shell_commands: value } } as unknown as RuntimeContext;
+      expect(evaluateCondition(gte, context), String(value)).toBe(true);
+    }
+  });
+});

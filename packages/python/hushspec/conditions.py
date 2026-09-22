@@ -358,25 +358,35 @@ class RuntimeContext:
         )
 
 
-def _coerce_counters(counters: Any) -> dict[str, int]:
-    """The integer counters of an untyped ``counters`` mapping.
+def _counter_events(value: Any) -> Optional[int]:
+    """*value* read as a counter, or ``None`` when it is not one.
 
-    A counter is a whole number of events. A value that is not one -- a
-    boolean, a string, a fraction, a non-finite float -- is dropped rather
-    than compared, so the ``rate`` predicate reading it is unevaluable and
-    holds, which leaves the rule block active (core spec 3.13) instead of
-    switching a security control off on malformed input.
+    A counter is a non-negative whole number of events. A boolean, a string, a
+    fraction, a negative and a non-finite float are none of those, so the
+    ``rate`` predicate reading such a counter is unevaluable and holds, which
+    leaves the rule block active (core spec 3.13) instead of switching a
+    security control off on malformed input.
     """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        whole = value
+    elif isinstance(value, float) and value.is_integer():
+        whole = int(value)
+    else:
+        return None
+    return whole if whole >= 0 else None
+
+
+def _coerce_counters(counters: Any) -> dict[str, int]:
+    """The counters of an untyped ``counters`` mapping, malformed ones dropped."""
     if not isinstance(counters, dict):
         return {}
     coerced: dict[str, int] = {}
     for name, value in counters.items():
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, int):
-            coerced[name] = value
-        elif isinstance(value, float) and value.is_integer():
-            coerced[name] = int(value)
+        whole = _counter_events(value)
+        if whole is not None:
+            coerced[name] = whole
     return coerced
 
 
@@ -613,7 +623,7 @@ def _evaluate_condition_depth(
 
     # `rate`: unevaluable when the engine supplied no such counter.
     if condition.rate is not None:
-        count = context.counters.get(condition.rate.counter)
+        count = _counter_events(context.counters.get(condition.rate.counter))
         verdict = _conjoin(
             verdict,
             _Verdict.UNEVALUABLE

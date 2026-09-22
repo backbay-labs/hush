@@ -763,6 +763,19 @@ class TestRatePredicate:
         # unevaluable and the block stays active.
         assert evaluate_condition(self.GTE, context)
 
+    def test_a_negative_counter_is_dropped(self):
+        context = RuntimeContext.from_dict({"counters": {"shell_commands": -1}})
+        assert context.counters == {}
+        assert evaluate_condition(self.GTE, context)
+
+    @pytest.mark.parametrize("value", [-1, 2.5, -0.5, float("inf"), float("nan"), "3", True])
+    def test_a_counter_that_is_not_a_non_negative_integer_is_unevaluable(self, value):
+        # A context built in memory bypasses from_dict, so the read path
+        # applies the same rule: the predicate holds and the block stays
+        # active (core spec 3.13).
+        context = RuntimeContext(counters={"shell_commands": value})
+        assert evaluate_condition(self.GTE, context)
+
 
 class TestRateDecoding:
     """Rate shape violations are parse errors (core spec 3.13, code E001)."""
