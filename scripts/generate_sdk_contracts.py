@@ -121,6 +121,20 @@ TS_TYPE_NAMES = {
 }
 
 
+# Object key sets the Go SDK consults. Go refuses an unknown member with
+# decoder.KnownFields(true) on the typed model, so it reads a key set only
+# where a check runs outside that decode: the raw-document validator and the
+# rule-path check in the guard. Emitting the rest would publish exported names
+# nothing reads.
+GO_OBJECT_KEY_SETS = {
+    "RULE_KEYS",
+    "EXTENSION_KEYS",
+    "CONTROL_MAPPING_KEYS",
+    "CHANGELOG_ENTRY_KEYS",
+    "RATE_CONDITION_KEYS",
+}
+
+
 GO_TYPED_ENUMS = {
     "MERGE_STRATEGIES": "MergeStrategy",
     "DEFAULT_ACTIONS": "DefaultAction",
@@ -188,6 +202,8 @@ def render_go() -> str:
     ]
 
     for name, values in CONTRACT["objects"].items():
+        if name not in GO_OBJECT_KEY_SETS:
+            continue
         lines.append(f"var {go_name(name)} = map[string]struct{{}}{{")
         for value in values:
             lines.append(f'\t"{value}": {{}},')

@@ -7,6 +7,56 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
+### Changed
+
+- **Go `RuntimeContext.Environment` is now `*string`.** A plain `string` made an engine-supplied
+  empty environment indistinguishable from an absent one, so `when: {context: {environment: ""}}`
+  was false in Go and true in the other three SDKs. `nil` is now "the engine supplied none" and
+  fails the predicate closed; a supplied `""` compares like any other value (core spec 3.13).
+  Vector: `fixtures/core/evaluation/conditions-context-empty-environment.test.yaml`.
+- **`isSafeRegex` (TypeScript) and `is_safe_regex` (Python) answer from the profile compiler.**
+  They previously reported "safe on every HushSpec engine" from a partial RE2-feature scan and
+  returned `true` for patterns the profile refuses (`\p{L}`, `[[:alpha:]]`, `(?i:foo)`, a
+  non-leading flag group, a pattern past 2048 bytes). They now accept exactly what validation
+  accepts and what the evaluator can run.
+- **A `time_window` bound is exactly two ASCII digits per component** in all four SDKs, the shape
+  the schema has always stated, so `9:05`, `09:5` and `009:05` are refused instead of validating
+  (core spec 3.13). Vectors: `fixtures/core/invalid/when-time-window-short-hour.yaml`,
+  `fixtures/core/invalid/when-time-window-long-hour.yaml`.
+- **A runtime `counters` entry that is not a non-negative integer is read as absent** in
+  TypeScript and Python, which makes the `rate` predicate unevaluable and leaves the rule block
+  active rather than switching a control off on a malformed value (core spec 3.13). Rust and Go
+  already refused such a value at the type level.
+- **Go host normalization folds case with the full Unicode lowercase mapping.** A label holding
+  U+0130 reduced to the ASCII host `i` under the simple mapping while the other SDKs encode the
+  punycode A-label; a word-final sigma diverged the same way (core spec 3.14.2). Vector:
+  `fixtures/core/evaluation/egress-host-case-folding.test.yaml`.
+
+### Removed
+
+- **Go: the generated contract no longer exports the object key sets Go does not consult**
+  (`ConditionKeys`, `TimeWindowKeys`, `OriginToolAccessOverlayKeys`, `OriginEgressOverlayKeys` and
+  the rest). Go refuses an unknown member during the typed decode, so those names were exported
+  and never read; `RuleKeys`, `ExtensionKeys`, `ControlMappingKeys`, `ChangelogEntryKeys` and
+  `RateConditionKeys` remain. `generated/sdk-contract.json` still carries every set, and the
+  TypeScript, Python and Rust bindings are unchanged.
+
+### Fixed
+
+- **The nested-quantifier refusal reads the same in Go as elsewhere**: it now carries the shared
+  message and the `<path> must be a valid regular expression: ` prefix.
+- **The regex profile's nested-quantifier rule is stated as the syntactic check it is** (core spec
+  3.14.3). `(a|aa)*` is no longer listed as refused -- it conforms and compiles in all four SDKs --
+  and Security specification section 2 now says what that leaves to the engine: the profile bounds
+  a pattern's structure, not its ambiguity, so an engine on a backtracking matcher SHOULD bound
+  matching time or use a linear-time matcher.
+- **The grammar matches the SDKs**: leading flag groups are a run (`*flags`), and only `\d`, `\w`
+  and `\s` are bracket-class members, with the negated shorthands joining the core MUST NOT list.
+  Vector: `fixtures/core/invalid/regex-negated-class-shorthand.yaml`.
+- **The TypeScript and Python fixture harnesses resolve `extends`** before evaluating, as the Rust
+  and Go runners do, and a listed fixture directory that is absent or holds no vector now fails the
+  TypeScript and Go runs instead of contributing zero cases to a green suite.
+
 ## [1.0.0] - 2026-09-15
 
 HushSpec 1.0.0 is the first stable release. Every specification in the family carries version
