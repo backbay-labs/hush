@@ -349,11 +349,12 @@ fn line_list(lines: &[usize]) -> String {
     text
 }
 
-/// Validate every receipt entry of `text` against the receipt schema.
+/// Validate every receipt entry of `text` against the published receipt schema.
 ///
-/// The chain verifier reads receipts through the typed model, which is not the
-/// schema: a line whose receipt is hash-consistent can still carry a document
-/// no auditor would accept as evidence.
+/// The chain verifier checks each receipt through the typed model, whose
+/// structural checks do not replicate every constraint the JSON Schema states:
+/// a line whose receipt is hash-consistent can still carry a document no
+/// auditor would accept as evidence.
 fn receipts_match_schema(name: &str, text: &str, schema: &JSONSchema) -> Result<(), LogError> {
     for (index, line) in text.lines().enumerate() {
         if line.trim().is_empty() {
@@ -365,7 +366,16 @@ fn receipts_match_schema(name: &str, text: &str, schema: &JSONSchema) -> Result<
         let Some(receipt) = &entry.receipt else {
             continue;
         };
-        let value = serde_json::to_value(receipt).unwrap_or_default();
+        let value = match serde_json::to_value(receipt) {
+            Ok(value) => value,
+            Err(error) => {
+                return Err(LogError {
+                    file: name.to_string(),
+                    line: index + 1,
+                    message: format!("cannot serialize receipt: {error}"),
+                });
+            }
+        };
         if let Err(errors) = schema.validate(&value) {
             let messages: Vec<String> = errors.map(|error| error.to_string()).collect();
             return Err(LogError {

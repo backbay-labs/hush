@@ -170,6 +170,40 @@ export interface Resolution {
  */
 export type LoadReasonCode = ReasonCode | 'digest_mismatch' | 'missing_signature';
 
+// A record rather than a set, so adding a member to the union without
+// listing it here is a compile error.
+const LOAD_REASON_CODES: Record<LoadReasonCode, true> = {
+  malformed_envelope: true,
+  unsupported_format_version: true,
+  unsupported_algorithm: true,
+  unknown_key_id: true,
+  key_revoked: true,
+  key_retired: true,
+  signed_at_in_future: true,
+  expired: true,
+  signature_mismatch: true,
+  content_hash_mismatch: true,
+  policy_version_rollback: true,
+  digest_mismatch: true,
+  missing_signature: true,
+};
+
+/** Whether `value` is a member of the closed {@link LoadReasonCode} set. */
+export function isLoadReasonCode(value: string): value is LoadReasonCode {
+  return Object.hasOwn(LOAD_REASON_CODES, value);
+}
+
+/**
+ * The reason an unverified {@link SignatureStatus} names, as a member of the
+ * closed set. A status that names none, or one outside the set, reads as
+ * `missing_signature`: the hop proved nothing, and that is all a caller can
+ * act on.
+ */
+export function loadReasonOf(status: SignatureStatus | undefined): LoadReasonCode {
+  const reason = status?.reason;
+  return reason !== undefined && isLoadReasonCode(reason) ? reason : 'missing_signature';
+}
+
 /**
  * Wrap a document that is already resolved (no `extends`) as a single-link
  * resolution, so a caller that holds a bare spec can still build receipts
@@ -707,7 +741,7 @@ function buildResolution(
       resolution.signature = chain[leafIndex]!.signature;
       throw new PolicyVerificationError(
         hop.source,
-        (status.reason as LoadReasonCode | undefined) ?? 'missing_signature',
+        loadReasonOf(status),
         status.reason === 'missing_signature' || status.reason === undefined
           ? 'no detached signature was found and no digest was pinned'
           : `signature did not verify (${status.reason})`,

@@ -11,6 +11,8 @@ import {
   PolicyVerificationError,
   createBuiltinLoader,
   defaultSignatureLocator,
+  isLoadReasonCode,
+  loadReasonOf,
   resolve,
   resolveFromFileWithOptions,
   resolveWithOptions,
@@ -667,5 +669,20 @@ name: pinned
         trustedKeys: [readFileSync(path.join(keysDir, 'test-signing.pub.pem'), 'utf8')],
       }),
     ).toThrow(/not both/);
+  });
+});
+
+describe('loadReasonOf', () => {
+  it('keeps a reason from the closed set', () => {
+    expect(loadReasonOf({ verified: false, reason: 'key_revoked' })).toBe('key_revoked');
+    expect(loadReasonOf({ verified: false, reason: 'digest_mismatch' })).toBe('digest_mismatch');
+  });
+
+  it('reads a status with no reason, or one outside the set, as missing_signature', () => {
+    expect(loadReasonOf(undefined)).toBe('missing_signature');
+    expect(loadReasonOf({ verified: false })).toBe('missing_signature');
+    expect(loadReasonOf({ verified: false, reason: 'locator_timeout' })).toBe('missing_signature');
+    expect(isLoadReasonCode('locator_timeout')).toBe(false);
+    expect(isLoadReasonCode('policy_version_rollback')).toBe(true);
   });
 });

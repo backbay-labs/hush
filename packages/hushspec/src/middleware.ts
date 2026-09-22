@@ -8,7 +8,6 @@ import { parse } from './parse.js';
 import { readFileSync, realpathSync } from 'node:fs';
 import nodePath from 'node:path';
 import type {
-  LoadReasonCode,
   Loader,
   ResolveOptions,
   Resolution,
@@ -18,6 +17,7 @@ import {
   PolicyVerificationError,
   createBuiltinLoader,
   createCompositeLoader,
+  loadReasonOf,
   resolutionFromResolved,
   resolveWithOptions,
 } from './resolve.js';
@@ -916,7 +916,7 @@ export class HushGuard {
     if (unproven !== undefined) {
       throw new PolicyVerificationError(
         unproven.source,
-        (unproven.status.reason as LoadReasonCode | undefined) ?? 'missing_signature',
+        loadReasonOf(unproven.status),
         'the reloaded policy carries no verified signature and this guard requires one',
         next,
         unproven.status,

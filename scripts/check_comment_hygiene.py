@@ -48,7 +48,6 @@ SCAN_ROOTS = (
     "rulesets",
     "spec",
     "docs/src",
-    ".github",
     "README.md",
     "CHANGELOG.md",
     "action.yml",
@@ -78,9 +77,10 @@ EXCLUDED_SUFFIXES = (".lock", ".sum")
 #: and what an allowlist entry names, so it is also the stable identifier for
 #: each rule -- edit one and its allowlist entries must be updated too.
 #:
-#: `P3-03` stays case-sensitive: lowercased, `p3-03` collides with ordinary
-#: identifiers and version strings. Everything else is prose, where case
-#: carries no signal.
+#: Identifier-shaped rules stay case-sensitive: lowercased, `p3-03` collides
+#: with ordinary identifiers and version strings, `(d7)` with any parenthesised
+#: label, and `codex`, `finding a`, `fixme` and `hack` with everyday words.
+#: Everything else is prose, where case carries no signal.
 PATTERNS: tuple[tuple[str, bool], ...] = (
     # Planning-document identifiers. The trailing boundary on the RFC rule is
     # what keeps it off real IETF citations: the receipt spec cites RFC 9562
