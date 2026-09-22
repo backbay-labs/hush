@@ -492,8 +492,8 @@ func observedRule(result EvaluationResult) string {
 // ---------------------------------------------------------------------------
 
 // DefaultDurationBucketsUs is the latency histogram's upper bounds, in
-// microseconds. It matches the exposition in docs (`hushspec_evaluate_duration_us`).
-var DefaultDurationBucketsUs = []float64{10, 50, 100, 500, 1000, 5000}
+// microseconds, shared by every SDK. The +Inf bucket is implicit.
+var DefaultDurationBucketsUs = []float64{10, 25, 50, 100, 250, 500, 1000, 5000, 10000}
 
 // EvaluationMetricKey counts one decision for one action type.
 type EvaluationMetricKey struct {
@@ -530,15 +530,23 @@ type MetricsSnapshot struct {
 //
 // Safe for concurrent use.
 type MetricsCollector struct {
-	mu           sync.Mutex
-	buckets      []float64
-	bucketCounts []uint64
-	sumUs        uint64
-	count        uint64
-	evaluations  map[EvaluationMetricKey]uint64
-	ruleMatches  map[RuleMetricKey]uint64
-	policyLoads  map[string]uint64
-	errors       uint64
+	mu      sync.Mutex
+	buckets []float64
+	// durations holds one histogram per action type: the
+	// `hushspec_evaluate_duration_us` series is labelled by `action_type` in
+	// every SDK.
+	durations   map[string]*durationHistogram
+	evaluations map[EvaluationMetricKey]uint64
+	ruleMatches map[RuleMetricKey]uint64
+	policyLoads map[string]uint64
+	errors      uint64
+}
+
+// durationHistogram is one action type's cumulative latency histogram.
+type durationHistogram struct {
+	counts []uint64
+	sumUs  uint64
+	count  uint64
 }
 
 // NewMetricsCollector collects with [DefaultDurationBucketsUs].
@@ -552,11 +560,11 @@ func NewMetricsCollectorWithBuckets(bucketsUs []float64) *MetricsCollector {
 	bounds := append([]float64(nil), bucketsUs...)
 	sort.Float64s(bounds)
 	return &MetricsCollector{
-		buckets:      bounds,
-		bucketCounts: make([]uint64, len(bounds)),
-		evaluations:  map[EvaluationMetricKey]uint64{},
-		ruleMatches:  map[RuleMetricKey]uint64{},
-		policyLoads:  map[string]uint64{},
+		buckets:     bounds,
+		durations:   map[string]*durationHistogram{},
+		evaluations: map[EvaluationMetricKey]uint64{},
+		ruleMatches: map[RuleMetricKey]uint64{},
+		policyLoads: map[string]uint64{},
 	}
 }
 
@@ -585,11 +593,16 @@ func (m *MetricsCollector) OnEvaluation(evaluation EvaluationObservation) {
 		m.ruleMatches[RuleMetricKey{RuleBlock: block, Decision: result.Decision}]++
 	}
 
-	m.count++
-	m.sumUs += uint64(micros)
+	histogram := m.durations[actionType]
+	if histogram == nil {
+		histogram = &durationHistogram{counts: make([]uint64, len(m.buckets))}
+		m.durations[actionType] = histogram
+	}
+	histogram.count++
+	histogram.sumUs += uint64(micros)
 	for i, bound := range m.buckets {
 		if float64(micros) <= bound {
-			m.bucketCounts[i]++
+			histogram.counts[i]++
 		}
 	}
 }
@@ -615,12 +628,10 @@ func (m *MetricsCollector) Snapshot() MetricsSnapshot {
 	defer m.mu.Unlock()
 
 	snapshot := MetricsSnapshot{
-		Evaluations:   make(map[EvaluationMetricKey]uint64, len(m.evaluations)),
-		RuleMatches:   make(map[RuleMetricKey]uint64, len(m.ruleMatches)),
-		PolicyLoads:   make(map[string]uint64, len(m.policyLoads)),
-		DurationSumUs: m.sumUs,
-		DurationCount: m.count,
-		Errors:        m.errors,
+		Evaluations: make(map[EvaluationMetricKey]uint64, len(m.evaluations)),
+		RuleMatches: make(map[RuleMetricKey]uint64, len(m.ruleMatches)),
+		PolicyLoads: make(map[string]uint64, len(m.policyLoads)),
+		Errors:      m.errors,
 	}
 	for key, value := range m.evaluations {
 		snapshot.Evaluations[key] = value
@@ -631,26 +642,51 @@ func (m *MetricsCollector) Snapshot() MetricsSnapshot {
 	for key, value := range m.policyLoads {
 		snapshot.PolicyLoads[key] = value
 	}
-	// Cumulative: a Prometheus histogram bucket counts every observation at or
-	// below its bound, and +Inf counts them all.
+	// Cumulative and summed over action types: a Prometheus histogram bucket
+	// counts every observation at or below its bound, and +Inf counts them all.
+	totals := make([]uint64, len(m.buckets))
+	for _, histogram := range m.durations {
+		snapshot.DurationSumUs += histogram.sumUs
+		snapshot.DurationCount += histogram.count
+		for i, count := range histogram.counts {
+			totals[i] += count
+		}
+	}
 	snapshot.DurationBuckets = make([]DurationBucket, 0, len(m.buckets)+1)
 	for i, bound := range m.buckets {
 		snapshot.DurationBuckets = append(snapshot.DurationBuckets, DurationBucket{
-			LE: bound, Count: m.bucketCounts[i],
+			LE: bound, Count: totals[i],
 		})
 	}
 	snapshot.DurationBuckets = append(snapshot.DurationBuckets, DurationBucket{
-		LE: math.Inf(1), Count: m.count,
+		LE: math.Inf(1), Count: snapshot.DurationCount,
 	})
 	return snapshot
+}
+
+// durationSeries copies the bucket bounds and the per-action-type histograms,
+// so the exposition renders from a consistent set.
+func (m *MetricsCollector) durationSeries() ([]float64, map[string]durationHistogram) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bounds := append([]float64(nil), m.buckets...)
+	series := make(map[string]durationHistogram, len(m.durations))
+	for actionType, histogram := range m.durations {
+		series[actionType] = durationHistogram{
+			counts: append([]uint64(nil), histogram.counts...),
+			sumUs:  histogram.sumUs,
+			count:  histogram.count,
+		}
+	}
+	return bounds, series
 }
 
 // Reset zeroes every counter.
 func (m *MetricsCollector) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.bucketCounts = make([]uint64, len(m.buckets))
-	m.sumUs, m.count, m.errors = 0, 0, 0
+	m.durations = map[string]*durationHistogram{}
+	m.errors = 0
 	m.evaluations = map[EvaluationMetricKey]uint64{}
 	m.ruleMatches = map[RuleMetricKey]uint64{}
 	m.policyLoads = map[string]uint64{}
@@ -664,6 +700,12 @@ func (m *MetricsCollector) Reset() {
 // Series are sorted, so the output of two identical snapshots is byte-equal.
 func (m *MetricsCollector) RenderPrometheus() string {
 	snapshot := m.Snapshot()
+	buckets, durations := m.durationSeries()
+	durationKeys := make([]string, 0, len(durations))
+	for actionType := range durations {
+		durationKeys = append(durationKeys, actionType)
+	}
+	sort.Strings(durationKeys)
 	var b strings.Builder
 
 	b.WriteString("# HELP hushspec_evaluate_total Total HushSpec evaluations\n")
@@ -685,12 +727,19 @@ func (m *MetricsCollector) RenderPrometheus() string {
 
 	b.WriteString("# HELP hushspec_evaluate_duration_us Evaluation duration in microseconds\n")
 	b.WriteString("# TYPE hushspec_evaluate_duration_us histogram\n")
-	for _, bucket := range snapshot.DurationBuckets {
-		fmt.Fprintf(&b, "hushspec_evaluate_duration_us_bucket{le=%q} %d\n",
-			formatBucketBound(bucket.LE), bucket.Count)
+	for _, actionType := range durationKeys {
+		histogram := durations[actionType]
+		for i, bound := range buckets {
+			fmt.Fprintf(&b, "hushspec_evaluate_duration_us_bucket{action_type=%q,le=%q} %d\n",
+				actionType, formatBucketBound(bound), histogram.counts[i])
+		}
+		fmt.Fprintf(&b, "hushspec_evaluate_duration_us_bucket{action_type=%q,le=%q} %d\n",
+			actionType, "+Inf", histogram.count)
+		fmt.Fprintf(&b, "hushspec_evaluate_duration_us_sum{action_type=%q} %d\n",
+			actionType, histogram.sumUs)
+		fmt.Fprintf(&b, "hushspec_evaluate_duration_us_count{action_type=%q} %d\n",
+			actionType, histogram.count)
 	}
-	fmt.Fprintf(&b, "hushspec_evaluate_duration_us_sum %d\n", snapshot.DurationSumUs)
-	fmt.Fprintf(&b, "hushspec_evaluate_duration_us_count %d\n", snapshot.DurationCount)
 
 	b.WriteString("# HELP hushspec_rule_match_total Rule block match counts\n")
 	b.WriteString("# TYPE hushspec_rule_match_total counter\n")

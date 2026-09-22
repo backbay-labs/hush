@@ -152,8 +152,9 @@ func TestMetricsCollectorCountsDecisions(t *testing.T) {
 	rendered := metrics.RenderPrometheus()
 	for _, want := range []string{
 		`hushspec_evaluate_total{decision="deny",action_type="egress"} 1`,
-		`hushspec_evaluate_duration_us_bucket{le="+Inf"} 3`,
-		`hushspec_evaluate_duration_us_count 3`,
+		`hushspec_evaluate_duration_us_bucket{action_type="egress",le="+Inf"} 2`,
+		`hushspec_evaluate_duration_us_count{action_type="egress"} 2`,
+		`hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="+Inf"} 1`,
 		`hushspec_rule_match_total{rule_block="egress",decision="deny"} 1`,
 		`hushspec_policy_load_total{status="success"} 1`,
 	} {

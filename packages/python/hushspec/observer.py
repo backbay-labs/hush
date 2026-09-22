@@ -20,8 +20,71 @@ from hushspec.schema import HushSpec
 
 #: How many recent durations :class:`MetricsCollector` keeps for its
 #: percentile. A collector lives as long as the process, so the window is
-#: bounded; the counters it reports are exact regardless.
+#: bounded; the counters and the histogram it reports are exact regardless.
 DURATION_WINDOW = 10_000
+
+#: Upper bounds of the latency histogram, in microseconds. The last bucket is
+#: ``+Inf``, which the exposition adds.
+DURATION_BUCKETS_US: tuple[int, ...] = (10, 25, 50, 100, 250, 500, 1_000, 5_000, 10_000)
+
+
+class _Histogram:
+    """One action type's cumulative latency histogram."""
+
+    __slots__ = ("buckets", "total", "count")
+
+    def __init__(self) -> None:
+        self.buckets = [0] * len(DURATION_BUCKETS_US)
+        self.total = 0.0
+        self.count = 0
+
+    def record(self, duration_us: float) -> None:
+        self.count += 1
+        self.total += duration_us
+        for index, bound in enumerate(DURATION_BUCKETS_US):
+            if duration_us <= bound:
+                self.buckets[index] += 1
+
+    def copy(self) -> "_Histogram":
+        clone = _Histogram()
+        clone.buckets = list(self.buckets)
+        clone.total = self.total
+        clone.count = self.count
+        return clone
+
+
+def rule_block_of(matched_rule: Optional[str]) -> Optional[str]:
+    """The rule block a ``matched_rule`` belongs to, for the metric label.
+
+    ``rules.egress.default`` is ``egress``; ``extensions.posture.budgets`` is
+    ``posture``; the bare ``detection`` the detection pipeline emits is
+    ``detection``; a reserved ``__hushspec_x__`` id is ``hushspec_x``. ``None``
+    for an evaluation no rule decided (a default allow).
+    """
+    if not matched_rule:
+        return None
+    if matched_rule.startswith("__"):
+        return matched_rule.strip("_")
+    for prefix in ("rules.", "extensions."):
+        if matched_rule.startswith(prefix):
+            return _first_segment(matched_rule[len(prefix):])
+    return _first_segment(matched_rule)
+
+
+def _first_segment(path: str) -> str:
+    for index, character in enumerate(path):
+        if character in ".[":
+            return path[:index]
+    return path
+
+
+def _escape_label(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _format_number(value: float) -> str:
+    """A duration sum as Prometheus reads it: an integer when it is whole."""
+    return str(int(value)) if value == int(value) else repr(value)
 
 
 class EvaluationObserver(ABC):
@@ -55,43 +118,86 @@ class ConsoleObserver(EvaluationObserver):
 
 
 class MetricsCollector(EvaluationObserver):
-    """Counts events and summarizes evaluation latency.
+    """Counters and a latency histogram over the evaluation stream.
 
     Safe to attach to a guard that several threads evaluate through: every
     counter update is taken under a lock. The duration samples are a bounded
     window (:data:`DURATION_WINDOW`), so the collector does not grow for the
-    life of the process; the averages and percentile it reports describe that
-    window, while the counts are exact.
+    life of the process; the average and the percentile it reports describe
+    that window, while the counters and the histogram are exact.
+
+    :meth:`to_prometheus` renders the series the observability specification
+    names, so a dashboard or a recording rule works against any SDK unchanged:
+
+    ==============================  =========  =========================
+    Series                          Type       Labels
+    ==============================  =========  =========================
+    ``hushspec_evaluate_total``     counter    ``decision``, ``action_type``
+    ``hushspec_evaluate_duration_us``  histogram  ``action_type``
+    ``hushspec_rule_match_total``   counter    ``rule_block``, ``decision``
+    ``hushspec_policy_load_total``  counter    ``status``
+    ==============================  =========  =========================
     """
 
     def __init__(self, duration_window: int = DURATION_WINDOW) -> None:
         self._lock = threading.Lock()
         self._counts: dict[str, int] = {}
+        self._evaluations: dict[tuple[str, str], int] = {}
+        self._rule_matches: dict[tuple[str, str], int] = {}
+        self._policy_loads: dict[str, int] = {}
+        self._histograms: dict[str, _Histogram] = {}
         self._durations: deque[float] = deque(maxlen=duration_window)
-        self._evaluations = 0
+        self._evaluation_count = 0
 
     def on_event(self, event: dict[str, Any]) -> None:
         event_type = event.get("type", "")
-        key: Optional[str] = None
-        duration_us: Optional[float] = None
-
-        if event_type == "evaluation.completed":
-            result = event.get("result")
-            if result is not None:
-                if isinstance(result, dict):
-                    decision = result.get("decision", "unknown")
-                else:
-                    decision = _decision_name(result.decision)
-                key = f"evaluate.{decision}"
-            duration_us = event.get("duration_us", 0)
-
         with self._lock:
-            if key is not None:
-                self._counts[key] = self._counts.get(key, 0) + 1
-            if duration_us is not None:
-                self._durations.append(duration_us)
-                self._evaluations += 1
             self._counts[event_type] = self._counts.get(event_type, 0) + 1
+            if event_type == "evaluation.completed":
+                self._record_evaluation(event)
+            elif event_type in ("policy.loaded", "policy.reloaded"):
+                self._policy_loads["success"] = self._policy_loads.get("success", 0) + 1
+            elif event_type == "policy.load_failed":
+                self._policy_loads["failure"] = self._policy_loads.get("failure", 0) + 1
+
+    def _record_evaluation(self, event: dict[str, Any]) -> None:
+        """Count one decision and record its latency. Called under the lock."""
+        result = event.get("result")
+        decision = "unknown"
+        matched_rule: Optional[str] = None
+        if isinstance(result, dict):
+            decision = str(result.get("decision", "unknown"))
+            matched = result.get("matched_rule")
+            matched_rule = None if matched is None else str(matched)
+        elif result is not None:
+            decision = _decision_name(result.decision)
+            matched_rule = result.matched_rule
+
+        action = event.get("action")
+        if isinstance(action, dict):
+            action_type = str(action.get("type", ""))
+        elif action is not None:
+            action_type = action.type
+        else:
+            action_type = ""
+
+        key = f"evaluate.{decision}"
+        self._counts[key] = self._counts.get(key, 0) + 1
+        self._evaluations[(decision, action_type)] = (
+            self._evaluations.get((decision, action_type), 0) + 1
+        )
+
+        rule_block = rule_block_of(matched_rule)
+        if rule_block is not None:
+            self._rule_matches[(rule_block, decision)] = (
+                self._rule_matches.get((rule_block, decision), 0) + 1
+            )
+
+        duration_us = max(0.0, float(event.get("duration_us", 0) or 0))
+        histogram = self._histograms.setdefault(action_type, _Histogram())
+        histogram.record(duration_us)
+        self._durations.append(duration_us)
+        self._evaluation_count += 1
 
     def get_count(self, key: str) -> int:
         with self._lock:
@@ -99,9 +205,10 @@ class MetricsCollector(EvaluationObserver):
 
     def get_total_evaluations(self) -> int:
         with self._lock:
-            return self._evaluations
+            return self._evaluation_count
 
     def get_average_duration_us(self) -> float:
+        """Mean latency over the sample window, in microseconds."""
         with self._lock:
             durations = list(self._durations)
         if not durations:
@@ -109,6 +216,7 @@ class MetricsCollector(EvaluationObserver):
         return sum(durations) / len(durations)
 
     def get_p99_duration_us(self) -> float:
+        """99th percentile latency over the sample window, in microseconds."""
         with self._lock:
             durations = sorted(self._durations)
         if not durations:
@@ -117,23 +225,68 @@ class MetricsCollector(EvaluationObserver):
         return durations[index]
 
     def to_prometheus(self) -> str:
+        """Prometheus text exposition (version 0.0.4) of every series."""
         with self._lock:
-            counts = dict(self._counts)
-            have_durations = bool(self._durations)
+            evaluations = dict(self._evaluations)
+            rule_matches = dict(self._rule_matches)
+            policy_loads = dict(self._policy_loads)
+            histograms = {name: histogram.copy() for name, histogram in self._histograms.items()}
+
         lines = [
-            f"hushspec_{key.replace('.', '_')}_total {value}"
-            for key, value in counts.items()
+            "# HELP hushspec_evaluate_total Total HushSpec evaluations",
+            "# TYPE hushspec_evaluate_total counter",
         ]
-        if have_durations:
-            lines.append(f"hushspec_evaluate_duration_us_avg {self.get_average_duration_us()}")
-            lines.append(f"hushspec_evaluate_duration_us_p99 {self.get_p99_duration_us()}")
-        return "\n".join(lines)
+        for (decision, action_type), count in sorted(evaluations.items()):
+            lines.append(
+                f'hushspec_evaluate_total{{decision="{decision}",'
+                f'action_type="{_escape_label(action_type)}"}} {count}'
+            )
+
+        lines.append("# HELP hushspec_evaluate_duration_us Evaluation duration in microseconds")
+        lines.append("# TYPE hushspec_evaluate_duration_us histogram")
+        for action_type, histogram in sorted(histograms.items()):
+            label = _escape_label(action_type)
+            for bound, count in zip(DURATION_BUCKETS_US, histogram.buckets):
+                lines.append(
+                    f'hushspec_evaluate_duration_us_bucket{{action_type="{label}",'
+                    f'le="{bound}"}} {count}'
+                )
+            lines.append(
+                f'hushspec_evaluate_duration_us_bucket{{action_type="{label}",'
+                f'le="+Inf"}} {histogram.count}'
+            )
+            lines.append(
+                f'hushspec_evaluate_duration_us_sum{{action_type="{label}"}} '
+                f"{_format_number(histogram.total)}"
+            )
+            lines.append(
+                f'hushspec_evaluate_duration_us_count{{action_type="{label}"}} {histogram.count}'
+            )
+
+        lines.append("# HELP hushspec_rule_match_total Rule block match counts")
+        lines.append("# TYPE hushspec_rule_match_total counter")
+        for (rule_block, decision), count in sorted(rule_matches.items()):
+            lines.append(
+                f'hushspec_rule_match_total{{rule_block="{_escape_label(rule_block)}",'
+                f'decision="{decision}"}} {count}'
+            )
+
+        lines.append("# HELP hushspec_policy_load_total Policy load operations")
+        lines.append("# TYPE hushspec_policy_load_total counter")
+        for status, count in sorted(policy_loads.items()):
+            lines.append(f'hushspec_policy_load_total{{status="{status}"}} {count}')
+
+        return "\n".join(lines) + "\n"
 
     def reset(self) -> None:
         with self._lock:
             self._counts.clear()
+            self._evaluations.clear()
+            self._rule_matches.clear()
+            self._policy_loads.clear()
+            self._histograms.clear()
             self._durations.clear()
-            self._evaluations = 0
+            self._evaluation_count = 0
 
 
 class ObservableEvaluator:

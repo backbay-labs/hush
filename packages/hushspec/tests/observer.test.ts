@@ -351,20 +351,53 @@ describe('MetricsCollector', () => {
     expect(metrics.getCount('nonexistent')).toBe(0);
   });
 
-  it('toPrometheus() outputs valid format', () => {
+  it('toPrometheus() renders the shared series set', () => {
     const evaluator = new ObservableEvaluator();
     const metrics = new MetricsCollector();
     evaluator.addObserver(metrics);
+    evaluator.notifyPolicyLoaded('p', 'sha256:aa');
+    evaluator.notifyPolicyLoadFailed('unreadable', 'policy.yaml');
 
     evaluator.evaluate(minimalSpec(), { type: 'tool_call', target: 'test' });
     evaluator.evaluate(specWithToolAccess(), { type: 'tool_call', target: 'dangerous_tool' });
 
     const output = metrics.toPrometheus();
-    expect(output).toContain('hushspec_evaluate_allow_total 1');
-    expect(output).toContain('hushspec_evaluate_deny_total 1');
-    expect(output).toContain('hushspec_evaluation_completed_total 2');
-    expect(output).toContain('hushspec_evaluate_duration_us_avg');
-    expect(output).toContain('hushspec_evaluate_duration_us_p99');
+    expect(output).toContain('# TYPE hushspec_evaluate_total counter');
+    expect(output).toContain('hushspec_evaluate_total{decision="allow",action_type="tool_call"} 1');
+    expect(output).toContain('hushspec_evaluate_total{decision="deny",action_type="tool_call"} 1');
+    expect(output).toContain('# TYPE hushspec_evaluate_duration_us histogram');
+    expect(output).toContain(
+      'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="10000"}',
+    );
+    expect(output).toContain(
+      'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="+Inf"} 2',
+    );
+    expect(output).toContain('hushspec_evaluate_duration_us_count{action_type="tool_call"} 2');
+    expect(output).toContain(
+      'hushspec_rule_match_total{rule_block="tool_access",decision="deny"} 1',
+    );
+    expect(output).toContain('hushspec_policy_load_total{status="failure"} 1');
+    expect(output).toContain('hushspec_policy_load_total{status="success"} 1');
+  });
+
+  it('bounds the duration sample window', () => {
+    const metrics = new MetricsCollector(4);
+    for (let i = 1; i <= 100; i++) {
+      metrics.onEvent({
+        type: 'evaluation.completed',
+        timestamp: new Date().toISOString(),
+        action: { type: 'tool_call', target: 'test' },
+        result: { decision: 'allow' },
+        duration_us: i,
+      });
+    }
+
+    // Every evaluation is still counted; only the percentile window is bounded.
+    expect(metrics.getTotalEvaluations()).toBe(100);
+    expect(metrics.getAverageDurationUs()).toBe((97 + 98 + 99 + 100) / 4);
+    expect(metrics.toPrometheus()).toContain(
+      'hushspec_evaluate_duration_us_count{action_type="tool_call"} 100',
+    );
   });
 
   it('reset clears all data', () => {
@@ -378,7 +411,7 @@ describe('MetricsCollector', () => {
     metrics.reset();
     expect(metrics.getTotalEvaluations()).toBe(0);
     expect(metrics.getCount('evaluate.allow')).toBe(0);
-    expect(metrics.toPrometheus()).toBe('');
+    expect(metrics.toPrometheus()).not.toContain('hushspec_evaluate_total{');
   });
 });
 

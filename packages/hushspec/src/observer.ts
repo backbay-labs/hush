@@ -114,17 +114,107 @@ export class ConsoleObserver implements EvaluationObserver {
   }
 }
 
+/**
+ * Upper bounds of the latency histogram, in microseconds. The last bucket is
+ * `+Inf`, which the exposition adds.
+ */
+export const DURATION_BUCKETS_US: readonly number[] = [
+  10, 25, 50, 100, 250, 500, 1_000, 5_000, 10_000,
+];
+
+/**
+ * How many recent durations a {@link MetricsCollector} keeps for its
+ * percentile. A collector lives as long as the process, so the window is
+ * bounded; the counters and the histogram it reports are exact regardless.
+ */
+export const DURATION_WINDOW = 10_000;
+
+/** One action type's latency histogram. */
+interface Histogram {
+  /** Cumulative counts, aligned with {@link DURATION_BUCKETS_US}. */
+  buckets: number[];
+  sum: number;
+  count: number;
+}
+
+/**
+ * Counters and a latency histogram over the evaluation stream, rendered as
+ * Prometheus text.
+ *
+ * The exposed series are the ones the observability specification names, so a
+ * dashboard or a recording rule works against any SDK unchanged:
+ *
+ * | Series | Type | Labels |
+ * |---|---|---|
+ * | `hushspec_evaluate_total` | counter | `decision`, `action_type` |
+ * | `hushspec_evaluate_duration_us` | histogram | `action_type` |
+ * | `hushspec_rule_match_total` | counter | `rule_block`, `decision` |
+ * | `hushspec_policy_load_total` | counter | `status` |
+ */
 export class MetricsCollector implements EvaluationObserver {
   private counts: Map<string, number> = new Map();
+  /** `decision` and `action_type` -> count. */
+  private evaluations: Map<string, number> = new Map();
+  /** `rule_block` and `decision` -> count. */
+  private ruleMatches: Map<string, number> = new Map();
+  /** `success` / `failure` -> count. */
+  private policyLoads: Map<string, number> = new Map();
+  /** `action_type` -> histogram. */
+  private histograms: Map<string, Histogram> = new Map();
+  /** A bounded window of recent samples, for the percentile. */
   private durations: number[] = [];
+  private durationsAt = 0;
+  private evaluationCount = 0;
+
+  constructor(private readonly durationWindow: number = DURATION_WINDOW) {}
 
   onEvent(event: ObserverEvent): void {
     if (event.type === 'evaluation.completed') {
-      const key = `evaluate.${event.result.decision}`;
-      this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
-      this.durations.push(event.duration_us);
+      this.recordEvaluation(event);
+    } else if (event.type === 'policy.loaded' || event.type === 'policy.reloaded') {
+      increment(this.policyLoads, 'success');
+    } else if (event.type === 'policy.load_failed') {
+      increment(this.policyLoads, 'failure');
     }
-    this.counts.set(event.type, (this.counts.get(event.type) ?? 0) + 1);
+    increment(this.counts, event.type);
+  }
+
+  private recordEvaluation(event: EvaluationCompletedEvent): void {
+    const decision = event.result.decision;
+    const actionType = event.action.type;
+    increment(this.counts, `evaluate.${decision}`);
+    increment(this.evaluations, labelKey(decision, actionType));
+
+    const ruleBlock = ruleBlockOf(event.result.matched_rule);
+    if (ruleBlock !== undefined) {
+      increment(this.ruleMatches, labelKey(ruleBlock, decision));
+    }
+
+    const durationUs = Math.max(0, event.duration_us);
+    let histogram = this.histograms.get(actionType);
+    if (histogram === undefined) {
+      histogram = { buckets: DURATION_BUCKETS_US.map(() => 0), sum: 0, count: 0 };
+      this.histograms.set(actionType, histogram);
+    }
+    histogram.count += 1;
+    histogram.sum += durationUs;
+    DURATION_BUCKETS_US.forEach((bound, index) => {
+      if (durationUs <= bound) histogram.buckets[index] += 1;
+    });
+
+    this.evaluationCount += 1;
+    this.recordSample(durationUs);
+  }
+
+  /** Keep the newest `durationWindow` samples, overwriting the oldest. */
+  private recordSample(durationUs: number): void {
+    if (this.durationWindow < 1) return;
+    if (this.durations.length < this.durationWindow) {
+      this.durations.push(durationUs);
+      return;
+    }
+    this.durations[this.durationsAt] = durationUs;
+    this.durationsAt = (this.durationsAt + 1) % this.durationWindow;
   }
 
   getCount(key: string): number {
@@ -132,14 +222,16 @@ export class MetricsCollector implements EvaluationObserver {
   }
 
   getTotalEvaluations(): number {
-    return this.durations.length;
+    return this.evaluationCount;
   }
 
+  /** Mean latency over the sample window, in microseconds. */
   getAverageDurationUs(): number {
     if (this.durations.length === 0) return 0;
     return this.durations.reduce((a, b) => a + b, 0) / this.durations.length;
   }
 
+  /** 99th percentile latency over the sample window, in microseconds. */
   getP99DurationUs(): number {
     if (this.durations.length === 0) return 0;
     const sorted = [...this.durations].sort((a, b) => a - b);
@@ -147,22 +239,113 @@ export class MetricsCollector implements EvaluationObserver {
     return sorted[Math.floor(sorted.length * 0.99)];
   }
 
+  /** Prometheus text exposition (version 0.0.4) of every series. */
   toPrometheus(): string {
     const lines: string[] = [];
-    for (const [key, value] of this.counts) {
-      lines.push(`hushspec_${key.replace(/\./g, '_')}_total ${value}`);
+
+    lines.push('# HELP hushspec_evaluate_total Total HushSpec evaluations');
+    lines.push('# TYPE hushspec_evaluate_total counter');
+    for (const [pair, count] of sortedEntries(this.evaluations)) {
+      const [decision, actionType] = splitKey(pair);
+      lines.push(
+        `hushspec_evaluate_total{decision="${decision}",action_type="${escapeLabel(actionType)}"} ${count}`,
+      );
     }
-    if (this.durations.length > 0) {
-      lines.push(`hushspec_evaluate_duration_us_avg ${this.getAverageDurationUs()}`);
-      lines.push(`hushspec_evaluate_duration_us_p99 ${this.getP99DurationUs()}`);
+
+    lines.push('# HELP hushspec_evaluate_duration_us Evaluation duration in microseconds');
+    lines.push('# TYPE hushspec_evaluate_duration_us histogram');
+    for (const [actionType, histogram] of [...this.histograms].sort(byKey)) {
+      const label = escapeLabel(actionType);
+      DURATION_BUCKETS_US.forEach((bound, index) => {
+        lines.push(
+          `hushspec_evaluate_duration_us_bucket{action_type="${label}",le="${bound}"} ${histogram.buckets[index]}`,
+        );
+      });
+      lines.push(
+        `hushspec_evaluate_duration_us_bucket{action_type="${label}",le="+Inf"} ${histogram.count}`,
+      );
+      lines.push(`hushspec_evaluate_duration_us_sum{action_type="${label}"} ${histogram.sum}`);
+      lines.push(`hushspec_evaluate_duration_us_count{action_type="${label}"} ${histogram.count}`);
     }
-    return lines.join('\n');
+
+    lines.push('# HELP hushspec_rule_match_total Rule block match counts');
+    lines.push('# TYPE hushspec_rule_match_total counter');
+    for (const [pair, count] of sortedEntries(this.ruleMatches)) {
+      const [ruleBlock, decision] = splitKey(pair);
+      lines.push(
+        `hushspec_rule_match_total{rule_block="${escapeLabel(ruleBlock)}",decision="${decision}"} ${count}`,
+      );
+    }
+
+    lines.push('# HELP hushspec_policy_load_total Policy load operations');
+    lines.push('# TYPE hushspec_policy_load_total counter');
+    for (const [status, count] of sortedEntries(this.policyLoads)) {
+      lines.push(`hushspec_policy_load_total{status="${status}"} ${count}`);
+    }
+
+    return lines.join('\n') + '\n';
   }
 
   reset(): void {
     this.counts.clear();
+    this.evaluations.clear();
+    this.ruleMatches.clear();
+    this.policyLoads.clear();
+    this.histograms.clear();
     this.durations = [];
+    this.durationsAt = 0;
+    this.evaluationCount = 0;
   }
+}
+
+/** Two label values as one map key; NUL cannot occur in either. */
+function labelKey(first: string, second: string): string {
+  return `${first}\0${second}`;
+}
+
+function splitKey(pair: string): [string, string] {
+  const index = pair.indexOf('\0');
+  return [pair.slice(0, index), pair.slice(index + 1)];
+}
+
+function increment(counts: Map<string, number>, at: string): void {
+  counts.set(at, (counts.get(at) ?? 0) + 1);
+}
+
+function byKey(left: [string, unknown], right: [string, unknown]): number {
+  return left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0;
+}
+
+function sortedEntries(counts: Map<string, number>): [string, number][] {
+  return [...counts].sort(byKey);
+}
+
+function escapeLabel(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
+/**
+ * The rule block a `matched_rule` belongs to, for the
+ * `hushspec_rule_match_total` label.
+ *
+ * `rules.egress.default` -> `egress`; `extensions.posture.budgets` ->
+ * `posture`; the bare `detection` the detection pipeline emits -> `detection`;
+ * a reserved `__hushspec_x__` id -> `hushspec_x`. `undefined` for an
+ * evaluation no rule decided (a default allow).
+ */
+export function ruleBlockOf(matchedRule?: string): string | undefined {
+  if (matchedRule === undefined || matchedRule === '') return undefined;
+  if (matchedRule.startsWith('__')) return matchedRule.replace(/^_+|_+$/g, '');
+  if (matchedRule.startsWith('rules.')) return firstSegment(matchedRule.slice('rules.'.length));
+  if (matchedRule.startsWith('extensions.')) {
+    return firstSegment(matchedRule.slice('extensions.'.length));
+  }
+  return firstSegment(matchedRule);
+}
+
+function firstSegment(path: string): string {
+  const index = path.search(/[.[]/);
+  return index < 0 ? path : path.slice(0, index);
 }
 
 export class ObservableEvaluator {
