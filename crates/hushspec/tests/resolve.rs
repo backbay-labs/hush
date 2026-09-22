@@ -303,3 +303,48 @@ fn no_chain_shape_leaves_a_resolution_instruction_behind() {
 fn parse_file(path: &PathBuf) -> hushspec::HushSpec {
     hushspec::HushSpec::parse(&fs::read_to_string(path).unwrap()).unwrap()
 }
+
+/// Core spec 2.3: a hop whose referrer pinned it by digest carries the
+/// evidence on its chain link, and only that hop does. The flag is in-memory
+/// evidence for a later re-check, so it stays out of every serialized form.
+#[test]
+fn a_pinned_hop_records_the_pin_and_never_serializes_it() {
+    let dir = temp_dir("resolve-pin-evidence");
+
+    let base = dir.join("base.yaml");
+    fs::write(
+        &base,
+        "hushspec: \"0.2.0\"\nname: base\nrules:\n  tool_access:\n    allow: [read_file]\n    default: block\n",
+    )
+    .unwrap();
+    let pin = own_content_hash(&parse_file(&base), "base.yaml").unwrap();
+
+    let leaf = dir.join("leaf.yaml");
+    fs::write(
+        &leaf,
+        format!("hushspec: \"0.2.0\"\nname: leaf\nextends: \"base.yaml#{pin}\"\n"),
+    )
+    .unwrap();
+
+    let resolution = resolve_path_with_options(&leaf, &ResolveOptions::default()).unwrap();
+    assert!(resolution.chain[0].pinned, "the pinned base is not marked");
+    assert!(
+        !resolution.chain[1].pinned,
+        "nothing refers to the leaf, so nothing pins it"
+    );
+
+    let wire = serde_json::to_string(&resolution.chain).unwrap();
+    assert!(
+        !wire.contains("pinned"),
+        "the pin flag reached the wire form: {wire}"
+    );
+}
+
+/// A document wrapped as a one-link resolution was not loaded through a
+/// reference, so nothing pinned it.
+#[test]
+fn a_wrapped_resolution_pins_nothing() {
+    let spec = hushspec::HushSpec::parse("hushspec: \"0.2.0\"\nname: wrapped\n").unwrap();
+    let resolution = hushspec::Resolution::from_resolved(&spec, None).unwrap();
+    assert!(!resolution.chain[0].pinned);
+}

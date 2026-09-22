@@ -147,6 +147,16 @@ export interface ChainLink {
   source: string;
   content_hash: string;
   signature?: SignatureStatus;
+  /**
+   * Whether the referring document pinned this one by digest and the digest
+   * matched (Core section 2.3). A pin is checked before anything else, so a
+   * `true` value is proof the document is the one the author named, and
+   * Signing section 6.5 accepts it in place of an envelope.
+   *
+   * Evidence for a re-check inside one process only: it stays out of the
+   * receipt and bundle wire formats.
+   */
+  pinned?: boolean;
 }
 
 /** A resolved policy together with the evidence gathered while loading it. */
@@ -747,6 +757,7 @@ function buildResolution(
     if (pinned && hop.pin !== link.content_hash) {
       throw digestMismatch(hop, link.content_hash, resolution);
     }
+    if (pinned) link.pinned = true;
 
     const envelope = envelopes[index] ?? null;
     if (verificationAttempted(options) && !isBuiltinSource(hop.source)) {

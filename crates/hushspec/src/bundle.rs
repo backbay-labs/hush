@@ -568,6 +568,7 @@ pub fn build_statement(
             source: relative_source(&link.source, options.base_dir.as_deref()),
             content_hash: link.content_hash.clone(),
             signature: link.signature.clone(),
+            pinned: link.pinned,
         })
         .collect();
 
@@ -1152,6 +1153,7 @@ mod tests {
                 source: source.to_string(),
                 content_hash: "sha256:00".to_string(),
                 signature: None,
+                pinned: false,
             }]
         };
         assert_eq!(

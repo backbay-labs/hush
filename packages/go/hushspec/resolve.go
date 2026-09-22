@@ -200,6 +200,14 @@ type ChainLink struct {
 	Source      string           `json:"source"`
 	ContentHash string           `json:"content_hash"`
 	Signature   *SignatureStatus `json:"signature,omitempty"`
+	// Pinned reports that the referring document pinned this one by digest
+	// and the digest matched (core spec 2.3). A pin is checked before
+	// anything else, so a true value is proof the document is the one the
+	// author named, and signing spec 6.5 accepts it in place of an envelope.
+	//
+	// Evidence for a re-check inside one process only: it stays out of the
+	// receipt and bundle wire formats.
+	Pinned bool `json:"-"`
 }
 
 // Resolution is the result of [ResolveWithOptions]: the document to enforce
@@ -703,6 +711,7 @@ func resolveChain(
 			Source:      hop.source,
 			ContentHash: own,
 			Signature:   status,
+			Pinned:      hop.pin != "",
 		})
 		resolution.Signature = status
 	}

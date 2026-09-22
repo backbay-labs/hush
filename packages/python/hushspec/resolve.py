@@ -230,6 +230,14 @@ class ChainLink:
     source: str
     content_hash: str
     signature: SignatureStatus | None = None
+    #: Whether the referring document pinned this one by digest and the digest
+    #: matched (core spec 2.3). A pin is checked before anything else, so a
+    #: true value is proof the document is the one the author named, and
+    #: signing spec 6.5 accepts it in place of an envelope.
+    #:
+    #: Evidence for a re-check inside one process only: it stays out of the
+    #: receipt and bundle wire formats.
+    pinned: bool = False
 
 
 @dataclass(frozen=True)
@@ -628,7 +636,12 @@ def _resolve_inner(
     # covers the document on its own.
     status = _verify_hop(source, resolved, pinned=pin is not None, prepared=prepared)
     chain.append(
-        ChainLink(source=_label(source), content_hash=own_hash, signature=status)
+        ChainLink(
+            source=_label(source),
+            content_hash=own_hash,
+            signature=status,
+            pinned=pin is not None,
+        )
     )
     return resolved, chain
 

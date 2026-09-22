@@ -110,6 +110,16 @@ pub struct ChainLink {
     /// attempted. Builtins are never verified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<SignatureStatus>,
+    /// Whether the referring document pinned this one by digest and the
+    /// digest matched (core spec 2.3). A pin is checked before anything else,
+    /// so a set flag is proof the document is the one the author named, and
+    /// signing spec 6.5 accepts it in place of an envelope.
+    ///
+    /// Evidence for a re-check inside one process only: it is not part of the
+    /// receipt or bundle wire format and never crosses a serialization
+    /// boundary.
+    #[serde(skip)]
+    pub pinned: bool,
 }
 
 /// A resolved policy with its provenance.
@@ -156,6 +166,7 @@ impl Resolution {
                 source,
                 content_hash,
                 signature: None,
+                pinned: false,
             }],
             signature: None,
         })
@@ -488,6 +499,7 @@ where
             source: hop.source.clone(),
             content_hash: own_content_hash(&hop.spec, &hop.source)?,
             signature: status.clone(),
+            pinned: hop.pinned,
         });
         signature = status;
         resolved = Some(merged);
