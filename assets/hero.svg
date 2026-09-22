@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="title desc">
+  <title id="title">HushSpec. Agentic compliance as code.</title>
+  <desc id="desc">A gold policy seal on charcoal, beside the HushSpec wordmark. Declare the boundary. Carry the evidence.</desc>
+  <defs>
+    <linearGradient id="background" x2="0" y2="1">
+      <stop stop-color="#111310"/>
+      <stop offset="1" stop-color="#191a15"/>
+    </linearGradient>
+    <radialGradient id="halo">
+      <stop stop-color="#c3a56c" stop-opacity=".17"/>
+      <stop offset="1" stop-color="#c3a56c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f0dfb4"/>
+      <stop offset=".5" stop-color="#b59965"/>
+      <stop offset="1" stop-color="#e2c68c"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#c3a56c" stroke-opacity=".035"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="400" rx="4" fill="url(#background)"/>
+  <rect width="1200" height="400" rx="4" fill="url(#grid)"/>
+  <g fill="none" stroke="#b59b6d" stroke-opacity=".4">
+    <path d="M28 48V28H48M1152 28H1172V48M28 352V372H48M1152 372H1172V352"/>
+    <path d="M72 79H1128M72 329H1128" stroke-opacity=".2"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="11" letter-spacing="3" fill="#bcb7a7">
+    <text x="74" y="56">BACKBAY LABS</text>
+    <text x="1128" y="56" text-anchor="end" fill="#c9b17e">OPEN SPECIFICATION / 1.0</text>
+  </g>
+  <circle cx="300" cy="204" r="180" fill="url(#halo)"/>
+  <g fill="none" stroke="#c3a56c">
+    <circle cx="300" cy="204" r="111" stroke-opacity=".2"/>
+    <circle cx="300" cy="204" r="97" stroke-opacity=".25" stroke-dasharray="1 7"/>
+    <path d="M159 204H191M409 204H441M300 91V105M300 303V317" stroke-opacity=".5"/>
+    <path d="M300 114L360 144V237L300 285L240 237V144Z" fill="#191b16" stroke="url(#gold)" stroke-width="1.8"/>
+    <path d="M300 126L349 151V231L300 271L251 231V151Z" stroke-opacity=".3"/>
+    <path d="M300 126V271M251 151L300 175L349 151" stroke-opacity=".16"/>
+    <path d="M276 167V229M324 167V229M276 198H324" stroke="url(#gold)" stroke-width="3"/>
+    <path d="M269 167H283M317 167H331M269 229H283M317 229H331" stroke="url(#gold)" stroke-width="2"/>
+    <path d="M292 247L300 239L308 247L300 255Z" fill="#d8bc83" stroke="none"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="482" y="143" font-size="12" letter-spacing="4" fill="#bcb7a7">AGENTIC COMPLIANCE AS CODE</text>
+    <text x="475" y="247" font-family="Georgia, 'Times New Roman', serif" font-size="106" letter-spacing="-3" fill="#eee5d3">HushSpec</text>
+    <text x="482" y="284" font-size="17" letter-spacing=".4" fill="#c9b17e">Declare the boundary. Carry the evidence.</text>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" font-size="11" letter-spacing="2.6" fill="#a9ab99">
+    <text x="74" y="357">PORTABLE POLICY</text>
+    <text x="600" y="357" text-anchor="middle">DETERMINISTIC DECISIONS</text>
+    <text x="1128" y="357" text-anchor="end">VERIFIABLE RECEIPTS</text>
+  </g>
+</svg>

@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="432" viewBox="0 0 1200 432" role="img" aria-labelledby="title desc">
+  <title id="title">From policy to proof</title>
+  <desc id="desc">Declare a YAML policy, enforce it at the runtime boundary, and record a decision receipt. The policy defines the rules; the runtime mediates actions; the receipt binds the decision to the resolved policy hash.</desc>
+  <defs>
+    <linearGradient id="background" x2="0" y2="1"><stop stop-color="#111310"/><stop offset="1" stop-color="#191a15"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L7 4L1 7" fill="none" stroke="#bfa574" stroke-width="1.2"/></marker>
+  </defs>
+  <rect width="1200" height="432" rx="4" fill="url(#background)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="48" y="47" font-size="11" letter-spacing="3" fill="#bfa574">THE POLICY LIFECYCLE</text>
+    <text x="1152" y="47" text-anchor="end" font-size="11" letter-spacing="2" fill="#a9ab99">ONE FORMAT. FOUR SDKS.</text>
+    <path d="M48 67H1152" stroke="#bfa574" stroke-opacity=".22"/>
+    <g fill="#1c1e18" stroke="#bfa574" stroke-opacity=".3">
+      <rect x="48" y="94" width="320" height="244" rx="5"/>
+      <rect x="440" y="94" width="320" height="244" rx="5"/>
+      <rect x="832" y="94" width="320" height="244" rx="5"/>
+    </g>
+    <path d="M380 214H427M772 214H819" stroke="#bfa574" stroke-opacity=".8" marker-end="url(#arrow)"/>
+    <g font-size="11" letter-spacing="2.4" fill="#bfa574">
+      <text x="72" y="125">01 / DECLARE</text>
+      <text x="464" y="125">02 / ENFORCE</text>
+      <text x="856" y="125">03 / RECORD</text>
+    </g>
+    <g font-family="Georgia, 'Times New Roman', serif" font-size="27" fill="#eee5d3">
+      <text x="72" y="162">The policy</text>
+      <text x="464" y="162">The boundary</text>
+      <text x="856" y="162">The receipt</text>
+    </g>
+    <g font-family="'Liberation Mono', Consolas, monospace" font-size="15" fill="#c8c5b8">
+      <text x="72" y="202">hushspec: <tspan fill="#c9b17e">"1.0.0"</tspan></text>
+      <text x="72" y="227">rules:</text>
+      <text x="89" y="252">egress:</text>
+      <text x="106" y="277">default: <tspan fill="#d6a094">block</tspan></text>
+      <text x="464" y="202">action + resolved policy</text>
+      <text x="856" y="202">decision</text>
+      <text x="856" y="227">policy.content_hash</text>
+      <text x="856" y="252">rule_trace</text>
+      <text x="856" y="277">enforcement</text>
+    </g>
+    <g font-size="14" text-anchor="middle">
+      <rect x="464" y="225" width="76" height="30" rx="3" fill="#a6ba9b" fill-opacity=".1" stroke="#a6ba9b" stroke-opacity=".3"/>
+      <text x="502" y="245" fill="#b9c9af">allow</text>
+      <rect x="552" y="225" width="76" height="30" rx="3" fill="#c9b17e" fill-opacity=".1" stroke="#c9b17e" stroke-opacity=".3"/>
+      <text x="590" y="245" fill="#d8c192">warn</text>
+      <rect x="640" y="225" width="76" height="30" rx="3" fill="#cc9384" fill-opacity=".1" stroke="#cc9384" stroke-opacity=".3"/>
+      <text x="678" y="245" fill="#d6a094">deny</text>
+    </g>
+    <text x="464" y="282" font-size="14" fill="#bcb7a7">Your runtime acts on the decision.</text>
+    <g font-size="14" fill="#a9ab99">
+      <text x="72" y="316">YAML you can version and review.</text>
+      <text x="464" y="316">HushGuard or your own integration.</text>
+      <text x="856" y="316">Hash, sign, chain, and verify.</text>
+    </g>
+    <path d="M48 366H1152" stroke="#bfa574" stroke-opacity=".22"/>
+    <text x="600" y="400" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="18" fill="#c9b17e">The rule travels with the policy. The evidence travels with the decision.</text>
+  </g>
+</svg>
