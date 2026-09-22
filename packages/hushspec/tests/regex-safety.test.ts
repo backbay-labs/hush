@@ -34,8 +34,10 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('^\\bfoo\\b$')).toBe(true);
   });
 
-  it('accepts \\0 (null character, not a backreference)', () => {
-    expect(isSafeRegex('\\0')).toBe(true);
+  // `\0` is not a backreference, but it is not a profile escape either: the
+  // profile spells a code point `\xHH`, so the pattern is outside it.
+  it('rejects \\0, which is not a profile escape', () => {
+    expect(isSafeRegex('\\0')).toBe(false);
   });
 
   it('rejects backreferences (\\1)', () => {
@@ -149,22 +151,21 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('\\\\z')).toBe(true);
   });
 
-  // `\Z`/`\z` inside a character class is an escaped literal letter, not an
-  // anchor, so this scan passes it through; the profile translation refuses it
-  // instead, because `new RegExp('[\\Z]')` succeeds where every other engine
-  // rejects the escape.
-  it('leaves \\Z inside a character class to the profile translation ([\\Z])', () => {
-    expect(isSafeRegex('[\\Z]')).toBe(true);
+  // `\Z`/`\z` inside a character class is an escaped literal letter rather
+  // than an anchor, and `new RegExp('[\\Z]')` succeeds where every other
+  // engine rejects the escape, so the profile refuses it and so does this.
+  it('rejects \\Z inside a character class ([\\Z])', () => {
+    expect(isSafeRegex('[\\Z]')).toBe(false);
     expect(() => compileProfileRegex('[\\Z]')).toThrow('anchor with');
   });
 
-  it('leaves \\z inside a character class to the profile translation ([\\z])', () => {
-    expect(isSafeRegex('[\\z]')).toBe(true);
+  it('rejects \\z inside a character class ([\\z])', () => {
+    expect(isSafeRegex('[\\z]')).toBe(false);
     expect(() => compileProfileRegex('[\\z]')).toThrow('anchor with');
   });
 
-  it('leaves \\Z inside a non-empty character class to the translation ([x\\Z])', () => {
-    expect(isSafeRegex('[x\\Z]')).toBe(true);
+  it('rejects \\Z inside a non-empty character class ([x\\Z])', () => {
+    expect(isSafeRegex('[x\\Z]')).toBe(false);
     expect(() => compileProfileRegex('[x\\Z]')).toThrow('anchor with');
   });
 
