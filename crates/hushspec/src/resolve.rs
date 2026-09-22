@@ -594,9 +594,11 @@ pub mod http {
     use super::*;
     use std::io::Read as _;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, LazyLock, mpsc};
+    use std::time::{Duration, Instant};
 
-    /// How long to wait for the TCP connection, in milliseconds.
+    /// How long to wait for DNS and the TCP/TLS connection, in milliseconds.
     pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 10_000;
 
     /// How long to wait for response bytes once connected, in milliseconds.
@@ -644,7 +646,9 @@ pub mod http {
     /// How the HTTPS loader behaves. The defaults are the safe ones.
     #[derive(Clone, Debug)]
     pub struct HttpLoaderConfig {
-        /// Milliseconds to wait for the TCP connection.
+        /// Milliseconds shared by DNS resolution and the TCP/TLS connection.
+        /// DNS uses at most eight resolver workers across all loaders; if all
+        /// are still busy, a new hostname lookup fails closed immediately.
         pub connect_timeout_ms: u64,
         /// Milliseconds to wait for response bytes once connected.
         pub read_timeout_ms: u64,
@@ -794,6 +798,97 @@ pub mod http {
         url_str: &str,
         config: &HttpLoaderConfig,
     ) -> Result<HttpTarget, ResolveError> {
+        validate_url_with_lookup(url_str, config, Instant::now(), lookup_host)
+    }
+
+    fn lookup_host(host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>> {
+        std::net::ToSocketAddrs::to_socket_addrs(&(host, port)).map(Iterator::collect)
+    }
+
+    // The platform resolver cannot be cancelled. Timed-out calls retain their
+    // permits until the lookup exits, so repeated failures cannot accumulate
+    // unbounded threads. Dropped JoinHandles detach rather than join: neither
+    // returning to the caller nor process exit waits for a stuck lookup.
+    const MAX_DNS_WORKERS: usize = 8;
+    static DNS_WORKERS: LazyLock<Arc<AtomicUsize>> =
+        LazyLock::new(|| Arc::new(AtomicUsize::new(0)));
+
+    struct DnsWorkerPermit(Arc<AtomicUsize>);
+
+    impl Drop for DnsWorkerPermit {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::AcqRel);
+        }
+    }
+
+    fn resolve_host_with_lookup(
+        host: &str,
+        port: u16,
+        timeout: Duration,
+        workers: Arc<AtomicUsize>,
+        lookup: impl FnOnce(&str, u16) -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
+    ) -> Result<Vec<SocketAddr>, ResolveError> {
+        let started = Instant::now();
+        workers
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < MAX_DNS_WORKERS).then_some(active + 1)
+            })
+            .map_err(|_| ResolveError::Http {
+                message: format!("DNS resolver capacity exhausted for host '{host}'"),
+            })?;
+        let permit = DnsWorkerPermit(workers);
+        let worker_host = host.to_string();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("hushspec-dns".to_string())
+            .spawn(move || {
+                let result = lookup(&worker_host, port);
+                drop(permit);
+                let _ = sender.send(result);
+            })
+            .map_err(|error| ResolveError::Http {
+                message: format!("failed to start resolver for host '{host}': {error}"),
+            })?;
+        let result = receiver
+            .recv_timeout(timeout.saturating_sub(started.elapsed()))
+            .map_err(|error| ResolveError::Http {
+                message: match error {
+                    mpsc::RecvTimeoutError::Timeout => {
+                        format!("connect timed out while resolving host '{host}'")
+                    }
+                    mpsc::RecvTimeoutError::Disconnected => {
+                        format!("resolver for host '{host}' exited without a result")
+                    }
+                },
+            })?;
+        if started.elapsed() >= timeout {
+            return Err(ResolveError::Http {
+                message: format!("connect timed out while resolving host '{host}'"),
+            });
+        }
+        result.map_err(|error| ResolveError::Http {
+            message: format!("failed to resolve host '{host}': {error}"),
+        })
+    }
+
+    fn connect_remaining(
+        config: &HttpLoaderConfig,
+        started: Instant,
+    ) -> Result<Duration, ResolveError> {
+        Duration::from_millis(config.connect_timeout_ms)
+            .checked_sub(started.elapsed())
+            .filter(|remaining| !remaining.is_zero())
+            .ok_or_else(|| ResolveError::Http {
+                message: "connect timed out during DNS resolution or connection setup".to_string(),
+            })
+    }
+
+    fn validate_url_with_lookup(
+        url_str: &str,
+        config: &HttpLoaderConfig,
+        started: Instant,
+        lookup: impl FnOnce(&str, u16) -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
+    ) -> Result<HttpTarget, ResolveError> {
         let parsed = url::Url::parse(url_str).map_err(|error| ResolveError::Http {
             message: format!("invalid URL '{url_str}': {error}"),
         })?;
@@ -835,11 +930,13 @@ pub mod http {
         let addresses: Vec<SocketAddr> = match &host {
             url::Host::Ipv4(address) => vec![SocketAddr::new(IpAddr::V4(*address), port)],
             url::Host::Ipv6(address) => vec![SocketAddr::new(IpAddr::V6(*address), port)],
-            url::Host::Domain(domain) => std::net::ToSocketAddrs::to_socket_addrs(&(*domain, port))
-                .map_err(|error| ResolveError::Http {
-                    message: format!("failed to resolve host '{host_name}': {error}"),
-                })?
-                .collect(),
+            url::Host::Domain(domain) => resolve_host_with_lookup(
+                domain,
+                port,
+                connect_remaining(config, started)?,
+                Arc::clone(&DNS_WORKERS),
+                lookup,
+            )?,
         };
 
         let Some(&address) = addresses.first() else {
@@ -882,8 +979,9 @@ pub mod http {
     fn pinned_client(
         target: &HttpTarget,
         config: &HttpLoaderConfig,
+        started: Instant,
     ) -> Result<reqwest::blocking::Client, ResolveError> {
-        let connect = Duration::from_millis(config.connect_timeout_ms);
+        let connect = connect_remaining(config, started)?;
         let read = Duration::from_millis(config.read_timeout_ms);
         // A proxy from the environment (`HTTPS_PROXY`, `ALL_PROXY`) would
         // resolve the host a second time on its side, and the pin below
@@ -891,7 +989,7 @@ pub mod http {
         let mut builder = reqwest::blocking::Client::builder()
             .no_proxy()
             .connect_timeout(connect)
-            .timeout(connect + read)
+            .timeout(connect.saturating_add(read))
             .redirect(reqwest::redirect::Policy::none())
             .danger_accept_invalid_certs(!config.verify_tls);
 
@@ -956,8 +1054,9 @@ pub mod http {
         config: &HttpLoaderConfig,
         etag: Option<&str>,
         missing_is_none: bool,
+        started: Instant,
     ) -> Result<FetchResult, ResolveError> {
-        let mut request = pinned_client(target, config)?
+        let mut request = pinned_client(target, config, started)?
             .get(&target.url)
             .header("Accept", "application/yaml, text/yaml, */*");
         if let Some(auth) = &config.auth_header {
@@ -966,6 +1065,13 @@ pub mod http {
         if let Some(etag) = etag {
             request = request.header("If-None-Match", etag);
         }
+        // Client construction and header setup also consume the original
+        // budget. Do not start a request after DNS exhausted it, and preserve
+        // the existing connect-plus-read total deadline through body reads.
+        request = request.timeout(
+            connect_remaining(config, started)?
+                .saturating_add(Duration::from_millis(config.read_timeout_ms)),
+        );
 
         let url_str = &target.url;
         let response = request.send().map_err(|error| ResolveError::Http {
@@ -1157,7 +1263,8 @@ pub mod http {
         url_str: &str,
         config: &HttpLoaderConfig,
     ) -> Result<LoadedSpec, ResolveError> {
-        let target = validate_url(url_str, config)?;
+        let started = Instant::now();
+        let target = validate_url_with_lookup(url_str, config, started, lookup_host)?;
 
         let cached = config
             .cache_dir
@@ -1169,6 +1276,7 @@ pub mod http {
             config,
             cached.as_ref().map(|(etag, _)| etag.as_str()),
             false,
+            started,
         )?;
 
         let body = if result.revalidated {
@@ -1228,8 +1336,9 @@ pub mod http {
         url_str: &str,
         config: &HttpLoaderConfig,
     ) -> Result<Option<Vec<u8>>, ResolveError> {
-        let target = validate_url(url_str, config)?;
-        let result = fetch(&target, config, None, true)?;
+        let started = Instant::now();
+        let target = validate_url_with_lookup(url_str, config, started, lookup_host)?;
+        let result = fetch(&target, config, None, true, started)?;
         if result.missing {
             return Ok(None);
         }
@@ -1354,6 +1463,258 @@ pub mod http {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn blocked_dns_returns_within_the_connect_budget() {
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let (result_tx, result_rx) = std::sync::mpsc::channel();
+            let caller = std::thread::spawn(move || {
+                let config = HttpLoaderConfig {
+                    connect_timeout_ms: 30,
+                    ..HttpLoaderConfig::default()
+                };
+                let result = validate_url_with_lookup(
+                    "https://policies.example/policy.yaml",
+                    &config,
+                    Instant::now(),
+                    move |_, _| {
+                        entered_tx.send(()).unwrap();
+                        release_rx.recv().unwrap();
+                        Ok(vec!["8.8.8.8:443".parse().unwrap()])
+                    },
+                );
+                result_tx.send(result).unwrap();
+            });
+            entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let result = result_rx.recv_timeout(Duration::from_millis(500));
+            // Release the resolver even when the regression is present, so a
+            // failed test cannot leave its caller hanging.
+            release_tx.send(()).unwrap();
+            caller.join().unwrap();
+            let message = result
+                .expect("DNS blocked the caller beyond the connect budget")
+                .expect_err("a blocked resolver must time out")
+                .to_string();
+            assert!(message.contains("timed out"), "{message}");
+        }
+
+        #[test]
+        fn stalled_dns_workers_are_bounded_and_release_capacity() {
+            let workers = Arc::new(AtomicUsize::new(0));
+            let mut releases = Vec::new();
+            for _ in 0..8 {
+                let (release_tx, release_rx) = mpsc::channel();
+                releases.push(release_tx);
+                let result = resolve_host_with_lookup(
+                    "policies.example",
+                    443,
+                    Duration::from_millis(10),
+                    Arc::clone(&workers),
+                    move |_, _| {
+                        release_rx.recv().unwrap();
+                        Ok(vec!["8.8.8.8:443".parse().unwrap()])
+                    },
+                );
+                assert!(result.unwrap_err().to_string().contains("timed out"));
+            }
+            let refused = (0..16)
+                .map(|_| {
+                    resolve_host_with_lookup(
+                        "policies.example",
+                        443,
+                        Duration::from_secs(1),
+                        Arc::clone(&workers),
+                        |_, _| Ok(vec!["8.8.8.8:443".parse().unwrap()]),
+                    )
+                })
+                .collect::<Vec<_>>();
+            for release in releases {
+                release.send(()).unwrap();
+            }
+            let cleanup_started = Instant::now();
+            while workers.load(Ordering::Acquire) != 0 {
+                assert!(cleanup_started.elapsed() < Duration::from_secs(2));
+                std::thread::yield_now();
+            }
+            for result in refused {
+                let message = result
+                    .expect_err("stalled DNS workers exceeded the limit")
+                    .to_string();
+                assert!(message.contains("capacity"), "{message}");
+            }
+            let addresses = resolve_host_with_lookup(
+                "policies.example",
+                443,
+                Duration::from_secs(1),
+                workers,
+                |_, _| Ok(vec!["8.8.8.8:443".parse().unwrap()]),
+            )
+            .expect("completed DNS workers must return their capacity");
+            assert_eq!(addresses, vec!["8.8.8.8:443".parse().unwrap()]);
+        }
+
+        #[test]
+        fn dns_elapsed_time_reduces_the_tls_connect_budget() {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let (accepted_tx, accepted_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (_stream, _) = listener.accept().unwrap();
+                accepted_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+            let (result_tx, result_rx) = mpsc::channel();
+            let caller = std::thread::spawn(move || {
+                // The private transport seam pins a loopback test socket; the
+                // public URL validator continues to reject loopback addresses.
+                let target = HttpTarget {
+                    url: format!("https://policies.example:{}/policy.yaml", address.port()),
+                    host: "policies.example".to_string(),
+                    address,
+                };
+                let config = HttpLoaderConfig {
+                    connect_timeout_ms: 1_000,
+                    read_timeout_ms: 2_000,
+                    ..HttpLoaderConfig::default()
+                };
+                let started = Instant::now() - Duration::from_millis(900);
+                let result = pinned_client(&target, &config, started)
+                    .unwrap()
+                    .get(&target.url)
+                    .send();
+                result_tx.send(result).unwrap();
+            });
+            accepted_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let result = result_rx.recv_timeout(Duration::from_millis(500));
+            release_tx.send(()).unwrap();
+            server.join().unwrap();
+            caller.join().unwrap();
+            let error = result
+                .expect("TCP/TLS received a fresh connect budget after DNS")
+                .expect_err("the stalled TLS handshake must time out");
+            assert!(error.is_timeout(), "{error}");
+        }
+
+        #[test]
+        fn timed_out_dns_worker_does_not_hold_process_open() {
+            const CHILD_ENV: &str = "HUSHSPEC_TEST_STALLED_DNS_CHILD";
+            if std::env::var_os(CHILD_ENV).is_some() {
+                let result = resolve_host_with_lookup(
+                    "policies.example",
+                    443,
+                    Duration::from_millis(20),
+                    Arc::new(AtomicUsize::new(0)),
+                    |_, _| loop {
+                        std::thread::park();
+                    },
+                );
+                assert!(result.unwrap_err().to_string().contains("timed out"));
+                return;
+            }
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "resolve::http::tests::timed_out_dns_worker_does_not_hold_process_open",
+                ])
+                .env(CHILD_ENV, "1")
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .unwrap();
+            let started = Instant::now();
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(status.success(), "DNS child failed: {status}");
+                    break;
+                }
+                if started.elapsed() >= Duration::from_secs(5) {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    panic!("a detached DNS worker held process exit open");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        #[test]
+        fn expired_connect_budget_stops_before_dns_or_transport() {
+            let config = HttpLoaderConfig {
+                connect_timeout_ms: 30,
+                ..HttpLoaderConfig::default()
+            };
+            let started = Instant::now() - Duration::from_secs(1);
+            let error = validate_url_with_lookup(
+                "https://policies.example/policy.yaml",
+                &config,
+                started,
+                |_, _| panic!("an expired budget must not launch DNS"),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("timed out"));
+            let target = validate_url("https://8.8.8.8/policy.yaml", &config).unwrap();
+            let error = pinned_client(&target, &config, started).unwrap_err();
+            assert!(error.to_string().contains("timed out"));
+        }
+
+        #[test]
+        fn bounded_dns_still_checks_every_address_and_pins_the_first() {
+            let config = HttpLoaderConfig::default();
+            let mixed = validate_url_with_lookup(
+                "https://policies.example:8443/policy.yaml",
+                &config,
+                Instant::now(),
+                |host, port| {
+                    assert_eq!((host, port), ("policies.example", 8443));
+                    Ok(vec![
+                        "8.8.8.8:8443".parse().unwrap(),
+                        "127.0.0.1:8443".parse().unwrap(),
+                    ])
+                },
+            )
+            .unwrap_err();
+            assert!(mixed.to_string().contains("SSRF protection"));
+
+            let target = validate_url_with_lookup(
+                "https://policies.example:8443/policy.yaml",
+                &config,
+                Instant::now(),
+                |_, _| {
+                    Ok(vec![
+                        "8.8.8.8:8443".parse().unwrap(),
+                        "1.1.1.1:8443".parse().unwrap(),
+                    ])
+                },
+            )
+            .unwrap();
+            assert_eq!(target.host, "policies.example");
+            assert_eq!(target.address, "8.8.8.8:8443".parse().unwrap());
+        }
+
+        #[test]
+        fn literals_and_allowlist_refusals_do_not_launch_dns() {
+            let config = HttpLoaderConfig::default();
+            let target = validate_url_with_lookup(
+                "https://8.8.8.8:8443/policy.yaml",
+                &config,
+                Instant::now(),
+                |_, _| panic!("an IP literal must bypass DNS"),
+            )
+            .unwrap();
+            assert_eq!(target.address, "8.8.8.8:8443".parse().unwrap());
+            let config = HttpLoaderConfig {
+                allowed_hosts: Some(vec!["policies.example".to_string()]),
+                ..config
+            };
+            let error = validate_url_with_lookup(
+                "https://outside.example/policy.yaml",
+                &config,
+                Instant::now(),
+                |_, _| panic!("an allowlist refusal must precede DNS"),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("allowlist"));
+        }
 
         fn address(text: &str) -> IpAddr {
             text.parse().expect("test address should parse")
@@ -1576,7 +1937,7 @@ pub mod http {
             // them; that they are is what this asserts.
             let config = HttpLoaderConfig::default();
             let target = validate_url("https://8.8.8.8/policy.yaml", &config).expect("literal");
-            assert!(pinned_client(&target, &config).is_ok());
+            assert!(pinned_client(&target, &config, Instant::now()).is_ok());
         }
 
         #[test]

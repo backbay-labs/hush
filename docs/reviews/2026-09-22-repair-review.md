@@ -119,3 +119,46 @@ After the review, the coordinator completed the full Rust workspace suite (1,025
 The independent dependency review's contributor-version correction is applied: development requires Node 20.19+ / 22.12+ / 24+. The SDK runtime declaration remains Node 18+. Node 20 execution is a hosted gate, not a local claim.
 
 Cross-SDK differential testing passed 500 groups / 2,000 actions with zero divergence. The final conformance report passed all six levels without failures or skips. Clippy, no-default-features, MSRV 1.88, generators, schema guards, policy-library coverage, documentation, Cargo audit/deny, and formatting checks passed. The delivery ledger records these results and the remaining clean-package, exact-commit hosted, integration, and publication boundaries.
+
+## Pre-push DNS correction and bounded follow-up review
+
+This correction is against local commit `341675a` plus its uncommitted DNS follow-up. The initial commit was not pushed when the coordinator found the gap. The earlier review missed part of an existing finding: Rust and Python still performed unbounded system DNS waits, TypeScript included DNS only when the optional overall timeout was supplied, and Go restarted the connection budget after lookup. These were not newly expanded requirements. The earlier statement that every original finding was closed was too broad and is superseded for DNS by this follow-up.
+
+The reviewer inspected all four loader implementations, their new controlled-stall/deadline tests, the shared specification clarification, and the operator availability notes. Scope is caller-visible DNS/connect budgets, bounded outstanding resolver work, no request from late results, and preservation of existing routing/security behavior. Public loader/configuration entry points remain compatible; Python's additional budget state is on its private target type. No dependency or Rust MSRV requirement was added.
+
+### Repairs and review findings
+
+- Rust starts an `Instant` before URL validation and carries it through DNS, cache lookup, client setup, and request admission. A maximum of eight native resolver workers is enforced before spawning. RAII retains a permit until actual completion, including unwinding or failed spawn; a timed-out caller does not join the detached worker. Remaining DNS time is subtracted from TCP/TLS waiting, and exhausted admission is refused after client construction as well as before it.
+- Python carries a monotonic `_ConnectBudget` from validation into the pinned socket. A process-wide eight-slot semaphore bounds daemon DNS workers, including those whose callers have timed out; admission itself is deadline-bounded, late completion releases the slot, and the worker has no request capability. Numeric addresses bypass libc resolution. The socket receives only the remaining DNS/connect time.
+- Go carries one absolute deadline through the context-aware resolver and pinned dialer. Fetch admission rejects an already exhausted deadline, and the total request deadline includes only remaining connection time plus the existing read allowance. Its standard resolver supplies the native concurrency limiter; the reviewer checked the installed Go implementation's context-aware admission and permit lifetime rather than assuming cancellation stops libc work.
+- TypeScript now creates a connection deadline by default, separately from its optional whole-request deadline. Native/custom pending lookups are bounded at 32, and slots remain occupied until actual lookup settlement. Late results encounter a deadline check before yielding a target, and the pinned transport receives only the remaining connection budget.
+
+One additional Important TypeScript boundary was found during this follow-up: `fetchTarget` created `https.request` before checking whether cache work or queued continuations had exhausted the budget. Scheduling a zero-delay cancellation afterward still allowed connection creation. The source now checks both deadlines before constructing the request. The first added regression checked only server receipt and expired its clock too late to exercise the guard; a stronger no-request-construction regression was requested before final closure. Its final evidence is recorded below when available.
+
+The surrounding allowlist-before-DNS ordering, all-address SSRF checks, original-host TLS verification, vetted-address pinning, proxy refusal, redirect refusal, and shared policy/sidecar transport paths remain intact. Tests cover mixed public/private answers, literal and allowlist bypass of DNS, no late fetch, saturation and recovery, and remaining connection time rather than a fresh full allowance.
+
+### Behaviors considered but not certified
+
+The coordinator explicitly accepted these limits within the original repair scope; none is silently treated as a stronger availability guarantee:
+
+- Native resolver isolation and uninterrupted process-wide service are not established. A permanently stalled Rust/Python lookup retains one of eight slots, and saturation fails closed. TypeScript's native `dns.lookup` still uses Node's shared libuv pool; bounded promises do not cancel native work, prove prompt process exit, or isolate unrelated pool users. This distinction follows the [Node DNS implementation documentation](https://nodejs.org/api/dns.html#implementation-considerations) and is now recorded in the delivery ledger. Injected unresolved promises test the caller contract, not native resolver isolation.
+- Rust client-construction and scheduling overhead is not a hard real-time connection guarantee. Reqwest fixes the relative connect timeout while building the client. The code refuses fully expired admission after construction and recomputes the total request allowance, but a partially consumed setup interval can remain in that relative connection timeout. Replacing the connector/transport solely to remove this overhead was explicitly ruled outside this bounded repair.
+- Full current-tree SDK/workspace, MSRV, packaging, and exact-commit hosted qualification remain coordinator gates. Prior full passes on `341675a` cannot qualify its later uncommitted DNS delta. No merge, tag, publication, or exhaustive availability approval is given.
+
+### Independent verification
+
+The reviewer ran `cargo test -p hushspec --features http --lib resolve::http::tests -- --test-threads=4`: all 27 passed, including the subprocess test proving a detached stalled resolver does not hold Rust process exit open. The selected Python DNS/security tests passed 12/12. The three new Go deadline tests passed with `-count=1`. `git diff --check` passed. The Python owner separately reported the complete HTTP suite at 108 passed and complete SDK suite at 3,031 passed, four intentional skips. TypeScript final admission-test verification and the bounded verdict follow below.
+
+The earlier Minor contributor Node-version wording issue is also closed: current CONTRIBUTING names Node 20.19+, 22.12+, or 24+.
+
+### Final DNS closure and verdict
+
+The TypeScript admission regression is now corrected: expiry occurs on the fourth clock read, at fetch admission, and a spy asserts `https.request` was never called. The owner temporarily removed only the guard and observed the regression fail because one request was constructed; restoring the guard returned it to green. The reviewer inspected that final source/test and independently ran the complete HTTP test file: 40 passed. The owner also reports the final build, lint, all 43 files / 2,328 tests, and coverage passing. The admission finding and its initially inadequate regression are closed.
+
+Scoped verdict: ready to commit the DNS follow-up and proceed to exact-commit hosted qualification, conditional on the coordinator completing the remaining final full-tree gates. No remaining Critical, Important, or Minor finding in this bounded follow-up blocks that workflow. This verdict replaces the earlier overbroad DNS closure; it does not erase the recorded review miss or certify native resolver isolation, hard real-time deadlines, uninterrupted availability, merge readiness, or release/publication approval.
+
+### Final DNS local qualification
+
+The coordinator's full Rust workspace run passed 1,028 tests with zero failures and one ignored benchmark. Four additional DNS tests were then included in the final 294-test core run and a workspace recheck: 1,031 passed, zero failed, one ignored, with only the already-passing 295-second CLI policy-neutrality test filtered from that repeat. TypeScript passed all 2,328 tests, build, lint, and coverage; Python passed 3,031 with the same four intentional pre-document skips; Go passed its full suite, vet, and race-enabled deadline regressions. MSRV 1.88, all-features clippy, no-default-features, generators, formatting, workflow lint, and documentation checks passed.
+
+Both full and runtime-only npm audits remain clean after the Vitest upgrade. Clean workspace packaging passed on `341675a`; the DNS follow-up still requires its own clean committed package check and exact-commit hosted qualification. No registry upload was performed.

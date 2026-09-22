@@ -6,9 +6,15 @@ Reviewed 2026-09-22 against cumulative `wave-6` candidate `a0637cbe9d2ceb65a6865
 
 The preserved 39-thread platform snapshot below remains the audit record; it
 does not resolve any GitHub thread. The current local repair evidence and its
-remaining Rust/hosted boundaries are recorded in the
+remaining hosted/publication boundaries are recorded in the
 [post-repair review](2026-09-22-repair-review.md). That record is separate from
 hosted qualification and from platform review resolution.
+
+The pre-push recheck also expanded the DNS repair beyond its initial TypeScript
+scope: Python and Rust still blocked on system DNS, TypeScript's default connect
+budget omitted DNS, and Go renewed the connection budget after lookup. The
+follow-up repairs and resolver-availability limits are recorded in the linked
+review and [delivery ledger](../plans/STATUS.md#resolver-availability-boundary).
 
 ## Scope and method
 

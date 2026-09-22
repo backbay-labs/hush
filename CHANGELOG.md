@@ -26,6 +26,8 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 - CLI policy scaffolds declare the current 1.0.0 source version.
 - Development tests and coverage use patched Vitest 4.1.11, addressing
   GHSA-82fw-gwwq-j7x9 without changing the SDK's runtime dependencies.
+- Remote loaders include DNS in the connection budget by default, preserve the
+  remaining budget after lookup, and bound outstanding non-cancellable resolver work.
 
 ### Clarified
 

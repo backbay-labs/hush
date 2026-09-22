@@ -16,7 +16,7 @@
  *   hostname still used for SNI, certificate validation and the `Host` header.
  *   A name that re-resolves to `127.0.0.1` between the check and the connect --
  *   DNS rebinding -- reaches nothing.
- * - **Bounded.** A byte cap on the body, a connect timeout, and a read timeout.
+ * - **Bounded.** A byte cap on the body, a DNS-plus-connect timeout, and a read timeout.
  * - **Optionally allowlisted.** {@link HttpLoaderConfig.allowedHosts} narrows
  *   the reachable hosts to a fixed set, which is what a deployment that knows
  *   its policy server should do.
@@ -39,7 +39,7 @@ import path from 'node:path';
 import type { LoadedSpec } from './resolve.js';
 import { parse } from './parse.js';
 
-/** How long to wait for the TCP connection, in milliseconds. */
+/** How long to wait for DNS resolution plus the TCP/TLS connection, in milliseconds. */
 export const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
 /** How long to wait for response bytes once connected, in milliseconds. */
@@ -53,6 +53,17 @@ export const DEFAULT_READ_TIMEOUT_MS = 10_000;
 export const DEFAULT_MAX_SIZE = 1_048_576;
 
 /**
+ * Bound resolver work that outlives a caller's DNS/connect timeout.
+ *
+ * Node's system resolver has no cancellation API: a timed-out native lookup
+ * can still occupy a libuv worker until the OS resolver returns. This cap
+ * limits those retained lookups; callers are released on their deadline and a
+ * late answer is never allowed to start a request.
+ */
+export const MAX_PENDING_DNS_LOOKUPS = 32;
+let pendingDnsLookups = 0;
+
+/**
  * The two well-known cloud instance-metadata endpoints, named so the intent is
  * readable even though the blocked networks already cover both
  * (`169.254.0.0/16` and `fc00::/7`). Reaching one from a URL an agent supplied
@@ -61,7 +72,7 @@ export const DEFAULT_MAX_SIZE = 1_048_576;
 export const CLOUD_METADATA_ADDRESSES = ['169.254.169.254', 'fd00:ec2::254'] as const;
 
 export interface HttpLoaderConfig {
-  /** Milliseconds to wait for the TCP connection. */
+  /** Milliseconds to wait for DNS resolution plus the TCP/TLS connection. */
   connectTimeoutMs?: number;
   /** Milliseconds to wait for response bytes once connected. */
   readTimeoutMs?: number;
@@ -103,7 +114,9 @@ export interface HttpLoaderConfig {
   tlsCa?: string | string[];
   /**
    * Optional DNS boundary for controlled environments and tests. Every result
-   * still passes the normal SSRF checks and is pinned before connection.
+   * still passes the normal SSRF checks and is pinned before connection. A
+   * lookup that outlives its caller cannot be cancelled by Node, but is capped
+   * globally and its late result cannot start a request.
    */
   lookup?: (host: string) => Promise<LookupAddress[]>;
 }
@@ -148,17 +161,29 @@ function deadlineFor(settings: Settings): Deadline | undefined {
     : { expiresAt: Date.now() + settings.deadlineMs, timeoutMs: settings.deadlineMs };
 }
 
+function connectDeadlineFor(settings: Settings): Deadline {
+  return { expiresAt: Date.now() + settings.connectTimeoutMs, timeoutMs: settings.connectTimeoutMs };
+}
+
 function deadlineError(url: string, deadline: Deadline): Error {
   return new Error(`HTTP request to '${url}' timed out after ${deadline.timeoutMs} ms`);
+}
+
+function connectDeadlineError(url: string, deadline: Deadline): Error {
+  return new Error(`connect to '${url}' timed out after ${deadline.timeoutMs} ms`);
 }
 
 function remainingDeadlineMs(deadline: Deadline): number {
   return Math.max(0, deadline.expiresAt - Date.now());
 }
 
-function assertBeforeDeadline(url: string, deadline?: Deadline): void {
+function assertBeforeDeadline(
+  url: string,
+  deadline?: Deadline,
+  timeoutError: (url: string, deadline: Deadline) => Error = deadlineError,
+): void {
   if (deadline !== undefined && remainingDeadlineMs(deadline) === 0) {
-    throw deadlineError(url, deadline);
+    throw timeoutError(url, deadline);
   }
 }
 
@@ -166,12 +191,13 @@ function withinDeadline<T>(
   url: string,
   deadline: Deadline | undefined,
   operation: () => Promise<T>,
+  timeoutError: (url: string, deadline: Deadline) => Error = deadlineError,
 ): Promise<T> {
   if (deadline === undefined) return operation();
   const remaining = remainingDeadlineMs(deadline);
-  if (remaining === 0) return Promise.reject(deadlineError(url, deadline));
+  if (remaining === 0) return Promise.reject(timeoutError(url, deadline));
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(deadlineError(url, deadline)), remaining);
+    const timer = setTimeout(() => reject(timeoutError(url, deadline)), remaining);
     void operation().then(
       (value) => {
         clearTimeout(timer);
@@ -183,6 +209,40 @@ function withinDeadline<T>(
       },
     );
   });
+}
+
+function reserveDnsLookup(): () => void {
+  if (pendingDnsLookups >= MAX_PENDING_DNS_LOOKUPS) {
+    throw new Error(`DNS resolver saturated: ${MAX_PENDING_DNS_LOOKUPS} lookups are still pending`);
+  }
+  pendingDnsLookups += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    pendingDnsLookups -= 1;
+  };
+}
+
+function resolveHost(host: string, settings: Settings): Promise<LookupAddress[]> {
+  const release = reserveDnsLookup();
+  let lookup: Promise<LookupAddress[]>;
+  try {
+    lookup = settings.lookup?.(host) ?? dnsLookup(host, { all: true });
+  } catch (error) {
+    release();
+    throw error;
+  }
+  return lookup.then(
+    (addresses) => {
+      release();
+      return addresses;
+    },
+    (error: unknown) => {
+      release();
+      throw error;
+    },
+  );
 }
 
 // --------------------------------------------------------------------------
@@ -430,13 +490,22 @@ function checkUrl(urlStr: string, settings: Settings): URL {
 export async function resolveTarget(urlStr: string, config?: HttpLoaderConfig): Promise<HttpTarget> {
   const settings = settingsFrom(config);
   const deadline = deadlineFor(settings);
-  return withinDeadline(urlStr, deadline, () => resolveTargetWithSettings(urlStr, settings, deadline));
+  const connectDeadline = connectDeadlineFor(settings);
+  return withinDeadline(urlStr, deadline, () =>
+    withinDeadline(
+      urlStr,
+      connectDeadline,
+      () => resolveTargetWithSettings(urlStr, settings, deadline, connectDeadline),
+      connectDeadlineError,
+    ),
+  );
 }
 
 async function resolveTargetWithSettings(
   urlStr: string,
   settings: Settings,
   deadline?: Deadline,
+  connectDeadline?: Deadline,
 ): Promise<HttpTarget> {
   const url = checkUrl(urlStr, settings);
   const host = url.hostname.replace(/^\[|\]$/g, '');
@@ -448,7 +517,7 @@ async function resolveTargetWithSettings(
     resolved = [{ address: host, family: literal }];
   } else {
     try {
-      resolved = await (settings.lookup?.(host) ?? dnsLookup(host, { all: true }));
+      resolved = await resolveHost(host, settings);
     } catch (err) {
       throw new Error(`failed to resolve host '${host}': ${err}`);
     }
@@ -456,6 +525,7 @@ async function resolveTargetWithSettings(
   // DNS cannot be cancelled by Node's resolver API, but it must never be
   // allowed to open a socket after the caller's deadline has elapsed.
   assertBeforeDeadline(urlStr, deadline);
+  assertBeforeDeadline(urlStr, connectDeadline);
   if (resolved.length === 0) {
     throw new Error(`host '${host}' did not resolve to any addresses`);
   }
@@ -531,8 +601,19 @@ function fetchTarget(
   etag: string | null,
   missingIsNone: boolean,
   deadline?: Deadline,
+  connectDeadline?: Deadline,
 ): Promise<FetchResult> {
   return new Promise<FetchResult>((resolve, reject) => {
+    // Resolving and cache work are allowed to consume time. Recheck both
+    // budgets before creating the request so an expired operation cannot even
+    // begin a pinned TCP/TLS connection.
+    try {
+      assertBeforeDeadline(target.url, deadline);
+      assertBeforeDeadline(target.url, connectDeadline, connectDeadlineError);
+    } catch (error) {
+      reject(error);
+      return;
+    }
     const headers: Record<string, string> = {
       Accept: 'application/yaml, text/yaml, */*',
     };
@@ -567,6 +648,8 @@ function fetchTarget(
     let settled = false;
     const timeoutFor = (limitMs: number): number =>
       deadline === undefined ? limitMs : Math.min(limitMs, remainingDeadlineMs(deadline));
+    const connectTimeoutFor = (): number =>
+      Math.min(timeoutFor(settings.connectTimeoutMs), remainingDeadlineMs(connectDeadline!));
     const timeoutMessage = (phase: 'connect' | 'read', limitMs: number): string =>
       deadline !== undefined && remainingDeadlineMs(deadline) === 0
         ? deadlineError(target.url, deadline).message
@@ -574,8 +657,15 @@ function fetchTarget(
           ? `connect to '${target.url}' timed out after ${limitMs} ms`
           : `HTTP request to '${target.url}' timed out after ${limitMs} ms`;
     let timer: NodeJS.Timeout = setTimeout(
-      () => fail(timeoutMessage('connect', settings.connectTimeoutMs)),
-      timeoutFor(settings.connectTimeoutMs),
+      () =>
+        fail(
+          deadline !== undefined && remainingDeadlineMs(deadline) === 0
+            ? deadlineError(target.url, deadline).message
+            : connectDeadline !== undefined && remainingDeadlineMs(connectDeadline) === 0
+              ? connectDeadlineError(target.url, connectDeadline).message
+              : timeoutMessage('connect', settings.connectTimeoutMs),
+        ),
+      connectDeadline === undefined ? timeoutFor(settings.connectTimeoutMs) : connectTimeoutFor(),
     );
 
     function fail(message: string): void {
@@ -724,10 +814,23 @@ export function createHttpLoader(
 
   return async (reference: string, _from?: string): Promise<LoadedSpec> => {
     const deadline = deadlineFor(settings);
+    const connectDeadline = connectDeadlineFor(settings);
     return withinDeadline(reference, deadline, async () => {
-      const target = await resolveTargetWithSettings(reference, settings, deadline);
+      const target = await withinDeadline(
+        reference,
+        connectDeadline,
+        () => resolveTargetWithSettings(reference, settings, deadline, connectDeadline),
+        connectDeadlineError,
+      );
       const cached = settings.cacheDir ? readCache(settings.cacheDir, reference) : null;
-      const result = await fetchTarget(target, settings, cached?.etag ?? null, false, deadline);
+      const result = await fetchTarget(
+        target,
+        settings,
+        cached?.etag ?? null,
+        false,
+        deadline,
+        connectDeadline,
+      );
 
       let body: string;
       if (result.revalidated) {
@@ -850,9 +953,15 @@ export async function fetchSignature(
 ): Promise<string | null> {
   const settings = settingsFrom(config);
   const deadline = deadlineFor(settings);
+  const connectDeadline = connectDeadlineFor(settings);
   return withinDeadline(url, deadline, async () => {
-    const target = await resolveTargetWithSettings(url, settings, deadline);
-    const result = await fetchTarget(target, settings, null, true, deadline);
+    const target = await withinDeadline(
+      url,
+      connectDeadline,
+      () => resolveTargetWithSettings(url, settings, deadline, connectDeadline),
+      connectDeadlineError,
+    );
+    const result = await fetchTarget(target, settings, null, true, deadline, connectDeadline);
     assertBeforeDeadline(url, deadline);
     return result.missing ? null : result.body;
   });

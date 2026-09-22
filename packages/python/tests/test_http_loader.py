@@ -31,6 +31,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator, Optional
 
 import pytest
@@ -238,6 +239,34 @@ def test_the_validated_target_pins_the_address_the_request_will_dial() -> None:
     assert target.port == 8443
 
 
+@pytest.mark.parametrize("host", ["8.8.8.8", "[2606:4700:4700::1111]"])
+def test_numeric_addresses_do_not_use_the_system_resolver(
+    host: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*args, **kwargs):
+        raise OSError("system resolver unavailable")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    assert validate_url(f"https://{host}/base.yaml").address == host.strip("[]")
+
+
+@pytest.mark.parametrize(
+    "addresses", [("8.8.8.8", "127.0.0.1"), ("127.0.0.1", "8.8.8.8")]
+)
+def test_every_dns_address_is_checked_before_a_target_is_returned(
+    addresses: tuple[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def resolve(host, port, *args, **kwargs):
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port))
+            for address in addresses
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(HttpLoadError, match="SSRF protection"):
+        validate_url("https://mixed.test/base.yaml")
+
+
 # --------------------------------------------------------------------------- #
 # Fetching, against a loopback server
 # --------------------------------------------------------------------------- #
@@ -289,6 +318,8 @@ class _Server:
                     self._send(200, b"x" * (DEFAULT_MAX_SIZE + 10))
                 elif self.path == "/redirect.yaml":
                     self._send(302, Location=f"{outer.base}/base.yaml")
+                elif self.path == "/redirect-host.yaml":
+                    self._send(302, Location="https://stalled-redirect.test/base.yaml")
                 elif self.path == "/broken.yaml":
                     self._send(200, b"hushspec: [unclosed\n")
                 elif self.path == "/error.yaml":
@@ -326,6 +357,136 @@ def server() -> Iterator[_Server]:
 @pytest.fixture
 def config() -> HttpLoaderConfig:
     return HttpLoaderConfig(allow_insecure_loopback=True)
+
+
+@pytest.mark.parametrize("operation", ["validate", "load", "signature", "sidecar"])
+def test_stalled_dns_obeys_connect_budget_and_late_results_cannot_fetch(
+    operation: str, server: _Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    done = threading.Event()
+    workers: list[threading.Thread] = []
+    errors: list[Exception] = []
+
+    def stalled(host, port, *args, **kwargs):
+        workers.append(threading.current_thread())
+        entered.set()
+        release.wait()
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", stalled)
+    settings = HttpLoaderConfig(allow_insecure_loopback=True, connect_timeout_s=0.05)
+    url = f"http://stalled.test:{server.port}/base.yaml"
+
+    def call() -> None:
+        try:
+            if operation == "validate":
+                validate_url(url, settings)
+            elif operation == "load":
+                create_http_loader(settings)(url)
+            elif operation == "signature":
+                fetch_signature(url + ".sig", settings)
+            else:
+                fetch_sidecar(url, settings)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    caller = threading.Thread(target=call, daemon=True)
+    caller.start()
+    try:
+        assert entered.wait(1), "the controlled lookup never started"
+        assert done.wait(0.5), "the caller remained blocked past its DNS budget"
+        assert len(errors) == 1 and isinstance(errors[0], HttpLoadError)
+        assert "connect budget" in str(errors[0])
+    finally:
+        release.set()
+        caller.join(timeout=2)
+        for worker in workers:
+            worker.join(timeout=2)
+    assert not caller.is_alive()
+    assert all(not worker.is_alive() for worker in workers)
+    assert server.requests == [], "a late DNS result must never issue a request"
+
+
+def test_stalled_dns_workers_are_bounded_across_loaders_and_release_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+    workers: list[threading.Thread] = []
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def stalled(host, port, *args, **kwargs):
+        with lock:
+            workers.append(threading.current_thread())
+        release.wait()
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", stalled)
+
+    def call() -> None:
+        try:
+            validate_url(
+                "https://stalled.test/base.yaml", HttpLoaderConfig(connect_timeout_s=0.05)
+            )
+        except Exception as exc:
+            with lock:
+                errors.append(exc)
+
+    callers = [threading.Thread(target=call, daemon=True) for _ in range(16)]
+    for caller in callers:
+        caller.start()
+    try:
+        deadline = time.monotonic() + 1
+        for caller in callers:
+            caller.join(timeout=max(0, deadline - time.monotonic()))
+        assert all(not caller.is_alive() for caller in callers), "DNS callers did not expire"
+        assert len(errors) == 16
+        assert all(isinstance(error, HttpLoadError) for error in errors)
+        assert 1 <= len(workers) <= 8, "stalled lookups must have a process-wide bound"
+        assert all(worker.daemon for worker in workers), "DNS must not hold process exit open"
+        # A saturated resolver must still permit numeric URLs.
+        assert validate_url("https://8.8.8.8/base.yaml").address == "8.8.8.8"
+    finally:
+        release.set()
+        for caller in callers:
+            caller.join(timeout=2)
+        for worker in workers:
+            worker.join(timeout=2)
+    assert all(not worker.is_alive() for worker in workers)
+    assert validate_url("https://recovered.test/base.yaml").address == "8.8.8.8"
+
+
+def test_dns_and_tcp_share_one_connect_budget(
+    server: _Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hushspec.http_loader as transport
+
+    now = [10.0]
+    connect_timeouts: list[float] = []
+    lookups: list[str] = []
+
+    def resolve(host, port, *args, **kwargs):
+        lookups.append(host)
+        now[0] += 1.5
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+
+    class ObservedSocket(transport._BudgetedSocket):
+        def connect(self, address):
+            connect_timeouts.append(self.gettimeout())
+            return super().connect(address)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(transport, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(transport, "_BudgetedSocket", ObservedSocket)
+    settings = HttpLoaderConfig(allow_insecure_loopback=True, connect_timeout_s=2)
+    loaded = create_http_loader(settings)(f"http://budget.test:{server.port}/base.yaml")
+    assert loaded.spec.name == "remote-base"
+    assert lookups == ["budget.test"], "the vetted address must remain pinned"
+    assert connect_timeouts == [pytest.approx(0.5)]
 
 
 def test_fetches_and_parses_a_policy(server: _Server, config: HttpLoaderConfig) -> None:
@@ -382,6 +543,23 @@ def test_a_redirect_is_refused(server: _Server, config: HttpLoaderConfig) -> Non
     # address checks never saw.
     with pytest.raises(HttpLoadError, match="redirects are not followed"):
         create_http_loader(config)(f"{server.base}/redirect.yaml")
+
+
+@pytest.mark.parametrize("sidecar", [False, True])
+def test_redirects_are_refused_without_resolving_the_destination(
+    sidecar: bool, server: _Server, config: HttpLoaderConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*args, **kwargs):
+        raise OSError("a redirect destination must never be resolved")
+
+    monkeypatch.setattr(socket, "getaddrinfo", unavailable)
+    url = f"{server.base}/redirect-host.yaml"
+    with pytest.raises(HttpLoadError, match="redirects are not followed"):
+        if sidecar:
+            fetch_signature(url, config)
+        else:
+            create_http_loader(config)(url)
+    assert server.requests == ["/redirect-host.yaml"]
 
 
 def test_an_error_status_is_reported(server: _Server, config: HttpLoaderConfig) -> None:

@@ -76,7 +76,7 @@ __all__ = [
     "validate_url",
 ]
 
-#: How long to wait for the TCP connection, in seconds.
+#: How long to wait for DNS resolution and the TCP connection, in seconds.
 DEFAULT_CONNECT_TIMEOUT_S = 10.0
 
 #: How long to wait for response bytes once connected, in seconds.
@@ -237,7 +237,8 @@ class EtagCache:
 class HttpLoaderConfig:
     """How the HTTPS loader behaves. The defaults are the safe ones."""
 
-    #: Seconds to wait for the TCP connection.
+    #: Seconds shared by DNS resolution and the TCP connection. Waiting for a
+    #: resolver slot also draws on this budget.
     connect_timeout_s: float = DEFAULT_CONNECT_TIMEOUT_S
     #: Seconds allowed for the whole response once connected. The status
     #: line, the headers and the body share this budget, so a peer that
@@ -278,6 +279,23 @@ class HttpLoaderConfig:
     ssl_context: Optional[ssl.SSLContext] = None
 
 
+class _ConnectBudget:
+    """One deadline covering resolver admission, DNS and TCP connection."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.deadline = time.monotonic() + seconds
+
+    def exhausted(self) -> TimeoutError:
+        return TimeoutError(f"the connect budget of {self.seconds:g} s is exhausted")
+
+    def remaining(self) -> float:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise self.exhausted()
+        return remaining
+
+
 @dataclass(frozen=True)
 class _Target:
     """A URL that passed every check, with the address the request will dial."""
@@ -287,11 +305,60 @@ class _Target:
     host: str
     port: int
     address: str
+    connect_budget: _ConnectBudget
 
 
 # --------------------------------------------------------------------------- #
 # URL validation and SSRF checks
 # --------------------------------------------------------------------------- #
+
+
+# libc resolution cannot be cancelled. A timed-out lookup keeps its slot until
+# it actually returns, so even separate loader instances can leave at most
+# eight stalled daemon workers behind. Admission waits on the caller's connect
+# deadline, without an executor queue or non-daemon shutdown joins.
+_DNS_SLOTS = threading.BoundedSemaphore(8)
+
+
+def _resolve_addresses(host: str, port: int, budget: _ConnectBudget) -> list[str]:
+    try:
+        return [str(ipaddress.ip_address(host))]
+    except ValueError:
+        pass
+
+    if not _DNS_SLOTS.acquire(timeout=budget.remaining()):
+        raise budget.exhausted()
+    done = threading.Event()
+    addresses: list[str] = []
+    errors: list[Exception] = []
+    resolver = socket.getaddrinfo
+
+    def resolve() -> None:
+        try:
+            # A worker that starts after the caller expires must not do a new
+            # lookup. It only resolves: a late answer cannot open a connection.
+            budget.remaining()
+            addresses.extend(
+                info[4][0] for info in resolver(host, port, type=socket.SOCK_STREAM)
+            )
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            _DNS_SLOTS.release()
+            done.set()
+
+    try:
+        worker = threading.Thread(target=resolve, name="hushspec-dns", daemon=True)
+        worker.start()
+    except Exception as exc:
+        _DNS_SLOTS.release()
+        raise OSError("could not start DNS resolver") from exc
+    if not done.wait(timeout=budget.remaining()):
+        raise budget.exhausted()
+    budget.remaining()
+    if errors:
+        raise errors[0]
+    return addresses
 
 
 def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target:
@@ -303,6 +370,7 @@ def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target
     name that reaches the private one.
     """
     config = config or HttpLoaderConfig()
+    connect_budget = _ConnectBudget(config.connect_timeout_s)
     try:
         parsed = urlsplit(url)
     except ValueError as exc:
@@ -339,10 +407,9 @@ def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target
         raise HttpLoadError(f"invalid URL '{url}': {exc}") from exc
 
     try:
-        resolved = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        addresses = _resolve_addresses(host, port, connect_budget)
     except OSError as exc:
         raise HttpLoadError(f"failed to resolve host '{host}': {exc}") from exc
-    addresses = [info[4][0] for info in resolved]
     if not addresses:
         raise HttpLoadError(f"host '{host}' did not resolve to any addresses")
 
@@ -369,6 +436,7 @@ def validate_url(url: str, config: Optional[HttpLoaderConfig] = None) -> _Target
         host=host,
         port=port,
         address=addresses[0],
+        connect_budget=connect_budget,
     )
 
 
@@ -496,7 +564,7 @@ def _connection_factory(target: _Target, config: HttpLoaderConfig):
         def __init__(self, host: str, **kwargs: Any) -> None:
             kwargs.pop("context", None)
             kwargs.pop("check_hostname", None)
-            kwargs["timeout"] = config.connect_timeout_s
+            kwargs["timeout"] = target.connect_budget.remaining()
             if secure:
                 kwargs["context"] = context
             super().__init__(host, **kwargs)
@@ -504,8 +572,12 @@ def _connection_factory(target: _Target, config: HttpLoaderConfig):
         def connect(self) -> None:
             family = socket.AF_INET6 if ":" in target.address else socket.AF_INET
             sock: Any = _BudgetedSocket(family, socket.SOCK_STREAM)
-            sock.settimeout(config.connect_timeout_s)
-            sock.connect((target.address, target.port))
+            try:
+                sock.settimeout(target.connect_budget.remaining())
+                sock.connect((target.address, target.port))
+            except BaseException:
+                sock.close()
+                raise
             # Separate budgets: getting connected is not the same wait as
             # getting bytes, and a server that accepts and then stalls must not
             # inherit the connect timeout's patience. From here on the TLS

@@ -19,9 +19,10 @@
  * itself asserted below.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import https from 'node:https';
 import path from 'node:path';
 import {
   CLOUD_METADATA_ADDRESSES,
@@ -32,6 +33,7 @@ import {
   preferredSidecarUrl,
   fetchSignature,
   isBlockedAddress,
+  MAX_PENDING_DNS_LOOKUPS,
   resolveTarget,
   stemSidecarUrl,
   type HttpLoaderConfig,
@@ -253,14 +255,53 @@ function testConfig(extra?: HttpLoaderConfig): HttpLoaderConfig {
 }
 
 describe('http loader transport', () => {
+  it('bounds a hung DNS lookup by the default connect budget', async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: (addresses: { address: string; family: number }[]) => void;
+      const pending = resolveTarget('https://policy.example.test/policy.yaml', {
+        allowedHosts: ['policy.example.test'],
+        lookup: () => new Promise((resolve) => { release = resolve; }),
+      });
+      const rejected = expect(pending).rejects.toThrow(
+        "connect to 'https://policy.example.test/policy.yaml' timed out after 10000 ms",
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+      release([{ address: '8.8.8.8', family: 4 }]);
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses an explicit connect budget for a hung DNS lookup without timeoutMs', async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: (addresses: { address: string; family: number }[]) => void;
+      const pending = resolveTarget('https://policy.example.test/policy.yaml', {
+        allowedHosts: ['policy.example.test'],
+        connectTimeoutMs: 25,
+        lookup: () => new Promise((resolve) => { release = resolve; }),
+      });
+      const rejected = expect(pending).rejects.toThrow('timed out after 25 ms');
+      await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+      release([{ address: '8.8.8.8', family: 4 }]);
+      await vi.runAllTimersAsync();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Break caught: beginning the timeout only after DNS lets a resolver stall
   // forever even when the caller supplied timeoutMs for the request.
   it('bounds a DNS lookup by the request deadline', async () => {
-    const hungLookup = () => new Promise<never>(() => {});
+    let release!: (addresses: { address: string; family: number }[]) => void;
     const loader = createHttpLoader({
       timeoutMs: 50,
       allowedHosts: ['policy.example.test'],
-      lookup: hungLookup,
+      lookup: () => new Promise((resolve) => { release = resolve; }),
     });
     const startedAt = Date.now();
 
@@ -268,6 +309,116 @@ describe('http loader transport', () => {
       'timed out after 50 ms',
     );
     expect(Date.now() - startedAt).toBeLessThan(500);
+    release([{ address: '8.8.8.8', family: 4 }]);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it('spends DNS time from the same connect budget used by the pinned socket', async () => {
+    const server = await serve((_req, res) => {
+      // The connection timeout, rather than a response, is the behavior under test.
+      void res;
+    });
+    vi.useFakeTimers();
+    try {
+      let release!: (addresses: { address: string; family: number }[]) => void;
+      const loader = createHttpLoader(testConfig({
+        connectTimeoutMs: 50,
+        lookup: () => new Promise((resolve) => { release = resolve; }),
+      }));
+      const pending = loader(`${server.origin}/policy.yaml`);
+
+      await vi.advanceTimersByTimeAsync(30);
+      release([{ address: '127.0.0.1', family: 4 }]);
+      await Promise.resolve();
+
+      const rejected = expect(pending).rejects.toThrow('timed out after 50 ms');
+      await vi.advanceTimersByTimeAsync(20);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open a socket when a DNS answer arrives after the connect deadline', async () => {
+    const server = await serve((_req, res) => res.end(POLICY));
+    vi.useFakeTimers();
+    try {
+      let release!: (addresses: { address: string; family: number }[]) => void;
+      const loader = createHttpLoader(testConfig({
+        connectTimeoutMs: 25,
+        lookup: () => new Promise((resolve) => { release = resolve; }),
+      }));
+      const pending = loader(`${server.origin}/policy.yaml`);
+      const rejected = expect(pending).rejects.toThrow('timed out after 25 ms');
+      await vi.advanceTimersByTimeAsync(25);
+      await rejected;
+
+      release([{ address: '127.0.0.1', family: 4 }]);
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      expect(server.requests).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not open a socket when time expires between DNS approval and fetch admission', async () => {
+    const server = await serve((_req, res) => res.end(POLICY));
+    // The first three reads cover creation and DNS validation. The fourth is
+    // fetchTarget's admission check, modelling synchronous cache work taking
+    // the final millisecond of the connect budget.
+    let clockReads = 0;
+    const now = vi.spyOn(Date, 'now').mockImplementation(() => (++clockReads >= 4 ? 25 : 0));
+    const request = vi.spyOn(https, 'request');
+    try {
+      const loader = createHttpLoader(testConfig({
+        cacheDir: tempCacheDir(),
+        connectTimeoutMs: 25,
+        lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+      }));
+      await expect(loader(`${server.origin}/policy.yaml`)).rejects.toThrow('timed out after 25 ms');
+      expect(request).not.toHaveBeenCalled();
+      expect(server.requests).toHaveLength(0);
+    } finally {
+      request.mockRestore();
+      now.mockRestore();
+    }
+  });
+
+  it('fails closed when unresolved DNS work is saturated, then releases a completed lookup', async () => {
+    const releases: Array<(addresses: { address: string; family: number }[]) => void> = [];
+    const pending = Array.from({ length: MAX_PENDING_DNS_LOOKUPS }, (_, index) =>
+      resolveTarget(`https://pending-${index}.example.test/policy.yaml`, {
+        connectTimeoutMs: 60_000,
+        lookup: () => new Promise((resolve) => { releases.push(resolve); }),
+      }),
+    );
+
+    await expect(
+      resolveTarget('https://saturated.example.test/policy.yaml', {
+        connectTimeoutMs: 60_000,
+        lookup: async () => [{ address: '8.8.8.8', family: 4 }],
+      }),
+    ).rejects.toThrow(`DNS resolver saturated: ${MAX_PENDING_DNS_LOOKUPS}`);
+
+    // Numeric targets bypass DNS and therefore do not consume the bounded resolver queue.
+    await expect(resolveTarget('https://8.8.8.8/policy.yaml')).resolves.toMatchObject({
+      address: '8.8.8.8',
+    });
+
+    releases[0]!([{ address: '8.8.8.8', family: 4 }]);
+    await expect(pending[0]).resolves.toMatchObject({ address: '8.8.8.8' });
+
+    let recover!: (addresses: { address: string; family: number }[]) => void;
+    const recovered = resolveTarget('https://recovered.example.test/policy.yaml', {
+      connectTimeoutMs: 60_000,
+      lookup: () => new Promise((resolve) => { recover = resolve; }),
+    });
+    recover([{ address: '8.8.4.4', family: 4 }]);
+    await expect(recovered).resolves.toMatchObject({ address: '8.8.4.4' });
+
+    for (const release of releases.slice(1)) release([{ address: '8.8.8.8', family: 4 }]);
+    await expect(Promise.all(pending.slice(1))).resolves.toHaveLength(MAX_PENDING_DNS_LOOKUPS - 1);
   });
 
   it('refuses loopback unless the test-only exemption is set', async () => {

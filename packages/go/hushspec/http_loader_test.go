@@ -1,13 +1,17 @@
 package hushspec
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // HTTPS `extends` loading (http_loader.go).
@@ -35,6 +39,70 @@ const httpTestExtendsRemote = "hushspec: \"0.2.0\"\nname: remote-leaf\n" +
 	"extends: \"https://policies.invalid/other.yaml\"\n"
 
 const httpTestSignature = `{"format_version": "0.2"}`
+
+func TestHTTPDNSLookupHonorsTheConnectBudget(t *testing.T) {
+	previous := net.DefaultResolver
+	t.Cleanup(func() { net.DefaultResolver = previous })
+	var attempts atomic.Int32
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			attempts.Add(1)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+	started := time.Now()
+	_, err := ValidateURL("https://dns-budget.invalid/policy.yaml", HTTPLoaderConfig{
+		ConnectTimeout: 50 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "failed to resolve") {
+		t.Fatalf("stalled resolver accepted: %v", err)
+	}
+	if attempts.Load() == 0 || time.Since(started) > time.Second {
+		t.Fatal("DNS did not run under the configured connection deadline")
+	}
+}
+
+func TestHTTPFetchDoesNotRenewAnExpiredDNSConnectBudget(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, _ = fmt.Fprint(w, httpTestPolicy)
+	}))
+	defer server.Close()
+	config := HTTPLoaderConfig{
+		AllowInsecureLoopback: true,
+		TLSClientConfig:       server.Client().Transport.(*http.Transport).TLSClientConfig,
+		ConnectTimeout:        time.Second,
+	}
+	target, err := ValidateURL(server.URL, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sidecar := range []bool{false, true} {
+		_, err = fetchHTTP(target, config, "", sidecar, time.Now().Add(-time.Millisecond))
+		if err == nil || !strings.Contains(err.Error(), "connect budget") {
+			t.Fatalf("expired DNS/connect budget accepted (sidecar=%v): %v", sidecar, err)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatal("a request was issued after the DNS/connect deadline")
+	}
+}
+
+func TestHTTPClientKeepsOnlyTheRemainingConnectBudget(t *testing.T) {
+	config := HTTPLoaderConfig{ConnectTimeout: time.Hour, ReadTimeout: time.Second}
+	deadline := time.Now().Add(100 * time.Millisecond)
+	client := newPinnedClient(&HTTPTarget{Address: "127.0.0.1", Port: 443}, config, deadline)
+	transport := client.Transport.(*http.Transport)
+	if transport.TLSHandshakeTimeout <= 0 || transport.TLSHandshakeTimeout > 100*time.Millisecond {
+		t.Fatalf("TLS renewed the elapsed DNS budget: %v", transport.TLSHandshakeTimeout)
+	}
+	if client.Timeout <= time.Second || client.Timeout > 1100*time.Millisecond {
+		t.Fatalf("request renewed the elapsed DNS budget: %v", client.Timeout)
+	}
+}
 
 // --------------------------------------------------------------------------
 // Address classification

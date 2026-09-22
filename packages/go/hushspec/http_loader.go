@@ -51,7 +51,7 @@ import (
 // reference is refused, which is the fail-closed default.
 
 const (
-	// DefaultHTTPConnectTimeout is how long to wait for the TCP connection.
+	// DefaultHTTPConnectTimeout bounds DNS resolution and the TCP connection.
 	DefaultHTTPConnectTimeout = 10 * time.Second
 	// DefaultHTTPReadTimeout is how long to wait for response bytes once
 	// connected.
@@ -284,7 +284,7 @@ func (c *HTTPEtagCache) Clear() {
 // HTTPLoaderConfig says how the HTTPS loader behaves. The zero value is usable
 // and is the safe one: HTTPS only, no allowlist, the default caps and timeouts.
 type HTTPLoaderConfig struct {
-	// ConnectTimeout bounds establishing the TCP connection. Zero means
+	// ConnectTimeout bounds DNS resolution and establishing the TCP connection together. Zero means
 	// [DefaultHTTPConnectTimeout].
 	ConnectTimeout time.Duration
 	// ReadTimeout bounds waiting for response bytes once connected. Zero means
@@ -367,6 +367,10 @@ type HTTPTarget struct {
 // merely the first -- a name with one public and one private address is a name
 // that reaches the private one.
 func ValidateURL(rawURL string, config HTTPLoaderConfig) (*HTTPTarget, error) {
+	return validateURLUntil(rawURL, config, time.Now().Add(config.connectTimeout()))
+}
+
+func validateURLUntil(rawURL string, config HTTPLoaderConfig, connectDeadline time.Time) (*HTTPTarget, error) {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, httpErr("invalid URL '%s': %v", rawURL, err)
@@ -406,7 +410,7 @@ func ValidateURL(rawURL string, config HTTPLoaderConfig) (*HTTPTarget, error) {
 		port = parsedPort
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), config.connectTimeout())
+	ctx, cancel := context.WithDeadline(context.Background(), connectDeadline)
 	defer cancel()
 	addresses, err := net.DefaultResolver.LookupHost(ctx, host)
 	if err != nil {
@@ -468,8 +472,9 @@ func isLoopbackAddress(ip string) bool {
 // and the certificate check all use it; only the socket goes to the address
 // [ValidateURL] already approved. That is what closes DNS rebinding: the name is
 // resolved once, judged once, and connected to once.
-func newPinnedClient(target *HTTPTarget, config HTTPLoaderConfig) *http.Client {
-	dialer := &net.Dialer{Timeout: config.connectTimeout()}
+func newPinnedClient(target *HTTPTarget, config HTTPLoaderConfig, connectDeadline time.Time) *http.Client {
+	remainingConnect := max(time.Until(connectDeadline), time.Nanosecond)
+	dialer := &net.Dialer{Deadline: connectDeadline}
 	pinned := net.JoinHostPort(target.Address, strconv.Itoa(target.Port))
 
 	var tlsConfig *tls.Config
@@ -492,7 +497,7 @@ func newPinnedClient(target *HTTPTarget, config HTTPLoaderConfig) *http.Client {
 		// Separate budgets: getting connected is not the same wait as getting
 		// bytes, and a server that accepts and then stalls must not inherit the
 		// connect timeout's patience.
-		TLSHandshakeTimeout:   config.connectTimeout(),
+		TLSHandshakeTimeout:   remainingConnect,
 		ResponseHeaderTimeout: config.readTimeout(),
 		DisableKeepAlives:     true,
 		Proxy:                 nil,
@@ -506,7 +511,7 @@ func newPinnedClient(target *HTTPTarget, config HTTPLoaderConfig) *http.Client {
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
-		Timeout: config.connectTimeout() + config.readTimeout(),
+		Timeout: remainingConnect + config.readTimeout(),
 	}
 }
 
@@ -521,9 +526,12 @@ type httpFetchResult struct {
 }
 
 // fetchHTTP performs one GET of target under config.
-func fetchHTTP(target *HTTPTarget, config HTTPLoaderConfig, etag string, missingIsNone bool) (*httpFetchResult, error) {
-	ctx, cancel := context.WithTimeout(
-		context.Background(), config.connectTimeout()+config.readTimeout())
+func fetchHTTP(target *HTTPTarget, config HTTPLoaderConfig, etag string, missingIsNone bool, connectDeadline time.Time) (*httpFetchResult, error) {
+	if !time.Now().Before(connectDeadline) {
+		return nil, httpErr("DNS/connect budget exhausted for '%s'", target.URL)
+	}
+	ctx, cancel := context.WithDeadline(
+		context.Background(), connectDeadline.Add(config.readTimeout()))
 	defer cancel()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target.URL, nil)
@@ -538,7 +546,7 @@ func fetchHTTP(target *HTTPTarget, config HTTPLoaderConfig, etag string, missing
 		request.Header.Set("If-None-Match", etag)
 	}
 
-	response, err := newPinnedClient(target, config).Do(request)
+	response, err := newPinnedClient(target, config, connectDeadline).Do(request)
 	if err != nil {
 		return nil, httpErr("HTTP request to '%s' failed: %v", target.URL, err)
 	}
@@ -596,13 +604,14 @@ func fetchHTTP(target *HTTPTarget, config HTTPLoaderConfig, etag string, missing
 // builtin and filesystem loaders.
 func NewHTTPLoader(config HTTPLoaderConfig) ResolveLoader {
 	return func(reference string, _ string) (*LoadedSpec, error) {
-		target, err := ValidateURL(reference, config)
+		connectDeadline := time.Now().Add(config.connectTimeout())
+		target, err := validateURLUntil(reference, config, connectDeadline)
 		if err != nil {
 			return nil, err
 		}
 
 		cachedEtag, cachedBody, cached := config.Cache.Get(reference)
-		result, err := fetchHTTP(target, config, cachedEtag, false)
+		result, err := fetchHTTP(target, config, cachedEtag, false, connectDeadline)
 		if err != nil {
 			return nil, err
 		}
@@ -660,11 +669,12 @@ func NewDefaultLoader(config HTTPLoaderConfig) ResolveLoader {
 // error, because a 500 or an oversized body says nothing about whether a
 // signature exists.
 func FetchSignature(rawURL string, config HTTPLoaderConfig) ([]byte, bool, error) {
-	target, err := ValidateURL(rawURL, config)
+	connectDeadline := time.Now().Add(config.connectTimeout())
+	target, err := validateURLUntil(rawURL, config, connectDeadline)
 	if err != nil {
 		return nil, false, err
 	}
-	result, err := fetchHTTP(target, config, "", true)
+	result, err := fetchHTTP(target, config, "", true, connectDeadline)
 	if err != nil {
 		return nil, false, err
 	}

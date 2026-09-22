@@ -52,20 +52,26 @@
 |---|---|---|---|
 | Raw YAML scalar portability | Locally tested | All four SDK raw parsers agree on the current shared corpus; raw report scoring passes. | Exact-commit hosted CI. |
 | Python decorator action arguments | Locally tested | Decorator/middleware argument-binding checks pass. | Hosted CI. |
-| Provider bootstrap, recovery, panic, DNS deadline | Locally tested | Watcher/HTTP lifecycle, build, and lint checks pass. | Hosted CI. |
+| Provider bootstrap, recovery, panic, DNS deadline | Locally tested | Watcher/HTTP lifecycle checks pass. The follow-up extends DNS-inclusive default connection budgets to every loader and tests bounded resolver capacity and late-answer refusal. | Exact-commit hosted CI; native resolver isolation is not established. |
 | Log schema enforcement | Locally tested | Four SDK log checks and schema-vector generation pass. | Exact-commit hosted CI. |
 | Strict runtime timestamps | Locally tested | Four SDK condition checks pass. | Exact-commit hosted CI. |
 | MCP mapping and argument size | Locally tested | TypeScript, Python, and Go adapter-contract checks pass. | Hosted CI. |
-| First-release Rust package qualification | Locally tested, dirty-worktree gate | `cargo package --workspace --locked --allow-dirty` verified three archives; CI/Publish use the clean equivalent. | Clean package command after commit, hosted CI, then authorized merge/tag/publication. |
+| First-release Rust package qualification | Locally tested | `cargo package --workspace --locked` verified all three archives on clean repair commit `341675a`; CI/Publish enforce the same command for each candidate. | Requalify the DNS follow-up's exact commit, then authorized merge/tag/publication. |
 
 ### Local verification record
 
-- Rust: 1,025 tests passed, zero failed, and one benchmark test intentionally ignored; all-features clippy and the no-default-features build passed.
-- TypeScript: 2,322 tests plus build, lint, and V8 coverage passed after upgrading Vitest and its coverage provider to 4.1.11. Full and runtime-only npm audits report zero vulnerabilities. These local runs used Node 24; CI separately exercises Node 20.
-- Python: 3,019 passed with four intentional YAML pre-document skips. Go full suite and `go vet` passed.
+- Rust: the workspace suite and final 294-test core rerun passed with zero failures; one benchmark is intentionally ignored. All-features clippy and the no-default-features build passed.
+- TypeScript: 2,328 tests plus build, lint, and V8 coverage passed after upgrading Vitest and its coverage provider to 4.1.11. Full and runtime-only npm audits report zero vulnerabilities. These local runs used Node 24; CI separately exercises Node 20.
+- Python: 3,031 passed with four intentional YAML pre-document skips. Go full suite, `go vet`, and race-enabled DNS regressions passed.
 - Cross-SDK: 86 raw cases in all four SDKs, 25 runtime-time cases, 471 log-schema cases, and 500 differential groups/2,000 actions with zero mismatches passed.
 - Documentation: 35 documents × 4 SDK round-trip checks and eight executable snippets passed. MSRV 1.88 build passed.
 - The L5 conformance report passed its 197 document fixtures plus raw/log cases. All six levels passed without failures or skips.
 - Generated artifacts, schema guards, formatting, comment hygiene, workflow lint, documentation build, Cargo audit/deny, and 206 library cases with 129/129 rule coverage passed.
 
 Adapter mapping remains supplemental SDK-integration evidence, not a core conformance level. Hosted CI records results against its exact commit; this ledger does not duplicate or predict that state.
+
+### Resolver availability boundary
+
+System DNS calls cannot generally be cancelled. Rust and Python cap detached/daemon resolver workers at eight per process; a stalled call retains its slot until it returns. TypeScript caps pending native/custom lookups at 32, but native `dns.lookup` still shares Node's worker pool and can occupy that pool after its caller times out. Go uses its standard context-aware resolver and native concurrency limit. Exhaustion fails closed; it is not a guarantee of uninterrupted availability or native resolver isolation.
+
+Rust subtracts DNS elapsed time from reqwest's connection timeout, refuses expired admission after client construction, and retains the original total request budget. Client-construction/scheduling overhead is not a hard real-time connection deadline. A separate resolver/transport isolation design would require additional qualification.
