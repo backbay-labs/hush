@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -557,6 +559,16 @@ func lastLogEntryIn(file *os.File, path string) (*LogEntry, error) {
 	if err := strictUnmarshalJSON(last, &entry); err != nil {
 		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %w", path, err)
 	}
+	// The tail this SDK is willing to continue is exactly the tail a verifier
+	// is willing to read, so the head runs the same payload check (log spec 8,
+	// step 1).
+	var object map[string]any
+	if err := json.Unmarshal(last, &object); err != nil {
+		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %w", path, err)
+	}
+	if problem := logPayloadProblem(object); problem != "" {
+		return nil, fmt.Errorf("log: the last line of %s is not a log entry: %s", path, problem)
+	}
 	// Reading the head loosely would seed the chain from a malformed tail. A
 	// sequence number starts at 1 and an entry hash is never empty, so the zero
 	// values mean the member was absent -- and continuing from them would make
@@ -754,6 +766,13 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			if err := strictUnmarshalJSON([]byte(line), &entry); err != nil {
 				return nil, fail("not a log entry: %s", err)
 			}
+			// The object the line held, which both the payload check and the
+			// entry hash read: the typed entry cannot answer for members it
+			// does not model, nor for the ones the line left out.
+			object, err := entryObjectOfLine(line)
+			if err != nil {
+				return nil, fail("not a log entry: %s", err)
+			}
 			// 2. Format version.
 			if entry.LogVersion != LogVersion {
 				return nil, fail(
@@ -766,6 +785,14 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			// 4. Exactly the payload the entry type names.
 			if !entry.PayloadMatchesType() {
 				return nil, fail("payload does not match entry_type %q", entry.EntryType)
+			}
+			// A payload the entry carries has to be the payload the log-entry
+			// schema describes, not merely a JSON object the typed model
+			// accepts: the entry hash covers whatever the line held, so a
+			// hash-consistent line can still carry a policy event missing the
+			// SDK that wrote it.
+			if problem := logPayloadProblem(object); problem != "" {
+				return nil, fail("not a log entry: %s", problem)
 			}
 			// 5. A continued file links to the previous file's last hash.
 			if expectedSeq == 1 && index > 0 {
@@ -795,10 +822,6 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 			// this SDK materializes rather than the ones the file holds, and
 			// would report a payload it cannot model exactly as a hash
 			// mismatch instead of letting the check that names it run.
-			object, err := entryObjectOfLine(line)
-			if err != nil {
-				return nil, fail("cannot canonicalize entry: %s", err)
-			}
 			receiptDocument := object["receipt"]
 			recomputed, err := entryHashOfObject(object)
 			if err != nil {
@@ -848,6 +871,183 @@ func VerifyLogs(files []LogFile, options *LogVerifyOptions) (*LogVerifyReport, e
 		carriedHash, haveCarried = prevHash, true
 	}
 	return report, nil
+}
+
+// logMemberKind is the JSON type the log-entry schema gives a payload member.
+// logMemberIndex is a non-negative integer (`PolicySummary.version`).
+type logMemberKind int
+
+const (
+	logMemberString logMemberKind = iota
+	logMemberBoolean
+	logMemberIndex
+	logMemberObject
+	logMemberArray
+)
+
+// logMember is one member of a log payload object: its schema type, whether
+// the schema requires it, and the closed enum its value must fall in when it
+// has one.
+type logMember struct {
+	name     string
+	kind     logMemberKind
+	required bool
+	values   []string
+}
+
+// The payload objects of schemas/hushspec-log-entry.v1.schema.json.
+var (
+	logStartedMembers = []logMember{
+		{name: "timestamp", kind: logMemberString, required: true},
+		{name: "previous_file", kind: logMemberString},
+		{name: "previous_entry_hash", kind: logMemberString},
+	}
+	policyEventMembers = []logMember{
+		{
+			name:     "event",
+			kind:     logMemberString,
+			required: true,
+			values:   []string{"loaded", "swapped"},
+		},
+		{name: "timestamp", kind: logMemberString, required: true},
+		{name: "policy", kind: logMemberObject, required: true},
+		{
+			name:     "enforcement_mode",
+			kind:     logMemberString,
+			required: true,
+			values:   []string{"enforce", "monitor"},
+		},
+		{name: "sdk", kind: logMemberObject, required: true},
+		{name: "spec_version", kind: logMemberString, required: true},
+		{name: "previous_content_hash", kind: logMemberString},
+	}
+	sdkMembers = []logMember{
+		{name: "name", kind: logMemberString, required: true},
+		{name: "version", kind: logMemberString, required: true},
+	}
+	policySummaryMembers = []logMember{
+		{name: "name", kind: logMemberString},
+		{name: "version", kind: logMemberIndex},
+		{name: "spec_version", kind: logMemberString, required: true},
+		{name: "content_hash", kind: logMemberString, required: true},
+		{name: "extends_chain", kind: logMemberArray},
+		{name: "signature", kind: logMemberObject},
+	}
+	chainLinkMembers = []logMember{
+		{name: "source", kind: logMemberString, required: true},
+		{name: "content_hash", kind: logMemberString, required: true},
+	}
+	signatureStatusMembers = []logMember{
+		{name: "verified", kind: logMemberBoolean, required: true},
+		{name: "key_id", kind: logMemberString},
+		{name: "verified_at", kind: logMemberString},
+		{name: "reason", kind: logMemberString},
+	}
+)
+
+// memberProblem is the first way container departs from members, or "".
+//
+// A member the schema makes optional may be absent or null; one it requires
+// may be neither.
+func memberProblem(container map[string]any, members []logMember, path string) string {
+	for _, member := range members {
+		where := path + "." + member.name
+		value, present := container[member.name]
+		if !present {
+			if member.required {
+				return where + " is missing"
+			}
+			continue
+		}
+		if value == nil {
+			if member.required {
+				return where + " must not be null"
+			}
+			continue
+		}
+		switch member.kind {
+		case logMemberString:
+			text, ok := value.(string)
+			if !ok {
+				return where + " is not a string"
+			}
+			if len(member.values) > 0 && !slices.Contains(member.values, text) {
+				return where + " is not one of " + strings.Join(member.values, ", ")
+			}
+		case logMemberBoolean:
+			if _, ok := value.(bool); !ok {
+				return where + " is not a boolean"
+			}
+		case logMemberIndex:
+			number, ok := value.(float64)
+			if !ok || number < 0 || number != math.Trunc(number) {
+				return where + " is not a non-negative integer"
+			}
+		case logMemberObject:
+			if _, ok := value.(map[string]any); !ok {
+				return where + " is not a JSON object"
+			}
+		case logMemberArray:
+			if _, ok := value.([]any); !ok {
+				return where + " is not an array"
+			}
+		}
+	}
+	return ""
+}
+
+// logPayloadProblem is why the payloads an entry carries are not the ones the
+// log-entry schema describes, or "".
+//
+// Log spec 8, step 1: an entry counts as parsed only once every payload it
+// carries validates against schemas/hushspec-log-entry.v1.schema.json. It
+// reads the object the line held rather than the typed entry, because
+// unmarshalling collapses an absent member into the zero value of the member
+// it was meant to fill.
+func logPayloadProblem(object map[string]any) string {
+	if started, ok := object["log_started"].(map[string]any); ok {
+		if problem := memberProblem(started, logStartedMembers, "log_started"); problem != "" {
+			return problem
+		}
+	}
+	event, ok := object["policy_event"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	if problem := memberProblem(event, policyEventMembers, "policy_event"); problem != "" {
+		return problem
+	}
+	sdk, _ := event["sdk"].(map[string]any)
+	if problem := memberProblem(sdk, sdkMembers, "policy_event.sdk"); problem != "" {
+		return problem
+	}
+	policy, _ := event["policy"].(map[string]any)
+	return policySummaryProblem(policy, "policy_event.policy")
+}
+
+// policySummaryProblem is why a policy identity is not a `PolicySummary`,
+// or "".
+func policySummaryProblem(policy map[string]any, path string) string {
+	if problem := memberProblem(policy, policySummaryMembers, path); problem != "" {
+		return problem
+	}
+	if chain, ok := policy["extends_chain"].([]any); ok {
+		for index, raw := range chain {
+			where := fmt.Sprintf("%s.extends_chain[%d]", path, index)
+			link, ok := raw.(map[string]any)
+			if !ok {
+				return where + " is not a JSON object"
+			}
+			if problem := memberProblem(link, chainLinkMembers, where); problem != "" {
+				return problem
+			}
+		}
+	}
+	signature, ok := policy["signature"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return memberProblem(signature, signatureStatusMembers, path+".signature")
 }
 
 // entryObjectOfLine reads one JSON Lines record as the object the line holds,
