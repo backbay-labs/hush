@@ -57,7 +57,7 @@ When a writer holds a signing key it SHOULD sign every entry: `signature` is the
 
 For each file in order, for each non-blank line in order:
 
-1. Parse the entry; unknown fields are a break.
+1. Parse the entry; it MUST validate against `schemas/hushspec-log-entry.v1.schema.json`, so an unknown field, a member the schema requires and the entry lacks, and a member outside the JSON type or closed enum the schema gives it are each a break.
 2. `log_version` MUST be `"0.1"`.
 3. `seq` MUST equal the expected value (1, then previous + 1).
 4. Exactly the payload named by `entry_type` MUST be present.

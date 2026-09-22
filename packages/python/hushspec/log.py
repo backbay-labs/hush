@@ -23,7 +23,16 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, BinaryIO, Iterable, Iterator, Optional, Sequence, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Iterable,
+    Iterator,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Union,
+)
 
 from hushspec.canonical import canonical_json_value
 from hushspec.receipt import (
@@ -420,10 +429,11 @@ def _log_entry_problem(entry: Any) -> Optional[str]:
     """Why *entry* is not a log entry, or ``None``.
 
     The entry-level strictness of log spec section 8, step 1: an unknown member
-    anywhere the log-entry schema closes an object, and a payload member that
-    is not a JSON object. An append runs it over the file's last line, so the
-    tail this SDK is willing to continue is exactly the tail a verifier is
-    willing to read.
+    anywhere the log-entry schema closes an object, a payload member that is
+    not a JSON object, and a ``policy_event`` or ``log_started`` that departs
+    from the shape the schema gives it. An append runs it over the file's last
+    line, so the tail this SDK is willing to continue is exactly the tail a
+    verifier is willing to read.
     """
     if not isinstance(entry, dict):
         return "expected a JSON object"
@@ -437,7 +447,159 @@ def _log_entry_problem(entry: Any) -> Optional[str]:
         or _unknown_key(entry.get("log_started"), _LOG_STARTED_KEYS)
         or _unknown_key(entry.get("signature"), _ENTRY_SIGNATURE_KEYS)
     )
-    return None if unknown is None else f"unknown field {unknown!r}"
+    if unknown is not None:
+        return f"unknown field {unknown!r}"
+    return _payload_problem(entry)
+
+
+class _Member(NamedTuple):
+    """One member of a log payload object, as the log-entry schema declares it.
+
+    ``kind`` is the JSON type the schema gives the member, where ``index`` is a
+    non-negative integer (``PolicySummary.version``); ``values`` is the closed
+    enum the value must fall in, when the schema gives it one.
+    """
+
+    name: str
+    kind: str
+    required: bool
+    values: tuple[str, ...] = ()
+
+
+# ``$defs.LogStarted`` of the log-entry schema.
+_LOG_STARTED_MEMBERS = (
+    _Member("timestamp", "string", True),
+    _Member("previous_file", "string", False),
+    _Member("previous_entry_hash", "string", False),
+)
+
+# ``$defs.PolicyEvent`` of the log-entry schema.
+_POLICY_EVENT_MEMBERS = (
+    _Member("event", "string", True, ("loaded", "swapped")),
+    _Member("timestamp", "string", True),
+    _Member("policy", "object", True),
+    _Member("enforcement_mode", "string", True, ("enforce", "monitor")),
+    _Member("sdk", "object", True),
+    _Member("spec_version", "string", True),
+    _Member("previous_content_hash", "string", False),
+)
+
+# ``$defs.PolicyEvent.sdk`` of the log-entry schema.
+_SDK_MEMBERS = (
+    _Member("name", "string", True),
+    _Member("version", "string", True),
+)
+
+# ``$defs.PolicySummary`` of the log-entry schema.
+_POLICY_SUMMARY_MEMBERS = (
+    _Member("name", "string", False),
+    _Member("version", "index", False),
+    _Member("spec_version", "string", True),
+    _Member("content_hash", "string", True),
+    _Member("extends_chain", "array", False),
+    _Member("signature", "object", False),
+)
+
+# ``$defs.PolicySummary.extends_chain`` items.
+_CHAIN_LINK_MEMBERS = (
+    _Member("source", "string", True),
+    _Member("content_hash", "string", True),
+)
+
+# ``$defs.PolicySummary.signature``.
+_SIGNATURE_STATUS_MEMBERS = (
+    _Member("verified", "boolean", True),
+    _Member("key_id", "string", False),
+    _Member("verified_at", "string", False),
+    _Member("reason", "string", False),
+)
+
+
+def _member_problem(
+    container: dict[str, Any], members: tuple[_Member, ...], path: str
+) -> Optional[str]:
+    """The first way *container* departs from *members*, or ``None``.
+
+    A member the schema makes optional may be absent or ``null``; one it
+    requires may be neither.
+    """
+    for member in members:
+        where = f"{path}.{member.name}"
+        if member.name not in container:
+            if member.required:
+                return f"{where} is missing"
+            continue
+        value = container[member.name]
+        if value is None:
+            if member.required:
+                return f"{where} must not be null"
+            continue
+        if member.kind == "string":
+            if not isinstance(value, str):
+                return f"{where} is not a string"
+            if member.values and value not in member.values:
+                return f"{where} is not one of {', '.join(member.values)}"
+        elif member.kind == "boolean":
+            if not isinstance(value, bool):
+                return f"{where} is not a boolean"
+        elif member.kind == "index":
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                return f"{where} is not a non-negative integer"
+        elif member.kind == "object":
+            if not isinstance(value, dict):
+                return f"{where} is not a JSON object"
+        elif member.kind == "array":
+            if not isinstance(value, list):
+                return f"{where} is not an array"
+    return None
+
+
+def _payload_problem(entry: dict[str, Any]) -> Optional[str]:
+    """Why the payloads *entry* carries are not the ones the schema describes.
+
+    Log spec section 8, step 1: an entry counts as parsed only once every
+    payload it carries validates against
+    ``schemas/hushspec-log-entry.v1.schema.json``. The entry hash covers
+    whatever JSON the line held, so a hash-consistent line can still carry a
+    payload missing a member an auditor reads.
+    """
+    started = entry.get("log_started")
+    if isinstance(started, dict):
+        problem = _member_problem(started, _LOG_STARTED_MEMBERS, "log_started")
+        if problem is not None:
+            return problem
+    event = entry.get("policy_event")
+    if not isinstance(event, dict):
+        return None
+    problem = _member_problem(event, _POLICY_EVENT_MEMBERS, "policy_event")
+    if problem is not None:
+        return problem
+    problem = _member_problem(event["sdk"], _SDK_MEMBERS, "policy_event.sdk")
+    if problem is not None:
+        return problem
+    return _policy_summary_problem(event["policy"], "policy_event.policy")
+
+
+def _policy_summary_problem(policy: dict[str, Any], path: str) -> Optional[str]:
+    """Why a policy identity is not a ``PolicySummary``, or ``None``."""
+    problem = _member_problem(policy, _POLICY_SUMMARY_MEMBERS, path)
+    if problem is not None:
+        return problem
+    chain = policy.get("extends_chain")
+    if isinstance(chain, list):
+        for index, link in enumerate(chain):
+            where = f"{path}.extends_chain[{index}]"
+            if not isinstance(link, dict):
+                return f"{where} is not a JSON object"
+            problem = _member_problem(link, _CHAIN_LINK_MEMBERS, where)
+            if problem is not None:
+                return problem
+    signature = policy.get("signature")
+    if not isinstance(signature, dict):
+        return None
+    return _member_problem(
+        signature, _SIGNATURE_STATUS_MEMBERS, f"{path}.signature"
+    )
 
 
 def _unknown_policy_summary_key(policy: Any) -> Optional[str]:
@@ -961,6 +1123,14 @@ def verify_logs(
                 raise fail(
                     f"payload does not match entry_type {entry.get('entry_type')!r}"
                 )
+            # A payload the entry carries has to be the payload the log-entry
+            # schema describes, not merely a JSON object with no unknown
+            # members: the entry hash covers whatever the line held, so a
+            # hash-consistent line can still carry a policy event missing the
+            # SDK that wrote it.
+            malformed = _payload_problem(entry)
+            if malformed is not None:
+                raise fail(f"not a log entry: {malformed}")
             started = entry.get("log_started")
             if expected_seq == 1 and index > 0:
                 if started is None:

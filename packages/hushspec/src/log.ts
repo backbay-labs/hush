@@ -250,6 +250,187 @@ function unknownPolicyEventKey(event: unknown): string | undefined {
   return inPolicy ?? unknownKey(sdk, SDK_KEYS);
 }
 
+/**
+ * The JSON types the log-entry schema gives the members of its payloads.
+ * `index` is a non-negative integer (`PolicySummary.version`).
+ */
+type MemberType = 'string' | 'boolean' | 'index' | 'object' | 'array';
+
+/**
+ * One member of a payload object: its schema type, whether the schema requires
+ * it, and the closed enum its value must fall in when it has one.
+ */
+interface Member {
+  readonly name: string;
+  readonly type: MemberType;
+  readonly required: boolean;
+  readonly values?: readonly string[];
+}
+
+/** `$defs.LogStarted` of the log-entry schema. */
+const LOG_STARTED_MEMBERS: readonly Member[] = [
+  { name: 'timestamp', type: 'string', required: true },
+  { name: 'previous_file', type: 'string', required: false },
+  { name: 'previous_entry_hash', type: 'string', required: false },
+];
+
+/** `$defs.PolicyEvent` of the log-entry schema. */
+const POLICY_EVENT_MEMBERS: readonly Member[] = [
+  { name: 'event', type: 'string', required: true, values: ['loaded', 'swapped'] },
+  { name: 'timestamp', type: 'string', required: true },
+  { name: 'policy', type: 'object', required: true },
+  {
+    name: 'enforcement_mode',
+    type: 'string',
+    required: true,
+    values: ['enforce', 'monitor'],
+  },
+  { name: 'sdk', type: 'object', required: true },
+  { name: 'spec_version', type: 'string', required: true },
+  { name: 'previous_content_hash', type: 'string', required: false },
+];
+
+/** `$defs.PolicyEvent.sdk` of the log-entry schema. */
+const SDK_MEMBERS: readonly Member[] = [
+  { name: 'name', type: 'string', required: true },
+  { name: 'version', type: 'string', required: true },
+];
+
+/** `$defs.PolicySummary` of the log-entry schema. */
+const POLICY_SUMMARY_MEMBERS: readonly Member[] = [
+  { name: 'name', type: 'string', required: false },
+  { name: 'version', type: 'index', required: false },
+  { name: 'spec_version', type: 'string', required: true },
+  { name: 'content_hash', type: 'string', required: true },
+  { name: 'extends_chain', type: 'array', required: false },
+  { name: 'signature', type: 'object', required: false },
+];
+
+/** `$defs.PolicySummary.extends_chain` items. */
+const CHAIN_LINK_MEMBERS: readonly Member[] = [
+  { name: 'source', type: 'string', required: true },
+  { name: 'content_hash', type: 'string', required: true },
+];
+
+/** `$defs.PolicySummary.signature`. */
+const SIGNATURE_STATUS_MEMBERS: readonly Member[] = [
+  { name: 'verified', type: 'boolean', required: true },
+  { name: 'key_id', type: 'string', required: false },
+  { name: 'verified_at', type: 'string', required: false },
+  { name: 'reason', type: 'string', required: false },
+];
+
+/**
+ * The first way `container` departs from `members`, or `undefined`.
+ *
+ * A member the schema makes optional may be absent or `null`; one it requires
+ * may be neither.
+ */
+function memberProblem(
+  container: Record<string, unknown>,
+  members: readonly Member[],
+  path: string,
+): string | undefined {
+  for (const member of members) {
+    const value: unknown = container[member.name];
+    const where = `${path}.${member.name}`;
+    if (value === undefined) {
+      if (member.required) return `${where} is missing`;
+      continue;
+    }
+    if (value === null) {
+      if (member.required) return `${where} must not be null`;
+      continue;
+    }
+    switch (member.type) {
+      case 'string':
+        if (typeof value !== 'string') return `${where} is not a string`;
+        if (member.values !== undefined && !member.values.includes(value)) {
+          return `${where} is not one of ${member.values.join(', ')}`;
+        }
+        break;
+      case 'boolean':
+        if (typeof value !== 'boolean') return `${where} is not a boolean`;
+        break;
+      case 'index':
+        if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+          return `${where} is not a non-negative integer`;
+        }
+        break;
+      case 'object':
+        if (typeof value !== 'object' || Array.isArray(value)) {
+          return `${where} is not a JSON object`;
+        }
+        break;
+      case 'array':
+        if (!Array.isArray(value)) return `${where} is not an array`;
+        break;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why the payloads an entry carries are not the ones the log-entry schema
+ * describes, or `undefined`.
+ *
+ * Log spec 8, step 1: an entry counts as parsed only once every payload it
+ * carries validates against `schemas/hushspec-log-entry.v1.schema.json`. The
+ * entry hash covers whatever JSON the line held, so a hash-consistent line can
+ * still carry a payload missing a member an auditor reads.
+ */
+function payloadProblem(entry: LogEntry): string | undefined {
+  const started: unknown = entry.log_started;
+  if (started != null) {
+    const problem = memberProblem(
+      started as Record<string, unknown>,
+      LOG_STARTED_MEMBERS,
+      'log_started',
+    );
+    if (problem !== undefined) return problem;
+  }
+  const event: unknown = entry.policy_event;
+  if (event == null) return undefined;
+  const record = event as Record<string, unknown>;
+  const top = memberProblem(record, POLICY_EVENT_MEMBERS, 'policy_event');
+  if (top !== undefined) return top;
+  const sdk = memberProblem(
+    record.sdk as Record<string, unknown>,
+    SDK_MEMBERS,
+    'policy_event.sdk',
+  );
+  if (sdk !== undefined) return sdk;
+  return policySummaryProblem(record.policy as Record<string, unknown>, 'policy_event.policy');
+}
+
+/** Why a policy identity is not a `PolicySummary`, or `undefined`. */
+function policySummaryProblem(
+  policy: Record<string, unknown>,
+  path: string,
+): string | undefined {
+  const top = memberProblem(policy, POLICY_SUMMARY_MEMBERS, path);
+  if (top !== undefined) return top;
+  const chain: unknown = policy.extends_chain;
+  if (Array.isArray(chain)) {
+    for (let index = 0; index < chain.length; index += 1) {
+      const link: unknown = chain[index];
+      const where = `${path}.extends_chain[${index}]`;
+      if (typeof link !== 'object' || link === null || Array.isArray(link)) {
+        return `${where} is not a JSON object`;
+      }
+      const problem = memberProblem(link as Record<string, unknown>, CHAIN_LINK_MEMBERS, where);
+      if (problem !== undefined) return problem;
+    }
+  }
+  const signature: unknown = policy.signature;
+  if (signature == null) return undefined;
+  return memberProblem(
+    signature as Record<string, unknown>,
+    SIGNATURE_STATUS_MEMBERS,
+    `${path}.signature`,
+  );
+}
+
 /** The first unknown member inside a policy summary's own objects. */
 function unknownSummaryKey(policy: unknown): string | undefined {
   if (typeof policy !== 'object' || policy === null) return undefined;
@@ -270,10 +451,11 @@ function unknownSummaryKey(policy: unknown): string | undefined {
  * Why `value` is not a log entry, or `undefined`.
  *
  * The entry-level strictness of log spec 8, step 1: an unknown member anywhere
- * the log-entry schema closes an object, and a payload member that is not a
- * JSON object. An append runs it over the file's last line, so the tail this
- * SDK is willing to continue is exactly the tail a verifier is willing to
- * read.
+ * the log-entry schema closes an object, a payload member that is not a JSON
+ * object, and a `policy_event` or `log_started` that departs from the shape
+ * the schema gives it. An append runs it over the file's last line, so the
+ * tail this SDK is willing to continue is exactly the tail a verifier is
+ * willing to read.
  */
 function logEntryProblem(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -291,7 +473,8 @@ function logEntryProblem(value: unknown): string | undefined {
     unknownPolicyEventKey(entry.policy_event) ??
     unknownKey(entry.log_started, LOG_STARTED_KEYS) ??
     unknownKey(entry.signature, SIGNATURE_KEYS);
-  return unknown === undefined ? undefined : `unknown field ${JSON.stringify(unknown)}`;
+  if (unknown !== undefined) return `unknown field ${JSON.stringify(unknown)}`;
+  return payloadProblem(entry);
 }
 
 /**
@@ -831,6 +1014,14 @@ export function verifyLogs(
         unknownKey(entry.signature, SIGNATURE_KEYS);
       if (nestedUnknown !== undefined) {
         return broke(`not a log entry: unknown field ${JSON.stringify(nestedUnknown)}`);
+      }
+      // A payload the entry carries has to be the payload the log-entry
+      // schema describes, not merely a JSON object with no unknown members:
+      // the entry hash covers whatever the line held, so a hash-consistent
+      // line can still carry a policy event missing the SDK that wrote it.
+      const malformed = payloadProblem(entry);
+      if (malformed !== undefined) {
+        return broke(`not a log entry: ${malformed}`);
       }
 
       if (expectedSeq === 1 && index > 0) {

@@ -2,6 +2,7 @@ package hushspec
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -848,5 +849,166 @@ func TestAppendRejectsAnAmbiguousPayload(t *testing.T) {
 	both := LogPayload{Receipt: &receipt, LogStarted: &LogStarted{Timestamp: "2026-09-15T12:00:00.000Z"}}
 	if _, err := sink.Append(both); err == nil {
 		t.Error("two payloads in one entry must be refused")
+	}
+}
+
+// --------------------------------------------------------------------------
+// Payload structure (log spec 8, step 1)
+// --------------------------------------------------------------------------
+
+// eventLine is the first entry of a vector chain with mutate applied to its
+// policy event and the entry hash restored, so nothing but the payload itself
+// can reject the line.
+func eventLine(t *testing.T, mutate func(event map[string]any)) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	writeVectorChain(t, path, false)
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read the log: %v", err)
+	}
+	var entry map[string]any
+	first := strings.Split(strings.TrimRight(string(text), "\n"), "\n")[0]
+	if err := json.Unmarshal([]byte(first), &entry); err != nil {
+		t.Fatalf("cannot read the first entry: %v", err)
+	}
+	mutate(entry["policy_event"].(map[string]any))
+	hash, err := entryHashOfObject(entry)
+	if err != nil {
+		t.Fatalf("cannot hash the entry: %v", err)
+	}
+	entry["entry_hash"] = hash
+	line, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("cannot write the entry: %v", err)
+	}
+	return string(line) + "\n"
+}
+
+// TestAMalformedPolicyEventIsRejected pins the payload check every SDK runs
+// before the entry hash: a hash-consistent line can still carry a policy event
+// that is not the one schemas/hushspec-log-entry.v1.schema.json describes.
+func TestAMalformedPolicyEventIsRejected(t *testing.T) {
+	// A member of the wrong JSON type is refused by the typed parse, which
+	// names the same member in encoding/json's own words, so each case says
+	// what the break has to name rather than the whole of it.
+	cases := []struct {
+		name    string
+		mutate  func(event map[string]any)
+		message string
+	}{
+		{"sdk", func(e map[string]any) { delete(e, "sdk") }, "policy_event.sdk is missing"},
+		{
+			"spec_version",
+			func(e map[string]any) { delete(e, "spec_version") },
+			"policy_event.spec_version is missing",
+		},
+		{
+			"timestamp_type",
+			func(e map[string]any) { e["timestamp"] = float64(17) },
+			"policy_event.timestamp",
+		},
+		{
+			"enforcement_mode",
+			func(e map[string]any) { e["enforcement_mode"] = "advisory" },
+			"policy_event.enforcement_mode is not one of enforce, monitor",
+		},
+		{
+			"null_timestamp",
+			func(e map[string]any) { e["timestamp"] = nil },
+			"policy_event.timestamp must not be null",
+		},
+		{
+			"sdk_version",
+			func(e map[string]any) { delete(e["sdk"].(map[string]any), "version") },
+			"policy_event.sdk.version is missing",
+		},
+		{
+			"content_hash",
+			func(e map[string]any) { delete(e["policy"].(map[string]any), "content_hash") },
+			"policy_event.policy.content_hash is missing",
+		},
+		{
+			"policy_version",
+			func(e map[string]any) { e["policy"].(map[string]any)["version"] = float64(-1) },
+			"policy_event.policy.version is not a non-negative integer",
+		},
+		{
+			"chain_link",
+			func(e map[string]any) {
+				e["policy"].(map[string]any)["extends_chain"] = []any{
+					map[string]any{"content_hash": contentHashPrefix + strings.Repeat("1", 64)},
+				}
+			},
+			"policy_event.policy.extends_chain[0].source is missing",
+		},
+		{
+			"signature_status",
+			func(e map[string]any) {
+				e["policy"].(map[string]any)["signature"] = map[string]any{"reason": "unsigned"}
+			},
+			"policy_event.policy.signature.verified is missing",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := VerifyLog("log.jsonl", eventLine(t, testCase.mutate), nil)
+			logErr, ok := err.(*LogError)
+			if !ok {
+				t.Fatalf("expected a *LogError, got %v", err)
+			}
+			if logErr.Line != 1 {
+				t.Errorf("expected the break at line 1, got %d", logErr.Line)
+			}
+			if !strings.HasPrefix(logErr.Message, "not a log entry: ") ||
+				!strings.Contains(logErr.Message, testCase.message) {
+				t.Errorf("unexpected break: %s", logErr.Message)
+			}
+		})
+	}
+}
+
+// TestAnOptionalMemberSetToNullReadsAsAbsent pins the one place null is not a
+// break: the schema's optional members, which every SDK reads as absent.
+func TestAnOptionalMemberSetToNullReadsAsAbsent(t *testing.T) {
+	line := eventLine(t, func(e map[string]any) { e["previous_content_hash"] = nil })
+	report, err := VerifyLog("log.jsonl", line, nil)
+	if err != nil {
+		t.Fatalf("an optional null must read as absent: %v", err)
+	}
+	if report.Entries != 1 {
+		t.Errorf("expected one entry, got %d", report.Entries)
+	}
+}
+
+// TestOpenRefusesATailWithAMalformedPayload keeps the tail this SDK will
+// continue the same as the tail a verifier will read.
+func TestOpenRefusesATailWithAMalformedPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "log.jsonl")
+	writeVectorChain(t, path, false)
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("cannot read the log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(text), "\n"), "\n")
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("cannot read the last entry: %v", err)
+	}
+	delete(last, "receipt")
+	last["entry_type"] = string(EntryTypeLogStarted)
+	last["log_started"] = map[string]any{}
+	rewritten, err := json.Marshal(last)
+	if err != nil {
+		t.Fatalf("cannot write the last entry: %v", err)
+	}
+	lines[len(lines)-1] = string(rewritten)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("cannot rewrite the log: %v", err)
+	}
+	if _, err := OpenChainedFileSink(path); err == nil {
+		t.Fatal("a tail with a malformed payload must be refused")
+	} else if !strings.Contains(err.Error(), "log_started.timestamp is missing") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

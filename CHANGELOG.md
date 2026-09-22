@@ -731,6 +731,14 @@ and the reference SDKs accept `0.1`, `0.2`, and `1.0`. Everything below was deve
   parsers now enforce the required members, types, closed enums and timestamp spelling the Rust
   model enforces, and every SDK rejects a timestamp naming an impossible calendar date. Vector:
   `fixtures/log/invalid/malformed-receipt-line-2.jsonl`.
+- Log verification validates the `log_started` and `policy_event` payloads too (log spec 8,
+  step 1). The TypeScript, Python and Go verifiers read them into their own types without
+  checking them, so `log_started: {}` or a policy event with no `sdk` verified as sound; all
+  three now require the members the log-entry schema requires, of the declared JSON type, with
+  `event` and `enforcement_mode` inside their closed enums, as the Rust typed model already did.
+  The head an append continues runs the same check. Vectors:
+  `fixtures/log/invalid/empty-log-started-line-1.jsonl`,
+  `fixtures/log/invalid/policy-event-without-sdk-line-1.jsonl`.
 - The v1 schemas bound the month, day, hour, minute and second of every timestamp to its
   calendar range and carry `format: date-time`.
 - Signing spec 6.2 step 1 defers the `format_version` and `algorithm` value constraints to
