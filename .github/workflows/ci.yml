@@ -682,7 +682,7 @@ jobs:
         run: |
           mkdir -p coverage-out
           cargo llvm-cov --workspace --all-features --lcov --output-path coverage-out/rust-lcov.info
-          cargo llvm-cov report --all-features --json --summary-only --output-path rust-summary.json
+          cargo llvm-cov report --json --summary-only --output-path rust-summary.json
           {
             echo '## Coverage'
             echo
