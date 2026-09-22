@@ -206,6 +206,36 @@ class TestObservableEvaluator:
 
 
 
+class TestObserverRedaction:
+    def test_every_evaluation_event_is_stripped_of_content(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+        action = EvaluationAction(
+            type="egress", target="api.example.com", content="sk-live-0123456789"
+        )
+
+        evaluator.evaluate(minimal_spec(), action)
+        evaluator.notify_evaluation_completed(
+            action, EvaluationResult(decision=Decision.ALLOW), 12
+        )
+
+        assert len(observer.events) == 2
+        for event in observer.events:
+            assert event["action"].content is None
+            assert event["content_redacted"] is True
+        assert action.content == "sk-live-0123456789"
+
+    def test_an_action_without_content_carries_no_flag(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+
+        evaluator.evaluate(minimal_spec(), EvaluationAction(type="tool_call", target="test"))
+
+        assert "content_redacted" not in observer.events[0]
+
+
 class TestMetricsCollector:
     def test_tracks_counts_by_decision_type(self):
         evaluator = ObservableEvaluator()

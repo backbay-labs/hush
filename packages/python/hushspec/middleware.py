@@ -359,9 +359,7 @@ class HushGuard:
         self._observable_evaluator = None
         if observer is not None:
             from hushspec.observer import ObservableEvaluator
-            self._observable_evaluator = ObservableEvaluator(
-                redact_content=self._audit.redact_content
-            )
+            self._observable_evaluator = ObservableEvaluator()
             self._observable_evaluator.add_observer(observer)
             if self._state.refusal is None:
                 self._observable_evaluator.notify_policy_loaded(

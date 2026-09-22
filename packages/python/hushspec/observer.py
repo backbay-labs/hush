@@ -292,9 +292,8 @@ class MetricsCollector(EvaluationObserver):
 class ObservableEvaluator:
     """Evaluates a policy and announces the outcome to its observers."""
 
-    def __init__(self, redact_content: bool = True) -> None:
+    def __init__(self) -> None:
         self._observers: list[EvaluationObserver] = []
-        self._redact_content = redact_content
 
     def add_observer(self, observer: EvaluationObserver) -> None:
         self._observers.append(observer)
@@ -315,13 +314,17 @@ class ObservableEvaluator:
         start_ns = time.perf_counter_ns()
         result = evaluate_with_detection(spec, action).evaluation
         duration_us = (time.perf_counter_ns() - start_ns) // 1000
-        self._emit({
+        redacted, content_redacted = _redact(action)
+        event: dict[str, Any] = {
             "type": "evaluation.completed",
             "timestamp": _iso_now(),
-            "action": self._redact(action),
+            "action": redacted,
             "result": result,
             "duration_us": duration_us,
-        })
+        }
+        if content_redacted:
+            event["content_redacted"] = True
+        self._emit(event)
         return result
 
     def notify_evaluation_completed(
@@ -332,30 +335,21 @@ class ObservableEvaluator:
         enforcement: Optional["EnforcementSummary"] = None,
         receipt: Optional["DecisionReceipt"] = None,
     ) -> None:
+        redacted, content_redacted = _redact(action)
         event: dict[str, Any] = {
             "type": "evaluation.completed",
             "timestamp": _iso_now(),
-            "action": self._redact(action),
+            "action": redacted,
             "result": result,
             "duration_us": duration_us,
         }
+        if content_redacted:
+            event["content_redacted"] = True
         if enforcement is not None:
             event["enforcement"] = enforcement
         if receipt is not None:
             event["receipt"] = receipt
         self._emit(event)
-
-    def _redact(self, action: EvaluationAction) -> EvaluationAction:
-        """Return *action* with ``content`` stripped for observer emission.
-
-        Evaluation itself (``evaluate()`` above) always runs against the real,
-        unredacted action -- this only affects what gets embedded in observer
-        events. A 0.2 receipt needs no such switch: it records the content's
-        hash and size and has no field content could go in (receipt spec 4.4).
-        """
-        if self._redact_content and action.content is not None:
-            return dataclasses.replace(action, content=None)
-        return action
 
     def notify_policy_loaded(self, name: Optional[str] = None, hash: Optional[str] = None) -> None:
         """Announce the policy now in force. ``hash`` is its canonical content
@@ -438,6 +432,21 @@ class ObservableEvaluator:
                     })
                 except Exception:  # noqa: BLE001
                     pass
+
+
+def _redact(action: EvaluationAction) -> tuple[EvaluationAction, bool]:
+    """*action* with ``content`` stripped, and whether anything was stripped.
+
+    Evaluation itself always runs against the real action; this is what reaches
+    an observer, and evidence records content by hash and size, never by its
+    bytes (receipt spec 4.4). The flag rides on the event rather than on the
+    action, because :class:`~hushspec.evaluate.EvaluationAction` is a closed
+    wire type -- an SDK reading the event back rejects a member it does not
+    declare.
+    """
+    if action.content is None:
+        return action, False
+    return dataclasses.replace(action, content=None), True
 
 
 def _decision_name(decision: Any) -> str:
