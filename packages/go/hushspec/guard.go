@@ -17,6 +17,20 @@ import (
 // deny (core spec 6).
 type WarnHandler func(result EvaluationResult, action *EvaluationAction) bool
 
+// PolicyProviderRule is the `matched_rule` for a denial issued because an
+// enforcement point's policy provider cannot serve a policy to evaluate
+// against: it has not loaded one, it handed back a document that still
+// declares `extends`, or it failed when asked (core spec 6.2).
+//
+// A [Guard] takes its policy from a provider that pushes each reload into
+// [Guard.SwapPolicy], so a reload that fails leaves the policy already in
+// force and the guard never reaches that state. The value is exported for
+// readers of receipts an enforcement point of the other kind emitted.
+//
+// Distinct from [PolicyUnverifiedRule], which means the policy was obtained
+// and rejected -- a receipt has to be able to say which.
+const PolicyProviderRule = "__hushspec_policy_provider__"
+
 // GuardRefusal is the verification failure a guard is holding a policy under.
 //
 // A guard in this state has the document -- [Guard.Resolution] reports its

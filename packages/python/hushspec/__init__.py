@@ -156,6 +156,7 @@ from hushspec.error_codes import (
 )
 from hushspec.merge import merge
 from hushspec.middleware import (
+    POLICY_PROVIDER_RULE,
     POLICY_SIGNATURE_RULE,
     EnforcementConfig,
     GateOutcome,
@@ -522,6 +523,7 @@ __all__ = [
     "EnforcementConfig",
     "EnforcementSummary",
     "GateOutcome",
+    "POLICY_PROVIDER_RULE",
     "POLICY_SIGNATURE_RULE",
     "matches_rule_path_prefix",
     "EvaluationObserver",

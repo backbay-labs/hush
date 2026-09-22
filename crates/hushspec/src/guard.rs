@@ -66,6 +66,21 @@ use crate::receipt::{
 use crate::resolve::{Resolution, ResolveError, SignatureStatus, own_content_hash};
 use crate::sink::{ReceiptSink, SinkError};
 
+/// `matched_rule` for a denial issued because the enforcement point's policy
+/// provider cannot serve a policy to evaluate against: it has not loaded one,
+/// it handed back a document that still declares `extends`, or it failed when
+/// asked (core spec 6.2).
+///
+/// A [`HushGuard`] takes its policy from a provider that pushes each reload
+/// into [`HushGuard::swap_policy`], so a reload that fails leaves the policy
+/// already in force and the guard never reaches that state. The value is
+/// exported for readers of receipts an enforcement point of the other kind
+/// emitted.
+///
+/// Distinct from `__hushspec_policy_unverified__`, which means the policy was
+/// obtained and rejected -- a receipt has to be able to say which.
+pub const POLICY_PROVIDER_RULE: &str = "__hushspec_policy_provider__";
+
 /// Decides whether a `warn` may proceed. Returning `true` is the runtime
 /// saying "the operator confirmed this"; the receipt records
 /// [`EnforcementOutcome::Confirmed`].

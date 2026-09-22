@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // recordingSink captures everything a guard records, so a test can assert on
@@ -729,4 +731,34 @@ func TestGuardSwapPolicyKeepsRefusalOnUnprovenChain(t *testing.T) {
 	if refused, _ := guard.Refused(); !refused {
 		t.Fatal("a rejected swap must not clear an existing refusal")
 	}
+}
+
+// TestPolicyProviderRuleMatchesTheRegistry pins the reserved `matched_rule`
+// against spec/registries/rule-paths.yaml, so renaming it in one place fails
+// here rather than quietly leaving the registry describing a value no receipt
+// carries. This guard never issues the denial itself -- its policy provider
+// pushes each reload into SwapPolicy, so a failed reload leaves the policy
+// already in force (core spec 6.2) -- but a reader of receipts an enforcement
+// point of the other kind emitted needs the spelling.
+func TestPolicyProviderRuleMatchesTheRegistry(t *testing.T) {
+	path := filepath.Join(fixtureRepoRoot(t), "spec", "registries", "rule-paths.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the rule-path registry: %v", err)
+	}
+	var registry struct {
+		Entries []struct {
+			ID   string `yaml:"id"`
+			Kind string `yaml:"kind"`
+		} `yaml:"entries"`
+	}
+	if err := yaml.Unmarshal(raw, &registry); err != nil {
+		t.Fatalf("parse the rule-path registry: %v", err)
+	}
+	for _, entry := range registry.Entries {
+		if entry.Kind == "reserved_matched_rule" && entry.ID == PolicyProviderRule {
+			return
+		}
+	}
+	t.Fatalf("%q is not a reserved matched_rule in %s", PolicyProviderRule, path)
 }

@@ -53,6 +53,19 @@ _ENFORCEMENT_MODES = frozenset(("enforce", "monitor"))
 #: name the receipt carries -- one spelling per fact.
 POLICY_SIGNATURE_RULE = POLICY_UNVERIFIED_RULE
 
+#: ``matched_rule`` for a denial issued because an enforcement point's policy
+#: provider cannot serve a policy to evaluate against: it has not loaded one,
+#: it handed back a document that still declares ``extends``, or it failed when
+#: asked (core spec 6.2).
+#:
+#: A :class:`HushGuard` takes its policy from a provider that pushes each
+#: reload into :meth:`HushGuard.swap_resolution`, so a reload that fails leaves
+#: the policy already in force and the guard never reaches that state. The
+#: value is exported for readers of receipts an enforcement point of the other
+#: kind emitted. Distinct from :data:`POLICY_SIGNATURE_RULE`, which means the
+#: policy was obtained and rejected.
+POLICY_PROVIDER_RULE = "__hushspec_policy_provider__"
+
 
 @dataclass
 class EnforcementConfig:
