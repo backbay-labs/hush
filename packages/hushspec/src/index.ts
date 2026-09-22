@@ -111,6 +111,8 @@ export {
   splitDigestPin,
   resolutionFromResolved,
   resolveErrorReason,
+  isLoadReasonCode,
+  loadReasonOf,
   PolicyVerificationError,
   ResolveError,
   MEMORY_SOURCE,
