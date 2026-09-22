@@ -469,23 +469,22 @@ fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> Verd
     })
 }
 
+/// A `time_window` bound, which is exactly two ASCII digits per component
+/// (`schemas/hushspec-core.v1.schema.json` `$defs.TimeWindow`). `9:05`,
+/// `09:5`, `009:05` and `+9:00` are all outside that shape, so they are not
+/// times: validation refuses them and an evaluator that meets one leaves the
+/// window unevaluable and the rule block active (core spec 3.13).
 fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    // Reject any HH:MM component that is not pure ASCII digits. `u8::from_str`
-    // otherwise accepts a leading `+` (e.g. `+9:00`), which the other engines
-    // reject; the same token would then be a live window here and unevaluable
-    // there. A non-digit component fails to parse, and the window is
-    // unevaluable in every engine.
-    for part in &parts {
-        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+    let (hours, minutes) = s.split_once(':')?;
+    let field = |part: &str| -> Option<u8> {
+        let bytes = part.as_bytes();
+        if bytes.len() != 2 || !bytes.iter().all(u8::is_ascii_digit) {
             return None;
         }
-    }
-    let hour: u8 = parts[0].parse().ok()?;
-    let minute: u8 = parts[1].parse().ok()?;
+        Some((bytes[0] - b'0') * 10 + (bytes[1] - b'0'))
+    };
+    let hour = field(hours)?;
+    let minute = field(minutes)?;
     if hour > 23 || minute > 59 {
         return None;
     }

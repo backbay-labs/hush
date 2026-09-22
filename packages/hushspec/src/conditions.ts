@@ -317,12 +317,17 @@ function checkTimeWindow(
   return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes);
 }
 
+/**
+ * A `time_window` bound, which is exactly two ASCII digits per component
+ * (`schemas/hushspec-core.v1.schema.json` `$defs.TimeWindow`). `9:05`, `09:5`,
+ * `009:05` and `+9:00` are all outside that shape, so they are not times:
+ * validation refuses them and an evaluator that meets one leaves the window
+ * unevaluable and the rule block active (core spec 3.13).
+ */
 function parseHHMM(s: string): [number, number] | undefined {
   const parts = s.split(':');
   if (parts.length !== 2) return undefined;
-  // Both halves must be purely digits: `09.9` and `09xx` are malformed times
-  // rather than values to truncate to 9.
-  if (!/^\d+$/.test(parts[0]) || !/^\d+$/.test(parts[1])) {
+  if (!/^[0-9]{2}$/.test(parts[0]) || !/^[0-9]{2}$/.test(parts[1])) {
     return undefined;
   }
   const hour = parseInt(parts[0], 10);

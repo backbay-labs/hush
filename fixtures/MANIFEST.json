@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-22T02:55:59Z",
+  "generated_at": "2026-09-22T03:02:18Z",
   "files": [
     {
       "path": "fixtures/bundle/README.md",
@@ -1014,6 +1014,34 @@
     {
       "path": "fixtures/core/invalid/when-rate-negative-threshold.yaml",
       "sha256": "cc6777855ba2d88a7f2a6fcc842b6a932113b7db1dbafcbc3704abd4246e9beb",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-time-window-long-hour.expect.yaml",
+      "sha256": "d9020b402eec469f639b73fc16ad50e6798868b81a26234d346319717e2e534b",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-time-window-long-hour.yaml",
+      "sha256": "4eeb8e61ef48fa49c14562199c17f21b715e2019aa0b2f97a788a310a4f58e3c",
+      "category": "invalid",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-time-window-short-hour.expect.yaml",
+      "sha256": "525454bf1437cb93fb2af6a4eb7509dc589c98e05326270f0ba5f365b7b98237",
+      "category": "expect",
+      "module": "core",
+      "level": 1
+    },
+    {
+      "path": "fixtures/core/invalid/when-time-window-short-hour.yaml",
+      "sha256": "6ef155989479c78493ecc8b3431869af208b980b3ff00908b10243d6496562e1",
       "category": "invalid",
       "module": "core",
       "level": 1

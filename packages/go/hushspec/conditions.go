@@ -2,7 +2,6 @@ package hushspec
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -348,28 +347,33 @@ func checkTimeWindow(tw *TimeWindowCondition, context *RuntimeContext) condition
 	return verdictOf(currentMinutes >= startMinutes || currentMinutes < endMinutes)
 }
 
+// parseHHMM reads a `time_window` bound, which is exactly two ASCII digits per
+// component (schemas/hushspec-core.v1.schema.json $defs.TimeWindow). "9:05",
+// "09:5", "009:05" and "+9:00" are all outside that shape, so they are not
+// times: validation refuses them and an evaluator that meets one leaves the
+// window unevaluable and the rule block active (core spec 3.13).
 func parseHHMM(s string) (int, int, bool) {
 	parts := strings.Split(s, ":")
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
-	// Require pure ASCII digits in each component. strconv.Atoi would
-	// otherwise accept a leading sign (e.g. "+9:00"), which the other engines
-	// reject; the same token would then be a live window here and unevaluable
-	// there. A non-digit component fails to parse, and the window is
-	// unevaluable in every engine.
-	if !isASCIIDigits(parts[0]) || !isASCIIDigits(parts[1]) {
+	hour, ok := twoDigitField(parts[0])
+	if !ok || hour > 23 {
 		return 0, 0, false
 	}
-	hour, err := strconv.Atoi(parts[0])
-	if err != nil || hour < 0 || hour > 23 {
-		return 0, 0, false
-	}
-	minute, err := strconv.Atoi(parts[1])
-	if err != nil || minute < 0 || minute > 59 {
+	minute, ok := twoDigitField(parts[1])
+	if !ok || minute > 59 {
 		return 0, 0, false
 	}
 	return hour, minute, true
+}
+
+// twoDigitField reads exactly two ASCII digits as a number.
+func twoDigitField(s string) (int, bool) {
+	if len(s) != 2 || !isASCIIDigits(s) {
+		return 0, false
+	}
+	return int(s[0]-'0')*10 + int(s[1]-'0'), true
 }
 
 func dayAbbreviationCond(day int) string {

@@ -538,8 +538,8 @@ Any rule block MAY carry a `when` object that gates whether the block is active 
 
 | Field      | Type            | Required | Default   | Description                                                   |
 |------------|-----------------|----------|-----------|---------------------------------------------------------------|
-| `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
-| `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, ASCII digits only.                          |
+| `start`    | string          | REQUIRED | --        | `HH:MM`, 24-hour, exactly two ASCII digits per component.     |
+| `end`      | string          | REQUIRED | --        | `HH:MM`, 24-hour, exactly two ASCII digits per component.     |
 | `timezone` | string          | OPTIONAL | `"UTC"`   | IANA time zone identifier, or a fixed offset (grammar below).  |
 | `days`     | array of string | OPTIONAL | all days  | Any of `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun` (case-insensitive). |
 
@@ -589,7 +589,7 @@ Equivalently: an expected array matches when at least one of its elements matche
 
 **Validation (parse time).** Parsers MUST reject a document when any `when` object:
 - contains an unknown key;
-- has a `time_window` whose `start` or `end` is not `HH:MM` with `00 <= HH <= 23` and `00 <= MM <= 59`;
+- has a `time_window` whose `start` or `end` is not two ASCII digits, a colon and two ASCII digits with `00 <= HH <= 23` and `00 <= MM <= 59` (`9:05`, `09:5` and `009:05` are all refused);
 - has a `timezone` that is neither an IANA identifier known to the engine nor a fixed offset;
 - lists a `days` entry outside the seven abbreviations;
 - has a `capability` or a `rate.counter` that does not match the identifier grammar;
@@ -605,7 +605,7 @@ Equivalently: an expected array matches when at least one of its elements matche
 
 Engines MAY additionally accept an out-of-band map of conditions keyed by block name (the reference SDKs expose `evaluate_with_context`); when both are present the out-of-band condition is ANDed with the document's `when`.
 
-Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`.
+Test vectors: `fixtures/core/valid/when-conditions.yaml`, `fixtures/core/invalid/when-*.yaml`, `fixtures/core/evaluation/conditions.test.yaml`, `fixtures/core/evaluation/conditions-context-match.test.yaml`, `fixtures/core/evaluation/conditions-capability.test.yaml`, `fixtures/core/evaluation/conditions-capability-unevaluable.test.yaml`, `fixtures/core/evaluation/conditions-rate.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-not.test.yaml`, `fixtures/core/evaluation/conditions-unevaluable-combinators.test.yaml`, `fixtures/core/evaluation/conditions-context-empty-environment.test.yaml`.
 
 ### 3.14 Pattern Matching
 

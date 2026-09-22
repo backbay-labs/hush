@@ -716,28 +716,30 @@ def _check_time_window(tw: TimeWindowCondition, context: RuntimeContext) -> _Ver
 
 
 def _parse_hhmm(s: str) -> Optional[tuple[int, int]]:
+    """A ``time_window`` bound: exactly two ASCII digits per component
+    (``schemas/hushspec-core.v1.schema.json`` ``$defs.TimeWindow``).
+
+    ``9:05``, ``09:5``, ``009:05`` and ``+9:00`` are all outside that shape, so
+    they are not times: validation refuses them and an evaluator that meets one
+    leaves the window unevaluable and the rule block active (core spec 3.13).
+    """
     if not isinstance(s, str):
         return None
     parts = s.split(":")
     if len(parts) != 2:
         return None
-    hour = _parse_strict_uint(parts[0])
-    minute = _parse_strict_uint(parts[1])
+    hour = _two_digit_field(parts[0])
+    minute = _two_digit_field(parts[1])
     if hour is None or minute is None:
         return None
-    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+    if hour > 23 or minute > 59:
         return None
     return (hour, minute)
 
 
-def _parse_strict_uint(s: str) -> Optional[int]:
-    """Parse *s* as a base-10 non-negative integer of pure ASCII digits.
-
-    Unlike ``int()``, this rejects underscores, surrounding whitespace, and
-    any other characters ``int()`` tolerates (e.g. ``"1_2"``, ``"  9 "``), so
-    a malformed numeric field is refused rather than silently coerced.
-    """
-    if s == "" or not all("0" <= ch <= "9" for ch in s):
+def _two_digit_field(s: str) -> Optional[int]:
+    """Exactly two ASCII digits read as a number, or ``None``."""
+    if len(s) != 2 or not all("0" <= ch <= "9" for ch in s):
         return None
     return int(s)
 
@@ -848,10 +850,8 @@ def _parse_offset_value(s: str) -> Optional[int]:
     else:
         hours_str = s
         minutes_str = "00"
-    if len(hours_str) != 2 or len(minutes_str) != 2:
-        return None
-    hours = _parse_strict_uint(hours_str)
-    minutes = _parse_strict_uint(minutes_str)
+    hours = _two_digit_field(hours_str)
+    minutes = _two_digit_field(minutes_str)
     if hours is None or minutes is None:
         return None
     if hours > 23 or minutes > 59:
