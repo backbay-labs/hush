@@ -9,6 +9,14 @@
 //! Entries wrap a [`DecisionReceipt`] or a [`PolicyEvent`] (which policy was
 //! loaded or swapped in, with its provenance) so the log proves not only what
 //! was decided but what was in force when.
+//!
+//! Writers exclude each other through the `<path>.lock` sentinel of log spec 4
+//! alone. The advisory `flock` the same section recommends underneath it needs
+//! a platform binding this crate does not carry: the library parses, hashes and
+//! verifies with no operating-system dependency, and a kernel lock bought at
+//! the price of one would trade a property every platform has for a property
+//! only some do. The sentinel is the lock all four SDKs share, so it is the one
+//! that decides who may write.
 
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};

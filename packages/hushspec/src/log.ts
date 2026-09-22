@@ -32,6 +32,12 @@ import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from './version.js';
  * Entries wrap a {@link DecisionReceipt} or a {@link PolicyEvent} (which
  * policy was loaded or swapped in, with its provenance) so the log proves not
  * only what was decided but what was in force when.
+ *
+ * Writers exclude each other through the `<path>.lock` sentinel of log spec 4
+ * alone. The advisory `flock` the same section recommends underneath it has no
+ * counterpart in Node's `fs` module, and a native addon bought to get one
+ * would cost this package its dependency-free install. The sentinel is the
+ * lock all four SDKs share, so it is the one that decides who may write.
  */
 
 /** The log-entry format this module writes and verifies. */
