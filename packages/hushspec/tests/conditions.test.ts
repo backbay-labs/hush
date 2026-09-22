@@ -482,9 +482,12 @@ describe('evaluateWithContext', () => {
     expect(result.decision).toBe('deny');
   });
 
+  // The target is on the block list, so the window decides the outcome: an
+  // allowlisted target would answer `allow` whether or not the condition was
+  // applied at all.
   it('tool access with time window condition', () => {
     const spec = makeToolAccessSpec();
-    const action = { type: 'tool_call', target: 'deploy' };
+    const action = { type: 'tool_call', target: 'danger_tool' };
     const conditions: Record<string, Condition> = {
       tool_access: {
         time_window: {
@@ -497,23 +500,34 @@ describe('evaluateWithContext', () => {
 
     const ctxInside: RuntimeContext = { current_time: '2026-01-14T10:00:00Z' };
     const resultInside = evaluateWithContext(spec, action, ctxInside, conditions);
-    expect(resultInside.decision).toBe('allow');
+    expect(resultInside.decision).toBe('deny');
 
     const ctxOutside: RuntimeContext = { current_time: '2026-01-14T20:00:00Z' };
     const resultOutside = evaluateWithContext(spec, action, ctxOutside, conditions);
     expect(resultOutside.decision).toBe('allow');
   });
 
+  // A context field the engine did not supply makes the predicate false, so
+  // the block is inert and the blocked target is not denied. The supplied
+  // context is asserted beside it, because a target the policy allows anyway
+  // would answer `allow` either way.
   it('missing context fails closed', () => {
     const spec = makeEgressSpec();
-    const action = { type: 'egress', target: 'api.openai.com' };
-    const ctx: RuntimeContext = {};
+    const action = { type: 'egress', target: 'evil.example.com' };
     const conditions: Record<string, Condition> = {
       egress: { context: { environment: 'production' } },
     };
 
-    const result = evaluateWithContext(spec, action, ctx, conditions);
-    expect(result.decision).toBe('allow');
+    const missing = evaluateWithContext(spec, action, {}, conditions);
+    expect(missing.decision).toBe('allow');
+
+    const supplied = evaluateWithContext(
+      spec,
+      action,
+      { environment: 'production' },
+      conditions,
+    );
+    expect(supplied.decision).toBe('deny');
   });
 
   it('compound condition', () => {
