@@ -1,6 +1,6 @@
 # Trustworthy evidence and claim repair
 
-Date: 2026-09-22. Status: proposed design for user review, not an implementation plan.
+Date: 2026-09-22. Status: design approved by the user; implementation-plan review is the next gate.
 
 Baseline: `wave-6` at `8c4bb871e6e8bd17076dace178779251b8ae4748`. Parent direction: [foundation-assurance roadmap](../../plans/2026-09-22-foundation-assurance-roadmap.md), project A. No product changes are implied by this document.
 
