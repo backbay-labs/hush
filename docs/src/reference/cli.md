@@ -652,7 +652,7 @@ Exit 0 when the chain verifies, 1 at the first break (reported as `file:line: re
 
 ### `h2h receipts verify <files...>`
 
-Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
+Validates receipts from `.jsonl` logs, JSON receipt files, or signed receipts (`{receipt, signature}`). With `--policy`, every receipt must name that policy's canonical content hash, and receipts whose action can be replayed (no content, not `browser_action`/`code_exec`) have their decision re-derived under the posture state the receipt records, and a recorded `origin` or `context` the engine cannot read back fails the check rather than being replayed without it. With `--keyring`/`--key`, signatures are verified; `--require-signatures` makes an unsigned receipt a failure.
 
 Exit 0 when every receipt passes, 1 otherwise, 2 for unusable inputs.
 

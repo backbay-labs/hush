@@ -6,8 +6,8 @@ use colored::Colorize;
 use hushspec::log::LogEntry;
 use hushspec::signing::{Envelope, SignedReceipt, verify_receipt};
 use hushspec::{
-    AuditConfig, AuditContext, DecisionReceipt, EvaluationAction, Resolution, ResolveOptions,
-    evaluate_audited,
+    AuditConfig, AuditContext, DecisionReceipt, EvaluationAction, PostureContext, Resolution,
+    ResolveOptions, evaluate_audited,
 };
 use std::path::{Path, PathBuf};
 
@@ -325,25 +325,52 @@ fn rederive(resolution: &Resolution, receipt: &DecisionReceipt) -> Check {
                 .to_string(),
         };
     }
+    // A recorded `origin` or `context` that will not deserialize cannot be
+    // replayed: dropping it would re-derive a different action and report the
+    // answer as if the recorded one had been checked.
+    let origin = match receipt.action.origin.clone() {
+        Some(value) => match serde_json::from_value(value) {
+            Ok(origin) => Some(origin),
+            Err(error) => {
+                return Check {
+                    name: "decision",
+                    ok: false,
+                    detail: format!("action.origin does not deserialize: {error}"),
+                };
+            }
+        },
+        None => None,
+    };
+    let context = match receipt.action.context.clone() {
+        Some(value) => match serde_json::from_value(value) {
+            Ok(context) => Some(context),
+            Err(error) => {
+                return Check {
+                    name: "decision",
+                    ok: false,
+                    detail: format!("action.context does not deserialize: {error}"),
+                };
+            }
+        },
+        None => None,
+    };
     let action = EvaluationAction {
         action_type: receipt.action.action_type.clone(),
         target: receipt.action.target.clone(),
         content: None,
-        origin: receipt
-            .action
-            .origin
-            .clone()
-            .and_then(|value| serde_json::from_value(value).ok()),
-        posture: None,
+        origin,
+        // `receipt.posture.current` is the state the evaluation ran under
+        // (receipt spec 4.8), so the replay runs under it too; without it a
+        // policy with a posture extension re-derives from the initial state.
+        posture: receipt.posture.as_ref().map(|posture| PostureContext {
+            current: Some(posture.current.clone()),
+            signal: None,
+        }),
         args_size: receipt.action.args_size.map(|size| size as usize),
         url: None,
         network: None,
         timeout_ms: None,
-        context: receipt
-            .action
-            .context
-            .clone()
-            .and_then(|value| serde_json::from_value(value).ok()),
+        context,
     };
     let replay = evaluate_audited(
         resolution,

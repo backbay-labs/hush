@@ -16,6 +16,10 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
   its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
   never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
   warnings.
+- `h2h receipts verify` replays a receipt under the posture state the receipt records, and fails the
+  `decision` check when a recorded `action.origin` or `action.context` will not deserialize. The
+  replay dropped both and always ran from the policy's initial posture state, then printed the check
+  as if the recorded action had been re-derived.
 - `h2h report --format oscal` carries the chain's status in `metadata`, the `result` and every
   `finding` as a `chain-verified` prop, and reports no control `satisfied` when the hash chain did
   not verify. An export made with `--unverified` over a broken chain read as clean evidence.
