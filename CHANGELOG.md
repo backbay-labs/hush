@@ -16,6 +16,9 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
   its JSON and SARIF reports listed applied fix codes and the post-fix findings for a file that was
   never written, and `--dry-run --fail-on-warnings` could exit `0` on a file that still held the
   warnings.
+- `h2h audit --strict` checks control rule paths whether or not `--controls` is also passed, as its
+  help says. The check only ran when `--controls` built the matrix, so plain `--strict` never
+  reported an unresolvable rule path. The matrix itself is still printed only under `--controls`.
 - `h2h test` credits rule coverage only from cases that passed. A failing case still credited its
   `matched_rule` and rule-trace paths, so a JUnit or JSON artifact could report full coverage from
   cases that did not pass.
