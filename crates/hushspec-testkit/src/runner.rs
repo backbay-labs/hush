@@ -625,7 +625,18 @@ fn test_merge_case(
     // A vector marked as a refusal (an `expect-reject` file, or `reject: true`
     // in the directory's fixture.yaml) has no expected document: the failure
     // is the assertion.
-    if crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+    let expects_reject = match crate::merge_vector::child_expects_reject(dir, &child_fixture.path) {
+        Ok(expects_reject) => expects_reject,
+        Err(error) => {
+            return TestResult {
+                fixture_path: path,
+                category: FixtureCategory::MergeChild,
+                passed: false,
+                message: format!("Failed to read the merge manifest: {error}"),
+            };
+        }
+    };
+    if expects_reject {
         return match crate::merge_vector::compose(base, &child_fixture.path) {
             Ok(_) => TestResult {
                 fixture_path: path,
