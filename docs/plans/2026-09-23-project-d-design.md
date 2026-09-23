@@ -84,6 +84,10 @@ evidence format merely to make local activity stand in for missing participants.
 
 ## Integration and qualification contract
 
+The [Chio migration research](2026-09-23-chio-hushspec-migration-research.md)
+expands the loader, native-guard, approval, identity and SDK-consumer change map.
+Its proposed architecture is not yet an approved migration implementation plan.
+
 The Chio migration needs an explicit choice between maintaining its native
 semantics and consuming the reference SDK, plus an approved non-main checkout.
 The migration must preserve or explicitly reject existing deployment policies;
