@@ -7,7 +7,7 @@ backed by a machine-readable report, and the report is backed by a corpus
 pinned by digest.
 
 Copy the template below, fill it in, and publish it wherever your users will
-look for it — a `CONFORMANCE.md` in your repository, a page in your docs, or a
+look for it: a `CONFORMANCE.md` in your repository, a page in your docs, or a
 section of your security overview. Nothing about it requires our permission or
 review; it requires only that the numbers are true.
 
@@ -76,7 +76,7 @@ review; it requires only that the numbers are true.
 ## Template
 
 ```markdown
-# HushSpec conformance statement — <Implementation name>
+# HushSpec conformance statement: <Implementation name>
 
 | | |
 |---|---|
@@ -113,7 +113,7 @@ a legitimate answer; leaving the row blank is not.>
 ## Deviations
 
 <Every vector this implementation does not satisfy, by path, with the reason.
-Write "None." if there are none — do not delete the section.>
+Write "None." if there are none; do not delete the section.>
 
 ## Scope
 
@@ -145,5 +145,5 @@ The reference implementation's own statement, for the shape of a filled-in one:
 Its "Deviations" section is `None.`, and its "Scope" says the claim covers the
 library's public API and the `h2h` CLI, both of which run the same evaluator,
 with the `signing` Cargo feature enabled. TypeScript, Python and Go reach
-Level 5 too — Python with the `signing` extra installed. The vectors behind
+Level 5 too, with Python with the `signing` extra installed. The vectors behind
 each claim are in the [SDK Conformance Matrix](sdk-conformance.md).

@@ -354,7 +354,9 @@ jobs:
         run: pip install -e "packages/python[dev]"
 
       - name: Run markdown smoke snippets
-        run: python3 scripts/smoke_snippets.py
+        run: |
+          python3 -m pip install -r scripts/requirements-docs.txt
+          python3 scripts/smoke_snippets.py
 
   cross-sdk-roundtrip:
     name: Cross-SDK Roundtrip

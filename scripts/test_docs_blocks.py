@@ -1,9 +1,11 @@
 """Fail closed on code-block drift and unclassified examples."""
 import unittest
-from docs_blocks import blocks, check_inventory
+from docs_blocks import blocks, check_inventory, sources
 
 
 class Blocks(unittest.TestCase):
+    def test_downloaded_readmes_are_inventoried(self):
+        self.assertTrue(any(str(path).endswith('docs/examples/evidence/README.md') for path in sources()))
     def test_indented_fences_keep_exact_code(self):
         found = blocks('intro\n\n   ```python\n   print("ok")\n   ```\n')
         self.assertEqual(found[0]['code'], 'print("ok")\n')

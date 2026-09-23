@@ -1,4 +1,14 @@
 {
+  "docs/examples/evidence/README.md:1": {
+    "kind": "runnable",
+    "runner": "scripts/test_docs_evidence.py",
+    "sha256": "32ca1a79f43ebd411fd638f3ac7a06305c37288429be9b4e7f70041d6c47ff98"
+  },
+  "docs/examples/quickstart/README.md:1": {
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py",
+    "sha256": "a3c110894d925559f2638c3a24937c42a3f0237cdb9d8bcae41be5784c60341f"
+  },
   "README.md:1": {
     "sha256": "fd9bc4db62f09036c7f5507641cffce273a827ee7433f11cb741a5c7d08f2399",
     "kind": "operator-command",
@@ -670,7 +680,7 @@
     "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
   },
   "docs/src/reference/conformance-statement.md:3": {
-    "sha256": "445e890bf63b308a7bfc5ae48bec06b6e508ea9c6ea319911a1593bbc116a349",
+    "sha256": "7615bf95c604aebaeba2cc03d9cbded8f543c3aba89b8c858db61d68654e793e",
     "kind": "fragment",
     "reason": "Blank conformance-statement template; values must be supplied from the implementation's evidence."
   },

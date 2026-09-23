@@ -56,18 +56,18 @@ The normative requirements are [core sections 2.4 and 7](../../spec/hushspec-cor
 
 ## 12 Core Rules
 
-1. **forbidden_paths** — Block access to sensitive filesystem paths
-2. **path_allowlist** — Allowlist-based path access control
-3. **egress** — Network egress control by host
-4. **secret_patterns** — Detect secrets in content
-5. **patch_integrity** — Validate patch/diff safety
-6. **shell_commands** — Block dangerous shell commands
-7. **tool_access** — Control tool/MCP invocations
-8. **computer_use** — Control computer use agent actions
-9. **remote_desktop_channels** — Control remote desktop side channels
-10. **input_injection** — Control input injection capabilities
-11. **browser_automation** — Control browser automation verbs, hosts, and typed credentials
-12. **code_execution** — Control sandboxed interpreter language, modules, network, and time
+1. **forbidden_paths**: Block access to sensitive filesystem paths
+2. **path_allowlist**: Allowlist-based path access control
+3. **egress**: Network egress control by host
+4. **secret_patterns**: Detect secrets in content
+5. **patch_integrity**: Validate patch/diff safety
+6. **shell_commands**: Block dangerous shell commands
+7. **tool_access**: Control tool/MCP invocations
+8. **computer_use**: Control computer use agent actions
+9. **remote_desktop_channels**: Control remote desktop side channels
+10. **input_injection**: Control input injection capabilities
+11. **browser_automation**: Control browser automation verbs, hosts, and typed credentials
+12. **code_execution**: Control sandboxed interpreter language, modules, network, and time
 
 Every rule block accepts `enabled` and an optional `when` condition that gates the block on a time window or runtime context.
 

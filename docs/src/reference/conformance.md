@@ -100,7 +100,7 @@ code: "E001"
 message_contains: "anchors are not allowed"
 ```
 
-Without this, "the document was rejected" is a weak assertion — a vector that
+Without this, "the document was rejected" is a weak assertion: a vector that
 tests the YAML profile passes just as well when the engine refuses it for an
 unrelated reason.
 

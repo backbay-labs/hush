@@ -7,12 +7,27 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from docs_blocks import blocks
+import shutil
 
 ROOT = Path(__file__).resolve().parent.parent
 H2H = os.environ.get('H2H', str(ROOT/'target/release/h2h'))
 
 
 class EvidenceDocs(unittest.TestCase):
+    def test_downloaded_readme_commands(self):
+        with tempfile.TemporaryDirectory(prefix='hush-doc-evidence-readme-') as directory:
+            work=Path(directory)
+            for source in ['docs/examples/evidence/verify.py','docs/examples/quickstart/policy.yaml']:
+                shutil.copyfile(ROOT/source,work/Path(source).name)
+            (work/'h2h').symlink_to(Path(H2H).resolve())
+            (work/'python3').symlink_to(Path(sys.executable).resolve())
+            commands=blocks((ROOT/'docs/examples/evidence/README.md').read_text())
+            self.assertEqual(len(commands),1)
+            result=subprocess.run(['sh','-eu','-c',commands[0]['code']],cwd=work,
+                env={**os.environ,'PATH':directory+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertEqual(json.loads(result.stdout)['wrong_key'],'unknown_key_id')
     def test_monitor_tamper_and_oscal_commands_are_copied_from_guide(self):
         guide = (ROOT/'docs/src/guides/evidence-verification.md').read_text()
         blocks = re.findall(r'<!-- docs-run: (evidence-[a-z]+) -->\s*```bash\n(.*?)```', guide, re.S)

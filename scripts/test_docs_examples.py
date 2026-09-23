@@ -10,6 +10,7 @@ import tempfile
 import time
 import unittest
 import yaml
+from docs_blocks import blocks as fenced_blocks
 
 ROOT = Path(__file__).resolve().parent.parent
 H2H = os.environ.get('H2H', str(ROOT / 'target/release/h2h'))
@@ -54,6 +55,7 @@ class Quickstart(unittest.TestCase):
         text=(ROOT/'docs/src/guides/getting-started.md').read_text()
         blocks=re.findall(r'<!-- docs-run: quickstart -->\s*```sh\n(.*?)```',text,re.S)
         self.assertTrue(blocks, 'No runnable quickstart commands')
+        blocks += [block['code'] for block in fenced_blocks((EXAMPLES/'README.md').read_text())]
         (self.work/'bin').mkdir()
         (self.work/'bin/h2h').symlink_to(Path(H2H).resolve())
         started=time.monotonic()

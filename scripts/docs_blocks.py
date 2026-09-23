@@ -20,7 +20,8 @@ def blocks(markdown):
 
 
 def sources():
-    return [ROOT / 'README.md', *sorted((ROOT / 'docs/src').rglob('*.md')), *sorted((ROOT / 'spec').glob('*.md'))]
+    return [ROOT / 'README.md', *sorted((ROOT / 'docs/src').rglob('*.md')),
+            *sorted((ROOT / 'docs/examples').rglob('*.md')), *sorted((ROOT / 'spec').glob('*.md'))]
 
 
 def all_blocks():

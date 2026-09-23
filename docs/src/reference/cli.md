@@ -92,7 +92,7 @@ is not an ISO 8601 calendar date (`YYYY-MM-DD`).
 
 ## `h2h resolve`
 
-Print a policy with its `extends` chain fully resolved and merged — the exact
+Print a policy with its `extends` chain fully resolved and merged: the exact
 document an enforcement engine would evaluate. `extends` is consumed by the
 merge, so the output has no `extends` key.
 
@@ -119,7 +119,7 @@ warnings) · `2` the policy file was not found.
 
 ## `h2h hash`
 
-Print a policy's **content hash** — the portable identity defined by the canonical form
+Print a policy's **content hash**, the portable identity defined by the canonical form
 specification (`spec/hushspec-canonical.md`). Two parties holding the same policy get the
 same digest in every SDK, regardless of which optional keys the author omitted or which
 language wrote the file.
@@ -140,7 +140,7 @@ h2h resolve policy.yaml | h2h hash -      # read an already-resolved document
 The hash covers the **resolved** document, so a policy that declares `extends` is resolved
 through the same chain `h2h resolve` walks before it is hashed. Changing a base therefore
 changes the identity of every policy that extends it, even when the child file is
-untouched — that is the point: the enforced policy changed. `merge_strategy` is a
+untouched. That is the point: the enforced policy changed. `merge_strategy` is a
 resolution field and never appears in the canonical form.
 
 The document is validated first: an invalid document has no canonical form, because a
@@ -194,7 +194,7 @@ warning[L008]: rules.egress.allow[1]: duplicate pattern "api.example.com"
 
 Positions come from a second pass over the same bytes with a real YAML event
 parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
-sequences and comments between entries correctly aligned — a line scanner does
+sequences and comments between entries correctly aligned; a line scanner does
 not. Lint reports the **resolved** document, so a finding about a block a policy
 inherits names the base that declares it:
 
@@ -208,8 +208,8 @@ JSON findings carry `code`, `severity`, `message`, `location`, `fixable`, the
 document `path`, and a `span` object (`file`, `line`, `column`, `end_line`,
 `end_column`; 1-based, with `end_column` pointing at the character after the
 region). Each file also reports the `fixed` codes that `--fix` actually applied.
-A finding whose key could not be located — an inherited default no document
-writes, or a base fetched over HTTP — omits `span` and still carries `location`.
+A finding whose key could not be located (an inherited default no document
+writes, or a base fetched over HTTP) omits `span` and still carries `location`.
 
 ### SARIF
 
@@ -217,7 +217,7 @@ writes, or a base fetched over HTTP — omits `span` and still carries `location
 `h2h` carrying the full rule catalog below (each with `shortDescription`,
 `fullDescription` and a `defaultConfiguration.level`), and one `result` per
 finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
-`logicalLocations` entry naming the document path, and — for fixable findings —
+`logicalLocations` entry naming the document path, and, for fixable findings,
 a `fixes` entry describing the deletion `--fix` would perform. Severities map
 `error → error`, `warning → warning`, `info → note`.
 
@@ -235,7 +235,7 @@ Severity is a function of provability. `error` means the document contains
 configuration that can never take effect under the spec's own rules; `warning`
 means a construct defeats something else the same document declares; `info`
 means the construct is coherent but easy to arrive at by accident. Two codes
-(`L016`, `L018`) report at two severities for exactly that reason — see their
+(`L016`, `L018`) report at two severities for exactly that reason; see their
 rows.
 
 | Code | Level | Rule | Why it fires |
@@ -253,13 +253,13 @@ rows.
 | `L009` | info | missing-secret-patterns | Without secret detection, a `file_write` carrying a credential is indistinguishable from any other write. |
 | `L010` | warning | unreachable-allow | Block takes precedence over allow, so an entry in both can never decide anything. |
 | `L011` | warning | unmapped-rule-block | Once a policy maps controls, an unmapped block is enforcement with no stated reason. Policies that map nothing are silent. |
-| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing — a false compliance claim. |
+| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing: a false compliance claim. |
 | `L013` | warning | unregistered-control | The framework is not in `spec/registries/frameworks.yaml`, or the control id does not match that framework's pattern. The registry is advisory, so this is an unverifiable claim, not an invalid document. |
 | `L014` | warning / info | credential-paths-uncovered | `.env`, `.ssh`, `.aws`, `.gnupg`, `.kube` and `id_rsa` are where agent credentials actually live, and the message names the ones a denylist does not reach. A policy running a `path_allowlist` is silent (everything outside it is already denied). A policy with **neither** block reports `info`: a capability-scoped document meant to be composed onto a base legitimately says nothing about the filesystem. |
 | `L015` | warning | under-graded-credential-pattern | Severity drives what an engine does with a match, so a pattern that recognizes an AWS key id (`AKIA`/`ASIA`), a GitHub token (`gh[opsur]_`, `github_pat_`), a PEM private key header or an OpenAI `sk-` key and grades it below `critical` has downgraded a credential leak to a note. |
-| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect — they become dead — and reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
+| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect: they become dead. The lint reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
 | `L017` | warning | permissive-default | `egress.default: allow` permits every host outside `block`, making the allow list decorative; `tool_access.default: allow` with empty `block` and `require_confirmation` permits every tool. Supersedes `L005`, which reported the same shape as `info` and only when the allow list was non-empty; `L005` is retired and will not be reused. |
-| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
+| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright, reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
 | `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
 | `L021` | warning | ungranted-capability | A `when.capability` naming a capability no posture state grants can never be true while the policy has a posture extension, so the block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported. |
 | `L022` | warning | empty-list-entry | An empty string in `tool_access.allow`, `block`, or `require_confirmation`, or in an origins overlay list, can never match a tool or host (core spec 3.3, 3.7) and is usually an editing mistake. |
@@ -300,7 +300,7 @@ discarded (first at line 2); pass --strip-comments to reformat anyway
 
 - A refused rewrite exits `1` and leaves the file untouched.
 - `--check` and `--diff` report `has comments; would not reformat` and treat it
-  as a skip, not a failure — a commented policy does not fail a `fmt --check` CI
+  as a skip, not a failure: a commented policy does not fail a `fmt --check` CI
   gate.
 - `--strip-comments` discards the comments and reformats anyway.
 - The modeline alone never triggers the refusal; it is preserved verbatim.
@@ -458,7 +458,7 @@ h2h audit policy.yaml --strict          # every finding is fatal
 | `--strict` | Exit non-zero when a check fails, a governance finding is reported, or a control rule path does not resolve (L012). |
 
 Every governance check that fires is listed with its code, severity and the
-document path it concerns — `GOV_SOD_VIOLATION` (author is also the approver),
+document path it concerns: `GOV_SOD_VIOLATION` (author is also the approver),
 `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER`,
 `GOV_EXPIRED`, `GOV_LIFECYCLE`, `GOV_MISSING_APPROVAL_DATE`,
 `GOV_RESTRICTED_NO_APPROVER` (core spec 2.5). Warnings are advisory: without
@@ -501,7 +501,7 @@ h2h schema --list --format json
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | A short name for the current `.v1.` lineage — `core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector` — the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
+| `[NAME]` | A short name for the current `.v1.` lineage (`core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector`), the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -529,7 +529,7 @@ h2h verify policy.yaml --keyring ~/.hushspec/keyring.json --last-seen-version 4
 ### What is signed
 
 The envelope covers the **content hash of the resolved policy**, not the file's
-bytes — the same digest `h2h hash` prints. So reformatting a signed policy keeps
+bytes, the same digest `h2h hash` prints. So reformatting a signed policy keeps
 its signature valid, and a change to a base policy reached through `extends`
 invalidates every signature over the policies that extend it, because the
 enforced policy changed. `sign` resolves and validates the chain first and
@@ -537,7 +537,7 @@ refuses to sign when it cannot.
 
 ### Keys and trust
 
-Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public — exactly
+Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public, exactly
 what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
 key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
 recomputes that id from the public key rather than trusting a keyring's claim.
