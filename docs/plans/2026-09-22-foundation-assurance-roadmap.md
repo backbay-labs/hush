@@ -13,6 +13,16 @@ close the independently authored engine running the same workflow, external
 adopter, outside assessor, merge or publication gates. The research baseline
 and requirements below remain historical context, not current readiness claims.
 
+Project D preparation, 2026-09-23: the user selected internal Chio as the
+integration candidate. Its evaluator's reference-port provenance and current
+0.1.0-only contract make it a first-party migration target, not the independently
+authored engine or external adopter. The [D design](2026-09-23-project-d-design.md),
+[stage-gated plan](2026-09-23-project-d-implementation.md) and
+[readiness assessment](../reviews/2026-09-23-project-d-readiness.md) retain the
+full milestone. Chio migration authority/architecture, independent-engine
+selection, early participant critique, outside assessment and adoption remain
+open. Chio source remains unchanged; no external participant has been contacted.
+
 ## Judgment and intended outcome
 
 Hush has a credible policy language and evidence substrate. The next investment should establish that its components compose into a trustworthy boundary, not add another SDK or a larger compliance catalog.
