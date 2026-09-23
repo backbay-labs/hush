@@ -103,6 +103,14 @@ pub struct ReportArgs {
     #[arg(long, value_name = "PATH")]
     verification_out: Option<PathBuf>,
 
+    /// Offline OSCAL assessment context manifest (requires strict OSCAL output)
+    #[arg(long, value_name = "PATH")]
+    assessment_context: Option<PathBuf>,
+
+    /// New native JSON report file accompanying strict OSCAL output
+    #[arg(long, value_name = "PATH")]
+    native_report_out: Option<PathBuf>,
+
     /// Strict mode only: maximum bytes in any input file (default 16777216)
     #[arg(long)]
     max_evidence_file_bytes: Option<u64>,
@@ -121,7 +129,7 @@ enum OutputFormat {
     Text,
     Json,
     Csv,
-    /// OSCAL assessment-results skeleton; needs `--experimental-oscal`
+    /// Contextual OSCAL observations; requires strict verification and assessment context
     Oscal,
 }
 
@@ -156,22 +164,21 @@ struct Loaded {
 }
 
 pub fn run(args: ReportArgs) -> i32 {
+    if args.format == OutputFormat::Oscal && !args.experimental_oscal {
+        eprintln!("error: Configuration: --format oscal requires --experimental-oscal");
+        return 2;
+    }
     if args.evidence_profile.is_some()
         || args.verification_out.is_some()
         || args.max_evidence_file_bytes.is_some()
         || args.max_evidence_total_bytes.is_some()
         || args.max_evidence_line_bytes.is_some()
+        || args.format == OutputFormat::Oscal
+        || args.assessment_context.is_some()
+        || args.native_report_out.is_some()
     {
         return run_strict(&args);
     }
-    if args.format == OutputFormat::Oscal && !args.experimental_oscal {
-        eprintln!(
-            "{} --format oscal is experimental; pass --experimental-oscal to enable it",
-            "error:".red()
-        );
-        return 2;
-    }
-
     let since = match parse_bound(args.since.as_deref(), "--since") {
         Ok(bound) => bound,
         Err(code) => return code,
@@ -301,14 +308,6 @@ pub fn run(args: ReportArgs) -> i32 {
         );
         return 2;
     }
-    if args.format == OutputFormat::Oscal && report.controls.is_none() {
-        eprintln!(
-            "{} --format oscal needs control mappings: pass --policy <file>",
-            "error:".red()
-        );
-        return 2;
-    }
-
     emit(&report, &args)
 }
 
@@ -328,24 +327,43 @@ fn strict_report(args: &ReportArgs) -> Result<(), crate::report_evidence::model:
     use crate::report_evidence::{self, model::*, output::*, policy, snapshot::*};
     use hushspec::signing::{Keyring, VerifyOptions};
     let config = |message| EvidenceError::new(EvidenceCode::Configuration, message);
-    let profile_path = args
-        .evidence_profile
-        .as_deref()
-        .ok_or_else(|| config("strict reporting requires --evidence-profile"))?;
-    if args.format != OutputFormat::Json
+    if !matches!(args.format, OutputFormat::Json | OutputFormat::Oscal)
         || args.lenient
         || args.unverified
         || args.by.is_some()
         || args.max_skew < 0
     {
         return Err(config(
-            "strict reporting requires JSON, nonnegative skew, and no --lenient, --unverified or --by",
+            "strict reporting requires JSON or contextual OSCAL, nonnegative skew, and no --lenient, --unverified or --by",
         ));
     }
-    let report_path = args
+    let is_oscal = args.format == OutputFormat::Oscal;
+    if is_oscal && args.assessment_context.is_none() {
+        return Err(EvidenceError::new(
+            EvidenceCode::ContextInvalid,
+            "OSCAL requires --assessment-context",
+        ));
+    }
+    if !is_oscal && (args.assessment_context.is_some() || args.native_report_out.is_some()) {
+        return Err(config(
+            "assessment context and native-report-out require OSCAL format",
+        ));
+    }
+    let profile_path = args
+        .evidence_profile
+        .as_deref()
+        .ok_or_else(|| config("strict reporting requires --evidence-profile"))?;
+    let output_path = args
         .out
         .as_ref()
         .ok_or_else(|| config("strict reporting requires --out"))?;
+    let report_path = if is_oscal {
+        args.native_report_out
+            .as_ref()
+            .ok_or_else(|| config("OSCAL requires --native-report-out"))?
+    } else {
+        output_path
+    };
     let sidecar_path = args
         .verification_out
         .as_ref()
@@ -412,9 +430,32 @@ fn strict_report(args: &ReportArgs) -> Result<(), crate::report_evidence::model:
         .chain([profile_input.path.as_path(), key_input.path.as_path()])
         .collect();
     reject_input_paths(
-        &[report_path.as_path(), sidecar_path.as_path()],
+        &[
+            report_path.as_path(),
+            sidecar_path.as_path(),
+            output_path.as_path(),
+        ],
         &input_paths,
     )?;
+    let context = args
+        .assessment_context
+        .as_ref()
+        .map(|path| crate::oscal_context::load_context(path, &limits, &mut budget))
+        .transpose()?;
+    if let Some(context) = &context {
+        reject_input_paths(
+            &[
+                report_path.as_path(),
+                sidecar_path.as_path(),
+                output_path.as_path(),
+            ],
+            &context
+                .input_paths()
+                .iter()
+                .map(|path| path.as_path())
+                .collect::<Vec<_>>(),
+        )?;
+    }
     let files: Vec<_> = profile
         .streams
         .iter()
@@ -554,7 +595,24 @@ fn strict_report(args: &ReportArgs) -> Result<(), crate::report_evidence::model:
         bytes: serde_json::to_vec_pretty(&sidecar_value)
             .map_err(|_| config("cannot serialize verification"))?,
     };
-    publish_outputs(&[native], &sidecar)
+    if let Some(context) = &context {
+        let value = crate::oscal_report::render_oscal(
+            &report,
+            &result,
+            context,
+            &native,
+            &sidecar,
+            output_path,
+        )?;
+        let oscal = OutputArtifact {
+            path: output_path.clone(),
+            bytes: serde_json::to_vec_pretty(&value)
+                .map_err(|_| config("cannot serialize OSCAL"))?,
+        };
+        publish_outputs(&[native, oscal], &sidecar)
+    } else {
+        publish_outputs(&[native], &sidecar)
+    }
 }
 
 fn parse_bound(text: Option<&str>, flag: &str) -> Result<Option<DateTime<Utc>>, i32> {
@@ -911,16 +969,10 @@ fn emit(report: &Report, args: &ReportArgs) -> i32 {
                 2
             }
         },
-        OutputFormat::Oscal => match serde_json::to_string_pretty(&oscal(report)) {
-            Ok(mut json) => {
-                json.push('\n');
-                write_out(args.out.as_deref(), &json)
-            }
-            Err(error) => {
-                eprintln!("{} cannot serialize the report: {error}", "error:".red());
-                2
-            }
-        },
+        OutputFormat::Oscal => {
+            eprintln!("error: Configuration: OSCAL requires the strict reporting pipeline");
+            2
+        }
         OutputFormat::Csv => write_csv(report, args),
     }
 }
@@ -1579,181 +1631,6 @@ fn write_csv(report: &Report, args: &ReportArgs) -> i32 {
     0
 }
 
-// --------------------------------------------------------------------- oscal
-
-/// A UUID derived from `key`, so an exported document is byte-stable for the
-/// same report. OSCAL wants UUIDs; it does not want fresh ones on every run.
-fn stable_uuid(key: &str) -> String {
-    let digest = hushspec::canonical::digest(key);
-    let hex: String = digest
-        .trim_start_matches("sha256:")
-        .chars()
-        .take(32)
-        .collect();
-    let version = format!("4{}", &hex[13..16]);
-    let variant = format!(
-        "{:x}{}",
-        (u8::from_str_radix(&hex[16..17], 16).unwrap_or(0) & 0x3) | 0x8,
-        &hex[17..20]
-    );
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        version,
-        variant,
-        &hex[20..32]
-    )
-}
-
-/// A minimal OSCAL 1.1.2 assessment-results document: one result whose
-/// findings are the per-control rows and whose observations hold the counts.
-///
-/// Experimental. It is deliberately the smallest document an OSCAL consumer
-/// will accept: there is no assessment plan to import, no system security
-/// plan, and no subject inventory, because HushSpec receipts describe a tool
-/// boundary rather than an assessed system.
-fn oscal(report: &Report) -> serde_json::Value {
-    let controls = report.controls.as_ref();
-    // A report over a log whose hash chain did not verify is not evidence that
-    // anything happened, so no control is satisfied from it and the document
-    // carries the chain's status where a consumer cannot miss it.
-    let chain_verified = report.chain_verified;
-    let chain_broken = chain_verified == Some(false);
-    let chain_reason = report
-        .chain
-        .as_ref()
-        .and_then(|chain| chain.reason.clone())
-        .unwrap_or_else(|| "the log chain did not verify".to_string());
-    let chain_props = serde_json::json!([{
-        "name": "chain-verified",
-        "ns": "https://hushspec.org/ns/oscal",
-        "value": match chain_verified {
-            Some(true) => "true",
-            Some(false) => "false",
-            None => "not-applicable",
-        },
-    }]);
-    let chain_remarks = if chain_broken {
-        Some(format!(
-            "The hash-linked log chain did not verify ({chain_reason}); no control is reported \
-             satisfied from this window."
-        ))
-    } else {
-        None
-    };
-    let start = report
-        .window
-        .first_receipt
-        .clone()
-        .or_else(|| report.window.since.clone())
-        .or_else(|| report.generated_at.clone())
-        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
-    let end = report
-        .window
-        .last_receipt
-        .clone()
-        .or_else(|| report.window.until.clone())
-        .unwrap_or_else(|| start.clone());
-
-    let mut observations = Vec::new();
-    let mut findings = Vec::new();
-    let mut selected = Vec::new();
-    for framework in controls.iter().flat_map(|controls| &controls.frameworks) {
-        for row in &framework.controls {
-            let id = format!("{}/{}", framework.framework, row.control_id);
-            selected.push(serde_json::json!({ "control-id": row.control_id }));
-            observations.push(serde_json::json!({
-                "uuid": stable_uuid(&format!("observation:{id}")),
-                "title": format!("{id}: recorded evaluations"),
-                "description": format!(
-                    "{} receipt(s) consulted {}; {} evaluation(s), {} fired, {} denied.",
-                    row.receipts,
-                    row.rule_paths.join(", "),
-                    row.evaluated,
-                    row.fired,
-                    row.denied
-                ),
-                "methods": ["TEST"],
-                "collected": row.last_seen.clone().unwrap_or_else(|| end.clone()),
-            }));
-            let mut finding = serde_json::json!({
-                "uuid": stable_uuid(&format!("finding:{id}")),
-                "title": id.as_str(),
-                "description": format!(
-                    "HushSpec rule paths {} were exercised {} time(s) in this window.",
-                    row.rule_paths.join(", "),
-                    row.evaluated
-                ),
-                "props": chain_props.clone(),
-                "target": {
-                    "type": "objective-id",
-                    "target-id": row.control_id,
-                    "status": {
-                        "state": if row.evaluated > 0 && !chain_broken {
-                            "satisfied"
-                        } else {
-                            "not-satisfied"
-                        },
-                    },
-                },
-                "related-observations": [
-                    { "observation-uuid": stable_uuid(&format!("observation:{id}")) },
-                ],
-            });
-            if let (Some(remarks), Some(object)) = (&chain_remarks, finding.as_object_mut()) {
-                object.insert(
-                    "remarks".to_string(),
-                    serde_json::Value::String(remarks.clone()),
-                );
-            }
-            findings.push(finding);
-        }
-    }
-
-    let mut metadata = serde_json::json!({
-        "title": "HushSpec control evidence",
-        "last-modified": report.generated_at.clone().unwrap_or_else(|| end.clone()),
-        "version": report.report_version,
-        "oscal-version": "1.1.2",
-        "props": chain_props.clone(),
-    });
-    if let (Some(remarks), Some(object)) = (&chain_remarks, metadata.as_object_mut()) {
-        object.insert(
-            "remarks".to_string(),
-            serde_json::Value::String(remarks.clone()),
-        );
-    }
-
-    serde_json::json!({
-        "assessment-results": {
-            "uuid": stable_uuid(&format!("assessment:{}:{start}:{end}", report.sources.join(","))),
-            "metadata": metadata,
-            "import-ap": { "href": "#" },
-            "results": [{
-                "uuid": stable_uuid(&format!("result:{start}:{end}")),
-                "title": "HushSpec receipt window",
-                "description": format!(
-                    "{} receipt(s) from {}; {} allow, {} warn, {} deny.",
-                    report.totals.receipts,
-                    report.sources.join(", "),
-                    report.totals.by_decision.allow,
-                    report.totals.by_decision.warn,
-                    report.totals.by_decision.deny
-                ),
-                "props": chain_props,
-                "start": start,
-                "end": end,
-                "reviewed-controls": {
-                    "control-selections": [{ "include-controls": selected }],
-                },
-                "observations": observations,
-                "findings": findings,
-            }],
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1816,20 +1693,6 @@ mod tests {
             "rules.forbidden_paths.patterns",
             &entry("forbidden_paths", Some("rules.forbidden_paths.patterns"))
         ));
-    }
-
-    #[test]
-    fn stable_uuids_are_stable_and_well_formed() {
-        let id = stable_uuid("finding:hipaa-2013/164.312(e)(1)");
-        assert_eq!(id, stable_uuid("finding:hipaa-2013/164.312(e)(1)"));
-        assert_ne!(id, stable_uuid("finding:other"));
-        let parts: Vec<&str> = id.split('-').collect();
-        assert_eq!(
-            parts.iter().map(|part| part.len()).collect::<Vec<_>>(),
-            vec![8, 4, 4, 4, 12]
-        );
-        assert!(parts[2].starts_with('4'));
-        assert!(["8", "9", "a", "b"].contains(&&parts[3][0..1]));
     }
 
     #[test]

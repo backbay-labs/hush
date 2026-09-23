@@ -201,6 +201,9 @@ pub(crate) struct PolicyInterval {
     pub(crate) receipts: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) controls: Option<hushspec::report::ControlsEvidence>,
+    /// Derived only from verified windowed receipts; never a wire-format field.
+    #[serde(skip)]
+    pub(crate) observed_totals: Option<hushspec::report::Totals>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

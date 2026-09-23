@@ -298,6 +298,7 @@ pub(crate) fn qualify_stream(
                 last: position.clone(),
                 receipts: 0,
                 controls: None,
+                observed_totals: None,
             },
             Vec::new(),
         ));
@@ -340,6 +341,7 @@ pub(crate) fn qualify_stream(
                     last: position.clone(),
                     receipts: 0,
                     controls: None,
+                    observed_totals: None,
                 },
                 Vec::new(),
             ));
@@ -358,6 +360,7 @@ pub(crate) fn qualify_stream(
                         last: position.clone(),
                         receipts: 0,
                         controls: None,
+                        observed_totals: None,
                     },
                     Vec::new(),
                 ));
@@ -379,9 +382,10 @@ pub(crate) fn qualify_stream(
     }
     for (interval, receipts) in &mut intervals {
         interval.receipts = receipts.len() as u64;
+        let report = hushspec::report::build_report(receipts, &[], &Default::default());
+        interval.observed_totals = Some(report.totals);
         let policy = &policies[&interval.policy_content_hash];
         if let (Some(spec), Some(source)) = (&policy.spec, &policy.source) {
-            let report = hushspec::report::build_report(receipts, &[], &Default::default());
             interval.controls = Some(crate::report_controls::build_control_evidence(
                 source,
                 spec,
