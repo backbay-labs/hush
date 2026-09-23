@@ -23,6 +23,7 @@ mod controls;
 mod generated_frameworks;
 mod generated_schemas;
 mod input;
+mod oscal_context;
 mod report_controls;
 mod report_evidence;
 mod verify_opts;

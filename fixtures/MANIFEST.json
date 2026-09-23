@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-23T00:33:21Z",
+  "generated_at": "2026-09-23T01:24:45Z",
   "files": [
     {
       "path": "fixtures/adapters/mcp-contract.json",
@@ -13,6 +13,34 @@
     {
       "path": "fixtures/assurance/README.md",
       "sha256": "9df27f83886fec92f2ad8c9ca9617d509f3ee88c067d33c6c7862b1405a6f268",
+      "category": "integration",
+      "module": "assurance",
+      "level": 0
+    },
+    {
+      "path": "fixtures/assurance/oscal/ap.json",
+      "sha256": "31e126c83b6365a73f86e028137926040cf3ce7d1f02eed0732ee26887fd23f1",
+      "category": "integration",
+      "module": "assurance",
+      "level": 0
+    },
+    {
+      "path": "fixtures/assurance/oscal/catalog.json",
+      "sha256": "9ab36193312edd04d61389b6eba0d97c72f1402267555947880bdb568cbc9d96",
+      "category": "integration",
+      "module": "assurance",
+      "level": 0
+    },
+    {
+      "path": "fixtures/assurance/oscal/context.json",
+      "sha256": "aa3d53b614f2c6973225c6406012c2fb020fe5b8f64f73a9236f4c224399d57b",
+      "category": "integration",
+      "module": "assurance",
+      "level": 0
+    },
+    {
+      "path": "fixtures/assurance/oscal/ssp.json",
+      "sha256": "a23d9d0dc27286b7c95ee9088bdb23b1259424f62193550401e029e10cb3fafa",
       "category": "integration",
       "module": "assurance",
       "level": 0

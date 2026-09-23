@@ -55,7 +55,7 @@ pub(crate) fn read_snapshot(
     snapshot_with_handle(path, label, limits, budget).map(|(snapshot, _handle)| snapshot)
 }
 
-fn snapshot_with_handle(
+pub(crate) fn snapshot_with_handle(
     path: &Path,
     label: &str,
     limits: &Limits,
