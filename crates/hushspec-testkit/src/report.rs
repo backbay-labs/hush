@@ -237,7 +237,25 @@ pub fn build(
 
     let mut results: Vec<VectorResult> = document_results.iter().map(VectorResult::from).collect();
     results.extend(evidence_results.iter().cloned());
-    results.extend(unattempted(&manifest, &results));
+    build_from_snapshot(
+        implementation,
+        &manifest,
+        manifest_sha256,
+        results,
+        generated_at,
+    )
+}
+
+/// Aggregate results against the manifest bytes already captured by a controller.
+pub fn build_from_snapshot(
+    implementation: Implementation,
+    manifest: &Manifest,
+    manifest_sha256: String,
+    mut results: Vec<VectorResult>,
+    generated_at: String,
+) -> Result<ConformanceReport, String> {
+    let explicit_parser_results = results.iter().any(|r| r.level == Some(0));
+    results.extend(unattempted(manifest, &results));
     results.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut levels: BTreeMap<String, LevelResult> = BTreeMap::new();
@@ -271,7 +289,7 @@ pub fn build(
     // validation. New case runners carry `parser_failure` explicitly, so an
     // advanced assertion cannot accidentally affect Level 0.
     let level_one = levels["1"].clone();
-    if level_one.passed + level_one.failed > 0 {
+    if !explicit_parser_results && level_one.passed + level_one.failed > 0 {
         let parse_failures = results
             .iter()
             .filter(|result| {
@@ -311,7 +329,7 @@ pub fn build(
 
     Ok(ConformanceReport {
         implementation,
-        fixtures_version: manifest.fixtures_version,
+        fixtures_version: manifest.fixtures_version.clone(),
         manifest_sha256,
         levels,
         highest_level,

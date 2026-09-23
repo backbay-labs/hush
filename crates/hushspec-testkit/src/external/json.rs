@@ -74,14 +74,57 @@ pub fn parse_json(bytes: &[u8]) -> Result<Value, String> {
     Ok(value)
 }
 
+/// Fixture containers use the same duplicate/depth/finite-number checks. Raw
+/// policy text never takes this path before it is supplied to the engine.
+pub(crate) fn parse_yaml(bytes: &[u8]) -> Result<Value, String> {
+    let mut documents = serde_yaml::Deserializer::from_slice(bytes);
+    let document = documents.next().ok_or("empty YAML fixture container")?;
+    let value = Seed(0).deserialize(document).map_err(|e| e.to_string())?;
+    if documents.next().is_some() {
+        return Err("multiple YAML fixture documents".into());
+    }
+    Ok(value)
+}
+
 pub fn validate(value: &Value, schema: &str) -> Result<(), String> {
-    let body = crate::generated_schemas::schema_body(schema)
-        .ok_or_else(|| format!("unknown schema {schema}"))?;
-    let schema_value: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
-    let compiled = jsonschema::JSONSchema::options()
-        .with_draft(jsonschema::Draft::Draft202012)
-        .compile(&schema_value)
-        .map_err(|e| e.to_string())?;
+    validate_schema(value, schema, None)
+}
+
+pub fn validate_at(value: &Value, schema: &str, definition: &str) -> Result<(), String> {
+    validate_schema(value, schema, Some(definition))
+}
+
+fn validate_schema(value: &Value, schema: &str, definition: Option<&str>) -> Result<(), String> {
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+    static CACHE: OnceLock<Mutex<BTreeMap<String, Arc<jsonschema::JSONSchema>>>> = OnceLock::new();
+    let key = format!("{schema}#{}", definition.unwrap_or(""));
+    let mut cache = CACHE
+        .get_or_init(Mutex::default)
+        .lock()
+        .map_err(|_| "schema cache poisoned")?;
+    let compiled = if let Some(compiled) = cache.get(&key) {
+        compiled.clone()
+    } else {
+        let body = crate::generated_schemas::schema_body(schema)
+            .ok_or_else(|| format!("unknown schema {schema}"))?;
+        let mut schema_value: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+        if let Some(definition) = definition {
+            if schema_value["$defs"].get(definition).is_none() {
+                return Err(format!("unknown schema definition {definition}"));
+            }
+            schema_value = serde_json::json!({"$schema":schema_value["$schema"],"$id":schema_value["$id"],"$defs":schema_value["$defs"],"$ref":format!("#/$defs/{definition}")});
+        }
+        let compiled = Arc::new(
+            jsonschema::JSONSchema::options()
+                .with_draft(jsonschema::Draft::Draft202012)
+                .compile(&schema_value)
+                .map_err(|e| e.to_string())?,
+        );
+        cache.insert(key, compiled.clone());
+        compiled
+    };
+    drop(cache);
     if let Err(errors) = compiled.validate(value) {
         return Err(errors
             .take(8)

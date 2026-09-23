@@ -81,6 +81,9 @@ The profile is experimental `0.1.0`, a closed JSON object containing:
 - `error_codes`: `registry` or `none`; registry mode enforces fixture rejection
   codes and message fragments. A response emitting a code must be checked even
   when the profile declares no codes.
+  As required by Core Section 8, a code-free validator is not required to use
+  the registry's diagnostic vocabulary. Resolver reason assertions are separate
+  protocol observations and remain required regardless of registry-code mode.
 - `materials`: optional local dependency/build identity files with exact
   digests, retained as operator-declared build materials, not a claim that the
   controller attested the build. Go bring-up includes go.mod and go.sum.
