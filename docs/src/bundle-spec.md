@@ -14,6 +14,25 @@ h2h bundle inspect hipaa.bundle.json
 
 Verification runs four ordered checks and stops at the first failure, reporting its reason code: shape (`malformed_bundle`), signature (`unknown_key_id`, `key_revoked`, `key_retired`, `dsse_signature_mismatch`), subject digest (`subject_digest_mismatch`), and — only with `--policy` — a re-resolution cross-check (`policy_mismatch`). Signature verification comes before the digest check on purpose, so an edit in transit reads as tampering rather than as an inconsistency.
 
-Because the envelope is ordinary DSSE, generic supply-chain tooling reads a bundle too: `cosign verify-blob-attestation` checks the same signature over the same PAE bytes, and `openssl pkeyutl -verify -rawin` checks it by hand. Such a tool covers the signature check only; the other three are HushSpec semantics.
+Generic DSSE tooling may verify the envelope's signature when configured for
+the same keys and payload type. That alone does not perform HushSpec's subject
+digest or policy cross-checks. Use `h2h bundle verify` for the complete contract.
 
 Vectors: `fixtures/bundle/vectors.yaml`, ten cases over bundles built from `library/healthcare/hipaa-base.yaml` with `created_at` pinned so they are byte-reproducible. Every release attaches a bundle for each `library/` and `rulesets/` policy, covered by GitHub build provenance.
+
+## What a bundle establishes
+
+A verified bundle authenticates its statement under your selected keyring and
+binds its resolved policy to the subject digest. Supplying `--policy` also
+compares your independently resolved local policy. Neither result establishes
+that an agent loaded that policy, mediated every effect or satisfied a control
+objective. Correlate [receipts](receipt-spec.md), [logs](log-spec.md) and runtime
+evidence separately.
+
+The bundle's signature authenticates the bundler. Per-hop signature status in
+its predicate is the bundler's recorded claim; use a separately trusted policy
+origin when that is required. Distribute trust roots independently of the
+bundle you are asking someone to trust.
+
+Run the [evidence lab](signing-spec.md#run-the-evidence-lab) to verify a real
+bundle and observe a tampered payload fail with `dsse_signature_mismatch`.

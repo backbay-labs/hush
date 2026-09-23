@@ -10,6 +10,12 @@ Scripts, dynamic ELF images, and interpreted/plugin dependency graphs are not
 supported. The Go SDK adapter is first-party bring-up, not evidence of
 independent authorship, external adoption, or a trusted MCP dispatch boundary.
 
+For application integration, start with the [SDK guides](sdk-conformance.md#language-guides).
+Use this controller when you are implementing or assessing an engine, and the
+[trusted invocation pilot](trusted-invocation.md) when studying a host-owned
+dispatch boundary. These are different experiments and neither certifies a
+third-party product.
+
 ## Run and verify
 
 From a checkout with Rust, Go and Python's `jsonschema` installed:

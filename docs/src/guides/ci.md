@@ -16,6 +16,7 @@ The action at the repository root (`action.yml`, named `HushSpec`) installs
   with:
     command: validate
     paths: policies/*.yaml
+    version: v1.0.0
 ```
 
 | Input | Default | Meaning |
@@ -38,12 +39,11 @@ runner's platform from GitHub Releases, checks it against the release's
 `gh` CLI supports `gh attestation verify`, and caches the extracted binary
 by `version` + target so repeat runs skip the download entirely.
 
-> **Before the first tagged release ships binaries**, `version: latest`
-> (the default) has nothing to download. Pass `version: source` instead --
-> it builds `crates/hushspec-cli` from the action's own checkout with a
-> Rust toolchain installed automatically. This repository's own CI does
-> exactly that (see `.github/workflows/ci.yml`'s `action-smoke` job) so the
-> action stays exercised on every PR even before `v0.x` binaries exist.
+Pin `version: v1.0.0` for repeatable release validation. Pin the action itself
+to a reviewed commit SHA when your supply-chain policy requires immutable
+workflow dependencies. `version: source` builds the action checkout with an
+installed Rust toolchain and is useful when testing a source candidate; it is
+not the same as qualifying a published binary.
 
 ### Validate on every PR
 
@@ -59,6 +59,7 @@ jobs:
         with:
           command: validate
           paths: policies/**/*.yaml
+          version: v1.0.0
 ```
 
 ### Lint with a SARIF upload
@@ -72,6 +73,7 @@ scanning:
         with:
           command: lint
           paths: policies/**/*.yaml
+          version: v1.0.0
           format: sarif
           fail-on-warnings: "true"
         continue-on-error: true
@@ -95,6 +97,7 @@ failing step.
         with:
           command: test
           paths: fixtures/policy-suite
+          version: v1.0.0
           format: junit
           report-file: junit.xml
       - uses: test-summary/action@v2
@@ -150,7 +153,7 @@ as `:<tag>` and `:latest`, with build provenance attached
 (`docker/build-push-action`'s `provenance: true`):
 
 ```bash
-docker run --rm -v "$PWD:/workspace" ghcr.io/backbay-labs/h2h:latest lint policy.yaml
+docker run --rm --network none -v "$PWD:/workspace:ro" ghcr.io/backbay-labs/h2h:v1.0.0 lint policy.yaml
 ```
 
 The image runs as a non-root user (`hushspec`, uid `10001`) with

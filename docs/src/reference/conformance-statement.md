@@ -28,8 +28,13 @@ review; it requires only that the numbers are true.
    bad = [e["path"] for e in manifest["files"]
           if hashlib.sha256(pathlib.Path(e["path"]).read_bytes()).hexdigest() != e["sha256"]]
    print("corpus ok" if not bad else "MISMATCH: " + ", ".join(bad))
+   raise SystemExit(1 if bad else 0)
    PY
    ```
+
+   This verifies the listed files' bytes, not the provenance of the manifest
+   itself. Obtain its expected digest through a trusted release channel. The
+   external controller additionally rejects unlisted files and unsafe paths.
 
 3. **Record the corpus digest.** `sha256sum fixtures/MANIFEST.json` is the
    `manifest_sha256` your report and your statement both cite.

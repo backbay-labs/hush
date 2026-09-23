@@ -1,150 +1,76 @@
-# Editor Setup
+# Editor setup
 
-HushSpec documents are backed by JSON Schemas, published at stable URLs under
-their own `$id` (for example,
-`https://hushspec.org/schemas/hushspec-core.v1.schema.json`). Any YAML-aware
-editor that speaks [`yaml-language-server`](https://github.com/redhat-developer/yaml-language-server)
-conventions -- VS Code (with the YAML extension), Neovim, JetBrains IDEs, and
-others -- can use these schemas for autocompletion, hover documentation, and
-inline validation as you write a policy.
+Connect your YAML editor to the v1 schema for completion, hover descriptions and
+structural validation. Then run `h2h validate --strict` and policy tests: editor
+validation does not resolve inheritance, enforce a policy or prove decisions.
 
-There are three ways to associate a HushSpec file with its schema, from most
-to least automatic.
+## Use a modeline
 
-## 1. SchemaStore (zero configuration, once submitted)
-
-[SchemaStore](https://www.schemastore.org/) is a community-maintained catalog
-that maps filenames to schema URLs. Editors and extensions that consult it
-(VS Code's YAML extension, JetBrains IDEs, and others) associate a schema
-automatically -- no per-file comment or workspace setting required.
-
-HushSpec's prepared catalog entries (checked in at
-[`docs/schemastore-entry.json`](https://github.com/backbay-labs/hush/blob/main/docs/schemastore-entry.json))
-cover five document kinds:
-
-| Entry | Schema | Matches |
-|-------|--------|---------|
-| HushSpec | core policy | `hushspec.yaml` / `hushspec.yml`, `.hushspec.yaml` / `.hushspec.yml`, `*.hushspec.yaml` / `*.hushspec.yml` |
-| HushSpec Evaluator Test | evaluator test | `*.hushspec.test.yaml` / `*.hushspec.test.yml`, `**/fixtures/**/*.test.yaml` |
-| HushSpec Decision Receipt | receipt | `*.receipt.json` |
-| HushSpec Log Entry | log entry | `*.log-entry.json` |
-| HushSpec Policy Bundle | bundle | `*.bundle.json` |
-
-Every pattern names something, and that is deliberate. A catalog entry is
-consulted in every project its reader ever opens, not just this one: a
-pattern like `rulesets/*.yaml` reads naturally from inside this repository
-but claims every YAML file in every `rulesets/` directory anywhere, and the
-reward for that is a wall of validation errors on somebody else's unrelated
-file. A directory name plus an extension the whole ecosystem uses is not a
-claim a global catalog gets to make. `**/fixtures/**/*.test.yaml` is the one
-pattern here that doesn't carry `hushspec`; `.test.yaml` under `fixtures/` is
-specific enough to be worth the reach, since that is where evaluator tests
-actually live.
-
-So name a policy `hushspec.yaml`, `.hushspec.yaml`, or `<something>.hushspec.yaml`
-and, once the SchemaStore submission below has merged, you get validation and
-autocomplete with no configuration at all. The convention already shows up
-elsewhere in HushSpec-aware tooling: the Claude Code hook's policy discovery
-walks up the directory tree looking for a `.hushspec.yaml`. Files `h2h init`
-scaffolds -- `policy.yaml` beside `tests/policy.test.yaml` -- are outside these
-patterns by name, and are covered instead by the modeline `h2h init` writes
-into them.
-
-A hash-linked log is a `.jsonl` stream with one entry per line, which no
-editor can validate against a schema that describes a single entry; use
-`h2h log verify` for those. The log-entry pattern above is for an entry
-extracted to its own file.
-
-This layer isn't live yet -- see the [submission checklist](#schemastore-submission-checklist)
-below for what's still pending.
-
-## 2. Modeline (works today, any filename)
-
-Add a `yaml-language-server` modeline as the **first line** of the file:
+Add this first line to any policy filename. It works with editors using the
+YAML language server's schema modeline, including VS Code with a YAML extension.
 
 ```yaml
 # yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "1.0.0"
-name: "my-policy"
+name: editor-example
 ```
 
-This works regardless of filename and needs no editor or workspace
-configuration beyond the YAML extension itself. It's what every shipped
-ruleset and library policy in this repository carries, and what `h2h init`
-writes into scaffolded files automatically. `h2h fmt` preserves this line
-across reformatting.
+Evaluator-test files use
+`https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json`.
+`h2h init` writes schema modelines in its scaffolds, and `h2h fmt` preserves them.
 
-Evaluator test files (the `*.test.yaml` fixtures `h2h init` scaffolds
-alongside a policy) use the evaluator-test schema instead:
+## Map a workspace explicitly
 
-```yaml
-# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
-```
+In VS Code, merge this JSON into `.vscode/settings.json`; preserve your existing
+settings and narrow the glob to your own policy directory:
 
-See the [JSON Schema reference](../reference/json-schema.md) for the full
-list of published schemas.
-
-## 3. Workspace settings (works today, any filename, explicit)
-
-If you'd rather not add a modeline to every file, or your editor doesn't
-support SchemaStore auto-detection, map a glob pattern to a schema URL in
-your workspace settings:
-
-```yaml
-# .vscode/settings.json
-"yaml.schemas": {
-  "https://hushspec.org/schemas/hushspec-core.v1.schema.json": ["policies/*.yaml"]
+```json
+{
+  "yaml.schemas": {
+    "https://hushspec.org/schemas/hushspec-core.v1.schema.json": [
+      "policies/*.yaml"
+    ]
+  }
 }
 ```
 
-(JetBrains IDEs: **Preferences → Languages & Frameworks → Schemas and DTDs →
-JSON Schema Mappings**, using the same URL and glob.)
+In JetBrains IDEs, create a JSON Schema mapping for the same URL and file pattern.
+Other YAML-aware editors can use a modeline or a language-server schema mapping.
+Automatic filename discovery depends on your editor and its catalog version;
+explicit association avoids that dependency.
 
-## Interim fallback: raw GitHub URL
+HushSpec-specific names such as `hushspec.yaml`, `.hushspec.yaml` and
+`*.hushspec.yaml` also make policies easier to identify. Do not apply the core
+policy schema to every YAML file in a repository.
 
-The Vercel website serves a commit-pinned schema snapshot at `hushspec.org`.
-Before its first schema deployment, substitute a raw GitHub URL anywhere above.
-Use the release tag or commit instead of `main` when pinning an exact version:
+## Validate JSON evidence and logs
 
+Select the appropriate [published schema](../reference/json-schema.md) for a
+receipt, keyring, bundle or individual log entry. A JSONL log contains multiple
+JSON documents: validating it against the single-entry schema is not log
+verification. Use `h2h log verify receipts.jsonl` for chain continuity and add
+your keyring/signature requirements when authenticating it.
+
+## Work offline or pin a release
+
+`h2h schema --list` lists embedded schemas; `h2h schema core` prints the exact
+core schema shipped in that binary. Save it locally and associate your editor
+with that file for offline work.
+
+The public [schema index](https://hushspec.org/schemas/index.json) records source
+commit and digests. A release-pinned fallback is:
+
+```text
+https://raw.githubusercontent.com/backbay-labs/hush/v1.0.0/schemas/hushspec-core.v1.schema.json
 ```
-https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v1.schema.json
-```
 
-The index at `https://hushspec.org/schemas/index.json` identifies the published
-source commit and file digests. V1 schemas use `.org` IDs; frozen v0 schemas
-retain their historical `.dev` IDs but are retrievable from the `.org` mirror.
-The project does not operate the legacy `.dev` host. A raw GitHub URL at `main`
-can be newer than the website snapshot.
+Current v1 schema IDs use `.org`. Frozen v0 schemas retain their historical
+`.dev` identifiers and are retrievable from the `.org` mirror; the project
+does not operate the legacy `.dev` host. Do not silently rewrite IDs in old
+evidence when configuring retrieval.
 
-Offline, `h2h schema --list` and `h2h schema <name>` print the same schemas
-from the binary itself, with no network access at all.
+## Check what your editor cannot
 
-## SchemaStore submission checklist
-
-Submitting the catalog entry to the upstream
-[`SchemaStore/schemastore`](https://github.com/SchemaStore/schemastore)
-repository is a separate, external PR, gated on the URLs above actually
-resolving. Roughly:
-
-1. Confirm every URL the entries name resolves over HTTPS.
-   `https://hushspec.org/schemas/index.json` lists them all.
-2. Fork `SchemaStore/schemastore`.
-3. Insert the objects from [`docs/schemastore-entry.json`](https://github.com/backbay-labs/hush/blob/main/docs/schemastore-entry.json)'s
-   `schemas` array into `src/api/json/catalog.json`'s own `schemas` array,
-   which is sorted by `name`. The objects carry only the keys that array
-   accepts, so they paste in verbatim; the `$comment` and the wrapper around
-   them are local and do not go upstream.
-4. Run SchemaStore's own catalog validation locally and address anything it
-   flags -- it will fetch `url` and validate the entry shape, so this step
-   only makes sense after step 1 is confirmed.
-5. Open the PR against `SchemaStore/schemastore` referencing this repository
-   and the `fileMatch` patterns above.
-
-No vendored copy of the schema is needed in the SchemaStore repository itself
--- the entry references HushSpec's externally hosted `url`, so only the
-catalog entry needs to land there.
-
-## What Next
-
-- [Writing Your First Policy](first-policy.md)
-- [JSON Schema Reference](../reference/json-schema.md)
+Run `h2h validate --strict policy.yaml` to include resolution, then execute
+your [policy tests](getting-started.md#3-test-the-boundary). Test both permission
+and refusal paths. A green editor gutter is not a runtime enforcement result.

@@ -41,7 +41,10 @@
 - [Policy Library](guides/policy-library.md)
 - [Policy Governance](guides/governance.md)
 - [Evidence Verification](guides/evidence-verification.md)
-- [Using with Clawdstrike](guides/clawdstrike.md)
+- [Reporting](guides/reporting.md)
+- [Safe Hot Reload](guides/hot-reload.md)
+- [Troubleshooting](guides/troubleshooting.md)
+- [Engine Compatibility](guides/clawdstrike.md)
 - [Editor Setup](guides/editor-setup.md)
 - [CI Integration](guides/ci.md)
 

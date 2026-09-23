@@ -10,6 +10,21 @@ Every resolved HushSpec policy has exactly one canonical form and one content ha
 
 The content hash is how receipts and signatures identify a policy. Reformatting a YAML file does not change it; changing a base policy in the `extends` chain does.
 
+## Resolve before identifying
+
+A file digest answers “which bytes did I download?” A canonical content hash
+answers “which resolved policy did I evaluate?” Keep both when distributing a
+policy: the first protects a particular artifact, while the second binds
+portable evaluation and evidence. A digest pin on one inheritance hop is not
+the same as the final resolved policy hash.
+
+The hash includes the canonical document, including its metadata. It does not
+identify a runtime binary, an authenticated user, the current filesystem or a
+complete execution history. Pair it with those separately recorded identities
+when making a claim about an agent run.
+
+## Compute and compare
+
 Computing it:
 
 ```bash
@@ -29,3 +44,6 @@ Reference implementation and vectors:
 python3 scripts/canonical_json.py rulesets/default.yaml     # canonical JSON and digest
 python3 scripts/canonical_json.py --check fixtures/core/hash # verify the normative vectors
 ```
+
+Continue with [decision receipts](receipt-spec.md) to see where this identity
+appears, or run the [evidence lab](signing-spec.md#run-the-evidence-lab).
