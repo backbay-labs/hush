@@ -61,6 +61,7 @@ export class InvocationCoordinator {
   #policyName: string | undefined;
   #lastVersion: number | undefined;
   #generation = 0;
+  #installing = false;
   #panic = false;
   #panicEpoch = 0;
   #sequence = 0;
@@ -90,23 +91,27 @@ export class InvocationCoordinator {
 
   installPolicy(document: string, envelope: unknown): void {
     this.#assertAvailable();
-    const generation = ++this.#generation;
-    this.#policy = undefined;
-    let policy: AuthenticatedPolicy;
+    if (this.#installing) throw new Error('policy installation in progress');
+    // Engine and journal callbacks may reenter. Nested installation must not
+    // observe an uncommitted version/name floor or skip a journal generation.
+    this.#installing = true;
     try {
-      policy = new AuthenticatedPolicy(document, envelope, this.#policyKey, this.#engine, this.#lastVersion);
-      if (this.#policyName !== undefined && policy.resolution.spec.name !== this.#policyName) throw new Error('policy name changed');
-      if (generation !== this.#generation) throw new Error('reentrant policy installation');
-    } catch (error) {
-      if (generation === this.#generation) this.#append({ type: 'policy', generation, status: 'refused', reason: 'policy_installation_refused' });
-      throw error;
-    }
-    this.#append({ type: 'policy', generation, status: 'accepted', policy: policy.resolution.spec,
-      envelope: policy.envelope, engine: policy.prepared.identity });
-    if (generation !== this.#generation) throw new Error('reentrant policy installation');
-    this.#policy = policy;
-    this.#policyName = policy.resolution.spec.name;
-    this.#lastVersion = policy.resolution.spec.metadata!.policy_version;
+      const generation = ++this.#generation;
+      this.#policy = undefined;
+      let policy: AuthenticatedPolicy;
+      try {
+        policy = new AuthenticatedPolicy(document, envelope, this.#policyKey, this.#engine, this.#lastVersion);
+        if (this.#policyName !== undefined && policy.resolution.spec.name !== this.#policyName) throw new Error('policy name changed');
+      } catch (error) {
+        this.#append({ type: 'policy', generation, status: 'refused', reason: 'policy_installation_refused' });
+        throw error;
+      }
+      this.#append({ type: 'policy', generation, status: 'accepted', policy: policy.resolution.spec,
+        envelope: policy.envelope, engine: policy.prepared.identity });
+      this.#policy = policy;
+      this.#policyName = policy.resolution.spec.name;
+      this.#lastVersion = policy.resolution.spec.metadata!.policy_version;
+    } finally { this.#installing = false; }
   }
 
   setPanic(active: boolean): void {

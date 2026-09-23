@@ -50,6 +50,28 @@ pipes after the owned child exited. Regression tests failed before repair and
 passed afterward. Closing inherited pipe endpoints bounds transport shutdown;
 it does not sandbox arbitrary approved server executables.
 
+## Fresh whole-change review and repair
+
+A fresh read-only reviewer examined baseline `96fb384` through `baad902`,
+including all five review-focus classes. It found no Critical issues, one
+Important issue and no Minor issues. Nested policy installation from a journal
+or engine-preparation callback could replace the initial name, bypass the
+remembered version floor, or skip a journal generation. Subsequent dispatch
+could succeed despite evidence that offline replay rejected.
+
+Three real-journal regressions reproduced all three variants before repair.
+The installation transaction now refuses nested installation before changing
+state, covering authentication, engine preparation and journal acknowledgment.
+Reload during permit acknowledgment remains supported and still aborts dispatch.
+All 41 coordinator tests, the full TypeScript suite (2,458 passed, one deliberate
+Docker skip), build/lint and the explicit nine-test Docker integration passed
+after repair. No Critical/Important finding remains unaddressed; no minor was
+deferred. The repair was verified by these regressions, not a second review.
+
+Strict Rust audit, cargo-deny, npm audit, isolated Python dependency audit and
+workflow lint passed locally. The clean `baad902` pilot packet and later repair
+integration packets are retained alongside earlier failures and crash evidence.
+
 ## Actual workflow and fault evidence
 
 The completed actor run made six server calls and two endpoint requests. It read
@@ -80,9 +102,9 @@ The independent-engine-in-this-workflow and external adopter/assessor gates stay
 open. Existing receipt/log/report wire formats and legacy adapter behavior are
 unchanged.
 
-Full regression, fresh whole-change review and hosted results are recorded in
-the execution ledger and exact candidate CI history. Do not read the local
-workflow tests above as completion of those later gates. The `Trusted MCP Pilot`
+Local regression and fresh review/repair are recorded above. Hosted results are
+separate in the execution ledger and exact candidate CI history; these local
+results do not establish that later gate. The `Trusted MCP Pilot`
 job retains successful, deliberately crashed and failed-qualification artifacts.
 Compare local, remote and PR SHA plus every terminal run/attempt before making
 an exact-head readiness claim. No merge, tag or package publication is implied.

@@ -32,7 +32,7 @@ function harness(options: any = {}) {
     timeoutMs: options.timeoutMs ?? 1000, engine: options.engine,
     confirm: (prompt: any) => { prompts++; return options.confirm ? options.confirm(prompt, coordinator) : true; } });
   const install = (doc = policy) => coordinator.installPolicy(JSON.stringify(doc), api.signPolicy(doc, policyKey.privateKeyPem));
-  install();
+  if (options.autoInstall !== false) install();
   return { coordinator, install, policy, file, events, effects, prompts: () => prompts,
     verify: () => { const cp = coordinator.close(); return api.verifyInvocationJournal(
       fs.readFileSync(path.join(root, 'journal', 'entries.jsonl'), 'utf8'), JSON.stringify(cp),
@@ -225,5 +225,58 @@ describe('trusted invocation admission', () => {
     expect(await invoke(h)).toMatchObject({ status: 'blocked' });
     expect(h.effects).toHaveLength(0);
     expect(h.events.at(-1).outcome).toBe('aborted_before_dispatch'); h.verify();
+  });
+  it('rejects rollback reentry while acknowledging an accepted policy', async () => {
+    let h: ReturnType<typeof harness>;
+    let nestedError: unknown; let outerError: unknown;
+    h = harness({ sink: (event: any, file: any, events: any[]) => {
+      events.push(event); const ack = file.append(event);
+      if (event.type === 'policy' && event.status === 'accepted' && event.policy.metadata.policy_version === 3) {
+        try { h.install({ ...h.policy, metadata: { policy_version: 2 } }); }
+        catch (error) { nestedError = error; }
+      }
+      return ack;
+    } });
+    try { h.install({ ...h.policy, metadata: { policy_version: 3 } }); }
+    catch (error) { outerError = error; }
+    expect(await invoke(h)).toMatchObject({ status: 'completed' });
+    expect(h.events.filter(e => e.type === 'policy' && e.status === 'accepted')
+      .map(e => e.policy.metadata.policy_version)).toEqual([1, 3]);
+    expect(nestedError).toBeInstanceOf(Error); expect(String(nestedError)).toMatch(/installation in progress/);
+    expect(outerError).toBeUndefined(); expect(h.effects).toHaveLength(1); h.verify();
+  });
+  it('rejects a first-name replacement during accepted-policy acknowledgment', async () => {
+    let h: ReturnType<typeof harness>;
+    let nestedError: unknown; let outerError: unknown;
+    h = harness({ autoInstall: false, sink: (event: any, file: any, events: any[]) => {
+      events.push(event); const ack = file.append(event);
+      if (event.type === 'policy' && event.status === 'accepted' && event.policy.name === 'coding') {
+        try { h.install({ ...h.policy, name: 'different' }); }
+        catch (error) { nestedError = error; }
+      }
+      return ack;
+    } });
+    try { h.install(); } catch (error) { outerError = error; }
+    expect(await invoke(h)).toMatchObject({ status: 'completed' });
+    expect(h.events.filter(e => e.type === 'policy' && e.status === 'accepted').map(e => e.policy.name)).toEqual(['coding']);
+    expect(nestedError).toBeInstanceOf(Error); expect(String(nestedError)).toMatch(/installation in progress/);
+    expect(outerError).toBeUndefined(); expect(h.effects).toHaveLength(1); h.verify();
+  });
+  it('rejects engine preparation reentry without skipping a journal generation', async () => {
+    let h: ReturnType<typeof harness>;
+    let nestedError: unknown; let outerError: unknown; let first = true;
+    h = harness({ autoInstall: false, engine: { prepare(resolution: any) {
+      if (first) {
+        first = false;
+        try { h.install({ ...h.policy, metadata: { policy_version: 2 } }); }
+        catch (error) { nestedError = error; }
+      }
+      return api.typescriptInvocationEngine.prepare(resolution);
+    } } });
+    try { h.install(); } catch (error) { outerError = error; }
+    expect(await invoke(h)).toMatchObject({ status: 'completed' });
+    expect(h.events.filter(e => e.type === 'policy').map(e => e.generation)).toEqual([1]);
+    expect(nestedError).toBeInstanceOf(Error); expect(String(nestedError)).toMatch(/installation in progress/);
+    expect(outerError).toBeUndefined(); expect(h.effects).toHaveLength(1); h.verify();
   });
 });

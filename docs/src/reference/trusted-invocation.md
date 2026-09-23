@@ -80,6 +80,9 @@ unverified state. A failed reload leaves the coordinator refusing calls, rather
 than silently retaining the old policy. Persist and supply `lastSeenVersion`
 when rollback protection must survive restart. The initial policy trust root
 comes from the operator, not the policy document.
+Nested installation from an engine-preparation or policy-journal callback is
+refused before changing the generation or identity/version pins. Reload from a
+permit callback remains supported and invalidates that pending admission.
 
 The engine seam prepares a snapshot from the authenticated resolution and
 returns component receipts. The default uses the real compiled TypeScript
