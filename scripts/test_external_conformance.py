@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from run_external_conformance import verify_packet
+from run_external_conformance import strict_json, verify_packet
 
 
 def encoded(value):
@@ -119,6 +119,11 @@ class PacketTests(unittest.TestCase):
         path.symlink_to(self.root / "moved")
         with self.assertRaises(ValueError):
             verify_packet(self.root)
+
+    def test_packet_json_rejects_nonfinite_and_excessive_depth(self):
+        for raw in [b'{"value":1e400}', b'[' * 65 + b'0' + b']' * 65, b'{"value":1,"value":2}']:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                strict_json(raw)
 
 
 if __name__ == "__main__":

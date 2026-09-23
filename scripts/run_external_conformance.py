@@ -11,6 +11,7 @@ import argparse
 from collections import Counter
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import stat
@@ -40,7 +41,30 @@ def strict_json(data):
     def constant(value):
         raise ValueError(f"nonfinite JSON number: {value}")
 
-    return json.loads(data.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+    def finite(value):
+        number = float(value)
+        require(math.isfinite(number), "nonfinite JSON number")
+        return number
+
+    # Check structural depth before materializing containers. Brackets inside
+    # strings are data, including when quotes follow an escaped backslash.
+    depth, quoted, escaped = 0, False, False
+    for byte in data:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif byte == ord("\\"):
+                escaped = True
+            elif byte == ord('"'):
+                quoted = False
+        elif byte == ord('"'):
+            quoted = True
+        elif byte in (ord("["), ord("{")):
+            depth += 1
+            require(depth <= 64, "JSON depth exceeds 64")
+        elif byte in (ord("]"), ord("}")):
+            depth -= 1
+    return json.loads(data.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant, parse_float=finite)
 
 
 @lru_cache(maxsize=None)
