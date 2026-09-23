@@ -1,5 +1,6 @@
 pub(crate) mod json;
 pub(crate) mod model;
+pub(crate) mod output;
 pub(crate) mod policy;
 pub(crate) mod snapshot;
 #[cfg(test)]

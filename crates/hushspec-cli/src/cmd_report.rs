@@ -75,7 +75,7 @@ pub struct ReportArgs {
     #[arg(long, value_name = "PATH")]
     key: Option<PathBuf>,
 
-    /// Every log entry must carry a signature that verifies
+    /// Every log entry must carry a signature that verifies (legacy mode: logs only)
     #[arg(long)]
     require_signatures: bool,
 
@@ -94,6 +94,26 @@ pub struct ReportArgs {
     /// How many `rule_path`s each rule-block row lists
     #[arg(long, default_value_t = 5, value_name = "N")]
     top_paths: usize,
+
+    /// Experimental strict verification profile (offline local artifacts)
+    #[arg(long, value_name = "PATH")]
+    evidence_profile: Option<PathBuf>,
+
+    /// New verification sidecar file, published last as the completion marker
+    #[arg(long, value_name = "PATH")]
+    verification_out: Option<PathBuf>,
+
+    /// Strict mode only: maximum bytes in any input file (default 16777216)
+    #[arg(long)]
+    max_evidence_file_bytes: Option<u64>,
+
+    /// Strict mode only: maximum total input bytes (default 67108864)
+    #[arg(long)]
+    max_evidence_total_bytes: Option<u64>,
+
+    /// Strict mode only: maximum JSONL line bytes (default 1048576)
+    #[arg(long)]
+    max_evidence_line_bytes: Option<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -136,6 +156,14 @@ struct Loaded {
 }
 
 pub fn run(args: ReportArgs) -> i32 {
+    if args.evidence_profile.is_some()
+        || args.verification_out.is_some()
+        || args.max_evidence_file_bytes.is_some()
+        || args.max_evidence_total_bytes.is_some()
+        || args.max_evidence_line_bytes.is_some()
+    {
+        return run_strict(&args);
+    }
     if args.format == OutputFormat::Oscal && !args.experimental_oscal {
         eprintln!(
             "{} --format oscal is experimental; pass --experimental-oscal to enable it",
@@ -285,6 +313,249 @@ pub fn run(args: ReportArgs) -> i32 {
 }
 
 // ---------------------------------------------------------------------- input
+
+fn run_strict(args: &ReportArgs) -> i32 {
+    match strict_report(args) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("error: {error}");
+            error.exit_code()
+        }
+    }
+}
+
+fn strict_report(args: &ReportArgs) -> Result<(), crate::report_evidence::model::EvidenceError> {
+    use crate::report_evidence::{self, model::*, output::*, policy, snapshot::*};
+    use hushspec::signing::{Keyring, VerifyOptions};
+    let config = |message| EvidenceError::new(EvidenceCode::Configuration, message);
+    let profile_path = args
+        .evidence_profile
+        .as_deref()
+        .ok_or_else(|| config("strict reporting requires --evidence-profile"))?;
+    if args.format != OutputFormat::Json
+        || args.lenient
+        || args.unverified
+        || args.by.is_some()
+        || args.max_skew < 0
+    {
+        return Err(config(
+            "strict reporting requires JSON, nonnegative skew, and no --lenient, --unverified or --by",
+        ));
+    }
+    let report_path = args
+        .out
+        .as_ref()
+        .ok_or_else(|| config("strict reporting requires --out"))?;
+    let sidecar_path = args
+        .verification_out
+        .as_ref()
+        .ok_or_else(|| config("strict reporting requires --verification-out"))?;
+    let key_path = match (&args.keyring, &args.key) {
+        (Some(path), None) | (None, Some(path)) => path,
+        _ => {
+            return Err(config(
+                "strict reporting requires exactly one --key or --keyring",
+            ));
+        }
+    };
+    let defaults = Limits::default();
+    let limits = Limits {
+        file_bytes: args.max_evidence_file_bytes.unwrap_or(defaults.file_bytes),
+        total_bytes: args
+            .max_evidence_total_bytes
+            .unwrap_or(defaults.total_bytes),
+        line_bytes: args.max_evidence_line_bytes.unwrap_or(defaults.line_bytes),
+    };
+    limits.validate()?;
+    let mut budget = InputBudget::default();
+    let profile_input = read_snapshot(profile_path, "profile", &limits, &mut budget)?;
+    let profile = parse_profile(&profile_input.bytes)?;
+    let key_input = read_snapshot(key_path, "trust input", &limits, &mut budget)?;
+    let key_text =
+        std::str::from_utf8(&key_input.bytes).map_err(|_| config("trust input is not UTF-8"))?;
+    let keys = if args.keyring.is_some() {
+        report_evidence::json::parse_json(&key_input.bytes, MAX_DEPTH)?;
+        Keyring::parse(key_text)
+    } else {
+        Keyring::from_public_key_pem(key_text)
+    }
+    .map_err(|_| config("invalid trust input"))?;
+    let timestamp = |text: &str| {
+        DateTime::parse_from_rfc3339(text)
+            .map(|dt| dt.with_timezone(&Utc))
+            .map_err(|_| config("invalid RFC 3339 timestamp"))
+    };
+    let since = timestamp(&profile.window.since)?;
+    let until = timestamp(&profile.window.until)?;
+    for (supplied, expected) in [(&args.since, since), (&args.until, until)] {
+        if let Some(supplied) = supplied
+            && timestamp(supplied)? != expected
+        {
+            return Err(config("CLI window must equal the profile window"));
+        }
+    }
+    let clock = VerifyOptions {
+        now: args
+            .now
+            .as_deref()
+            .map(timestamp)
+            .transpose()?
+            .unwrap_or_else(Utc::now),
+        max_clock_skew_seconds: args.max_skew,
+        last_seen_version: None,
+    };
+    let inputs = snapshot_profile_inputs(&profile_input.path, &profile, &limits, &mut budget)?;
+    let input_paths: Vec<_> = inputs
+        .artifacts
+        .values()
+        .map(|input| input.path.as_path())
+        .chain([profile_input.path.as_path(), key_input.path.as_path()])
+        .collect();
+    reject_input_paths(
+        &[report_path.as_path(), sidecar_path.as_path()],
+        &input_paths,
+    )?;
+    let files: Vec<_> = profile
+        .streams
+        .iter()
+        .flat_map(|stream| &stream.files)
+        .collect();
+    if files.len() != args.files.len() {
+        return Err(config("positional files must match profile order"));
+    }
+    for (supplied, declared) in args.files.iter().zip(&files) {
+        if supplied
+            .canonicalize()
+            .map_err(|_| config("cannot resolve positional source"))?
+            != inputs.artifacts[&declared.path].path
+        {
+            return Err(config("positional files must match profile order"));
+        }
+    }
+    if let Some(selected) = &args.policy {
+        let selected = selected
+            .canonicalize()
+            .map_err(|_| config("cannot resolve selected policy"))?;
+        if !profile
+            .policies
+            .iter()
+            .filter_map(|policy| policy.artifact.as_ref())
+            .any(|artifact| inputs.artifacts[&artifact.path].path == selected)
+        {
+            return Err(config("--policy must name a declared policy artifact"));
+        }
+    }
+    let verified = report_evidence::verify_evidence(&profile, &inputs, &keys, &clock, &limits)?;
+    let receipts: Vec<_> = verified
+        .streams
+        .iter()
+        .flat_map(|stream| stream.receipts.iter().cloned())
+        .collect();
+    let events: Vec<_> = verified
+        .streams
+        .iter()
+        .flat_map(|stream| {
+            stream
+                .entries
+                .iter()
+                .filter_map(|entry| entry.policy_event.clone())
+        })
+        .collect();
+    let mut chain = ChainSummary {
+        verified: true,
+        ..Default::default()
+    };
+    let mut sources = Vec::new();
+    for stream in &verified.streams {
+        for file in &stream.spec.files {
+            let snapshot = &inputs.artifacts[&file.path];
+            let mut signers = std::collections::BTreeSet::new();
+            let mut records = 0;
+            // Parse only authenticated snapshots; never reopen a source path.
+            for line in snapshot
+                .bytes
+                .split(|b| *b == b'\n')
+                .filter(|line| !line.iter().all(u8::is_ascii_whitespace))
+            {
+                let value = report_evidence::json::parse_json(line, MAX_DEPTH)?;
+                signers.insert(
+                    value["signature"]["key_id"]
+                        .as_str()
+                        .expect("verified signature key")
+                        .to_owned(),
+                );
+                records += 1;
+                if stream.spec.kind == StreamKind::SignedLog {
+                    chain.entries += 1;
+                    chain.signed_entries += 1;
+                    chain.receipts += u64::from(value.get("receipt").is_some());
+                    chain.policy_events += u64::from(value.get("policy_event").is_some());
+                    chain.last_seq = value["seq"].as_u64().expect("verified sequence");
+                    chain.last_entry_hash = value["entry_hash"].as_str().map(str::to_owned);
+                }
+            }
+            if stream.spec.kind == StreamKind::SignedLog {
+                chain.files += 1;
+            }
+            sources.push(SourceResult {
+                stream_id: stream.spec.id.clone(),
+                path: snapshot.label.clone(),
+                sha256: snapshot.sha256.clone(),
+                records,
+                signer_key_ids: signers.into_iter().collect(),
+            });
+        }
+    }
+    let options = ReportOptions {
+        sources: files.iter().map(|file| file.path.clone()).collect(),
+        since: Some(since),
+        until: Some(until),
+        generated_at: Some(clock.now),
+        chain: (chain.files > 0).then_some(chain),
+        top_rule_paths: args.top_paths,
+        ..Default::default()
+    };
+    let mut report = build_report(&receipts, &events, &options);
+    if profile.policies.len() == 1 {
+        let policies = policy::load_policies(&profile, &inputs, &keys, &clock)?;
+        let (hash, policy) = policies.first_key_value().expect("declared policy");
+        if let (Some(spec), Some(source)) = (&policy.spec, &policy.source) {
+            let window: Vec<_> = receipts
+                .iter()
+                .filter(|receipt| in_window(&receipt.timestamp, Some(since), Some(until)))
+                .collect();
+            report.controls = Some(crate::report_controls::build_control_evidence(
+                source, spec, hash, &window, &report,
+            ));
+        }
+    }
+    let native_value =
+        serde_json::to_value(&report).map_err(|_| config("cannot serialize report"))?;
+    validate_schema(&native_value, "report")?;
+    let native = OutputArtifact {
+        path: report_path.clone(),
+        bytes: serde_json::to_vec_pretty(&native_value)
+            .map_err(|_| config("cannot serialize report"))?,
+    };
+    let result = VerificationResult { verification_version: "0.1.0".into(), run_id: profile.run_id.clone(), window: profile.window.clone(),
+        verified_at: hushspec::receipt::format_timestamp(clock.now), verifier: Verifier { name: "h2h".into(), version: env!("CARGO_PKG_VERSION").into() },
+        profile_sha256: profile_input.sha256, keyring_sha256: key_input.sha256, report_sha256: sha256_bytes(&native.bytes), sources, streams: verified.results,
+        inventory_sha256: profile.inventory.as_ref().map(|artifact| artifact.sha256.clone()),
+        limitations: vec!["Authentication covers supplied records, including outside the selected window; it does not establish action-attempt completeness.".into(),
+            "Inventory acquisition and the trusted profile/key inputs are operator assumptions.".into(),
+            "Counts describe recorded decisions and enforcement outcomes, not control satisfaction or certification.".into(),
+            "This unsigned sidecar requires source reverification or an authenticated packet producer. Presence alone is not assurance.".into(),
+            "Native chain fields summarize checked log files; per-stream continuity and policy intervals are in this sidecar.".into()] };
+    let sidecar_value =
+        serde_json::to_value(&result).map_err(|_| config("cannot serialize verification"))?;
+    validate_schema(&sidecar_value, "evidence-verification-experimental")?;
+    let sidecar = OutputArtifact {
+        path: sidecar_path.clone(),
+        bytes: serde_json::to_vec_pretty(&sidecar_value)
+            .map_err(|_| config("cannot serialize verification"))?,
+    };
+    publish_outputs(&[native], &sidecar)
+}
 
 fn parse_bound(text: Option<&str>, flag: &str) -> Result<Option<DateTime<Utc>>, i32> {
     let Some(text) = text else {

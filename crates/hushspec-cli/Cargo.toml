@@ -32,8 +32,8 @@ similar = "2"
 clap_complete = "4"
 sha2 = "0.10"
 same-file = "1"
+tempfile = "3"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
-tempfile = "3"
