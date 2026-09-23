@@ -11,6 +11,7 @@ export { verifyInvocationJournal, inspectInvocationJournal, type InvocationTrust
 export { InvocationCoordinator, InvocationEvidenceError, type InvocationCoordinatorOptions,
   type InvocationResult, type InvocationPrompt } from './invocation/coordinator.js';
 export { getPanicEpoch } from './evaluate.js';
+export { OwnedMcpConnection, INVOCATION_MCP_VERSION, type OwnedMcpOptions } from './invocation/stdio.js';
 export type {
   Rules,
   ForbiddenPathsRule,
