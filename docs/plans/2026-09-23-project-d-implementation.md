@@ -52,9 +52,13 @@
   Expected: inspected baselines match the design; the ancestor's header identifies a reference port; Chio supports only `0.1.0`; C is still bound to the TS engine. If revisions differ, refresh the source assessment instead of borrowing the old conclusions.
 - [x] Record the candidate findings and distinguish source inspection from tests, qualification, approval, adoption and publication. Link this plan from the roadmap without closing D.
 - [x] Run `git diff --check`, `python3 scripts/check_comment_hygiene.py --check` and `mdbook build docs`. Expected: exit 0. Manually verify the new relative Markdown links; plans outside the book are not covered by mdBook.
-- [ ] Commit the plan-reviewed preparation using `docs: plan project D and assess Chio integration` for a bounded final review range.
-- [ ] Request a fresh final review of the preparation diff against the roadmap and all five Review Focus items. This is a code/document review, not D's outside assessment. Address findings and commit the review disposition before push.
-- [ ] Push/qualify under the existing wave-6 commit/push authority; retain exact-head run/attempt status separately from D completion.
+- [x] Commit the plan-reviewed preparation using `docs: plan project D and assess Chio integration` for a bounded final review range (`27fcc2b`).
+- [x] Request a fresh final review of the preparation diff against the roadmap and all five Review Focus items. This is a code/document review, not D's outside assessment. Address findings and commit the review disposition before push.
+
+Task 1 delivery gate: push/qualify under the existing wave-6 authority. Retain
+the resulting exact-head run/attempt status in the execution handoff and hosted
+records, separately from D completion. A pre-push plan commit cannot attest to
+its own future CI result.
 
 ## Task 2: Authorized Chio migration and provenance decision
 
