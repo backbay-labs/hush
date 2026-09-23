@@ -970,10 +970,12 @@ dependencies = [
  "jsonschema",
  "predicates",
  "regex",
+ "same-file",
  "saphyr-parser",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "similar",
  "tempfile",
 ]

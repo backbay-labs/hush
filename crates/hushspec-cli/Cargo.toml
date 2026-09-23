@@ -30,6 +30,8 @@ jsonschema = { version = "0.18", features = ["draft202012"] }
 regex = "1"
 similar = "2"
 clap_complete = "4"
+sha2 = "0.10"
+same-file = "1"
 
 [dev-dependencies]
 assert_cmd = "2"
