@@ -752,6 +752,9 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Build SDK used by subprocess tests
+        run: npm run build
+
       - name: Install Python package
         run: pip install -e "packages/python[dev]"
 

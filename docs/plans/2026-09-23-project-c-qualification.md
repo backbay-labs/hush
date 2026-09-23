@@ -90,6 +90,16 @@ The fresh non-cache output passed all 820 requests / 1,375 slots and separate
 offline verification locally; all nine packet-verifier tests and workflow lint
 also passed without removing the deliberately colliding directory.
 
+The initial PR run also exposed a missing coverage-job prerequisite: the new
+owned subprocess tests import the compiled SDK, but coverage installed packages
+without building it. The exact failed log is retained. Removing the generated
+SDK from the local test path reproduced the same 13 failures; that prior build
+was moved to the ignored evidence workspace, not deleted. Coverage now builds
+the SDK before running the unchanged tests, as the normal TypeScript and pilot
+jobs already do. No test was skipped and no coverage threshold was lowered.
+The unchanged coverage command then passed all 2,458 tests with only the
+existing opt-in Docker skip, and emitted its coverage reports.
+
 ## Actual workflow and fault evidence
 
 The completed actor run made six server calls and two endpoint requests. It read
