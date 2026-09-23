@@ -27,6 +27,84 @@ enum Command {
     /// Package the published conformance bundle: prose, schemas, vectors and
     /// the manifest that pins them, reproducibly
     Bundle(BundleArgs),
+    /// Run a digest-bound external engine against the captured corpus (Linux)
+    External(ExternalArgs),
+}
+
+#[derive(clap::Args)]
+struct ExternalArgs {
+    #[arg(long, value_name = "PROFILE")]
+    engine: PathBuf,
+    #[arg(long, default_value = "fixtures", value_name = "DIR")]
+    fixtures: PathBuf,
+    #[arg(long, value_name = "NEW_DIR")]
+    out: PathBuf,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(0..=3))]
+    level: u8,
+    #[arg(long, default_value_t = 2000)]
+    timeout_ms: u64,
+    /// Total engine-dispatch time budget, excluding snapshot and publication
+    #[arg(long, default_value_t = 300000)]
+    total_timeout_ms: u64,
+    #[arg(long, default_value_t = 1048576)]
+    stdout_bytes: usize,
+    #[arg(long, default_value_t = 262144)]
+    stderr_bytes: usize,
+    #[arg(long, default_value_t = 67108864)]
+    total_output_bytes: usize,
+    /// Combined retained request and serialized input bytes
+    #[arg(long, default_value_t = 67108864)]
+    total_request_bytes: usize,
+    #[arg(long)]
+    source_sha: Option<String>,
+    #[arg(long)]
+    ci_run: Option<String>,
+    #[arg(long)]
+    ci_attempt: Option<String>,
+}
+
+fn run_external_command(args: &ExternalArgs) -> i32 {
+    use hushspec_testkit::external::{
+        model::{BuildContext, ProcessLimits},
+        run::{ExternalOptions, run_external},
+    };
+    let options = ExternalOptions {
+        profile: args.engine.clone(),
+        fixtures: args.fixtures.clone(),
+        output: args.out.clone(),
+        level: args.level,
+        limits: ProcessLimits {
+            timeout_ms: args.timeout_ms,
+            total_timeout_ms: args.total_timeout_ms,
+            stdout_bytes: args.stdout_bytes,
+            stderr_bytes: args.stderr_bytes,
+            total_output_bytes: args.total_output_bytes,
+            total_request_bytes: args.total_request_bytes,
+        },
+        context: BuildContext {
+            source_sha: args.source_sha.clone(),
+            ci_run: args.ci_run.clone(),
+            ci_attempt: args.ci_attempt.clone(),
+        },
+    };
+    match run_external(options) {
+        Ok(outcome) => {
+            println!(
+                "external conformance {}: {}",
+                if outcome.qualified {
+                    "qualified"
+                } else {
+                    "not qualified"
+                },
+                outcome.report_path.display()
+            );
+            i32::from(!outcome.qualified)
+        }
+        Err(error) => {
+            eprintln!("ERROR external conformance: {error}");
+            2
+        }
+    }
 }
 
 #[derive(clap::Args)]
@@ -52,6 +130,9 @@ fn main() {
 
     if let Some(Command::Bundle(args)) = &cli.command {
         std::process::exit(run_bundle(args));
+    }
+    if let Some(Command::External(args)) = &cli.command {
+        std::process::exit(run_external_command(args));
     }
 
     if !cli.fixtures.exists() {

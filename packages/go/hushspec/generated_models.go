@@ -119,7 +119,7 @@ type Rules struct {
 }
 
 type ForbiddenPathsRule struct {
-	Enabled    bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled    bool       `yaml:"enabled" json:"enabled"`
 	When       *Condition `yaml:"when,omitempty" json:"when,omitempty"`
 	Patterns   []string   `yaml:"patterns,omitempty" json:"patterns,omitempty"`
 	Exceptions []string   `yaml:"exceptions,omitempty" json:"exceptions,omitempty"`
@@ -134,7 +134,7 @@ type PathAllowlistRule struct {
 }
 
 type EgressRule struct {
-	Enabled bool          `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled bool          `yaml:"enabled" json:"enabled"`
 	When    *Condition    `yaml:"when,omitempty" json:"when,omitempty"`
 	Allow   []string      `yaml:"allow,omitempty" json:"allow,omitempty"`
 	Block   []string      `yaml:"block,omitempty" json:"block,omitempty"`
@@ -149,30 +149,30 @@ type SecretPattern struct {
 }
 
 type SecretPatternsRule struct {
-	Enabled   bool            `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled   bool            `yaml:"enabled" json:"enabled"`
 	When      *Condition      `yaml:"when,omitempty" json:"when,omitempty"`
 	Patterns  []SecretPattern `yaml:"patterns,omitempty" json:"patterns,omitempty"`
 	SkipPaths []string        `yaml:"skip_paths,omitempty" json:"skip_paths,omitempty"`
 }
 
 type PatchIntegrityRule struct {
-	Enabled           bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled           bool       `yaml:"enabled" json:"enabled"`
 	When              *Condition `yaml:"when,omitempty" json:"when,omitempty"`
-	MaxAdditions      int        `yaml:"max_additions,omitempty" json:"max_additions,omitempty"`
-	MaxDeletions      int        `yaml:"max_deletions,omitempty" json:"max_deletions,omitempty"`
+	MaxAdditions      int        `yaml:"max_additions" json:"max_additions"`
+	MaxDeletions      int        `yaml:"max_deletions" json:"max_deletions"`
 	ForbiddenPatterns []string   `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
 	RequireBalance    bool       `yaml:"require_balance,omitempty" json:"require_balance,omitempty"`
 	MaxImbalanceRatio *float64   `yaml:"max_imbalance_ratio,omitempty" json:"max_imbalance_ratio,omitempty"`
 }
 
 type ShellCommandsRule struct {
-	Enabled           bool       `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled           bool       `yaml:"enabled" json:"enabled"`
 	When              *Condition `yaml:"when,omitempty" json:"when,omitempty"`
 	ForbiddenPatterns []string   `yaml:"forbidden_patterns,omitempty" json:"forbidden_patterns,omitempty"`
 }
 
 type ToolAccessRule struct {
-	Enabled             bool          `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Enabled             bool          `yaml:"enabled" json:"enabled"`
 	When                *Condition    `yaml:"when,omitempty" json:"when,omitempty"`
 	Allow               []string      `yaml:"allow,omitempty" json:"allow,omitempty"`
 	Block               []string      `yaml:"block,omitempty" json:"block,omitempty"`
@@ -193,7 +193,7 @@ type RemoteDesktopChannelsRule struct {
 	When         *Condition `yaml:"when,omitempty" json:"when,omitempty"`
 	Clipboard    bool       `yaml:"clipboard,omitempty" json:"clipboard,omitempty"`
 	FileTransfer bool       `yaml:"file_transfer,omitempty" json:"file_transfer,omitempty"`
-	Audio        bool       `yaml:"audio,omitempty" json:"audio,omitempty"`
+	Audio        bool       `yaml:"audio" json:"audio"`
 	DriveMapping bool       `yaml:"drive_mapping,omitempty" json:"drive_mapping,omitempty"`
 }
 
@@ -210,7 +210,7 @@ type BrowserAutomationRule struct {
 	AllowedDomains          []string   `yaml:"allowed_domains,omitempty" json:"allowed_domains,omitempty"`
 	BlockedDomains          []string   `yaml:"blocked_domains,omitempty" json:"blocked_domains,omitempty"`
 	AllowedVerbs            []string   `yaml:"allowed_verbs,omitempty" json:"allowed_verbs,omitempty"`
-	CredentialDetection     bool       `yaml:"credential_detection,omitempty" json:"credential_detection,omitempty"`
+	CredentialDetection     bool       `yaml:"credential_detection" json:"credential_detection"`
 	ExtraCredentialPatterns []string   `yaml:"extra_credential_patterns,omitempty" json:"extra_credential_patterns,omitempty"`
 }
 

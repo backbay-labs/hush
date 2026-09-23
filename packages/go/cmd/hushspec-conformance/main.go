@@ -345,7 +345,7 @@ func observe(operation string, raw json.RawMessage) observation {
 		if action.Type == "" {
 			return fault(fmt.Errorf("action type is required"))
 		}
-		return observed(hushspec.Evaluate(resolved, &action))
+		return observed(hushspec.EvaluateWithDetection(resolved, &action).Evaluation)
 	case "canonicalize":
 		canonical, err := hushspec.CanonicalJSON(policy)
 		if err != nil {

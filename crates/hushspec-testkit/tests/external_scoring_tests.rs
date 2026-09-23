@@ -36,6 +36,12 @@ fn response(case: &Case, result: Observation) -> Response {
 fn ok(value: Value) -> Observation {
     Observation::Ok { value }
 }
+
+#[test]
+fn external_document_projection_uses_declared_schema_lineage() {
+    assert!(normalize_document(&json!({"hushspec":"0.2.0","name":""}), false).is_ok());
+    assert!(normalize_document(&json!({"hushspec":"1.0.0","name":""}), false).is_err());
+}
 fn status(case: &Case, observation: Observation, codes: ErrorCodes) -> Status {
     score(case, &response(case, observation), codes).unwrap()[0].status
 }

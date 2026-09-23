@@ -3,7 +3,7 @@
   "$id": "https://hushspec.dev/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
   "title": "Experimental conformance execution record 0.1.0",
   "type": "object", "additionalProperties": false,
-  "required": ["protocol", "run_id", "implementation", "requested_level", "outcome", "generated_at", "declared_build_context", "controller", "engine", "profile", "manifest", "corpus", "builtins", "declared_materials", "args", "environment", "os", "architecture", "limits", "planned", "unattempted", "cases", "report", "limitations"],
+  "required": ["protocol", "run_id", "implementation", "requested_level", "outcome", "abort_reason", "generated_at", "declared_build_context", "controller", "engine", "profile", "manifest", "corpus", "builtins", "declared_materials", "args", "environment", "os", "architecture", "limits", "planned", "unattempted", "cases", "report", "limitations"],
   "properties": {
     "protocol": {"const": "0.1.0"},
     "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -13,6 +13,7 @@
     },
     "requested_level": {"type": "integer", "minimum": 0, "maximum": 3},
     "outcome": {"enum": ["qualified", "not_qualified"]},
+    "abort_reason": {"type": ["string", "null"]},
     "generated_at": {"type": "string", "format": "date-time"},
     "declared_build_context": {"type": "object", "additionalProperties": false, "properties": {
       "source_sha": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
@@ -36,7 +37,7 @@
     "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
     "artifact": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "bytes"], "properties": {
-      "path": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*$", "maxLength": 4096},
+      "path": {"type": "string", "pattern": "^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*$", "maxLength": 4096},
       "sha256": {"$ref": "#/$defs/digest"}, "bytes": {"type": "integer", "minimum": 0, "maximum": 268435456}
     }},
     "slot": {"type": "object", "additionalProperties": false, "required": ["path", "category", "level"], "properties": {

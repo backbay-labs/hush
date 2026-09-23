@@ -212,10 +212,12 @@ not prevent subsequent bounded cases from being scored.
 
 ### Resource and process lifecycle
 
-CLI limits: per-case deadline default 2000 ms (1..30000), total run deadline
+CLI limits: per-case deadline default 2000 ms (1..30000), total dispatch deadline
 300000 ms (1..3600000), stdout 1 MiB and stderr 256 KiB per case (1..16 MiB),
 64 MiB aggregate captured output (1..256 MiB), 10000 cases. Requests are capped
-at 16 MiB each and 64 MiB aggregate (maximum configurable 256 MiB). Each dispatch
+at 16 MiB each, with retained requests plus serialized input artifacts capped at
+64 MiB aggregate (maximum configurable 256 MiB). Snapshot preparation and packet
+publication have bounded byte sizes but are outside the engine-dispatch deadline. Each dispatch
 uses the smaller of its case deadline and the remaining total deadline.
 Deadline includes response collection, not just leader exit.
 The request is prepared in a private regular file used as stdin; no potentially
@@ -242,12 +244,14 @@ version string. Source/CI metadata are declared context, not cryptographic
 attestation of the executable's build. This record is unsigned; digest binding
 alone is not trusted provenance.
 
-All artifacts are staged privately and synced before publication. The final
-directory is created exclusively only after the run and schemas validate.
-Publish files without overwriting and write execution.json last; failures must
-not leave a completion marker. Recoverable cleanup removes only files/directories
-owned by this invocation. A process crash can leave an incomplete directory;
-operators must require the completion marker and verify recorded digests.
+All artifacts are staged privately and synced before publication. Write
+execution.json last, then publish the complete directory using Linux
+RENAME_NOREPLACE after the run and schemas validate. An existing destination is
+never replaced, even if empty. A parent-directory sync error revokes completion
+through the owned directory handle and attempts an identity-checked rollback.
+Recoverable cleanup removes only paths owned by this invocation. Operators must
+require the completion marker and verify recorded digests; power-loss durability
+is not established when publication reports a sync error.
 
 ## Verification and delivery
 

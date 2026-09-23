@@ -893,7 +893,16 @@ def render_go() -> str:
             # `emit_empty` fields are serialized whether or not they hold
             # anything, so `omitempty` would make Go the one SDK that drops an
             # empty required collection from the wire.
-            if field_info["emit_empty"]:
+            # A scalar with a nonzero parse default must retain explicit zero
+            # and false values. Omitting them would re-enable disabled rules or
+            # restore permissive limits on a serialize/parse merge copy. Enum
+            # empty strings remain absence sentinels; pointers retain presence.
+            preserve_zero = (
+                field_info["type"] in ("bool", "count", "float")
+                and bool(field_info["default"])
+                and not field_info["go_pointer"]
+            )
+            if field_info["emit_empty"] or preserve_zero:
                 tag_suffix = ""
             elif not field_info["required"] or is_collection(field_info["type"]):
                 tag_suffix = ",omitempty"

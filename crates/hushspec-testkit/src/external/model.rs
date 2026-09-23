@@ -223,6 +223,7 @@ pub struct ExecutionRecord {
     pub implementation: Implementation,
     pub requested_level: u8,
     pub outcome: Outcome,
+    pub abort_reason: Option<String>,
     pub generated_at: String,
     pub declared_build_context: BuildContext,
     pub controller: Artifact,

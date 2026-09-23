@@ -15,6 +15,12 @@ pub struct Snapshot {
     identity: (u64, u64),
 }
 
+impl Snapshot {
+    pub(crate) fn identity(&self) -> (u64, u64) {
+        self.identity
+    }
+}
+
 #[derive(Debug)]
 pub struct CorpusSnapshot {
     pub manifest: Manifest,

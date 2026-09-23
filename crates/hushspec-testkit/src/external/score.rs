@@ -108,11 +108,19 @@ fn project(
 /// Resolution instructions are checked before projection, never stripped to
 /// turn an incorrectly unresolved engine observation into a passing result.
 pub fn normalize_document(document: &Value, resolved: bool) -> Result<Value, String> {
-    json::validate(document, "core")?;
+    let lineage = if document["hushspec"]
+        .as_str()
+        .is_some_and(|v| v.starts_with("0."))
+    {
+        "core.v0"
+    } else {
+        "core"
+    };
+    json::validate(document, lineage)?;
     if resolved && (document.get("extends").is_some() || document.get("merge_strategy").is_some()) {
         return Err("resolved observation retains resolution fields".into());
     }
-    let body = crate::generated_schemas::schema_body("core").ok_or("missing core schema")?;
+    let body = crate::generated_schemas::schema_body(lineage).ok_or("missing core schema")?;
     let schema: Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     project(document, &schema, &schema, &schema, 0, true, resolved)
 }
