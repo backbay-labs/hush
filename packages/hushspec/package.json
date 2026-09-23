@@ -31,7 +31,7 @@
     "@types/node": "^20.0.0",
     "@vitest/coverage-v8": "4.1.11",
     "typescript": "^5.7.0",
-    "vitest": "4.1.11"
+    "vitest": "5.0.1"
   },
   "dependencies": {
     "yaml": "^2.7.0"
