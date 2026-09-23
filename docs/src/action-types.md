@@ -41,7 +41,7 @@ Rules produce one of three decisions:
 | `warn` | Action is permitted pending confirmation (e.g., `require_confirmation`). An engine with no confirmation channel treats it as `deny`. |
 | `deny` | Action is blocked |
 
-When multiple rules evaluate the same action, the **most restrictive** decision wins: `deny` > `warn` > `allow`. The reported `matched_rule` comes from the first rule, in evaluation order, whose decision equals the final decision.
+When multiple rules evaluate the same action, the **most restrictive** decision wins: `deny` > `warn` > `allow`. The reported `matched_rule` comes from the first block, in evaluation order, whose decision equals the final decision and which named a `matched_rule`. If none named one, it is absent.
 
 ## Multi-Rule Evaluation Examples
 

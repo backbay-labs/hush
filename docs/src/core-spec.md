@@ -82,8 +82,8 @@ See the [Rules Reference](rules-reference.md) for detailed field documentation.
 ## Decision Types and Precedence
 
 All applicable rules participate. `deny` outranks `warn`, which outranks `allow`;
-the first rule in evaluation order with the winning decision supplies
-`matched_rule`. A tool allowlist never bypasses content scanning.
+the first block in evaluation order with the winning decision that named a
+`matched_rule` supplies it; otherwise it is absent. A tool allowlist never bypasses content scanning.
 In enforce mode, `warn` requires positive confirmation. Without a confirmation
 channel, or after refusal, the action is blocked. This is a requirement of
 [core section 6](../../spec/hushspec-core.md#6-decision-types), not a recommendation.
