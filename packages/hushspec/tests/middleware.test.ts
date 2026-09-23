@@ -178,6 +178,36 @@ describe('HushGuard', () => {
   });
 
   describe('warn handler', () => {
+    it.each([false, true])('records blocked callback failures (sink failure: %s)', (sinkFails) => {
+      for (const marker of [new Error('confirmation unavailable'), {kind: 'unavailable'}, undefined]) {
+        const declined: DecisionReceipt[] = [];
+        const action = {type: 'tool_call', target: 'risky_tool'};
+        HushGuard.fromYaml(DENY_SHELL_POLICY, {
+          onWarn: () => false,
+          sink: {send: receipt => { declined.push(receipt); }},
+        }).gate(action);
+        const receipts: DecisionReceipt[] = [];
+        const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+          onWarn: () => { throw marker; },
+          sink: {send: receipt => {
+            receipts.push(receipt);
+            if (sinkFails) throw new Error('sink unavailable');
+          }},
+        });
+        let completed = false;
+        let caught: unknown;
+        try { guard.gate(action); completed = true; }
+        catch (error) { caught = error; }
+        expect(completed).toBe(false);
+        expect(caught).toBe(marker);
+        expect(receipts).toHaveLength(1);
+        expect(receipts[0].decision).toBe('warn');
+        expect(receipts[0].enforcement).toEqual({mode: 'enforce', outcome: 'blocked'});
+        expect(receipts[0].reason).toBe(declined[0].reason);
+        expect(receipts[0].rule_trace).toEqual(declined[0].rule_trace);
+      }
+    });
+
     it('calls onWarn for warn decisions and allows when handler returns true', () => {
       let warnCalled = false;
       const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {

@@ -762,10 +762,20 @@ class HushGuard:
         elif result.decision == Decision.WARN:
             if mode == "monitor":
                 proceed, outcome = True, "would_block"
-            elif self._on_warn(result, action):
-                proceed, outcome = True, "confirmed"
             else:
-                proceed, outcome = False, "blocked"
+                try:
+                    confirmed = self._on_warn(result, action)
+                except Exception:
+                    try:
+                        self._record(
+                            action, result, duration_us,
+                            EnforcementSummary(mode=mode, outcome="blocked"), receipt,
+                        )
+                    except Exception:
+                        # Preserve the original confirmation failure.
+                        pass
+                    raise
+                proceed, outcome = (True, "confirmed") if confirmed else (False, "blocked")
         else:
             proceed = mode == "monitor"
             outcome = "would_block" if proceed else "blocked"

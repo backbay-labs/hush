@@ -742,12 +742,20 @@ export class HushGuard {
         if (mode === 'monitor') {
           proceed = true;
           outcome = 'would_block';
-        } else if (this.onWarn(result, action)) {
-          proceed = true;
-          outcome = 'confirmed';
         } else {
-          proceed = false;
-          outcome = 'blocked';
+          let confirmed: boolean;
+          try {
+            confirmed = this.onWarn(result, action);
+          } catch (original) {
+            try {
+              this.record(action, result, durationUs, {mode, outcome: 'blocked'}, receipt);
+            } catch {
+              // Recording must not replace the original confirmation failure.
+            }
+            throw original;
+          }
+          proceed = confirmed;
+          outcome = confirmed ? 'confirmed' : 'blocked';
         }
         break;
       case 'deny':

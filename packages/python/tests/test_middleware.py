@@ -657,6 +657,52 @@ class _ExplodingSink(ReceiptSink):
         raise RuntimeError("sink down")
 
 
+@pytest.mark.parametrize("sink_fails", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+def test_callback_failure_records_blocked_warn(sink_fails, error_type):
+    marker = error_type("confirmation unavailable")
+    action = EvaluationAction(type="tool_call", target="risky_tool")
+    declined = _CaptureSink()
+    HushGuard.from_yaml(DENY_SHELL_POLICY, sink=declined).gate(action)
+
+    class AttemptSink(_CaptureSink):
+        def send(self, receipt):
+            super().send(receipt)
+            if sink_fails:
+                raise RuntimeError("sink unavailable")
+
+    sink = AttemptSink()
+
+    def fail(_result, _action):
+        raise marker
+
+    guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=fail, sink=sink)
+    with pytest.raises(error_type) as caught:
+        guard.gate(action)
+    assert caught.value is marker
+    assert len(sink.receipts) == 1
+    receipt = sink.receipts[0]
+    assert receipt.decision == Decision.WARN
+    assert receipt.enforcement.mode == "enforce"
+    assert receipt.enforcement.outcome == "blocked"
+    assert receipt.reason == declined.receipts[0].reason
+    assert receipt.rule_trace == declined.receipts[0].rule_trace
+
+
+def test_keyboard_interrupt_is_outside_callback_receipt_guarantee():
+    marker = KeyboardInterrupt()
+    sink = _CaptureSink()
+
+    def interrupt(_result, _action):
+        raise marker
+
+    guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=interrupt, sink=sink)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        guard.gate(EvaluationAction(type="tool_call", target="risky_tool"))
+    assert caught.value is marker
+    assert sink.receipts == []
+
+
 class TestReceiptSinkIntegration:
     def test_gate_sends_tagged_receipt_to_sink(self):
         sink = _CaptureSink()
