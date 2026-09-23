@@ -44,8 +44,9 @@ review; it requires only that the numbers are true.
 
    This command does not invoke your engine, even if it is written in Rust.
    Arbitrary implementation identity overrides are rejected. For an external
-   engine, run the vectors through a harness that invokes that exact engine
-   and retain its executable identity, inputs and outputs. The testkit version,
+   engine, use the [external controller](external-conformance.md) to invoke its
+   captured executable and retain identity, inputs and outputs. It currently
+   supports Linux static executables and L0-L3. The testkit version,
    corpus manifest digest and tested implementation identity are distinct.
 
 5. **Emit a report** conforming to

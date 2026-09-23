@@ -35,13 +35,36 @@ names the implementation, pins the corpus by the SHA-256 of
 every vector it ran. `highest_level` is the largest N for which levels 0..=N
 all pass; a level with any unattempted vector is never a pass.
 
-This runner executes only the reference implementation in Rust. It rejects the
+The root command executes only the reference implementation in Rust. It rejects the
 former `--implementation`, `--implementation-version` and
 `--implementation-language` metadata overrides: relabeling a reference run
 does not test another engine. External engines need a harness that actually
-invokes them; an implementation-bound external runner is not yet supplied.
+invokes them; use the experimental external command described below.
 The implementation version, testkit version and corpus manifest digest are
 separate identities, even when their version strings happen to match.
+
+## External engine runs
+
+```sh
+hushspec-testkit external --engine engine-profile.json --fixtures fixtures --out new-packet --level 3
+```
+
+This Linux-only controller executes a captured, SHA-256-pinned static ELF
+engine and grades its observations with no reference fallback. It retains
+`report.json`, a completion marker `execution.json`, captured images and inputs,
+all request/output bytes and every planned result slot. Existing output
+directories are refused. Exit 0 qualifies the requested level; 1 retains a
+nonqualifying packet; 2 indicates configuration/corpus/publication failure.
+
+From the repository, `python3 scripts/run_external_conformance.py --out
+target/go-conformance` builds and tests the first-party Go adapter.
+`python3 scripts/run_external_conformance.py --verify target/go-conformance/packet`
+checks offline integrity without executing images. Go bring-up is not
+independent-engine qualification. L4/L5, independent authorship and adoption
+remain separate gates. The engine is approved code, **not sandboxed**; the
+unsigned record is not authenticated provenance or a build attestation.
+See the [protocol and operator guide](https://github.com/backbay-labs/hush/blob/main/docs/src/reference/external-conformance.md)
+for schemas, examples, limits and trust boundaries.
 
 Reports also run the JSON case corpora that SDK unit tests consume:
 `core/raw-yaml/scalars.json` records parse acceptance at Level 0, decoded

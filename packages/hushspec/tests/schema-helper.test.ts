@@ -24,9 +24,9 @@ describe('the test JSON Schema validator', () => {
       // a keyword added to an unexercised branch was enforced by nobody.
       const schema: SchemaDocument = {
         type: 'object',
-        properties: { a: { type: 'string' }, b: { allOf: [{ type: 'number' }] } },
+        properties: { a: { type: 'string' }, b: { dependentSchemas: { x: { type: 'number' } } } },
       };
-      expect(() => errors(schema, { a: 'x' })).toThrow(/unsupported schema keyword allOf/);
+      expect(() => errors(schema, { a: 'x' })).toThrow(/unsupported schema keyword dependentSchemas/);
     });
 
     it('rejects an unevaluatedProperties that is not false', () => {
@@ -37,7 +37,7 @@ describe('the test JSON Schema validator', () => {
       ).toThrow(/only `false` is implemented/);
     });
 
-    it.each(['required', 'enum'])('rejects a non-array %s', (keyword) => {
+    it.each(['required', 'enum', 'allOf', 'oneOf'])('rejects a non-array %s', (keyword) => {
       expect(() => errors({ type: 'object', [keyword]: 'a' }, {})).toThrow(/must be an array/);
     });
 
@@ -69,6 +69,34 @@ describe('the test JSON Schema validator', () => {
         ) as SchemaDocument;
         expect(() => assertSupported(document), name).not.toThrow();
       }
+    });
+  });
+
+  describe('external protocol combinators', () => {
+    it('enforces every allOf branch and exactly one oneOf branch', () => {
+      const conjunction = { allOf: [{ type: 'number' }, { minimum: 2 }] };
+      expect(errors(conjunction, 2)).toEqual([]);
+      expect(errors(conjunction, 1)).not.toEqual([]);
+      expect(errors(conjunction, '2')).not.toEqual([]);
+      const exclusive = { oneOf: [{ type: 'number' }, { const: 2 }] };
+      expect(errors(exclusive, 1)).toEqual([]);
+      expect(errors(exclusive, 2)).not.toEqual([]);
+      expect(errors(exclusive, '2')).not.toEqual([]);
+    });
+
+    it('propagates successful evaluated properties and walks every branch', () => {
+      for (const keyword of ['allOf', 'oneOf']) {
+        const schema = { [keyword]: [{ properties: { a: { type: 'string' } } }], unevaluatedProperties: false };
+        expect(errors(schema, { a: 'ok' })).toEqual([]);
+        expect(errors(schema, { a: 'ok', extra: 1 })).not.toEqual([]);
+        expect(() => errors({ [keyword]: [{ dependentSchemas: {} }] }, {})).toThrow(/unsupported schema keyword/);
+        expect(() => errors({ [keyword]: [] }, {})).toThrow(/nonempty/);
+      }
+    });
+
+    it('enforces document map property limits', () => {
+      expect(errors({ maxProperties: 1 }, { a: 1 })).toEqual([]);
+      expect(errors({ maxProperties: 1 }, { a: 1, b: 2 })).not.toEqual([]);
     });
   });
 

@@ -12,9 +12,9 @@
  * schema resource embedded in the same document), `$defs`, `type` (including
  * `integer`), `const`, `enum`, `pattern`, `format` (`date`, `date-time`,
  * `uri`), `required`, `properties`, `additionalProperties` (`false` or a
- * subschema), `unevaluatedProperties: false`, `if`/`then`/`else`, `not`,
+ * subschema), `unevaluatedProperties: false`, `if`/`then`/`else`, `not`, `allOf`, `oneOf`,
  * `items`, `minimum`, `exclusiveMinimum`, `maximum`, `minLength`,
- * `maxLength`, `minItems`, `maxItems`, `uniqueItems` and `minProperties`.
+ * `maxLength`, `minItems`, `maxItems`, `uniqueItems`, `minProperties` and `maxProperties`.
  *
  * Boolean subschemas (`true`, `false`) are accepted anywhere a schema is
  * permitted, as 2020-12 requires.
@@ -51,6 +51,8 @@ const ASSERTIONS = new Set([
   'then',
   'else',
   'not',
+  'allOf',
+  'oneOf',
   'items',
   'minimum',
   'exclusiveMinimum',
@@ -61,6 +63,7 @@ const ASSERTIONS = new Set([
   'maxItems',
   'uniqueItems',
   'minProperties',
+  'maxProperties',
 ]);
 
 /** Keywords that describe rather than constrain, and are deliberately inert. */
@@ -161,6 +164,13 @@ export function assertSupported(document: SchemaDocument): void {
       for (const [name, member] of Object.entries(members)) {
         visit(member, `${path}/${keyword}/${name}`);
       }
+    }
+    for (const keyword of ['allOf', 'oneOf']) {
+      if (!(keyword in record)) continue;
+      const branches = record[keyword];
+      if (!Array.isArray(branches)) throw new Error(`${keyword} at ${path} must be an array`);
+      if (branches.length === 0) throw new Error(`${keyword} at ${path} must be nonempty`);
+      branches.forEach((branch, index) => visit(branch, `${path}/${keyword}/${index}`));
     }
   };
 
@@ -352,6 +362,20 @@ function check(
     }
   }
 
+  for (const keyword of ['allOf', 'oneOf']) {
+    const branches = schema[keyword] as (SchemaDocument | boolean)[] | undefined;
+    if (branches === undefined) continue;
+    const matches: Set<string>[] = [];
+    for (const branch of branches) {
+      const branchErrors: string[] = [];
+      const annotations = check(scope, branch, value, path, branchErrors);
+      if (branchErrors.length === 0) matches.push(annotations);
+    }
+    const valid = keyword === 'allOf' ? matches.length === branches.length : matches.length === 1;
+    if (!valid) errors.push(`${path}: ${keyword} matched ${matches.length} of ${branches.length} branches`);
+    else for (const annotations of matches) for (const key of annotations) evaluated.add(key);
+  }
+
   // `if`/`then`/`else` applies to every instance type, so it sits above the
   // array and non-object returns below. Only an object contributes evaluated
   // property names, and `check` returns an empty set for everything else, so
@@ -460,6 +484,10 @@ function check(
   const minProperties = schema['minProperties'];
   if (typeof minProperties === 'number' && Object.keys(members).length < minProperties) {
     errors.push(`${path}: fewer than minProperties ${minProperties}`);
+  }
+  const maxProperties = schema['maxProperties'];
+  if (typeof maxProperties === 'number' && Object.keys(members).length > maxProperties) {
+    errors.push(`${path}: more than maxProperties ${maxProperties}`);
   }
 
   const properties = (schema['properties'] ?? {}) as Record<string, SchemaDocument | boolean>;

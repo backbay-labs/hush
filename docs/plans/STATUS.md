@@ -2,10 +2,26 @@
 
 **Reviewed:** 2026-09-22
 **Reviewed baseline:** `wave-6` at `a0637cbe9d2ceb65a6865bb35d8ee4f0af5f2f1b`
-**Repair revision:** Project A evidence repairs on `wave-6`; qualification tracked below
+**Repair revision:** Projects A and B on `wave-6`; qualification tracked below
 **Authority:** This is the current status ledger for `docs/plans/`. The numbered RFCs retain their original requirements and design rationale; they are not completion records.
 
 > **Evidence boundary:** The reviewed baseline and repair revision are different states. The complete local verification record below does not establish hosted qualification, merge, tag, or publication. Terminal [CI checks](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) attached to the exact candidate record hosted qualification separately.
+
+## Project B external controller (2026-09-23)
+
+The [implementation-bound conformance plan](../superpowers/plans/2026-09-23-implementation-bound-conformance.md)
+has implemented contracts, bounded Linux processes, captured-corpus scoring,
+the Go adapter and atomic packets. The complete Go run passes L0-L3: 820
+requests, 1375 result slots and 4023 artifact digests checked. It exposed and
+repaired a Go zero/false serialization bug, alongside controller/adapter
+bring-up defects, without changing corpus expectations or Core semantics.
+
+The acceptance driver, CI integration and operator guidance are in local
+qualification. Fresh whole-branch review and exact-head hosted qualification
+remain pending in the [qualification record](../reviews/2026-09-23-project-b-qualification.md).
+The independent-engine gate remains open; Go is first-party bring-up. Projects
+C (trusted MCP dispatch) and D (external assessor/adopter validation) remain open.
+No merge, tag or publication is implied.
 
 ## Project A evidence repair (2026-09-22)
 
@@ -21,7 +37,7 @@ No merge, tag, package publication or external assessment is implied.
 
 The older repair and hosted snapshots below remain historical evidence for
 their named revisions, not qualification of Project A. The [foundation roadmap](2026-09-22-foundation-assurance-roadmap.md)
-still requires B (an executable independent-engine conformance harness), C
+still requires B's independent-engine qualification, C
 (trusted MCP tool-plus-effect authorization and durable no-permit/no-dispatch),
 and D (external assessor/adopter validation). Signed records do not establish
 these runtime or adoption properties.

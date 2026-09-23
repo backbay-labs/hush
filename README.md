@@ -51,6 +51,11 @@ for the contracts and their test coverage.
 The 1.0 SDK release is not yet published. See the [delivery status](docs/plans/STATUS.md)
 for implementation, qualification, and release evidence.
 
+The experimental [external conformance controller](docs/src/reference/external-conformance.md)
+tests a captured executable against the L0-L3 corpus and retains its inputs,
+outputs and identity. The Go adapter is first-party bring-up, not independent
+engine or runtime-boundary qualification.
+
 ## Quickstart
 
 Build the `h2h` CLI from this checkout:

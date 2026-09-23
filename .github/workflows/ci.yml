@@ -98,6 +98,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Format check
         run: cargo fmt --all -- --check
 
@@ -112,6 +116,38 @@ jobs:
 
       - name: Verify publishable Rust workspace
         run: cargo package --workspace --locked
+
+  external-conformance:
+    name: External Conformance (Go bring-up)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install 'jsonschema[format]>=4.0'
+      - name: Test offline packet verification
+        run: python3 -m unittest discover -s scripts -p test_external_conformance.py
+      - name: Qualify first-party Go through the external protocol
+        run: python3 scripts/run_external_conformance.py --out target/external-conformance
+      - name: Retain complete packet and build inputs on every outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: external-conformance-go-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/external-conformance/
+          if-no-files-found: error
 
   typescript:
     name: TypeScript

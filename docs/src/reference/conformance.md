@@ -10,6 +10,10 @@ For the current per-SDK status on `main`, see the
 [SDK Conformance Matrix](sdk-conformance.md). To publish a claim of your own,
 fill in the [Conformance Statement](conformance-statement.md) template.
 
+To test an executable outside the built-in reference runner, use the experimental
+[external engine controller](external-conformance.md). It binds L0-L3 results
+to captured engine bytes and retains a verifiable execution packet.
+
 ## Claiming a level
 
 A claim is made against a specific corpus, not against "the fixtures". Every

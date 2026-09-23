@@ -1,5 +1,9 @@
 # CLI Reference
 
+For executable conformance testing, see the separate
+[`hushspec-testkit external` reference](external-conformance.md). Its execution
+packet, supported platforms and exit semantics are separate from `h2h` below.
+
 `h2h` is the reference command-line tool for HushSpec documents. It validates,
 resolves, lints, formats, diffs, evaluates, signs and scaffolds policies, and
 every reporting subcommand is scriptable: machine-readable output through
