@@ -509,6 +509,156 @@
     "kind": "operator-command",
     "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
   },
+  "docs/src/reference/cli.md:23": {
+    "sha256": "634f74c0129d8cbc4c9920891590f61e16c9c859b55bb91693100c724db00674",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:24": {
+    "sha256": "7d780f0c43d763ec4f3dcf5447268c025bda8fad708fbe88d3d9ed60c078ea65",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:25": {
+    "sha256": "c4416e2107f7df73b2a741371a9670ef99ffa340edf72171d6bc8c4b00dba6b9",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:26": {
+    "sha256": "6d38bf80a6b13d540d64e9e4c5699649a27295c2c63082518154089b891bc4f1",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:27": {
+    "sha256": "bbc2597515bf231da17d4abaa2fb3ec2fa6b31273fd1d932c1fff6a5df57a17f",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:28": {
+    "sha256": "c99c2a237cc8fb92bee89df9b4ab47182a08e16a51f55c8eb17e4cdd79d680a9",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:29": {
+    "sha256": "3455c651d6ea5c35cfd47f1d0a3ad8e456aaf58020e656d5dca0e2084de64696",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:30": {
+    "sha256": "80064a58e8e1f32327a0526d79702a097d746db6aa6e29a2b46d56efc7f6c820",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:31": {
+    "sha256": "6236c858f47148b47ad9ebcebfc32e3ae31603d9833b5f6af8e5544eb5e6857d",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:32": {
+    "sha256": "f600b305fe94f1d973d731d103c9c6f0152d4ac6902d12c651adcb31cdc8b73c",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:33": {
+    "sha256": "f754fd06d12ff9f7a365fd60f1757b7c138efd264ec137d8ce93f65989bc43fe",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:34": {
+    "sha256": "f08c2526ec9097fea46c1dbfd185a44a2974b8c98b459bc246a4f87e608fc1fe",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:35": {
+    "sha256": "23feca4826f83f3eccc807613e5eb2423da49b11b4d723fbe6a0e7a7cabd89fa",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:36": {
+    "sha256": "22fc2b9cb1d03addf4db68f2eb1b28e9fc1258abadef46608a6564fce23e6f16",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:37": {
+    "sha256": "0ecfddf0203ef3fd2218a54b0b8aa7a71a3862e3da0bb8d14c00075b80fbb414",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:38": {
+    "sha256": "a4ae4415185c2d50b5804b72cfcde89552b06f15aecf8f4f6e5b57e82bde5c83",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:39": {
+    "sha256": "84bc338c1e3f9d08223056776775587b03a0b52b2dae22eba0758d58675f1a3f",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:40": {
+    "sha256": "2f00835f33485e35ce50ff7badc30d4123b81312db3581175fb26bcd5e0f83e7",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:41": {
+    "sha256": "d1ad8a73a4ea0411757ffb8b53e5bee9ddeefa847003d5fd6e3e3b23e222e19c",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:42": {
+    "sha256": "0495634f48c177425be16d1182c7cf2318e50630ab82be9bdc5dd0b6b9382e10",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:43": {
+    "sha256": "b8029459e9026127329a164cd1cdfdef7e50c7ef3895b0a0a8d56ced52536bc0",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:44": {
+    "sha256": "d1e6a6a8921c44575105040d8d82fe2c2a2e2c4859b5e7913d925c6fa1c2e70a",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:45": {
+    "sha256": "c5161041f5023945ff18921d530e9196a340affc2468d460e1ef96b5db598744",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:46": {
+    "sha256": "6207f90b0479abc722b740293c28388c3cd5a3bf0d94a1e8a30be9fee519989c",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:47": {
+    "sha256": "9ac247714baa378501368f011265e81a6b0fc7aa327a1bf9aa86caeb845d8024",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:48": {
+    "sha256": "8263c23003dfbfa96af52d68f76fd1fe4255eab83f29de35b3627389acc109be",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:49": {
+    "sha256": "b4bb0695fab15f91d24d71affe237b2b3c85d770b06593d29eb1eaf3033c4ab6",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:50": {
+    "sha256": "a1753e43c06b68a95684312f8464405a89b746f6b0bac7fe4f93075c046fb6d2",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:51": {
+    "sha256": "d5371d826a2bc95fb0c5512663f2c8b4a6e66c67a8d7a6059cbcbbbca0824328",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
+  "docs/src/reference/cli.md:52": {
+    "sha256": "94981e12447938d23461b8c599a079283700304445f44478b0dcf91d592e6976",
+    "kind": "expected-output",
+    "reason": "Verbatim h2h 1.0.0 help, checked by scripts/check_cli_docs.py; not a command."
+  },
   "docs/src/reference/conformance-statement.md:1": {
     "sha256": "1c1ed327943d26328333b15cdc80078b10144d1d6380669f20f6da6b68b0d933",
     "kind": "operator-command",
