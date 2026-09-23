@@ -59,7 +59,7 @@ expect(() => snapshotJson('{"x":1e999}')).toThrow();
 expect(Object.isFrozen(snapshotJson('{"x":{"y":1}}'))).toBe(true);
 ```
 
-Also assert control/lone-surrogate/duplicate identity refusal, UTF-8 limits, rollback/expiry/unresolved/unsigned refusal, engine policy hash binding, and real action receipt traces.
+Also assert control/lone-surrogate/duplicate identity refusal, UTF-8 limits, rollback/expiry/unresolved/unsigned refusal, missing/mismatched envelope policy name/version refusal despite valid generic signatures, engine policy hash binding, and real action receipt traces. Runtime and offline verification compare signed document version, not only generic envelope claims.
 - [ ] Run `npm --prefix packages/hushspec test -- tests/invocation-bindings.test.ts`. Expected: missing APIs fail assertions before implementation.
 - [ ] Implement a recursive JSON token parser with duplicate-key sets, raw-byte/depth/node limits and finite Unicode values; canonicalize and deep-freeze copied data. Snapshot registry bindings, enforce qualified identity grammar, verify resolved signed policy and compile the default engine. Reject monitor/unverified receipts at the later coordinator seam, not in legacy adapters.
 
@@ -106,7 +106,7 @@ const signature = signContentHash(entryHash, privateKeyPem);
 
 ### Task 3: Fail-closed invocation coordinator
 
-**Files:** Create `src/invocation/coordinator.ts`, `tests/invocation-coordinator.test.ts`; extend exports.
+**Files:** Create `src/invocation/coordinator.ts`, `tests/invocation-coordinator.test.ts`; extend exports. Add a backwards-compatible monotonic panic epoch getter to `src/evaluate.ts`, consumed by admission alongside the existing active boolean.
 
 **Interfaces:** Consumes registry, authenticated policy, engine, journal. Produces `InvocationCoordinator({registry,journal,policyPublicKeyPem,engine?,confirm?,mode?:'enforce',timeoutMs?,lastSeenVersion?})`, `installPolicy(document,envelope)`, `setPanic(active)`, `invoke(connectionId,toolName,argumentsJson,trustedContext?)`, `close()`. Result discriminant is `blocked | completed | error | unknown`, always with `callId`; only completed returns a bounded JSON value.
 
@@ -119,7 +119,7 @@ expect(dispatches).toBe(0);
 // A second fixture warns on tool plus two effects: one prompt, one dispatch.
 ```
 
-Cover mutation, malformed plans/receipts, same-name server, unqualified allow, evaluator timeout/rejection, prompt false/throw/timeout, reload/panic during confirmation, reentrant append changing generation, async/bad sink acknowledgments, sink failure before permit and after effects, bounded pending work, duplicate call/receipt IDs and close with pending work.
+Cover mutation, malformed plans/receipts, same-name server, unqualified allow, evaluator timeout/rejection, prompt false/throw/timeout, reload/panic during confirmation (including public global activate then deactivate), reentrant append changing generation, async/bad sink acknowledgments, sink failure before permit and after effects, bounded pending work, duplicate call/receipt IDs and close with pending work.
 - [ ] Run `npm --prefix packages/hushspec test -- tests/invocation-coordinator.test.ts`. Expected: coordinator contract assertions fail before implementation.
 - [ ] Implement the state machine with captured identity/args/actions/context/policy, deny-first aggregate, one bound prompt and no-await final admission:
 
@@ -197,7 +197,7 @@ const isolation = ['--network=none', '--read-only', '--user=65534:65534',
 
 **Interfaces:** Consumes pilot CLI and public APIs; produces read-only CI job `Trusted MCP Pilot`, retained evidence and exact-head qualification record.
 
-- [ ] Add documentation/CI contract tests checking enforce-only example, explicit trust keys, no independent/adopter claim, and always-upload retained artifacts. Run before adding those integration pieces. Expected: missing doc/job assertions fail.
+- [ ] Execute the documented pilot command against a fresh output directory and existing schema/docs checks after adding integration pieces. Human prose gets editorial review, not source-text assertions. Exercise failure artifact retention through a deliberately failed controller scenario. Expected: failed scenario returns nonzero and preserves its evidence; normal pilot and documentation checks pass.
 - [ ] Add Ubuntu Node 22 pilot job with digest-pinned actor image, `npm ci`, build and pilot controller; artifact upload uses `if: always()`, no private keys. Document lifecycle, generation boundary, sink contract, direct-route exclusions, evidence limits, reproduction and all open roadmap gates.
 
 ```yaml
