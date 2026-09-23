@@ -46,7 +46,7 @@ Repository = "https://github.com/backbay-labs/hush"
 # `hushspec.bundle.verify_bundle` raise `SigningUnavailable` rather than
 # reporting an unverified signature as good.
 signing = ["cryptography>=42"]
-dev = ["pytest>=7.0", "pytest-cov", "cryptography>=42", "jsonschema[format]>=4.0"]
+dev = ["pytest>=7.0", "pytest-cov", "cryptography>=42", "jsonschema[format]>=4.26.0"]
 
 [tool.setuptools.packages.find]
 include = ["hushspec", "hushspec.*"]
