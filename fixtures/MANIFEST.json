@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-23T01:36:00Z",
+  "generated_at": "2026-09-23T01:47:04Z",
   "files": [
     {
       "path": "fixtures/adapters/mcp-contract.json",
@@ -12,7 +12,7 @@
     },
     {
       "path": "fixtures/assurance/README.md",
-      "sha256": "9df27f83886fec92f2ad8c9ca9617d509f3ee88c067d33c6c7862b1405a6f268",
+      "sha256": "b380fe32c36cb1c48f22627328948d5ee9d23928eee425665f7de9f4087cbe9c",
       "category": "integration",
       "module": "assurance",
       "level": 0

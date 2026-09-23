@@ -1,6 +1,6 @@
 # Trustworthy evidence and claim repair
 
-Date: 2026-09-22. Status: design approved by the user; implementation-plan review is the next gate.
+Date: 2026-09-22. Status: design approved and implemented on the open branch; [qualification](../../reviews/2026-09-22-project-a-qualification.md) is tracked separately. This design is not a release-completion record.
 
 Baseline: `wave-6` at `8c4bb871e6e8bd17076dace178779251b8ae4748`. Parent direction: [foundation-assurance roadmap](../../plans/2026-09-22-foundation-assurance-roadmap.md), project A. No product changes are implied by this document.
 
@@ -16,7 +16,7 @@ Excluded: a new invocation coordinator, external-engine harness, key-management 
 
 Keep ordinary `h2h report` as an exploratory aggregation command. Preserve the existing log-only scope of `--require-signatures`, but make it explicit in help and examples. Introduce opt-in strict behavior rather than silently changing the meaning of old report v1 fields.
 
-Proposed CLI contract:
+CLI contract:
 
 ```text
 h2h report <declared-files...> --format json --out report.json \
@@ -24,7 +24,7 @@ h2h report <declared-files...> --format json --out report.json \
   --verification-out verification.json
 ```
 
-These new flags are design proposals, not currently usable commands. Strict mode requires the profile, an independently operator-supplied key/keyring and a verification output destination. Reject `--lenient` and `--unverified`, undeclared extra files, missing files and ambiguous output destinations. Existing clock/revocation verification options apply with their documented limits.
+The implemented flags and runnable examples are documented in the [operator guide](../../src/guides/evidence-verification.md). Strict mode requires the profile, an independently operator-supplied key/keyring and a verification output destination. Reject `--lenient` and `--unverified`, undeclared extra files, missing files and ambiguous output destinations. Existing clock/revocation verification options apply with their documented limits.
 
 Do not add fields to the closed receipt, log, conformance-report or report v1 schemas. Introduce separately versioned experimental profile/result schemas with explicit unknown-version rejection. Their initial naming and JSON field definitions will be fixed in the implementation plan before code; the semantic requirements below are not optional.
 

@@ -10,7 +10,7 @@
 
 **Spec:** [Approved trustworthy-evidence design](../specs/2026-09-22-trustworthy-evidence-design.md). Read it with this plan. The [milestone roadmap](../../plans/2026-09-22-foundation-assurance-roadmap.md) retains Projects B/C/D.
 
-**Status:** Ready for user review; no implementation task is complete. Planning baseline: clean `wave-6` at `3cca247`. Use the existing checkout as requested, not a new worktree. Recommended execution: native in this session, because the verifier, report integration and OSCAL tasks share tightly coupled contracts; use a fresh independent whole-branch reviewer before qualification.
+**Status:** User-approved; Tasks 1-9 are implemented on `wave-6`. Task 10 qualification is recorded in [Project A qualification](../../reviews/2026-09-22-project-a-qualification.md), with local and hosted evidence kept separate. The checklists below preserve the execution requirements, not an assertion that pending hosted checks passed. Planning baseline: clean `wave-6` at `3cca247`. Execution uses the existing checkout as requested, native implementation and one fresh independent whole-branch review.
 
 ## Global Constraints
 

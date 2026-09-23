@@ -108,9 +108,10 @@ If an ordinary confirmation callback throws, the guard attempts to record the
 existing warn receipt with outcome `blocked`, then propagates the original
 failure. A failing sink cannot replace that failure or authorize the action.
 Rust unwinding panics and recoverable Go panics use the same boundary; Python
-`BaseException` termination paths, Rust abort-mode panic and fatal process
-errors are outside the recording guarantee. Unavailable storage means no
-receipt can be promised. Monitor mode does not invoke confirmation callbacks.
+`BaseException` termination paths, Go `runtime.Goexit()`, Rust abort-mode panic
+and fatal process errors are outside the recording guarantee. Goexit retains
+goroutine-termination behavior and is not converted into a panic. Unavailable
+storage means no receipt can be promised. Monitor mode does not invoke confirmation callbacks.
 
 ### Enforcement modes
 

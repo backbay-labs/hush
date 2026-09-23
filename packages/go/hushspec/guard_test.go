@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -211,6 +212,28 @@ func TestGuardWarnNilPanic(t *testing.T) {
 	}
 	if receipts[0].Enforcement.Outcome != EnforcementOutcomeBlocked {
 		t.Fatal("not blocked")
+	}
+}
+
+func TestGuardWarnGoexitDoesNotPanic(t *testing.T) {
+	sink := &recordingSink{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, OnWarn: func(EvaluationResult, *EvaluationAction) bool {
+		runtime.Goexit()
+		return false
+	}})
+	finished := make(chan any, 1)
+	go func() {
+		defer func() { finished <- recover() }()
+		content := "token WARNME here"
+		_, _ = guard.Check(context.Background(), &EvaluationAction{Type: "file_write", Target: "a.txt", Content: &content})
+		panic("Goexit returned")
+	}()
+	if recovered := <-finished; recovered != nil {
+		t.Fatalf("goroutine termination became a panic: %v", recovered)
+	}
+	receipts, _ := sink.snapshot()
+	if len(receipts) != 0 {
+		t.Fatal("goroutine termination was misclassified as a callback panic")
 	}
 }
 

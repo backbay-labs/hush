@@ -129,8 +129,12 @@ with full license and byte hashes in the CLI crate. It validates both schema
 shape and local references. An assessment-context manifest binds an AP, its
 exact SSP and an already-resolved catalog. Supported scope is one explicit
 nonempty control selection and explicit component subjects present in the SSP.
-Remote references, fragments, encoded references, profile resolution,
-include-all, exclusions, objective selections and unknown IDs are refused.
+SSP implemented control IDs must exist in the catalog and cannot repeat;
+AP-selected controls need not already be implemented. Structured `links` anywhere
+in copied reviewed controls or subjects are unsupported: AP-local resources are
+not copied into results. Remote import references, fragments, encoded import
+references, profile resolution, include-all, exclusions, objective selections
+and unknown IDs are refused.
 
 This example uses the clearly labelled synthetic context, not a real customer
 assessment plan:

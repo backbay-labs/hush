@@ -607,30 +607,34 @@ func (g *Guard) decide(
 	mode := effectiveMode(result, state.mode, state.overrides)
 	confirmed := false
 	if gate && result.Decision == DecisionWarn && mode != EnforcementModeMonitor && state.onWarn != nil {
+		completed := false
+		var original any
 		func() {
-			completed := false
 			defer func() {
-				if completed {
-					return
+				if !completed {
+					original = recover()
 				}
-				original := recover()
-				blocked := EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeBlocked}
-				if receipt != nil {
-					receipt.Enforcement = blocked
-				}
-				// Attempt one receipt without replacing the confirmation panic.
-				// Fatal process failures and unavailable storage cannot promise it.
-				func() {
-					defer func() { _ = recover() }()
-					g.record(state, action, GuardDecision{
-						Result: result, Receipt: receipt, Enforced: true, Enforcement: blocked,
-					}, duration)
-				}()
-				panic(original)
 			}()
 			confirmed = state.onWarn(result, action)
 			completed = true
 		}()
+		// Goexit runs defers but never returns here. A recovered panic does,
+		// including panic(nil) when the legacy panicnil setting is enabled.
+		if !completed {
+			blocked := EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeBlocked}
+			if receipt != nil {
+				receipt.Enforcement = blocked
+			}
+			// Attempt one receipt without replacing the confirmation panic.
+			// Fatal process failures and unavailable storage cannot promise it.
+			func() {
+				defer func() { _ = recover() }()
+				g.record(state, action, GuardDecision{
+					Result: result, Receipt: receipt, Enforced: true, Enforcement: blocked,
+				}, duration)
+			}()
+			panic(original)
+		}
 	}
 	enforcement := gateOutcome(result, mode, gate, confirmed)
 	if receipt != nil {

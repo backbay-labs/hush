@@ -156,11 +156,19 @@ fn bad_inputs_and_context_leave_no_packet() {
                 [0]["control-id"] = json!("different-control");
             let ap_bytes = serde_json::to_vec(&ap).unwrap();
             std::fs::write(ap_path, &ap_bytes).unwrap();
+            let ssp_path = fixture.dir.path().join("context/ssp.json");
+            let mut ssp: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&ssp_path).unwrap()).unwrap();
+            ssp["system-security-plan"]["control-implementation"]["implemented-requirements"][0]
+                ["control-id"] = json!("different-control");
+            let ssp_bytes = serde_json::to_vec(&ssp).unwrap();
+            std::fs::write(ssp_path, &ssp_bytes).unwrap();
             let manifest_path = fixture.dir.path().join("context/context.json");
             let mut manifest: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
             manifest["resolved_catalog"]["sha256"] = evidence::digest(&bytes).into();
             manifest["assessment_plan"]["sha256"] = evidence::digest(&ap_bytes).into();
+            manifest["system_security_plan"]["sha256"] = evidence::digest(&ssp_bytes).into();
             std::fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         } else if case == "context-digest" {
             std::fs::write(fixture.dir.path().join("context/ap.json"), b"tampered").unwrap();
@@ -178,17 +186,90 @@ fn bad_inputs_and_context_leave_no_packet() {
             fixture.profile["streams"][0]["files"][0]["sha256"] = evidence::digest(&bytes).into();
             fixture.save_profile();
         }
-        fixture
+        let assertion = fixture
             .command_oscal()
             .assert()
             .code(exit)
             .stderr(predicate::str::contains(code));
+        if case == "scope" {
+            assertion.stderr(predicate::str::contains(
+                "policy-mapped control is not selected by the assessment plan",
+            ));
+        }
         for name in [
             "report.json",
             "verification.json",
             "assessment-results.json",
         ] {
             assert!(!fixture.dir.path().join(name).exists(), "{case}: {name}");
+        }
+    }
+}
+
+#[test]
+fn unresolved_context_references_leave_no_packet() {
+    for case in [
+        "scope-link",
+        "selection-link",
+        "subject-link",
+        "ssp-control",
+        "ssp-duplicate",
+    ] {
+        let fixture = evidence::Fixture::monitor();
+        let (name, field) = if case.starts_with("ssp-") {
+            ("ssp.json", "system_security_plan")
+        } else {
+            ("ap.json", "assessment_plan")
+        };
+        let path = fixture.dir.path().join("context").join(name);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        if case.starts_with("ssp-") {
+            let requirements =
+                value["system-security-plan"]["control-implementation"]["implemented-requirements"]
+                    .as_array_mut()
+                    .unwrap();
+            if case == "ssp-control" {
+                requirements[0]["control-id"] = json!("undefined-control");
+            } else {
+                let mut second = requirements[0].clone();
+                second["uuid"] = json!("00000000-0000-4000-8000-000000000078");
+                requirements.push(second);
+            }
+        } else {
+            value["assessment-plan"]["back-matter"] = json!({"resources":[{
+                "uuid":"00000000-0000-4000-8000-000000000077", "title":"AP-only resource"
+            }]});
+            let pointer = match case {
+                "scope-link" => "/assessment-plan/reviewed-controls",
+                "selection-link" => "/assessment-plan/reviewed-controls/control-selections/0",
+                _ => "/assessment-plan/assessment-subjects/0/include-subjects/0",
+            };
+            value.pointer_mut(pointer).unwrap()["links"] = json!([{
+                "href":"#00000000-0000-4000-8000-000000000077", "rel":"reference"
+            }]);
+        }
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(path, &bytes).unwrap();
+        let manifest_path = fixture.dir.path().join("context/context.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        manifest[field]["sha256"] = evidence::digest(&bytes).into();
+        std::fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fixture
+            .command_oscal()
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("ContextInvalid"));
+        for output in [
+            "report.json",
+            "verification.json",
+            "assessment-results.json",
+        ] {
+            assert!(
+                !fixture.dir.path().join(output).exists(),
+                "{case}: {output}"
+            );
         }
     }
 }

@@ -1,6 +1,6 @@
 # Project A qualification
 
-Date: 2026-09-22. Branch: `wave-6`. Implementation baseline: `df45623`;
+Started: 2026-09-22; review repairs: 2026-09-23. Branch: `wave-6`. Implementation baseline: `df45623`;
 review baseline: `3cca247`. Scope is the [approved trustworthy-evidence plan](../superpowers/plans/2026-09-22-trustworthy-evidence.md),
 not the independent-engine or trusted MCP-dispatch milestones.
 
@@ -54,6 +54,43 @@ the unpublished workspace dependency `hushspec ^1.0` (crates.io has 0.1.x).
 The required final gate is `cargo package --workspace --locked`, which packages
 the local prerequisites together. No version substitution or publication is
 authorized by this repair.
+
+The first workspace packaging run returned zero but was invalidated: Cargo
+reused stale `hushspec 1.0.0` source from its synthetic local registry. Running
+packaging concurrently also replaced `target/debug/h2h`, causing five existing
+timestamp fixture failures in the full Rust suite. Rebuilding the current CLI
+passed the unchanged failing fixture test. The workspace and newly packaged
+`conditions.rs` digest was `a3807c9241e5cc7fc841893dab288841d6f27597f88c151c00b54e4e386938bd`;
+the stale registry copy was `e83ab0799738a7e961f8de9774c33284b7bae87129a4dee4b300a6e410bd73a2`.
+The repeat package gate uses a fresh synthetic-registry cache and a separate
+build directory; full workspace tests run without competing package builds.
+Neither the invalidated packaging result nor the failed full-suite attempt is
+counted as a pass.
+
+## Independent review and regression repair
+
+A fresh whole-branch reviewer inspected `3cca247..4ee75d9`. It found three
+Important issues, no Critical issues and no deferred Minor issues. Each was
+reproduced before the repair, with original failing output retained:
+
+| Finding | Repair and observed regression |
+|---|---|
+| Copied AP links could dangle in Assessment Results | Recursively reject structured links in copied reviewed controls and subjects. `copied_scope_links_are_explicitly_unsupported` failed before repair, then passed for root scope, nested selections and subjects. |
+| SSP implemented controls could name absent catalog IDs | Resolve every implemented control and reject repeats. `ssp_controls_must_resolve_without_repetition` failed before repair, then passed; a separate positive test permits AP selections not yet implemented by the SSP. |
+| Goexit became a panic | Recover within the callback closure, record/repanic only after it returns. `TestGuardWarnGoexitDoesNotPanic` failed with `PanicNilError`, then passed; ordinary and legacy nil-panic behavior remains covered. |
+
+`unresolved_context_references_leave_no_packet` also failed before repair by
+publishing successfully, then passed all five refusal cases. All eight context
+tests and ten OSCAL CLI tests passed after repair. The full Go suite, vet, race
+suite and `GODEBUG=panicnil=1` confirmation tests passed after repair.
+
+Review rulings retain pinned upstream whitespace, make no maximum-capacity
+performance claim, and keep fatal/abort/panic-on-drop behavior outside the
+recoverable callback guarantee. Truthful instrumentation, independently
+acquired inventory, key custody and unsigned-sidecar provenance remain explicit
+operator assumptions. B/C/D, hosted readiness and human approval were not
+established by the reviewer. The implementation tests and hosted checks must
+establish their own bounded results; automated review is not approval.
 
 ## Final qualification gates
 

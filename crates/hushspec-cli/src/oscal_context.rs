@@ -157,6 +157,26 @@ fn catalog_controls(value: &Value, ids: &mut BTreeSet<String>) -> Result<(), Evi
     Ok(())
 }
 
+fn reject_copied_links(value: &Value) -> Result<(), EvidenceError> {
+    match value {
+        Value::Object(object) => {
+            if object.contains_key("links") {
+                return Err(invalid("links in copied assessment scope are unsupported"));
+            }
+            for child in object.values() {
+                reject_copied_links(child)?;
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                reject_copied_links(child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 pub(crate) fn load_context(
     path: &Path,
     limits: &Limits,
@@ -183,7 +203,20 @@ pub(crate) fn load_context(
     check_reference(&ssp, &ssp_doc["import-profile"]["href"], &catalog)?;
     let mut catalog_ids = BTreeSet::new();
     catalog_controls(&catalog_doc, &mut catalog_ids)?;
+    let implemented = ssp_doc["control-implementation"]["implemented-requirements"]
+        .as_array()
+        .ok_or_else(|| invalid("SSP implemented requirements are required"))?;
+    let mut implemented_ids = BTreeSet::new();
+    for requirement in implemented {
+        let id = requirement["control-id"]
+            .as_str()
+            .ok_or_else(|| invalid("SSP implemented requirement lacks control ID"))?;
+        if !catalog_ids.contains(id) || !implemented_ids.insert(id) {
+            return Err(invalid("unknown or repeated SSP implemented control"));
+        }
+    }
     let reviewed = &ap_doc["reviewed-controls"];
+    reject_copied_links(reviewed)?;
     if reviewed.get("control-objective-selections").is_some() {
         return Err(invalid("objective selections are unsupported"));
     }
@@ -241,6 +274,7 @@ pub(crate) fn load_context(
             .filter(|list| !list.is_empty())
             .ok_or_else(|| invalid("component subjects cannot be empty"))?
         {
+            reject_copied_links(subject)?;
             let id = subject["subject-uuid"]
                 .as_str()
                 .ok_or_else(|| invalid("subject lacks UUID"))?;
@@ -383,6 +417,87 @@ mod tests {
                 "{case}"
             );
         }
+    }
+
+    #[test]
+    fn copied_scope_links_are_explicitly_unsupported() {
+        for pointer in [
+            "/assessment-plan/reviewed-controls",
+            "/assessment-plan/reviewed-controls/control-selections/0",
+            "/assessment-plan/assessment-subjects/0/include-subjects/0",
+        ] {
+            let dir = package();
+            mutate(dir.path(), "ap.json", |value| {
+                value["assessment-plan"]["back-matter"] = json!({"resources":[{
+                    "uuid":"00000000-0000-4000-8000-000000000077", "title":"AP-only resource"
+                }]});
+                value.pointer_mut(pointer).unwrap()["links"] = json!([{
+                    "href":"#00000000-0000-4000-8000-000000000077", "rel":"reference"
+                }]);
+                validate_oscal(value, "oscal_assessment-plan_schema.json").unwrap();
+            });
+            assert_eq!(
+                load_context(
+                    &dir.path().join("context.json"),
+                    &Limits::default(),
+                    &mut InputBudget::default()
+                )
+                .unwrap_err()
+                .message,
+                "links in copied assessment scope are unsupported",
+                "{pointer}"
+            );
+        }
+    }
+
+    #[test]
+    fn ssp_controls_must_resolve_without_repetition() {
+        for duplicate in [false, true] {
+            let dir = package();
+            mutate(dir.path(), "ssp.json", |value| {
+                let requirements = value["system-security-plan"]["control-implementation"]
+                    ["implemented-requirements"].as_array_mut().unwrap();
+                if duplicate {
+                    let mut second = requirements[0].clone();
+                    second["uuid"] = json!("00000000-0000-4000-8000-000000000078");
+                    requirements.push(second);
+                } else {
+                    requirements[0]["control-id"] = json!("undefined-control");
+                }
+                validate_oscal(value, "oscal_ssp_schema.json").unwrap();
+            });
+            assert_eq!(
+                load_context(
+                    &dir.path().join("context.json"),
+                    &Limits::default(),
+                    &mut InputBudget::default()
+                )
+                .unwrap_err()
+                .message,
+                "unknown or repeated SSP implemented control"
+            );
+        }
+    }
+
+    #[test]
+    fn ap_selection_need_not_be_an_ssp_implemented_control() {
+        let dir = package();
+        mutate(dir.path(), "catalog.json", |value| {
+            value["catalog"]["controls"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"id":"unimplemented-control", "title":"Assessment scope"}));
+        });
+        mutate(dir.path(), "ap.json", |value| {
+            value["assessment-plan"]["reviewed-controls"]["control-selections"][0]["include-controls"]
+                [0]["control-id"] = json!("unimplemented-control");
+        });
+        load_context(
+            &dir.path().join("context.json"),
+            &Limits::default(),
+            &mut InputBudget::default(),
+        )
+        .unwrap();
     }
 
     #[test]
