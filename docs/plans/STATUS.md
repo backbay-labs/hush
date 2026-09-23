@@ -13,8 +13,10 @@ Tasks 1-9 of the [approved implementation plan](../superpowers/plans/2026-09-22-
 are implemented on the branch: honest reference-runner identity, four-SDK
 confirmation-failure recording, bounded strict evidence verification, scoped
 inventory/policy qualification and validated observation-only OSCAL. Focused
-regressions pass. Full local qualification, the independent whole-branch review
-and exact-head hosted CI are tracked in the [Project A qualification record](../reviews/2026-09-22-project-a-qualification.md).
+regressions and full local qualification pass. The independent whole-branch
+review found three Important issues; all were repaired with failing-then-passing
+regressions in `ff117f3`. Local evidence and the separate exact-head hosted gate
+are tracked in the [Project A qualification record](../reviews/2026-09-22-project-a-qualification.md).
 No merge, tag, package publication or external assessment is implied.
 
 The older repair and hosted snapshots below remain historical evidence for

@@ -10,7 +10,7 @@
 
 **Spec:** [Approved trustworthy-evidence design](../specs/2026-09-22-trustworthy-evidence-design.md). Read it with this plan. The [milestone roadmap](../../plans/2026-09-22-foundation-assurance-roadmap.md) retains Projects B/C/D.
 
-**Status:** User-approved; Tasks 1-9 are implemented on `wave-6`. Task 10 qualification is recorded in [Project A qualification](../../reviews/2026-09-22-project-a-qualification.md), with local and hosted evidence kept separate. The checklists below preserve the execution requirements, not an assertion that pending hosted checks passed. Planning baseline: clean `wave-6` at `3cca247`. Execution uses the existing checkout as requested, native implementation and one fresh independent whole-branch review.
+**Status:** Implemented on `wave-6`, including all three independent-review repairs in `ff117f3`. Full local qualification passed. Task 10's exact-head hosted gate is separate; see [Project A qualification](../../reviews/2026-09-22-project-a-qualification.md) and the final candidate's GitHub checks. The checklists below preserve the execution requirements, not an assertion that hosted checks passed before the final commit. Planning baseline: clean `wave-6` at `3cca247`. Execution uses the existing checkout as requested, native implementation and one fresh independent whole-branch review.
 
 ## Global Constraints
 

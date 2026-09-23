@@ -62,8 +62,10 @@ timestamp fixture failures in the full Rust suite. Rebuilding the current CLI
 passed the unchanged failing fixture test. The workspace and newly packaged
 `conditions.rs` digest was `a3807c9241e5cc7fc841893dab288841d6f27597f88c151c00b54e4e386938bd`;
 the stale registry copy was `e83ab0799738a7e961f8de9774c33284b7bae87129a4dee4b300a6e410bd73a2`.
-The repeat package gate uses a fresh synthetic-registry cache and a separate
-build directory; full workspace tests run without competing package builds.
+The repeat package gate passed using a fresh synthetic-registry cache and a
+separate build directory. All packaged crate source trees and CLI schemas match
+the checkout, including the new synthetic registry's core source. Full workspace
+tests passed without competing package builds.
 Neither the invalidated packaging result nor the failed full-suite attempt is
 counted as a pass.
 
@@ -92,13 +94,30 @@ operator assumptions. B/C/D, hosted readiness and human approval were not
 established by the reviewer. The implementation tests and hosted checks must
 establish their own bounded results; automated review is not approval.
 
-## Final qualification gates
+## Final local qualification
 
-Full workspace/cross-SDK verification and an independent whole-branch review
-are in progress. Exact-head hosted CI has not yet been run for the final
-candidate. This record will be reconciled with completed local results before
-the final source commit; hosted run URLs, attempts and the exact matching SHA
-belong to the final handoff and GitHub checks.
+Local gates passed after implementation and the review repair in `ff117f3`.
+Rust/Go and affected documentation gates were repeated after those repairs;
+unchanged TypeScript/Python and cross-SDK lanes retain their execution results.
+
+| Gate | Result |
+|---|---|
+| Rust workspace, all features, locked | 1,098 passed, zero failed; one existing ignored benchmark is run separately in CI. |
+| Rust format and clippy | Passed, including unchanged `-D warnings`. |
+| No-default-features and MSRV | Passed; installed `1.88` toolchain reports Rust/Cargo 1.88.0. |
+| Rust workspace packaging, locked | Passed with isolated synthetic registry and target; packaged source/schema comparisons passed. |
+| TypeScript Node 20.20.2 and 24.16.0 | Build/lint and 2,331 tests passed on each; npm audit reported zero vulnerabilities. |
+| Python 3.13.13 | 3,036 passed; four pre-existing skips. |
+| Go 1.26.4 | Full tests, vet, race and legacy nil-panic confirmation tests passed. Hosted CI covers Go 1.22. |
+| Conformance and differential | 197/197 reference cases; seed 42, 2,000 differential cases, zero divergences. This is not independent-engine qualification. |
+| Interchange and snippets | 35 documents across four SDKs; eight markdown snippets passed. |
+| Generated artifacts | SDK contracts/models/builtins, CLI/testkit/canonical schemas, frameworks, fixture manifest, canonical/bundle/log vectors passed. |
+| Documentation and hygiene | mdBook 0.5.4, runnable signed/tampered/monitor guide examples, comment hygiene and authored-file whitespace passed. Pinned vendor whitespace is retained. |
+
+Exact-head hosted CI is deliberately not claimed in this pre-push record.
+The final source/documentation commit must precede qualification; matching
+local/remote/PR head, terminal run URLs, attempts and jobs belong to the final
+handoff and GitHub checks. A later commit requires new exact-head qualification.
 
 No PR merge, release tag or package publication is part of this execution.
 An automated review is not human approval. A qualified branch is not a shipped
