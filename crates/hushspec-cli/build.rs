@@ -22,8 +22,8 @@ fn main() {
     }
 }
 
-/// Resolve the short git SHA: an externally supplied `H2H_GIT_SHA` wins (CI
-/// release builds set it), otherwise ask git, otherwise give up quietly.
+/// Resolve the git SHA: an externally supplied `H2H_GIT_SHA` wins, otherwise
+/// ask git for the short SHA, otherwise give up quietly.
 fn git_sha() -> Option<String> {
     if let Ok(sha) = std::env::var("H2H_GIT_SHA") {
         let sha = sha.trim().to_string();
@@ -83,6 +83,9 @@ fn watch_head() {
     watch(&git_dir.join(reference));
     watch(&common_dir.join(reference));
     watch(&common_dir.join("packed-refs"));
+    // Updating a packed branch can create a loose ref without changing HEAD
+    // or packed-refs. Watch the ref tree so that creation invalidates the build.
+    watch(&common_dir.join("refs"));
 }
 
 /// Watch a path that may not exist: a path Cargo cannot stat counts as

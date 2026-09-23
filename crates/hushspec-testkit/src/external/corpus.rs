@@ -1,14 +1,22 @@
 //! Snapshot-only case planning. Expectations are data, never reference verdicts.
 use super::{
     json as wire,
-    model::{MAX_CASES, MAX_REQUEST, Operation, PROTOCOL, Phase, ProcessLimits, Request, Slot},
+    model::{
+        MAX_CASES, MAX_REQUEST, MIB, Operation, PROTOCOL, Phase, ProcessLimits, Request, Slot,
+    },
     snapshot::CorpusSnapshot,
 };
 use crate::report::{Status, VectorResult};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::{self, Write};
 
-#[derive(Debug, Clone)]
+// Separate from the request/input budget: expectations and skipped slots never
+// enter an engine request, but are still retained across the entire corpus.
+const MAX_PLAN_BYTES: usize = 64 * MIB;
+
+#[derive(Debug, Clone, Serialize)]
 pub enum Assertion {
     Accept,
     ParseUnconstrained,
@@ -24,7 +32,7 @@ pub enum Assertion {
         value: Value,
     },
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Expectation {
     pub slot: Slot,
     pub assertion: Assertion,
@@ -43,6 +51,45 @@ pub struct Plan {
     pub builtins: BTreeMap<String, String>,
     retained_request_bytes: usize,
     request_budget: usize,
+    planned_cases: usize,
+    retained_plan_bytes: usize,
+}
+
+struct ByteBudget {
+    remaining: usize,
+}
+
+impl Write for ByteBudget {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.remaining = self
+            .remaining
+            .checked_sub(bytes.len())
+            .ok_or_else(|| io::Error::other("retained plan byte limit exceeded"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn charge_plan_bytes<T: Serialize>(retained: &mut usize, value: &T) -> Result<(), String> {
+    let mut budget = ByteBudget {
+        remaining: MAX_PLAN_BYTES
+            .checked_sub(*retained)
+            .ok_or("retained plan byte limit exceeded")?,
+    };
+    // Count without allocating another serialization of a large expectation.
+    serde_json::to_writer(&mut budget, value).map_err(|e| e.to_string())?;
+    *retained = MAX_PLAN_BYTES - budget.remaining;
+    Ok(())
+}
+
+fn unattempted(plan: &mut Plan, slot: &Slot, message: &str) -> Result<(), String> {
+    let result = slot_result(slot, Status::NotAttempted, message);
+    charge_plan_bytes(&mut plan.retained_plan_bytes, &result)?;
+    plan.unattempted.push(result);
+    Ok(())
 }
 
 pub fn slot_result(slot: &Slot, status: Status, message: impl Into<String>) -> VectorResult {
@@ -134,10 +181,12 @@ fn one(
     }
 }
 fn add(plan: &mut Plan, case: Case, level: u8) -> Result<(), String> {
+    if plan.planned_cases >= MAX_CASES {
+        return Err("oversized external case plan".into());
+    }
+    plan.planned_cases += 1;
     if case.expectations.iter().any(|e| e.slot.level <= level) {
-        if plan.cases.len() >= MAX_CASES {
-            return Err("oversized external case plan".into());
-        }
+        charge_plan_bytes(&mut plan.retained_plan_bytes, &case.expectations)?;
         let input = serde_json::to_vec(&case.input).map_err(|e| e.to_string())?;
         // Both generated identifiers are 64 ASCII bytes. Serialize the real
         // envelope with a null placeholder to count its exact overhead without
@@ -170,11 +219,7 @@ fn add(plan: &mut Plan, case: Case, level: u8) -> Result<(), String> {
         plan.cases.push(case);
     } else {
         for e in case.expectations {
-            plan.unattempted.push(slot_result(
-                &e.slot,
-                Status::NotAttempted,
-                "above requested level",
-            ));
+            unattempted(plan, &e.slot, "above requested level")?;
         }
     }
     Ok(())
@@ -310,11 +355,11 @@ fn evaluator_cases(
             .ok_or("expected result must be an object")?;
         for field in ["rule_trace", "receipt"] {
             if fields.remove(field).is_some() {
-                plan.unattempted.push(slot_result(
+                unattempted(
+                    plan,
                     &slot(format!("{path}#{index}/{field}"), "evaluation-evidence", 4),
-                    Status::NotAttempted,
                     "external L4 evidence assertions are not implemented",
-                ));
+                )?;
             }
         }
         let input = json!({"policy":policy,"action":action,"source":path,"documents":documents_for_policy(&suite["policy"],plan)});
@@ -409,11 +454,11 @@ fn raw_cases(
                 assertion,
             });
         } else {
-            plan.unattempted.push(slot_result(
+            unattempted(
+                plan,
                 &slot(format!("{path}#{id}/value"), "raw-yaml", 1),
-                Status::NotAttempted,
                 "above requested level",
-            ));
+            )?;
         }
         add(plan, c, target)?;
         if let Some(canonical) = v.get("canonical") {
@@ -625,6 +670,8 @@ pub fn plan_cases_with_limits(
         builtins: builtin_documents(),
         retained_request_bytes: 0,
         request_budget: limits.total_request_bytes,
+        planned_cases: 0,
+        retained_plan_bytes: 0,
     };
     let mut merge_dirs = BTreeSet::new();
     for entry in &snapshot.manifest.files {
@@ -656,11 +703,11 @@ pub fn plan_cases_with_limits(
                 merge_dirs.insert(entry.path.rsplit_once('/').ok_or("invalid merge path")?.0);
             }
             "expect" | "doc" | "integration" => {}
-            _ => plan.unattempted.push(slot_result(
+            _ => unattempted(
+                &mut plan,
                 &slot(&entry.path, &entry.category, entry.level),
-                Status::NotAttempted,
                 "external controller does not implement this evidence category",
-            )),
+            )?,
         }
     }
     for dir in merge_dirs {
@@ -684,4 +731,69 @@ pub fn plan_cases_with_limits(
     }
     plan.complete_results(&[])?;
     Ok(plan)
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    fn empty_plan() -> Plan {
+        Plan {
+            cases: Vec::new(),
+            unattempted: Vec::new(),
+            builtins: BTreeMap::new(),
+            retained_request_bytes: 0,
+            request_budget: 64 * MIB,
+            planned_cases: 0,
+            retained_plan_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn skipped_cases_accept_exact_count_boundary() {
+        let mut plan = empty_plan();
+        let case = one(
+            "case".into(),
+            "evaluation",
+            3,
+            Operation::Evaluate,
+            Value::Null,
+            Assertion::Accept,
+        );
+        for _ in 0..MAX_CASES {
+            add(&mut plan, case.clone(), 0).unwrap();
+        }
+        assert!(plan.cases.is_empty());
+        assert_eq!(plan.unattempted.len(), MAX_CASES);
+        assert_eq!(plan.planned_cases, MAX_CASES);
+        assert!(add(&mut plan, case, 0).unwrap_err().contains("oversized"));
+        assert_eq!(plan.unattempted.len(), MAX_CASES);
+    }
+
+    #[test]
+    fn skipped_result_metadata_is_charged_before_retention() {
+        let mut plan = empty_plan();
+        plan.retained_plan_bytes = MAX_PLAN_BYTES;
+        let error =
+            unattempted(&mut plan, &slot("case", "receipt", 4), "not implemented").unwrap_err();
+        assert!(error.contains("retained plan byte limit"));
+        assert!(plan.unattempted.is_empty());
+    }
+
+    #[test]
+    fn retained_plan_budget_accepts_exact_boundary_and_refuses_next_byte() {
+        // JSON string "x" occupies three bytes. A failed charge must not commit
+        // a partial count; successful charges must accumulate across entries.
+        let mut retained = MAX_PLAN_BYTES - 6;
+        charge_plan_bytes(&mut retained, &"x").unwrap();
+        assert_eq!(retained, MAX_PLAN_BYTES - 3);
+        charge_plan_bytes(&mut retained, &"x").unwrap();
+        assert_eq!(retained, MAX_PLAN_BYTES);
+        assert!(charge_plan_bytes(&mut retained, &0).is_err());
+        assert_eq!(retained, MAX_PLAN_BYTES);
+
+        let mut retained = MAX_PLAN_BYTES - 2;
+        assert!(charge_plan_bytes(&mut retained, &"x").is_err());
+        assert_eq!(retained, MAX_PLAN_BYTES - 2);
+    }
 }

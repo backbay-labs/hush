@@ -35,6 +35,9 @@ jobs:
 
       - run: python3 -m pip install pyyaml 'jsonschema[format]>=4.0'
 
+      - name: Check release candidate selection and version agreement
+        run: python3 scripts/test_release_workflow.py
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
@@ -42,6 +45,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+
+      - name: Check CLI build provenance across Git ref updates
+        run: python3 scripts/test_build_provenance.py
 
       - name: Check generated SDK contracts
         run: python3 scripts/generate_sdk_contracts.py --check

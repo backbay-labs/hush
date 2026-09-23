@@ -76,6 +76,83 @@ fn external_planning_budget_matches_exact_retained_wire_sizes() {
     let error = plan_cases_with_limits(&corpus, 3, &limits).unwrap_err();
     assert!(error.contains("request/input byte limit"), "{error}");
 }
+
+#[test]
+fn external_low_target_bounds_all_planned_cases() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let mut corpus = snapshot_corpus(&root).unwrap();
+    let evaluation = corpus
+        .manifest
+        .files
+        .iter()
+        .find(|e| e.category == "evaluation")
+        .unwrap()
+        .path
+        .clone();
+    let valid = corpus
+        .manifest
+        .files
+        .iter()
+        .find(|e| e.category == "valid")
+        .unwrap()
+        .path
+        .clone();
+    corpus
+        .manifest
+        .files
+        .retain(|e| e.path == evaluation || e.path == valid);
+    let vector = json!({"description":"bounded case","action":{"type":"tool_call","target":"echo"},"expect":{"decision":"allow"}});
+    corpus.files.get_mut(&evaluation).unwrap().bytes = serde_json::to_vec(&json!({
+        "hushspec_test":"0.1.0", "description":"case count limit", "policy":{"hushspec":"1.0.0"},
+        "cases":vec![vector; 10_001]
+    }))
+    .unwrap();
+    let error = plan_cases(&corpus, 0)
+        .err()
+        .expect("oversized above-level cases must be refused");
+    assert!(error.contains("oversized external case plan"), "{error}");
+}
+
+#[test]
+fn external_expectation_retention_is_bounded_across_fixture_files() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let mut corpus = snapshot_corpus(&root).unwrap();
+    let template = corpus
+        .manifest
+        .files
+        .iter()
+        .find(|e| e.category == "evaluation")
+        .unwrap()
+        .clone();
+    let snapshot = corpus.files[&template.path].clone();
+    corpus.manifest.files.clear();
+    let mut suite = String::from(
+        "hushspec_test: '0.1.0'\ndescription: retained plan limit\npolicy: {hushspec: '1.0.0'}\ncases:\n",
+    );
+    for index in 0..24 {
+        suite.push_str("  - description: bounded expectation\n    action: {type: tool_call, target: echo}\n    expect:\n      decision: allow\n      reason: ");
+        if index == 0 {
+            suite.push_str("&message ");
+            suite.push_str(&"a".repeat(1024 * 1024));
+        } else {
+            suite.push_str("*message");
+        }
+        suite.push('\n');
+    }
+    for index in 0..4 {
+        let mut entry = template.clone();
+        entry.path = format!("fixtures/core/evaluation/retained-{index}.test.yaml");
+        let mut captured = snapshot.clone();
+        captured.bytes = suite.as_bytes().to_vec();
+        corpus.files.insert(entry.path.clone(), captured);
+        corpus.manifest.files.push(entry);
+    }
+    let error = plan_cases(&corpus, 3)
+        .err()
+        .expect("aggregate retained expectations must be bounded");
+    assert!(error.contains("retained plan byte limit"), "{error}");
+}
+
 fn status(case: &Case, observation: Observation, codes: ErrorCodes) -> Status {
     score(case, &response(case, observation), codes).unwrap()[0].status
 }

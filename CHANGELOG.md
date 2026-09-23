@@ -7,8 +7,24 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ## [Unreleased]
 
+### Added
+
+- Evidence qualification with explicit reference-runner identity, strict bounded
+  verification, confirmation-failure recording and observation-only OSCAL output.
+- Experimental Linux external-conformance controller with captured executable,
+  corpus and result packets; the first-party Go adapter qualifies through L3.
+- Experimental trusted MCP invocation boundary and contained coding-agent pilot:
+  immutable tool/effect bindings, signed durable permits and crash reconciliation.
+  These are first-party evidence, not independent adoption or assurance.
+- Exact-commit release rehearsals that build platform artifacts and verify
+  disposable-key policy bundles without publishing to distribution channels.
+
 ### Fixed
 
+- CLI build provenance now refreshes when a packed branch ref becomes loose,
+  including linked worktrees; executable build regressions cover both cases.
+- External-conformance planning bounds skipped cases and aggregate serialized
+  expectations/result metadata, separately from request/input accounting.
 - Raw YAML scalar interpretation across the four SDKs, with source-preserving
   conformance vectors for numeric forms, quoting, and non-finite values.
 - Python LangChain/CrewAI decorators now evaluate actual invocation arguments.
@@ -37,6 +53,8 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 - The delivery ledger separates branch implementation, local testing, hosted
   qualification, merge, and publication. Original plans retain explicit deferred
   scope; the 1.0.0 source declaration is not a published package release.
+- Python package metadata describes the intended stable 1.0 SDK; the external
+  controller and trusted-invocation surfaces retain their experimental status.
 
 ## 1.0.0 source declaration - 2026-09-15 (not yet released)
 

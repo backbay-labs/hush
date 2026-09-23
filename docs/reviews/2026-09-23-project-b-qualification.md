@@ -3,6 +3,8 @@
 Branch: `wave-6`. Baseline: `2835c86cce67f4bea930343a7685497460010615`.
 Scope: the [reviewed implementation plan](../superpowers/plans/2026-09-23-implementation-bound-conformance.md)
 and [design](../superpowers/specs/2026-09-23-implementation-bound-conformance-design.md).
+Historical implementation evidence below is supplemented by the completed
+release-closure review at the end of this record.
 The external controller and Go adapter are first-party bring-up. Independently
 authored engine qualification, trusted MCP dispatch, external assessment and
 adoption remain open. No merge, tag or publication is authorized here.
@@ -122,8 +124,34 @@ on the exact repair candidate. Compare local, remote and PR head SHA and inspect
 all jobs and attempts; the [CI history](https://github.com/backbay-labs/hush/actions/workflows/ci.yml)
 is the hosted record, not this local test summary.
 
-The complete independent final-review gate remains open. PR #10 remains open
+At this historical snapshot the complete independent final-review gate remained open. PR #10 remains open
 against `wave-5`; historical review threads and human approval remain separate
 from test qualification. Independent-engine, trusted MCP dispatch and external
 assessment/adoption gates remain open. No release readiness, merge, tag or
 publication is implied.
+
+## Completed fresh review during v1 release closure
+
+A separate read-only reviewer completed the full Project B review from `2835c86`
+through `5a35dca`. No Critical finding was established. One new Important finding
+was reproduced: an L0 plan accepted more than 10,000 above-level cases, and four
+small alias-bearing suites retained approximately 96 MiB of expected reason
+strings outside the request budget. This was a real gap in the earlier repair.
+
+The release repair counts cases before level selection and adds an independent
+64 MiB budget for encoded expectations and every unattempted result slot.
+The exact request-plus-input budget retains its original semantics. Both public
+planner regressions failed on accepted oversized plans before the fix; all 17
+scoring tests pass after it. Initial malformed test fixtures were corrected
+before the actual bug reproductions and are not counted as product failures.
+Boundary and skipped-metadata unit tests accompany the repair. Full candidate
+and hosted qualification are recorded by the release-closure work, not inferred
+from these focused results.
+
+Deferred Minor M1 remains: non-Linux snapshot-test/lint portability is not
+qualified. The external controller is explicitly Linux-only. Existing portable
+wire/scoring behavior is not claimed to extend process execution to other hosts.
+The fresh review does not establish a sandbox, same-user hostile-code isolation,
+authenticated packet producers, reproducible engine builds, independent authorship,
+L4/L5 external execution, power-loss durability or bounded filesystem latency.
+Project C/D, human approval and publication are separate gates.

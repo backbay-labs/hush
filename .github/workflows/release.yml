@@ -6,8 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build artifacts for"
+        description: "Release tag (planned tag for a dry run; existing tag for publication)"
         required: true
+      dry-run:
+        description: "Build and verify artifacts without any release, registry or Homebrew publication"
+        type: boolean
+        default: true
+      ref:
+        description: "Full candidate commit SHA, required for dry runs and forbidden for publication"
+        required: false
       allow-unsigned:
         description: "Build policy bundles without a HushSpec signature when POLICY_SIGNING_KEY is not configured"
         type: boolean
@@ -19,6 +26,8 @@ permissions:
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] || false }}
+  CANDIDATE_REF: ${{ inputs.ref }}
 
 jobs:
   candidate:
@@ -27,16 +36,50 @@ jobs:
       sha: ${{ steps.candidate.outputs.sha }}
     steps:
       - name: Validate tag format
+        id: selection
         shell: bash
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
+          case "$DRY_RUN" in
+            true)
+              [[ "$CANDIDATE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dry runs require a full candidate commit SHA"; exit 1; }
+              checkout_ref="$CANDIDATE_REF"
+              ;;
+            false)
+              [ -z "$CANDIDATE_REF" ] || { echo "::error::publication must use the release tag, not a ref override"; exit 1; }
+              checkout_ref="refs/tags/$TAG"
+              ;;
+            *) echo "::error::invalid dry-run mode"; exit 1 ;;
+          esac
+          printf 'checkout_ref=%s\n' "$checkout_ref" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ env.TAG }}
+          ref: ${{ steps.selection.outputs.checkout_ref }}
       - name: Pin release candidate
         id: candidate
         shell: bash
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          sha="$(git rev-parse HEAD)"
+          if [ "$DRY_RUN" = true ] && [ "$sha" != "$CANDIDATE_REF" ]; then
+            echo "::error::checkout does not match the requested candidate"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import tomllib
+          expected = os.environ["TAG"][1:]
+          versions = {
+              "Rust": tomllib.loads(pathlib.Path("Cargo.toml").read_text())["workspace"]["package"]["version"],
+              "npm": json.loads(pathlib.Path("packages/hushspec/package.json").read_text())["version"],
+              "Python": tomllib.loads(pathlib.Path("packages/python/pyproject.toml").read_text())["project"]["version"],
+          }
+          for package, version in versions.items():
+              if version != expected:
+                  raise SystemExit(f"{package} version {version} does not match tag version {expected}")
+          PY
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   ci:
     needs: candidate
@@ -71,11 +114,17 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install cross
         if: matrix.cross
         run: cargo install cross --locked
       - name: Build
         shell: bash
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
+          CROSS_BUILD_ENV_PASSTHROUGH: H2H_GIT_SHA
         run: |
           # --locked builds from the committed Cargo.lock so release binaries
           # are reproducible and pinned (no fresh dependency resolution at
@@ -93,6 +142,34 @@ jobs:
           mkdir "$stage"
           cp "target/${{ matrix.target }}/release/${bin}" LICENSE README.md "$stage/"
           tar -czf "${stage}.tar.gz" "$stage"
+      - name: Smoke-test executable
+        shell: bash
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
+          CROSS_BUILD_ENV_PASSTHROUGH: H2H_GIT_SHA
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: |
+          bin="h2h"; [ "${{ runner.os }}" = "Windows" ] && bin="h2h.exe"
+          if [ "${{ matrix.cross }}" = true ]; then
+            # Cross supplies QEMU for this target. This is an emulated smoke
+            # check, not evidence of execution on a native ARM64 runner.
+            cross run -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- version --format json > cli-version.json
+            cross run -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- validate rulesets/default.yaml
+          else
+            "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
+            "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          actual = json.loads(pathlib.Path("cli-version.json").read_text())
+          expected = {"git_sha": os.environ["H2H_GIT_SHA"], "version": os.environ["TAG"][1:], "target": os.environ["EXPECTED_TARGET"]}
+          for field, value in expected.items():
+              if actual.get(field) != value:
+                  raise SystemExit(f"artifact {field} mismatch: {actual.get(field)!r} != {value!r}")
+          print(json.dumps(actual, sort_keys=True))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: h2h-${{ matrix.target }}
@@ -117,15 +194,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build h2h
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
         run: cargo build -p hushspec-cli --release --locked
       - name: Bundle every library and ruleset policy
         shell: bash
         env:
-          POLICY_SIGNING_KEY: ${{ secrets.POLICY_SIGNING_KEY }}
+          POLICY_SIGNING_KEY: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) && secrets.POLICY_SIGNING_KEY || '' }}
           # The public half of POLICY_SIGNING_KEY, which `h2h keygen` writes
           # alongside it. It is not secret, and the gate below verifies the
           # signatures this step produces against it.
-          POLICY_SIGNING_PUBLIC_KEY: ${{ vars.POLICY_SIGNING_PUBLIC_KEY }}
+          POLICY_SIGNING_PUBLIC_KEY: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) && vars.POLICY_SIGNING_PUBLIC_KEY || '' }}
           ALLOW_UNSIGNED: ${{ github.event.inputs.allow-unsigned }}
         run: |
           set -euo pipefail
@@ -134,7 +213,10 @@ jobs:
           pub_file="${RUNNER_TEMP}/policy-signing.pub.pem"
           trap 'rm -f "$key_file"' EXIT
           key_args=()
-          if [ -n "${POLICY_SIGNING_KEY}" ]; then
+          if [ "$DRY_RUN" = true ]; then
+            ./target/release/h2h keygen --output-dir "$RUNNER_TEMP" --name policy-signing
+            key_args=(--key "$key_file")
+          elif [ -n "${POLICY_SIGNING_KEY}" ]; then
             # Exactly one trailing newline, whether or not the secret carries
             # one: the strict PEM decoder wants the END line terminated and
             # nothing after it.
@@ -191,6 +273,12 @@ jobs:
           name: policy-bundles
           path: dist/bundles/*.bundle.json
           retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs['dry-run']
+        with:
+          name: rehearsal-policy-public-key
+          path: ${{ runner.temp }}/policy-signing.pub.pem
+          retention-days: 3
 
       # The conformance bundle: prose, schemas, vectors and the manifest that
       # pins them, so a third party can claim a level from the download alone
@@ -223,6 +311,7 @@ jobs:
           retention-days: 3
 
   release:
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
     needs: [candidate, ci, build, bundles]
     runs-on: ubuntu-latest
     permissions:
@@ -303,6 +392,7 @@ jobs:
         run: gh release upload "$TAG" h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json --repo "$GITHUB_REPOSITORY" --clobber
 
   homebrew:
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
     needs: [candidate, release]
     runs-on: ubuntu-latest
     steps:
@@ -333,6 +423,7 @@ jobs:
             --title "h2h ${TAG}" --body "Automated formula update for ${TAG}."
 
   npm-cli:
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
     needs: [candidate, release]
     runs-on: ubuntu-latest
     permissions:

@@ -4,6 +4,12 @@ Reviewed 2026-09-22 against cumulative `wave-6` candidate `a0637cbe9d2ceb65a6865
 
 ## Post-repair verification
 
+The [2026-09-23 fresh audit](2026-09-23-v1-release-preparation.md#platform-thread-audit)
+supersedes this snapshot's current-state claims. It found the packed-ref build
+provenance repair incomplete and corrected overstated Rust HTTP integration and
+build-script test coverage. The historical ledger below is preserved, not
+silently rewritten as if those qualifications had existed at its original head.
+
 The preserved 39-thread platform snapshot below remains the audit record; it
 does not resolve any GitHub thread. The current local repair evidence and its
 remaining hosted/publication boundaries are recorded in the

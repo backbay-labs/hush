@@ -126,15 +126,18 @@ window, 1 MiB stdout, 256 KiB stderr, 64 MiB aggregate captured output, and
 64 MiB aggregate retained request-plus-input bytes. CLI options can raise these
 within fixed ceilings: 30 seconds per process, 3600 seconds total dispatch,
 16 MiB per output stream, and 256 MiB per aggregate. A request is at most
-16 MiB, and at most 10,000 cases are planned. Snapshot/publication I/O has byte
+16 MiB, and at most 10,000 cases are planned, including cases above the requested
+level. Serialized expectations and all unattempted result metadata share a
+separate, fixed 64 MiB budget across the corpus. Snapshot/publication I/O has byte
 caps but is outside the dispatch deadline.
 
 Inputs are bounded snapshots: profile 1 MiB; engine 128 MiB; controller 256 MiB;
 materials 16 files/16 MiB total; manifest 8 MiB; corpus 4096 files, 16 MiB per
-file and 64 MiB total. Decoded YAML fixture containers have a separate 64 MiB
+file and 64 MiB total. Each decoded YAML fixture container has a separate 64 MiB
 accounting budget, charging string/key bytes and 64 bytes per value/key before
 retention, including expanded aliases. This is not a process RSS limit. Case
-count and request/input budgets are checked incrementally during planning.
+count, expectation/metadata and request/input budgets are checked incrementally
+during planning. The encoded-data budgets are not process RSS limits.
 Symlinks, physical aliases, missing/unlisted corpus files
 and digest mismatches are refused. The controller captures its running image
 through `/proc/self/exe`; it executes the private captured engine image, not

@@ -1,8 +1,8 @@
 # HushSpec Delivery Ledger
 
-**Reviewed:** 2026-09-22
-**Reviewed baseline:** `wave-6` at `a0637cbe9d2ceb65a6865bb35d8ee4f0af5f2f1b`
-**Repair revision:** Projects A and B on `wave-6`; qualification tracked below
+**Reviewed:** 2026-09-23
+**Reviewed baseline:** `wave-6` at `5a35dca012dc215a35b5c23c42ae1085018a8f30`
+**Repair revision:** v1 release preparation on `wave-6`; exact-candidate qualification remains separate
 **Authority:** This is the current status ledger for `docs/plans/`. The numbered RFCs retain their original requirements and design rationale; they are not completion records.
 
 > **Evidence boundary:** The reviewed baseline and repair revision are different states. The complete local verification record below does not establish hosted qualification, merge, tag, or publication. Terminal [CI checks](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) attached to the exact candidate record hosted qualification separately.
@@ -17,15 +17,29 @@ repaired a Go zero/false serialization bug, alongside controller/adapter
 bring-up defects, without changing corpus expectations or Core semantics.
 
 The acceptance driver, CI integration and operator guidance are implemented.
-The final independent review was interrupted after identifying a request-budget
-defect. The author repaired it and an adjacent fixture-expansion path, with
-failing-then-passing regressions, and performed a disclosed self-review.
-Post-repair full local verification passes; exact-head hosted qualification is tracked
-in the [qualification record](../reviews/2026-09-23-project-b-qualification.md).
-A complete independent final review remains open; self-review is not approval.
-The independent-engine gate remains open; Go is first-party bring-up. Projects
-C (trusted MCP dispatch) and D (external assessor/adopter validation) remain open.
-No merge, tag or publication is implied.
+The previously interrupted review is now supplemented by a completed fresh
+review of baseline `2835c86` through `5a35dca`. It found one additional Important
+planning-resource defect: skipped cases escaped the case cap and expectations
+escaped the aggregate byte budget. Both reproductions failed before the release
+repair and pass locally afterward. See the [qualification record](../reviews/2026-09-23-project-b-qualification.md)
+and [release closure](2026-09-23-v1-release-closure.md) for candidate gates.
+The independent-engine gate remains open; Go is first-party bring-up.
+No merge, tag, publication or human approval is implied.
+
+## Project C and D (2026-09-23)
+
+Project C's trusted MCP boundary and contained coding-agent pilot are implemented,
+with fresh review, repairs, real side effects and actual crash evidence in its
+[qualification record](2026-09-23-project-c-qualification.md). Baseline `5a35dca`
+has successful direct and PR CI (runs `35873896964` and `35873905933`, attempt 1,
+26 jobs each), including the trusted pilot and external Go conformance. These
+runs do not qualify later release-preparation changes. C's independently authored
+engine milestone remains open.
+
+Project D is [readiness work](2026-09-23-project-d-design.md), not completed external
+validation. Chio in `../arc` is a candidate integration and migration research
+target, not an independent assessor or an already-qualified v1 adopter. Neither
+the Chio migration nor external validation is silently part of v1 publication.
 
 ## Project A evidence repair (2026-09-22)
 
@@ -41,9 +55,9 @@ No merge, tag, package publication or external assessment is implied.
 
 The older repair and hosted snapshots below remain historical evidence for
 their named revisions, not qualification of Project A. The [foundation roadmap](2026-09-22-foundation-assurance-roadmap.md)
-still requires B's independent-engine qualification, C
-(trusted MCP tool-plus-effect authorization and durable no-permit/no-dispatch),
-and D (external assessor/adopter validation). Signed records do not establish
+still requires B's independent-engine qualification, C's independently authored
+engine running the trusted workflow, and D (external assessor/adopter validation).
+The first-party C implementation alone does not close those gates. Signed records do not establish
 these runtime or adoption properties.
 
 ### State definitions
