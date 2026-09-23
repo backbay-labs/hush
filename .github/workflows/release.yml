@@ -119,7 +119,7 @@ jobs:
           python-version: '3.12'
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --locked
+        run: cargo install cross --version 0.2.5 --locked
       - name: Build
         shell: bash
         env:
@@ -151,12 +151,14 @@ jobs:
         run: |
           bin="h2h"; [ "${{ runner.os }}" = "Windows" ] && bin="h2h.exe"
           if [ "${{ matrix.cross }}" = true ]; then
-            # Cross supplies QEMU for this target. This is an emulated smoke
-            # check, not evidence of execution on a native ARM64 runner.
-            # Quiet also suppresses rustup's toolchain status on stdout,
-            # keeping the captured output a JSON document.
-            cross run --quiet -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- version --format json > cli-version.json
-            cross run --quiet -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- validate rulesets/default.yaml
+            # Execute the built binary using Cross's QEMU image directly.
+            # Invoking `cross run` also writes rustup status to stdout, even
+            # in quiet mode. No build/launcher output belongs in the JSON.
+            # This is emulated execution, not a native ARM64 runner.
+            runner=(docker run --rm --network=none --volume "$PWD:/work:ro" --workdir /work
+              ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5 /linux-runner aarch64)
+            "${runner[@]}" "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
+            "${runner[@]}" "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml
           else
             "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
             "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml

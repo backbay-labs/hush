@@ -154,3 +154,20 @@ Python 3,041 passed with four skips and two subtests; TypeScript 2,462 passed wi
 one opt-in Docker skip, build and lint passed; Go full race-enabled tests and vet
 passed. The nine workflow regressions pass. Hosted qualification must use the
 new commit, not the earlier candidate's successful PR CI.
+
+## Quiet-mode rehearsal correction
+
+Rehearsal `35894067431` at `e2e01f9`, attempt 1, passed all reusable CI jobs,
+bundles and three native CLI platforms, but ARM64 smoke failed with the same JSON
+parse error; matrix fail-fast cancelled macOS Intel. The earlier quiet-mode test double modeled rustup incorrectly:
+`rustup --quiet toolchain add` still prints the toolchain status to stdout.
+Cross 0.2.5 also does not strip the newer `(active, default)` marker when deciding
+whether the toolchain is installed, so it invokes that command again.
+
+The corrected regression retains noisy output even with `--quiet` and fails
+against the earlier workflow. Smoke now executes the already-built binary through
+the pinned Cross image's QEMU runner directly, without invoking Cargo or rustup.
+The container has no network and a read-only checkout. Exact SHA, version and
+target checks remain unchanged; no output filtering accepts malformed JSON.
+All ten workflow regressions pass. Actual hosted ARM64 execution remains a gate;
+the local ARM64 host cannot launch this x86-64 container without host emulation.
