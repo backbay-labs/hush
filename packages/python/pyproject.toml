@@ -24,7 +24,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
     # conditions.py resolves `time_window.timezone` through `zoneinfo`, which
     # reads the *system* tz database. Windows has none, and slim/distroless
     # container images routinely omit it, so a timezone-scoped rule would fail
