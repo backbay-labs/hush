@@ -1,6 +1,6 @@
 use hushspec_testkit::external::{
-    corpus::{Assertion, Case, Expectation, plan_cases},
-    model::{ErrorCodes, Observation, Operation, Phase, Response, Slot},
+    corpus::{Assertion, Case, Expectation, plan_cases, plan_cases_with_limits},
+    model::{ErrorCodes, Observation, Operation, Phase, ProcessLimits, Request, Response, Slot},
     score::{normalize_document, score},
     snapshot::snapshot_corpus,
 };
@@ -41,6 +41,40 @@ fn ok(value: Value) -> Observation {
 fn external_document_projection_uses_declared_schema_lineage() {
     assert!(normalize_document(&json!({"hushspec":"0.2.0","name":""}), false).is_ok());
     assert!(normalize_document(&json!({"hushspec":"1.0.0","name":""}), false).is_err());
+}
+
+#[test]
+fn external_planning_budget_matches_exact_retained_wire_sizes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let corpus = snapshot_corpus(&root).unwrap();
+    let plan = plan_cases(&corpus, 3).unwrap();
+    let bytes: usize = plan
+        .cases
+        .iter()
+        .map(|case| {
+            let input = serde_json::to_vec(&case.input).unwrap();
+            let request = Request {
+                protocol: "0.1.0".into(),
+                run_id: "a".repeat(64),
+                case_id: case.id.clone(),
+                operation: case.operation,
+                input_sha256: "b".repeat(64),
+                input: case.input.clone(),
+            };
+            input.len() + serde_json::to_vec(&request).unwrap().len()
+        })
+        .sum();
+    let limits = ProcessLimits {
+        total_request_bytes: bytes,
+        ..Default::default()
+    };
+    assert!(plan_cases_with_limits(&corpus, 3, &limits).is_ok());
+    let limits = ProcessLimits {
+        total_request_bytes: bytes - 1,
+        ..Default::default()
+    };
+    let error = plan_cases_with_limits(&corpus, 3, &limits).unwrap_err();
+    assert!(error.contains("request/input byte limit"), "{error}");
 }
 fn status(case: &Case, observation: Observation, codes: ErrorCodes) -> Status {
     score(case, &response(case, observation), codes).unwrap()[0].status

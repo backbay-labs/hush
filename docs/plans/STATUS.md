@@ -16,9 +16,13 @@ requests, 1375 result slots and 4023 artifact digests checked. It exposed and
 repaired a Go zero/false serialization bug, alongside controller/adapter
 bring-up defects, without changing corpus expectations or Core semantics.
 
-The acceptance driver, CI integration and operator guidance are in local
-qualification. Fresh whole-branch review and exact-head hosted qualification
-remain pending in the [qualification record](../reviews/2026-09-23-project-b-qualification.md).
+The acceptance driver, CI integration and operator guidance are implemented.
+The final independent review was interrupted after identifying a request-budget
+defect. The author repaired it and an adjacent fixture-expansion path, with
+failing-then-passing regressions, and performed a disclosed self-review.
+Post-repair full local verification passes; exact-head hosted qualification is tracked
+in the [qualification record](../reviews/2026-09-23-project-b-qualification.md).
+A complete independent final review remains open; self-review is not approval.
 The independent-engine gate remains open; Go is first-party bring-up. Projects
 C (trusted MCP dispatch) and D (external assessor/adopter validation) remain open.
 No merge, tag or publication is implied.

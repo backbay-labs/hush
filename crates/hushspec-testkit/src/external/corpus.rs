@@ -1,7 +1,7 @@
 //! Snapshot-only case planning. Expectations are data, never reference verdicts.
 use super::{
     json as wire,
-    model::{MAX_CASES, Operation, Phase, Slot},
+    model::{MAX_CASES, MAX_REQUEST, Operation, PROTOCOL, Phase, ProcessLimits, Request, Slot},
     snapshot::CorpusSnapshot,
 };
 use crate::report::{Status, VectorResult};
@@ -41,6 +41,8 @@ pub struct Plan {
     pub cases: Vec<Case>,
     pub unattempted: Vec<VectorResult>,
     pub builtins: BTreeMap<String, String>,
+    retained_request_bytes: usize,
+    request_budget: usize,
 }
 
 pub fn slot_result(slot: &Slot, status: Status, message: impl Into<String>) -> VectorResult {
@@ -131,8 +133,40 @@ fn one(
         input,
     }
 }
-fn add(plan: &mut Plan, case: Case, level: u8) {
+fn add(plan: &mut Plan, case: Case, level: u8) -> Result<(), String> {
     if case.expectations.iter().any(|e| e.slot.level <= level) {
+        if plan.cases.len() >= MAX_CASES {
+            return Err("oversized external case plan".into());
+        }
+        let input = serde_json::to_vec(&case.input).map_err(|e| e.to_string())?;
+        // Both generated identifiers are 64 ASCII bytes. Serialize the real
+        // envelope with a null placeholder to count its exact overhead without
+        // cloning the potentially large policy/dependency map again.
+        let envelope = Request {
+            protocol: PROTOCOL.into(),
+            run_id: "0".repeat(64),
+            case_id: case.id.clone(),
+            operation: case.operation,
+            input_sha256: "0".repeat(64),
+            input: Value::Null,
+        };
+        let overhead = serde_json::to_vec(&envelope)
+            .map_err(|e| e.to_string())?
+            .len()
+            - 4;
+        let request_bytes = input
+            .len()
+            .checked_add(overhead)
+            .ok_or("request byte count overflow")?;
+        let retained = plan
+            .retained_request_bytes
+            .checked_add(request_bytes)
+            .and_then(|n| n.checked_add(input.len()))
+            .ok_or("request byte count overflow")?;
+        if request_bytes > MAX_REQUEST || retained > plan.request_budget {
+            return Err("retained request/input byte limit exceeded".into());
+        }
+        plan.retained_request_bytes = retained;
         plan.cases.push(case);
     } else {
         for e in case.expectations {
@@ -143,6 +177,7 @@ fn add(plan: &mut Plan, case: Case, level: u8) {
             ));
         }
     }
+    Ok(())
 }
 
 fn mandatory_parse_rejection(path: &str) -> bool {
@@ -192,7 +227,7 @@ fn document_cases(
             parse,
         ),
         target,
-    );
+    )?;
     let validation = if valid {
         Assertion::Accept
     } else {
@@ -227,7 +262,7 @@ fn document_cases(
             validation,
         ),
         target,
-    );
+    )?;
     Ok(())
 }
 
@@ -294,7 +329,7 @@ fn evaluator_cases(
                 Assertion::Fields(expected),
             ),
             target,
-        );
+        )?;
     }
     Ok(())
 }
@@ -380,7 +415,7 @@ fn raw_cases(
                 "above requested level",
             ));
         }
-        add(plan, c, target);
+        add(plan, c, target)?;
         if let Some(canonical) = v.get("canonical") {
             let canonical = canonical
                 .as_str()
@@ -398,9 +433,9 @@ fn raw_cases(
                 ),
             );
             if target == 3 {
-                plan.cases.push(case);
+                add(plan, case, 4)?;
             } else {
-                add(plan, case, target);
+                add(plan, case, target)?;
             }
         }
         if let Some(decision) = v.get("decision") {
@@ -419,7 +454,7 @@ fn raw_cases(
                     Assertion::Fields(json!({"decision":decision})),
                 ),
                 target,
-            );
+            )?;
         }
     }
     Ok(())
@@ -506,12 +541,12 @@ fn merge_cases(
                 assertion,
             ),
             target,
-        );
+        )?;
     }
     Ok(())
 }
 
-fn resolution_counterexamples(plan: &mut Plan, target: u8) {
+fn resolution_counterexamples(plan: &mut Plan, target: u8) -> Result<(), String> {
     // Literal witnesses supplement the hash-oriented L4 resolve corpus. They
     // are controller inputs, whose provenance is the captured controller image.
     for strategy in ["deep_merge", "merge", "replace"] {
@@ -535,7 +570,7 @@ fn resolution_counterexamples(plan: &mut Plan, target: u8) {
                 Assertion::Document(expected),
             ),
             target,
-        );
+        )?;
     }
     for (name, policy, documents, reason) in [
         (
@@ -566,11 +601,21 @@ fn resolution_counterexamples(plan: &mut Plan, target: u8) {
                 },
             ),
             target,
-        );
+        )?;
     }
+    Ok(())
 }
 
 pub fn plan_cases(snapshot: &CorpusSnapshot, target: u8) -> Result<Plan, String> {
+    plan_cases_with_limits(snapshot, target, &ProcessLimits::default())
+}
+
+pub fn plan_cases_with_limits(
+    snapshot: &CorpusSnapshot,
+    target: u8,
+    limits: &ProcessLimits,
+) -> Result<Plan, String> {
+    limits.validate()?;
     if target > 3 {
         return Err("external controller currently targets levels 0 through 3".into());
     }
@@ -578,6 +623,8 @@ pub fn plan_cases(snapshot: &CorpusSnapshot, target: u8) -> Result<Plan, String>
         cases: Vec::new(),
         unattempted: Vec::new(),
         builtins: builtin_documents(),
+        retained_request_bytes: 0,
+        request_budget: limits.total_request_bytes,
     };
     let mut merge_dirs = BTreeSet::new();
     for entry in &snapshot.manifest.files {
@@ -619,7 +666,7 @@ pub fn plan_cases(snapshot: &CorpusSnapshot, target: u8) -> Result<Plan, String>
     for dir in merge_dirs {
         merge_cases(snapshot, &mut plan, dir, target)?;
     }
-    resolution_counterexamples(&mut plan, target);
+    resolution_counterexamples(&mut plan, target)?;
     if plan.cases.is_empty() || plan.cases.len() > MAX_CASES {
         return Err("empty or oversized external case plan".into());
     }

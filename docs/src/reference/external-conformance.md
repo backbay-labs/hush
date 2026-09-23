@@ -2,7 +2,7 @@
 
 `hushspec-testkit external` executes a digest-pinned engine and grades its
 observations against captured corpus expectations. It never substitutes the
-Rust reference evaluator. The experimental protocol and execution record are
+built-in evaluator. The experimental protocol and execution record are
 version `0.1.0`; the resulting conformance report retains the stable v1 format.
 
 The current backend targets L0-L3 on Linux with a static, native ELF executable.
@@ -131,7 +131,11 @@ caps but is outside the dispatch deadline.
 
 Inputs are bounded snapshots: profile 1 MiB; engine 128 MiB; controller 256 MiB;
 materials 16 files/16 MiB total; manifest 8 MiB; corpus 4096 files, 16 MiB per
-file and 64 MiB total. Symlinks, physical aliases, missing/unlisted corpus files
+file and 64 MiB total. Decoded YAML fixture containers have a separate 64 MiB
+accounting budget, charging string/key bytes and 64 bytes per value/key before
+retention, including expanded aliases. This is not a process RSS limit. Case
+count and request/input budgets are checked incrementally during planning.
+Symlinks, physical aliases, missing/unlisted corpus files
 and digest mismatches are refused. The controller captures its running image
 through `/proc/self/exe`; it executes the private captured engine image, not
 the original mutable path. JSON nesting is limited to 64.

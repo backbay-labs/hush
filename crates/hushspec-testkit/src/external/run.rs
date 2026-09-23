@@ -1,6 +1,6 @@
 //! External controller orchestration. No reference-engine operations or fallback.
 use super::{
-    corpus::{plan_cases, slot_result},
+    corpus::{plan_cases_with_limits, slot_result},
     json,
     model::*,
     output::Packet,
@@ -128,7 +128,7 @@ pub fn run_external(options: ExternalOptions) -> Result<RunOutcome, String> {
         }
         materials.push(captured);
     }
-    let plan = plan_cases(&corpus, options.level)?;
+    let plan = plan_cases_with_limits(&corpus, options.level, &options.limits)?;
     let run_id = fresh_id()?;
     let mut requests = Vec::new();
     let mut planned = Vec::new();

@@ -1,18 +1,45 @@
 //! Duplicate-aware bounded JSON, before schema or typed decoding.
 use serde::de::{self, DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
+use std::cell::Cell;
 use std::fmt;
 
-struct Seed(usize);
+#[derive(Clone, Copy)]
+struct Seed<'a> {
+    depth: usize,
+    remaining: Option<&'a Cell<usize>>,
+}
+impl Seed<'_> {
+    fn charge<E: de::Error>(&self, bytes: usize) -> Result<(), E> {
+        if let Some(remaining) = self.remaining {
+            remaining.set(
+                remaining
+                    .get()
+                    .checked_sub(bytes)
+                    .ok_or_else(|| E::custom("decoded fixture byte limit exceeded"))?,
+            );
+        }
+        Ok(())
+    }
+    fn child(self) -> Self {
+        Self {
+            depth: self.depth + 1,
+            ..self
+        }
+    }
+}
 
-impl<'de> DeserializeSeed<'de> for Seed {
+impl<'de> DeserializeSeed<'de> for Seed<'_> {
     type Value = Value;
     fn deserialize<D: de::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+        // Charge each value before visiting it, including repeated YAML aliases.
+        // The fixed charge also bounds collections of small scalar values.
+        self.charge(64)?;
         d.deserialize_any(self)
     }
 }
 
-impl<'de> Visitor<'de> for Seed {
+impl<'de> Visitor<'de> for Seed<'_> {
     type Value = Value;
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("unambiguous JSON of depth at most 64")
@@ -32,34 +59,37 @@ impl<'de> Visitor<'de> for Seed {
             .ok_or_else(|| E::custom("nonfinite number"))
     }
     fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
+        self.charge(v.len())?;
         Ok(Value::String(v.into()))
     }
     fn visit_string<E: de::Error>(self, v: String) -> Result<Value, E> {
+        self.charge(v.len())?;
         Ok(Value::String(v))
     }
     fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
         Ok(Value::Null)
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<Value, A::Error> {
-        if self.0 >= 64 {
+        if self.depth >= 64 {
             return Err(de::Error::custom("JSON nesting exceeds 64"));
         }
         let mut items = Vec::new();
-        while let Some(v) = a.next_element_seed(Seed(self.0 + 1))? {
+        while let Some(v) = a.next_element_seed(self.child())? {
             items.push(v);
         }
         Ok(Value::Array(items))
     }
     fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Value, A::Error> {
-        if self.0 >= 64 {
+        if self.depth >= 64 {
             return Err(de::Error::custom("JSON nesting exceeds 64"));
         }
         let mut items = Map::new();
         while let Some(k) = a.next_key::<String>()? {
+            self.charge(k.len().saturating_add(64))?;
             if items.contains_key(&k) {
                 return Err(de::Error::custom(format!("duplicate JSON key {k:?}")));
             }
-            items.insert(k, a.next_value_seed(Seed(self.0 + 1))?);
+            items.insert(k, a.next_value_seed(self.child())?);
         }
         Ok(Value::Object(items))
     }
@@ -67,9 +97,12 @@ impl<'de> Visitor<'de> for Seed {
 
 pub fn parse_json(bytes: &[u8]) -> Result<Value, String> {
     let mut decoder = serde_json::Deserializer::from_slice(bytes);
-    let value = Seed(0)
-        .deserialize(&mut decoder)
-        .map_err(|e| e.to_string())?;
+    let value = Seed {
+        depth: 0,
+        remaining: None,
+    }
+    .deserialize(&mut decoder)
+    .map_err(|e| e.to_string())?;
     decoder.end().map_err(|e| e.to_string())?;
     Ok(value)
 }
@@ -79,7 +112,15 @@ pub fn parse_json(bytes: &[u8]) -> Result<Value, String> {
 pub(crate) fn parse_yaml(bytes: &[u8]) -> Result<Value, String> {
     let mut documents = serde_yaml::Deserializer::from_slice(bytes);
     let document = documents.next().ok_or("empty YAML fixture container")?;
-    let value = Seed(0).deserialize(document).map_err(|e| e.to_string())?;
+    // Source-file caps do not bound alias-expanded values. Keep a separate
+    // decoded budget; raw policy spelling is still passed untouched to engines.
+    let remaining = Cell::new(64 * super::model::MIB);
+    let value = Seed {
+        depth: 0,
+        remaining: Some(&remaining),
+    }
+    .deserialize(document)
+    .map_err(|e| e.to_string())?;
     if documents.next().is_some() {
         return Err("multiple YAML fixture documents".into());
     }

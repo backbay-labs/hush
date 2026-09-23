@@ -123,8 +123,35 @@ impl Fixture {
         std::fs::write(&self.profile, serde_json::to_vec(&profile).unwrap()).unwrap();
     }
     fn run(&self, level: u8, extra: &[&str]) -> Output {
+        self.run_with_memory_limit(level, extra, None)
+    }
+    fn run_with_memory_limit(&self, level: u8, extra: &[&str], memory: Option<u64>) -> Output {
         let _guard = RUN_LOCK.lock().unwrap();
-        Command::new(&self.controller)
+        let mut command = Command::new(&self.controller);
+        if let Some(bytes) = memory {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: the child setup only calls async-signal-safe setrlimit.
+            unsafe {
+                command.pre_exec(move || {
+                    let limit = libc::rlimit {
+                        rlim_cur: bytes,
+                        rlim_max: bytes,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_AS, &limit) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    let no_core = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_CORE, &no_core) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+        command
             .arg("external")
             .arg("--engine")
             .arg(&self.profile)
@@ -148,6 +175,42 @@ impl Fixture {
     fn report(&self) -> Value {
         serde_json::from_slice(&std::fs::read(self.out.join("report.json")).unwrap()).unwrap()
     }
+}
+
+fn repeated_input_is_bounded(policy: Value, cases: usize) {
+    let f = Fixture::new("honest");
+    let vector = json!({"description":"unknown action", "action":{"type":"unknown"}, "expect":{"decision":"deny"}});
+    let suite = json!({"hushspec_test":"0.1.0", "description":"bounded expansion", "policy":policy, "cases":vec![vector; cases]}).to_string();
+    f.corpus(&[
+        ("one.yaml", "valid", 1, "hushspec: '1.0.0'\n"),
+        ("two.yaml", "valid", 1, "hushspec: '1.0.0'\n"),
+        ("suite.yaml", "evaluation", 3, &suite),
+    ]);
+    let result = f.run_with_memory_limit(3, &[], Some(384 * 1024 * 1024));
+    assert_eq!(
+        result.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("request/input byte limit"));
+    assert!(!f.out.exists());
+}
+
+#[test]
+fn external_cli_request_budget_precedes_repeated_policy_expansion() {
+    repeated_input_is_bounded(
+        json!({"hushspec":"1.0.0", "description":"x".repeat(512 * 1024)}),
+        1000,
+    );
+}
+
+#[test]
+fn external_cli_request_budget_precedes_repeated_dependency_expansion() {
+    repeated_input_is_bounded(
+        json!({"hushspec":"1.0.0", "extends":"builtin:default"}),
+        9000,
+    );
 }
 
 #[test]
@@ -239,6 +302,26 @@ fn external_cli_bad_protocol_or_process_never_qualifies_and_retains_remaining_sl
                 .any(|r| r["level"] == 0 && r["status"] == "not_attempted")
         );
     }
+}
+
+#[test]
+fn external_cli_bounds_decoded_fixture_aliases_before_planning() {
+    let f = Fixture::new("honest");
+    let suite = format!(
+        "hushspec_test: '0.1.0'\ndescription: bounded aliases\npolicy:\n  hushspec: '1.0.0'\n  description: &text {}\ncases:\n{}",
+        "x".repeat(512 * 1024),
+        "  - description: case\n    action: {type: unknown, target: *text}\n    expect: {decision: deny}\n".repeat(1000)
+    );
+    f.corpus(&[
+        ("one.yaml", "valid", 1, "hushspec: '1.0.0'\n"),
+        ("two.yaml", "valid", 1, "hushspec: '1.0.0'\n"),
+        ("suite.yaml", "evaluation", 3, &suite),
+    ]);
+    let result = f.run_with_memory_limit(3, &[], Some(384 * 1024 * 1024));
+    let error = String::from_utf8_lossy(&result.stderr);
+    assert_eq!(result.status.code(), Some(2), "{error}");
+    assert!(error.contains("decoded fixture byte limit"), "{error}");
+    assert!(!f.out.exists());
 }
 
 #[test]
