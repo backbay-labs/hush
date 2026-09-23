@@ -135,7 +135,7 @@ slots assert highest_level cannot rise to 3.
 
 ```go
 func TestEvaluateUnknownAction(t *testing.T) {
-    input := []byte(`{"policy":"hushspec: '1.0.0'","action":{"type":"unknown"}}`)
+    input := []byte(`{"policy":"hushspec: '1.0.0'","action":{"type":"unknown"},"source":"policy.yaml","documents":{}}`)
     result := observe("evaluate", input)
     if result.Status != "ok" || result.Value["decision"] != "deny" {
         t.Fatalf("unexpected observation: %#v", result)

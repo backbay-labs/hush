@@ -129,7 +129,8 @@ The request is a single JSON value on stdin:
 ```json
 {"protocol":"0.1.0","run_id":"unique-run-id","case_id":"fixture#case",
  "operation":"evaluate","input_sha256":"64 lowercase hex digits",
- "input":{"policy":"raw YAML or JSON text","action":{"type":"tool_call","target":"read_file"}}}
+ "input":{"policy":"raw YAML or JSON text","action":{"type":"tool_call","target":"read_file"},
+ "source":"policy.yaml","documents":{}}}
 ```
 
 `input_sha256` binds the controller's serialized input value, which is retained
