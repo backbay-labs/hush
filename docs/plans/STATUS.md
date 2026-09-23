@@ -2,12 +2,29 @@
 
 **Reviewed:** 2026-09-22
 **Reviewed baseline:** `wave-6` at `a0637cbe9d2ceb65a6865bb35d8ee4f0af5f2f1b`
-**Repair revision:** This revision; local verification record 2026-09-22
+**Repair revision:** Project A evidence repairs on `wave-6`; qualification tracked below
 **Authority:** This is the current status ledger for `docs/plans/`. The numbered RFCs retain their original requirements and design rationale; they are not completion records.
 
 > **Evidence boundary:** The reviewed baseline and repair revision are different states. The complete local verification record below does not establish hosted qualification, merge, tag, or publication. Terminal [CI checks](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) attached to the exact candidate record hosted qualification separately.
 
-## Reading the states
+## Project A evidence repair (2026-09-22)
+
+Tasks 1-9 of the [approved implementation plan](../superpowers/plans/2026-09-22-trustworthy-evidence.md)
+are implemented on the branch: honest reference-runner identity, four-SDK
+confirmation-failure recording, bounded strict evidence verification, scoped
+inventory/policy qualification and validated observation-only OSCAL. Focused
+regressions pass. Full local qualification, the independent whole-branch review
+and exact-head hosted CI are tracked in the [Project A qualification record](../reviews/2026-09-22-project-a-qualification.md).
+No merge, tag, package publication or external assessment is implied.
+
+The older repair and hosted snapshots below remain historical evidence for
+their named revisions, not qualification of Project A. The [foundation roadmap](2026-09-22-foundation-assurance-roadmap.md)
+still requires B (an executable independent-engine conformance harness), C
+(trusted MCP tool-plus-effect authorization and durable no-permit/no-dispatch),
+and D (external assessor/adopter validation). Signed records do not establish
+these runtime or adoption properties.
+
+### State definitions
 
 | State | Meaning |
 |---|---|
@@ -17,7 +34,7 @@
 | Merged | The candidate is on `main`; it may still be unqualified or unpublished. |
 | Published | A tagged artifact is resolvable from its intended public registry. |
 
-## Current integration and release state
+## Earlier repair integration and release snapshot
 
 | Item | State | Evidence and boundary |
 |---|---|---|

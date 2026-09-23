@@ -73,6 +73,10 @@ EXCLUDED_PATHS = (
     "package-lock.json",
     "packages/go/go.sum",
     "crates/hushspec-cli/schemas/sarif-2.1.0.schema.json",
+    "crates/hushspec-cli/schemas/oscal/v1.1.2/oscal_assessment-plan_schema.json",
+    "crates/hushspec-cli/schemas/oscal/v1.1.2/oscal_assessment-results_schema.json",
+    "crates/hushspec-cli/schemas/oscal/v1.1.2/oscal_ssp_schema.json",
+    "crates/hushspec-cli/schemas/oscal/v1.1.2/oscal_catalog_schema.json",
     "scripts/comment-hygiene-allow.txt",
 )
 EXCLUDED_SUFFIXES = (".lock", ".sum")

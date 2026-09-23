@@ -6,6 +6,56 @@ use predicates::prelude::*;
 use serde_json::json;
 
 #[test]
+fn documented_monitor_example_is_current_and_runnable() {
+    let generated = evidence::Fixture::monitor();
+    let example = generated.root.join("fixtures/assurance/monitor");
+    if matches!(
+        std::env::var("HUSHSPEC_UPDATE_MONITOR_EXAMPLE").as_deref(),
+        Ok("1" | "true")
+    ) {
+        std::fs::create_dir_all(&example).unwrap();
+        for name in ["policy.yaml", "profile.json", "evidence.jsonl"] {
+            std::fs::copy(generated.dir.path().join(name), example.join(name)).unwrap();
+        }
+    }
+    for name in ["policy.yaml", "profile.json", "evidence.jsonl"] {
+        assert_eq!(
+            std::fs::read(example.join(name)).unwrap(),
+            std::fs::read(generated.dir.path().join(name)).unwrap(),
+            "{name}"
+        );
+    }
+    let output = tempfile::tempdir().unwrap();
+    assert_cmd::Command::cargo_bin("h2h")
+        .unwrap()
+        .arg("report")
+        .arg(example.join("evidence.jsonl"))
+        .args([
+            "--format",
+            "json",
+            "--now",
+            "2026-09-15T12:00:00Z",
+            "--evidence-profile",
+        ])
+        .arg(example.join("profile.json"))
+        .arg("--keyring")
+        .arg(generated.root.join("fixtures/signing/keys/keyring.json"))
+        .arg("--out")
+        .arg(output.path().join("report.json"))
+        .arg("--verification-out")
+        .arg(output.path().join("verification.json"))
+        .assert()
+        .success();
+    let verification: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(output.path().join("verification.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        verification["report_sha256"],
+        evidence::digest(&std::fs::read(output.path().join("report.json")).unwrap())
+    );
+}
+
+#[test]
 fn signed_monitor_evidence_produces_observations_not_findings() {
     let fixture = evidence::Fixture::monitor();
     fixture.command_oscal().assert().success();

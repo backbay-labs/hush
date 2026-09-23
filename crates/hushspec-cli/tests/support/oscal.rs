@@ -8,8 +8,11 @@ impl Fixture {
         let mut fixture = Self::new();
         let text = "hushspec: '1.0.0'\nname: synthetic-pilot\nrules:\n  tool_access:\n    require_confirmation: [risky_tool]\n    default: block\nmetadata:\n  controls:\n    - framework: pilot\n      control_id: tool-access\n      rule_paths: [rules.tool_access]\n";
         std::fs::write(fixture.dir.path().join("policy.yaml"), text).unwrap();
-        let resolution = hushspec::resolve_path_with_options(
-            &fixture.dir.path().join("policy.yaml"),
+        let spec = hushspec::HushSpec::parse(text).unwrap();
+        let resolution = hushspec::resolve_with_options(
+            &spec,
+            Some("policy.yaml"),
+            &|_, _| panic!("resolved example must not load another policy"),
             &Default::default(),
         )
         .unwrap();

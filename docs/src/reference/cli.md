@@ -665,7 +665,7 @@ Prints the document's own content hash with `extends` and `merge_strategy` strip
 
 ## `h2h report <files...>`
 
-Turns a window of receipts into a compliance evidence report: what the policy decided, which controls ran, how often they fired, which policy was in force while they did, and -- with `--policy` -- which compliance controls that adds up to.
+Aggregates recorded policy decisions, enforcement outcomes and mapped rule activity over a window. Ordinary mode is exploratory; a rule/control mapping is not an assessment conclusion. Use an explicit evidence profile for authenticated, stream-scoped reporting.
 
 ```bash
 h2h report audit.jsonl                                     # the whole log, as tables
@@ -690,11 +690,18 @@ When the input is a log, its chain is verified before anything is counted (the s
 | `--unverified` | Report on a log whose chain did not verify. |
 | `--keyring <PATH>` | Trusted keyring JSON for entry signatures. Without one, signed entries are counted but not verified. |
 | `--key <PATH>` | A single trusted public key (PEM), as a one-key keyring. Mutually exclusive with `--keyring`. |
-| `--require-signatures` | Every log entry must carry a signature that verifies; an unsigned entry (`entry_unsigned`) or a missing keyring (`no_keyring`) breaks the chain. |
+| `--require-signatures` | Legacy mode: log entries only, not standalone receipt envelopes. Every log entry must carry a verifying signature; an unsigned entry or missing keyring breaks the chain. Strict mode always authenticates every declared record. |
 | `--max-skew <SECONDS>` | Allowed signer clock skew while verifying entry signatures (default 300). |
 | `--now <TIMESTAMP>` | Stamp `generated_at` with this instead of the wall clock (reproducible reports). It is also the verifier's clock for entry signatures, so a report pinned to an instant verifies them as of the moment it describes. |
 | `--top-paths <N>` | How many `rule_path`s each rule-block row lists (default 5). |
 | `--experimental-oscal` | Required by `--format oscal`. |
+| `--evidence-profile <PATH>` | Experimental strict profile. Requires JSON or contextual OSCAL, exactly one key/keyring, `--out` and `--verification-out`. |
+| `--verification-out <PATH>` | New verification sidecar file; published last as the completion marker. |
+| `--assessment-context <PATH>` | OSCAL only: local manifest binding AP, SSP and resolved catalog. |
+| `--native-report-out <PATH>` | OSCAL only: new accompanying native JSON report. |
+| `--max-evidence-file-bytes <N>` | Strict-only file cap: default 16 MiB, maximum 1 GiB. |
+| `--max-evidence-total-bytes <N>` | Strict-only shared input budget: default 64 MiB, maximum 1 GiB. |
+| `--max-evidence-line-bytes <N>` | Strict-only JSONL line cap: default 1 MiB, maximum 16 MiB. Require `0 < line <= file <= total`. |
 
 ### What it aggregates
 
@@ -712,9 +719,34 @@ A mapping that names a rule block (`rules.egress`) is evidenced by everything th
 
 `--format json` emits one document validated by [`schemas/hushspec-report.v1.schema.json`](https://github.com/backbay-labs/hush/blob/main/schemas/hushspec-report.v1.schema.json) (`h2h schema report`). `--format csv` with `--out <dir>` writes `totals.csv`, `rule_blocks.csv`, `action_types.csv`, `policies.csv`, `policy_timeline.csv`, `actors.csv`, `signatures.csv`, `detections.csv`, and -- with `--policy` -- `controls.csv` and `unmapped_rule_blocks.csv`; without `--out` it writes the single table `--by` names to stdout.
 
-`--format oscal` (behind `--experimental-oscal`, and requiring `--policy`) emits a minimal OSCAL 1.1.2 `assessment-results` document: one `result` for the window whose `findings` are the per-control rows and whose `observations` carry the counts. The chain's status travels with the document: `metadata`, the `result` and every `finding` carry a `chain-verified` prop (`true`, `false`, or `not-applicable` when the inputs were not logs), and under `--unverified` over a broken chain the `metadata` and each `finding` carry `remarks` naming the reason and no finding is `satisfied`. **Experimental**: the shape is deliberately the smallest an OSCAL consumer will accept -- no assessment plan, no system security plan, no subject inventory -- and it may change without a spec version bump.
+`--format oscal --experimental-oscal` requires the strict profile, trusted keys,
+`--assessment-context`, `--native-report-out`, `--out`, and
+`--verification-out`. The pinned OSCAL 1.1.2 exporter emits receipt-derived
+`EXAMINE` observations, not findings, risks or objective satisfaction. It
+validates both the local AP/SSP/catalog context and generated result. Older
+experimental commands without context now fail; `--unverified` is prohibited.
+
+Strict mode authenticates captured source bytes before window filtering,
+verifies ordered rotations per stream, checks policy transitions and optionally
+matches independently obtained inventory. Completeness remains not-established
+without that inventory. Supplied optional policy signatures must still verify.
+The sidecar binds native report, profile, trust-input and source byte digests;
+an unsigned sidecar is not itself an attestation. Native `signatures` retains
+runtime-reported policy-signature semantics. Multi-policy controls are separate
+interval summaries in the sidecar.
+
+Strict outputs must be distinct new files in one existing operator-controlled
+directory; no input aliases or overwrites. Files must match the profile's
+flattened source order. Strict mode rejects `--lenient`, `--unverified`, `--by`,
+stdout, negative clock skew and mismatched explicit windows. `--policy` may only
+select an already-declared resolved artifact. See [Evidence Verification](../guides/evidence-verification.md)
+for runnable examples, bounds, trust assumptions and publication/crash limits.
 
 Exit 0 when the report was produced, 1 for a broken chain without `--unverified`, 2 for unusable inputs or flags.
+
+Strict mode also uses exit 1 for digest, signature, signer-role, duplicate
+receipt, policy-binding and required-boundary failures; context/output/limit
+errors use exit 2. Refused strict inputs publish no success packet.
 
 Vectors: [`fixtures/report/`](https://github.com/backbay-labs/hush/tree/main/fixtures/report) -- a synthetic 24-hour log and the exact report it must produce.
 

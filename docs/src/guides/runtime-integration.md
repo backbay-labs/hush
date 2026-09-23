@@ -104,6 +104,14 @@ A handler that returns `true` records the outcome as `confirmed` -- distinct
 from `allowed` in the receipt, so an auditor can tell a policy allow from a
 human override.
 
+If an ordinary confirmation callback throws, the guard attempts to record the
+existing warn receipt with outcome `blocked`, then propagates the original
+failure. A failing sink cannot replace that failure or authorize the action.
+Rust unwinding panics and recoverable Go panics use the same boundary; Python
+`BaseException` termination paths, Rust abort-mode panic and fatal process
+errors are outside the recording guarantee. Unavailable storage means no
+receipt can be promised. Monitor mode does not invoke confirmation callbacks.
+
 ### Enforcement modes
 
 `EnforcementMode::Monitor` records what the policy *would* have done and lets
@@ -159,9 +167,18 @@ document to refuse against.
 
 ## Observers
 
-Receipts are the *evidence* channel: durable, hash-linked, specified.
+Receipts are the *evidence* channel: specified records that can be stored in
+signed, hash-linked logs. Durability depends on the sink and its successful
+storage, not merely on configuring a guard.
 Observers are the *telemetry* channel: best-effort, structured, cheap. A guard
 drives both from the same evaluation.
+
+These best-effort hooks are not a no-durable-permit/no-dispatch boundary. A
+successful effect check from an automatic tool mapper also does not establish
+MCP server identity or tool authorization: allowed egress can coexist with a
+denied tool call. Complete tool-plus-effect authorization and controlled
+dispatch remain separate integration work. See [Evidence Verification](evidence-verification.md)
+for what authenticated records can and cannot establish.
 
 ```rust
 pub trait EvaluationObserver: Send + Sync {
