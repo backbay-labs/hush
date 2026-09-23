@@ -20,18 +20,6 @@ struct Cli {
     /// (schemas/hushspec-conformance-report.v1.schema.json) to this path
     #[arg(long, value_name = "FILE")]
     report: Option<PathBuf>,
-
-    /// Name recorded in the report's `implementation` block
-    #[arg(long, value_name = "NAME", requires = "report")]
-    implementation: Option<String>,
-
-    /// Version recorded in the report's `implementation` block
-    #[arg(long, value_name = "VERSION", requires = "report")]
-    implementation_version: Option<String>,
-
-    /// Language recorded in the report's `implementation` block
-    #[arg(long, value_name = "LANGUAGE", requires = "report")]
-    implementation_language: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -168,18 +156,7 @@ fn write_report(
         .filter(|result| result.status != report::Status::Pass)
         .count();
 
-    let default = report::reference_implementation();
-    let implementation = report::Implementation {
-        name: cli.implementation.clone().unwrap_or(default.name),
-        version: cli
-            .implementation_version
-            .clone()
-            .unwrap_or(default.version),
-        language: cli
-            .implementation_language
-            .clone()
-            .unwrap_or(default.language),
-    };
+    let implementation = report::reference_implementation();
 
     let built = report::build(
         implementation,

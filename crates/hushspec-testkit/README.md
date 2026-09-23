@@ -4,7 +4,7 @@ Conformance and differential-testing toolkit for [HushSpec](https://github.com/b
 the portable specification for declaring, enforcing and proving the security
 controls an AI agent operates under.
 
-It replays the published conformance corpus against an implementation, scores
+Its conformance runner replays the published corpus against the reference implementation in Rust, scores
 the run against the six conformance levels of `spec/hushspec-core.md` section
 8, and packages the corpus as a reproducible bundle a third party can download
 and run on their own engine.
@@ -26,10 +26,6 @@ hushspec-testkit --fixtures fixtures
 # Add the evidence-chain vectors (levels 4 and 5) and write a report
 hushspec-testkit --fixtures fixtures --report report.json
 
-# Report on an implementation other than the Rust one
-hushspec-testkit --fixtures fixtures --report report.json \
-  --implementation "acme-guard" --implementation-version 2.1.0 \
-  --implementation-language go
 ```
 
 The report validates against
@@ -38,6 +34,14 @@ names the implementation, pins the corpus by the SHA-256 of
 `fixtures/MANIFEST.json`, gives an outcome for each of levels 0-5, and lists
 every vector it ran. `highest_level` is the largest N for which levels 0..=N
 all pass; a level with any unattempted vector is never a pass.
+
+This runner executes only the reference implementation in Rust. It rejects the
+former `--implementation`, `--implementation-version` and
+`--implementation-language` metadata overrides: relabeling a reference run
+does not test another engine. External engines need a harness that actually
+invokes them; an implementation-bound external runner is not yet supplied.
+The implementation version, testkit version and corpus manifest digest are
+separate identities, even when their version strings happen to match.
 
 Reports also run the JSON case corpora that SDK unit tests consume:
 `core/raw-yaml/scalars.json` records parse acceptance at Level 0, decoded

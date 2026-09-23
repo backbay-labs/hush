@@ -114,7 +114,9 @@ A Level 3 implementation additionally:
   vector that declares one
 
 This is the full engine level. All four HushSpec SDKs pass it, and go on to
-Levels 4 and 5; Clawdstrike is a Level 3 implementation.
+Levels 4 and 5. Clawdstrike's conformance level is not qualified here: it needs
+a pinned report from a harness that actually executes that engine. The bundled
+reference runner cannot establish external-engine conformance by relabeling its report.
 
 ## Level 4: Auditor
 

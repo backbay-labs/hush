@@ -17,9 +17,11 @@ There is no formal RBAC or identity-provider integration for repository governan
 (`crates/hushspec/src/governance.rs` models policy-document lifecycle metadata, not
 repository access control). Enterprise policy-lifecycle governance (author/approver
 metadata, separation of duties) is a property of *policy documents* evaluated by `h2h
-audit`, and `h2h audit` is currently advisory only: it reports findings but always exits
-`0`. It does not gate merges in this repository. Making it enforceable is tracked as an
-open RFC under [`docs/plans/`](./docs/plans/).
+audit`. Error-severity findings fail the audit even without `--strict`.
+`--strict` also fails on failed governance checks, warnings and unresolved control
+rule paths. Other advisory findings do not change the default exit status.
+These are policy-document checks, not authenticated repository approval or
+identity enforcement, and they do not themselves gate merges in this repository.
 
 ## How Specification Changes Happen
 

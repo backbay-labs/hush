@@ -8,11 +8,11 @@ import { utf8ByteLength } from '../utf8.js';
  *
  * The Vercel AI SDK and LangChain.js both hand an enforcement point a tool
  * name and a bag of arguments, with no declared action semantics. This module
- * is the one table that turns the handful of unambiguous names into reference
- * action types, so the two adapters cannot drift apart on what `readFile`
- * means. Anything not in the table is a `tool_call` against the tool's own
- * name: guessing wrong would consult the wrong rule block, which is worse than
- * not guessing at all.
+ * maps host naming conventions to effect action types. A name does not
+ * authenticate a tool server or prove its effects. Mapping a tool to an effect
+ * does not also enforce tool_access: hosts must authorize the original tool
+ * and every effect at the actual dispatch boundary. Unknown names remain
+ * tool_call actions. This helper alone does not establish containment.
  */
 
 type ArgRecord = Record<string, unknown>;

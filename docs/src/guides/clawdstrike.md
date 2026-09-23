@@ -1,6 +1,11 @@
 # Using HushSpec with Clawdstrike
 
-[Clawdstrike](https://github.com/backbay-labs/clawdstrike) is the reference engine for HushSpec. It implements all 10 core rules, all three extensions, plus engine-specific features like Ed25519 receipt signing, async guard pipelines, and detection algorithms.
+[Clawdstrike](https://github.com/backbay-labs/clawdstrike) is an integration target
+for HushSpec. The examples below describe its integration surface, not a
+qualified conformance claim. Pin and test the actual engine version before
+relying on support: no implementation-bound report is supplied here for Core
+1.0's 12 rule blocks or all three extensions. The Rust HushSpec crate is the
+reference implementation tested by `hushspec-testkit`.
 
 ## Dual-Format Support
 
@@ -32,7 +37,8 @@ clawdstrike migrate --to native policy.hushspec.yaml > policy.yaml
 
 ## Mapping: HushSpec to Clawdstrike
 
-HushSpec rules map directly to Clawdstrike's built-in guards:
+The historical integration maps these ten rule blocks to Clawdstrike guards;
+this table is not complete Core 1.0 coverage:
 
 | HushSpec Rule | Clawdstrike Guard |
 |---------------|-------------------|
@@ -49,9 +55,10 @@ HushSpec rules map directly to Clawdstrike's built-in guards:
 
 ## Engine-Specific Features
 
-These Clawdstrike features are not part of HushSpec and have no HushSpec equivalent:
+Portable policy and receipt signing are part of HushSpec's signing specification.
+An engine's receipt format and signing integration still need compatibility
+verification; Ed25519 alone does not establish it. Engine-specific features include:
 
-- **Receipt signing** -- Ed25519-signed attestations of every decision
 - **Detection guards** -- `PromptInjectionGuard`, `JailbreakGuard`, `SpiderSenseGuard` (HushSpec detection extension configures thresholds, but the algorithms are engine-specific)
 - **Async guard pipeline** -- `AsyncGuard` trait for guards that call external services
 - **Broker subsystem** -- Brokered egress with capability tokens and secret injection

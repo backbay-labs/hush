@@ -6,6 +6,7 @@ import type { Resolution } from '../src/resolve.js';
 import { Keyring } from '../src/signing.js';
 import type { HushSpec } from '../src/schema.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
+import { mapWellKnownTool } from '../src/adapters/tool-mapping.js';
 import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
 import { activatePanic, deactivatePanic } from '../src/evaluate.js';
@@ -13,6 +14,20 @@ import type { DecisionReceipt } from '../src/receipt.js';
 import { NullSink } from '../src/sinks.js';
 import type { ObserverEvent, EvaluationCompletedEvent } from '../src/observer.js';
 import type { EvaluationResult } from '../src/evaluate.js';
+
+it('effect mapping does not establish tool authorization', () => {
+  const guard = HushGuard.fromYaml(`hushspec: "1.0.0"
+rules:
+  tool_access:
+    block: [fetch]
+    default: block
+  egress:
+    allow: [api.example.com]
+    default: block
+`);
+  expect(guard.gate(mapWellKnownTool('fetch', {url: 'https://api.example.com'})).proceed).toBe(true);
+  expect(guard.gate({type: 'tool_call', target: 'fetch'}).proceed).toBe(false);
+});
 
 
 // ---------------------------------------------------------------------------

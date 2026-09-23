@@ -35,17 +35,18 @@ review; it requires only that the numbers are true.
    `manifest_sha256` your report and your statement both cite.
 
 4. **Run the vectors** against your implementation. Each level's vectors are
-   the manifest entries whose `level` is at or below it. For a Rust engine the
-   reference runner does this directly:
+   the manifest entries whose `level` is at or below it. To test only HushSpec's
+   reference implementation in Rust, use:
 
    ```bash
-   hushspec-testkit --fixtures fixtures --report report.json \
-     --implementation "your-engine" --implementation-version 1.4.0 \
-     --implementation-language rust
+   hushspec-testkit --fixtures fixtures --report report.json
    ```
 
-   For any other language, run the vectors through your own harness and emit a
-   report yourself.
+   This command does not invoke your engine, even if it is written in Rust.
+   Arbitrary implementation identity overrides are rejected. For an external
+   engine, run the vectors through a harness that invokes that exact engine
+   and retain its executable identity, inputs and outputs. The testkit version,
+   corpus manifest digest and tested implementation identity are distinct.
 
 5. **Emit a report** conforming to
    `schemas/hushspec-conformance-report.v1.schema.json`. Validate it with any
