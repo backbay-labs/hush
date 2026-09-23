@@ -72,6 +72,24 @@ Strict Rust audit, cargo-deny, npm audit, isolated Python dependency audit and
 workflow lint passed locally. The clean `baad902` pilot packet and later repair
 integration packets are retained alongside earlier failures and crash evidence.
 
+## Hosted qualification finding
+
+The initial `66dcfd1` direct-head run `35866118297` and PR run `35866125822`
+both failed the pre-existing external-conformance job before engine execution:
+the Rust cache restored `target/external-conformance`, and the controller refused
+to overwrite that directory. Both failed job logs are retained. No new execution
+packet existed to upload, so the artifact step also failed rather than presenting
+old material as a fresh packet.
+
+The job now uses a run/attempt-specific directory under the runner's temporary
+directory, outside the cached Rust target tree. The controller's fresh-directory
+requirement and evidence-retention behavior are unchanged. The cache collision
+was also reproduced locally before the workflow repair. Later exact-head runs
+must qualify this correction; the earlier failed runs remain part of the record.
+The fresh non-cache output passed all 820 requests / 1,375 slots and separate
+offline verification locally; all nine packet-verifier tests and workflow lint
+also passed without removing the deliberately colliding directory.
+
 ## Actual workflow and fault evidence
 
 The completed actor run made six server calls and two endpoint requests. It read

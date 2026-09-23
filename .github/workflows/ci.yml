@@ -140,13 +140,13 @@ jobs:
       - name: Test offline packet verification
         run: python3 -m unittest discover -s scripts -p test_external_conformance.py
       - name: Qualify first-party Go through the external protocol
-        run: python3 scripts/run_external_conformance.py --out target/external-conformance
+        run: python3 scripts/run_external_conformance.py --out "$RUNNER_TEMP/hush-external-conformance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
       - name: Retain complete packet and build inputs on every outcome
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: external-conformance-go-${{ github.run_id }}-${{ github.run_attempt }}
-          path: target/external-conformance/
+          path: ${{ runner.temp }}/hush-external-conformance-${{ github.run_id }}-${{ github.run_attempt }}/
           if-no-files-found: error
 
   trusted-mcp-pilot:
