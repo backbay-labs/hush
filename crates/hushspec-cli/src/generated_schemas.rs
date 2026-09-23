@@ -5,12 +5,16 @@
 
 /// Short schema names accepted by `h2h schema`, in canonical order.
 pub const SCHEMA_NAMES: &[&str] = &[
+    "assessment-context-experimental",
     "bundle",
     "conformance-report",
     "core",
     "detection",
     "error-codes",
     "evaluator-test",
+    "evidence-inventory-experimental",
+    "evidence-profile-experimental",
+    "evidence-verification-experimental",
     "framework-registry",
     "hash-vector",
     "keyring",
@@ -48,6 +52,10 @@ pub const SCHEMA_NAMES: &[&str] = &[
 
 /// Published file name for each short schema name.
 pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
+    (
+        "assessment-context-experimental",
+        "hushspec-assessment-context-experimental.v1.schema.json",
+    ),
     ("bundle", "hushspec-bundle.v1.schema.json"),
     (
         "conformance-report",
@@ -57,6 +65,18 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     ("detection", "hushspec-detection.v1.schema.json"),
     ("error-codes", "hushspec-error-codes.v1.schema.json"),
     ("evaluator-test", "hushspec-evaluator-test.v1.schema.json"),
+    (
+        "evidence-inventory-experimental",
+        "hushspec-evidence-inventory-experimental.v1.schema.json",
+    ),
+    (
+        "evidence-profile-experimental",
+        "hushspec-evidence-profile-experimental.v1.schema.json",
+    ),
+    (
+        "evidence-verification-experimental",
+        "hushspec-evidence-verification-experimental.v1.schema.json",
+    ),
     (
         "framework-registry",
         "hushspec-framework-registry.v1.schema.json",
@@ -127,6 +147,63 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
 
 /// Schema bodies, keyed by short name.
 const SCHEMA_BODIES: &[(&str, &str)] = &[
+    (
+        "assessment-context-experimental",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-assessment-context-experimental.v1.schema.json",
+  "title": "HushSpec assessment-context-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hushspec_assessment_context",
+    "assessment_plan",
+    "system_security_plan",
+    "resolved_catalog"
+  ],
+  "properties": {
+    "hushspec_assessment_context": {
+      "const": "0.1.0"
+    },
+    "assessment_plan": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "system_security_plan": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "resolved_catalog": {
+      "$ref": "#/$defs/ArtifactRef"
+    }
+  },
+  "$defs": {
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}
+"##,
+    ),
     (
         "bundle",
         r##"{
@@ -2657,6 +2734,781 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         },
         "next": {
           "type": "string"
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "evidence-inventory-experimental",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-evidence-inventory-experimental.v1.schema.json",
+  "title": "HushSpec evidence-inventory-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "inventory_version",
+    "run_id",
+    "window",
+    "acquired_from",
+    "streams"
+  ],
+  "properties": {
+    "inventory_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "acquired_from": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/InventoryStream"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    }
+  },
+  "$defs": {
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "InventoryStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "file_sha256s"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "file_sha256s": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        },
+        "log": {
+          "$ref": "#/$defs/LogBoundary"
+        }
+      }
+    },
+    "LogBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_prev_hash",
+        "end_file_sha256",
+        "end_seq",
+        "end_entry_hash"
+      ],
+      "properties": {
+        "start_prev_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "initial_policy_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "end_file_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "end_seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_entry_hash": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "until"
+      ],
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "evidence-profile-experimental",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-evidence-profile-experimental.v1.schema.json",
+  "title": "HushSpec evidence-profile-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_version",
+    "run_id",
+    "window",
+    "policies",
+    "streams",
+    "requirements"
+  ],
+  "properties": {
+    "profile_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PolicySpec"
+      },
+      "minItems": 1,
+      "maxItems": 1024
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StreamSpec"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "requirements": {
+      "$ref": "#/$defs/Requirements"
+    },
+    "inventory": {
+      "$ref": "#/$defs/ArtifactRef"
+    }
+  },
+  "$defs": {
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "PolicySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_hash",
+        "allowed_signer_key_ids"
+      ],
+      "properties": {
+        "content_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "signature": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "allowed_signer_key_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 0,
+          "maxItems": 1024,
+          "uniqueItems": true
+        }
+      }
+    },
+    "Requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundary_inventory",
+        "policy_signatures"
+      ],
+      "properties": {
+        "boundary_inventory": {
+          "type": "boolean"
+        },
+        "policy_signatures": {
+          "type": "boolean"
+        }
+      }
+    },
+    "StreamSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "files",
+        "allowed_signer_key_ids",
+        "allowed_policy_hashes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "kind": {
+          "enum": [
+            "signed-receipts",
+            "signed-log"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        },
+        "allowed_signer_key_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        },
+        "allowed_policy_hashes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        }
+      }
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "until"
+      ],
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "evidence-verification-experimental",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-evidence-verification-experimental.v1.schema.json",
+  "title": "HushSpec evidence-verification-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "verification_version",
+    "run_id",
+    "window",
+    "verified_at",
+    "verifier",
+    "profile_sha256",
+    "keyring_sha256",
+    "report_sha256",
+    "sources",
+    "streams",
+    "limitations"
+  ],
+  "properties": {
+    "verification_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "verified_at": {
+      "$ref": "#/$defs/Timestamp"
+    },
+    "verifier": {
+      "$ref": "#/$defs/Verifier"
+    },
+    "profile_sha256": {
+      "$ref": "#/$defs/Digest"
+    },
+    "keyring_sha256": {
+      "$ref": "#/$defs/Digest"
+    },
+    "report_sha256": {
+      "$ref": "#/$defs/Digest"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SourceResult"
+      },
+      "minItems": 1,
+      "maxItems": 1024
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StreamResult"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096,
+        "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+      },
+      "minItems": 1,
+      "maxItems": 1024
+    },
+    "inventory_sha256": {
+      "$ref": "#/$defs/Digest"
+    }
+  },
+  "$defs": {
+    "ContentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A content hash in the wire form defined by spec/hushspec-canonical.md section 5."
+    },
+    "ControlEvidenceRow": {
+      "type": "object",
+      "required": [
+        "control_id",
+        "rule_paths",
+        "rule_blocks",
+        "receipts",
+        "evaluated",
+        "fired",
+        "denied"
+      ],
+      "additionalProperties": false,
+      "description": "One control's evidence: what the policy says implements it, and what the receipts recorded against those paths.",
+      "properties": {
+        "control_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rule_paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "metadata.controls[].rule_paths, verbatim (core spec section 2.5.1)."
+        },
+        "rule_blocks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "The rule blocks those paths were observed under in the receipts."
+        },
+        "receipts": {
+          "$ref": "#/$defs/Count",
+          "description": "Receipts in which at least one mapped path was consulted."
+        },
+        "evaluated": {
+          "$ref": "#/$defs/Count"
+        },
+        "fired": {
+          "$ref": "#/$defs/Count"
+        },
+        "denied": {
+          "$ref": "#/$defs/Count"
+        },
+        "last_seen": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "ControlsEvidence": {
+      "type": "object",
+      "required": [
+        "policy_source",
+        "policy_content_hash",
+        "receipts_matching_policy",
+        "frameworks",
+        "unmapped_fired_rule_blocks"
+      ],
+      "additionalProperties": false,
+      "description": "The metadata.controls join, present when a policy was supplied or one could be resolved from the log's policy events.",
+      "properties": {
+        "policy_source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The policy the mappings were read from, as the caller named it."
+        },
+        "policy_content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "receipts_matching_policy": {
+          "$ref": "#/$defs/Count",
+          "description": "Receipts in the window that name policy_content_hash. Evidence for a control is only as strong as this number: a receipt evaluated under a different policy proves nothing about these mappings."
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FrameworkEvidence"
+          }
+        },
+        "unmapped_fired_rule_blocks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Rule blocks that fired in the window with no control mapping behind them: the coverage gap lint L011 flags statically, observed dynamically."
+        }
+      }
+    },
+    "Count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "FrameworkEvidence": {
+      "type": "object",
+      "required": [
+        "framework",
+        "registered",
+        "controls"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "framework": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]*$"
+        },
+        "registered": {
+          "type": "boolean",
+          "description": "Whether the framework id is in spec/registries/frameworks.yaml. Registration is advisory (core spec section 2.5.1)."
+        },
+        "controls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ControlEvidenceRow"
+          },
+          "description": "In the order the policy declared the mappings."
+        }
+      }
+    },
+    "PolicyInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_content_hash",
+        "first",
+        "last",
+        "receipts"
+      ],
+      "properties": {
+        "policy_content_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "first": {
+          "$ref": "#/$defs/Position"
+        },
+        "last": {
+          "$ref": "#/$defs/Position"
+        },
+        "receipts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "controls": {
+          "$ref": "#/$defs/ControlsEvidence"
+        }
+      }
+    },
+    "Position": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file_sha256",
+        "line"
+      ],
+      "properties": {
+        "file_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "PropertyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "scope",
+        "basis"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "verified",
+            "not-established",
+            "not-applicable"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "basis": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "minItems": 0,
+          "maxItems": 1024
+        }
+      }
+    },
+    "SourceResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stream_id",
+        "path",
+        "sha256",
+        "records",
+        "signer_key_ids"
+      ],
+      "properties": {
+        "stream_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "records": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "signer_key_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        }
+      }
+    },
+    "StreamResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "authenticity",
+        "continuity",
+        "completeness",
+        "policy_binding",
+        "policy_origin",
+        "signatures_verified",
+        "intervals"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "kind": {
+          "enum": [
+            "signed-receipts",
+            "signed-log"
+          ]
+        },
+        "authenticity": {
+          "$ref": "#/$defs/PropertyResult"
+        },
+        "continuity": {
+          "$ref": "#/$defs/PropertyResult"
+        },
+        "completeness": {
+          "$ref": "#/$defs/PropertyResult"
+        },
+        "policy_binding": {
+          "$ref": "#/$defs/PropertyResult"
+        },
+        "policy_origin": {
+          "$ref": "#/$defs/PropertyResult"
+        },
+        "signatures_verified": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "first": {
+          "$ref": "#/$defs/Position"
+        },
+        "last": {
+          "$ref": "#/$defs/Position"
+        },
+        "intervals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PolicyInterval"
+          },
+          "minItems": 0,
+          "maxItems": 1000000
+        }
+      }
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Verifier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "const": "h2h"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        }
+      }
+    },
+    "Window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "until"
+      ],
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
         }
       }
     }

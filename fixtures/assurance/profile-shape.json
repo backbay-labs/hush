@@ -1,0 +1,13 @@
+{
+  "profile_version": "0.1.0",
+  "run_id": "shape-only",
+  "window": {"since":"2026-09-15T00:00:00.000Z","until":"2026-09-16T00:00:00.000Z"},
+  "policies": [{"content_hash":"sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5","allowed_signer_key_ids":[]}],
+  "streams": [{
+    "id":"agent-1", "kind":"signed-receipts",
+    "files":[{"path":"evidence.jsonl","sha256":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}],
+    "allowed_signer_key_ids":["sha256:1187bb3ca0fd60b25cb90390812fb3a90823466b499e9c29effcc9f3c4ce6142"],
+    "allowed_policy_hashes":["sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5"]
+  }],
+  "requirements":{"boundary_inventory":false,"policy_signatures":false}
+}

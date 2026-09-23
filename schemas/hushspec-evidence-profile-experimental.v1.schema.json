@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-evidence-profile-experimental.v1.schema.json",
+  "title": "HushSpec evidence-profile-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_version",
+    "run_id",
+    "window",
+    "policies",
+    "streams",
+    "requirements"
+  ],
+  "properties": {
+    "profile_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "policies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PolicySpec"
+      },
+      "minItems": 1,
+      "maxItems": 1024
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/StreamSpec"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "requirements": {
+      "$ref": "#/$defs/Requirements"
+    },
+    "inventory": {
+      "$ref": "#/$defs/ArtifactRef"
+    }
+  },
+  "$defs": {
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "PolicySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "content_hash",
+        "allowed_signer_key_ids"
+      ],
+      "properties": {
+        "content_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "artifact": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "signature": {
+          "$ref": "#/$defs/ArtifactRef"
+        },
+        "allowed_signer_key_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 0,
+          "maxItems": 1024,
+          "uniqueItems": true
+        }
+      }
+    },
+    "Requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundary_inventory",
+        "policy_signatures"
+      ],
+      "properties": {
+        "boundary_inventory": {
+          "type": "boolean"
+        },
+        "policy_signatures": {
+          "type": "boolean"
+        }
+      }
+    },
+    "StreamSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "files",
+        "allowed_signer_key_ids",
+        "allowed_policy_hashes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "kind": {
+          "enum": [
+            "signed-receipts",
+            "signed-log"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactRef"
+          },
+          "minItems": 1,
+          "maxItems": 1024
+        },
+        "allowed_signer_key_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        },
+        "allowed_policy_hashes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        }
+      }
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "until"
+      ],
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}

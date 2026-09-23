@@ -51,6 +51,7 @@ MODULES = "core|posture|origins|detection"
 #: (regex over the repo-relative path, category, level). First match wins, so
 #: the more specific patterns come first.
 CATEGORY_RULES: list[tuple[re.Pattern[str], str, int]] = [
+    (re.compile(r"^fixtures/assurance/"), "integration", 0),
     (re.compile(r"^fixtures/(?:[^/]+/)*README\.md$"), "doc", 0),
     # Expected-error sidecars sit beside the invalid vector they describe.
     (re.compile(rf"^fixtures/(?:{MODULES})/invalid/.+\.expect\.yaml$"), "expect", 1),

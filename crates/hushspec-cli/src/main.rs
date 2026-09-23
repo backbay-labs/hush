@@ -23,6 +23,7 @@ mod controls;
 mod generated_frameworks;
 mod generated_schemas;
 mod input;
+mod report_evidence;
 mod verify_opts;
 
 use clap::{Parser, Subcommand};

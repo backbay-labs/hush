@@ -24,6 +24,10 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-merge-vector.v1.schema.json` | The merge-vector directory convention under `fixtures/*/merge/` (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, optional `fixture.yaml`) |
 | `hushspec-conformance-report.v1.schema.json` | Conformance report emitted by `hushspec-testkit --report`; see [Conformance Levels](conformance.md) |
 | `hushspec-report.v1.schema.json` | Evidence report 0.1: an aggregation over receipts and policy-in-effect events for one window, emitted by `h2h report --format json` |
+| `hushspec-evidence-profile-experimental.v1.schema.json` | Experimental 0.1.0 operator scope, ordered sources, byte digests and signer authorization |
+| `hushspec-evidence-inventory-experimental.v1.schema.json` | Experimental 0.1.0 independently acquired stream inventory and boundaries |
+| `hushspec-evidence-verification-experimental.v1.schema.json` | Experimental 0.1.0 verification result bound to native report bytes |
+| `hushspec-assessment-context-experimental.v1.schema.json` | Experimental 0.1.0 local assessment-plan, SSP and resolved catalog references |
 | `hushspec-registry-action-types.v0.schema.json` | Shape of [`spec/registries/action-types.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/action-types.yaml), the action types an evaluator dispatches on |
 | `hushspec-registry-capabilities.v0.schema.json` | Shape of [`spec/registries/capabilities.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/capabilities.yaml), the capabilities a posture state may grant |
 | `hushspec-registry-condition-types.v0.schema.json` | Shape of [`spec/registries/condition-types.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/condition-types.yaml), the `when` condition keys |
@@ -38,6 +42,10 @@ names and `h2h schema <name>` prints one to stdout.
 
 
 ## Schema lineage
+
+The `*-experimental.v1.schema.json` companion artifacts declare their own
+`0.1.0` contract version. Their filename lineage does not make them stable or
+change the existing policy, receipt, log, report or conformance-report formats.
 
 Document-format schemas are named per major version (`spec/versioning.md` section 9). The `.v1.` files above are the current lineage: the schemas HushSpec 1.0.0 published, referenced by every SDK, the CLI, the testkit, and the fixture modelines. The `.v0.` files describe the 0.x line and are frozen: each carries a `$comment` saying so, [`schemas/frozen-v0.json`](https://github.com/backbay-labs/hush/blob/main/schemas/frozen-v0.json) records their `sha256:` digests, and a test in the reference implementation fails when one of them changes. A document that declares a 0.x `hushspec` version validates against its `.v0.` schema; a document declaring `1.0.z` validates against `.v1.`.
 
