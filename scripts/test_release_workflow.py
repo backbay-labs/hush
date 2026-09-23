@@ -107,7 +107,7 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.assertEqual(output, "checkout_ref=" + "a" * 40 + "\n")
 
     def test_rehearsal_rejects_missing_or_mutable_ref(self):
-        for candidate in ("", "main", "wave-6", "a" * 39, "g" * 40):
+        for candidate in ("", "main", "feature/candidate", "a" * 39, "g" * 40):
             with self.subTest(candidate=candidate):
                 result, output = self.run_selection(dry_run="true", candidate=candidate)
                 self.assertNotEqual(result.returncode, 0)

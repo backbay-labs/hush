@@ -79,6 +79,22 @@ build and lint; Go passes full uncached tests and vet. Python distribution check
 pass after installing the missing local Twine tool into the isolated environment.
 These are working-tree checks, not public-registry installation evidence.
 
+## First hosted preparation attempts
+
+Candidate `e4726cd9fa57d83cdfc9f94130bd3fe57b62d170` was pushed and cumulative
+[PR #11](https://github.com/backbay-labs/hush/pull/11) opened against `main`.
+Clean `cargo package --workspace --locked` verified all three extracted Rust
+archives with a fresh Cargo home and target directory.
+
+The first rehearsal dispatch, `35885875406`, contained a hand-entered wrong SHA
+and failed checkout; all publication jobs skipped. The corrected dispatch,
+`35885912049`, selected the actual full SHA but failed the unchanged comment
+hygiene gate: a new test fixture used a planning branch name. The original job
+log is retained. The local hygiene scan had omitted that then-untracked script;
+after commit it reproduced the hosted failure. A generic mutable branch name
+preserves the rejection assertion without a planning reference. Later candidate
+runs must qualify this correction; these failures are not converted to passes.
+
 ## Remaining owner and integration gates
 
 The owner explicitly deferred revocation of the supplied credentials until after
