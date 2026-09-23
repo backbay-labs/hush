@@ -1,0 +1,29 @@
+hushspec_test: "0.1.0"
+description: Quickstart decisions; embedded policy is checked against policy.yaml
+policy:
+  hushspec: "1.0.0"
+  name: coding-agent-quickstart
+  rules:
+    forbidden_paths:
+      patterns: ["**/.env", "**/.ssh/**"]
+    tool_access:
+      allow: [read_file, search]
+      block: [deploy]
+      require_confirmation: [write_file]
+      default: block
+cases:
+  - description: Read ordinary source
+    action: {type: file_read, target: /workspace/src/main.ts}
+    expect: {decision: allow}
+  - description: Block a protected path
+    action: {type: file_read, target: /workspace/.env}
+    expect: {decision: deny, matched_rule: rules.forbidden_paths.patterns}
+  - description: Search is allowed
+    action: {type: tool_call, target: search}
+    expect: {decision: allow, matched_rule: rules.tool_access.allow}
+  - description: Deploy never proceeds
+    action: {type: tool_call, target: deploy}
+    expect: {decision: deny, matched_rule: rules.tool_access.block}
+  - description: Write requires confirmation
+    action: {type: tool_call, target: write_file}
+    expect: {decision: warn, matched_rule: rules.tool_access.require_confirmation}

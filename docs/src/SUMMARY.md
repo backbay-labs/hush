@@ -25,7 +25,9 @@
 # Guides
 
 - [Getting Started](guides/getting-started.md)
+- [Installation](guides/installation.md)
 - [Writing Your First Policy](guides/first-policy.md)
+- [Upgrade to V1](guides/migration-v1.md)
 - [Runtime Integration](guides/runtime-integration.md)
 - [Conditional Rules](guides/conditions.md)
 - [Policy Library](guides/policy-library.md)

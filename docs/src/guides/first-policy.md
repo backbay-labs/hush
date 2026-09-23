@@ -1,152 +1,90 @@
-# Writing Your First Policy
+# Your first policy
 
-This guide walks through building a HushSpec policy from scratch.
+A useful policy starts with the effects your runtime owns. The
+[quickstart](getting-started.md) supplies one tested policy and five decisions.
+This page explains that policy and how to extend it safely.
 
-## Step 1: Start Minimal
+## Start with a complete document
 
-Every HushSpec document needs exactly one required field:
-
-```yaml
-hushspec: "1.0.0"
-```
-
-This is a valid document. It declares no rules, so no actions are restricted.
-
-## Step 2: Add Metadata
-
-Give your policy a name and description:
+Save [the tested policy](../../examples/quickstart/policy.yaml) as `policy.yaml`:
 
 ```yaml
 hushspec: "1.0.0"
-name: "my-first-policy"
-description: "A starter policy for development"
-```
-
-## Step 3: Block Sensitive Paths
-
-The most common first rule. Block access to credentials and secrets:
-
-```yaml
-hushspec: "1.0.0"
-name: "my-first-policy"
-
+name: coding-agent-quickstart
 rules:
   forbidden_paths:
-    patterns:
-      - "**/.ssh/**"
-      - "**/.aws/**"
-      - "**/.env"
-      - "**/credentials*"
-    exceptions:
-      - "**/.env.example"
-```
-
-## Step 4: Control Network Egress
-
-Restrict which domains the agent can reach:
-
-```yaml
-rules:
-  forbidden_paths:
-    patterns:
-      - "**/.ssh/**"
-      - "**/.aws/**"
-
-  egress:
-    allow:
-      - "api.openai.com"
-      - "*.anthropic.com"
-      - "**.googleapis.com"
-    default: "block"
-```
-
-With `default: "block"`, any domain not in the `allow` list is denied.
-
-## Step 5: Add Secret Detection
-
-Catch secrets before they get written to files:
-
-```yaml
-rules:
-  # ... previous rules ...
-
-  secret_patterns:
-    patterns:
-      - name: aws_key
-        pattern: "AKIA[0-9A-Z]{16}"
-        severity: critical
-      - name: private_key
-        pattern: "-----BEGIN (RSA |EC )?PRIVATE KEY-----"
-        severity: critical
-      - name: generic_token
-        pattern: "(?i)(token|secret|password)\\s*[=:]\\s*['\"]?[a-z0-9]{20,}"
-        severity: warn
-```
-
-## Step 6: Control Tool Access
-
-Block dangerous tools and require confirmation for sensitive ones:
-
-```yaml
-rules:
-  # ... previous rules ...
-
+    patterns: ["**/.env", "**/.ssh/**"]
   tool_access:
-    block:
-      - shell_exec
-      - run_command
-    require_confirmation:
-      - deploy
-      - database_write
-    default: "allow"
+    allow: [read_file, search]
+    block: [deploy]
+    require_confirmation: [write_file]
+    default: block
 ```
 
-## The Complete Policy
+The version is a string. `name` is optional, but cannot be empty when present.
+The `rules` object is closed: a misspelled rule does not silently disappear.
 
-```yaml
-hushspec: "1.0.0"
-name: "my-first-policy"
-description: "Development policy with basic protections"
+## Block sensitive paths
 
-rules:
-  forbidden_paths:
-    patterns:
-      - "**/.ssh/**"
-      - "**/.aws/**"
-      - "**/.env"
-    exceptions:
-      - "**/.env.example"
+The `forbidden_paths` block applies to reads, writes and patches. Patterns use
+portable path globs, not shell expansion. The host must map the real target path
+and prevent symlink/TOCTOU bypasses when it opens files.
 
-  egress:
-    allow:
-      - "api.openai.com"
-      - "*.anthropic.com"
-    default: "block"
+`**/.env` deliberately does not match every `.env.*` variant. Add the paths
+your threat model actually requires and test both protected files and intended
+exceptions. See [pattern grammars](../reference/patterns.md).
 
-  secret_patterns:
-    patterns:
-      - name: aws_key
-        pattern: "AKIA[0-9A-Z]{16}"
-        severity: critical
-      - name: private_key
-        pattern: "-----BEGIN (RSA |EC )?PRIVATE KEY-----"
-        severity: critical
+## Control tool access
 
-  shell_commands:
-    forbidden_patterns:
-      - "rm\\s+-rf\\s+/"
-      - "curl.*\\|.*sh"
+The tool block uses exact names. Block entries take precedence; confirmation
+entries are checked before the allowlist. Unknown tools fail this allowlist.
+A `write_file` warning is not permission to execute automatically.
 
-  tool_access:
-    block:
-      - shell_exec
-    require_confirmation:
-      - deploy
-    default: "allow"
+This does not authorize a known tool's hidden side effects. For host-owned MCP
+tools, evaluate the tool gate and the mapped file/shell/network effects at the
+appropriate execution boundaries. See [MCP integration](integrations/mcp.md).
+
+## Add metadata
+
+Use a meaningful name and description first. Governance `metadata` can carry
+ownership and review information, but it never changes a decision or proves
+who signed the policy. See [governance](governance.md).
+
+## Add network and content controls
+
+The quickstart intentionally leaves egress and secret detection unconfigured.
+For a runtime that exposes them, add an `egress` block with an explicit
+default and a `secret_patterns` block containing portable regexes. The
+[rule reference](../rules-reference.md) supplies classified fragments and field
+defaults. An allowed host does not exempt transmitted content from scanning.
+
+## Add extensions only with trusted context
+
+[Posture](../extensions/posture.md) needs host-owned state and counters.
+[Origins](../extensions/origins.md) needs authenticated request context.
+[Detection](../extensions/detection.md) adds analysis, not a guarantee of finding
+every attack. Test missing context as well as expected context.
+
+## Validate and test
+
+```sh
+h2h validate --strict policy.yaml
+h2h test --policy policy.yaml policy.test.yaml
 ```
 
-## Next Steps
+Use the [quickstart test file](../../examples/quickstart/policy.test.yaml).
+Five cases pin read/search, protected path/deploy, and confirmation behavior.
+Use `h2h explain` to inspect a changed result; it keeps the evaluation exit
+code, including 1 for deny and 4 for warn.
 
-- Extend a built-in policy instead of starting from scratch -- see [Merge Semantics](../merge-semantics.md)
-- Add [Posture](../extensions/posture.md) for budget limits and state machines
-- Use this policy with [Clawdstrike](clawdstrike.md)
+## Extend a baseline deliberately
+
+[Built-in rulesets](policy-library.md) resolve without network access.
+A supplied child rule block replaces that entire base block. Review
+`h2h resolve policy.yaml` and the effective policy diff before deployment.
+
+## Next steps
+
+Connect a [guard](runtime-integration.md), record [receipts](../receipt-spec.md),
+and gate future policy changes in [CI](ci.md). A valid policy only controls
+effects that your runtime actually routes through enforcement.
