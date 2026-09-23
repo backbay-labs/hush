@@ -1,46 +1,74 @@
-# SDK Conformance Test-Surface Matrix
+# SDK features and conformance evidence
 
-This page maps vector runners in the unreleased source tree; it is **not** a
-release conformance certificate and does not describe `main`. The reviewed
-baseline is `a0637cb`. This repair revision has a complete local verification record. See the
-[delivery ledger](https://github.com/backbay-labs/hush/blob/wave-6/docs/plans/STATUS.md)
-for integration, review, and publication state.
+The v1 SDKs implement the same policy semantics and evidence formats, with
+language-specific APIs and lifecycle behavior. This page separates **available
+features** from a **conformance claim**: a feature table or a passing example
+does not certify an engine.
 
-A runner and its local results are useful source evidence. A level can be
-certified only when its complete contract has passed on the exact candidate in
-hosted CI, the candidate has no unresolved acceptance finding, and the result
-is recorded with its attempt. The local record covers raw YAML parsing, runtime
-timestamps, log-schema refusal, adapter mapping/argument sizing, provider
-recovery, and a passing L5 conformance report. Release qualification additionally
-requires exact-commit hosted evidence; no SDK has a release-qualified L0-L5 claim here.
+## Language guides
 
-## Current Status
+Start with a complete, tested program: [Rust](../guides/sdks/rust.md),
+[TypeScript](../guides/sdks/typescript.md), [Python](../guides/sdks/python.md),
+or [Go](../guides/sdks/go.md). For return types and every public API family,
+see the [SDK API contract](sdk-api.md).
 
-| SDK | L0 Parser | L1 Validator | L2 Merger | L3 Evaluator | L4 Auditor | L5 Attested | Highest |
-|-----|-----------|--------------|-----------|--------------|------------|-------------|---------|
-| Rust | Runner present | Runner present | Runner present | Runner present | Runner present | Runner present | Local suite and L5 report pass; see exact-commit CI |
-| TypeScript | Runner present | Runner present | Runner present | Runner present | Runner present | Runner present | Local verification recorded; see exact-commit CI |
-| Python | Runner present | Runner present | Runner present | Runner present | Runner present | Runner present | Local verification recorded; see exact-commit CI |
-| Go | Runner present | Runner present | Runner present | Runner present | Runner present | Runner present | Local verification recorded; see exact-commit CI |
+## Feature matrix
 
-The runners below cover every listed vector family in source, including bundle
-vectors, `.expect.yaml` error-code sidecars, raw policy spelling, and
-schema-derived log entries. Adapter-contract and provider-lifecycle tests also
-pass locally. Hosted qualification remains required.
+| Capability | Rust | TypeScript | Python | Go |
+|---|---|---|---|---|
+| Parse, validate, resolve, compile and evaluate | Yes | Yes | Yes | Yes |
+| Guards, actors, receipts and sinks | Yes | Yes | Yes | Yes |
+| File reload and policy polling | Yes | Yes | Yes | Yes |
+| HTTPS policy provider | `http` feature | Yes | Yes | Yes |
+| Policy/receipt signing and bundle verification | `signing` feature | Yes | `signing` extra | Yes |
+| Bundle creation | Yes / CLI | CLI | CLI | CLI |
+| Structural MCP, OpenAI and Anthropic adapters | Own guard boundary | Yes | Yes | Yes |
+| LangChain adapter | Own guard boundary | Yes | Yes | Own guard boundary |
+| CrewAI decorator | Own guard boundary | Own guard boundary | Yes | Own guard boundary |
+| Governance lint and aggregate reporting | Rust / CLI | CLI | CLI | CLI |
 
-Two qualifications, neither of which changes the level:
+Framework adapters do not establish server identity or contain unmediated
+side effects. See [MCP dispatch](../guides/integrations/mcp.md).
 
-- **Python** reaches Levels 4 and 5 only with the optional `signing` extra
-  installed (`pip install "hushspec[signing]"`). Without `cryptography`, the
-  signature, receipt-signing and bundle entry points raise `SigningUnavailable`
-  rather than reporting an unverified signature as good, and their vector
-  runners skip (`pytest.importorskip` in
-  [`tests/test_bundle_vectors.py`](https://github.com/backbay-labs/hush/blob/wave-6/packages/python/tests/test_bundle_vectors.py)).
-  Failing closed and skipping is the honest behaviour; a Level 5 claim requires
-  the extra.
-- **Rust** reaches Level 5 only with the `signing` Cargo feature. It is off by
-  default and on for `cargo test --workspace`, because `hushspec-cli` depends on
-  `hushspec` with `features = ["signing"]` and the workspace unifies features.
+## Current status
+
+The immutable [v1.0.0 source](https://github.com/backbay-labs/hush/tree/e771ec647b7f26a0a09ff852886eb8a91093bc58)
+contains L0-L5 vector runners for all four SDKs. Use the exact commit's
+[CI checks](https://github.com/backbay-labs/hush/commit/e771ec647b7f26a0a09ff852886eb8a91093bc58/checks)
+and saved conformance report to assess a specific candidate. This page is a
+test-surface inventory, not an independent certification or an assertion that
+another engine implements these levels.
+
+A claim names its implementation revision, corpus digest, requested level,
+feature configuration, complete result and execution attempt. Higher levels
+include the lower-level contracts; skipping a required vector is not a pass.
+
+## SDK-specific notes
+
+### Rust SDK
+
+L5 requires the `signing` Cargo feature. `cargo test --workspace` enables it
+through the CLI dependency and Cargo feature unification; a standalone library
+consumer must request it explicitly. HTTPS and OTLP have separate features.
+
+### TypeScript SDK
+
+Node.js 18 or newer is the SDK runtime floor. Provider watchers must be stopped
+by their owner. Synchronous re-entry from a confirmation handler or sink is
+rejected; post-recording observers may re-enter.
+
+### Python SDK
+
+L5 signing and bundle tests require `pip install "hushspec[signing]"`.
+Unsigned canonicalization and receipts at L4 do not require `cryptography`.
+Missing signing support raises `SigningUnavailable`; skipped signing tests
+cannot support an L5 claim. Close guards and stop watchers/pollers.
+
+### Go SDK
+
+Go 1.22 or newer is required. Branch on both the `Check` error and
+`GuardDecision.Allowed()`; `Evaluate` alone does not dispatch or stop a tool.
+Cancel and close the provider loops your application owns.
 
 ## What each SDK runs
 
@@ -53,9 +81,9 @@ Every runner walks the same sixteen directories -- `{core,posture,origins,detect
 | SDK | Runner | Notes |
 |---|---|---|
 | Rust | `crates/hushspec-testkit/src/runner.rs`, driven by `hushspec-testkit --fixtures fixtures --report report.json` | Also discovers `fixtures/library/` suites |
-| TypeScript | [`packages/hushspec/tests/shared-fixtures.test.ts`](https://github.com/backbay-labs/hush/blob/wave-6/packages/hushspec/tests/shared-fixtures.test.ts) | `validDirs` / `invalidDirs` / `mergeDirs` / `evaluationDirs` |
-| Python | [`packages/python/tests/test_shared_fixtures.py`](https://github.com/backbay-labs/hush/blob/wave-6/packages/python/tests/test_shared_fixtures.py) | `VALID_DIRS` / `INVALID_DIRS` / `MERGE_DIRS` / `EVALUATION_DIRS` |
-| Go | [`packages/go/hushspec/fixtures_test.go`](https://github.com/backbay-labs/hush/blob/wave-6/packages/go/hushspec/fixtures_test.go) | `validFixtureDirs` / `invalidFixtureDirs` / `mergeFixtureDirs` / `evaluationFixtureDirs` |
+| TypeScript | [`packages/hushspec/tests/shared-fixtures.test.ts`](https://github.com/backbay-labs/hush/blob/e771ec647b7f26a0a09ff852886eb8a91093bc58/packages/hushspec/tests/shared-fixtures.test.ts) | `validDirs` / `invalidDirs` / `mergeDirs` / `evaluationDirs` |
+| Python | [`packages/python/tests/test_shared_fixtures.py`](https://github.com/backbay-labs/hush/blob/e771ec647b7f26a0a09ff852886eb8a91093bc58/packages/python/tests/test_shared_fixtures.py) | `VALID_DIRS` / `INVALID_DIRS` / `MERGE_DIRS` / `EVALUATION_DIRS` |
+| Go | [`packages/go/hushspec/fixtures_test.go`](https://github.com/backbay-labs/hush/blob/e771ec647b7f26a0a09ff852886eb8a91093bc58/packages/go/hushspec/fixtures_test.go) | `validFixtureDirs` / `invalidFixtureDirs` / `mergeFixtureDirs` / `evaluationFixtureDirs` |
 
 The raw-source corpus is a separate shared runner because ordinary document
 discovery cannot preserve scalar spelling:
@@ -89,7 +117,7 @@ chain breaks, not only that it does.
 All four fixture runners assert the registered error code, not merely that
 the vector was rejected. Each `fixtures/<module>/invalid/<name>.yaml` has a
 `<name>.expect.yaml` sidecar naming a code from
-[`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/wave-6/spec/registries/error-codes.yaml)
+[`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/e771ec647b7f26a0a09ff852886eb8a91093bc58/spec/registries/error-codes.yaml)
 and an optional `message_contains` substring; the runners compare both.
 
 | SDK | Where the code is asserted | Where the code comes from |
@@ -129,11 +157,11 @@ page does not duplicate or predict their status.
 - [`shared-fixtures`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs the same conformance fixture corpus against Rust, TypeScript, Python, and Go.
 - [`cross-sdk-roundtrip`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) parses the shared corpus with all four SDKs and compares each document's canonical form byte for byte (`scripts/check_cross_sdk_roundtrip.py`).
 - [`differential-fuzz`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) runs `hushspec-difftest` over 500 generated policy groups per commit, comparing each port against the in-process evaluator on decision, `matched_rule`, `reason`, recorded rule trace, canonical `content_hash` **and** receipt hash.
-- [`smoke-snippets`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) executes the marked README and getting-started examples directly from the markdown source.
+- [`smoke-snippets`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) executes the classified and marked documentation examples directly from the markdown source.
 - [`docs`](https://github.com/backbay-labs/hush/actions/workflows/ci.yml) builds the mdBook site.
 
 The workflow definition itself lives in
-[`/.github/workflows/ci.yml`](https://github.com/backbay-labs/hush/blob/wave-6/.github/workflows/ci.yml).
+[`/.github/workflows/ci.yml`](https://github.com/backbay-labs/hush/blob/e771ec647b7f26a0a09ff852886eb8a91093bc58/.github/workflows/ci.yml).
 
 To publish a conformance claim for an implementation of your own, use the
 [Conformance Statement](conformance-statement.md) template after recording the

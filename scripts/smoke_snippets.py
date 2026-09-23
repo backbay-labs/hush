@@ -14,10 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-MARKDOWN_FILES = [
-    ROOT / "README.md",
-    ROOT / "docs" / "src" / "guides" / "getting-started.md",
-]
+MARKDOWN_FILES = [ROOT / "README.md", *sorted((ROOT / "docs/src").rglob("*.md"))]
 POLICY_YAML = 'hushspec: "0.1.0"\nname: smoke-test\n'
 
 
@@ -30,18 +27,12 @@ class Snippet:
 
 
 def main() -> int:
+    from docs_blocks import check
+    check()
     snippets = extract_snippets()
-    for snippet_id in [
-        "readme-rust",
-        "readme-typescript",
-        "readme-python",
-        "readme-go",
-        "guide-rust-parse",
-        "guide-typescript-parse",
-        "guide-rust-validate",
-        "guide-typescript-validate",
-    ]:
-        snippet = snippets[snippet_id]
+    if len(snippets) < 4:
+        raise ValueError('missing executable README examples')
+    for snippet in snippets.values():
         print(f"[smoke] {snippet.id} ({snippet.language})")
         run_snippet(snippet)
     return 0
@@ -58,6 +49,8 @@ def extract_snippets() -> dict[str, Snippet]:
         content = markdown_file.read_text()
         for match in pattern.finditer(content):
             snippet_id, language, code = match.groups()
+            if snippet_id in snippets:
+                raise ValueError(f'duplicate runnable example ID: {snippet_id}')
             snippets[snippet_id] = Snippet(
                 id=snippet_id,
                 language=language.strip().split()[0],

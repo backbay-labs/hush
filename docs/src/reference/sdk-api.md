@@ -8,7 +8,8 @@ things. This page is the contract. It lists, capability area by capability
 area, the entry point each SDK publishes today, what the four are required to
 agree on, and where they deliberately differ because the language does.
 
-Every name below is the name in the source on `main`. Three tests pin the core
+Names below describe the v1 release surface. Source links on the website are
+pinned to its recorded source revision. Three tests pin the core
 of this surface so a rename is a deliberate act rather than a silent
 divergence:
 
@@ -47,16 +48,16 @@ object. Likewise in TypeScript only `parse` and `resolve` return the `ok`
 union -- `resolveWithOptions`, `merge`, the `evaluate*` family and
 `compilePolicy` return directly and throw.
 
-Verification results are *not* errors in any SDK. An invalid signature is a
-value, not an exception, because "this did not verify, and here is the reason
-code" is the answer a relying party needs:
+Verification APIs preserve a reason code for a failed check. Rust represents
+failure as an error result; the other three use an outcome value. Do not
+confuse a successfully returned outcome object with a valid signature:
 
 | SDK | Verification result |
 |---|---|
 | Rust | `Result<Verified, VerifyError>`; `VerifyError::reason_code()` |
 | TypeScript | `VerificationOutcome`: `{ ok: true, ... }` or `{ ok: false, reason, detail }` |
 | Python | `VerifyResult` (`.valid`, `.reason`) |
-| Go | `VerifyResult` (`.Valid`, `.Reason`) |
+| Go | `VerifyResult` (`.OK`, `.Reason`) |
 
 ## Parse and validate
 
@@ -99,11 +100,11 @@ code" is the answer a relying party needs:
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
 | Compile a document | `CompiledPolicy::compile` | `compilePolicy` | `compile_policy` | `CompilePolicy` | Every regex, path glob, host pattern, tool set, `when` condition, severity table and detector is prepared once. Decisions, traces, hashes and receipts are unchanged from the uncompiled path | |
-| Compile a `Resolution` | `CompiledPolicy::from_resolution` | `compileResolution` | `compile_policy` (accepts either) | `CompilePolicy` (accepts either) | Keeps the resolved chain so receipts can name it | |
+| Compile a `Resolution` | `CompiledPolicy::from_resolution` | `compileResolution` | `compile_policy` (accepts either) | `CompilePolicy` (takes `resolution.Spec`) | Keep the `Resolution` for guard/receipt provenance; Go compilation takes its document, not the resolution itself | |
 | Compile error | `CompileError` | `CompileError` | `CompileError` | `CompileError` | Strict by default: a pattern outside the regex profile fails at compile time, naming the offending rule path | Non-strict keeps the evaluator's deferred deny: TS `{ strict: false }`, Python `strict=False` |
 | Cached content hash | `CompiledPolicy::content_hash` | `CompiledPolicy` (cached on first use) | `CompiledPolicy` (cached) | `(*CompiledPolicy).ContentHash` | Computed once, reused by every receipt | |
 | Loading facade | `Policy` (`from_path`, `from_str`, `resolve`, `verify`, `compile`) | -- | -- | -- | `load -> resolve -> verify -> validate -> compile` as one chain | Rust only; the other three compose the free functions |
-| Cache behind the free functions | (explicit) | `WeakMap` keyed on the document | small compiled-policy cache | (explicit) | The free `evaluate*` functions never recompile per call | Rust and Go make the caller hold the `CompiledPolicy` |
+| Cache behind the free functions | (explicit) | `WeakMap` keyed on the document | small compiled-policy cache | (explicit) | Hold a compiled policy for repeated evaluation instead of assuming a cache behind every free function | Rust and Go make the caller hold the `CompiledPolicy` |
 
 ## Evaluation
 
@@ -234,7 +235,8 @@ good.
 |---|---|---|---|---|---|---|
 | The enforcement point | `HushGuard` | `HushGuard` | `HushGuard` | `Guard` | Compiled policy, enforcement mode, warn channel, sink, observers, actor and clock behind `check` / `evaluate` / `enforce` | **Go spells it `Guard`** -- `HushGuard` would stutter as `hushspec.HushGuard` |
 | Construct | `HushGuard::from_path`, `from_policy`, `from_resolution`, `builder` | `HushGuard.fromFile`, `fromYaml`, `fromProvider` | `HushGuard.from_file`, `from_provider` | `NewGuard`, `NewGuardFromFile`, `NewGuardFromProvider` | Compiles once at construction | Rust uses a builder (`HushGuardBuilder`); the others use options structs or keyword arguments |
-| Check without throwing | `check` | `check` | `check` | `Check` | Returns the decision plus the receipt, the enforced flag and the duration | `GuardDecision` in all four |
+| Check without throwing | `check` -> `GuardDecision` | `check` -> boolean | `check` -> bool | `Check` -> `(GuardDecision, error)` | Branch on the language's proceed result; Go errors also stop dispatch | These return types are deliberately not identical |
+| Full gate outcome | `check` -> `GuardDecision` | `gate` -> `GateOutcome` | `gate` -> `GateOutcome` | `Check` -> `(GuardDecision, error)` | Rust `allowed()`, TS/Python `proceed`, Go `Allowed()` | Receipts reach configured sinks; do not assume every return object embeds one |
 | Enforce | `enforce` -> `Result<_, Denied>` | `enforce` (throws `HushSpecDenied`) | `enforce` (raises `HushSpecDenied`) | `Check` plus `GuardDecision.Allowed` | A deny stops the tool call before its body runs | Go has no exceptions, so the caller branches on `Allowed()` |
 | Record without enforcing | `evaluate` | `evaluate` | `evaluate` | `Evaluate` | Monitor-mode observation | |
 | Enforcement mode | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `EnforcementConfig` | `EnforcementMode`, `GuardOptions.RuleOverrides` | `enforce` or `monitor`, with per-rule-path overrides; **longest prefix wins** | Monitor mode is refused without an observer or a sink that auditing writes receipts to: an unrecorded observation is not evidence |
@@ -265,9 +267,9 @@ good.
 
 | Operation | Rust | TypeScript | Python | Go | Semantics | Notes |
 |---|---|---|---|---|---|---|
-| Provider interface | `PolicyProvider` | `PolicyProvider` | `PolicyProvider` | `PolicyProvider` | `load() -> Resolution` plus a `source` | A provider carries its own `ResolveOptions`, so `require_signature` applies to every reload |
+| Provider interface | `PolicyProvider` | `PolicyProvider` | `PolicyProvider` | `PolicyProvider` | Rust/Python/Go load a `Resolution`; TypeScript `load()` returns `Promise<HushSpec>` and exposes `resolution()`, `current()`, `watch()` and `stop()` | Preserve the verified chain when adopting a provider result; apply trust requirements on every reload |
 | File provider | `FileProvider` | `FileProvider` | `FileProvider` | `NewFileProvider` | | |
-| HTTP provider | `HttpProvider` *(feature `http`)* | `HttpProvider` | -- | -- | ETag-aware | Python and Go reload from a file or a callback |
+| HTTP provider | `HttpProvider` *(feature `http`)* | `HttpProvider` | `HttpProvider` | `NewHTTPProvider` | Bounded HTTPS loader with explicit trust/host configuration | Providers must not accept arbitrary model-selected URLs |
 | Callback provider | closure | closure | `CallbackProvider` | interface | | |
 | Watcher | `PolicyWatcher` | `PolicyWatcher` | `PolicyWatcher` | `NewPolicyWatcher`, `PolicyWatcher` | Stats one file per tick; delivers only on a real change (mtime **and** content hash) | |
 | Poller | `PolicyPoller` | `PolicyPoller` | `PolicyPoller` | `NewPolicyPoller` | Reloads through any provider on an interval; delivers only on a `content_hash` change | |
@@ -370,7 +372,7 @@ Three deliberate differences:
   named constants and per-value `.code` / `.Code` members. Go adds
   `ErrorCodeOf(err)` and `RegistryErrorCode(kind)`.
 
-The signing (11 codes), bundle (5 codes) and resolve reason sets are separate
+The signing (11 codes), bundle (7 codes) and resolve reason sets are separate
 closed registries and never overlap with `E0xx`. They are normative in the
 [signing](../signing-spec.md) and [bundle](../bundle-spec.md) specifications.
 

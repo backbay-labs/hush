@@ -19,7 +19,7 @@ H2H = os.environ.get('H2H', str(ROOT / 'target/release/h2h'))
 class DocumentationPolicies(unittest.TestCase):
     def test_complete_curated_policies(self):
         total = 0
-        for source in sorted((ROOT / 'docs/src').rglob('*.md')):
+        for source in [ROOT / 'README.md', *sorted((ROOT / 'docs/src').rglob('*.md'))]:
             blocks = re.findall(r'^```ya?ml[^\n]*\n(.*?)^```', source.read_text(), re.M | re.S)
             policies = []
             for index, raw in enumerate(blocks):

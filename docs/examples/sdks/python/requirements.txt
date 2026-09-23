@@ -1,0 +1,1 @@
+hushspec[signing]==1.0.0

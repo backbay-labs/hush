@@ -1,0 +1,847 @@
+{
+  "README.md:1": {
+    "sha256": "fd9bc4db62f09036c7f5507641cffce273a827ee7433f11cb741a5c7d08f2399",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "README.md:2": {
+    "sha256": "0f37852785f55d4cc49031efe77a82a1bd7ecfe44cef080d5e50b9a11e266597",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "README.md:3": {
+    "sha256": "51be1b22551999461f353a7278c8c2eb6debbca3ff9d33911710e7405b025ce3",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "README.md:4": {
+    "sha256": "3be9b38e893a69325e92617e3bf6a0dee8873313a9d498fa840f99f2ab0790cb",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "README.md:5": {
+    "sha256": "fcb31391abd668f1bf32264afee8f8246173d64bbef4ecde86326d965ee015a7",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "README.md:6": {
+    "sha256": "a54e1d5c226b48879fa16ecc667408343e15b3b7be73a928a897781a04042bdd",
+    "kind": "runnable",
+    "runner": "scripts/smoke_snippets.py"
+  },
+  "README.md:7": {
+    "sha256": "fd3586a50724bc9069ca322668023b61223918d851c5af2b8c6e9a7dbc25db40",
+    "kind": "runnable",
+    "runner": "scripts/smoke_snippets.py"
+  },
+  "README.md:8": {
+    "sha256": "85d859185c7428d75a4b2103c1f9d1d42cb2a98e878d6b9e66584cb85f8a58c7",
+    "kind": "runnable",
+    "runner": "scripts/smoke_snippets.py"
+  },
+  "README.md:9": {
+    "sha256": "305a71c82f65877169bac7f94f0314b5162d325fbf134f2c1be02e0d936b08ca",
+    "kind": "runnable",
+    "runner": "scripts/smoke_snippets.py"
+  },
+  "README.md:10": {
+    "sha256": "c209af6f18f14201a3393fac8d7b7fcbff2d223788a0bca0ae5a4f2a955ff48f",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "README.md:11": {
+    "sha256": "14e27f4dd2cd9a5021513599051ee4f83da6055ddde1e00e199e0859c198fb8a",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "README.md:12": {
+    "sha256": "b49e0dd697729e3299dfe50f007e308f702df61e83da55bf854af00e23022967",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "README.md:13": {
+    "sha256": "49a04a187ff48050f0a24f96b0177ad77d4cf5fdfa9f127684421a66dc655f9b",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/bundle-spec.md:1": {
+    "sha256": "887a5965b3bf0028ba0bd7c9f27f8d098d50ca5abc25a66ad0d952bfb0cda97b",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/canonical-spec.md:1": {
+    "sha256": "217520b15dbd3d42eaaa674e7ce0faa8bc7b150116457cc2346c6003de3daa9e",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/canonical-spec.md:2": {
+    "sha256": "dbb559e224e09aac08c051f403e6cf7fe6e8573b134535cdb5a1d6a04d7307f9",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/canonical-spec.md:3": {
+    "sha256": "110266ea44b0846ace2aaa1678bd771d82eee45d3bb6f209cfe66e443c2cc739",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/core-spec.md:1": {
+    "sha256": "84d0c571831385be7e5f9554159695bd68b9f15a908125b5bc3c04ba37dcaedd",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/extensions/detection.md:1": {
+    "sha256": "487fd6a21bf51a054228292b838875617bab4e699f075a88645d19399ac9cfba",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/extensions/detection.md:2": {
+    "sha256": "e3851260c6d3e6441cafc97ae1aa31654fa510476acd3c821c6b26b2b7fa5b11",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/extensions/origins.md:1": {
+    "sha256": "d114b4d5eae91503b6161bd02988b4c3105dbd018afd36acb4af419aba6c19da",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/extensions/posture.md:1": {
+    "sha256": "c91bbbcdfc18601d5b2d2e535955adebeb2c59977a2b1c3a9608326eefe7098b",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:1": {
+    "sha256": "01f2a1ec4229084123d38fff2b0b518eaf3aaf3935c1870256432e44d7774881",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:2": {
+    "sha256": "c27a2ace426eef739c375d1adfa6862eb730bd1d82be752be48947272a4c9b91",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:3": {
+    "sha256": "b0a89ed291ef6b6220a8ad86c4e1ed7b85dcbbe31e2865ece827565bfb613214",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:4": {
+    "sha256": "bc67ebe51741798256b154e7f7f69a6d1156424899a2126356699ee9f1cb1269",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:5": {
+    "sha256": "7eb1ab3084d70ed8e736bc04d42f4c6be785fb2ff71d612a0673d7910a62c170",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/ci.md:6": {
+    "sha256": "8d3852fe50001d138c304be06299d0667177705693f3a04fc1f457ea1f0894e7",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/ci.md:7": {
+    "sha256": "b7b94f828aa7c1546d7046f1e3b648699470ae6cb289ee1e5d297b50bc4b2d19",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/conditions.md:1": {
+    "sha256": "9e6ee380263e885cd5559bc6cf5ab7276c896d78ed54791fa4d3dc38a73eea8b",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/guides/editor-setup.md:1": {
+    "sha256": "9e1746483a65242080a74efdf9afe7d908ebf6193993d970aa0585249a269405",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/guides/editor-setup.md:2": {
+    "sha256": "11659273f437a06c857806bf419a42c31bef4f9668acc640eef48d4c538b5610",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/editor-setup.md:3": {
+    "sha256": "2b8bdd5388a22b02fac7f7be8feaa658a3ef92b7df8cd32a70ff3b8281cb63d4",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/editor-setup.md:4": {
+    "sha256": "fef801cd357d0a6488132c4c15453afa7360264849fc9ad5e7302c3aa85318e0",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/guides/evidence-verification.md:1": {
+    "sha256": "9f9a067cf80b2301a2835ee3fa0db0f065ee609331f60f9fb5c2eb1000196909",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/evidence-verification.md:2": {
+    "sha256": "4a07772df8b796a6996d591687857ccb707a63a471848f72ee12795d32e60ca8",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/evidence-verification.md:3": {
+    "sha256": "33622d43c2547086c27d412dbb911af3f99f01aa8995faee75cd40d39ed3ae5d",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/first-policy.md:1": {
+    "sha256": "846f3d5ed0bd4b44097df6bd4d624d925f6c52a1794b69dfd15d18ce449609fd",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/guides/first-policy.md:2": {
+    "sha256": "a3c110894d925559f2638c3a24937c42a3f0237cdb9d8bcae41be5784c60341f",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/getting-started.md:1": {
+    "sha256": "8206f50a07c838eb57ceedaa04f64bab2910e66f8f25382de4afff0bf33092ea",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/getting-started.md:2": {
+    "sha256": "a27c136c47a83620f125c92edadf804aaa74dbb08723af28673a2aff0c386ee8",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py"
+  },
+  "docs/src/guides/getting-started.md:3": {
+    "sha256": "2f36dfa7af37d369a42b7c168e1bc5ac0d6d50ae33c7dc905eb10ba744a524f8",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py"
+  },
+  "docs/src/guides/getting-started.md:4": {
+    "sha256": "e060fd6a0a78d1880326cec51c7d807e08507c8b39c0ce9893377035e8acbbbe",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py"
+  },
+  "docs/src/guides/getting-started.md:5": {
+    "sha256": "eeb3e2ebfc4f4d4be375935ec1ff45734b566acd93210a2a33b5ec091e5700b7",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py"
+  },
+  "docs/src/guides/getting-started.md:6": {
+    "sha256": "487fdf326999b8b3447679c23af7224def024a552619c5e472011efa2fd5a63a",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_examples.py"
+  },
+  "docs/src/guides/governance.md:1": {
+    "sha256": "1a3764267a46fc416f2f0bf69a2fe38aab5532dc9db76d9f83652456d741aa47",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/installation.md:1": {
+    "sha256": "8206f50a07c838eb57ceedaa04f64bab2910e66f8f25382de4afff0bf33092ea",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/installation.md:2": {
+    "sha256": "800de791bd12430560b72cd61f05cf3f884b48ca358ee4892ba35e2c637b5931",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/installation.md:3": {
+    "sha256": "c71cb2c0b60cef6ef16f7b3ba5c6114a75eb2495246b41875e3933069bf61ddb",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/integrations/mcp.md:1": {
+    "sha256": "a461c77a7a2f89e198e1d08bb9f5de34ae2b72d901ac1fc02022e440468c4366",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/integrations/mcp.md:2": {
+    "sha256": "c6f64892ec9fb5e0ad3f42d5c69668853a61a938ae9db8eb1480c5bda32f08bc",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_sdk_examples.py"
+  },
+  "docs/src/guides/integrations/openai.md:1": {
+    "sha256": "332e71784fa906862f573d2abd269da5e0d6e6c3420543a82ab5b1bc235973ae",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/migration-v1.md:1": {
+    "sha256": "84874d75d6ff01ee8c9274917b6ca4d1d97cb18ba9f1722fe327c9ea17858d86",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/policy-library.md:1": {
+    "sha256": "c6f8f51783b540cfff5052f9af4142803b80cf7623749915e5170e0b8fbbf676",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/guides/policy-library.md:2": {
+    "sha256": "b9f8ebfd0c310aebaf4f0766baadd2d0c457e40dde8e9b89bc25e0e21b8b874c",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/runtime-integration.md:1": {
+    "sha256": "ff4a3d244a4a70d51537b91502968354e55e59a57ba33762a9b6c56992990e03",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:2": {
+    "sha256": "a3bdb66b335874c35c77d33d57e300f6c5a9392855a642c25034c1cfcb3eb07a",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:3": {
+    "sha256": "7504a257ce863059204cc81e0a4ad4ea5cc4717287b86507e9e40907ed94c42c",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:4": {
+    "sha256": "59c5393415f471ff4b2b52dff84bf9eaf6fdefe6ea36a843477bc071b79bc18b",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:5": {
+    "sha256": "a47d3a1ab09ad83a844e152fdf8105d1dca79b1b3a263942e666761c7c22748b",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:6": {
+    "sha256": "b4226452c99712823d7a55b6b6d03f5c15c8916b805ff5f2b7bb00f1ae8a28a9",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:7": {
+    "sha256": "25fa7a433f44144c382aec8cf159afcde8324889fdf288b0e547b9a1c40b23a3",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/guides/runtime-integration.md:8": {
+    "sha256": "a60492c9108e1602852f328f44f6fb78d210b7ba0a7fbeba75aece51783ac57e",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:9": {
+    "sha256": "52d0a92ca673339149deee2505511e3b79d72e7c0dfd109d9f21383c9baf83f0",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:10": {
+    "sha256": "78bab7479fa9a4e9594314f01ecaacfed6df35cf3857cc245cb56eaf265cab1e",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:11": {
+    "sha256": "aca396e2dc36d5320cff99f15e8241ebaa4055b2751caf885f984612f8a261b1",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/guides/runtime-integration.md:12": {
+    "sha256": "b333c814d939be92270a64d57b94eda8c573a3d9a8fec999c0baa06fe7e4fc67",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/runtime-integration.md:13": {
+    "sha256": "c5147fd9da31cc9bd4b23e50a603739b89a78c7cd62876ec9e7d25879e4a49be",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/guides/sdks/go.md:1": {
+    "sha256": "30822a1a19537874430ef209a8b38217e6cb96c5ee45eabd3f9068ec27afbaaa",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/sdks/go.md:2": {
+    "sha256": "99408b0d0a59d0991c3c1d91506bd1b10815fd7e7b6c45c99abcbf0763f358ab",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_sdk_examples.py"
+  },
+  "docs/src/guides/sdks/python.md:1": {
+    "sha256": "2fa6de261d72df3d35bc44071f5046559cbd8bce03af51d7e339bc969d8caece",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/sdks/python.md:2": {
+    "sha256": "f6af72a0b05a4664174594ea57fabc1e2625102339dc89ce6219dbac5a2da642",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_sdk_examples.py"
+  },
+  "docs/src/guides/sdks/rust.md:1": {
+    "sha256": "7fd574343b64bafb9f5b8c52cbe27f08655a136e33d349955f299bdfe17bbd56",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/sdks/rust.md:2": {
+    "sha256": "548892544c4ac107c7003a60c906f98e6ec1ae166d6ebe2dfddf371502ea81eb",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_sdk_examples.py"
+  },
+  "docs/src/guides/sdks/typescript.md:1": {
+    "sha256": "1e37ab8f697b485db403dd8be01b3d19ba4c2d7aeac715f52dae330940980cec",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/guides/sdks/typescript.md:2": {
+    "sha256": "913b985318462cd49323e1722e7f78b5154e5a877ad8006f7c8ef86da1755ed5",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_sdk_examples.py"
+  },
+  "docs/src/log-spec.md:1": {
+    "sha256": "8d5f3873e40311b34f820b994023de7db5f4f50c6750422c3ae5374e57db9ec8",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/merge-semantics.md:1": {
+    "sha256": "7e7012d74b0f59312c6bd71ca37a54ba61ef581e0db19ec7d2910e1c11be95b7",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/merge-semantics.md:2": {
+    "sha256": "ab1dd61e2ba3d68ea64065b65c5898d543a00ee2e1454bef18f96f25b4a6f039",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/reference/cli.md:1": {
+    "sha256": "3edbaab27c976f94f966c2440db2a214f8495f534b9aa4300b71b4c9fb77162e",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:2": {
+    "sha256": "44472235fbbf5390e5da4cdc714469339b16b56d19e959dac1912e9925cec0ef",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:3": {
+    "sha256": "a60b147cc18b92674f31417ae0d7cdaa84f6f35e981faa207300589cc6f06c6b",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:4": {
+    "sha256": "e19d575798fca50c9261a8fef48df6e5437419393e087f318dfe3a5e4b697ab1",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:5": {
+    "sha256": "be35de563f7b00a3179bee51bbea9fc363a4b011e94061378088224a221df99f",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:6": {
+    "sha256": "7d64bbe8a39caf53e23862c27a4e06a346ac29b658c6589bf72e182ae262293e",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:7": {
+    "sha256": "bbd2eff5baf3953f244d20de9c98146b819b3622adc7d989c29057b66eed8911",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/reference/cli.md:8": {
+    "sha256": "70bdc7fb018fb4bcbfd703585406d5aa4f1befaab1999768df06b9f466a6ba6c",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/reference/cli.md:9": {
+    "sha256": "9ed5a9c255c115389c4d26bdcf00823f92cff4ac0611a97be1a8b52b2139d36f",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:10": {
+    "sha256": "30736c1d1eebe1aa2231f4edea6e1184f8e542c36957ab4cf3af99e5320b8b5e",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:11": {
+    "sha256": "ac8612c8242f86c3ca2cf602662b9f1a21416e07690dc97963af080733804299",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/reference/cli.md:12": {
+    "sha256": "8ec3eabb432d1b5a52f706bcd2a6e6ee09f878e3fdbd786e435b2b6ac1e3c70a",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:13": {
+    "sha256": "47c01991bac0b19270c5c66afc397293dc8fd2da097e605bf831959365ff5881",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:14": {
+    "sha256": "c53f57c90f6e7c7a848cf41e7419cdb234a1201621cc83af086c1184936b0f2e",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:15": {
+    "sha256": "c60e0f91a3981b1956cc3c9b68a066afc2dac1faca5f8fe84a4fe980eae34c38",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:16": {
+    "sha256": "e4c57b1188e6fd295290094bdffda0f5b03a259ff755413969cdf786428632cc",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:17": {
+    "sha256": "c6e721b4545269b7dd3fbbba5d0cb3166c10e67bf18e8db0208399a6ab3d60bc",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:18": {
+    "sha256": "62df5f76cd8f49583b1df736bcf024e440b67ef8cf85672026b2f8b1a88768af",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:19": {
+    "sha256": "205ae1b0fb700a6dd6c670a1b03928829dfb91d48a60bd5324abf1f4b5e76724",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:20": {
+    "sha256": "a4a4d3174a6c88832a98993cfaf7d1d5630e913b7c4a3587f98438be819514fc",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:21": {
+    "sha256": "02f3d49b45d16da108a15dffcdc0c32fa30d28b6bee3035a60e8e733adf29854",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/cli.md:22": {
+    "sha256": "fb6e1f4f1869c316642b4ab54e8668cff5e05df861d740700625d78a5cfcfcc7",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/conformance-statement.md:1": {
+    "sha256": "37de7bb1a6479a933692023d31f8b0771ff5a1fc15127b3b09f7d86af18e1105",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/conformance-statement.md:2": {
+    "sha256": "a69b67735470e919d649ca5ca9ac2b0e5d5ecde8629671f850665d0c8ab53457",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/conformance-statement.md:3": {
+    "sha256": "445e890bf63b308a7bfc5ae48bec06b6e508ea9c6ea319911a1593bbc116a349",
+    "kind": "fragment",
+    "reason": "Blank conformance-statement template; values must be supplied from the implementation's evidence."
+  },
+  "docs/src/reference/conformance.md:1": {
+    "sha256": "a69b67735470e919d649ca5ca9ac2b0e5d5ecde8629671f850665d0c8ab53457",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/conformance.md:2": {
+    "sha256": "6b0cf6587b8eac6c029e1748491e1a9554a37281f4677ae2b1247f3c4f521e29",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/reference/errors.md:1": {
+    "sha256": "c509ec9c5921584a1928d85fe7a68223560fbcc7210f1084afaea322f21f9b34",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/external-conformance.md:1": {
+    "sha256": "04293d6b9dbc6c4f1e146b22cad2ac3cf2e751b8d4da2e58785429d257c94d3d",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/external-conformance.md:2": {
+    "sha256": "9676df5f6844c289b2cbe44d2da89d46115c4325c2cdbea934c5d91b0c92bf97",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/external-conformance.md:3": {
+    "sha256": "00a9c0039a4858b9d5fac60da1f58bdaedecc4d8c878adb3b0be7a777fdabe68",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/reference/external-conformance.md:4": {
+    "sha256": "a9c63a5090940656a378de6fac9998271d5246e2989c59b3b890ee0e449e7d3f",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/reference/external-conformance.md:5": {
+    "sha256": "56f531727a59d6bea6664fff3af0a1425557b07dc5126c48fc9d3beeee10b390",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/reference/json-schema.md:1": {
+    "sha256": "1e64e23f84d5057d61394c19a2c7e2732975ab5eb9730bd926807b53ae7a511c",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/reference/json-schema.md:2": {
+    "sha256": "60ef6e324146d1a3f524b79b294a22175768aec5375c5005283c6aa185269836",
+    "kind": "expected-output",
+    "reason": "Illustrative output, repository layout or URL; not a command."
+  },
+  "docs/src/reference/json-schema.md:3": {
+    "sha256": "c51880dbda205741ccb7996f6ddb0d3c829b96c4d3d7690de8a80a4e01a3a056",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/json-schema.md:4": {
+    "sha256": "1462753b4f91ea30d39eed175f01048fbcb0d81409baa78517814a60a1ffda8c",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/reference/json-schema.md:5": {
+    "sha256": "53480ca602e50f3625e298ee2c7251575f84e14970a450e199991373c5cd3419",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/reference/patterns.md:1": {
+    "sha256": "021b1f0e9287595ade493fabc9b761c0728eb80202633ee2bc8bdf39a25ea83e",
+    "kind": "runnable",
+    "runner": "scripts/test_docs_policies.py"
+  },
+  "docs/src/reference/trusted-invocation.md:1": {
+    "sha256": "652317040d6102bd52e4dacf7945e7d011fb479c145109209e4482f53ecf4fa3",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "docs/src/rules-reference.md:1": {
+    "sha256": "bb8ccf0e225baf13a266aa0adafa5b71e9bfb49ac6911a1f241acb59597fd0c3",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:2": {
+    "sha256": "0c22cd62de6979086c47b7cf1bf2a058debfb48c988d23388438998fd02f6469",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:3": {
+    "sha256": "5a310ee015c8f502f9a4e9d23cced2b6889f5119b9ac5a0e1b7a6db40c93d694",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:4": {
+    "sha256": "c9ef83d07d52fb336260bd08ed1151f6edc48eb03fba332ae3dd77e97c56f786",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:5": {
+    "sha256": "0f18ebaeb2ae0dd123160522faafd2ff73506244d3124df4150c592154f7fdc9",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:6": {
+    "sha256": "1bab01884aca485535aebbcf70d9257e5565f5967e9ccc24f8bde6df934f80c4",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:7": {
+    "sha256": "d86b464111a4343ab6f699d0fb4a580c19c4af5bec60dca3bdca07a182fedc36",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:8": {
+    "sha256": "18f28bc7662101fc894f797af41390fd26accd7827f473e9fddaadc716aa2897",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:9": {
+    "sha256": "47c1c2d8768fbb5a82f2668caa9cf97bde500d610348a21fb633a9fe123c4f06",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:10": {
+    "sha256": "0906c66bfddef0586025d2d77703c7d03f0193435db2ea05e83e9d5bb5d4437f",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:11": {
+    "sha256": "0127a0fd0284a33a057986045debb6200ab43f998ca65f19518633f1c9c0ab0e",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:12": {
+    "sha256": "0226fbe14421b53dc9ba449c577b32934432bcb81c56787806ac7fadb23f53aa",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/rules-reference.md:13": {
+    "sha256": "4842fba85811d6514594fcf03538ddb0de49d686d57d7baa327aa205273c56f9",
+    "kind": "fragment",
+    "reason": "API or configuration excerpt; requires the surrounding application or document."
+  },
+  "docs/src/signing-spec.md:1": {
+    "sha256": "3983dd6a6980601405bd98f2f2913bcfbd3da31eeb5c745ace6b9365a54bc774",
+    "kind": "operator-command",
+    "reason": "Operator supplies the named policy, trust material, checkout, installation or output path; not a self-contained CI example."
+  },
+  "spec/hushspec-bundle.md:1": {
+    "sha256": "2f88a110b8455f1448abccc650f87fb0d0c03e5fb0b5903ce73c468e428ab109",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-bundle.md:2": {
+    "sha256": "da771544755d56c14fbbd34c9104b8f6da0dad4bc0c143daa6d08bda40191938",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-bundle.md:3": {
+    "sha256": "ea50c770b1c35d323043eecccd1a8d3949ff2f63b49a7397e2ae9aaf77ce0fde",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-canonical.md:1": {
+    "sha256": "223a54ae75f36262ae0eb4ba2833f0b4793849422fa2c5f30dae20c611052309",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-canonical.md:2": {
+    "sha256": "e249b1d279f8b5f6c96eb7a64976597881af1b1170506f758975ef5b563f0d02",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-canonical.md:3": {
+    "sha256": "9624afeef9f6567fa55e6f6cc162bd59aaa4f64669b0229237879af3e5c6f0b3",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-canonical.md:4": {
+    "sha256": "3141a973194607cf284a101401d57ada0e59e94f0651c22ab51ffd38f4f8859c",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:1": {
+    "sha256": "6cf9cef9395f795b4a06798ad166f6dac991a0fc53962a719c95560096332817",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:2": {
+    "sha256": "054e5972eb5e94e05545e2e6509cde2b9c119561d9ef9bd6639ebdc8e7a7dfe7",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:3": {
+    "sha256": "fcdc0109fabdcb80a18e862509702db96df1f0f4a12750321af1f3f68d88f414",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:4": {
+    "sha256": "7d8cea71836690592b0d67a04ebd5df343dc601ecb48cfb757ac6c584a39aef2",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:5": {
+    "sha256": "9e6959fec74502d61b6a71dfeabdbfd05de9c8ee269f3bbd3edbf41c0f10c641",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-core.md:6": {
+    "sha256": "82bca0b4cdef624403cae2c36ac24fd9c7aca7b99a656eefc9729a5ab6968a02",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-detection.md:1": {
+    "sha256": "49a948ac1bc21178e72b2842af9f4e07172adc0bc8fec984c28600dd0bac36c6",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-detection.md:2": {
+    "sha256": "8c4d3c9e9e4e6522f79a36b58a02a42d150b4d131e417bfd01cfd5a285df9ce0",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-detection.md:3": {
+    "sha256": "e61678544b7cbd81ea3701387dc039ebb20cd6040b2eb211346a528bcade88ea",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:1": {
+    "sha256": "804fc6ffc6c417e820609260a6f4fe116e90037fb7e79ec33bd829abcec30a42",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:2": {
+    "sha256": "1370a744ad87a0762030c5dfc9c1782ac8e266940562522143994da4aac5d488",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:3": {
+    "sha256": "8f51d4dc235cf4844cecfe1447782147392889415dce344e2e780c956d47ca7b",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:4": {
+    "sha256": "208db1d33119817663921ecb61083c145a6b6bccd0f12ae726b024d3c4ded4e1",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:5": {
+    "sha256": "85aff339aa77b37ebc732c5e34a215e25f10cac1bb81f6c9d2bd5b509a0c92b2",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:6": {
+    "sha256": "19e6924866af87e50e6fa9adabdc8ec86aecdf0e670062c4e713abf1f25816ae",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:7": {
+    "sha256": "aad5d862f00796ffd4c80adb71392e74ed14b3f008eee91753bdd2dec9d3732f",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:8": {
+    "sha256": "df7e3ed2c57810771054912afa613fba7360b22a4800ed528821feec1f0a33d8",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:9": {
+    "sha256": "7d8cea71836690592b0d67a04ebd5df343dc601ecb48cfb757ac6c584a39aef2",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:10": {
+    "sha256": "0a12b2f4081640db6fab243400dee1cd5db09bf03098917d05152ed04f81fae3",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:11": {
+    "sha256": "321faf6e99881c6c731b70fa4074162999994c898b24d8b1000f7a2f5a59bd2e",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-grammars.md:12": {
+    "sha256": "5e33486111871d6dde6764d275304c6d001ec725de8c6e04bf57e7b1f9dfff4a",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-origins.md:1": {
+    "sha256": "e498822f5e6d7866bfe363ca8139e033f549c3102c6f80747dd42b99c4df1c81",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-origins.md:2": {
+    "sha256": "6cda4f62e613fbc79404964a4473ef9544184ccc3d48067cb62da898810df70d",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-posture.md:1": {
+    "sha256": "09bb786992d56c0c35e5638eb0bab18eaf8870612d6510aff07540b6cfd22d2b",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-posture.md:2": {
+    "sha256": "40a8b049a0e1cd122ebacf8aba3e1cdb276efce23eaa5dd37779d0cbbe57244e",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-posture.md:3": {
+    "sha256": "fe4af9a57935a7ee096cbb8fecf53ea1a4ce824012c4c850ea0123552bc1876b",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-signing.md:1": {
+    "sha256": "88b25cf9e7b2d488f287771dbb370e2abba7c30e72624ae64a065c9721a00052",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-signing.md:2": {
+    "sha256": "4344ffdee0a0d9874ddb8d2c2ee62e4e21e999bd99eb797d77bb7e3be2ce3630",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  },
+  "spec/hushspec-signing.md:3": {
+    "sha256": "6aef727875002675a26a9d6b8946dca2d731c80fb34dd9e56651c3655884142f",
+    "kind": "normative",
+    "reason": "Immutable normative grammar, wire example or pseudocode; not an executable tutorial."
+  }
+}
