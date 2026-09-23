@@ -6,17 +6,25 @@ packet, supported platforms and exit semantics are separate from `h2h` below.
 
 `h2h` is the reference command-line tool for HushSpec documents. It validates,
 resolves, lints, formats, diffs, evaluates, signs and scaffolds policies, and
-every reporting subcommand is scriptable: machine-readable output through
-`--format json` and exit codes that mean the same thing everywhere. The
+most reporting subcommands support machine-readable output through
+`--format json`. The
 exceptions are `init`, `keygen`, `sign`, `panic` and `completions`, which
 take no `--format`, and `hash`, whose `--format` selects `digest` or
-`canonical`.
+`canonical`. `resolve` selects YAML or JSON; `schema --format` affects the
+listing only, while a schema body is always JSON. The option appendix below
+is captured from the release binary, including every nested subcommand.
 
 ```bash
 h2h --help            # subcommand list
 h2h <command> --help  # flags for one command
 h2h version           # CLI, build and spec versions
 ```
+
+## Installation
+
+Install the CLI through the [installation guide](../guides/installation.md#cli-macos-and-linux).
+It includes the rootless installer, package managers, prebuilt binaries and
+Windows instructions. The installed command is `h2h`.
 
 ## Exit codes
 
@@ -27,14 +35,20 @@ h2h version           # CLI, build and spec versions
 | `2` | Input or usage failure: file not found, unreadable input, a document `fmt` could not parse, an unknown flag or value (clap's own usage errors also exit `2`). |
 | `4` | `eval` / `explain` only: the action's decision was `warn`. |
 
-The split is deliberate: `1` means "the tool worked and the answer is no", `2`
-means "the tool could not run the check at all". CI can therefore treat `2` as a
-pipeline bug and `1` as a policy failure.
+These are common conventions, not a universal error taxonomy. `init`, `keygen`,
+`sign` and panic commands also use exit 1 for some I/O or setup failures;
+`panic status` uses 1 for an active or unreadable sentinel. Consult the
+command-specific contracts below and retain the diagnostic. `eval` and
+`explain` describe decisions; they do not run the requested tool.
 
 ## Reading from stdin
 
-`validate`, `lint` and `fmt` accept `-` in place of a path and read the document
+`validate`, `lint`, `fmt` and `hash` accept `-` in place of a path and read the document
 from stdin. Diagnostics name it `<stdin>`.
+
+`eval` and `explain` accept a full action from stdin through `--action-file -`;
+their policy argument remains a file or builtin reference. Do not assume
+every path-taking command supports `-`.
 
 ```bash
 cat policy.yaml | h2h validate -
@@ -82,7 +96,7 @@ is not an ISO 8601 calendar date (`YYYY-MM-DD`).
 
 ## `h2h resolve`
 
-Print a policy with its `extends` chain fully resolved and merged — the exact
+Print a policy with its `extends` chain fully resolved and merged: the exact
 document an enforcement engine would evaluate. `extends` is consumed by the
 merge, so the output has no `extends` key.
 
@@ -109,7 +123,7 @@ warnings) · `2` the policy file was not found.
 
 ## `h2h hash`
 
-Print a policy's **content hash** — the portable identity defined by the canonical form
+Print a policy's **content hash**, the portable identity defined by the canonical form
 specification (`spec/hushspec-canonical.md`). Two parties holding the same policy get the
 same digest in every SDK, regardless of which optional keys the author omitted or which
 language wrote the file.
@@ -130,7 +144,7 @@ h2h resolve policy.yaml | h2h hash -      # read an already-resolved document
 The hash covers the **resolved** document, so a policy that declares `extends` is resolved
 through the same chain `h2h resolve` walks before it is hashed. Changing a base therefore
 changes the identity of every policy that extends it, even when the child file is
-untouched — that is the point: the enforced policy changed. `merge_strategy` is a
+untouched. That is the point: the enforced policy changed. `merge_strategy` is a
 resolution field and never appears in the canonical form.
 
 The document is validated first: an invalid document has no canonical form, because a
@@ -184,7 +198,7 @@ warning[L008]: rules.egress.allow[1]: duplicate pattern "api.example.com"
 
 Positions come from a second pass over the same bytes with a real YAML event
 parser (`saphyr-parser`), which keeps quoted keys, block scalars, flow
-sequences and comments between entries correctly aligned — a line scanner does
+sequences and comments between entries correctly aligned; a line scanner does
 not. Lint reports the **resolved** document, so a finding about a block a policy
 inherits names the base that declares it:
 
@@ -198,8 +212,8 @@ JSON findings carry `code`, `severity`, `message`, `location`, `fixable`, the
 document `path`, and a `span` object (`file`, `line`, `column`, `end_line`,
 `end_column`; 1-based, with `end_column` pointing at the character after the
 region). Each file also reports the `fixed` codes that `--fix` actually applied.
-A finding whose key could not be located — an inherited default no document
-writes, or a base fetched over HTTP — omits `span` and still carries `location`.
+A finding whose key could not be located (an inherited default no document
+writes, or a base fetched over HTTP) omits `span` and still carries `location`.
 
 ### SARIF
 
@@ -207,7 +221,7 @@ writes, or a base fetched over HTTP — omits `span` and still carries `location
 `h2h` carrying the full rule catalog below (each with `shortDescription`,
 `fullDescription` and a `defaultConfiguration.level`), and one `result` per
 finding with `ruleId`, `level`, `message`, a `physicalLocation` region, a
-`logicalLocations` entry naming the document path, and — for fixable findings —
+`logicalLocations` entry naming the document path, and, for fixable findings,
 a `fixes` entry describing the deletion `--fix` would perform. Severities map
 `error → error`, `warning → warning`, `info → note`.
 
@@ -225,7 +239,7 @@ Severity is a function of provability. `error` means the document contains
 configuration that can never take effect under the spec's own rules; `warning`
 means a construct defeats something else the same document declares; `info`
 means the construct is coherent but easy to arrive at by accident. Two codes
-(`L016`, `L018`) report at two severities for exactly that reason — see their
+(`L016`, `L018`) report at two severities for exactly that reason; see their
 rows.
 
 | Code | Level | Rule | Why it fires |
@@ -243,13 +257,13 @@ rows.
 | `L009` | info | missing-secret-patterns | Without secret detection, a `file_write` carrying a credential is indistinguishable from any other write. |
 | `L010` | warning | unreachable-allow | Block takes precedence over allow, so an entry in both can never decide anything. |
 | `L011` | warning | unmapped-rule-block | Once a policy maps controls, an unmapped block is enforcement with no stated reason. Policies that map nothing are silent. |
-| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing — a false compliance claim. |
+| `L012` | error | broken-control-mapping | A mapping claims a control is implemented through a rule path that resolves to nothing: a false compliance claim. |
 | `L013` | warning | unregistered-control | The framework is not in `spec/registries/frameworks.yaml`, or the control id does not match that framework's pattern. The registry is advisory, so this is an unverifiable claim, not an invalid document. |
 | `L014` | warning / info | credential-paths-uncovered | `.env`, `.ssh`, `.aws`, `.gnupg`, `.kube` and `id_rsa` are where agent credentials actually live, and the message names the ones a denylist does not reach. A policy running a `path_allowlist` is silent (everything outside it is already denied). A policy with **neither** block reports `info`: a capability-scoped document meant to be composed onto a base legitimately says nothing about the filesystem. |
 | `L015` | warning | under-graded-credential-pattern | Severity drives what an engine does with a match, so a pattern that recognizes an AWS key id (`AKIA`/`ASIA`), a GitHub token (`gh[opsur]_`, `github_pat_`), a PEM private key header or an OpenAI `sk-` key and grades it below `critical` has downgraded a credential leak to a note. |
-| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect — they become dead — and reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
+| `L016` | warning / info | overbroad-forbidden-pattern | Forbidden patterns are unanchored, so `.*`, `.+`, a bare single character, or anything matching the empty string matches every command or diff. Beside other patterns that is a defect: they become dead. The lint reports `warning`. As the **only** entry in its list it is a coherent deny-all (the sole way this block can express one) and reports `info`. |
 | `L017` | warning | permissive-default | `egress.default: allow` permits every host outside `block`, making the allow list decorative; `tool_access.default: allow` with empty `block` and `require_confirmation` permits every tool. Supersedes `L005`, which reported the same shape as `info` and only when the allow list was non-empty; `L005` is retired and will not be reused. |
-| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright — reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
+| `L018` | warning / info | empty-capability-allowlist | `enabled: false` makes a block inert, which *permits* the capability, so `enabled: true` with an empty allowlist is the spec's only way to deny one outright, reported `info` (this is what `rulesets/panic.yaml` does deliberately). Promoted to `warning` where the document contradicts itself (`computer_use.allowed_actions` permits `input.inject` while `input_injection.allowed_types` is empty) or where the block does nothing at all (`computer_use` in `observe` mode with nothing allowed: observe never denies). |
 | `L019` | error | unreachable-extension | A posture state that is neither `initial` nor the target of any transition is never entered; a transition naming an undefined state never fires; an origin profile with no `match` object is never a candidate ([origins spec §3](../extensions/origins.md)) and one repeating an earlier profile's `match` always loses the document-order tie; a literal overlay `allow` entry the base allowlist does not match can never allow anything (origins spec §4.1, overlay allowlists intersect). |
 | `L021` | warning | ungranted-capability | A `when.capability` naming a capability no posture state grants can never be true while the policy has a posture extension, so the block is permanently inert. Without a posture extension the predicate is unevaluable and the block stays active (core spec 3.13), so nothing is reported. |
 | `L022` | warning | empty-list-entry | An empty string in `tool_access.allow`, `block`, or `require_confirmation`, or in an origins overlay list, can never match a tool or host (core spec 3.3, 3.7) and is usually an editing mistake. |
@@ -290,7 +304,7 @@ discarded (first at line 2); pass --strip-comments to reformat anyway
 
 - A refused rewrite exits `1` and leaves the file untouched.
 - `--check` and `--diff` report `has comments; would not reformat` and treat it
-  as a skip, not a failure — a commented policy does not fail a `fmt --check` CI
+  as a skip, not a failure: a commented policy does not fail a `fmt --check` CI
   gate.
 - `--strip-comments` discards the comments and reformats anyway.
 - The modeline alone never triggers the refusal; it is preserved verbatim.
@@ -448,7 +462,7 @@ h2h audit policy.yaml --strict          # every finding is fatal
 | `--strict` | Exit non-zero when a check fails, a governance finding is reported, or a control rule path does not resolve (L012). |
 
 Every governance check that fires is listed with its code, severity and the
-document path it concerns — `GOV_SOD_VIOLATION` (author is also the approver),
+document path it concerns: `GOV_SOD_VIOLATION` (author is also the approver),
 `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER`,
 `GOV_EXPIRED`, `GOV_LIFECYCLE`, `GOV_MISSING_APPROVAL_DATE`,
 `GOV_RESTRICTED_NO_APPROVER` (core spec 2.5). Warnings are advisory: without
@@ -491,7 +505,7 @@ h2h schema --list --format json
 
 | Flag | Description |
 |---|---|
-| `[NAME]` | A short name for the current `.v1.` lineage — `core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector` — the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
+| `[NAME]` | A short name for the current `.v1.` lineage (`core`, `posture`, `origins`, `detection`, `evaluator-test`, `hash-vector`, `receipt`, `log-entry`, `signature`, `keyring`, `bundle`, `report`, `error-codes`, `merge-vector`), the same name with a `.v0` suffix for the frozen 0.x file (`core.v0`), or the published file name. Required unless `--list`. |
 | `--list` | List the available schemas instead of printing one. |
 | `-f, --format <text\|json>` | Format for `--list` (the schema body is always JSON). |
 
@@ -519,7 +533,7 @@ h2h verify policy.yaml --keyring ~/.hushspec/keyring.json --last-seen-version 4
 ### What is signed
 
 The envelope covers the **content hash of the resolved policy**, not the file's
-bytes — the same digest `h2h hash` prints. So reformatting a signed policy keeps
+bytes, the same digest `h2h hash` prints. So reformatting a signed policy keeps
 its signature valid, and a change to a base policy reached through `extends`
 invalidates every signature over the policies that extend it, because the
 enforced policy changed. `sign` resolves and validates the chain first and
@@ -527,7 +541,7 @@ refuses to sign when it cannot.
 
 ### Keys and trust
 
-Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public — exactly
+Keys are standard PEM: PKCS#8 private, SubjectPublicKeyInfo public, exactly
 what `openssl genpkey -algorithm ed25519` and `openssl pkey -pubout` produce. A
 key is named by `sha256:` plus the digest of its SPKI DER, and `verify`
 recomputes that id from the public key rather than trusting a keyring's claim.
@@ -816,3 +830,883 @@ signing key ids -- without verifying anything. `--format json` prints the whole
 decoded statement.
 
 Exit 0, or 1 when the bundle cannot be decoded.
+
+## Common workflows
+
+### Validating and linting before commit
+
+Run `h2h validate --strict policy.yaml` and `h2h lint --fail-on-warnings policy.yaml`.
+Use `h2h fmt --check policy.yaml` to check formatting without changing files.
+See [CI integration](../guides/ci.md) for action, hook and container setup.
+
+### Running conformance tests
+
+Use `h2h test --fixtures tests/` for your policy's expected decisions. It tests
+the reference evaluator, not an arbitrary external engine. Engine claims use
+the separate [conformance testkit](conformance.md).
+
+### Policy diffing for PR review
+
+Use `h2h diff old.yaml new.yaml --fail-on relaxed` to flag a relaxation, and
+retain both resolved policy hashes with the review. Re-run policy fixtures;
+a diff is not exhaustive proof over every possible runtime input.
+
+### Emergency panic mode
+
+Use `h2h panic status --sentinel /operator/chosen/path` to inspect your configured
+sentinel. Activating creates the file; deactivating removes it. Only processes
+configured to consult that path will see it, and an already latched SDK needs
+an explicit application reset. See [safe recovery](../guides/hot-reload.md#panic-and-recovery).
+
+<!-- generated-cli-reference -->
+
+## Complete v1 option reference
+
+Captured from `h2h 1.0.0`. These blocks list every public command and option.
+Exit notes are checked against the release implementation, not inferred from help.
+
+### `h2h audit` options
+
+<!-- cli-exit: audit -->
+0: report produced; 1: unreadable/invalid policy or strict governance failure. Usage errors: 2.
+
+<!-- cli-help: audit -->
+```text
+Display governance metadata and run advisory checks
+
+Usage: h2h audit [OPTIONS] <FILE>
+
+Arguments:
+  <FILE>  Policy YAML file to audit
+
+Options:
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+      --controls         Report the control -> rule-path matrix and rule-block coverage
+      --strict           Exit non-zero when a governance check fails, a governance finding is reported, or a control rule path does not resolve (lint L012)
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h bundle` options
+
+<!-- cli-exit: bundle -->
+Select create, verify or inspect; their exit contracts follow below. Missing/invalid subcommand: 2.
+
+<!-- cli-help: bundle -->
+```text
+Create, verify, and inspect signed policy bundles (DSSE / in-toto)
+
+Usage: h2h bundle <COMMAND>
+
+Commands:
+  create   Resolve a policy and attest it as a signed DSSE / in-toto bundle
+  verify   Check a bundle's signatures, subject digest, and (optionally) the policy it claims to be about
+  inspect  Print a bundle's predicate summary without verifying it
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### `h2h bundle create` options
+
+<!-- cli-exit: bundle create -->
+0: bundle created; 1: policy resolution/validation/trust refusal; 2: unusable input or output.
+
+<!-- cli-help: bundle create -->
+```text
+Resolve a policy and attest it as a signed DSSE / in-toto bundle
+
+Usage: h2h bundle create [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>  Policy file to bundle, or a builtin reference (e.g. "builtin:default")
+
+Options:
+  -k, --key <PATH>              PEM PKCS#8 Ed25519 private key that signs the bundle (see `h2h keygen`)
+      --keyring <PATH>          Trusted keyring JSON used to verify the policy's own signature on load
+      --require-signature       Refuse to bundle unless every non-builtin document in the extends chain carries a verifying signature or a matching #sha256: pin
+      --max-skew <SECONDS>      Allowed signer clock skew in seconds when verifying on load [default: 300]
+  -o, --out <PATH>              Output path for the bundle (defaults to <POLICY>.bundle.json)
+      --created-at <TIMESTAMP>  Pin predicate.created_at instead of using the clock, for reproducible bundles (RFC 3339, e.g. 2026-09-15T12:00:00.000Z)
+      --subject-name <NAME>     Override the subject name (defaults to the policy's name)
+  -f, --format <FORMAT>         Output format [default: text] [possible values: text, json]
+  -h, --help                    Print help
+  -V, --version                 Print version
+```
+
+### `h2h bundle verify` options
+
+<!-- cli-exit: bundle verify -->
+0: valid; 1: verification refused with a reason code on stderr; 2: unusable input or trust configuration.
+
+<!-- cli-help: bundle verify -->
+```text
+Check a bundle's signatures, subject digest, and (optionally) the policy it claims to be about
+
+Usage: h2h bundle verify [OPTIONS] <BUNDLE>
+
+Arguments:
+  <BUNDLE>  Bundle file to verify
+
+Options:
+  -k, --key <PATH>       PEM SPKI public key, accepted as a one-key keyring
+      --keyring <PATH>   Trusted keyring JSON (hushspec-keyring.v1.schema.json)
+      --policy <PATH>    Re-resolve this policy and assert the bundle attests it (check 4)
+      --now <TIMESTAMP>  Verifier clock, RFC 3339 (defaults to now). A bundle has no expiry; this only stamps the report
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h bundle inspect` options
+
+<!-- cli-exit: bundle inspect -->
+0: decoded; 1: bundle cannot be decoded. Inspection does not verify trust. Usage errors: 2.
+
+<!-- cli-help: bundle inspect -->
+```text
+Print a bundle's predicate summary without verifying it
+
+Usage: h2h bundle inspect [OPTIONS] <BUNDLE>
+
+Arguments:
+  <BUNDLE>  Bundle file to read
+
+Options:
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h validate` options
+
+<!-- cli-exit: validate -->
+0: valid; 1: invalid; 2: input could not be read or invalid usage.
+
+<!-- cli-help: validate -->
+```text
+Validate policy files against the HushSpec schema
+
+Usage: h2h validate [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...  Policy YAML files to validate; "-" reads the document from stdin
+
+Options:
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+      --strict           Also check that extends references resolve
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h resolve` options
+
+<!-- cli-exit: resolve -->
+0: resolved; 1: resolution/validation/trust failure or strict warning; 2: missing input or invalid usage.
+
+<!-- cli-help: resolve -->
+```text
+Print a policy with its extends chain fully resolved and merged
+
+Usage: h2h resolve [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>  Policy YAML file, or a builtin reference (e.g. "builtin:default")
+
+Options:
+  -f, --format <FORMAT>        Output format [default: yaml] [possible values: yaml, json]
+      --strict                 Treat validation warnings (unknown extension keys, unreachable posture states, ...) on the resolved document as failures
+      --require-signature      Require every non-builtin document in the extends chain to carry a verifying detached signature or a matching #sha256: pin
+      --keyring <PATH>         Trusted keyring JSON used to verify policy signatures on load
+      --key <PATH>             A single trusted public key (PEM) used to verify policy signatures on load
+      --now <TIMESTAMP>        Verifier clock as an RFC 3339 timestamp (defaults to now)
+      --max-skew <SECONDS>     Allowed signer clock skew in seconds [default: 300]
+      --last-seen-version <N>  The last policy_version accepted for this policy (rollback protection)
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+### `h2h test` options
+
+<!-- cli-exit: test -->
+0: all cases passed; 1: failed cases or no runnable cases; 2: input/configuration failure.
+
+<!-- cli-help: test -->
+```text
+Run evaluation test suites against policies
+
+Usage: h2h test [OPTIONS] [TESTS]...
+
+Arguments:
+  [TESTS]...  Test fixture files
+
+Options:
+  -p, --policy <POLICY>      Policy file to test against (overrides policy embedded in fixtures)
+      --fixtures <FIXTURES>  Directory of test fixture files
+      --sentinel <PATH>      Panic sentinel file to consult before evaluating; if it exists the process denies all actions (default: .hushspec_panic)
+  -f, --format <FORMAT>      Output format [default: text] [possible values: text, tap, json, junit]
+      --report-file <PATH>   Write the report in `--format` here instead of to stdout; stdout then carries the human-readable summary
+      --fail-on-uncovered    Exit non-zero when a declared rule path was never hit by any case
+  -h, --help                 Print help
+  -V, --version              Print version
+```
+
+### `h2h eval` options
+
+<!-- cli-exit: eval -->
+0: allow; 1: deny or policy refusal; 4: warn; 2: input/usage failure. No tool is executed.
+
+<!-- cli-help: eval -->
+```text
+Evaluate a single action against a policy
+
+Usage: h2h eval [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>  Policy YAML file, or a builtin reference (e.g. "builtin:default")
+
+Options:
+      --type <TYPE>            Action type (file_read, file_write, patch_apply, shell_command, tool_call, egress, computer_use, input_inject, browser_action, code_exec, custom)
+      --target <TARGET>        Action target (path, domain, tool name, command, channel)
+      --content <STRING>       Action content (file body, patch text)
+      --content-file <PATH>    Read action content from a file
+      --args-size <N>          Serialized tool-argument size in bytes
+      --url <URL>              browser_action: navigation destination URL
+      --network                code_exec: the call requests network access
+      --timeout-ms <MS>        code_exec: requested execution time in milliseconds
+      --context <JSON|@PATH>   Runtime context for `when` conditions: an inline JSON object, or @PATH to read a YAML/JSON file
+      --origin <KEY=VALUE>     Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id, space_id, space_type, visibility, external_participants, tags, sensitivity, actor_role
+      --posture <STATE>        Current posture state (defaults to the policy's posture "initial" state)
+      --signal <SIGNAL>        Posture transition signal
+      --action-json <JSON>     Full action as an inline JSON object
+      --action-file <PATH>     Full action as a YAML or JSON file; "-" reads stdin
+      --sentinel <PATH>        Panic sentinel file to consult before evaluating; if it exists the process denies all actions (default: .hushspec_panic)
+      --explain                Render the rule-by-rule trace (text output only)
+      --require-signature      Require every non-builtin document in the extends chain to carry a verifying detached signature or a matching #sha256: pin
+      --keyring <PATH>         Trusted keyring JSON used to verify policy signatures on load
+      --key <PATH>             A single trusted public key (PEM) used to verify policy signatures on load
+      --now <TIMESTAMP>        Verifier clock as an RFC 3339 timestamp (defaults to now)
+      --max-skew <SECONDS>     Allowed signer clock skew in seconds [default: 300]
+      --last-seen-version <N>  The last policy_version accepted for this policy (rollback protection)
+      --monitor                Record the decision in monitor mode (a warn or deny is recorded as would_block instead of blocked)
+      --agent-id <ID>          Actor recorded in the receipt: the agent
+      --session-id <ID>        Actor recorded in the receipt: the session, run, or job
+      --principal <ID>         Actor recorded in the receipt: the principal the agent acts for
+      --log <PATH>             Append the receipt to a hash-linked log (log spec), recording a policy_loaded event first
+      --log-key <PATH>         Sign log entries with this Ed25519 private key (PEM)
+  -f, --format <FORMAT>        Output format [default: text] [possible values: text, json, receipt]
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+### `h2h explain` options
+
+<!-- cli-exit: explain -->
+0: allow; 1: deny or policy refusal; 4: warn; 2: input/usage failure. No tool is executed.
+
+<!-- cli-help: explain -->
+```text
+Explain a single-action decision with a rule-by-rule trace
+
+Usage: h2h explain [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>  Policy YAML file, or a builtin reference (e.g. "builtin:default")
+
+Options:
+      --type <TYPE>            Action type (file_read, file_write, patch_apply, shell_command, tool_call, egress, computer_use, input_inject, browser_action, code_exec, custom)
+      --target <TARGET>        Action target (path, domain, tool name, command, channel)
+      --content <STRING>       Action content (file body, patch text)
+      --content-file <PATH>    Read action content from a file
+      --args-size <N>          Serialized tool-argument size in bytes
+      --url <URL>              browser_action: navigation destination URL
+      --network                code_exec: the call requests network access
+      --timeout-ms <MS>        code_exec: requested execution time in milliseconds
+      --context <JSON|@PATH>   Runtime context for `when` conditions: an inline JSON object, or @PATH to read a YAML/JSON file
+      --origin <KEY=VALUE>     Origin context field as KEY=VALUE (repeatable). Keys: provider, tenant_id, space_id, space_type, visibility, external_participants, tags, sensitivity, actor_role
+      --posture <STATE>        Current posture state (defaults to the policy's posture "initial" state)
+      --signal <SIGNAL>        Posture transition signal
+      --action-json <JSON>     Full action as an inline JSON object
+      --action-file <PATH>     Full action as a YAML or JSON file; "-" reads stdin
+      --sentinel <PATH>        Panic sentinel file to consult before evaluating; if it exists the process denies all actions (default: .hushspec_panic)
+      --explain                Render the rule-by-rule trace (text output only)
+      --require-signature      Require every non-builtin document in the extends chain to carry a verifying detached signature or a matching #sha256: pin
+      --keyring <PATH>         Trusted keyring JSON used to verify policy signatures on load
+      --key <PATH>             A single trusted public key (PEM) used to verify policy signatures on load
+      --now <TIMESTAMP>        Verifier clock as an RFC 3339 timestamp (defaults to now)
+      --max-skew <SECONDS>     Allowed signer clock skew in seconds [default: 300]
+      --last-seen-version <N>  The last policy_version accepted for this policy (rollback protection)
+      --monitor                Record the decision in monitor mode (a warn or deny is recorded as would_block instead of blocked)
+      --agent-id <ID>          Actor recorded in the receipt: the agent
+      --session-id <ID>        Actor recorded in the receipt: the session, run, or job
+      --principal <ID>         Actor recorded in the receipt: the principal the agent acts for
+      --log <PATH>             Append the receipt to a hash-linked log (log spec), recording a policy_loaded event first
+      --log-key <PATH>         Sign log entries with this Ed25519 private key (PEM)
+  -f, --format <FORMAT>        Output format [default: text] [possible values: text, json, receipt]
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+### `h2h init` options
+
+<!-- cli-exit: init -->
+0: scaffold created; 1: refusal or filesystem failure; 2: invalid usage.
+
+<!-- cli-help: init -->
+```text
+Scaffold a new policy project
+
+Usage: h2h init [OPTIONS]
+
+Options:
+      --preset <PRESET>  Security preset [default: default] [possible values: permissive, default, strict]
+      --dir <DIR>        Directory to create .hushspec/ in [default: .]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h lint` options
+
+<!-- cli-exit: lint -->
+0: no blocking findings; 1: errors or warnings with --fail-on-warnings; 2: input/usage failure.
+
+<!-- cli-help: lint -->
+```text
+Run static analysis checks on policy files
+
+Usage: h2h lint [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...
+          Policy YAML files to lint; "-" reads the document from stdin
+
+Options:
+  -f, --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text
+          - json
+          - sarif: SARIF 2.1.0, the format GitHub code scanning ingests
+
+          [default: text]
+
+      --fail-on-warnings
+          Exit 1 if any warnings are reported (not just errors)
+
+      --fix
+          Apply decision-neutral auto-fixes in place
+
+      --dry-run
+          Show what --fix would change without modifying files
+
+      --out <PATH>
+          Write the report to this file instead of stdout (json and sarif only)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+### `h2h diff` options
+
+<!-- cli-exit: diff -->
+0: no selected --fail-on class; 1: selected change class found; 2: input/usage failure.
+
+<!-- cli-help: diff -->
+```text
+Compare two policies and show effective decision changes
+
+Usage: h2h diff [OPTIONS] <OLD> <NEW>
+
+Arguments:
+  <OLD>
+          Base policy file (before change)
+
+  <NEW>
+          Updated policy file (after change)
+
+Options:
+      --sentinel <PATH>
+          Panic sentinel file to consult before evaluating; if it exists the process denies all actions (default: .hushspec_panic)
+
+  -f, --format <FORMAT>
+          Output format
+
+          [default: text]
+          [possible values: text, json]
+
+      --fail-on <CLASS>
+          Exit 1 when the diff contains a change of this class: "relaxed" (a deny becomes allow/warn, or a warn becomes allow), "tightened" (the reverse), or "any" (either)
+
+          Possible values:
+          - relaxed:   Any change that can turn a deny into allow/warn or a warn into allow
+          - tightened: Any change that can turn an allow into warn/deny or a warn into deny
+          - any:       Either direction
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+### `h2h fmt` options
+
+<!-- cli-exit: fmt -->
+0: formatted or already canonical; 1: --check needs changes or rewrite refused; 2: read/parse/write/usage failure.
+
+<!-- cli-help: fmt -->
+```text
+Format policy files canonically
+
+Usage: h2h fmt [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...  Policy YAML files to format; "-" reads stdin and writes to stdout
+
+Options:
+      --check            Check formatting without modifying files (exit 1 if changes needed)
+      --diff             Show what would change without modifying files
+      --strip-comments   Reformat even though it discards comments. Without this flag `fmt` refuses to rewrite a document that carries comments beyond a leading yaml-language-server modeline
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h hash` options
+
+<!-- cli-exit: hash -->
+0: digest/canonical output; 1: parse/resolve/validation/canonicalization failure; 2: input/usage failure.
+
+<!-- cli-help: hash -->
+```text
+Print the content hash of a policy's canonical form
+
+Usage: h2h hash [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>
+          Policy YAML file, a builtin reference (e.g. "builtin:default"), or "-" to read the document from stdin
+
+Options:
+  -f, --format <FORMAT>
+          Output format
+
+          Possible values:
+          - digest:    The `sha256:<hex>` content hash (canonical spec 5)
+          - canonical: The RFC 8785 canonical JSON text the hash covers (canonical spec 4)
+
+          [default: digest]
+
+      --strict
+          Treat validation warnings on the resolved document as failures
+
+      --own
+          Hash the document on its own, with `extends` and `merge_strategy` stripped and no resolution: the value a `#sha256:` digest pin names and a receipt records for a chain link (core spec 2.3)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```
+
+### `h2h panic` options
+
+<!-- cli-exit: panic -->
+Select activate, deactivate or status. This manages a sentinel file, not another process latch. Usage errors: 2.
+
+<!-- cli-help: panic -->
+```text
+Manage emergency panic mode (deny-all kill switch)
+
+Usage: h2h panic <COMMAND>
+
+Commands:
+  activate    Activate panic mode by creating the sentinel file
+  deactivate  Deactivate panic mode by removing the sentinel file
+  status      Check the current panic mode status
+  help        Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### `h2h panic activate` options
+
+<!-- cli-exit: panic activate -->
+0: sentinel created; 1: write failed; 2: invalid usage.
+
+<!-- cli-help: panic activate -->
+```text
+Activate panic mode by creating the sentinel file
+
+Usage: h2h panic activate [OPTIONS]
+
+Options:
+      --sentinel <SENTINEL>  Path to the sentinel file (default: .hushspec_panic in current directory)
+  -h, --help                 Print help
+  -V, --version              Print version
+```
+
+### `h2h panic deactivate` options
+
+<!-- cli-exit: panic deactivate -->
+0: sentinel removed or already absent; 1: removal failed; 2: invalid usage. Running SDK latches require explicit reset.
+
+<!-- cli-help: panic deactivate -->
+```text
+Deactivate panic mode by removing the sentinel file
+
+Usage: h2h panic deactivate [OPTIONS]
+
+Options:
+      --sentinel <SENTINEL>  Path to the sentinel file (default: .hushspec_panic in current directory)
+  -h, --help                 Print help
+  -V, --version              Print version
+```
+
+### `h2h panic status` options
+
+<!-- cli-exit: panic status -->
+0: absence proven; 1: present or absence cannot be proven; 2: invalid usage.
+
+<!-- cli-help: panic status -->
+```text
+Check the current panic mode status
+
+Usage: h2h panic status [OPTIONS]
+
+Options:
+      --sentinel <SENTINEL>  Path to the sentinel file (default: .hushspec_panic in current directory)
+  -h, --help                 Print help
+  -V, --version              Print version
+```
+
+### `h2h sign` options
+
+<!-- cli-exit: sign -->
+0: signed; 1: approval/key/policy/signing/output failure; 2: missing policy, invalid duration or usage.
+
+<!-- cli-help: sign -->
+```text
+Sign a policy file with an Ed25519 key
+
+Usage: h2h sign [OPTIONS] --key <KEY> <POLICY>
+
+Arguments:
+  <POLICY>  Policy file to sign
+
+Options:
+  -k, --key <KEY>              PEM PKCS#8 Ed25519 private key (see `h2h keygen`)
+      --expires-in <DURATION>  Expiry, as a duration from now: 30d, 12h, 90m, 3600s
+      --policy-version <N>     Override the policy_version claim (defaults to metadata.policy_version)
+      --signer <SIGNER>        Human-readable signer identity (e.g. an email address)
+  -o, --out <PATH>             Output path for the .sig file (defaults to <POLICY>.sig)
+      --allow-unapproved       Sign a policy whose lifecycle_state is not approved or deployed (development only -- the signature then attests an unreviewed policy)
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+### `h2h verify` options
+
+<!-- cli-exit: verify -->
+0: valid; 1: invalid signature with reason/detail JSON on stderr; 2: unusable inputs or usage.
+
+<!-- cli-help: verify -->
+```text
+Verify a policy file's detached signature
+
+Usage: h2h verify [OPTIONS] <POLICY>
+
+Arguments:
+  <POLICY>  Policy file to verify
+
+Options:
+  -s, --sig <PATH>             Detached .sig file (defaults to <POLICY>.sig, then <POLICY stem>.sig)
+  -k, --key <PATH>             PEM SPKI public key, accepted as a one-key keyring
+      --keyring <PATH>         Trusted keyring JSON (hushspec-keyring.v1.schema.json)
+      --now <TIMESTAMP>        Verifier clock, RFC 3339 (defaults to now)
+      --max-skew <SECONDS>     Allowed clock skew for signed_at, in seconds [default: 300]
+      --last-seen-version <N>  The last policy_version accepted for this policy name (rollback protection)
+  -f, --format <FORMAT>        Output format [default: text] [possible values: text, json]
+  -h, --help                   Print help
+  -V, --version                Print version
+```
+
+### `h2h keygen` options
+
+<!-- cli-exit: keygen -->
+0: keys written; 1: key conversion, existing-file refusal or I/O failure; 2: invalid usage.
+
+<!-- cli-help: keygen -->
+```text
+Generate a new Ed25519 keypair for policy signing
+
+Usage: h2h keygen [OPTIONS]
+
+Options:
+      --output-dir <OUTPUT_DIR>  Directory to write key files to (defaults to the current directory) [default: .]
+      --name <NAME>              Base name for the key files: writes <NAME>.key.pem and <NAME>.pub.pem [default: h2h]
+      --convert <OLD_KEY>        Convert a HushSpec 0.1 key file to PEM instead of generating a new key
+      --force                    Overwrite existing key files
+  -h, --help                     Print help
+  -V, --version                  Print version
+```
+
+### `h2h schema` options
+
+<!-- cli-exit: schema -->
+0: schema/list printed; 2: unknown name or input/serialization/usage failure.
+
+<!-- cli-help: schema -->
+```text
+Print a published HushSpec JSON Schema
+
+Usage: h2h schema [OPTIONS] [NAME]
+
+Arguments:
+  [NAME]  Schema to print: a short name (core, posture, ...) or a published file name (hushspec-core.v1.schema.json)
+
+Options:
+      --list             List the available schema names instead of printing one
+  -f, --format <FORMAT>  Output format for --list (the schema body itself is always JSON) [default: text] [possible values: text, json]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h completions` options
+
+<!-- cli-exit: completions -->
+0: completion script printed; 2: invalid shell or usage.
+
+<!-- cli-help: completions -->
+```text
+Generate a shell completion script
+
+Usage: h2h completions <SHELL>
+
+Arguments:
+  <SHELL>  Shell to generate a completion script for [possible values: bash, elvish, fish, powershell, zsh]
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### `h2h version` options
+
+<!-- cli-exit: version -->
+0: version printed; 1: serialization failure; 2: invalid usage.
+
+<!-- cli-help: version -->
+```text
+Print CLI, build, and spec version information
+
+Usage: h2h version [OPTIONS]
+
+Options:
+  -f, --format <FORMAT>  Output format [default: text] [possible values: text, json]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### `h2h log` options
+
+<!-- cli-exit: log -->
+Select verify; missing/invalid subcommand: 2.
+
+<!-- cli-help: log -->
+```text
+Verify a hash-linked receipt log
+
+Usage: h2h log <COMMAND>
+
+Commands:
+  verify  Check sequence continuity, hash links, receipt validity, and entry signatures; report the first break by file and line
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### `h2h log verify` options
+
+<!-- cli-exit: log verify -->
+0: supplied chain verifies; 1: first break reported by file/line; 2: unusable trust configuration or usage. A prefix is not completeness.
+
+<!-- cli-help: log verify -->
+```text
+Check sequence continuity, hash links, receipt validity, and entry signatures; report the first break by file and line
+
+Usage: h2h log verify [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...  Log files in rotation order, oldest first
+
+Options:
+      --keyring <PATH>      Trusted keyring JSON for entry signatures
+      --key <PATH>          A single trusted public key (PEM) for entry signatures
+      --require-signatures  Every entry must carry a signature that verifies
+      --now <TIMESTAMP>     Verifier clock as an RFC 3339 timestamp (defaults to now)
+      --max-skew <SECONDS>  Allowed signer clock skew in seconds [default: 300]
+  -f, --format <FORMAT>     Output format [default: text] [possible values: text, json]
+  -h, --help                Print help
+  -V, --version             Print version
+```
+
+### `h2h receipts` options
+
+<!-- cli-exit: receipts -->
+Select verify; missing/invalid subcommand: 2.
+
+<!-- cli-help: receipts -->
+```text
+Verify decision receipts against a policy and a keyring
+
+Usage: h2h receipts <COMMAND>
+
+Commands:
+  verify  Validate receipts, check they name the given policy, re-derive the decision where the action can be replayed, and verify signatures
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+### `h2h receipts verify` options
+
+<!-- cli-exit: receipts verify -->
+0: supplied receipts pass requested checks; 1: receipt/policy/signature refusal; 2: input/configuration/usage failure.
+
+<!-- cli-help: receipts verify -->
+```text
+Validate receipts, check they name the given policy, re-derive the decision where the action can be replayed, and verify signatures
+
+Usage: h2h receipts verify [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...  Receipt files: .jsonl logs (receipt entries), JSON receipts, or signed receipts ({receipt, signature})
+
+Options:
+      --policy <PATH>       The policy every receipt must name (by canonical content hash); when the receipt carries no content, the decision is re-derived against it
+      --keyring <PATH>      Trusted keyring JSON for receipt signatures
+      --key <PATH>          A single trusted public key (PEM) for receipt signatures
+      --require-signatures  Every receipt must carry a signature that verifies
+      --now <TIMESTAMP>     Verifier clock as an RFC 3339 timestamp (defaults to now)
+      --max-skew <SECONDS>  Allowed signer clock skew in seconds [default: 300]
+  -f, --format <FORMAT>     Output format [default: text] [possible values: text, json]
+  -h, --help                Print help
+  -V, --version             Print version
+```
+
+### `h2h report` options
+
+<!-- cli-exit: report -->
+0: output produced; 1: chain/integrity/authentication/required-boundary failure; 2: input/configuration/limits/output/usage failure. Strict mode publishes no success packet on refusal.
+
+<!-- cli-help: report -->
+```text
+Aggregate receipts into a compliance evidence report
+
+Usage: h2h report [OPTIONS] <FILES>...
+
+Arguments:
+  <FILES>...
+          Hash-linked logs (`.jsonl`) or plain receipt JSONL files
+
+Options:
+      --since <TIMESTAMP>
+          Only count records at or after this RFC 3339 timestamp
+
+      --until <TIMESTAMP>
+          Only count records at or before this RFC 3339 timestamp
+
+      --policy <PATH>
+          Policy whose `metadata.controls` the report joins the receipts against
+
+  -f, --format <FORMAT>
+          Output format
+
+          Possible values:
+          - text
+          - json
+          - csv
+          - oscal: Contextual OSCAL observations; requires strict verification and assessment context
+
+          [default: text]
+
+      --by <TABLE>
+          Report on one table only (and, for CSV on stdout, which one)
+
+          [possible values: control, rule, decision, policy]
+
+      --out <PATH>
+          Write here: a directory for `--format csv`, a file for every other format (default: stdout)
+
+      --lenient
+          Skip input lines that do not parse instead of refusing to report
+
+      --unverified
+          Report even though an input log's hash chain did not verify
+
+      --keyring <PATH>
+          Trusted keyring JSON for entry signatures
+
+      --key <PATH>
+          A single trusted public key (PEM) for entry signatures
+
+      --require-signatures
+          Every log entry must carry a signature that verifies (legacy mode: logs only)
+
+      --max-skew <SECONDS>
+          Allowed signer clock skew in seconds
+
+          [default: 300]
+
+      --now <TIMESTAMP>
+          Stamp the report with this RFC 3339 time instead of the wall clock
+
+      --experimental-oscal
+          Enable the experimental OSCAL exporter (`--format oscal`)
+
+      --top-paths <N>
+          How many `rule_path`s each rule-block row lists
+
+          [default: 5]
+
+      --evidence-profile <PATH>
+          Experimental strict verification profile (offline local artifacts)
+
+      --verification-out <PATH>
+          New verification sidecar file, published last as the completion marker
+
+      --assessment-context <PATH>
+          Offline OSCAL assessment context manifest (requires strict OSCAL output)
+
+      --native-report-out <PATH>
+          New native JSON report file accompanying strict OSCAL output
+
+      --max-evidence-file-bytes <MAX_EVIDENCE_FILE_BYTES>
+          Strict mode only: maximum bytes in any input file (default 16777216)
+
+      --max-evidence-total-bytes <MAX_EVIDENCE_TOTAL_BYTES>
+          Strict mode only: maximum total input bytes (default 67108864)
+
+      --max-evidence-line-bytes <MAX_EVIDENCE_LINE_BYTES>
+          Strict mode only: maximum JSONL line bytes (default 1048576)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
+```

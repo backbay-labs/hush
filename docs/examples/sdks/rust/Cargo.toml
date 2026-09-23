@@ -1,0 +1,11 @@
+[package]
+name = "hushspec-docs-example"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+
+[dependencies]
+hushspec = { version = "=1.0.0", features = ["signing"] }
+tempfile = "3"
+
+[workspace]

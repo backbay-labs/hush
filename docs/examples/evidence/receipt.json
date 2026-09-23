@@ -1,0 +1,41 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0d04d-88de-7550-af3c-5b12e1791d93",
+  "timestamp": "2026-09-23T22:05:37.374Z",
+  "time_source": "system",
+  "actor": {
+    "runtime": "h2h/1.0.0"
+  },
+  "policy": {
+    "name": "coding-agent-quickstart",
+    "spec_version": "1.0.0",
+    "content_hash": "sha256:f07d08f7594f1cc97dbf0ae224260a2581eec45797edc83d7dd9439ff46cfedf"
+  },
+  "action": {
+    "type": "file_read",
+    "target": "/workspace/.env"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.forbidden_paths.patterns",
+  "reason": "path matched a forbidden pattern",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "rule_path": "rules.forbidden_paths.patterns",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "path matched a forbidden pattern"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  },
+  "duration_us": 10
+}

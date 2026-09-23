@@ -13,11 +13,18 @@ The shape is the same in every SDK:
 4. Let the guard follow the policy file so a change takes effect without a
    restart.
 
-This page covers the Rust SDK. The TypeScript and Python SDKs expose the same
-concepts under the same names (`HushGuard`, observers, providers, an OTLP
-sink); where a spelling differs, it is noted.
+This page explains the runtime contract using Rust. The [Rust](sdks/rust.md),
+[TypeScript](sdks/typescript.md), [Python](sdks/python.md), and [Go](sdks/go.md)
+guides each provide a complete executable dispatch example. Go calls its guard
+`Guard`. TypeScript/Python `check` returns a boolean and `gate` returns a richer
+outcome; Rust/Go `check`/`Check` returns a structured decision. Do not assume
+identical return shapes from similar names.
 
 ## The guard
+
+The Rust blocks on this page are API fragments: they assume the surrounding
+application's imports, action and error handling. For copy-and-run programs
+with tested side effects, use the four language guides linked above.
 
 `HushGuard` is the enforcement point. It holds a compiled policy and adds
 everything a bare `CompiledPolicy` deliberately does not know about.

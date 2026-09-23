@@ -16,6 +16,22 @@ to captured engine bytes and retains a verifiable execution packet.
 
 ## Claiming a level
 
+## Quick Reference
+
+| Level | Adds |
+| --- | --- |
+| L0 | YAML profile parsing |
+| L1 | Closed schema and semantic validation |
+| L2 | Inheritance and merge |
+| L3 | Deterministic evaluation |
+| L4 | Canonical policy identity and decision receipts |
+| L5 | Signed provenance, evidence verification and bundles |
+
+A higher level includes lower-level obligations. SDK feature availability and
+external engine claims are different kinds of evidence.
+
+### Claim Evidence
+
 A claim is made against a specific corpus, not against "the fixtures". Every
 file under `fixtures/` is inventoried in `fixtures/MANIFEST.json` with its
 SHA-256, its category, and the level at which it becomes required, and a claim
@@ -84,7 +100,7 @@ code: "E001"
 message_contains: "anchors are not allowed"
 ```
 
-Without this, "the document was rejected" is a weak assertion — a vector that
+Without this, "the document was rejected" is a weak assertion: a vector that
 tests the YAML profile passes just as well when the engine refuses it for an
 unrelated reason.
 

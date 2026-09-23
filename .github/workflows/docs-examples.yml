@@ -1,0 +1,42 @@
+name: Documentation Examples
+on:
+  push:
+    branches: [main, docs/v1-complete]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  examples:
+    name: V1 documentation examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: npm ci
+      - run: npm run build
+      - run: python3 -m pip install -r scripts/requirements-docs.txt 'packages/python[dev,signing]'
+      - run: cargo build --locked --release -p hushspec-cli
+      - name: Qualify exact documentation source and v1 implementation
+        run: python3 scripts/qualify_docs.py --h2h target/release/h2h
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docs-examples-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: target/docs-qualification
+          if-no-files-found: error

@@ -1,0 +1,10 @@
+hushspec: "1.0.0"
+name: coding-agent-quickstart
+rules:
+  forbidden_paths:
+    patterns: ["**/.env", "**/.ssh/**"]
+  tool_access:
+    allow: [read_file, search]
+    block: [deploy]
+    require_confirmation: [write_file]
+    default: block

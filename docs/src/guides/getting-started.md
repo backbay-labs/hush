@@ -1,121 +1,148 @@
-# Getting Started
+# Quickstart
 
-## Installation
+Make your first policy decision in a few minutes, then put the same policy in
+front of a real tool. This walkthrough uses synthetic paths and a local CLI;
+it needs no model API, credentials, or production data.
 
-### CLI
+## 1. Install
 
-| Method | Command |
-|---|---|
-| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
-| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
-| Cargo (from source) | `cargo install hushspec-cli` |
-| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
+On macOS or glibc Linux (x64 or ARM64):
 
-This installs the `h2h` command.
-
-Each SDK is published at 1.0.0.
-
-### Rust
-
-```toml
-[dependencies]
-hushspec = "1.0"
+```sh
+curl -fsSL https://hushspec.org/install.sh -o install-h2h.sh
+sh install-h2h.sh --version v1.0.0
+export PATH="$HOME/.local/bin:$PATH"
+h2h --version
 ```
 
-### TypeScript / Node.js
+The installer verifies SHA-256 before extracting the executable, uses no sudo,
+and changes no shell profile. Review the downloaded script before running it.
+For Windows, Homebrew, npm, Cargo, containers and SDKs, see [installation](installation.md).
 
-```bash
-npm install @hushspec/core
+## 2. Create a workspace
+
+Create an empty directory and save these two downloads there:
+[policy.yaml](https://hushspec.org/docs-examples/quickstart/policy.yaml) and
+[policy.test.yaml](https://hushspec.org/docs-examples/quickstart/policy.test.yaml).
+Keep their filenames. Open `policy.yaml` in your editor.
+
+The policy allows read/search tools, blocks `deploy`, requires confirmation for
+`write_file`, and denies reads or writes targeting `.env` or `.ssh`.
+It is a focused demonstration, not a complete shell/network sandbox.
+[Your first policy](first-policy.md) explains every field.
+
+## 3. Validate
+
+Run from the directory containing the two files:
+
+<!-- docs-run: quickstart -->
+```sh
+set -e
+h2h validate --strict policy.yaml
 ```
 
-### Python
+A valid policy exits 0. Unknown fields and invalid values are refused.
+Validation alone does not test the decisions you intended.
 
-```bash
-pip install hushspec
+## 4. Evaluate
+
+<!-- docs-run: quickstart -->
+```sh
+set -e
+h2h eval policy.yaml --type tool_call --target search
+h2h eval policy.yaml --type file_read --target /workspace/src/main.ts
 ```
 
-### Go
+Both decisions are `allow` (exit 0). Now check the negative paths.
+The following commands intentionally capture nonzero statuses so an expected
+denial is not mistaken for a broken tutorial.
 
-```bash
-go get github.com/backbay-labs/hush/packages/go@v1.0.0
+<!-- docs-run: quickstart -->
+```sh
+result=0
+h2h eval policy.yaml --type file_read --target /workspace/.env || result=$?
+test "$result" -eq 1 || exit 1
+
+result=0
+h2h eval policy.yaml --type tool_call --target deploy || result=$?
+test "$result" -eq 1 || exit 1
+
+result=0
+h2h eval policy.yaml --type tool_call --target write_file || result=$?
+test "$result" -eq 4 || exit 1
 ```
 
-## Parsing a Document
+| Action | Decision | Exit |
+| --- | --- | --- |
+| Search or ordinary read | `allow` | 0 |
+| Protected path or deploy | `deny` | 1 |
+| Write tool | `warn` | 4 |
 
-### Rust
+`h2h eval` describes a proposed action. It does not run a tool or open those
+paths. With no confirmation channel, a warning is recorded as blocked.
 
-<!-- smoke: guide-rust-parse -->
-```rust
-use hushspec::HushSpec;
+## 5. Explain the refusal
 
-let yaml = std::fs::read_to_string("policy.yaml")?;
-let spec = HushSpec::parse(&yaml)?;
-
-println!("Policy: {}", spec.name.as_deref().unwrap_or_default());
-println!("Version: {}", spec.hushspec);
+<!-- docs-run: quickstart -->
+```sh
+result=0
+h2h explain policy.yaml --type file_read --target /workspace/.env || result=$?
+test "$result" -eq 1 || exit 1
 ```
 
-### TypeScript
+The winning match is `rules.forbidden_paths.patterns`. The trace shows which
+other applicable rules ran or were skipped. A denial remains a denial even if
+another rule allows.
 
-<!-- smoke: guide-typescript-parse -->
-```typescript
-import { readFile } from 'node:fs/promises';
-import { parseOrThrow } from '@hushspec/core';
+## 6. Test the policy
 
-const yaml = await readFile('policy.yaml', 'utf-8');
-const spec = parseOrThrow(yaml);
-
-console.log(`Policy: ${spec.name ?? ''}`);
-console.log(`Version: ${spec.hushspec}`);
+<!-- docs-run: quickstart -->
+```sh
+set -e
+h2h test --policy policy.yaml policy.test.yaml
 ```
 
-## Validating a Document
+Expected: **5 passed, 0 failed**. The test fixture's `hushspec_test: "0.1.0"`
+is its current fixture format, not the policy version. Add a regression case
+before changing a permission.
 
-`parse` / `parseOrThrow` rejects malformed YAML, unknown fields, wrong types,
-and other fail-closed schema violations. `validate` adds version checks,
-cross-field validation, and warnings.
+## 7. Integrate before dispatch
 
-### Rust
+Choose [TypeScript](sdks/typescript.md), [Python](sdks/python.md),
+[Rust](sdks/rust.md), or [Go](sdks/go.md). Each guide uses a real owned handler
+and tests that a denial never calls it, an unconfirmed warning stays blocked,
+and a confirmed warning calls it exactly once.
 
-<!-- smoke: guide-rust-validate -->
-```rust
-use hushspec::HushSpec;
+For MCP, start with [trusted action mapping](integrations/mcp.md). Do not treat
+an adapter's evaluation result as proof that all server effects were mediated.
 
-let yaml = std::fs::read_to_string("policy.yaml")?;
-let spec = HushSpec::parse(&yaml)?;
-let result = hushspec::validate(&spec);
+### Rust SDK
 
-if result.is_valid() {
-    println!("Valid");
-} else {
-    for error in result.errors {
-        eprintln!("Rejected: {error}");
-    }
-}
-```
+[Install Rust SDK v1 and run the complete example](sdks/rust.md#install-and-run-the-complete-example)
+with `cargo add hushspec@1.0.0`. The guide covers parsing, validation, evaluation,
+resolution, guards and signing; the CLI installer does not install the library.
 
-### TypeScript
+### TypeScript SDK
 
-<!-- smoke: guide-typescript-validate -->
-```typescript
-import { readFile } from 'node:fs/promises';
-import { parseOrThrow, validate } from '@hushspec/core';
+[Install TypeScript SDK v1 and run the complete example](sdks/typescript.md#install-and-run-the-complete-example)
+with `npm install @hushspec/core@1.0.0`. Continue there for parsing, validation,
+evaluation, adapters, guard confirmation and policy reload.
 
-const yaml = await readFile('policy.yaml', 'utf-8');
-const spec = parseOrThrow(yaml);
-const result = validate(spec);
+### Python SDK
 
-if (result.valid) {
-  console.log('Valid');
-} else {
-  for (const error of result.errors) {
-    console.error(`Rejected: ${error.message}`);
-  }
-}
-```
+[Install Python SDK v1 and run the complete example](sdks/python.md#install-and-run-the-complete-example)
+with `python -m pip install 'hushspec==1.0.0'`. Continue there for resolution,
+validation, evaluation, guards and adapters; signing uses the `signing` extra.
 
-## What Next
+### Go SDK
 
-- [Write your first policy](first-policy.md)
-- [Use HushSpec with Clawdstrike](clawdstrike.md)
-- Read the [Rules Reference](../rules-reference.md)
+[Install Go SDK v1 and run the complete example](sdks/go.md#install-and-run-the-complete-example)
+with `go get github.com/backbay-labs/hush/packages/go@v1.0.0`. The guide covers
+resolution, validation, evaluation, guards and signed receipts.
+
+## Next steps
+
+Read [runtime integration](runtime-integration.md) for enforcement and sink
+failures, [receipts](../receipt-spec.md) for evidence, and [policy tests in
+CI](ci.md) for safe changes. The [SDK API contract](../reference/sdk-api.md)
+covers parsing, resolution, actors, providers and language-specific return types.

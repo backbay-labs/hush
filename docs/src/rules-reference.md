@@ -6,6 +6,19 @@ All rules share two common fields: `enabled` (boolean, default varies by rule) a
 
 Every applicable rule for an action is evaluated; an allow from one rule never skips another. The most restrictive decision wins.
 
+Use the [action-to-rule table](action-types.md#action-to-rule-mapping) to see
+which blocks apply and in what order. A rule's absence does not activate its
+defaults: defaults apply inside a present block. Validate all fragments below
+inside a complete document with `hushspec: "1.0.0"`.
+
+`matched_rule` identifies the winning restriction, such as
+`rules.tool_access.block` or `rules.browser_automation.allowed_domains`.
+Each field's exact decision path and precedence are specified in
+[core section 3](../../spec/hushspec-core.md#3-rules). The first participating
+rule with the winning decision and a named match supplies the summary;
+[receipt traces](receipt-spec.md) retain the remaining checks. Reserved stages
+such as panic and invalid-policy refusal use the [rule-path registry](../../spec/registries/rule-paths.yaml).
+
 ---
 
 ## 1. `forbidden_paths`

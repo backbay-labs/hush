@@ -162,7 +162,8 @@ uses the owned [MCP 2026-07-28 request metadata](https://modelcontextprotocol.io
 and [stdio](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
 profile; it does not negotiate legacy initialization or implement every MCP feature.
 
-An independently authored engine must qualify through Project B and run this
+An independently authored engine must qualify through the external controller and run this
 same workflow without reference fallback. An external adopter must run their
 own integration, and an outside practitioner must assess the scoped evidence.
-Those gates, merge and publication remain separate from this first-party pilot.
+Those evidence gates remain separate from this first-party pilot. A published
+v1 package does not turn them into completed independent validation.

@@ -12,15 +12,16 @@ a control objective was satisfied.
 
 ## A runnable signed example
 
-From the repository root, build the CLI and use the committed synthetic monitor
+From a v1 source checkout, use the installed CLI and committed synthetic monitor
 fixture. Its key is public test material, never a production trust root. The
 fixed verifier clock is part of this reproducible example, not a way to bypass
 expiry in production.
 
+<!-- docs-run: evidence-monitor -->
 ```bash
-cargo build -p hushspec-cli --locked
+h2h version
 packet_dir=$(mktemp -d)
-target/debug/h2h report fixtures/assurance/monitor/evidence.jsonl \
+h2h report fixtures/assurance/monitor/evidence.jsonl \
   --format json --evidence-profile fixtures/assurance/monitor/profile.json \
   --keyring fixtures/signing/keys/keyring.json --now 2026-09-15T12:00:00Z \
   --out "$packet_dir/report.json" --verification-out "$packet_dir/verification.json"
@@ -108,15 +109,30 @@ Continue with the temporary directory above. This changes bytes without
 changing the trusted profile, so expect exit 1 with `InputDigestMismatch` and
 neither requested output file:
 
+<!-- docs-run: evidence-tamper -->
 ```bash
 mkdir "$packet_dir/tampered"
 cp fixtures/assurance/monitor/* "$packet_dir/tampered/"
 printf '\n' >> "$packet_dir/tampered/evidence.jsonl"
-target/debug/h2h report "$packet_dir/tampered/evidence.jsonl" \
+if h2h report "$packet_dir/tampered/evidence.jsonl" \
   --format json --evidence-profile "$packet_dir/tampered/profile.json" \
   --keyring fixtures/signing/keys/keyring.json --now 2026-09-15T12:00:00Z \
   --out "$packet_dir/rejected-report.json" \
-  --verification-out "$packet_dir/rejected-verification.json"
+  --verification-out "$packet_dir/rejected-verification.json" \
+  2> "$packet_dir/refusal.txt"; then
+  echo "Unexpected acceptance of altered evidence" >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
+python3 - "$packet_dir" <<'PY'
+from pathlib import Path
+import sys
+packet = Path(sys.argv[1])
+assert "InputDigestMismatch" in (packet / "refusal.txt").read_text()
+assert not (packet / "rejected-report.json").exists()
+assert not (packet / "rejected-verification.json").exists()
+PY
 ```
 
 Updating that digest to match altered receipt content does not repair a broken
@@ -139,9 +155,10 @@ and unknown IDs are refused.
 This example uses the clearly labelled synthetic context, not a real customer
 assessment plan:
 
+<!-- docs-run: evidence-oscal -->
 ```bash
 cp -R fixtures/assurance/oscal "$packet_dir/context"
-target/debug/h2h report fixtures/assurance/monitor/evidence.jsonl \
+h2h report fixtures/assurance/monitor/evidence.jsonl \
   --format oscal --experimental-oscal \
   --evidence-profile fixtures/assurance/monitor/profile.json \
   --keyring fixtures/signing/keys/keyring.json --now 2026-09-15T12:00:00Z \

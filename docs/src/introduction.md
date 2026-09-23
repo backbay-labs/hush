@@ -1,45 +1,50 @@
-# HushSpec
+# HushSpec documentation
 
-HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced.
+Declare what an agent may do. Enforce it before a side effect. Keep evidence
+that another implementation can read and verify.
 
-## Why HushSpec?
+HushSpec v1 is a portable policy and evidence specification with a CLI and
+reference SDKs for Rust, TypeScript, Python and Go. Start with a small tested
+boundary, then expand its coverage deliberately.
 
-AI agents interact with tools — file systems, network APIs, shell commands, MCP servers. HushSpec provides a standard way to declare which interactions are allowed, blocked, or require confirmation.
+## Write a policy
 
-- **Portable**: Works with any engine that implements the spec
-- **Declarative**: Rules are stateless YAML — no runtime state, no detection algorithms
-- **Fail-closed**: Unknown fields are rejected; invalid documents produce errors, not silent misconfiguration
-- **Extensible**: Optional modules for posture state machines, origin-aware profiles, and detection thresholds
+Follow the [quickstart](guides/getting-started.md), download the policy and tests,
+and see allow, deny and confirmation-required decisions.
+[All twelve rule blocks](rules-reference.md) cover paths, tools, egress,
+content, shell, desktop, browser and code-execution actions.
 
-## A Minimal Example
+## Integrate an agent
 
-```yaml
-hushspec: "1.0.0"
-name: my-policy
+Use a [runtime guard](guides/runtime-integration.md) immediately before dispatch.
+The [MCP guide](guides/integrations/mcp.md) explains trusted mapping and the
+difference between checking a tool name and controlling its effects.
+Pick a [language SDK](reference/sdk-api.md) for exact APIs and return conventions.
 
-rules:
-  forbidden_paths:
-    patterns:
-      - "**/.ssh/**"
-      - "**/.aws/**"
+## Inspect evidence
 
-  egress:
-    allow:
-      - "api.openai.com"
-      - "*.anthropic.com"
-    default: block
+Understand [canonical policy identity](canonical-spec.md),
+[decision receipts](receipt-spec.md), [signing](signing-spec.md),
+[logs](log-spec.md), and [bundles](bundle-spec.md).
+Authenticity, continuity, completeness, and runtime truth are separate claims.
 
-  tool_access:
-    block:
-      - shell_exec
-      - run_command
-    default: allow
-```
+## Implement the specification
 
-## Spec vs Engine
+Read the [normative library](reference/specifications.md), then run a
+[conformance corpus](reference/conformance.md) against a specific implementation.
+Use [schemas](reference/json-schema.md) and [registries](reference/registries.md)
+as machine-readable companions, not substitutes for evaluation semantics.
 
-HushSpec defines the **portable rule language**. Engines like [Clawdstrike](https://github.com/backbay-labs/clawdstrike) implement the spec and add engine-specific features (detection algorithms, receipt signing, async guard infrastructure).
+## What v1 guarantees
 
-## Current Status
+The v1 portable contract is stable under the [versioning policy](reference/versioning.md).
+Receipt/signature wire version 0.2 and log/bundle version 0.1 remain current.
+Strict evidence profiles, external-engine execution packets, and the
+[trusted-invocation pilot](reference/trusted-invocation.md) remain experimental.
 
-HushSpec 1.0.0 is stable. The document format, evaluation semantics, canonical form, wire formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series; a minor version only adds ([versioning](reference/versioning.md)).
+## Where the boundary ends
+
+HushSpec evaluates descriptions of actions. The host owns authentication,
+dispatch, filesystem/network containment, counters and evidence delivery.
+A policy file alone is not a sandbox; a signed receipt is not certification.
+The [security model](security-spec.md) makes those assumptions explicit.
