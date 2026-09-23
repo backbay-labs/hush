@@ -1,0 +1,9 @@
+hushspec_resolve: 0.1.0
+description: 'core 2.3: every fragment is read as a pin, so one that names no digest is rejected rather than loaded as part of the reference'
+policy:
+  hushspec: 0.1.0
+  name: word-fragment-pin
+  extends: builtin:default#notes
+expect:
+  resolves: false
+  rejects: invalid_pin

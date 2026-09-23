@@ -9,41 +9,62 @@ export const RULE_KEYS_SET: ReadonlySet<string> = new Set(RULE_KEYS);
 export const EXTENSION_KEYS = ['posture', 'origins', 'detection'] as const;
 export const EXTENSION_KEYS_SET: ReadonlySet<string> = new Set(EXTENSION_KEYS);
 
-export const GOVERNANCE_METADATA_KEYS = ['author', 'approved_by', 'approval_date', 'classification', 'change_ticket', 'lifecycle_state', 'policy_version', 'effective_date', 'expiry_date'] as const;
+export const GOVERNANCE_METADATA_KEYS = ['author', 'approved_by', 'approval_date', 'classification', 'change_ticket', 'lifecycle_state', 'policy_version', 'effective_date', 'expiry_date', 'owner', 'reviewers', 'next_review_date', 'changelog', 'supersedes', 'controls'] as const;
 export const GOVERNANCE_METADATA_KEYS_SET: ReadonlySet<string> = new Set(GOVERNANCE_METADATA_KEYS);
 
-export const FORBIDDEN_PATH_KEYS = ['enabled', 'patterns', 'exceptions'] as const;
+export const CONTROL_MAPPING_KEYS = ['framework', 'control_id', 'rule_paths', 'notes'] as const;
+export const CONTROL_MAPPING_KEYS_SET: ReadonlySet<string> = new Set(CONTROL_MAPPING_KEYS);
+
+export const CHANGELOG_ENTRY_KEYS = ['version', 'date', 'summary', 'author'] as const;
+export const CHANGELOG_ENTRY_KEYS_SET: ReadonlySet<string> = new Set(CHANGELOG_ENTRY_KEYS);
+
+export const FORBIDDEN_PATH_KEYS = ['when', 'enabled', 'patterns', 'exceptions'] as const;
 export const FORBIDDEN_PATH_KEYS_SET: ReadonlySet<string> = new Set(FORBIDDEN_PATH_KEYS);
 
-export const PATH_ALLOWLIST_KEYS = ['enabled', 'read', 'write', 'patch'] as const;
+export const PATH_ALLOWLIST_KEYS = ['when', 'enabled', 'read', 'write', 'patch'] as const;
 export const PATH_ALLOWLIST_KEYS_SET: ReadonlySet<string> = new Set(PATH_ALLOWLIST_KEYS);
 
-export const EGRESS_KEYS = ['enabled', 'allow', 'block', 'default'] as const;
+export const EGRESS_KEYS = ['when', 'enabled', 'allow', 'block', 'default'] as const;
 export const EGRESS_KEYS_SET: ReadonlySet<string> = new Set(EGRESS_KEYS);
 
-export const SECRET_PATTERNS_KEYS = ['enabled', 'patterns', 'skip_paths'] as const;
+export const SECRET_PATTERNS_KEYS = ['when', 'enabled', 'patterns', 'skip_paths'] as const;
 export const SECRET_PATTERNS_KEYS_SET: ReadonlySet<string> = new Set(SECRET_PATTERNS_KEYS);
 
 export const SECRET_PATTERN_KEYS = ['name', 'pattern', 'severity', 'description'] as const;
 export const SECRET_PATTERN_KEYS_SET: ReadonlySet<string> = new Set(SECRET_PATTERN_KEYS);
 
-export const PATCH_INTEGRITY_KEYS = ['enabled', 'max_additions', 'max_deletions', 'forbidden_patterns', 'require_balance', 'max_imbalance_ratio'] as const;
+export const PATCH_INTEGRITY_KEYS = ['when', 'enabled', 'max_additions', 'max_deletions', 'forbidden_patterns', 'require_balance', 'max_imbalance_ratio'] as const;
 export const PATCH_INTEGRITY_KEYS_SET: ReadonlySet<string> = new Set(PATCH_INTEGRITY_KEYS);
 
-export const SHELL_COMMAND_KEYS = ['enabled', 'forbidden_patterns'] as const;
+export const SHELL_COMMAND_KEYS = ['when', 'enabled', 'forbidden_patterns'] as const;
 export const SHELL_COMMAND_KEYS_SET: ReadonlySet<string> = new Set(SHELL_COMMAND_KEYS);
 
-export const TOOL_ACCESS_KEYS = ['enabled', 'allow', 'block', 'require_confirmation', 'default', 'max_args_size'] as const;
+export const TOOL_ACCESS_KEYS = ['when', 'enabled', 'allow', 'block', 'require_confirmation', 'default', 'max_args_size'] as const;
 export const TOOL_ACCESS_KEYS_SET: ReadonlySet<string> = new Set(TOOL_ACCESS_KEYS);
 
-export const COMPUTER_USE_KEYS = ['enabled', 'mode', 'allowed_actions'] as const;
+export const COMPUTER_USE_KEYS = ['when', 'enabled', 'mode', 'allowed_actions'] as const;
 export const COMPUTER_USE_KEYS_SET: ReadonlySet<string> = new Set(COMPUTER_USE_KEYS);
 
-export const REMOTE_DESKTOP_KEYS = ['enabled', 'clipboard', 'file_transfer', 'audio', 'drive_mapping'] as const;
+export const REMOTE_DESKTOP_KEYS = ['when', 'enabled', 'clipboard', 'file_transfer', 'audio', 'drive_mapping'] as const;
 export const REMOTE_DESKTOP_KEYS_SET: ReadonlySet<string> = new Set(REMOTE_DESKTOP_KEYS);
 
-export const INPUT_INJECTION_KEYS = ['enabled', 'allowed_types', 'require_postcondition_probe'] as const;
+export const INPUT_INJECTION_KEYS = ['when', 'enabled', 'allowed_types', 'require_postcondition_probe'] as const;
 export const INPUT_INJECTION_KEYS_SET: ReadonlySet<string> = new Set(INPUT_INJECTION_KEYS);
+
+export const BROWSER_AUTOMATION_KEYS = ['when', 'enabled', 'allowed_domains', 'blocked_domains', 'allowed_verbs', 'credential_detection', 'extra_credential_patterns'] as const;
+export const BROWSER_AUTOMATION_KEYS_SET: ReadonlySet<string> = new Set(BROWSER_AUTOMATION_KEYS);
+
+export const CODE_EXECUTION_KEYS = ['when', 'enabled', 'language_allowlist', 'module_denylist', 'network_access', 'max_execution_time_ms', 'max_scan_bytes'] as const;
+export const CODE_EXECUTION_KEYS_SET: ReadonlySet<string> = new Set(CODE_EXECUTION_KEYS);
+
+export const CONDITION_KEYS = ['time_window', 'context', 'all_of', 'any_of', 'not', 'capability', 'rate'] as const;
+export const CONDITION_KEYS_SET: ReadonlySet<string> = new Set(CONDITION_KEYS);
+
+export const TIME_WINDOW_KEYS = ['start', 'end', 'timezone', 'days'] as const;
+export const TIME_WINDOW_KEYS_SET: ReadonlySet<string> = new Set(TIME_WINDOW_KEYS);
+
+export const RATE_CONDITION_KEYS = ['counter', 'threshold', 'comparison'] as const;
+export const RATE_CONDITION_KEYS_SET: ReadonlySet<string> = new Set(RATE_CONDITION_KEYS);
 
 export const POSTURE_KEYS = ['initial', 'states', 'transitions'] as const;
 export const POSTURE_KEYS_SET: ReadonlySet<string> = new Set(POSTURE_KEYS);
@@ -63,6 +84,12 @@ export const ORIGIN_PROFILE_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_PROFI
 export const ORIGIN_MATCH_KEYS = ['provider', 'tenant_id', 'space_id', 'space_type', 'visibility', 'external_participants', 'tags', 'sensitivity', 'actor_role'] as const;
 export const ORIGIN_MATCH_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_MATCH_KEYS);
 
+export const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS = ['allow', 'block', 'require_confirmation', 'default', 'max_args_size'] as const;
+export const ORIGIN_TOOL_ACCESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_TOOL_ACCESS_OVERLAY_KEYS);
+
+export const ORIGIN_EGRESS_OVERLAY_KEYS = ['allow', 'block', 'default'] as const;
+export const ORIGIN_EGRESS_OVERLAY_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_EGRESS_OVERLAY_KEYS);
+
 export const ORIGIN_DATA_KEYS = ['allow_external_sharing', 'redact_before_send', 'block_sensitive_outputs'] as const;
 export const ORIGIN_DATA_KEYS_SET: ReadonlySet<string> = new Set(ORIGIN_DATA_KEYS);
 
@@ -78,8 +105,11 @@ export const BRIDGE_TARGET_KEYS_SET: ReadonlySet<string> = new Set(BRIDGE_TARGET
 export const DETECTION_KEYS = ['prompt_injection', 'jailbreak', 'threat_intel'] as const;
 export const DETECTION_KEYS_SET: ReadonlySet<string> = new Set(DETECTION_KEYS);
 
-export const PROMPT_INJECTION_KEYS = ['enabled', 'warn_at_or_above', 'block_at_or_above', 'max_scan_bytes'] as const;
+export const PROMPT_INJECTION_KEYS = ['enabled', 'warn_at_or_above', 'block_at_or_above', 'max_scan_bytes', 'heuristics'] as const;
 export const PROMPT_INJECTION_KEYS_SET: ReadonlySet<string> = new Set(PROMPT_INJECTION_KEYS);
+
+export const PROMPT_INJECTION_HEURISTICS_KEYS = ['enabled', 'min_score'] as const;
+export const PROMPT_INJECTION_HEURISTICS_KEYS_SET: ReadonlySet<string> = new Set(PROMPT_INJECTION_HEURISTICS_KEYS);
 
 export const JAILBREAK_KEYS = ['enabled', 'block_threshold', 'warn_threshold', 'max_input_bytes'] as const;
 export const JAILBREAK_KEYS_SET: ReadonlySet<string> = new Set(JAILBREAK_KEYS);

@@ -1,29 +1,176 @@
 package hushspec
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// The registered error codes of spec/registries/error-codes.yaml. Every
+// refusal this SDK reports carries one, so "the document was rejected" can be
+// checked as "rejected for this reason" (core spec 8, Level 1). A registered
+// code's meaning never changes and is never reused for a different condition.
+const (
+	// ErrorCodeInput: the policy file does not exist, or reading it failed.
+	// A transport-level failure: nothing was parsed.
+	ErrorCodeInput = "E000"
+	// ErrorCodeParse: the input is not a single YAML 1.2 Core document that
+	// deserializes into the HushSpec model. Covers syntax errors, YAML profile
+	// violations, a missing required field, an unknown field at any nesting
+	// level, a value of the wrong type, and an unknown enum variant.
+	ErrorCodeParse = "E001"
+	// ErrorCodeUnsupportedVersion: the `hushspec` field names a version this
+	// engine does not accept.
+	ErrorCodeUnsupportedVersion = "E002"
+	// ErrorCodeDuplicatePatternName: two `rules.secret_patterns.patterns`
+	// entries share a `name`.
+	ErrorCodeDuplicatePatternName = "E003"
+	// ErrorCodeConstraint: a structural constraint of core Section 7 or of an
+	// extension module is violated.
+	ErrorCodeConstraint = "E004"
+	// ErrorCodeInvalidRegex: a pattern field holds a regular expression
+	// outside the HushSpec regex profile (core Section 3.14).
+	ErrorCodeInvalidRegex = "E005"
+	// ErrorCodeExtends: the `extends` chain could not be resolved.
+	ErrorCodeExtends = "E010"
+	// ErrorCodeInvalidDate: a `metadata` date field is not an ISO 8601
+	// calendar date.
+	ErrorCodeInvalidDate = "E011"
+)
+
+// ErrorCodes is every code this SDK emits, in registry order. The set is
+// closed: a code outside it is not a code.
+var ErrorCodes = []string{
+	ErrorCodeInput,
+	ErrorCodeParse,
+	ErrorCodeUnsupportedVersion,
+	ErrorCodeDuplicatePatternName,
+	ErrorCodeConstraint,
+	ErrorCodeInvalidRegex,
+	ErrorCodeExtends,
+	ErrorCodeInvalidDate,
+}
+
+// validationKindCodes maps this SDK's own symbolic error kinds onto the
+// registered codes. Anything not listed is a constraint violation, which is
+// what E004 covers.
+var validationKindCodes = map[string]string{
+	// A document with no `hushspec` never reaches Validate -- Parse refuses it
+	// as a missing required field, which is a parse refusal in every SDK.
+	"MISSING_VERSION":        ErrorCodeParse,
+	"UNSUPPORTED_VERSION":    ErrorCodeUnsupportedVersion,
+	"DUPLICATE_PATTERN_NAME": ErrorCodeDuplicatePatternName,
+	"INVALID_REGEX":          ErrorCodeInvalidRegex,
+	"INVALID_DATE":           ErrorCodeInvalidDate,
+	// A value outside an enum's closed set is an unknown variant, which the
+	// schema refuses at parse time. [Parse] refuses these at parse time too
+	// (see raw_validate.go); the checks below catch a document a caller built
+	// in memory, and must name the same code.
+	"INVALID_MERGE_STRATEGY":     ErrorCodeParse,
+	"INVALID_DEFAULT_ACTION":     ErrorCodeParse,
+	"INVALID_SEVERITY":           ErrorCodeParse,
+	"INVALID_COMPUTER_USE_MODE":  ErrorCodeParse,
+	"INVALID_DETECTION_LEVEL":    ErrorCodeParse,
+	"INVALID_TRANSITION_TRIGGER": ErrorCodeParse,
+	"INVALID_DEFAULT_BEHAVIOR":   ErrorCodeParse,
+}
+
+// RegistryErrorCode is the registered code for one of this SDK's symbolic
+// error kinds.
+func RegistryErrorCode(kind string) string {
+	if code, ok := validationKindCodes[kind]; ok {
+		return code
+	}
+	return ErrorCodeConstraint
+}
+
+// requiresNonEmptyName reports whether a document declaring version must give
+// a present `name` a non-empty value. A bundle's subject and a receipt's policy
+// summary both name the policy, and an empty name names nothing.
+//
+// This is the one constraint the 1.0 document format adds to 0.2 (versioning
+// spec 10): the frozen 0.x format allows `name: ""`. A version that cannot be
+// read as MAJOR.MINOR.PATCH is already refused as unsupported, and is held to
+// the current format's constraints here so an unreadable version can never
+// relax one.
+func requiresNonEmptyName(version string) bool {
+	major, ok := MajorVersion(version)
+	return !ok || major >= 1
+}
+
+// ValidationResult is everything [Validate] found: refusals that make the
+// document invalid, and advisory warnings that do not.
 type ValidationResult struct {
 	Errors   []ValidationError
 	Warnings []string
 }
 
+// ValidationError is one refusal. Code is the registered identifier of
+// spec/registries/error-codes.yaml and is the programmatic contract; Kind is
+// this SDK's finer-grained symbolic name for the same condition; Path names
+// the offending member when the producer knows it; Message is free text for
+// humans and MUST NOT be parsed.
+//
+// A *ValidationError is an error, so a refusal returned by [Parse] can be
+// inspected with errors.As to read its code.
 type ValidationError struct {
 	Code    string
+	Kind    string
+	Path    string
 	Message string
 }
 
+func (e *ValidationError) Error() string {
+	if e.Path != "" && !strings.Contains(e.Message, e.Path) {
+		return fmt.Sprintf("%s: %s: %s", e.Code, e.Path, e.Message)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// ErrorCodeOf reports the registered error code an error carries, and whether
+// it carried one at all.
+//
+// A [*ValidationError] carries its own code. Beyond that, a failure to resolve
+// an `extends` chain is E010 and a failure to read the input at all is E000,
+// so a caller can report one code for every refusal without type-switching by
+// hand. A parse failure found inside a resolve failure keeps its own E001: the
+// chain was walked, and a document on it was not a HushSpec document.
+func ErrorCodeOf(err error) (string, bool) {
+	var validationError *ValidationError
+	if errors.As(err, &validationError) {
+		return validationError.Code, true
+	}
+	if _, ok := ResolveReason(err); ok {
+		return ErrorCodeExtends, true
+	}
+	var pathError *fs.PathError
+	if errors.As(err, &pathError) {
+		return ErrorCodeInput, true
+	}
+	return "", false
+}
+
+// IsValid reports whether the document passed validation. Warnings do not
+// make a document invalid.
 func (r *ValidationResult) IsValid() bool {
 	return len(r.Errors) == 0
 }
 
-func (r *ValidationResult) addError(code, msg string) {
-	r.Errors = append(r.Errors, ValidationError{Code: code, Message: msg})
+func (r *ValidationResult) addError(kind, msg string) {
+	r.Errors = append(r.Errors, ValidationError{
+		Code: RegistryErrorCode(kind), Kind: kind, Message: msg,
+	})
+}
+
+func (r *ValidationResult) addErrorAt(kind, path, msg string) {
+	r.Errors = append(r.Errors, ValidationError{
+		Code: RegistryErrorCode(kind), Kind: kind, Path: path, Message: msg,
+	})
 }
 
 func (r *ValidationResult) addWarning(msg string) {
@@ -39,7 +186,12 @@ func Validate(spec *HushSpec) *ValidationResult {
 		result.addError("MISSING_VERSION", "missing or empty 'hushspec' version field")
 	} else if !IsSupported(spec.HushSpecVersion) {
 		result.addError("UNSUPPORTED_VERSION",
-			fmt.Sprintf("unsupported HushSpec version %q; supported: %v", spec.HushSpecVersion, SupportedVersions))
+			fmt.Sprintf("unsupported hushspec version: %s (this engine accepts minor versions %s)",
+				spec.HushSpecVersion, strings.Join(SupportedMinors, ", ")))
+	}
+
+	if spec.Name != nil && *spec.Name == "" && requiresNonEmptyName(spec.HushSpecVersion) {
+		result.addErrorAt("INVALID_VALUE", "name", "name: must not be empty when present")
 	}
 
 	if spec.MergeStrategy != "" && !containsTyped(spec.MergeStrategy, MergeStrategies) {
@@ -64,25 +216,135 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 		return
 	}
 	m := spec.Metadata
+	today := currentDateISO()
+
+	for _, field := range []struct {
+		path  string
+		value *string
+	}{
+		{"metadata.approval_date", m.ApprovalDate},
+		{"metadata.effective_date", m.EffectiveDate},
+		{"metadata.expiry_date", m.ExpiryDate},
+		{"metadata.next_review_date", m.NextReviewDate},
+	} {
+		if field.value != nil && !isISODate(*field.value) {
+			result.addError("INVALID_DATE", fmt.Sprintf(
+				"%s: %q is not an ISO 8601 date (YYYY-MM-DD)", field.path, *field.value))
+		}
+	}
+
+	for i, entry := range m.Changelog {
+		if !isISODate(entry.Date) {
+			result.addError("INVALID_DATE", fmt.Sprintf(
+				"metadata.changelog[%d].date: %q is not an ISO 8601 date (YYYY-MM-DD)", i, entry.Date))
+		}
+	}
+
+	// GOV_SELF_SUPERSEDES: a document that replaces its own version describes
+	// an impossible lineage, so it is an error rather than an advisory warning.
+	if m.Supersedes != nil && m.PolicyVersion != nil &&
+		strings.TrimSpace(*m.Supersedes) == strconv.Itoa(*m.PolicyVersion) {
+		result.addError("INVALID_VALUE", fmt.Sprintf(
+			"metadata.supersedes '%s' is the policy's own policy_version", *m.Supersedes))
+	}
 
 	if m.LifecycleState == LifecycleStateDeprecated || m.LifecycleState == LifecycleStateArchived {
 		result.addWarning(fmt.Sprintf("policy lifecycle state is '%s'", m.LifecycleState))
 	}
 
-	if m.ExpiryDate != "" {
-		today := currentDateISO()
-		if m.ExpiryDate < today {
-			result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", m.ExpiryDate))
-		}
+	if m.ExpiryDate != nil && isISODate(*m.ExpiryDate) && *m.ExpiryDate < today {
+		result.addWarning(fmt.Sprintf("policy expiry_date '%s' is in the past", *m.ExpiryDate))
 	}
 
-	if m.ApprovedBy != "" && m.ApprovalDate == "" {
+	if m.ApprovedBy != nil && m.ApprovalDate == nil {
 		result.addWarning("approved_by is set but approval_date is missing")
 	}
 
-	if m.Classification == ClassificationRestricted && m.ApprovedBy == "" {
+	if m.Classification == ClassificationRestricted && m.ApprovedBy == nil {
 		result.addWarning("classification is 'restricted' but no approved_by is set")
 	}
+
+	// GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that
+	// a copy-paste with different capitalization defeats is no check at all.
+	if m.Author != nil && m.ApprovedBy != nil {
+		if author := strings.TrimSpace(*m.Author); author != "" &&
+			strings.EqualFold(author, strings.TrimSpace(*m.ApprovedBy)) {
+			result.addWarning(fmt.Sprintf(
+				"author and approved_by are the same identity '%s': separation of duties requires a different approver",
+				author))
+		}
+	}
+
+	// GOV_UNAPPROVED_STATE.
+	if (m.LifecycleState == LifecycleStateApproved || m.LifecycleState == LifecycleStateDeployed) &&
+		m.ApprovedBy == nil {
+		result.addWarning(fmt.Sprintf(
+			"lifecycle_state is '%s' but no approved_by is set", m.LifecycleState))
+	}
+
+	// GOV_REVIEW_OVERDUE.
+	if m.NextReviewDate != nil && isISODate(*m.NextReviewDate) && *m.NextReviewDate < today {
+		result.addWarning(fmt.Sprintf(
+			"policy next_review_date '%s' is in the past", *m.NextReviewDate))
+	}
+
+	// GOV_CHANGELOG_ORDER.
+	if index := changelogDisorder(m.Changelog); index >= 0 {
+		result.addWarning(fmt.Sprintf(
+			"changelog entries are not in descending version/date order at entry %d", index))
+	}
+}
+
+// isISODate reports whether value is `YYYY-MM-DD` and names a date that
+// actually exists. Dates are compared as strings throughout the toolchain --
+// which is calendar order only for this shape -- so an unchecked `01/02/2026`
+// would make an expired policy compare as current instead of failing loudly.
+func isISODate(value string) bool {
+	if !isoDatePattern.MatchString(value) {
+		return false
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return false
+	}
+	// time.Parse normalizes out-of-range days (2023-02-29 -> 2023-03-01), so
+	// round-trip the result to reject a date that does not exist.
+	return parsed.Format("2006-01-02") == value
+}
+
+var isoDatePattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+
+// compareChangelogVersions orders two versions numerically when both are plain
+// integers (the shape metadata.policy_version takes), lexicographically
+// otherwise.
+func compareChangelogVersions(left, right string) int {
+	a, errA := strconv.Atoi(strings.TrimSpace(left))
+	b, errB := strconv.Atoi(strings.TrimSpace(right))
+	if errA == nil && errB == nil {
+		switch {
+		case a == b:
+			return 0
+		case a < b:
+			return -1
+		default:
+			return 1
+		}
+	}
+	return strings.Compare(left, right)
+}
+
+// changelogDisorder returns the index of the first entry that is not ordered
+// after the one above it (the list runs newest first), or -1 when ordered.
+func changelogDisorder(entries []ChangelogEntry) int {
+	for index := 1; index < len(entries); index++ {
+		previous, current := entries[index-1], entries[index]
+		versionOrder := compareChangelogVersions(previous.Version, current.Version)
+		ordered := versionOrder > 0 || (versionOrder == 0 && previous.Date >= current.Date)
+		if !ordered {
+			return index
+		}
+	}
+	return -1
 }
 
 // isNonFiniteFloat reports whether x is NaN or +/-Infinity. YAML's `.nan`,
@@ -91,10 +353,8 @@ func validateGovernance(spec *HushSpec, result *ValidationResult) {
 // fails every `<= 0` / `< lo || > hi` bounds check (comparisons against NaN
 // are always false), so an unchecked NaN silently passes validation and
 // then makes downstream comparisons like `ratio > max_imbalance_ratio` fail
-// open. It also can't reach encoding/json, which errors on NaN/Infinity and
-// would otherwise silently blank out a receipt's content_hash. Must stay in
-// lockstep with the Rust `!x.is_finite()`, TypeScript `!Number.isFinite(x)`,
-// and Python `not math.isfinite(x)` checks.
+// open. It also cannot reach encoding/json, which errors on NaN/Infinity and
+// would otherwise silently blank out a receipt's content_hash.
 func isNonFiniteFloat(x float64) bool {
 	return math.IsNaN(x) || math.IsInf(x, 0)
 }
@@ -177,6 +437,25 @@ func validateRules(rules *Rules, result *ValidationResult) {
 		for index, pattern := range rules.ShellCommands.ForbiddenPatterns {
 			validateRegex(pattern, fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index), result)
 		}
+	}
+
+	if rules.BrowserAutomation != nil {
+		for index, pattern := range rules.BrowserAutomation.ExtraCredentialPatterns {
+			validateRegex(pattern, fmt.Sprintf("rules.browser_automation.extra_credential_patterns[%d]", index), result)
+		}
+	}
+
+	if rules.CodeExecution != nil && rules.CodeExecution.MaxScanBytes != nil && *rules.CodeExecution.MaxScanBytes < 1 {
+		result.addError("INVALID_MAX_SCAN_BYTES", "rules.code_execution.max_scan_bytes must be >= 1")
+	}
+
+	// Core spec 3.13: every rule block's `when` condition is validated at parse
+	// time; a bad HH:MM, timezone, day, or excessive nesting is an error.
+	for _, message := range ValidateConditions(rules) {
+		// Every condition diagnostic is `<path>: <what is wrong>`, so the path
+		// the refusal reports is the part before the first colon.
+		path, _, _ := strings.Cut(message, ": ")
+		result.addErrorAt("INVALID_CONDITION", path, message)
 	}
 }
 
@@ -287,23 +566,48 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 		}
 		seen[profile.ID] = true
 
-		if profile.ToolAccess != nil && profile.ToolAccess.Default != "" && !containsTyped(profile.ToolAccess.Default, DefaultActions) {
+		// Profile rule blocks are tri-state overlays (origins spec 4): an absent
+		// `default` inherits the base document's, so only a present value is
+		// checked.
+		if profile.ToolAccess != nil && profile.ToolAccess.Default != nil && !containsTyped(*profile.ToolAccess.Default, DefaultActions) {
 			result.addError("INVALID_DEFAULT_ACTION",
-				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, profile.ToolAccess.Default))
+				fmt.Sprintf("origins.profiles[%d].tool_access default action %q must be 'allow' or 'block'", index, *profile.ToolAccess.Default))
 		}
-		if profile.Egress != nil && profile.Egress.Default != "" && !containsTyped(profile.Egress.Default, DefaultActions) {
+		if profile.Egress != nil && profile.Egress.Default != nil && !containsTyped(*profile.Egress.Default, DefaultActions) {
 			result.addError("INVALID_DEFAULT_ACTION",
-				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, profile.Egress.Default))
+				fmt.Sprintf("origins.profiles[%d].egress default action %q must be 'allow' or 'block'", index, *profile.Egress.Default))
+		}
+		if profile.ToolAccess != nil && profile.ToolAccess.MaxArgsSize != nil && *profile.ToolAccess.MaxArgsSize < 1 {
+			result.addError("INVALID_MAX_ARGS_SIZE",
+				fmt.Sprintf("origins.profiles[%d].tool_access.max_args_size must be >= 1", index))
 		}
 
 		if profile.Match != nil {
-			if profile.Match.SpaceType != "" && !containsTyped(profile.Match.SpaceType, OriginSpaceTypes) {
+			if profile.Match.SpaceType != nil && !containsTyped(*profile.Match.SpaceType, OriginSpaceTypes) {
 				result.addError("INVALID_ORIGIN_SPACE_TYPE",
-					fmt.Sprintf("origins.profiles[%d].match.space_type %q is not valid", index, profile.Match.SpaceType))
+					fmt.Sprintf("origins.profiles[%d].match.space_type %q is not valid", index, *profile.Match.SpaceType))
 			}
-			if profile.Match.Visibility != "" && !containsTyped(profile.Match.Visibility, OriginVisibilities) {
+			if profile.Match.Visibility != nil && !containsTyped(*profile.Match.Visibility, OriginVisibilities) {
 				result.addError("INVALID_ORIGIN_VISIBILITY",
-					fmt.Sprintf("origins.profiles[%d].match.visibility %q is not valid", index, profile.Match.Visibility))
+					fmt.Sprintf("origins.profiles[%d].match.visibility %q is not valid", index, *profile.Match.Visibility))
+			}
+			// A present-but-empty free-text match field is an unsatisfiable
+			// constraint: no origin carries an empty provider or tenant. The
+			// enum fields above already refuse "" as an unknown variant.
+			for _, field := range []struct {
+				name  string
+				value *string
+			}{
+				{"provider", profile.Match.Provider},
+				{"tenant_id", profile.Match.TenantID},
+				{"space_id", profile.Match.SpaceID},
+				{"sensitivity", profile.Match.Sensitivity},
+				{"actor_role", profile.Match.ActorRole},
+			} {
+				if field.value != nil && *field.value == "" {
+					result.addError("INVALID_VALUE", fmt.Sprintf(
+						"origins.profiles[%d].match.%s must not be empty", index, field.name))
+				}
 			}
 		}
 
@@ -328,13 +632,13 @@ func validateOrigins(ext *Extensions, result *ValidationResult) {
 
 		if profile.Bridge != nil {
 			for targetIndex, target := range profile.Bridge.AllowedTargets {
-				if target.SpaceType != "" && !containsTyped(target.SpaceType, OriginSpaceTypes) {
+				if target.SpaceType != nil && !containsTyped(*target.SpaceType, OriginSpaceTypes) {
 					result.addError("INVALID_BRIDGE_SPACE_TYPE",
-						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].space_type %q is not valid", index, targetIndex, target.SpaceType))
+						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].space_type %q is not valid", index, targetIndex, *target.SpaceType))
 				}
-				if target.Visibility != "" && !containsTyped(target.Visibility, OriginVisibilities) {
+				if target.Visibility != nil && !containsTyped(*target.Visibility, OriginVisibilities) {
 					result.addError("INVALID_BRIDGE_VISIBILITY",
-						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].visibility %q is not valid", index, targetIndex, target.Visibility))
+						fmt.Sprintf("origins.profiles[%d].bridge.allowed_targets[%d].visibility %q is not valid", index, targetIndex, *target.Visibility))
 				}
 			}
 		}
@@ -354,6 +658,10 @@ func validateDetection(detection *DetectionExtension, result *ValidationResult) 
 		}
 		if prompt.MaxScanBytes != nil && *prompt.MaxScanBytes < 1 {
 			result.addError("INVALID_MAX_SCAN_BYTES", "detection.prompt_injection.max_scan_bytes must be >= 1")
+		}
+		if h := prompt.Heuristics; h != nil && h.MinScore != nil && (*h.MinScore < 0 || *h.MinScore > 100) {
+			result.addError("INVALID_MIN_SCORE",
+				"detection.prompt_injection.heuristics.min_score must be between 0 and 100")
 		}
 
 		warnLevel := DetectionLevelSuspicious
@@ -421,31 +729,40 @@ func validateOptionalNonNegativeInt(value *int, code, msg string, result *Valida
 // validateRegex rejects ReDoS-unsafe and non-portable patterns. A portability
 // pre-check runs first, rejecting constructs that are unsupported by, or behave
 // differently across, the four SDK regex engines (possessive quantifiers,
-// \Z/\z end-anchors, empty character classes). Go's regexp is RE2-only, so the
-// RE2-feature check then comes for free at compile time; the nested-quantifier
-// check finally rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2
-// tolerates but the backtracking SDK engines (JS RegExp, Python re) do not,
-// keeping the safety contract identical across all four SDKs.
+// \Z/\z end-anchors, empty character classes). The nested-quantifier check then
+// rejects catastrophic-backtracking shapes (e.g. (a+)+) that RE2 tolerates but
+// the backtracking SDK engines (JS RegExp, Python re) do not. The HushSpec
+// regex profile check comes last, and carries the RE2-feature rejection with it
+// because Go's regexp is RE2-only.
 func validateRegex(pattern, path string, result *ValidationResult) {
 	if message, bad := disallowedRegexFeature(pattern); bad {
 		result.addError("INVALID_REGEX",
 			fmt.Sprintf("%s must be a valid regular expression: %s", path, message))
 		return
 	}
-	if _, err := regexp.Compile(pattern); err != nil {
-		result.addError("INVALID_REGEX",
-			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
-		return
-	}
 	if hasNestedQuantifier(pattern) {
 		result.addError("INVALID_REGEX",
-			fmt.Sprintf("%s contains a nested unbounded quantifier (e.g. (a+)+) that can cause catastrophic backtracking (ReDoS)", path))
+			fmt.Sprintf("%s must be a valid regular expression: %s", path, nestedQuantifierMessage))
+		return
+	}
+	// CompileProfileRegex is the exact call the evaluator makes: it repeats the
+	// two checks above, applies the HushSpec regex profile (ASCII \d/\w/\s/\b,
+	// leading-only inline flags, portable escapes) and then compiles. Routing
+	// validation through it means a pattern that validates here can never fail
+	// to compile at evaluation time -- and vice versa.
+	if _, err := CompileProfileRegex(pattern); err != nil {
+		result.addError("INVALID_REGEX",
+			fmt.Sprintf("%s must be a valid regular expression: %v", path, err))
 	}
 }
 
 // possessiveRegexMessage is the shared rejection message for possessive
 // quantifiers.
 const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable across the HushSpec SDK regex engines"
+
+// openLowerBoundRegexMessage is the shared rejection message for the
+// open-lower-bound quantifier {,n}.
+const openLowerBoundRegexMessage = "the {,n} quantifier is not portable across the HushSpec SDK regex engines (Python reads it as {0,n}, the others as literal text); write {0,n}"
 
 // disallowedRegexFeature is a portability pre-check: it rejects regex
 // constructs that are unsupported by, or behave differently across, the four
@@ -456,9 +773,12 @@ const possessiveRegexMessage = "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+,
 //     RegExp and Go RE2 reject them at compile time),
 //   - \Z and \z end-anchors (Rust/Python/Go accept them with differing
 //     semantics; JS reads \Z/\z as a literal letter -- users anchor with $),
-//   - empty character classes [] and [^] (JS accepts them; the others reject).
+//   - empty character classes [] and [^] (JS accepts them; the others reject),
+//   - the {,n} quantifier (Python reads it as {0,n}; the others read the whole
+//     brace as literal text).
 //
-// Must stay byte-identical to the Rust, TypeScript, and Python implementations.
+// The rules are part of the HushSpec regex profile, so every engine must apply
+// them identically.
 func disallowedRegexFeature(pattern string) (string, bool) {
 	chars := []rune(pattern)
 	n := len(chars)
@@ -512,6 +832,9 @@ func disallowedRegexFeature(pattern string) (string, bool) {
 			if j < n {
 				inner := string(chars[i+1 : j])
 				if braceKind(inner) != quantNone {
+					if strings.HasPrefix(inner, ",") {
+						return openLowerBoundRegexMessage, true
+					}
 					if j+1 < n && chars[j+1] == '+' {
 						return possessiveRegexMessage, true
 					}
@@ -540,8 +863,9 @@ const (
 // ( ... ) group nesting -- ignoring escaped parens and character-class contents
 // -- and returns true when a group whose body contains an unbounded quantifier
 // (*, +, {n,}) is itself immediately followed by an unbounded quantifier.
-// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. Must stay identical
-// to the Rust, TypeScript, and Python implementations.
+// Bounded quantifiers ((a{1,3}){1,3}, (abc)+) are accepted. The heuristic is
+// part of the HushSpec regex profile, so every engine must apply it
+// identically.
 func hasNestedQuantifier(pattern string) bool {
 	chars := []rune(pattern)
 	n := len(chars)
@@ -711,9 +1035,11 @@ func isKnownBudgetKey(value string) bool {
 	}
 }
 
+// durationPattern is the `after` grammar of a posture timeout transition.
+var durationPattern = regexp.MustCompile(`^[0-9]+[smhd]$`)
+
 func isValidDuration(value string) bool {
-	matched, _ := regexp.MatchString(`^\d+[smhd]$`, value)
-	return matched
+	return durationPattern.MatchString(value)
 }
 
 func containsTyped[T comparable](value T, allowed map[T]struct{}) bool {

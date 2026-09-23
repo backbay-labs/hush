@@ -1,7 +1,8 @@
+// Command hushspec-normalize parses a HushSpec document and prints its own
+// canonical form, for the cross-SDK comparison.
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -26,11 +27,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	output, err := json.Marshal(spec)
+	// The document's own canonical form: extends and merge_strategy are
+	// resolution instructions, not policy (canonical spec 3).
+	spec.Extends = nil
+	spec.MergeStrategy = ""
+	output, err := hushspec.CanonicalJSON(spec)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to serialize %s: %v\n", os.Args[1], err)
+		fmt.Fprintf(os.Stderr, "failed to canonicalize %s: %v\n", os.Args[1], err)
 		os.Exit(1)
 	}
 
-	fmt.Println(string(output))
+	fmt.Println(output)
 }

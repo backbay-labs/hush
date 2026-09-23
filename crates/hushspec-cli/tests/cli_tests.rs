@@ -53,8 +53,11 @@ fn validate_invalid_fixture_exits_1() {
         .arg("fixtures/core/invalid/missing-version.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("\u{2717}"))
-        .stdout(predicate::str::contains("error[E001]"));
+        // Every failure line is on stderr, so a caller redirecting it away
+        // never sees some failures and hides others.
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("\u{2717}"))
+        .stderr(predicate::str::contains("error[E001]"));
 }
 
 #[test]
@@ -64,7 +67,7 @@ fn validate_duplicate_patterns() {
         .arg("fixtures/core/invalid/duplicate-pattern-names.yaml")
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E003]"));
+        .stderr(predicate::str::contains("error[E003]"));
 }
 
 #[test]
@@ -171,8 +174,8 @@ rules:
         .arg(child_path.to_str().unwrap())
         .assert()
         .code(1)
-        .stdout(predicate::str::contains("error[E010]"))
-        .stdout(predicate::str::contains("extends resolution failed"));
+        .stderr(predicate::str::contains("error[E010]"))
+        .stderr(predicate::str::contains("extends resolution failed"));
 }
 
 #[test]
@@ -183,6 +186,19 @@ fn test_egress_fixtures() {
         .assert()
         .success()
         .stdout(predicate::str::contains("5 passed, 0 failed"));
+}
+
+/// A suite argument that names nothing on disk stops the run: silently
+/// dropping it would report a green summary for suites that never ran.
+#[test]
+fn test_reports_a_missing_suite_path() {
+    h2h()
+        .arg("test")
+        .arg("fixtures/core/evaluation/egress.test.yaml")
+        .arg("fixtures/core/evaluation/does-not-exist.test.yaml")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("does-not-exist.test.yaml"));
 }
 
 #[test]
@@ -220,7 +236,238 @@ fn test_json_output() {
         .assert()
         .success()
         .stdout(predicate::str::contains("\"passed\":"))
-        .stdout(predicate::str::contains("\"failed\":"));
+        .stdout(predicate::str::contains("\"failed\":"))
+        .stdout(predicate::str::contains("\"coverage\":"));
+}
+
+/// A 0.2 fixture's `controls` and `tags` reach the JUnit report as
+/// `<property>` entries, which is what makes a run evidence for a control
+/// rather than a pass/fail line.
+#[test]
+fn test_junit_output_carries_controls_and_tags() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("controls.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "a control-tagged case"
+policy:
+  hushspec: "0.1.0"
+  name: controls
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "transmission security allows the approved endpoint"
+    controls:
+      - framework: hipaa-2013
+        control_id: "164.312(e)(1)"
+    tags: ["allow", "egress"]
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("junit")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<testsuites name=\"h2h test\""))
+        .stdout(predicate::str::contains(
+            "<property name=\"control\" value=\"hipaa-2013:164.312(e)(1)\"/>",
+        ))
+        .stdout(predicate::str::contains(
+            "<property name=\"tag\" value=\"egress\"/>",
+        ))
+        .stdout(predicate::str::contains(
+            "<testsuite name=\"rule coverage\"",
+        ));
+}
+
+/// `--report-file` puts the machine-readable report on disk and leaves the
+/// readable summary on stdout, so a CI log stays legible while the artifact
+/// is uploaded.
+#[test]
+fn test_report_file_writes_the_report_and_keeps_the_summary() {
+    let tmp = TempDir::new().unwrap();
+    let report = tmp.path().join("nested/report.xml");
+
+    h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("junit")
+        .arg("--report-file")
+        .arg(report.to_str().unwrap())
+        .arg("fixtures/core/evaluation/egress.test.yaml")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5 passed, 0 failed"))
+        .stdout(predicate::str::contains("Rule coverage:"));
+
+    let xml = fs::read_to_string(&report).unwrap();
+    assert!(
+        xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"),
+        "{xml}"
+    );
+    assert!(
+        xml.contains("<testcase name=\"allow listed domain\""),
+        "{xml}"
+    );
+}
+
+/// The gate the library suites run under: a policy with a rule path no case
+/// ever hits fails the run, and the uncovered path is named.
+#[test]
+fn test_fail_on_uncovered_reports_the_unhit_path() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("partial.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "one block is never exercised"
+policy:
+  hushspec: "0.1.0"
+  name: partial
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+cases:
+  - description: "an allowed domain"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg("--fail-on-uncovered")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "uncovered: rules.secret_patterns.patterns.aws",
+        ));
+
+    // Without the flag the same run is green: coverage is reported, not gated.
+    h2h()
+        .arg("test")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .success();
+}
+
+/// A failing case is not evidence that the rule paths it touched were
+/// exercised, so it credits no coverage.
+#[test]
+fn test_a_failing_case_credits_no_coverage() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("failing.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.1.0"
+description: "the only case fails"
+policy:
+  hushspec: "0.1.0"
+  name: failing
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "an allowed domain the fixture expects to be denied"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: deny
+"#,
+    )
+    .unwrap();
+
+    let output = h2h()
+        .arg("test")
+        .arg("--format")
+        .arg("json")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(report["failed"], 1);
+    assert_eq!(
+        report["coverage"]["covered"], 0,
+        "a failing case credits nothing: {report}"
+    );
+}
+
+/// The 0.2 assertions are enforced, not merely parsed.
+#[test]
+fn test_rule_trace_and_receipt_assertions_are_checked() {
+    let tmp = TempDir::new().unwrap();
+    let fixture = tmp.path().join("wrong.test.yaml");
+    fs::write(
+        &fixture,
+        r#"hushspec_test: "0.2.0"
+description: "a trace and a receipt that do not hold"
+policy:
+  hushspec: "0.1.0"
+  name: wrong
+  rules:
+    egress:
+      allow: ["api.example.com"]
+      default: block
+cases:
+  - description: "the trace names the wrong outcome"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      rule_trace:
+        - rule_block: egress
+          outcome: deny
+        - rule_block: secret_patterns
+          outcome: skip
+  - description: "the receipt names the wrong enforcement outcome"
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      receipt:
+        enforcement:
+          outcome: blocked
+"#,
+    )
+    .unwrap();
+
+    h2h()
+        .arg("test")
+        .arg(fixture.to_str().unwrap())
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("rule_trace[0]"))
+        .stdout(predicate::str::contains("receipt.enforcement.outcome"));
 }
 
 #[test]
@@ -321,8 +568,8 @@ fn init_permissive_preset() {
 /// template that was never updated.
 #[test]
 fn scaffolded_files_carry_schema_modelines() {
-    const CORE_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json\n";
-    const TEST_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json\n";
+    const CORE_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json\n";
+    const TEST_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json\n";
 
     for preset in ["default", "permissive", "strict"] {
         let tmp = TempDir::new().unwrap();
@@ -336,6 +583,8 @@ fn scaffolded_files_carry_schema_modelines() {
             .success();
 
         let policy = fs::read_to_string(tmp.path().join(".hushspec/policy.yaml")).unwrap();
+        let parsed_policy = hushspec::HushSpec::parse(&policy).unwrap();
+        assert_eq!(parsed_policy.hushspec, env!("CARGO_PKG_VERSION"));
         assert!(
             policy.starts_with(CORE_MODELINE),
             "{preset} policy.yaml should start with the core schema modeline:\n{policy}"
@@ -343,6 +592,11 @@ fn scaffolded_files_carry_schema_modelines() {
 
         let test_content =
             fs::read_to_string(tmp.path().join(".hushspec/tests/policy.test.yaml")).unwrap();
+        let starter: serde_yaml::Value = serde_yaml::from_str(&test_content).unwrap();
+        assert_eq!(
+            starter["policy"]["hushspec"].as_str(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
         assert!(
             test_content.starts_with(TEST_MODELINE),
             "{preset} starter test should start with the evaluator-test schema modeline:\n{test_content}"
@@ -531,8 +785,8 @@ fn keygen_writes_private_key_with_restrictive_permissions() {
         .success()
         .stdout(predicate::str::contains("Created"));
 
-    let private_key = tmp.path().join("h2h.key");
-    let public_key = tmp.path().join("h2h.pub");
+    let private_key = tmp.path().join("h2h.key.pem");
+    let public_key = tmp.path().join("h2h.pub.pem");
     assert!(private_key.exists(), "private key should exist");
     assert!(public_key.exists(), "public key should exist");
 
@@ -940,7 +1194,7 @@ fn fmt_parse_error_reports_same_line_as_lint_with_modeline() {
 
     // `bogus_field` is an unknown field on line 5 -- deny_unknown_fields
     // rejects it at parse time with a "line 5" position in the error.
-    let content = r#"# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+    let content = r#"# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "0.1.0"
 name: t
 description: d

@@ -8,17 +8,23 @@ use std::path::PathBuf;
 
 #[derive(clap::Args)]
 pub struct FmtArgs {
-    /// Policy YAML files to format
+    /// Policy YAML files to format; "-" reads stdin and writes to stdout
     #[arg(required = true)]
     files: Vec<PathBuf>,
 
     /// Check formatting without modifying files (exit 1 if changes needed)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "diff")]
     check: bool,
 
     /// Show what would change without modifying files
     #[arg(long)]
     diff: bool,
+
+    /// Reformat even though it discards comments. Without this flag `fmt`
+    /// refuses to rewrite a document that carries comments beyond a leading
+    /// yaml-language-server modeline.
+    #[arg(long)]
+    strip_comments: bool,
 
     /// Output format
     #[arg(short, long, default_value = "text")]
@@ -37,6 +43,16 @@ struct FmtResult {
     changed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     diff: Option<String>,
+    /// True when the document carries comments beyond a leading modeline.
+    /// (Additive field; `changed` keeps its original meaning.)
+    has_comments: bool,
+    /// Number of comment lines that a rewrite would discard.
+    comment_count: usize,
+    /// 1-based line number of the first such comment, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    first_comment_line: Option<usize>,
+    /// True when formatting was skipped to avoid destroying comments.
+    skipped: bool,
 }
 
 /// Canonical field order for rule blocks
@@ -80,40 +96,35 @@ const SORTABLE_LISTS: &[&str] = &[
 pub fn run(args: FmtArgs) -> i32 {
     let mut any_would_change = false;
     let mut any_error = false;
+    let mut any_refused = false;
     let mut results: Vec<FmtResult> = Vec::new();
 
     for path in &args.files {
-        if !path.exists() {
-            match args.format {
-                FmtOutputFormat::Text => {
-                    eprintln!("{} file not found: {}", "error".red(), path.display());
-                }
-                FmtOutputFormat::Json => {}
-            }
-            any_error = true;
-            results.push(FmtResult {
-                file: path.display().to_string(),
-                changed: false,
-                diff: None,
-            });
-            continue;
-        }
+        let display = crate::input::display(path);
+        let to_stdout = crate::input::is_stdin(path);
 
-        let original = match std::fs::read_to_string(path) {
+        let original = match crate::input::read_policy(path) {
             Ok(c) => c,
-            Err(e) => {
+            Err(crate::input::ReadError::NotFound) => {
                 match args.format {
                     FmtOutputFormat::Text => {
-                        eprintln!("{} failed to read {}: {e}", "error".red(), path.display());
+                        eprintln!("{} file not found: {display}", "error".red());
                     }
                     FmtOutputFormat::Json => {}
                 }
                 any_error = true;
-                results.push(FmtResult {
-                    file: path.display().to_string(),
-                    changed: false,
-                    diff: None,
-                });
+                results.push(FmtResult::skeleton(&display));
+                continue;
+            }
+            Err(crate::input::ReadError::Io(e)) => {
+                match args.format {
+                    FmtOutputFormat::Text => {
+                        eprintln!("{} {e}", "error".red());
+                    }
+                    FmtOutputFormat::Json => {}
+                }
+                any_error = true;
+                results.push(FmtResult::skeleton(&display));
                 continue;
             }
         };
@@ -124,16 +135,12 @@ pub fn run(args: FmtArgs) -> i32 {
             Err(e) => {
                 match args.format {
                     FmtOutputFormat::Text => {
-                        eprintln!("{} failed to parse {}: {e}", "error".red(), path.display());
+                        eprintln!("{} failed to parse {display}: {e}", "error".red());
                     }
                     FmtOutputFormat::Json => {}
                 }
                 any_error = true;
-                results.push(FmtResult {
-                    file: path.display().to_string(),
-                    changed: false,
-                    diff: None,
-                });
+                results.push(FmtResult::skeleton(&display));
                 continue;
             }
         };
@@ -142,7 +149,19 @@ pub fn run(args: FmtArgs) -> i32 {
         let original_normalized = normalize_trailing_newline(&original);
         let formatted_normalized = normalize_trailing_newline(&formatted);
 
-        let changed = original_normalized != formatted_normalized;
+        // Canonical formatting is a structural re-render: every comment except
+        // the leading modeline is lost. Audited policies carry control-mapping
+        // comments ("# --- 45 CFR 164.312(a)(1) ---"), so refuse to rewrite
+        // rather than silently deleting the evidence trail.
+        // A document that is already canonical needs no rewrite, so there is
+        // nothing to refuse -- that also keeps a false-positive comment scan
+        // from failing an otherwise clean file.
+        let comments = comment_lines(&original);
+        let has_comments = !comments.is_empty();
+        let would_change = original_normalized != formatted_normalized;
+        let refuse = has_comments && !args.strip_comments && would_change;
+
+        let changed = !refuse && would_change;
 
         if changed {
             any_would_change = true;
@@ -158,13 +177,48 @@ pub fn run(args: FmtArgs) -> i32 {
             None
         };
 
+        if refuse {
+            // --check/--diff report and move on (not an error); a real rewrite
+            // stops with exit 1 so CI notices.
+            let first = comments[0];
+            if args.check || args.diff {
+                if matches!(args.format, FmtOutputFormat::Text) {
+                    println!(
+                        "{} {display} has comments; would not reformat ({} comment line(s), first at line {first})",
+                        "skip".yellow(),
+                        comments.len()
+                    );
+                }
+            } else {
+                any_refused = true;
+                if matches!(args.format, FmtOutputFormat::Text) {
+                    eprintln!(
+                        "{} refusing to reformat {display}: {} comment line(s) would be discarded (first at line {first}); pass --strip-comments to reformat anyway",
+                        "error".red(),
+                        comments.len()
+                    );
+                }
+            }
+
+            results.push(FmtResult {
+                file: display,
+                changed: false,
+                diff: None,
+                has_comments,
+                comment_count: comments.len(),
+                first_comment_line: Some(first),
+                skipped: true,
+            });
+            continue;
+        }
+
         match args.format {
             FmtOutputFormat::Text => {
                 if args.check {
                     if changed {
-                        println!("{} {} would be reformatted", "FAIL".red(), path.display());
+                        println!("{} {display} would be reformatted", "FAIL".red());
                     } else {
-                        println!("{} {} already formatted", "ok".green(), path.display());
+                        println!("{} {display} already formatted", "ok".green());
                     }
                 } else if args.diff {
                     if changed {
@@ -172,19 +226,23 @@ pub fn run(args: FmtArgs) -> i32 {
                             println!("{diff}");
                         }
                     } else {
-                        println!("{} {} already formatted", "ok".green(), path.display());
+                        println!("{} {display} already formatted", "ok".green());
                     }
+                } else if to_stdout {
+                    // `h2h fmt -` is a filter: the document goes to stdout, so
+                    // status lines would corrupt it.
+                    print!("{formatted_normalized}");
                 } else {
                     // Actually write the formatted output
                     if changed {
                         if let Err(e) = std::fs::write(path, &formatted_normalized) {
-                            eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
+                            eprintln!("{} failed to write {display}: {e}", "error".red());
                             any_error = true;
                         } else {
-                            println!("{} {} formatted", "DONE".green(), path.display());
+                            println!("{} {display} formatted", "DONE".green());
                         }
                     } else {
-                        println!("{} {} already formatted", "ok".green(), path.display());
+                        println!("{} {display} already formatted", "ok".green());
                     }
                 }
             }
@@ -194,19 +252,24 @@ pub fn run(args: FmtArgs) -> i32 {
                 // non-writing; the JSON summary is emitted once after the loop.
                 if !args.check
                     && !args.diff
+                    && !to_stdout
                     && changed
                     && let Err(e) = std::fs::write(path, &formatted_normalized)
                 {
-                    eprintln!("{} failed to write {}: {e}", "error".red(), path.display());
+                    eprintln!("{} failed to write {display}: {e}", "error".red());
                     any_error = true;
                 }
             }
         }
 
         results.push(FmtResult {
-            file: path.display().to_string(),
+            file: display,
             changed,
             diff: diff_text,
+            has_comments,
+            comment_count: comments.len(),
+            first_comment_line: comments.first().copied(),
+            skipped: false,
         });
     }
 
@@ -218,11 +281,120 @@ pub fn run(args: FmtArgs) -> i32 {
 
     if any_error {
         2
-    } else if args.check && any_would_change {
+    } else if any_refused || (args.check && any_would_change) {
         1
     } else {
         0
     }
+}
+
+impl FmtResult {
+    /// Result row for a file that could not be read or parsed.
+    fn skeleton(file: &str) -> Self {
+        FmtResult {
+            file: file.to_string(),
+            changed: false,
+            diff: None,
+            has_comments: false,
+            comment_count: 0,
+            first_comment_line: None,
+            skipped: false,
+        }
+    }
+}
+
+/// 1-based line numbers of YAML comments in `input`, ignoring a leading
+/// yaml-language-server modeline (which `format_canonical` preserves).
+///
+/// Quote-aware so a `#` inside a scalar (`pattern: "sk-[a-z]#"`) is not
+/// mistaken for a comment, and block-scalar-aware so `#` lines inside a
+/// `description: >` body are treated as content. Worst case it over-reports,
+/// which costs the user an explicit `--strip-comments` rather than a silently
+/// destroyed comment.
+pub(crate) fn comment_lines(input: &str) -> Vec<usize> {
+    let (modeline, _) = split_modeline(input);
+    let skip_first = modeline.is_some();
+
+    let mut lines = Vec::new();
+    let mut block_indent: Option<usize> = None;
+
+    for (idx, line) in input.lines().enumerate() {
+        let lineno = idx + 1;
+        if skip_first && lineno == 1 {
+            continue;
+        }
+
+        let indent = line.len() - line.trim_start().len();
+
+        if let Some(parent) = block_indent {
+            if line.trim().is_empty() || indent > parent {
+                // Still inside the block scalar body.
+                continue;
+            }
+            block_indent = None;
+        }
+
+        if comment_start(line).is_some() {
+            lines.push(lineno);
+            continue;
+        }
+
+        if opens_block_scalar(line) {
+            block_indent = Some(indent);
+        }
+    }
+
+    lines
+}
+
+/// Byte offset where a YAML comment starts on this line, if any. A `#` only
+/// opens a comment at the start of a line or after whitespace, and never
+/// inside a quoted scalar.
+fn comment_start(line: &str) -> Option<usize> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut prev_is_space = true;
+
+    let mut chars = line.char_indices();
+    while let Some((idx, ch)) = chars.next() {
+        match ch {
+            '\\' if in_double => {
+                // Skip the escaped character.
+                chars.next();
+                prev_is_space = false;
+            }
+            '\'' if !in_double => {
+                in_single = !in_single;
+                prev_is_space = false;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                prev_is_space = false;
+            }
+            '#' if !in_single && !in_double && prev_is_space => return Some(idx),
+            _ => prev_is_space = ch.is_whitespace(),
+        }
+    }
+
+    None
+}
+
+/// True when this line opens a block scalar (`key: |`, `- >-`, ...), whose
+/// body lines are content rather than YAML syntax.
+fn opens_block_scalar(line: &str) -> bool {
+    let content = line.trim_end();
+    let Some(last) = content.split_whitespace().next_back() else {
+        return false;
+    };
+
+    let mut chars = last.chars();
+    if !matches!(chars.next(), Some('|' | '>')) {
+        return false;
+    }
+
+    // Remaining characters may only be a chomping indicator and/or an explicit
+    // indentation digit: |- |+ |2 |2- and so on.
+    chars.all(|ch| ch == '-' || ch == '+' || ch.is_ascii_digit())
 }
 
 pub(crate) fn normalize_trailing_newline(s: &str) -> String {
@@ -775,12 +947,12 @@ pub(crate) fn compute_diff(original: &str, formatted: &str, path: &std::path::Pa
 
 #[cfg(test)]
 mod tests {
-    use super::{format_canonical, format_spec, yaml_scalar};
+    use super::{comment_lines, format_canonical, format_spec, opens_block_scalar, yaml_scalar};
     use hushspec::HushSpec;
     use hushspec::schema::MergeStrategy;
 
     const MODELINE: &str =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
 
     #[test]
     fn fmt_preserves_leading_modeline() {
@@ -792,6 +964,66 @@ mod tests {
         );
         // Idempotent with the modeline present:
         assert_eq!(format_canonical(&out).unwrap(), out);
+    }
+
+    #[test]
+    fn comment_lines_finds_whole_line_and_trailing_comments() {
+        let input = "hushspec: \"0.1.0\"\n# control mapping\nname: t  # inline note\n";
+        assert_eq!(comment_lines(input), vec![2, 3]);
+    }
+
+    #[test]
+    fn comment_lines_ignores_the_leading_modeline() {
+        let input = format!("{MODELINE}\nhushspec: \"0.1.0\"\nname: t\n");
+        assert!(comment_lines(&input).is_empty());
+
+        // ... but not a second, non-modeline comment.
+        let input = format!("{MODELINE}\n# real comment\nhushspec: \"0.1.0\"\n");
+        assert_eq!(comment_lines(&input), vec![2]);
+    }
+
+    #[test]
+    fn comment_lines_ignores_hashes_inside_scalars() {
+        let input = concat!(
+            "hushspec: \"0.1.0\"\n",
+            "name: \"tag #1\"\n",
+            "description: 'a # b'\n",
+            "rules:\n",
+            "  shell_commands:\n",
+            "    forbidden_patterns:\n",
+            "      - \"curl .*#frag\"\n",
+        );
+        assert!(
+            comment_lines(input).is_empty(),
+            "quoted hashes are data: {:?}",
+            comment_lines(input)
+        );
+    }
+
+    #[test]
+    fn comment_lines_treats_block_scalar_bodies_as_content() {
+        let input = concat!(
+            "hushspec: \"0.1.0\"\n",
+            "description: >\n",
+            "  this line mentions # not a comment\n",
+            "  and so does this one\n",
+            "name: after-block\n",
+        );
+        assert!(comment_lines(input).is_empty());
+
+        // The scan must resume after the block ends.
+        let input = format!("{input}# trailing comment\n");
+        assert_eq!(comment_lines(&input), vec![6]);
+    }
+
+    #[test]
+    fn opens_block_scalar_matches_only_block_indicators() {
+        assert!(opens_block_scalar("description: >"));
+        assert!(opens_block_scalar("description: |-"));
+        assert!(opens_block_scalar("  - |2"));
+        assert!(!opens_block_scalar("name: pipe|value"));
+        assert!(!opens_block_scalar("  - \"a|b\""));
+        assert!(!opens_block_scalar("default: block"));
     }
 
     #[test]
@@ -833,6 +1065,7 @@ mod tests {
             rules: Some(hushspec::Rules {
                 secret_patterns: Some(hushspec::SecretPatternsRule {
                     enabled: true,
+                    when: None,
                     patterns: vec![hushspec::SecretPattern {
                         name: "token".to_string(),
                         pattern: "token".to_string(),
@@ -843,6 +1076,7 @@ mod tests {
                 }),
                 computer_use: Some(hushspec::ComputerUseRule {
                     enabled: true,
+                    when: None,
                     mode: hushspec::ComputerUseMode::Guardrail,
                     allowed_actions: vec![],
                 }),

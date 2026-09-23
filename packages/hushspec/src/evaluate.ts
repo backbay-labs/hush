@@ -1,23 +1,41 @@
+/**
+ * Reference evaluator for HushSpec 0.2 (core spec Sections 3, 5, and 6).
+ *
+ * Evaluation of one action is:
+ * 1. extension guards (panic, origins `default_behavior`, posture capability),
+ * 2. every applicable rule block for the action type -- present, `enabled`,
+ *    and with a satisfied `when` condition -- evaluated in the order of the
+ *    Section 5 table, never short-circuiting on an allow,
+ * 3. aggregation: deny beats warn beats allow; `matched_rule`/`reason` come
+ *    from the first block in evaluation order whose decision equals the
+ *    aggregate and which named a rule.
+ *
+ * Unknown action types deny (`__unknown_action_type__`). Hosts and paths are
+ * normalized as specified in Section 3.14 before any pattern is consulted.
+ *
+ * The engine itself lives in `compiled.ts`: a policy is compiled once --
+ * regexes, globs, host patterns, tool sets, `when` conditions and block
+ * applicability -- and evaluated through a {@link CompiledPolicy}. The
+ * functions here are the document-in, decision-out form of that engine; they
+ * compile the document on first use and reuse the compilation for as long as
+ * the caller holds the document object. Hold a `CompiledPolicy` (or a
+ * `HushGuard`) directly when evaluating the same policy repeatedly.
+ *
+ * The core specification is normative for every decision here, and
+ * `fixtures/core/evaluation/` pins it: a change in behaviour has to be a
+ * change in the specification first.
+ */
+import { statSync } from 'node:fs';
 import type { HushSpec } from './schema.js';
-import type {
-  ComputerUseRule,
-  EgressRule,
-  ForbiddenPathsRule,
-  InputInjectionRule,
-  PatchIntegrityRule,
-  PathAllowlistRule,
-  RemoteDesktopChannelsRule,
-  SecretPatternsRule,
-  ShellCommandsRule,
-  ToolAccessRule,
-} from './rules.js';
-import type {
-  OriginMatch,
-  OriginProfile,
-  PostureExtension,
-} from './extensions.js';
+import type { Condition, RuntimeContext } from './conditions.js';
 import { parseOrThrow } from './parse.js';
-import { compileSafePolicyRegex } from './regex.js';
+import { PANIC_POLICY_YAML } from './builtin.js';
+import { compiledFor } from './compiled.js';
+
+/** `matched_rule` reported when the action type is unknown to the specification. */
+export const UNKNOWN_ACTION_TYPE_RULE = '__unknown_action_type__';
+/** `matched_rule` reported when the emergency panic protocol is active. */
+export const PANIC_RULE = '__hushspec_panic__';
 
 export type Decision = 'allow' | 'warn' | 'deny';
 
@@ -28,8 +46,17 @@ export interface EvaluationAction {
   origin?: OriginContext;
   posture?: PostureContext;
   args_size?: number;
-  /** Set on the redacted copy emitted to observers when content is stripped. */
-  content_redacted?: boolean;
+  /** `browser_action`: navigation destination (core spec 3.11). */
+  url?: string;
+  /** `code_exec`: whether the call requests network access (core spec 3.12). */
+  network?: boolean;
+  /** `code_exec`: requested execution time in milliseconds (core spec 3.12). */
+  timeout_ms?: number;
+  /**
+   * Runtime context consulted by `when` conditions (core spec 3.13). When
+   * absent, conditions see an empty context and the engine clock.
+   */
+  context?: RuntimeContext;
 }
 
 export interface OriginContext {
@@ -62,1185 +89,488 @@ export interface PostureResult {
   next: string;
 }
 
-const enum PathOperation {
-  Read,
-  Write,
-  Patch,
+export type RuleOutcome = 'allow' | 'warn' | 'deny' | 'skip';
+
+/**
+ * One recorded rule-block consultation. Produced by the evaluator itself, in
+ * evaluation order, so receipts reflect exactly what ran.
+ */
+export interface RuleEvaluation {
+  rule_block: string;
+  outcome: RuleOutcome;
+  matched_rule?: string;
+  reason?: string;
+  evaluated: boolean;
 }
 
-interface PatchStats {
-  additions: number;
-  deletions: number;
+/** An evaluation result together with its recorded rule trace. */
+export interface TracedEvaluation {
+  result: EvaluationResult;
+  trace: RuleEvaluation[];
 }
 
-function allowResult(
-  matchedRule: string | undefined,
-  reason: string | undefined,
-  originProfile: string | undefined,
-  posture: PostureResult | undefined,
+/**
+ * Evaluate `action` against a resolved document.
+ *
+ * `when` conditions are evaluated against `action.context` (an empty context
+ * and the engine clock when absent).
+ *
+ * The document is compiled on first use and the compilation is cached against
+ * the document object, so repeated calls with the same object pay for the
+ * policy's patterns once. The cache is keyed by object identity: a document
+ * mutated in place after it has been evaluated keeps its first compilation, so
+ * build a new document (or a new {@link CompiledPolicy}) to change a policy.
+ */
+export function evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {
+  return compiledFor(spec).evaluate(action);
+}
+
+/**
+ * Like {@link evaluate} with an explicit runtime context and an out-of-band map
+ * of conditions keyed by rule-block name. The explicit `context` replaces
+ * `action.context`; out-of-band conditions are ANDed with each block's own
+ * `when` (core spec 3.13).
+ */
+export function evaluateWithContext(
+  spec: HushSpec,
+  action: EvaluationAction,
+  context: RuntimeContext,
+  conditions: Record<string, Condition>,
 ): EvaluationResult {
-  return { decision: 'allow', matched_rule: matchedRule, reason, origin_profile: originProfile, posture };
+  return compiledFor(spec).evaluateWithContext(action, context, conditions);
 }
 
-function warnResult(
-  matchedRule: string | undefined,
-  reason: string | undefined,
-  originProfile: string | undefined,
-  posture: PostureResult | undefined,
-): EvaluationResult {
-  return { decision: 'warn', matched_rule: matchedRule, reason, origin_profile: originProfile, posture };
+/** Full evaluation with the recorded rule trace (used by receipts). */
+export function evaluateTraced(
+  spec: HushSpec,
+  action: EvaluationAction,
+  context?: RuntimeContext,
+  conditions: Record<string, Condition> = {},
+): TracedEvaluation {
+  return compiledFor(spec).evaluateTraced(action, context, conditions);
 }
 
-function denyResult(
-  matchedRule: string | undefined,
-  reason: string | undefined,
-  originProfile: string | undefined,
-  posture: PostureResult | undefined,
-): EvaluationResult {
-  return { decision: 'deny', matched_rule: matchedRule, reason, origin_profile: originProfile, posture };
-}
+/**
+ * Built-in credential detectors consulted by `browser_automation` when
+ * `credential_detection` is true (core spec 3.11). Documents needing portable
+ * detection list their own patterns in `extra_credential_patterns`.
+ */
+export const BUILTIN_CREDENTIAL_PATTERNS: ReadonlyArray<readonly [string, string]> = [
+  ['aws_access_key', '(AKIA|ASIA)[0-9A-Z]{16}'],
+  ['github_token', 'gh[opsur]_[A-Za-z0-9]{36}'],
+  ['github_fine_grained_pat', 'github_pat_[0-9a-zA-Z_]{50,}'],
+  ['openai_key', 'sk-[A-Za-z0-9_-]{20,}'],
+  ['slack_token', 'xox[baprs]-[0-9A-Za-z-]{10,}'],
+  ['private_key', '-----BEGIN[ \\t]+(RSA[ \\t]+|EC[ \\t]+|OPENSSH[ \\t]+)?PRIVATE[ \\t]+KEY-----'],
+  ['jwt', 'eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}'],
+];
 
-function decisionRank(decision: Decision): number {
-  switch (decision) {
-    case 'allow': return 1;
-    case 'warn': return 2;
-    case 'deny': return 3;
+// ---------------------------------------------------------------------------
+// Path globs (core spec 3.14.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a filesystem path for matching: NFC, `\` to `/`, collapsed
+ * separators, lexical `.`/`..` resolution, no trailing `/`.
+ */
+export function normalizePath(target: string): string {
+  const unified = target.normalize('NFC').replace(/\\/g, '/');
+  const absolute = unified.startsWith('/');
+  const segments: string[] = [];
+  for (const segment of unified.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') {
+      const last = segments[segments.length - 1];
+      if (last != null && last !== '..') {
+        segments.pop();
+      } else if (!absolute) {
+        segments.push('..');
+      }
+      continue;
+    }
+    segments.push(segment);
   }
+  const joined = segments.join('/');
+  return absolute ? `/${joined}` : joined;
 }
 
-function moreRestrictiveResult(left: EvaluationResult, right: EvaluationResult): EvaluationResult {
-  const leftRank = decisionRank(left.decision);
-  const rightRank = decisionRank(right.decision);
-  if (rightRank > leftRank) {
-    return right;
-  }
-  if (leftRank > rightRank) {
-    return left;
-  }
-  return right.matched_rule != null ? right : left;
+/** Escape one character for use as a literal in a `u`-flagged RegExp source. */
+function regexEscape(ch: string): string {
+  return /[.*+?^${}()|[\]\\/]/.test(ch) ? `\\${ch}` : ch;
 }
 
-function globMatches(pattern: string, target: string): boolean {
-  let regex = '^';
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === '*') {
-      if (i + 1 < pattern.length && pattern[i + 1] === '*') {
-        if (i + 2 < pattern.length && pattern[i + 2] === '/') {
-          // `**/` matches zero or more leading path segments (including zero),
-          // so `**/.env` matches both `.env` and `a/b/.env`. Uses `[^\n]`
-          // rather than `.` -- see the `u`-flag note below for why.
-          regex += '(?:[^\\n]*/)?';
-          i += 3;
-        } else {
-          regex += '[^\\n]*';
-          i += 2;
-        }
+/**
+ * Compiled-pattern caches. Bounded so a process that hot-reloads many distinct
+ * policies cannot accumulate compiled patterns without limit; on overflow the
+ * cache is cleared rather than grown.
+ */
+const MAX_COMPILED_PATTERN_CACHE = 4096;
+
+function cachePut<K, V>(cache: Map<K, V>, key: K, value: V): V {
+  if (cache.size >= MAX_COMPILED_PATTERN_CACHE) {
+    cache.clear();
+  }
+  cache.set(key, value);
+  return value;
+}
+
+const pathGlobCache = new Map<string, RegExp | undefined>();
+
+/**
+ * Compile a path glob (core spec 3.14.1) into an anchored regex, or
+ * `undefined` when the glob has no regular expression (it then matches
+ * nothing).
+ *
+ * Compiled policies call this once per pattern at compile time; the cache
+ * serves the per-call `pathGlobMatches` form and repeated compilations of the
+ * same pattern across policies.
+ */
+export function compilePathGlob(pattern: string): RegExp | undefined {
+  const cached = pathGlobCache.get(pattern);
+  if (cached !== undefined || pathGlobCache.has(pattern)) return cached;
+
+  const chars = Array.from(pattern.normalize('NFC'));
+  let source = '^';
+  let index = 0;
+  while (index < chars.length) {
+    const ch = chars[index];
+    if (ch === '*' && chars[index + 1] === '*') {
+      const atSegmentStart = index === 0 || chars[index - 1] === '/';
+      if (atSegmentStart && chars[index + 2] === '/') {
+        // `**/`: zero or more complete leading segments.
+        source += '(?:[^/]*/)*';
+        index += 3;
       } else {
-        regex += '[^/]*';
-        i += 1;
+        // `**` is any run of characters except newlines (core spec 3.14.1).
+        // JavaScript's `.` also excludes `\r`, U+2028 and U+2029, so the class
+        // is spelled out rather than left to the host's definition.
+        source += '[^\\n]*';
+        index += 2;
       }
+      continue;
+    }
+    if (ch === '*') {
+      source += '[^/]*';
     } else if (ch === '?') {
-      regex += '[^\\n]';
-      i += 1;
-    } else if ('.+(){}[]^$|\\'.includes(ch)) {
-      regex += '\\' + ch;
-      i += 1;
+      source += '[^/]';
     } else {
-      regex += ch;
-      i += 1;
+      source += regexEscape(ch);
     }
+    index += 1;
   }
-  regex += '$';
+  source += '$';
 
+  let compiled: RegExp | undefined;
   try {
-    // `?`/`**`/`**/` emit `[^\n]` (not `.`) for cross-SDK parity: JavaScript
-    // `.` excludes EVERY line terminator (`\n`, `\r`, U+2028, U+2029) -- even
-    // under the `u` flag -- whereas the Rust/Python/Go reference engines exclude
-    // only `\n`. Emitting `.` here would fail to match a target with an interior
-    // `\r`/U+2028/U+2029 (e.g. `secrets/**` vs `secrets/x\ry`), silently letting
-    // it slip past a `forbidden_paths`/`block` glob that the other SDKs enforce.
-    // `[^\n]` excludes only `\n`, matching the reference engines exactly.
-    //
-    // 'u' flag: makes the negated classes code-point-aware so a single `?`
-    // (`[^\n]`) matches one full Unicode code point (e.g. an astral emoji)
-    // rather than one UTF-16 code unit. Every construct this translator emits
-    // (the escaped literals `\. \+ \( \) \{ \} \[ \] \^ \$ \| \\`, plus
-    // `(?:[^\n]*/)?`, `[^/]*`, `[^\n]*`, `[^\n]`, `^`, `$`, and literal source
-    // characters) is valid under `u`.
-    return new RegExp(regex, 'u').test(target);
+    compiled = new RegExp(source, 'u');
   } catch {
-    return false;
+    compiled = undefined;
   }
+  return cachePut(pathGlobCache, pattern, compiled);
 }
 
-function findFirstMatch(target: string, patterns: string[]): number | undefined {
-  for (let i = 0; i < patterns.length; i++) {
-    if (globMatches(patterns[i], target)) {
-      return i;
+/** Whether `path` (already normalized) matches the path glob `pattern`. */
+export function pathGlobMatches(pattern: string, path: string): boolean {
+  const regex = compilePathGlob(pattern);
+  return regex != null && regex.test(path);
+}
+
+// ---------------------------------------------------------------------------
+// Host patterns (core spec 3.14.2)
+// ---------------------------------------------------------------------------
+
+function isAscii(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) > 127) return false;
+  }
+  return true;
+}
+
+function asciiLowercase(value: string): string {
+  let out = '';
+  for (const ch of value) {
+    const code = ch.charCodeAt(0);
+    out += code >= 65 && code <= 90 && ch.length === 1 ? String.fromCharCode(code + 32) : ch;
+  }
+  return out;
+}
+
+/**
+ * Reduce an egress target (host, `host:port`, or URL) to a normalized host.
+ * Returns `undefined` when the target cannot be reduced to a syntactically
+ * valid host, in which case it matches nothing.
+ */
+export function normalizeHost(target: string): string | undefined {
+  const trimmed = target.trim();
+  const schemeIndex = trimmed.indexOf('://');
+  let authority = schemeIndex >= 0 ? trimmed.slice(schemeIndex + 3) : trimmed;
+  // A backslash ends the authority exactly as a slash does (core spec
+  // 3.14.2), the way a browser reads a special-scheme URL.
+  const end = firstIndexOfAny(authority, ['/', '\\', '?', '#']);
+  authority = end >= 0 ? authority.slice(0, end) : authority;
+  const at = authority.lastIndexOf('@');
+  if (at >= 0) {
+    authority = authority.slice(at + 1);
+  }
+  if (authority.length === 0) return undefined;
+
+  if (authority.startsWith('[')) {
+    const rest = authority.slice(1);
+    const close = rest.indexOf(']');
+    if (close < 0) return undefined;
+    const inner = rest.slice(0, close);
+    if (inner.length === 0 || !/^[0-9A-Fa-f:.]+$/.test(inner)) return undefined;
+    return `[${asciiLowercase(inner)}]`;
+  }
+
+  let host = authority;
+  const colon = host.lastIndexOf(':');
+  if (colon >= 0) {
+    const port = host.slice(colon + 1);
+    if (port.length > 0 && /^[0-9]+$/.test(port)) {
+      host = host.slice(0, colon);
     }
   }
-  return undefined;
+  if (host.includes(':')) return undefined;
+  if (host.endsWith('.')) {
+    host = host.slice(0, -1);
+  }
+  if (host.length === 0) return undefined;
+
+  const labels: string[] = [];
+  for (const label of host.split('.')) {
+    if (label.length === 0) return undefined;
+    const normalized = normalizeHostLabel(label);
+    if (normalized == null) return undefined;
+    labels.push(normalized);
+  }
+  const normalized = labels.join('.');
+  if (!/^[A-Za-z0-9\-._]*$/.test(normalized)) return undefined;
+  return normalized;
 }
 
-function hasPatterns(patterns: string[] | undefined): boolean {
-  return (patterns?.length ?? 0) > 0;
+function firstIndexOfAny(value: string, needles: string[]): number {
+  let best = -1;
+  for (const needle of needles) {
+    const index = value.indexOf(needle);
+    if (index >= 0 && (best < 0 || index < best)) best = index;
+  }
+  return best;
 }
 
-function isRuleActive(rule: { enabled?: boolean } | undefined): boolean {
-  return rule != null && rule.enabled !== false;
+/**
+ * Normalize one host label: ASCII lowercase, or the IDNA A-label (punycode)
+ * of the NFC-normalized, lowercased label when it is not ASCII.
+ */
+function normalizeHostLabel(label: string): string | undefined {
+  if (isAscii(label)) {
+    return asciiLowercase(label);
+  }
+  const folded = label.toLowerCase().normalize('NFC');
+  if (isAscii(folded)) {
+    return folded;
+  }
+  const encoded = punycodeEncode(folded);
+  return encoded != null ? `xn--${encoded}` : undefined;
 }
 
-function prefixedRule(prefix: string | undefined, suffix: string): string | undefined {
-  return prefix != null ? `${prefix}.${suffix}` : undefined;
+/** Normalize a host pattern (steps 5-7 of core spec 3.14.2), preserving `*`. */
+function normalizeHostPattern(pattern: string): string {
+  let normalized = pattern.trim();
+  if (normalized.endsWith('.')) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (normalized.startsWith('[')) {
+    return asciiLowercase(normalized);
+  }
+  return normalized
+    .split('.')
+    .map(label => (isAscii(label)
+      ? asciiLowercase(label)
+      : normalizeHostLabel(label) ?? label.toLowerCase()))
+    .join('.');
 }
 
-function profileRulePrefix(profileId: string, field: string): string {
-  return `extensions.origins.profiles.${profileId}.${field}`;
+function isIpv4Literal(host: string): boolean {
+  const octets = host.split('.');
+  return octets.length === 4
+    && octets.every(octet =>
+      octet.length > 0
+      && octet.length <= 3
+      && /^[0-9]+$/.test(octet)
+      && Number(octet) <= 255);
 }
 
-function patchStats(content: string): PatchStats {
-  let additions = 0;
-  let deletions = 0;
+function isIpLiteral(host: string): boolean {
+  return host.startsWith('[') || isIpv4Literal(host);
+}
 
-  for (const line of content.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) {
+/**
+ * A host pattern normalized (core spec 3.14.2 steps 5-7) and compiled once.
+ *
+ * `normalized` is what an IP literal is compared against -- IP literals match
+ * only exactly -- and `regex` is the wildcard matcher for every other host.
+ */
+export interface CompiledHostPattern {
+  normalized: string;
+  regex?: RegExp;
+}
+
+const hostPatternCache = new Map<string, CompiledHostPattern>();
+
+/**
+ * Normalize and compile a host pattern (core spec 3.14.2): `*` is one or more
+ * non-dot characters, `**` one or more characters including dots, everything
+ * else literal.
+ *
+ * Compiled policies call this once per pattern, so a per-action match costs a
+ * single regex test rather than re-normalizing the pattern every time.
+ */
+export function compileHostPattern(pattern: string): CompiledHostPattern {
+  const cached = hostPatternCache.get(pattern);
+  if (cached !== undefined) return cached;
+
+  const normalized = normalizeHostPattern(pattern);
+  let source = '^';
+  const chars = Array.from(normalized);
+  let index = 0;
+  while (index < chars.length) {
+    if (chars[index] === '*') {
+      if (chars[index + 1] === '*') {
+        // `**` is one or more characters except newlines (core spec 3.14.2);
+        // JavaScript's `.` also excludes `\r`, U+2028 and U+2029.
+        source += '[^\\n]+';
+        index += 2;
+      } else {
+        source += '[^.]+';
+        index += 1;
+      }
       continue;
     }
-    if (line.startsWith('+')) {
-      additions += 1;
-    } else if (line.startsWith('-')) {
-      deletions += 1;
+    source += regexEscape(chars[index]);
+    index += 1;
+  }
+  source += '$';
+
+  let regex: RegExp | undefined;
+  try {
+    regex = new RegExp(source, 'u');
+  } catch {
+    regex = undefined;
+  }
+  return cachePut(hostPatternCache, pattern, { normalized, ...(regex === undefined ? {} : { regex }) });
+}
+
+/** Whether a normalized host matches an already-compiled host pattern. */
+export function hostMatcherMatches(pattern: CompiledHostPattern, host: string): boolean {
+  if (isIpLiteral(host)) {
+    return pattern.normalized === host;
+  }
+  return pattern.regex != null && pattern.regex.test(host);
+}
+
+/**
+ * Whether a normalized host matches a host pattern (core spec 3.14.2): `*` is
+ * one or more non-dot characters, `**` one or more characters including dots,
+ * everything else literal. IP literals match only exactly.
+ */
+export function hostPatternMatches(pattern: string, host: string): boolean {
+  return hostMatcherMatches(compileHostPattern(pattern), host);
+}
+
+/** RFC 3492 punycode encoding of one label (without the `xn--` prefix). */
+export function punycodeEncode(input: string): string | undefined {
+  const BASE = 36;
+  const TMIN = 1;
+  const TMAX = 26;
+  const SKEW = 38;
+  const DAMP = 700;
+  const INITIAL_BIAS = 72;
+  const INITIAL_N = 128;
+  const MAX_U32 = 0xffffffff;
+
+  const adapt = (delta: number, numPoints: number, firstTime: boolean): number => {
+    let d = Math.floor(firstTime ? delta / DAMP : delta / 2);
+    d += Math.floor(d / numPoints);
+    let k = 0;
+    while (d > Math.floor(((BASE - TMIN) * TMAX) / 2)) {
+      d = Math.floor(d / (BASE - TMIN));
+      k += BASE;
     }
+    return k + Math.floor(((BASE - TMIN + 1) * d) / (d + SKEW));
+  };
+
+  const digit = (value: number): string =>
+    value < 26
+      ? String.fromCharCode(0x61 + value)
+      : String.fromCharCode(0x30 + (value - 26));
+
+  const codePoints = Array.from(input).map(ch => ch.codePointAt(0) as number);
+  const output: string[] = [];
+  for (const cp of codePoints) {
+    if (cp < 128) output.push(String.fromCharCode(cp));
+  }
+  const basicCount = output.length;
+  let handled = basicCount;
+  if (basicCount > 0) {
+    output.push('-');
   }
 
-  return { additions, deletions };
-}
-
-function imbalanceRatio(additions: number, deletions: number): number {
-  if (additions === 0 && deletions === 0) return 0;
-  if (additions === 0) return deletions;
-  if (deletions === 0) return additions;
-  const larger = Math.max(additions, deletions);
-  const smaller = Math.min(additions, deletions);
-  return larger / smaller;
-}
-
-function requiredCapability(actionType: string): string | undefined {
-  switch (actionType) {
-    case 'file_read': return 'file_access';
-    case 'file_write': return 'file_write';
-    case 'patch_apply': return 'patch';
-    case 'shell_command': return 'shell';
-    case 'tool_call': return 'tool_call';
-    case 'egress': return 'egress';
-    default: return undefined;
-  }
-}
-
-function resolvePosture(
-  spec: HushSpec,
-  matchedProfile: OriginProfile | undefined,
-  posture: PostureContext | undefined,
-): PostureResult | undefined {
-  const postureExtension = spec.extensions?.posture;
-  if (!postureExtension) return undefined;
-
-  const current =
-    matchedProfile?.posture ??
-    posture?.current ??
-    postureExtension.initial;
-
-  const signal = posture?.signal;
-  const next = signal != null && signal !== 'none'
-    ? nextPostureState(postureExtension, current, signal) ?? current
-    : current;
-
-  return { current, next };
-}
-
-function nextPostureState(
-  posture: PostureExtension,
-  current: string,
-  signal: string,
-): string | undefined {
-  for (const transition of posture.transitions) {
-    if (transition.from !== '*' && transition.from !== current) {
-      continue;
+  let n = INITIAL_N;
+  let delta = 0;
+  let bias = INITIAL_BIAS;
+  while (handled < codePoints.length) {
+    let m = Number.POSITIVE_INFINITY;
+    for (const cp of codePoints) {
+      if (cp >= n && cp < m) m = cp;
     }
-    if (transition.on !== signal) {
-      continue;
-    }
-    return transition.to;
-  }
-  return undefined;
-}
-
-function postureCapabilityGuard(
-  action: EvaluationAction,
-  postureResult: PostureResult | undefined,
-  spec: HushSpec,
-  originProfileId: string | undefined,
-): EvaluationResult | undefined {
-  if (!postureResult) return undefined;
-
-  const postureExtension = spec.extensions?.posture;
-  if (!postureExtension) return undefined;
-
-  const capability = requiredCapability(action.type);
-  if (capability == null) return undefined;
-
-  const currentState = postureExtension.states[postureResult.current];
-  if (!currentState) {
-    return denyResult(
-      `extensions.posture.states.${postureResult.current}`,
-      `unknown posture state '${postureResult.current}'`,
-      originProfileId,
-      { ...postureResult },
-    );
-  }
-
-  const capabilities = currentState.capabilities ?? [];
-  if (capabilities.includes(capability)) {
-    return undefined;
-  }
-
-  return denyResult(
-    `extensions.posture.states.${postureResult.current}.capabilities`,
-    `posture '${postureResult.current}' does not allow capability '${capability}'`,
-    originProfileId,
-    { ...postureResult },
-  );
-}
-
-function selectOriginProfile(
-  spec: HushSpec,
-  origin: OriginContext | undefined,
-): OriginProfile | undefined {
-  if (!origin) return undefined;
-
-  const profiles = spec.extensions?.origins?.profiles;
-  if (!profiles) return undefined;
-
-  let bestScore = -1;
-  let bestProfile: OriginProfile | undefined;
-
-  for (const profile of profiles) {
-    if (!profile.match) continue;
-    const score = matchOrigin(profile.match, origin);
-    if (score != null && score > bestScore) {
-      bestScore = score;
-      bestProfile = profile;
-    }
-  }
-
-  return bestProfile;
-}
-
-function matchOrigin(rules: OriginMatch, origin: OriginContext): number | undefined {
-  let score = 0;
-
-  if (rules.provider != null) {
-    if (origin.provider !== rules.provider) return undefined;
-    score += 4;
-  }
-  if (rules.tenant_id != null) {
-    if (origin.tenant_id !== rules.tenant_id) return undefined;
-    score += 6;
-  }
-  if (rules.space_id != null) {
-    if (origin.space_id !== rules.space_id) return undefined;
-    score += 8;
-  }
-  if (rules.space_type != null) {
-    if (origin.space_type !== rules.space_type) return undefined;
-    score += 4;
-  }
-  if (rules.visibility != null) {
-    if (origin.visibility !== rules.visibility) return undefined;
-    score += 4;
-  }
-  if (rules.external_participants != null) {
-    if (origin.external_participants !== rules.external_participants) return undefined;
-    score += 2;
-  }
-  if (rules.tags != null && rules.tags.length > 0) {
-    const originTags = origin.tags ?? [];
-    if (!rules.tags.every(tag => originTags.includes(tag))) return undefined;
-    score += rules.tags.length;
-  }
-  if (rules.sensitivity != null) {
-    if (origin.sensitivity !== rules.sensitivity) return undefined;
-    score += 4;
-  }
-  if (rules.actor_role != null) {
-    if (origin.actor_role !== rules.actor_role) return undefined;
-    score += 4;
-  }
-
-  return score;
-}
-
-function evaluateToolAccessRule(
-  rule: ToolAccessRule | undefined,
-  prefix: string | undefined,
-  target: string,
-  argsSize: number | undefined,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (!rule) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  if (rule.enabled === false) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  if (rule.max_args_size != null && (argsSize ?? 0) > rule.max_args_size) {
-    return denyResult(
-      prefixedRule(prefix, 'max_args_size'),
-      'tool arguments exceeded max_args_size',
-      originProfileId,
-      posture,
-    );
-  }
-
-  if (findFirstMatch(target, rule.block ?? []) != null) {
-    return denyResult(
-      prefixedRule(prefix, 'block'),
-      'tool is explicitly blocked',
-      originProfileId,
-      posture,
-    );
-  }
-  if (findFirstMatch(target, rule.require_confirmation ?? []) != null) {
-    return warnResult(
-      prefixedRule(prefix, 'require_confirmation'),
-      'tool requires confirmation',
-      originProfileId,
-      posture,
-    );
-  }
-  if (findFirstMatch(target, rule.allow ?? []) != null) {
-    return allowResult(
-      prefixedRule(prefix, 'allow'),
-      'tool is explicitly allowed',
-      originProfileId,
-      posture,
-    );
-  }
-
-  const defaultAction = rule.default ?? 'allow';
-  if (defaultAction === 'allow') {
-    return allowResult(
-      prefixedRule(prefix, 'default'),
-      'tool matched default allow',
-      originProfileId,
-      posture,
-    );
-  }
-  return denyResult(
-    prefixedRule(prefix, 'default'),
-    'tool matched default block',
-    originProfileId,
-    posture,
-  );
-}
-
-function evaluateEgressRule(
-  rule: EgressRule,
-  prefix: string,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled === false) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  if (findFirstMatch(target, rule.block ?? []) != null) {
-    return denyResult(
-      prefixedRule(prefix, 'block'),
-      'domain is explicitly blocked',
-      originProfileId,
-      posture,
-    );
-  }
-  if (findFirstMatch(target, rule.allow ?? []) != null) {
-    return allowResult(
-      prefixedRule(prefix, 'allow'),
-      'domain is explicitly allowed',
-      originProfileId,
-      posture,
-    );
-  }
-
-  const defaultAction = rule.default ?? 'block';
-  if (defaultAction === 'allow') {
-    return allowResult(
-      prefixedRule(prefix, 'default'),
-      'domain matched default allow',
-      originProfileId,
-      posture,
-    );
-  }
-  return denyResult(
-    prefixedRule(prefix, 'default'),
-    'domain matched default block',
-    originProfileId,
-    posture,
-  );
-}
-
-function evaluateSecretPatterns(
-  rule: SecretPatternsRule,
-  target: string,
-  content: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled === false) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  if (findFirstMatch(target, rule.skip_paths ?? []) != null) {
-    return allowResult(
-      'rules.secret_patterns.skip_paths',
-      'path is excluded from secret scanning',
-      originProfileId,
-      posture,
-    );
-  }
-
-  for (const pattern of rule.patterns ?? []) {
-    try {
-      if (compileSafePolicyRegex(pattern.pattern).regex.test(content)) {
-        return denyResult(
-          `rules.secret_patterns.patterns.${pattern.name}`,
-          `content matched secret pattern '${pattern.name}'`,
-          originProfileId,
-          posture,
-        );
+    if (!Number.isFinite(m)) return undefined;
+    delta += (m - n) * (handled + 1);
+    if (delta > MAX_U32) return undefined;
+    n = m;
+    for (const cp of codePoints) {
+      if (cp < n) {
+        delta += 1;
+        if (delta > MAX_U32) return undefined;
       }
-    } catch (error) {
-      return denyResult(
-        `rules.secret_patterns.patterns.${pattern.name}.pattern`,
-        `secret pattern '${pattern.name}' is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        originProfileId,
-        posture,
-      );
-    }
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluatePatchIntegrity(
-  rule: PatchIntegrityRule,
-  content: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled === false) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const forbiddenPatterns = rule.forbidden_patterns ?? [];
-  for (let index = 0; index < forbiddenPatterns.length; index++) {
-    try {
-      if (compileSafePolicyRegex(forbiddenPatterns[index]).regex.test(content)) {
-        return denyResult(
-          `rules.patch_integrity.forbidden_patterns[${index}]`,
-          'patch content matched a forbidden pattern',
-          originProfileId,
-          posture,
-        );
+      if (cp === n) {
+        let q = delta;
+        let k = BASE;
+        for (;;) {
+          const t = k <= bias ? TMIN : k >= bias + TMAX ? TMAX : k - bias;
+          if (q < t) break;
+          output.push(digit(t + ((q - t) % (BASE - t))));
+          q = Math.floor((q - t) / (BASE - t));
+          k += BASE;
+        }
+        output.push(digit(q));
+        bias = adapt(delta, handled + 1, handled === basicCount);
+        delta = 0;
+        handled += 1;
       }
-    } catch (error) {
-      return denyResult(
-        `rules.patch_integrity.forbidden_patterns[${index}]`,
-        `patch forbidden pattern is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        originProfileId,
-        posture,
-      );
     }
+    delta += 1;
+    n += 1;
+    if (delta > MAX_U32 || n > MAX_U32) return undefined;
   }
 
-  const stats = patchStats(content);
-  const maxAdditions = rule.max_additions ?? 1000;
-  const maxDeletions = rule.max_deletions ?? 500;
-
-  if (stats.additions > maxAdditions) {
-    return denyResult(
-      'rules.patch_integrity.max_additions',
-      'patch additions exceeded max_additions',
-      originProfileId,
-      posture,
-    );
-  }
-  if (stats.deletions > maxDeletions) {
-    return denyResult(
-      'rules.patch_integrity.max_deletions',
-      'patch deletions exceeded max_deletions',
-      originProfileId,
-      posture,
-    );
-  }
-
-  if (rule.require_balance) {
-    const ratio = imbalanceRatio(stats.additions, stats.deletions);
-    const maxRatio = rule.max_imbalance_ratio ?? 10.0;
-    if (ratio > maxRatio) {
-      return denyResult(
-        'rules.patch_integrity.max_imbalance_ratio',
-        'patch exceeded max imbalance ratio',
-        originProfileId,
-        posture,
-      );
-    }
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
+  return output.join('');
 }
 
-function evaluateShellRule(
-  rule: ShellCommandsRule,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled === false) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const forbiddenPatterns = rule.forbidden_patterns ?? [];
-  for (let index = 0; index < forbiddenPatterns.length; index++) {
-    try {
-      if (compileSafePolicyRegex(forbiddenPatterns[index]).regex.test(target)) {
-        return denyResult(
-          `rules.shell_commands.forbidden_patterns[${index}]`,
-          'shell command matched a forbidden pattern',
-          originProfileId,
-          posture,
-        );
-      }
-    } catch (error) {
-      return denyResult(
-        `rules.shell_commands.forbidden_patterns[${index}]`,
-        `shell forbidden pattern is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        originProfileId,
-        posture,
-      );
-    }
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluateComputerUseRule(
-  rule: ComputerUseRule,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled !== true) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const allowedActions = rule.allowed_actions ?? [];
-  if (allowedActions.includes(target)) {
-    return allowResult(
-      'rules.computer_use.allowed_actions',
-      'computer-use action is explicitly allowed',
-      originProfileId,
-      posture,
-    );
-  }
-
-  const mode = rule.mode ?? 'guardrail';
-  switch (mode) {
-    case 'observe':
-      return allowResult(
-        'rules.computer_use.mode',
-        'observe mode does not block unlisted actions',
-        originProfileId,
-        posture,
-      );
-    case 'guardrail':
-      return warnResult(
-        'rules.computer_use.mode',
-        'guardrail mode warns on unlisted actions',
-        originProfileId,
-        posture,
-      );
-    case 'fail_closed':
-      return denyResult(
-        'rules.computer_use.mode',
-        'fail_closed mode denies unlisted actions',
-        originProfileId,
-        posture,
-      );
-  }
-}
-
-function evaluateRemoteDesktopChannelsRule(
-  rule: RemoteDesktopChannelsRule,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult | undefined {
-  if (rule.enabled !== true) {
-    return undefined;
-  }
-
-  let field: string;
-  let allowed: boolean;
-  switch (target) {
-    case 'remote.clipboard':
-      field = 'clipboard';
-      allowed = rule.clipboard ?? false;
-      break;
-    case 'remote.file_transfer':
-      field = 'file_transfer';
-      allowed = rule.file_transfer ?? false;
-      break;
-    case 'remote.audio':
-      field = 'audio';
-      allowed = rule.audio ?? true;
-      break;
-    case 'remote.drive_mapping':
-      field = 'drive_mapping';
-      allowed = rule.drive_mapping ?? false;
-      break;
-    default:
-      return undefined;
-  }
-
-  if (allowed) {
-    return allowResult(
-      `rules.remote_desktop_channels.${field}`,
-      `remote desktop channel '${field}' is enabled`,
-      originProfileId,
-      posture,
-    );
-  }
-
-  return denyResult(
-    `rules.remote_desktop_channels.${field}`,
-    `remote desktop channel '${field}' is disabled`,
-    originProfileId,
-    posture,
-  );
-}
-
-function evaluateInputInjectionRule(
-  rule: InputInjectionRule,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  if (rule.enabled !== true) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const allowedTypes = rule.allowed_types ?? [];
-  if (allowedTypes.length === 0) {
-    return denyResult(
-      'rules.input_injection.allowed_types',
-      'input injection is not allowed when allowed_types is empty',
-      originProfileId,
-      posture,
-    );
-  }
-
-  if (allowedTypes.includes(target)) {
-    return allowResult(
-      'rules.input_injection.allowed_types',
-      'input injection type is explicitly allowed',
-      originProfileId,
-      posture,
-    );
-  }
-
-  return denyResult(
-    'rules.input_injection.allowed_types',
-    'input injection type is not allowed',
-    originProfileId,
-    posture,
-  );
-}
-
-function evaluateForbiddenPaths(
-  rule: ForbiddenPathsRule,
-  target: string,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): { denied?: EvaluationResult; exceptionMatched: boolean } {
-  if (rule.enabled === false) {
-    return { exceptionMatched: false };
-  }
-
-  if (findFirstMatch(target, rule.exceptions ?? []) != null) {
-    return { exceptionMatched: true };
-  }
-
-  if (findFirstMatch(target, rule.patterns ?? []) != null) {
-    return {
-      denied: denyResult(
-        'rules.forbidden_paths.patterns',
-        'path matched a forbidden pattern',
-        originProfileId,
-        posture,
-      ),
-      exceptionMatched: false,
-    };
-  }
-
-  return { exceptionMatched: false };
-}
-
-function evaluatePathAllowlist(
-  rule: PathAllowlistRule,
-  target: string,
-  operation: PathOperation,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult | undefined {
-  if (rule.enabled !== true) {
-    return undefined;
-  }
-
-  let patterns: string[];
-  switch (operation) {
-    case PathOperation.Read:
-      patterns = rule.read ?? [];
-      break;
-    case PathOperation.Write:
-      patterns = rule.write ?? [];
-      break;
-    case PathOperation.Patch: {
-      const patchPatterns = rule.patch ?? [];
-      patterns = patchPatterns.length > 0 ? patchPatterns : (rule.write ?? []);
-      break;
-    }
-  }
-
-  if (findFirstMatch(target, patterns) != null) {
-    return allowResult(
-      'rules.path_allowlist',
-      'path matched allowlist',
-      originProfileId,
-      posture,
-    );
-  }
-
-  return denyResult(
-    'rules.path_allowlist',
-    'path did not match allowlist',
-    originProfileId,
-    posture,
-  );
-}
-
-function evaluatePathGuards(
-  spec: HushSpec,
-  target: string,
-  operation: PathOperation,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult | undefined {
-  const rules = spec.rules;
-  if (!rules) return undefined;
-
-  let forbiddenExceptionMatched = false;
-
-  if (rules.forbidden_paths) {
-    const result = evaluateForbiddenPaths(
-      rules.forbidden_paths,
-      target,
-      posture,
-      originProfileId,
-    );
-    if (result.denied) {
-      return result.denied;
-    }
-    forbiddenExceptionMatched = result.exceptionMatched;
-  }
-
-  if (rules.path_allowlist) {
-    const result = evaluatePathAllowlist(
-      rules.path_allowlist,
-      target,
-      operation,
-      posture,
-      originProfileId,
-    );
-    if (result) return result;
-  }
-
-  if (forbiddenExceptionMatched) {
-    return allowResult(
-      'rules.forbidden_paths.exceptions',
-      'path matched an explicit exception',
-      originProfileId,
-      posture,
-    );
-  }
-
-  return undefined;
-}
-
-function evaluateToolCall(
-  spec: HushSpec,
-  action: EvaluationAction,
-  matchedProfile: OriginProfile | undefined,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const baseRule = isRuleActive(spec.rules?.tool_access) ? spec.rules?.tool_access : undefined;
-  const profileRule = matchedProfile != null && isRuleActive(matchedProfile.tool_access)
-    ? matchedProfile.tool_access
-    : undefined;
-  if (baseRule == null && profileRule == null) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const target = action.target ?? '';
-  const profilePrefix = matchedProfile != null
-    ? profileRulePrefix(matchedProfile.id, 'tool_access')
-    : undefined;
-  const argLimitCandidates = [
-    baseRule?.max_args_size != null
-      ? { maxArgsSize: baseRule.max_args_size, matchedRule: 'rules.tool_access.max_args_size' }
-      : undefined,
-    profileRule?.max_args_size != null && profilePrefix != null
-      ? { maxArgsSize: profileRule.max_args_size, matchedRule: `${profilePrefix}.max_args_size` }
-      : undefined,
-  ].filter((candidate): candidate is { maxArgsSize: number; matchedRule: string } => candidate != null);
-  let smallestArgLimit: { maxArgsSize: number; matchedRule: string } | undefined;
-  for (const candidate of argLimitCandidates) {
-    if (smallestArgLimit == null || candidate.maxArgsSize < smallestArgLimit.maxArgsSize) {
-      smallestArgLimit = candidate;
-    }
-  }
-
-  if (smallestArgLimit != null && (action.args_size ?? 0) > smallestArgLimit.maxArgsSize) {
-    return denyResult(
-      smallestArgLimit.matchedRule,
-      'tool arguments exceeded max_args_size',
-      originProfileId,
-      posture,
-    );
-  }
-
-  if (baseRule != null && findFirstMatch(target, baseRule.block ?? []) != null) {
-    return denyResult('rules.tool_access.block', 'tool is explicitly blocked', originProfileId, posture);
-  }
-  if (profileRule != null && profilePrefix != null && findFirstMatch(target, profileRule.block ?? []) != null) {
-    return denyResult(`${profilePrefix}.block`, 'tool is explicitly blocked', originProfileId, posture);
-  }
-
-  if (baseRule != null && findFirstMatch(target, baseRule.require_confirmation ?? []) != null) {
-    return warnResult(
-      'rules.tool_access.require_confirmation',
-      'tool requires confirmation',
-      originProfileId,
-      posture,
-    );
-  }
-  if (profileRule != null && profilePrefix != null && findFirstMatch(target, profileRule.require_confirmation ?? []) != null) {
-    return warnResult(
-      `${profilePrefix}.require_confirmation`,
-      'tool requires confirmation',
-      originProfileId,
-      posture,
-    );
-  }
-
-  const baseHasAllow = hasPatterns(baseRule?.allow);
-  const profileHasAllow = hasPatterns(profileRule?.allow);
-  const baseAllowMatch = !baseHasAllow || findFirstMatch(target, baseRule?.allow ?? []) != null;
-  const profileAllowMatch = !profileHasAllow || findFirstMatch(target, profileRule?.allow ?? []) != null;
-  if ((baseHasAllow || profileHasAllow) && baseAllowMatch && profileAllowMatch) {
-    const matchedRule = profileHasAllow && profilePrefix != null
-      ? `${profilePrefix}.allow`
-      : baseHasAllow
-        ? 'rules.tool_access.allow'
-        : undefined;
-    return allowResult(matchedRule, 'tool is explicitly allowed', originProfileId, posture);
-  }
-
-  const defaultAction = baseRule?.default === 'block' || profileRule?.default === 'block'
-    ? 'block'
-    : 'allow';
-  const defaultRule = profileRule != null && profilePrefix != null
-    ? `${profilePrefix}.default`
-    : baseRule != null
-      ? 'rules.tool_access.default'
-      : undefined;
-  if (defaultAction === 'allow') {
-    return allowResult(defaultRule, 'tool matched default allow', originProfileId, posture);
-  }
-
-  return denyResult(defaultRule, 'tool matched default block', originProfileId, posture);
-}
-
-function evaluateEgress(
-  spec: HushSpec,
-  action: EvaluationAction,
-  matchedProfile: OriginProfile | undefined,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const baseRule = isRuleActive(spec.rules?.egress) ? spec.rules?.egress : undefined;
-  const profileRule = matchedProfile != null && isRuleActive(matchedProfile.egress)
-    ? matchedProfile.egress
-    : undefined;
-  if (baseRule == null && profileRule == null) {
-    return allowResult(undefined, undefined, originProfileId, posture);
-  }
-
-  const target = action.target ?? '';
-  const profilePrefix = matchedProfile != null
-    ? profileRulePrefix(matchedProfile.id, 'egress')
-    : undefined;
-
-  if (baseRule != null && findFirstMatch(target, baseRule.block ?? []) != null) {
-    return denyResult('rules.egress.block', 'domain is explicitly blocked', originProfileId, posture);
-  }
-  if (profileRule != null && profilePrefix != null && findFirstMatch(target, profileRule.block ?? []) != null) {
-    return denyResult(`${profilePrefix}.block`, 'domain is explicitly blocked', originProfileId, posture);
-  }
-
-  const baseHasAllow = hasPatterns(baseRule?.allow);
-  const profileHasAllow = hasPatterns(profileRule?.allow);
-  const baseAllowMatch = !baseHasAllow || findFirstMatch(target, baseRule?.allow ?? []) != null;
-  const profileAllowMatch = !profileHasAllow || findFirstMatch(target, profileRule?.allow ?? []) != null;
-  if ((baseHasAllow || profileHasAllow) && baseAllowMatch && profileAllowMatch) {
-    const matchedRule = profileHasAllow && profilePrefix != null
-      ? `${profilePrefix}.allow`
-      : baseHasAllow
-        ? 'rules.egress.allow'
-        : undefined;
-    return allowResult(matchedRule, 'domain is explicitly allowed', originProfileId, posture);
-  }
-
-  const defaultAction =
-    (baseRule != null && (baseRule.default ?? 'block') === 'block')
-      || (profileRule != null && (profileRule.default ?? 'block') === 'block')
-    ? 'block'
-    : 'allow';
-  const defaultRule = profileRule != null && profilePrefix != null
-    ? `${profilePrefix}.default`
-    : baseRule != null
-      ? 'rules.egress.default'
-      : undefined;
-  if (defaultAction === 'allow') {
-    return allowResult(defaultRule, 'domain matched default allow', originProfileId, posture);
-  }
-
-  return denyResult(defaultRule, 'domain matched default block', originProfileId, posture);
-}
-
-function evaluateFileRead(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const pathResult = evaluatePathGuards(
-    spec,
-    action.target ?? '',
-    PathOperation.Read,
-    posture,
-    originProfileId,
-  );
-  if (pathResult) return pathResult;
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluateFileWrite(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const pathResult = evaluatePathGuards(
-    spec,
-    action.target ?? '',
-    PathOperation.Write,
-    posture,
-    originProfileId,
-  );
-  if (pathResult) return pathResult;
-
-  const secretRule = spec.rules?.secret_patterns;
-  if (secretRule) {
-    return evaluateSecretPatterns(
-      secretRule,
-      action.target ?? '',
-      action.content ?? '',
-      posture,
-      originProfileId,
-    );
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluatePatch(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const pathResult = evaluatePathGuards(
-    spec,
-    action.target ?? '',
-    PathOperation.Patch,
-    posture,
-    originProfileId,
-  );
-  if (pathResult) return pathResult;
-
-  const patchRule = spec.rules?.patch_integrity;
-  if (patchRule) {
-    return evaluatePatchIntegrity(
-      patchRule,
-      action.content ?? '',
-      posture,
-      originProfileId,
-    );
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluateShellCommand(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const shellRule = spec.rules?.shell_commands;
-  if (shellRule) {
-    return evaluateShellRule(
-      shellRule,
-      action.target ?? '',
-      posture,
-      originProfileId,
-    );
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluateComputerUse(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const target = action.target ?? '';
-  const computerUseResult = spec.rules?.computer_use != null
-    ? evaluateComputerUseRule(
-      spec.rules.computer_use,
-      target,
-      posture,
-      originProfileId,
-    )
-    : undefined;
-  const remoteDesktopResult = spec.rules?.remote_desktop_channels != null
-    ? evaluateRemoteDesktopChannelsRule(
-      spec.rules.remote_desktop_channels,
-      target,
-      posture,
-      originProfileId,
-    )
-    : undefined;
-
-  if (computerUseResult != null && remoteDesktopResult != null) {
-    return moreRestrictiveResult(computerUseResult, remoteDesktopResult);
-  }
-  if (computerUseResult != null) {
-    return computerUseResult;
-  }
-  if (remoteDesktopResult != null) {
-    return remoteDesktopResult;
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
-
-function evaluateInputInjection(
-  spec: HushSpec,
-  action: EvaluationAction,
-  posture: PostureResult | undefined,
-  originProfileId: string | undefined,
-): EvaluationResult {
-  const inputInjectionRule = spec.rules?.input_injection;
-  if (inputInjectionRule) {
-    return evaluateInputInjectionRule(
-      inputInjectionRule,
-      action.target ?? '',
-      posture,
-      originProfileId,
-    );
-  }
-
-  return allowResult(undefined, undefined, originProfileId, posture);
-}
+// ---------------------------------------------------------------------------
+// Panic protocol
+// ---------------------------------------------------------------------------
 
 let panicActive = false;
-const PANIC_POLICY_YAML = `hushspec: "0.1.0"
-name: "__hushspec_panic__"
-description: "Emergency deny-all policy. Activated by panic mode."
-
-rules:
-  forbidden_paths:
-    enabled: true
-    patterns:
-      - "**"
-    exceptions: []
-
-  egress:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    default: block
-
-  shell_commands:
-    enabled: true
-    forbidden_patterns:
-      - ".*"
-
-  tool_access:
-    enabled: true
-    allow: []
-    block:
-      - "*"
-    require_confirmation: []
-    default: block
-
-  computer_use:
-    enabled: true
-    mode: fail_closed
-    allowed_actions: []
-
-  input_injection:
-    enabled: true
-    allowed_types: []
-`;
+let panicEpoch = 0;
 
 export function activatePanic(): void {
+  panicEpoch++;
   panicActive = true;
 }
 
 export function deactivatePanic(): void {
+  panicEpoch++;
   panicActive = false;
 }
 
@@ -1248,50 +578,37 @@ export function isPanicActive(): boolean {
   return panicActive;
 }
 
+/** Invalidates captured invocation approval even after panic has been cleared. */
+export function getPanicEpoch(): number {
+  return panicEpoch;
+}
+
 export function panicPolicy(): HushSpec {
   return parseOrThrow(PANIC_POLICY_YAML);
 }
 
-export function evaluate(spec: HushSpec, action: EvaluationAction): EvaluationResult {
-  if (panicActive) {
-    return {
-      decision: 'deny',
-      matched_rule: '__hushspec_panic__',
-      reason: 'emergency panic mode is active',
-    };
+/** The sentinel file `h2h panic` creates, and the one a reload loop consults. */
+export const DEFAULT_PANIC_SENTINEL = '.hushspec_panic';
+
+/**
+ * Activate panic mode when the sentinel file at `path` exists.
+ *
+ * A kill switch fails closed: when the file's existence cannot be determined
+ * (a permission error, or a path component that is not a directory) the
+ * sentinel counts as present and panic mode is activated. Only a definite
+ * "not found" counts as absent, the reading every SDK applies.
+ */
+export function checkPanicSentinel(path: string): boolean {
+  let present: boolean;
+  try {
+    statSync(path);
+    present = true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    present = code !== 'ENOENT';
   }
-
-  const matchedProfile = selectOriginProfile(spec, action.origin);
-  const originProfileId = matchedProfile?.id;
-  const posture = resolvePosture(spec, matchedProfile, action.posture);
-
-  const denied = postureCapabilityGuard(action, posture, spec, originProfileId);
-  if (denied) return denied;
-
-  switch (action.type) {
-    case 'tool_call':
-      return evaluateToolCall(spec, action, matchedProfile, posture, originProfileId);
-    case 'egress':
-      return evaluateEgress(spec, action, matchedProfile, posture, originProfileId);
-    case 'file_read':
-      return evaluateFileRead(spec, action, posture, originProfileId);
-    case 'file_write':
-      return evaluateFileWrite(spec, action, posture, originProfileId);
-    case 'patch_apply':
-      return evaluatePatch(spec, action, posture, originProfileId);
-    case 'shell_command':
-      return evaluateShellCommand(spec, action, posture, originProfileId);
-    case 'computer_use':
-      return evaluateComputerUse(spec, action, posture, originProfileId);
-    case 'input_inject':
-      return evaluateInputInjection(spec, action, posture, originProfileId);
-    default:
-      return {
-        decision: 'allow',
-        matched_rule: undefined,
-        reason: 'no reference evaluator rule for this action type',
-        origin_profile: originProfileId,
-        posture,
-      };
+  if (present) {
+    activatePanic();
   }
+  return present;
 }

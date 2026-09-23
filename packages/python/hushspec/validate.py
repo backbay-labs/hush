@@ -6,9 +6,19 @@ from dataclasses import dataclass, field
 
 from datetime import date
 
-from hushspec.extensions import DetectionLevel, TransitionTrigger
+from hushspec.conditions import Condition, validate_condition
+from hushspec.error_codes import (
+    ERROR_CONSTRAINT_VIOLATION,
+    ERROR_DUPLICATE_PATTERN_NAME,
+    ERROR_INVALID_DATE,
+    ERROR_INVALID_REGEX,
+    ERROR_UNSUPPORTED_VERSION,
+)
+from hushspec.extensions import DetectionLevel, Extensions, TransitionTrigger
+from hushspec.regex_profile import NESTED_QUANTIFIER_MESSAGE, compile_profile_regex
+from hushspec.rules import Rules
 from hushspec.schema import Classification, HushSpec, LifecycleState
-from hushspec.version import is_supported
+from hushspec.version import HUSHSPEC_SUPPORTED_MINORS, is_supported, major_version
 
 _CAPABILITY_NAMES = frozenset(
     {"file_access", "file_write", "egress", "shell", "tool_call", "patch", "custom"}
@@ -19,6 +29,7 @@ _BUDGET_NAMES = frozenset(
 )
 
 _DURATION_PATTERN = re.compile(r"^[0-9]+[smhd]$")
+_ISO_DATE_PATTERN = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 _DETECTION_LEVEL_ORDER = {
     DetectionLevel.SAFE: 0,
     DetectionLevel.SUSPICIOUS: 1,
@@ -27,10 +38,36 @@ _DETECTION_LEVEL_ORDER = {
 }
 
 
+#: Which registry code each validation check reports. Every check not listed
+#: here is a core Section 7 / extension-module constraint violation, which is
+#: what E004 covers, so only the ones the registry names separately need an
+#: entry. A pattern outside the RE2 subset is a bad pattern like any other, so
+#: it reports E005 alongside ``invalid_regex``.
+_REGISTRY_CODES: dict[str, str] = {
+    "unsupported_version": ERROR_UNSUPPORTED_VERSION,
+    "duplicate_pattern_name": ERROR_DUPLICATE_PATTERN_NAME,
+    "invalid_regex": ERROR_INVALID_REGEX,
+    "non_re2_regex": ERROR_INVALID_REGEX,
+    "invalid_date": ERROR_INVALID_DATE,
+}
+
+
 @dataclass
 class ValidationError:
-    code: str
+    """One reason a document was refused.
+
+    ``kind`` names the specific check (``invalid_condition``,
+    ``duplicate_pattern_name``, ...); ``code`` is the stable registry
+    identifier that check reports (``spec/registries/error-codes.yaml``), the
+    one a shared ``invalid/`` vector's ``.expect.yaml`` sidecar pins.
+    """
+
+    kind: str
     message: str
+    code: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.code = _REGISTRY_CODES.get(self.kind, ERROR_CONSTRAINT_VIOLATION)
 
     def __str__(self) -> str:
         return self.message
@@ -46,13 +83,39 @@ class ValidationResult:
         return not self.errors
 
 
+def _requires_non_empty_name(version: str) -> bool:
+    """Whether a document declaring *version* must give a present ``name`` a
+    non-empty value.
+
+    This is the one constraint the 1.0 document format adds to 0.2
+    (spec/versioning.md section 10): the frozen 0.x format allows ``name: ""``.
+    A version this engine cannot read as ``MAJOR.MINOR.PATCH`` is already
+    refused as unsupported, and is held to the current format's constraints
+    here so an unreadable version can never relax one.
+    """
+    major = major_version(version)
+    return major is None or major >= 1
+
+
 def validate(spec: HushSpec) -> ValidationResult:
     errors: list[ValidationError] = []
     warnings: list[str] = []
 
     if not is_supported(spec.hushspec):
+        minors = ", ".join(HUSHSPEC_SUPPORTED_MINORS)
         errors.append(
-            ValidationError("unsupported_version", f"unsupported hushspec version: {spec.hushspec}")
+            ValidationError(
+                "unsupported_version",
+                f"unsupported hushspec version: {spec.hushspec} "
+                f"(this engine accepts minor versions {minors})",
+            )
+        )
+
+    # Core spec 2: `name` is optional, but an empty one names nothing -- and a
+    # bundle subject and a receipt's policy summary both carry it.
+    if spec.name == "" and _requires_non_empty_name(spec.hushspec):
+        errors.append(
+            ValidationError("empty_name", "name: must not be empty when present")
         )
 
     if spec.rules is not None:
@@ -69,6 +132,8 @@ def validate(spec: HushSpec) -> ValidationResult:
             and spec.rules.computer_use is None
             and spec.rules.remote_desktop_channels is None
             and spec.rules.input_injection is None
+            and spec.rules.browser_automation is None
+            and spec.rules.code_execution is None
         ):
             warnings.append("no rules configured")
     else:
@@ -79,16 +144,12 @@ def validate(spec: HushSpec) -> ValidationResult:
         _validate_origins(spec.extensions, errors)
         _validate_detection(spec.extensions, errors, warnings)
 
-    _validate_governance(spec, warnings)
+    _validate_governance(spec, errors, warnings)
 
     return ValidationResult(errors=errors, warnings=warnings)
 
 
-def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
-    from hushspec.rules import Rules
-
-    assert isinstance(rules, Rules)
-
+def _validate_rules(rules: Rules, errors: list[ValidationError]) -> None:
     if rules.secret_patterns is not None:
         seen: set[str] = set()
         for pattern in rules.secret_patterns.patterns:
@@ -144,12 +205,72 @@ def _validate_rules(rules: object, errors: list[ValidationError]) -> None:
             )
         )
 
+    if rules.browser_automation is not None:
+        for index, pattern in enumerate(
+            rules.browser_automation.extra_credential_patterns
+        ):
+            _validate_regex(
+                pattern,
+                f"rules.browser_automation.extra_credential_patterns[{index}]",
+                errors,
+            )
 
-def _validate_posture(ext: object, errors: list[ValidationError], warnings: list[str]) -> None:
-    from hushspec.extensions import Extensions
+    if rules.code_execution is not None and rules.code_execution.max_scan_bytes == 0:
+        errors.append(
+            ValidationError(
+                "invalid_max_scan_bytes",
+                "rules.code_execution.max_scan_bytes must be >= 1",
+            )
+        )
 
-    assert isinstance(ext, Extensions)
+    validate_conditions(rules, errors)
 
+
+#: Rule blocks that may carry a ``when`` condition, in document order.
+_CONDITIONAL_BLOCKS = (
+    "forbidden_paths",
+    "path_allowlist",
+    "egress",
+    "secret_patterns",
+    "patch_integrity",
+    "shell_commands",
+    "tool_access",
+    "computer_use",
+    "remote_desktop_channels",
+    "input_injection",
+    "browser_automation",
+    "code_execution",
+)
+
+
+def validate_conditions(rules: object, errors: list[ValidationError]) -> None:
+    """Validate every rule block's ``when`` condition (core spec 3.13, 7.10).
+
+    Structural problems (unknown keys, wrong types) are parse errors and are
+    reported by ``hushspec.raw_validate``; what is checked here is the
+    semantics: ``HH:MM`` fields, the IANA time zone, the day abbreviations,
+    and the nesting depth.
+    """
+    for name in _CONDITIONAL_BLOCKS:
+        block = getattr(rules, name, None)
+        if block is None:
+            continue
+        raw = getattr(block, "when", None)
+        if raw is None:
+            continue
+        path = f"rules.{name}.when"
+        try:
+            condition = raw if isinstance(raw, Condition) else Condition.from_dict(raw)
+        except (ValueError, TypeError, AttributeError) as exc:
+            errors.append(ValidationError("invalid_condition", f"{path}: {exc}"))
+            continue
+        for message in validate_condition(condition, path):
+            errors.append(ValidationError("invalid_condition", message))
+
+
+def _validate_posture(
+    ext: Extensions, errors: list[ValidationError], warnings: list[str]
+) -> None:
     if ext.posture is None:
         return
 
@@ -241,11 +362,7 @@ def _validate_posture(ext: object, errors: list[ValidationError], warnings: list
                 )
 
 
-def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
-    from hushspec.extensions import Extensions
-
-    assert isinstance(ext, Extensions)
-
+def _validate_origins(ext: Extensions, errors: list[ValidationError]) -> None:
     if ext.origins is None:
         return
 
@@ -266,6 +383,17 @@ def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
             )
         seen_ids.add(profile.id)
 
+        if (
+            profile.tool_access is not None
+            and profile.tool_access.max_args_size == 0
+        ):
+            errors.append(
+                ValidationError(
+                    "invalid_max_args_size",
+                    f"origins.profiles[{index}].tool_access.max_args_size must be >= 1",
+                )
+            )
+
         if profile.posture is not None:
             if posture_states is None:
                 errors.append(
@@ -284,12 +412,8 @@ def _validate_origins(ext: object, errors: list[ValidationError]) -> None:
 
 
 def _validate_detection(
-    ext: object, errors: list[ValidationError], warnings: list[str]
+    ext: Extensions, errors: list[ValidationError], warnings: list[str]
 ) -> None:
-    from hushspec.extensions import Extensions
-
-    assert isinstance(ext, Extensions)
-
     if ext.detection is None:
         return
 
@@ -303,6 +427,20 @@ def _validate_detection(
                 ValidationError(
                     "invalid_max_scan_bytes",
                     "detection.prompt_injection.max_scan_bytes must be >= 1",
+                )
+            )
+
+        heuristics = pi.heuristics
+        if (
+            heuristics is not None
+            and heuristics.min_score is not None
+            and not 0 <= heuristics.min_score <= 100
+        ):
+            errors.append(
+                ValidationError(
+                    "invalid_min_score",
+                    "detection.prompt_injection.heuristics.min_score must be "
+                    "between 0 and 100",
                 )
             )
 
@@ -373,44 +511,17 @@ def _validate_detection(
             )
 
 
-# Pattern that detects regex features outside the RE2 subset.
-#
-# HushSpec requires all regex patterns to be RE2-compatible to prevent ReDoS
-# attacks. Python's ``re`` module uses a backtracking engine that is vulnerable
-# to catastrophic backtracking with certain pattern constructs.  By restricting
-# patterns to the RE2 subset we ensure safe O(mn) evaluation across all SDKs.
-#
-# Disallowed features:
-# - Backreferences: \1, \2, ..., \k<name>
-# - Lookahead: (?=...), (?!...)
-# - Lookbehind: (?<=...), (?<!...)
-# - Atomic groups: (?>...)
-# - Conditional patterns: (?(...)...|...)
-# - Recursive patterns: (?R), (?1), (?2), ...
-# - Named backreferences: (?P=name)
-# - Subroutine calls: \g<name>
-#
-# Possessive quantifiers (*+, ++, ?+, and possessive braces {n}+/{n,}+/
-# {n,m}+), \Z/\z end-of-string anchors, and empty character classes ([],
-# [^]) are also disallowed for cross-SDK portability (see
-# `_disallowed_regex_feature` below), but are intentionally NOT part of this
-# substring regex: a raw substring match over-rejects those constructs when
-# they appear inside a character class (`[*+]`, `[?+]`), as an escaped
-# backslash followed by a literal Z/z rather than the real anchor (`\\Z`,
-# written in a pattern string as an escaped `\` then `Z`), etc. The
-# escape-aware, character-class-aware scanner below distinguishes these
-# cases correctly.
-_RE2_DISALLOWED = re.compile(
-    r"\\[1-9]|\\k<|\(\?[=!]|\(\?<[=!]|\(\?>"
-    r"|\(\?\(|\(\?R\)|\(\?\d+\)|\(\?P=|\\g<"
-)
-
-
-# Shared rejection message for possessive quantifiers. Must stay identical to
-# the copy in raw_validate.py and to Rust's `POSSESSIVE_MESSAGE` constant.
+# Shared rejection message for possessive quantifiers. The wording is part of
+# the contract, so it must read the same in every SDK.
 _POSSESSIVE_MESSAGE = (
     "possessive quantifiers (*+, ++, ?+, {n}+, {n,}+, {n,m}+) are not portable "
     "across the HushSpec SDK regex engines"
+)
+
+# Shared rejection message for the open-lower-bound quantifier {,n}.
+_OPEN_LOWER_BOUND_MESSAGE = (
+    "the {,n} quantifier is not portable across the HushSpec SDK regex engines "
+    "(Python reads it as {0,n}, the others as literal text); write {0,n}"
 )
 
 
@@ -427,10 +538,14 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
         differing semantics; JavaScript reads ``\\Z``/``\\z`` as a literal
         letter -- users anchor with ``$``),
       * empty character classes ``[]`` and ``[^]`` (JavaScript accepts these;
-        the others reject them).
+        the others reject them),
+      * the ``{,n}`` quantifier (Python's `re` reads it as ``{0,n}``; the
+        others read the whole brace as literal text).
 
-    Must stay byte-identical to the Rust, TypeScript, and Go implementations,
-    and to the copy of this function in raw_validate.py.
+    The accepted set is normative: every SDK must reject exactly these
+    constructs. ``hushspec.raw_validate`` runs this same function, so a
+    pattern refused at parse time and one refused at validate time cannot
+    disagree.
     """
     chars = list(pattern)
     n = len(chars)
@@ -483,6 +598,8 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
             if j < n:
                 inner = "".join(chars[i + 1 : j])
                 if _brace_kind(inner) != "none":
+                    if inner.startswith(","):
+                        return _OPEN_LOWER_BOUND_MESSAGE
                     if j + 1 < n and chars[j + 1] == "+":
                         return _POSSESSIVE_MESSAGE
                     i = j + 1
@@ -494,27 +611,20 @@ def _disallowed_regex_feature(pattern: str) -> str | None:
 
 
 def is_safe_regex(pattern: str) -> bool:
-    """Check whether a regex pattern is safe for evaluation across all SDKs.
+    """Whether *pattern* is accepted by the HushSpec regex profile (core spec
+    3.14.3): the pattern a policy may carry, which every HushSpec engine
+    compiles to the same language and matches with the same semantics.
 
-    Returns ``True`` only if the pattern is safe on every HushSpec engine.
-    Returns ``False`` if the pattern contains backreferences, lookaround,
-    atomic groups, possessive quantifiers (including possessive braces like
-    ``{2,}+``), ``\\Z``/``\\z`` anchors, empty character classes (``[]``,
-    ``[^]``), or other non-RE2 features, OR a nested unbounded quantifier
-    (e.g. ``(a+)+``) that catastrophically backtracks on the backtracking
-    engines (JavaScript ``RegExp``, Python ``re``).
+    It answers by compiling under the profile, so it accepts exactly what
+    :func:`validate` accepts and what the evaluator can run -- the portability
+    pre-check, the nested-quantifier refusal, the RE2 subset, the ASCII class
+    escapes, leading-only flag groups and the 2048-byte bound included.
     """
-    # Portability pre-check first: possessive quantifiers, \Z/\z anchors, and
-    # empty character classes, via the escape/class-aware scanner.
-    if _disallowed_regex_feature(pattern) is not None:
+    try:
+        compile_profile_regex(pattern)
+    except ValueError:
         return False
-    # RE2-feature check second: backreferences, lookaround, atomic groups,
-    # conditional/recursive patterns -- Python's `re` compiles these, unlike
-    # RE2, so they must be rejected explicitly via substring match.
-    if _RE2_DISALLOWED.search(pattern) is not None:
-        return False
-    # Nested-quantifier check third.
-    return not _has_nested_quantifier(pattern)
+    return True
 
 
 def _has_nested_quantifier(pattern: str) -> bool:
@@ -525,8 +635,8 @@ def _has_nested_quantifier(pattern: str) -> bool:
     escaped parens and character-class contents -- and returns ``True`` when a
     group whose body contains an unbounded quantifier (``*``, ``+``, ``{n,}``) is
     itself immediately followed by an unbounded quantifier. Bounded quantifiers
-    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. Must stay identical to the
-    Rust, TypeScript, and Go implementations.
+    (``(a{1,3}){1,3}``, ``(abc)+``) are accepted. The over-approximation is
+    normative: every SDK must flag exactly the same patterns.
     """
     chars = list(pattern)
     n = len(chars)
@@ -632,36 +742,131 @@ def _brace_kind(inner: str) -> str:
 
 
 def _validate_regex(pattern: str, path: str, errors: list[ValidationError]) -> None:
-    try:
-        re.compile(pattern)
-    except re.error as e:
+    def reject(kind: str, message: str) -> None:
         errors.append(
-            ValidationError(
-                "invalid_regex",
-                f"{path} must be a valid regular expression: {e}",
-            )
+            ValidationError(kind, f"{path} must be a valid regular expression: {message}")
         )
+
+    # Portability pre-check first: reject constructs that are unsupported by, or
+    # behave differently across, the four SDK regex engines (possessive
+    # quantifiers, ``\Z``/``\z`` end-anchors, ``{,n}``, empty character classes)
+    # so a pattern validates identically everywhere. The wording of each
+    # rejection is shared with the other three SDKs.
+    feature = _disallowed_regex_feature(pattern)
+    if feature is not None:
+        reject("non_re2_regex", feature)
         return
 
-    if not is_safe_regex(pattern):
-        errors.append(
-            ValidationError(
-                "non_re2_regex",
-                f"{path}: pattern uses features not in the RE2 subset "
-                "(backreferences, lookaround, etc.) which may cause ReDoS",
-            )
-        )
+    # Nested-quantifier check second: RE2 tolerates shapes like ``(a+)+`` that
+    # catastrophically backtrack on Python's ``re``.
+    if _has_nested_quantifier(pattern):
+        reject("non_re2_regex", NESTED_QUANTIFIER_MESSAGE)
+        return
+
+    # Profile check last: ``compile_profile_regex`` repeats the two checks
+    # above, refuses the rest of the non-RE2 syntax (lookaround,
+    # backreferences, atomic and recursive groups) and then compiles. It is the
+    # exact call the evaluator makes, so a pattern that validates here can never
+    # fail to compile at evaluation time -- and vice versa.
+    try:
+        compile_profile_regex(pattern)
+    except ValueError as e:
+        reject("invalid_regex", str(e))
 
 
 def _is_valid_duration(value: str) -> bool:
     return bool(_DURATION_PATTERN.match(value))
 
 
-def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
+def _is_iso_date(value: str) -> bool:
+    """``YYYY-MM-DD``, and a date that actually exists.
+
+    Dates are compared as strings throughout the toolchain -- which is calendar
+    order only for this shape -- so an unchecked ``01/02/2026`` would make an
+    expired policy compare as current instead of failing loudly.
+    """
+    if _ISO_DATE_PATTERN.match(value) is None:
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _compare_changelog_versions(left: str, right: str) -> int:
+    """Numeric when both versions are plain integers, lexicographic otherwise.
+
+    ``str.isdigit`` is not the test: it holds for superscripts and other
+    Unicode digits that ``int()`` either refuses outright or reads with a
+    value no other engine agrees on. Only an ASCII digit run compares
+    numerically.
+    """
+    if _is_ascii_digits(left.strip()) and _is_ascii_digits(right.strip()):
+        a, b = int(left), int(right)
+        return 0 if a == b else (-1 if a < b else 1)
+    return 0 if left == right else (-1 if left < right else 1)
+
+
+def _changelog_disorder(entries: list) -> int:
+    """Index of the first entry not ordered after the one above it (the list
+    runs newest first), or ``-1`` when the list is ordered."""
+    for index in range(1, len(entries)):
+        previous, current = entries[index - 1], entries[index]
+        version_order = _compare_changelog_versions(previous.version, current.version)
+        ordered = version_order > 0 or (version_order == 0 and previous.date >= current.date)
+        if not ordered:
+            return index
+    return -1
+
+
+def _validate_governance(
+    spec: HushSpec, errors: list[ValidationError], warnings: list[str]
+) -> None:
     if spec.metadata is None:
         return
 
     metadata = spec.metadata
+    today = date.today().isoformat()
+
+    for field_path, value in (
+        ("metadata.approval_date", metadata.approval_date),
+        ("metadata.effective_date", metadata.effective_date),
+        ("metadata.expiry_date", metadata.expiry_date),
+        ("metadata.next_review_date", metadata.next_review_date),
+    ):
+        if value is not None and not _is_iso_date(value):
+            errors.append(
+                ValidationError(
+                    "invalid_date",
+                    f"{field_path}: '{value}' is not an ISO 8601 date (YYYY-MM-DD)",
+                )
+            )
+
+    for index, entry in enumerate(metadata.changelog):
+        if not _is_iso_date(entry.date):
+            errors.append(
+                ValidationError(
+                    "invalid_date",
+                    f"metadata.changelog[{index}].date: '{entry.date}' "
+                    "is not an ISO 8601 date (YYYY-MM-DD)",
+                )
+            )
+
+    # GOV_SELF_SUPERSEDES: a document that replaces its own version describes an
+    # impossible lineage, so it is an error rather than an advisory warning.
+    if (
+        metadata.supersedes is not None
+        and metadata.policy_version is not None
+        and metadata.supersedes.strip() == str(metadata.policy_version)
+    ):
+        errors.append(
+            ValidationError(
+                "invalid_value",
+                f"metadata.supersedes '{metadata.supersedes}' "
+                "is the policy's own policy_version",
+            )
+        )
 
     if metadata.lifecycle_state is not None:
         if metadata.lifecycle_state in (LifecycleState.DEPRECATED, LifecycleState.ARCHIVED):
@@ -670,8 +875,7 @@ def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
             )
 
     if metadata.expiry_date is not None:
-        today = date.today().isoformat()
-        if metadata.expiry_date < today:
+        if _is_iso_date(metadata.expiry_date) and metadata.expiry_date < today:
             warnings.append(
                 f"policy expiry_date '{metadata.expiry_date}' is in the past"
             )
@@ -681,3 +885,36 @@ def _validate_governance(spec: HushSpec, warnings: list[str]) -> None:
 
     if metadata.classification == Classification.RESTRICTED and metadata.approved_by is None:
         warnings.append("classification is 'restricted' but no approved_by is set")
+
+    # GOV_SOD_VIOLATION. Compared trimmed and case-insensitively: a check that a
+    # copy-paste with different capitalization defeats is no check at all.
+    if metadata.author is not None and metadata.approved_by is not None:
+        author = metadata.author.strip()
+        if author != "" and author.lower() == metadata.approved_by.strip().lower():
+            warnings.append(
+                f"author and approved_by are the same identity '{author}': "
+                "separation of duties requires a different approver"
+            )
+
+    # GOV_UNAPPROVED_STATE.
+    if (
+        metadata.lifecycle_state in (LifecycleState.APPROVED, LifecycleState.DEPLOYED)
+        and metadata.approved_by is None
+    ):
+        warnings.append(
+            f"lifecycle_state is '{metadata.lifecycle_state.value}' but no approved_by is set"
+        )
+
+    # GOV_REVIEW_OVERDUE.
+    if metadata.next_review_date is not None:
+        if _is_iso_date(metadata.next_review_date) and metadata.next_review_date < today:
+            warnings.append(
+                f"policy next_review_date '{metadata.next_review_date}' is in the past"
+            )
+
+    # GOV_CHANGELOG_ORDER.
+    disorder = _changelog_disorder(metadata.changelog)
+    if disorder >= 0:
+        warnings.append(
+            f"changelog entries are not in descending version/date order at entry {disorder}"
+        )

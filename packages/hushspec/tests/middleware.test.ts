@@ -1,28 +1,75 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { HushGuard, HushSpecDenied, matchesRulePathPrefix } from '../src/middleware.js';
 import { parseOrThrow } from '../src/parse.js';
+import { resolutionFromResolved } from '../src/resolve.js';
+import type { Resolution } from '../src/resolve.js';
+import { Keyring } from '../src/signing.js';
+import type { HushSpec } from '../src/schema.js';
 import { mapClaudeToolToAction, createSecureToolHandler } from '../src/adapters/anthropic.js';
+import { mapWellKnownTool } from '../src/adapters/tool-mapping.js';
 import type { PolicyProvider } from '../src/policy-provider.js';
 import type { EnforcementMode } from '../src/receipt.js';
 import { activatePanic, deactivatePanic } from '../src/evaluate.js';
 import type { DecisionReceipt } from '../src/receipt.js';
+import { NullSink } from '../src/sinks.js';
 import type { ObserverEvent, EvaluationCompletedEvent } from '../src/observer.js';
 import type { EvaluationResult } from '../src/evaluate.js';
+
+it('effect mapping does not establish tool authorization', () => {
+  const guard = HushGuard.fromYaml(`hushspec: "1.0.0"
+rules:
+  tool_access:
+    block: [fetch]
+    default: block
+  egress:
+    allow: [api.example.com]
+    default: block
+`);
+  expect(guard.gate(mapWellKnownTool('fetch', {url: 'https://api.example.com'})).proceed).toBe(true);
+  expect(guard.gate({type: 'tool_call', target: 'fetch'}).proceed).toBe(false);
+});
 
 
 // ---------------------------------------------------------------------------
 // Shared policies
 // ---------------------------------------------------------------------------
 
+/** A provider that hands the guard its own resolution for exactly this spec. */
+function signedProvider(spec: HushSpec, resolution: Resolution): PolicyProvider {
+  return {
+    async load() {
+      return spec;
+    },
+    watch() {},
+    stop() {},
+    current() {
+      return spec;
+    },
+    resolution() {
+      return resolution;
+    },
+  };
+}
+
+/** The same resolution with every hop reporting a verified signature. */
+function verifiedResolution(spec: HushSpec, source: string): Resolution {
+  const base = resolutionFromResolved(spec, source);
+  const signature = { verified: true, key_id: 'test-key' };
+  return {
+    ...base,
+    chain: base.chain.map((link) => ({ ...link, signature })),
+    signature,
+  };
+}
+
 const ALLOW_ALL_POLICY = `
 hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
   egress:
-    allow: ["*"]
+    allow: ["**"]
     default: allow
 `;
 
@@ -131,6 +178,36 @@ describe('HushGuard', () => {
   });
 
   describe('warn handler', () => {
+    it.each([false, true])('records blocked callback failures (sink failure: %s)', (sinkFails) => {
+      for (const marker of [new Error('confirmation unavailable'), {kind: 'unavailable'}, undefined]) {
+        const declined: DecisionReceipt[] = [];
+        const action = {type: 'tool_call', target: 'risky_tool'};
+        HushGuard.fromYaml(DENY_SHELL_POLICY, {
+          onWarn: () => false,
+          sink: {send: receipt => { declined.push(receipt); }},
+        }).gate(action);
+        const receipts: DecisionReceipt[] = [];
+        const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
+          onWarn: () => { throw marker; },
+          sink: {send: receipt => {
+            receipts.push(receipt);
+            if (sinkFails) throw new Error('sink unavailable');
+          }},
+        });
+        let completed = false;
+        let caught: unknown;
+        try { guard.gate(action); completed = true; }
+        catch (error) { caught = error; }
+        expect(completed).toBe(false);
+        expect(caught).toBe(marker);
+        expect(receipts).toHaveLength(1);
+        expect(receipts[0].decision).toBe('warn');
+        expect(receipts[0].enforcement).toEqual({mode: 'enforce', outcome: 'blocked'});
+        expect(receipts[0].reason).toBe(declined[0].reason);
+        expect(receipts[0].rule_trace).toEqual(declined[0].rule_trace);
+      }
+    });
+
     it('calls onWarn for warn decisions and allows when handler returns true', () => {
       let warnCalled = false;
       const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
@@ -205,6 +282,68 @@ describe('HushGuard', () => {
       expect(result.decision).toBe('deny');
       expect(result.matched_rule).toBe('__hushspec_policy_provider__');
       expect(result.reason).toContain('Policy is stale');
+    });
+
+    // A provider resolves under its own options. Adopting its resolution
+    // unchecked would let `requireSignature` be dropped by handing the policy
+    // in pre-resolved, which is the fail-open the requirement exists to stop.
+    it('refuses an adopted resolution that carries no verified signature', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = resolutionFromResolved(spec, 'file:///policies/app.yaml');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      const result = guard.evaluate({ type: 'tool_call', target: 'any_tool' });
+      expect(result.decision).toBe('deny');
+      expect(result.reason).toContain('file:///policies/app.yaml');
+      expect(guard.resolution).toBe(resolution);
+    });
+
+    it('adopts a resolution whose every hop verified', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = verifiedResolution(spec, 'file:///policies/app.yaml');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      expect(guard.evaluate({ type: 'tool_call', target: 'any_tool' }).decision).toBe('allow');
+    });
+
+    it('exempts a builtin hop, which is embedded rather than loaded', async () => {
+      const spec = parseOrThrow(ALLOW_ALL_POLICY);
+      const resolution = resolutionFromResolved(spec, 'builtin:default');
+      const provider = signedProvider(spec, resolution);
+
+      const guard = await HushGuard.fromProvider(provider, {
+        requireSignature: true,
+        keyring: new Keyring([]),
+      });
+
+      expect(guard.evaluate({ type: 'tool_call', target: 'any_tool' }).decision).toBe('allow');
+    });
+
+    it('keeps the policy in force when a reload adopts an unverified resolution', async () => {
+      const spec = parseOrThrow(DENY_SHELL_POLICY);
+      const guard = await HushGuard.fromProvider(
+        signedProvider(spec, verifiedResolution(spec, 'file:///policies/app.yaml')),
+        { requireSignature: true, keyring: new Keyring([]) },
+      );
+
+      const reloaded = parseOrThrow(ALLOW_ALL_POLICY);
+      expect(() =>
+        guard.swapPolicy(reloaded, resolutionFromResolved(reloaded, 'file:///policies/app.yaml')),
+      ).toThrow(/verification failed/);
+
+      // The refusal left the verified policy in force rather than swapping in
+      // one that never proved itself.
+      expect(guard.check({ type: 'shell_command', target: 'rm -rf /' })).toBe(false);
     });
   });
 
@@ -302,6 +441,52 @@ describe('mapClaudeToolToAction', () => {
     expect(action.type).toBe('file_write');
   });
 
+  it('maps str_replace_based_edit_tool create to file_write carrying the whole file', () => {
+    const action = mapClaudeToolToAction('str_replace_based_edit_tool', {
+      command: 'create',
+      path: '/app/x.env',
+      file_text: 'AKIA0123',
+    });
+    expect(action.type).toBe('file_write');
+    expect(action.target).toBe('/app/x.env');
+    expect(action.content).toBe('AKIA0123');
+  });
+
+  it('maps the undated text_editor name', () => {
+    const action = mapClaudeToolToAction('text_editor', {
+      command: 'view',
+      path: '/etc/passwd',
+    });
+    expect(action.type).toBe('file_read');
+    expect(action.target).toBe('/etc/passwd');
+  });
+
+  it('maps any dated revision of a built-in tool', () => {
+    const action = mapClaudeToolToAction('bash_20250124', { command: 'ls' });
+    expect(action.type).toBe('shell_command');
+    expect(action.target).toBe('ls');
+  });
+
+  it('maps web_fetch to egress against the URL host', () => {
+    const action = mapClaudeToolToAction('web_fetch', {
+      url: 'https://evil.example.com/x',
+    });
+    expect(action.type).toBe('egress');
+    expect(action.target).toBe('evil.example.com');
+  });
+
+  it('maps fetch to egress against the URL host', () => {
+    const action = mapClaudeToolToAction('fetch', { url: 'https://api.example.com/data' });
+    expect(action.type).toBe('egress');
+    expect(action.target).toBe('api.example.com');
+  });
+
+  it('maps a missing field to an empty target', () => {
+    const action = mapClaudeToolToAction('bash', {});
+    expect(action.type).toBe('shell_command');
+    expect(action.target).toBe('');
+  });
+
   it('maps computer tool to computer_use', () => {
     const action = mapClaudeToolToAction('computer', { action: 'screenshot' });
     expect(action.type).toBe('computer_use');
@@ -373,6 +558,27 @@ describe('enforcement config validation', () => {
     expect(() =>
       HushGuard.fromYaml(ALLOW_ALL_POLICY, { enforcement: { mode: 'monitor' } }),
     ).toThrow('monitor mode requires an observer or a receipt sink');
+  });
+
+  it('rejects monitor mode with a sink but no auditing', () => {
+    // With auditing off no receipt is built, so the sink is handed nothing and
+    // the shadow decision leaves no trace at all.
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        enforcement: { mode: 'monitor' },
+        sink: new NullSink(),
+        audit: { enabled: false, includeRuleTrace: false, recordDuration: false },
+      }),
+    ).toThrow('monitor mode requires an observer or a receipt sink');
+
+    // An observer still reports every decision, whatever auditing records.
+    expect(() =>
+      HushGuard.fromYaml(ALLOW_ALL_POLICY, {
+        enforcement: { mode: 'monitor' },
+        observer: noopObserver,
+        audit: { enabled: false, includeRuleTrace: false, recordDuration: false },
+      }),
+    ).not.toThrow();
   });
 
   it('rejects unknown rule names in override keys', () => {
@@ -631,10 +837,10 @@ describe('detection matched_rule normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Detection extension wiring: gate()/check()/enforce()/evaluate() now route
-// through evaluateWithDetection(), so a policy's `extensions.detection`
-// block is honored end-to-end through the public API (not just when calling
-// evaluateWithDetection() directly).
+// Detection extension wiring: gate(), check(), enforce() and evaluate() all
+// route through the detection pipeline, so a policy's `extensions.detection`
+// block is honoured through the public API and not only when
+// evaluateWithDetection() is called directly.
 // ---------------------------------------------------------------------------
 
 describe('HushGuard honors a policy detection extension', () => {
@@ -643,7 +849,6 @@ hushspec: "0.1.0"
 name: detection-enforced
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -680,7 +885,6 @@ hushspec: "0.1.0"
 name: detection-monitor
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 extensions:
   detection:
@@ -758,11 +962,22 @@ extensions:
       expect(receipt.decision).toBe('deny');
       expect(receipt.matched_rule).toBe('detection');
       expect(receipt.reason).toBe('content flagged by prompt_injection detection');
-      const detectionEntry = receipt.rule_trace.find((e) => e.rule_block === 'detection');
-      expect(detectionEntry).toBeDefined();
-      expect(detectionEntry!.outcome).toBe('deny');
-      expect(detectionEntry!.matched_rule).toBe('detection');
-      expect(detectionEntry!.evaluated).toBe(true);
+      // Format 0.2 records detectors in `detection_trace`, not as a rule block:
+      // `rule_trace` is the *rule* blocks that ran (receipt spec 4.3, 4.6).
+      expect(receipt.rule_trace.some((e) => e.rule_block === 'detection')).toBe(false);
+      const detector = receipt.detection_trace?.find(
+        (d) => d.category === 'prompt_injection',
+      );
+      expect(detector).toBeDefined();
+      expect(detector!.detector_id).toBe('regex_injection@1');
+      expect(detector!.matched).toBe(true);
+      expect(detector!.level).toBe('critical');
+      // Content is hashed, never carried (receipt spec 4.4).
+      expect(receipt.action.content_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(receipt.action.content_size).toBe(
+        Buffer.byteLength(action.content, 'utf8'),
+      );
+      expect(JSON.stringify(receipt)).not.toContain('ignore all previous');
     }
   });
 
@@ -799,10 +1014,12 @@ describe('receipt sink integration', () => {
     expect(receipts).toHaveLength(1);
     expect(receipts[0].decision).toBe('deny');
     expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
-    expect(receipts[0].policy.content_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(receipts[0].receipt_version).toBe('0.2');
+    expect(receipts[0].policy.content_hash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(receipts[0].policy.content_hash).toBe(guard.resolution.content_hash);
   });
 
-  it('evaluate() sends an untagged receipt', () => {
+  it('evaluate() records the disposition implied by the decision', () => {
     const receipts: DecisionReceipt[] = [];
     const guard = HushGuard.fromYaml(DENY_SHELL_POLICY, {
       sink: { send: (r) => receipts.push(r) },
@@ -810,7 +1027,10 @@ describe('receipt sink integration', () => {
     const result = guard.evaluate({ type: 'tool_call', target: 'dangerous_tool' });
     expect(result.decision).toBe('deny');
     expect(receipts).toHaveLength(1);
-    expect(receipts[0].enforcement).toBeUndefined();
+    // `enforcement` is required in 0.2: a receipt without a disposition is not
+    // evidence that a control operated (receipt spec 4.7). evaluate() has no
+    // enforcement point, so the decision implies it.
+    expect(receipts[0].enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
   });
 
   it('a throwing sink never breaks enforcement', () => {
@@ -848,14 +1068,11 @@ describe('receipt sink integration', () => {
 // ---------------------------------------------------------------------------
 // Sink-only guard on provider failure (no observer)
 //
-// Regression test: HushGuard.gate()'s provider-failure branch used to call
-// record(action, policy, 0, enforcement, undefined) with an undefined
-// receipt. record() only forwards to the sink `if (receipt)`, so a guard
-// configured with a `sink` but no `observer` (monitor mode accepts either,
-// per validateEnforcementConfig) produced ZERO audit output on a provider
-// outage -- violating "a monitored block is never silent". gate() now builds
-// a minimal receipt (buildFailureReceipt) whenever a sink is configured, so
-// the sink always gets a record here too.
+// record() forwards to the sink only when a receipt is present, so gate()'s
+// provider-failure branch builds one (buildFailureReceipt) whenever a sink
+// is configured. Without it a guard holding a `sink` but no `observer` --
+// monitor mode accepts either -- would produce no audit output at all on a
+// provider outage, and a monitored block is never silent.
 // ---------------------------------------------------------------------------
 
 describe('sink-only guard on provider failure', () => {
@@ -955,8 +1172,9 @@ describe('sink-only guard on provider failure', () => {
     expect(receipts[0].decision).toBe('deny');
     expect(receipts[0].matched_rule).toBe('__hushspec_policy_provider__');
     expect(receipts[0].reason).toContain('provider unavailable');
-    // evaluate() never sets enforcement (unlike gate()) -- receipts stay untagged.
-    expect(receipts[0].enforcement).toBeUndefined();
+    // 0.2 requires a disposition; evaluate() records the one the decision
+    // implies under the guard's mode (monitor here).
+    expect(receipts[0].enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
     expect(receipts[0].rule_trace).toEqual([]);
     expect(receipts[0].policy.name).toBe('allow-all');
   });

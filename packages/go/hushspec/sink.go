@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 )
 
 // ReceiptSink persists or forwards decision receipts.
@@ -11,38 +12,87 @@ type ReceiptSink interface {
 	Send(receipt *DecisionReceipt) error
 }
 
+// PolicyEventSink is a sink that can also record which policy is in force
+// (log spec 6).
+//
+// It is a separate, optional interface rather than a second method on
+// [ReceiptSink] so that every sink written against the 0.1 API keeps
+// compiling; [RecordPolicyEvent] routes an event to a sink that implements it
+// and drops it for one that does not.
+type PolicyEventSink interface {
+	ReceiptSink
+	RecordPolicyEvent(event *PolicyEvent) error
+}
+
+// RecordPolicyEvent writes a policy-in-effect record to sink when it can carry
+// one, and reports whether it did. A plain [ReceiptSink] -- stderr, a filter,
+// a callback over receipts -- has nowhere to put the event and is not an
+// error: only a hash-linked log needs the record to tie receipts to the policy
+// that produced them.
+func RecordPolicyEvent(sink ReceiptSink, event *PolicyEvent) (bool, error) {
+	target, ok := sink.(PolicyEventSink)
+	if !ok {
+		return false, nil
+	}
+	return true, target.RecordPolicyEvent(event)
+}
+
+// sinkName is how a `sink.error` observer event names a sink in its source:
+// the sink's own type name, without its package or pointer decoration.
+func sinkName(sink ReceiptSink) string {
+	if sink == nil {
+		return ""
+	}
+	t := reflect.TypeOf(sink)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if name := t.Name(); name != "" {
+		return name
+	}
+	return t.String()
+}
+
 // FileReceiptSink appends receipts as JSON Lines to a file.
 type FileReceiptSink struct {
 	path string
 }
 
+// NewFileReceiptSink appends receipts to the file at path, creating it if it
+// does not exist. Writes are not locked or hash-linked; use a
+// [ChainedFileSink] when the audit trail has to be tamper-evident.
 func NewFileReceiptSink(path string) *FileReceiptSink {
 	return &FileReceiptSink{path: path}
 }
 
-func (s *FileReceiptSink) Send(receipt *DecisionReceipt) error {
-	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("sink: open file: %w", err)
-	}
-	defer f.Close()
-
+// Send appends the receipt as one JSON line. A close that fails is reported:
+// a buffered write lost on close is a receipt that was never recorded.
+func (s *FileReceiptSink) Send(receipt *DecisionReceipt) (err error) {
 	data, err := json.Marshal(receipt)
 	if err != nil {
 		return fmt.Errorf("sink: marshal receipt: %w", err)
 	}
 
-	_, err = fmt.Fprintf(f, "%s\n", data)
+	f, err := os.OpenFile(s.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
+		return fmt.Errorf("sink: open file: %w", err)
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("sink: close file: %w", closeErr)
+		}
+	}()
+
+	if _, err := fmt.Fprintf(f, "%s\n", data); err != nil {
 		return fmt.Errorf("sink: write receipt: %w", err)
 	}
-
 	return nil
 }
 
 // StderrReceiptSink writes pretty-printed receipts to stderr.
 type StderrReceiptSink struct{}
 
+// Send writes the receipt to stderr, prefixed with "[hushspec]".
 func (s *StderrReceiptSink) Send(receipt *DecisionReceipt) error {
 	data, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
@@ -59,6 +109,8 @@ type FilteredSink struct {
 	decisions []Decision
 }
 
+// NewFilteredSink forwards to sink only the receipts whose decision is one of
+// decisions. An empty list forwards nothing.
 func NewFilteredSink(sink ReceiptSink, decisions []Decision) *FilteredSink {
 	return &FilteredSink{
 		inner:     sink,
@@ -66,10 +118,12 @@ func NewFilteredSink(sink ReceiptSink, decisions []Decision) *FilteredSink {
 	}
 }
 
+// NewDenyOnlySink forwards only denials to sink.
 func NewDenyOnlySink(sink ReceiptSink) *FilteredSink {
 	return NewFilteredSink(sink, []Decision{DecisionDeny})
 }
 
+// Send forwards the receipt when its decision is one the filter keeps.
 func (s *FilteredSink) Send(receipt *DecisionReceipt) error {
 	for _, d := range s.decisions {
 		if receipt.Decision == d {
@@ -79,23 +133,50 @@ func (s *FilteredSink) Send(receipt *DecisionReceipt) error {
 	return nil
 }
 
-// MultiSink fans out to all sinks. Returns the first error but always
-// attempts every sink.
+// RecordPolicyEvent forwards the event whatever the filter is: the filter
+// selects which *decisions* are worth keeping, and a policy event is what ties
+// the kept receipts to the policy that produced them.
+func (s *FilteredSink) RecordPolicyEvent(event *PolicyEvent) error {
+	_, err := RecordPolicyEvent(s.inner, event)
+	return err
+}
+
+// MultiSink fans out to several sinks.
+//
+// Every sink is attempted whatever the ones before it did -- one destination
+// refusing a receipt must not cost the others theirs -- and the first failure
+// is returned as a [SinkError] naming the sink that refused, so a guard raises
+// a `sink.error` observer event for it.
 type MultiSink struct {
 	sinks []ReceiptSink
 }
 
+// NewMultiSink fans every receipt out to each of sinks.
 func NewMultiSink(sinks []ReceiptSink) *MultiSink {
 	return &MultiSink{sinks: sinks}
 }
 
+// Send forwards the receipt to every sink, returning the first failure.
 func (s *MultiSink) Send(receipt *DecisionReceipt) error {
+	return s.fanOut(func(sink ReceiptSink) error {
+		return sink.Send(receipt)
+	})
+}
+
+// RecordPolicyEvent fans the event out to every sink that can carry one,
+// returning the first failure.
+func (s *MultiSink) RecordPolicyEvent(event *PolicyEvent) error {
+	return s.fanOut(func(sink ReceiptSink) error {
+		_, err := RecordPolicyEvent(sink, event)
+		return err
+	})
+}
+
+func (s *MultiSink) fanOut(deliver func(ReceiptSink) error) error {
 	var firstErr error
 	for _, sink := range s.sinks {
-		if err := sink.Send(receipt); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
+		if err := deliver(sink); err != nil && firstErr == nil {
+			firstErr = &SinkError{Sink: sinkName(sink), Err: err}
 		}
 	}
 	return firstErr
@@ -106,10 +187,12 @@ type CallbackSink struct {
 	callback func(*DecisionReceipt) error
 }
 
+// NewCallbackSink hands each receipt to callback.
 func NewCallbackSink(callback func(*DecisionReceipt) error) *CallbackSink {
 	return &CallbackSink{callback: callback}
 }
 
+// Send invokes the callback with the receipt.
 func (s *CallbackSink) Send(receipt *DecisionReceipt) error {
 	return s.callback(receipt)
 }
@@ -117,6 +200,13 @@ func (s *CallbackSink) Send(receipt *DecisionReceipt) error {
 // NullSink discards all receipts.
 type NullSink struct{}
 
+// Send discards the receipt.
 func (s *NullSink) Send(receipt *DecisionReceipt) error {
+	return nil
+}
+
+// RecordPolicyEvent discards the event, like everything else a NullSink is
+// handed.
+func (s *NullSink) RecordPolicyEvent(event *PolicyEvent) error {
 	return nil
 }

@@ -1,0 +1,24 @@
+hushspec_test: "0.1.0"
+description: "When allow is non-empty, an unlisted tool is denied and default is not consulted (core spec 3.7 step 5)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      allow:
+        - read_file
+      default: allow
+cases:
+  - description: "a listed tool is allowed"
+    action:
+      type: tool_call
+      target: read_file
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
+  - description: "an unlisted tool is denied even though default is allow"
+    action:
+      type: tool_call
+      target: write_file
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.allow

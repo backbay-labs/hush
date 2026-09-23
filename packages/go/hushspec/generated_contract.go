@@ -2,17 +2,6 @@
 
 package hushspec
 
-var TopLevelKeys = map[string]struct{}{
-	"hushspec":       {},
-	"name":           {},
-	"description":    {},
-	"extends":        {},
-	"merge_strategy": {},
-	"rules":          {},
-	"extensions":     {},
-	"metadata":       {},
-}
-
 var RuleKeys = map[string]struct{}{
 	"forbidden_paths":         {},
 	"path_allowlist":          {},
@@ -34,192 +23,24 @@ var ExtensionKeys = map[string]struct{}{
 	"detection": {},
 }
 
-var GovernanceMetadataKeys = map[string]struct{}{
-	"author":          {},
-	"approved_by":     {},
-	"approval_date":   {},
-	"classification":  {},
-	"change_ticket":   {},
-	"lifecycle_state": {},
-	"policy_version":  {},
-	"effective_date":  {},
-	"expiry_date":     {},
+var ControlMappingKeys = map[string]struct{}{
+	"framework":  {},
+	"control_id": {},
+	"rule_paths": {},
+	"notes":      {},
 }
 
-var ForbiddenPathKeys = map[string]struct{}{
-	"enabled":    {},
-	"patterns":   {},
-	"exceptions": {},
+var ChangelogEntryKeys = map[string]struct{}{
+	"version": {},
+	"date":    {},
+	"summary": {},
+	"author":  {},
 }
 
-var PathAllowlistKeys = map[string]struct{}{
-	"enabled": {},
-	"read":    {},
-	"write":   {},
-	"patch":   {},
-}
-
-var EgressKeys = map[string]struct{}{
-	"enabled": {},
-	"allow":   {},
-	"block":   {},
-	"default": {},
-}
-
-var SecretPatternsKeys = map[string]struct{}{
-	"enabled":    {},
-	"patterns":   {},
-	"skip_paths": {},
-}
-
-var SecretPatternKeys = map[string]struct{}{
-	"name":        {},
-	"pattern":     {},
-	"severity":    {},
-	"description": {},
-}
-
-var PatchIntegrityKeys = map[string]struct{}{
-	"enabled":             {},
-	"max_additions":       {},
-	"max_deletions":       {},
-	"forbidden_patterns":  {},
-	"require_balance":     {},
-	"max_imbalance_ratio": {},
-}
-
-var ShellCommandKeys = map[string]struct{}{
-	"enabled":            {},
-	"forbidden_patterns": {},
-}
-
-var ToolAccessKeys = map[string]struct{}{
-	"enabled":              {},
-	"allow":                {},
-	"block":                {},
-	"require_confirmation": {},
-	"default":              {},
-	"max_args_size":        {},
-}
-
-var ComputerUseKeys = map[string]struct{}{
-	"enabled":         {},
-	"mode":            {},
-	"allowed_actions": {},
-}
-
-var RemoteDesktopKeys = map[string]struct{}{
-	"enabled":       {},
-	"clipboard":     {},
-	"file_transfer": {},
-	"audio":         {},
-	"drive_mapping": {},
-}
-
-var InputInjectionKeys = map[string]struct{}{
-	"enabled":                     {},
-	"allowed_types":               {},
-	"require_postcondition_probe": {},
-}
-
-var PostureKeys = map[string]struct{}{
-	"initial":     {},
-	"states":      {},
-	"transitions": {},
-}
-
-var PostureStateKeys = map[string]struct{}{
-	"description":  {},
-	"capabilities": {},
-	"budgets":      {},
-}
-
-var PostureTransitionKeys = map[string]struct{}{
-	"from":  {},
-	"to":    {},
-	"on":    {},
-	"after": {},
-}
-
-var OriginsKeys = map[string]struct{}{
-	"default_behavior": {},
-	"profiles":         {},
-}
-
-var OriginProfileKeys = map[string]struct{}{
-	"id":          {},
-	"match":       {},
-	"posture":     {},
-	"tool_access": {},
-	"egress":      {},
-	"data":        {},
-	"budgets":     {},
-	"bridge":      {},
-	"explanation": {},
-}
-
-var OriginMatchKeys = map[string]struct{}{
-	"provider":              {},
-	"tenant_id":             {},
-	"space_id":              {},
-	"space_type":            {},
-	"visibility":            {},
-	"external_participants": {},
-	"tags":                  {},
-	"sensitivity":           {},
-	"actor_role":            {},
-}
-
-var OriginDataKeys = map[string]struct{}{
-	"allow_external_sharing":  {},
-	"redact_before_send":      {},
-	"block_sensitive_outputs": {},
-}
-
-var OriginBudgetKeys = map[string]struct{}{
-	"tool_calls":     {},
-	"egress_calls":   {},
-	"shell_commands": {},
-}
-
-var BridgePolicyKeys = map[string]struct{}{
-	"allow_cross_origin": {},
-	"allowed_targets":    {},
-	"require_approval":   {},
-}
-
-var BridgeTargetKeys = map[string]struct{}{
-	"provider":   {},
-	"space_type": {},
-	"tags":       {},
-	"visibility": {},
-}
-
-var DetectionKeys = map[string]struct{}{
-	"prompt_injection": {},
-	"jailbreak":        {},
-	"threat_intel":     {},
-}
-
-var PromptInjectionKeys = map[string]struct{}{
-	"enabled":           {},
-	"warn_at_or_above":  {},
-	"block_at_or_above": {},
-	"max_scan_bytes":    {},
-}
-
-var JailbreakKeys = map[string]struct{}{
-	"enabled":         {},
-	"block_threshold": {},
-	"warn_threshold":  {},
-	"max_input_bytes": {},
-}
-
-var ThreatIntelKeys = map[string]struct{}{
-	"enabled":              {},
-	"pattern_db":           {},
-	"similarity_threshold": {},
-	"top_k":                {},
+var RateConditionKeys = map[string]struct{}{
+	"counter":    {},
+	"threshold":  {},
+	"comparison": {},
 }
 
 var MergeStrategies = map[MergeStrategy]struct{}{

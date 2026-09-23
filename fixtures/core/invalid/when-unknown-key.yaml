@@ -1,0 +1,7 @@
+# An unknown key inside a condition is a parse error (core spec 2.1, 3.13).
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      weekday_only: true
+    forbidden_patterns: ["mkfs"]

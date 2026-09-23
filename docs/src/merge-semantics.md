@@ -2,15 +2,17 @@
 
 HushSpec supports policy inheritance via the `extends` field. When a child policy extends a base, the `merge_strategy` controls how they combine.
 
-The merge result is a resolved document, so `extends` is consumed during resolution and omitted from the merged output.
+The merge result is a resolved document: `extends` and `merge_strategy` are consumed during resolution and omitted from the merged output. Engines evaluate only resolved documents; evaluating a child whose `extends` has not been resolved silently drops the base policy.
+
+Under every strategy, a child `metadata` object replaces the base's entirely; when the child omits `metadata`, the base's is kept.
 
 ## Strategies
 
 ### `deep_merge` (default)
 
 Child rules override base rules at the individual rule-block level. If the child
-defines `rules.egress`, it replaces the base's `rules.egress` entirely. Rules
-not defined in the child are preserved from the base.
+defines `rules.egress`, it replaces the base's `rules.egress` entirely, including
+its `when` condition. Rules not defined in the child are preserved from the base.
 
 Extensions use their companion-spec merge rules under `deep_merge`:
 
@@ -34,7 +36,7 @@ The child document entirely replaces the base. No fields from the base are prese
 
 ```yaml
 # base.yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: base
 rules:
   egress:
@@ -46,7 +48,7 @@ rules:
 
 ```yaml
 # child.yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: child
 extends: base.yaml
 rules:

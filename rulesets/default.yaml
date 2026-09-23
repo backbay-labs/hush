@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "0.1.0"
 name: default
 description: Default security rules for AI agent execution
@@ -49,7 +49,6 @@ rules:
       - "github.com"
       - "*.githubusercontent.com"
       - "*.npmjs.org"
-      - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
       - "crates.io"

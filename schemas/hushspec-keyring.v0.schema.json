@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-keyring.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
+  "title": "HushSpec Trusted Keyring v0.2",
+  "description": "The set of public keys a verifier trusts for policy signatures. Normative prose: spec/hushspec-signing.md section 5. A verifier MUST select the key whose key_id equals the envelope's key_id and MUST NOT fall back to any other key.",
+  "type": "object",
+  "required": [
+    "keyring_version",
+    "keys"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "keyring_version": {
+      "type": "string",
+      "const": "0.2"
+    },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/TrustedKey"
+      }
+    }
+  },
+  "$defs": {
+    "TrustedKey": {
+      "type": "object",
+      "required": [
+        "key_id",
+        "algorithm",
+        "public_key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "key_id": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of the DER-encoded SubjectPublicKeyInfo in public_key. Verifiers MUST recompute it from public_key and reject the entry if it differs."
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "public_key": {
+          "type": "string",
+          "pattern": "^-----BEGIN PUBLIC KEY-----\\n[A-Za-z0-9+/=\\n]+-----END PUBLIC KEY-----\\n?$",
+          "description": "The public key as a PEM-encoded SubjectPublicKeyInfo (RFC 7468 'PUBLIC KEY')."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable label for the key."
+        },
+        "not_after": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$",
+          "description": "Signatures whose signed_at is at or after this instant MUST be rejected for this key. Lets a key be retired without invalidating signatures made before retirement."
+        },
+        "revoked": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, every signature by this key MUST be rejected regardless of signed_at."
+        }
+      }
+    }
+  }
+}

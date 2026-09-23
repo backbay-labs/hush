@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import argparse
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from generator_support import gofmt, rustfmt
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,8 +69,21 @@ def field(
         "rs_name": rs_name or name,
         "go_name": go_name or camel(name),
         "go_pointer": go_pointer,
+        # An empty collection that is not emitted is omitted by every SDK's
+        # serializer, so absent and empty round-trip identically across all four.
         "emit_empty": emit_empty,
     }
+
+
+# Types defined by hand in each SDK (not generated) that generated structs may
+# reference. `when` conditions live in each SDK's conditions module; Python's
+# conditions module imports evaluate/schema, so the generated Python keeps the
+# raw mapping to avoid an import cycle and lets the conditions module decode it.
+EXTERNAL_TYPES = {
+    "Condition": {"rs": "Condition", "py": "dict", "go": "Condition"},
+}
+
+RS_EXTERNAL_IMPORTS = ["use crate::conditions::Condition;"]
 
 
 def list_of(item: object) -> dict:
@@ -117,6 +130,7 @@ STRUCTS = [
         "name": "ForbiddenPathsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("patterns", list_of("string"), default=[], emit_empty=False),
             field("exceptions", list_of("string"), default=[], emit_empty=False),
         ],
@@ -125,6 +139,7 @@ STRUCTS = [
         "name": "PathAllowlistRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("read", list_of("string"), default=[], emit_empty=False),
             field("write", list_of("string"), default=[], emit_empty=False),
             field("patch", list_of("string"), default=[], emit_empty=False),
@@ -134,6 +149,7 @@ STRUCTS = [
         "name": "EgressRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("allow", list_of("string"), default=[], emit_empty=False),
             field("block", list_of("string"), default=[], emit_empty=False),
             field("default", "DefaultAction", default=("enum", "DefaultAction", "block")),
@@ -152,6 +168,7 @@ STRUCTS = [
         "name": "SecretPatternsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("patterns", list_of("SecretPattern"), default=[], emit_empty=False),
             field("skip_paths", list_of("string"), default=[], emit_empty=False),
         ],
@@ -160,6 +177,7 @@ STRUCTS = [
         "name": "PatchIntegrityRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("max_additions", "count", default=1000),
             field("max_deletions", "count", default=500),
             field("forbidden_patterns", list_of("string"), default=[], emit_empty=False),
@@ -171,6 +189,7 @@ STRUCTS = [
         "name": "ShellCommandsRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("forbidden_patterns", list_of("string"), default=[], emit_empty=False),
         ],
     },
@@ -178,6 +197,7 @@ STRUCTS = [
         "name": "ToolAccessRule",
         "fields": [
             field("enabled", "bool", default=True),
+            field("when", "Condition"),
             field("allow", list_of("string"), default=[], emit_empty=False),
             field("block", list_of("string"), default=[], emit_empty=False),
             field("require_confirmation", list_of("string"), default=[], emit_empty=False),
@@ -189,6 +209,7 @@ STRUCTS = [
         "name": "ComputerUseRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("mode", "ComputerUseMode", default=("enum", "ComputerUseMode", "guardrail")),
             field("allowed_actions", list_of("string"), default=[], emit_empty=False),
         ],
@@ -197,6 +218,7 @@ STRUCTS = [
         "name": "RemoteDesktopChannelsRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("clipboard", "bool", default=False),
             field("file_transfer", "bool", default=False),
             field("audio", "bool", default=True),
@@ -207,6 +229,7 @@ STRUCTS = [
         "name": "InputInjectionRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("allowed_types", list_of("string"), default=[], emit_empty=False),
             field("require_postcondition_probe", "bool", default=False),
         ],
@@ -215,6 +238,7 @@ STRUCTS = [
         "name": "BrowserAutomationRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("allowed_domains", list_of("string"), default=[], emit_empty=False),
             field("blocked_domains", list_of("string"), default=[], emit_empty=False),
             field("allowed_verbs", list_of("string"), default=[], emit_empty=False),
@@ -226,6 +250,7 @@ STRUCTS = [
         "name": "CodeExecutionRule",
         "fields": [
             field("enabled", "bool", default=False),
+            field("when", "Condition"),
             field("language_allowlist", list_of("string"), default=[], emit_empty=False),
             field("module_denylist", list_of("string"), default=[], emit_empty=False),
             field("network_access", "bool", default=False),
@@ -264,7 +289,7 @@ STRUCTS = [
             field("from", "string", required=True, py_name="from_state"),
             field("to", "string", required=True),
             field("on", "TransitionTrigger", required=True),
-            field("after", "string", go_pointer=True),
+            field("after", "string"),
         ],
     },
     {
@@ -279,13 +304,31 @@ STRUCTS = [
         "fields": [
             field("id", "string", required=True, go_name="ID"),
             field("match", "OriginMatch", py_name="match_rules", rs_name="match_rules", go_name="Match"),
-            field("posture", "string", go_pointer=True),
-            field("tool_access", "ToolAccessRule"),
-            field("egress", "EgressRule"),
+            field("posture", "string"),
+            field("tool_access", "OriginToolAccessOverlay"),
+            field("egress", "OriginEgressOverlay"),
             field("data", "OriginDataPolicy"),
             field("budgets", "OriginBudgets"),
             field("bridge", "BridgePolicy"),
-            field("explanation", "string", go_pointer=True),
+            field("explanation", "string"),
+        ],
+    },
+    {
+        "name": "OriginToolAccessOverlay",
+        "fields": [
+            field("allow", list_of("string"), default=[], emit_empty=False),
+            field("block", list_of("string"), default=[], emit_empty=False),
+            field("require_confirmation", list_of("string"), default=[], emit_empty=False),
+            field("default", "DefaultAction", go_pointer=True),
+            field("max_args_size", "count", go_pointer=True),
+        ],
+    },
+    {
+        "name": "OriginEgressOverlay",
+        "fields": [
+            field("allow", list_of("string"), default=[], emit_empty=False),
+            field("block", list_of("string"), default=[], emit_empty=False),
+            field("default", "DefaultAction", go_pointer=True),
         ],
     },
     {
@@ -350,6 +393,14 @@ STRUCTS = [
             field("warn_at_or_above", "DetectionLevel", go_pointer=True),
             field("block_at_or_above", "DetectionLevel", go_pointer=True),
             field("max_scan_bytes", "count", go_pointer=True),
+            field("heuristics", "PromptInjectionHeuristics"),
+        ],
+    },
+    {
+        "name": "PromptInjectionHeuristics",
+        "fields": [
+            field("enabled", "bool", go_pointer=True),
+            field("min_score", "count", go_pointer=True),
         ],
     },
     {
@@ -365,9 +416,27 @@ STRUCTS = [
         "name": "ThreatIntelDetection",
         "fields": [
             field("enabled", "bool", go_pointer=True),
-            field("pattern_db", "string", go_pointer=True, go_name="PatternDB"),
+            field("pattern_db", "string", go_name="PatternDB"),
             field("similarity_threshold", "float", go_pointer=True),
             field("top_k", "count", go_pointer=True),
+        ],
+    },
+    {
+        "name": "ControlMapping",
+        "fields": [
+            field("framework", "string", required=True),
+            field("control_id", "string", required=True, go_name="ControlID"),
+            field("rule_paths", list_of("string"), required=True, emit_empty=True),
+            field("notes", "string"),
+        ],
+    },
+    {
+        "name": "ChangelogEntry",
+        "fields": [
+            field("version", "string", required=True),
+            field("date", "string", required=True),
+            field("summary", "string", required=True),
+            field("author", "string"),
         ],
     },
     {
@@ -382,6 +451,12 @@ STRUCTS = [
             field("policy_version", "count", go_pointer=True),
             field("effective_date", "string"),
             field("expiry_date", "string"),
+            field("owner", "string"),
+            field("reviewers", list_of("string"), default=[], emit_empty=False),
+            field("next_review_date", "string"),
+            field("changelog", list_of("ChangelogEntry"), default=[], emit_empty=False),
+            field("supersedes", "string"),
+            field("controls", list_of("ControlMapping"), default=[], emit_empty=False),
         ],
     },
 ]
@@ -418,9 +493,28 @@ def go_type(field_info: dict) -> str:
     base = render_type(field_info["type"], "go")
     if field_info["go_pointer"] and not is_collection(field_info["type"]):
         return f"*{base}"
-    if is_struct(field_info["type"]) and not field_info["required"]:
+    if (is_struct(field_info["type"]) or is_external(field_info["type"])) and not field_info["required"]:
+        return f"*{base}"
+    if is_optional_go_string(field_info):
         return f"*{base}"
     return base
+
+
+def is_optional_go_string(field_info: dict) -> bool:
+    """Whether a field is an optional free-text string.
+
+    Go has no zero value left over to mean "absent", so such a field is a
+    `*string`: nil is absent and a pointer to "" is a present empty value. The
+    other three SDKs model the same distinction with `Option<String>`,
+    `str | None` and `string | undefined`, and the canonical form keeps a
+    present empty string, so Go must be able to hold one. Enums need no pointer
+    -- "" is not one of their values, and validation rejects it.
+    """
+    return (
+        field_info["type"] == "string"
+        and not field_info["required"]
+        and field_info["default"] is None
+    )
 
 
 def render_type(type_info: object, language: str) -> str:
@@ -442,6 +536,8 @@ def render_type(type_info: object, language: str) -> str:
         raise ValueError(f"unsupported type info: {type_info}")
     if type_info in SCALARS:
         return SCALARS[type_info][language]
+    if type_info in EXTERNAL_TYPES:
+        return EXTERNAL_TYPES[type_info][language]
     return str(type_info)
 
 
@@ -451,6 +547,10 @@ def is_collection(type_info: object) -> bool:
 
 def is_struct(type_info: object) -> bool:
     return isinstance(type_info, str) and type_info in STRUCT_MAP
+
+
+def is_external(type_info: object) -> bool:
+    return isinstance(type_info, str) and type_info in EXTERNAL_TYPES
 
 
 def is_enum(type_info: object) -> bool:
@@ -623,6 +723,7 @@ def render_rust() -> str:
         "// Code generated by scripts/generate_sdk_models.py. DO NOT EDIT.",
         "use serde::{Deserialize, Serialize};",
         "use std::collections::BTreeMap;",
+        *RS_EXTERNAL_IMPORTS,
         "",
     ]
 
@@ -667,6 +768,9 @@ def render_rust() -> str:
                     attrs.append(f'default = "{default_meta[0]}"')
                 elif default == [] or default == {} or default is False or not field_info["required"]:
                     attrs.append("default")
+                    if not field_info["emit_empty"] and is_collection(field_info["type"]):
+                        helper = "Vec::is_empty" if field_info["type"]["kind"] == "list" else "BTreeMap::is_empty"
+                        attrs.append(f'skip_serializing_if = "{helper}"')
             if attrs:
                 lines.append(f"    #[serde({', '.join(attrs)})]")
             lines.append(
@@ -682,17 +786,85 @@ def render_rust() -> str:
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        return content
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
+
+
+def go_needs_init() -> set[str]:
+    """Structs that own an `emit_empty` collection, or can reach one.
+
+    `initEmptyCollections` recurses, so a struct needs the method when any
+    struct it holds -- directly, in a list, or in a map -- needs it too.
+    """
+    needs = {
+        struct["name"]
+        for struct in STRUCTS
+        if any(f["emit_empty"] for f in struct["fields"])
+    }
+    changed = True
+    while changed:
+        changed = False
+        for struct in STRUCTS:
+            if struct["name"] in needs:
+                continue
+            if any(go_item_type(f["type"]) in needs for f in struct["fields"]):
+                needs.add(struct["name"])
+                changed = True
+    return needs
+
+
+def go_item_type(type_info: object) -> object:
+    """The struct a field holds: itself, its list item, or its map value."""
+    if isinstance(type_info, dict):
+        return type_info["item"] if type_info["kind"] == "list" else type_info["value"]
+    return type_info
+
+
+def go_empty_literal(type_info: dict) -> str:
+    return f"{render_type(type_info, 'go')}{{}}"
+
+
+def render_go_init(struct: dict, needs: set[str]) -> list[str]:
+    """`initEmptyCollections` for one struct, or nothing when it needs none.
+
+    Go cannot give a field a default, and encoding/json writes a nil slice as
+    `null` rather than `[]`, so a required collection is given an empty value
+    at decode time -- the same place the Python model does it, with
+    `data.get(wire, [])` in `from_dict`.
+    """
+    if struct["name"] not in needs:
+        return []
+    lines = [
+        "// initEmptyCollections gives every required collection a non-nil value and",
+        "// recurses into the structs below it, so a collection that is empty serializes",
+        "// as an empty container in Go exactly as it does in the other three SDKs.",
+        f"func (x *{struct['name']}) initEmptyCollections() {{",
+        "\tif x == nil {",
+        "\t\treturn",
+        "\t}",
+    ]
+    for field_info in struct["fields"]:
+        name = field_info["go_name"]
+        if field_info["emit_empty"] and is_collection(field_info["type"]):
+            lines.append(f"\tif x.{name} == nil {{")
+            lines.append(f"\t\tx.{name} = {go_empty_literal(field_info['type'])}")
+            lines.append("\t}")
+        item = go_item_type(field_info["type"])
+        if item not in needs:
+            continue
+        if not isinstance(field_info["type"], dict):
+            lines.append(f"\tx.{name}.initEmptyCollections()")
+        elif field_info["type"]["kind"] == "list":
+            lines.append(f"\tfor i := range x.{name} {{")
+            lines.append(f"\t\tx.{name}[i].initEmptyCollections()")
+            lines.append("\t}")
+        else:
+            lines.append(f"\tfor key, value := range x.{name} {{")
+            lines.append("\t\tvalue.initEmptyCollections()")
+            lines.append(f"\t\tx.{name}[key] = value")
+            lines.append("\t}")
+    lines.append("}")
+    lines.append("")
+    return lines
 
 
 def render_go() -> str:
@@ -714,28 +886,37 @@ def render_go() -> str:
         lines.append(")")
         lines.append("")
 
+    needs_init = go_needs_init()
     for struct in STRUCTS:
         lines.append(f"type {struct['name']} struct {{")
         for field_info in struct["fields"]:
-            tag_suffix = ",omitempty" if (not field_info["required"] or is_collection(field_info["type"])) else ""
+            # `emit_empty` fields are serialized whether or not they hold
+            # anything, so `omitempty` would make Go the one SDK that drops an
+            # empty required collection from the wire.
+            # A scalar with a nonzero parse default must retain explicit zero
+            # and false values. Omitting them would re-enable disabled rules or
+            # restore permissive limits on a serialize/parse merge copy. Enum
+            # empty strings remain absence sentinels; pointers retain presence.
+            preserve_zero = (
+                field_info["type"] in ("bool", "count", "float")
+                and bool(field_info["default"])
+                and not field_info["go_pointer"]
+            )
+            if field_info["emit_empty"] or preserve_zero:
+                tag_suffix = ""
+            elif not field_info["required"] or is_collection(field_info["type"]):
+                tag_suffix = ",omitempty"
+            else:
+                tag_suffix = ""
             lines.append(
                 f'\t{field_info["go_name"]} {go_type(field_info)} `yaml:"{field_info["wire"]}{tag_suffix}" json:"{field_info["wire"]}{tag_suffix}"`'
             )
         lines.append("}")
         lines.append("")
+        lines.extend(render_go_init(struct, needs_init))
 
     content = "\n".join(lines).rstrip() + "\n"
-    gofmt = shutil.which("gofmt")
-    if gofmt is None:
-        return content
-    result = subprocess.run(
-        [gofmt],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return gofmt(content)
 
 
 def write_or_check(path: Path, content: str, check: bool) -> list[str]:

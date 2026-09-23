@@ -1,9 +1,7 @@
 import io
 import json
 
-import pytest
-
-from hushspec.evaluate import Decision, EvaluationAction, evaluate
+from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult
 from hushspec.middleware import HushGuard
 from hushspec.observer import (
     ConsoleObserver,
@@ -14,6 +12,7 @@ from hushspec.observer import (
 )
 from hushspec.parse import parse_or_raise
 from hushspec.schema import HushSpec
+from hushspec.sinks import MultiSink, ReceiptSink
 
 
 
@@ -49,6 +48,16 @@ class EventCollector(EvaluationObserver):
         self.events.append(event)
 
 
+class FailingSink(ReceiptSink):
+    """Refuses everything it is handed, and says so."""
+
+    def send(self, receipt):
+        raise OSError("no space left on device")
+
+    def record_policy_event(self, event):
+        raise OSError("no space left on device")
+
+
 
 # ObservableEvaluator
 
@@ -70,7 +79,7 @@ class TestObservableEvaluator:
         assert event["type"] == "evaluation.completed"
         assert event["action"] is action
         assert event["result"] is result
-        assert event["duration_us"] >= 0
+        assert isinstance(event["duration_us"], int)
         assert "T" in event["timestamp"]
 
     def test_emits_correct_decision_for_denied_tool(self):
@@ -144,6 +153,40 @@ class TestObservableEvaluator:
         assert result.decision == Decision.ALLOW
         assert len(safe_observer.events) == 1
 
+    def test_a_raising_observer_is_handed_its_own_failure(self):
+        evaluator = ObservableEvaluator()
+
+        class CrashingObserver(EvaluationObserver):
+            def __init__(self) -> None:
+                self.events: list[dict] = []
+
+            def on_event(self, event):
+                self.events.append(event)
+                if event["type"] != "error":
+                    raise RuntimeError("observer crash")
+
+        observer = CrashingObserver()
+        evaluator.add_observer(observer)
+        evaluator.evaluate(
+            minimal_spec(), EvaluationAction(type="tool_call", target="test")
+        )
+
+        errors = [event for event in observer.events if event["type"] == "error"]
+        assert len(errors) == 1
+        assert "observer crash" in errors[0]["error"]
+
+    def test_emits_an_error_event_for_a_failure_the_guard_absorbed(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+
+        evaluator.notify_error("reload failed", "policy.yaml")
+
+        event = observer.events[0]
+        assert event["type"] == "error"
+        assert event["error"] == "reload failed"
+        assert event["source"] == "policy.yaml"
+
     def test_remove_observer_stops_notifications(self):
         evaluator = ObservableEvaluator()
         observer = EventCollector()
@@ -161,6 +204,36 @@ class TestObservableEvaluator:
 
 # MetricsCollector
 
+
+
+class TestObserverRedaction:
+    def test_every_evaluation_event_is_stripped_of_content(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+        action = EvaluationAction(
+            type="egress", target="api.example.com", content="sk-live-0123456789"
+        )
+
+        evaluator.evaluate(minimal_spec(), action)
+        evaluator.notify_evaluation_completed(
+            action, EvaluationResult(decision=Decision.ALLOW), 12
+        )
+
+        assert len(observer.events) == 2
+        for event in observer.events:
+            assert event["action"].content is None
+            assert event["content_redacted"] is True
+        assert action.content == "sk-live-0123456789"
+
+    def test_an_action_without_content_carries_no_flag(self):
+        evaluator = ObservableEvaluator()
+        observer = EventCollector()
+        evaluator.add_observer(observer)
+
+        evaluator.evaluate(minimal_spec(), EvaluationAction(type="tool_call", target="test"))
+
+        assert "content_redacted" not in observer.events[0]
 
 
 class TestMetricsCollector:
@@ -220,10 +293,12 @@ class TestMetricsCollector:
         assert metrics.get_total_evaluations() == 0
         assert metrics.get_count("nonexistent") == 0
 
-    def test_to_prometheus_outputs_valid_format(self):
+    def test_to_prometheus_renders_the_shared_series_set(self):
         evaluator = ObservableEvaluator()
         metrics = MetricsCollector()
         evaluator.add_observer(metrics)
+        evaluator.notify_policy_loaded("p", "sha256:aa")
+        evaluator.notify_policy_load_failed("unreadable", "policy.yaml")
 
         evaluator.evaluate(minimal_spec(), EvaluationAction(type="tool_call", target="test"))
         evaluator.evaluate(
@@ -232,11 +307,41 @@ class TestMetricsCollector:
         )
 
         output = metrics.to_prometheus()
-        assert "hushspec_evaluate_allow_total 1" in output
-        assert "hushspec_evaluate_deny_total 1" in output
-        assert "hushspec_evaluation_completed_total 2" in output
-        assert "hushspec_evaluate_duration_us_avg" in output
-        assert "hushspec_evaluate_duration_us_p99" in output
+        assert "# TYPE hushspec_evaluate_total counter" in output
+        assert 'hushspec_evaluate_total{decision="allow",action_type="tool_call"} 1' in output
+        assert 'hushspec_evaluate_total{decision="deny",action_type="tool_call"} 1' in output
+        assert "# TYPE hushspec_evaluate_duration_us histogram" in output
+        assert (
+            'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="10000"}' in output
+        )
+        assert (
+            'hushspec_evaluate_duration_us_bucket{action_type="tool_call",le="+Inf"} 2' in output
+        )
+        assert 'hushspec_evaluate_duration_us_count{action_type="tool_call"} 2' in output
+        assert 'hushspec_rule_match_total{rule_block="tool_access",decision="deny"} 1' in output
+        assert 'hushspec_policy_load_total{status="failure"} 1' in output
+        assert 'hushspec_policy_load_total{status="success"} 1' in output
+
+    def test_duration_window_is_bounded(self):
+        metrics = MetricsCollector(duration_window=4)
+        for sample in range(1, 101):
+            metrics.on_event(
+                {
+                    "type": "evaluation.completed",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "action": EvaluationAction(type="tool_call", target="test"),
+                    "result": EvaluationResult(decision=Decision.ALLOW),
+                    "duration_us": sample,
+                }
+            )
+
+        # Every evaluation is still counted; only the percentile window is bounded.
+        assert metrics.get_total_evaluations() == 100
+        assert metrics.get_average_duration_us() == (97 + 98 + 99 + 100) / 4
+        assert (
+            'hushspec_evaluate_duration_us_count{action_type="tool_call"} 100'
+            in metrics.to_prometheus()
+        )
 
     def test_reset_clears_all_data(self):
         evaluator = ObservableEvaluator()
@@ -249,7 +354,7 @@ class TestMetricsCollector:
         metrics.reset()
         assert metrics.get_total_evaluations() == 0
         assert metrics.get_count("evaluate.allow") == 0
-        assert metrics.to_prometheus() == ""
+        assert "hushspec_evaluate_total{" not in metrics.to_prometheus()
 
 
 
@@ -326,7 +431,6 @@ hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
 """
 
@@ -369,6 +473,52 @@ class TestHushGuardObserverIntegration:
         guard = HushGuard.from_yaml(ALLOW_POLICY)
         assert guard.check(EvaluationAction(type="tool_call", target="test")) is True
 
+    def test_a_sink_that_refuses_a_receipt_leaves_the_decision_and_raises_sink_error(self):
+        observer = EventCollector()
+        guard = HushGuard.from_yaml(DENY_POLICY, observer=observer, sink=FailingSink())
+        observer.events.clear()
+
+        assert guard.check(EvaluationAction(type="tool_call", target="dangerous_tool")) is False
+        assert guard.check(EvaluationAction(type="tool_call", target="anything")) is False
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 2
+        assert errors[0]["error"] == "no space left on device"
+        assert errors[0]["source"] == "FailingSink"
+        assert errors[0]["timestamp"].endswith("Z")
+
+    def test_a_sink_that_refuses_the_policy_event_raises_sink_error(self):
+        observer = EventCollector()
+        HushGuard.from_yaml(ALLOW_POLICY, observer=observer, sink=FailingSink())
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 1
+        assert errors[0]["error"] == "no space left on device"
+        assert errors[0]["source"] == "FailingSink"
+
+    def test_a_sink_that_refuses_behind_a_multi_sink_names_the_child(self):
+        recorded: list[object] = []
+
+        class Recording(ReceiptSink):
+            def send(self, receipt):
+                recorded.append(receipt)
+
+        observer = EventCollector()
+        guard = HushGuard.from_yaml(
+            DENY_POLICY,
+            observer=observer,
+            sink=MultiSink([FailingSink(), Recording()]),
+        )
+        observer.events.clear()
+
+        assert guard.check(EvaluationAction(type="tool_call", target="dangerous_tool")) is False
+        assert len(recorded) == 1
+
+        errors = [e for e in observer.events if e["type"] == "sink.error"]
+        assert len(errors) == 1
+        assert errors[0]["error"] == "sink FailingSink: no space left on device"
+        assert errors[0]["source"] == "MultiSink"
+
 
 
 # Module-level exports
@@ -376,16 +526,16 @@ class TestHushGuardObserverIntegration:
 
 
 class TestExports:
-    def test_observer_types_importable_from_top_level(self):
-        from hushspec import (
-            EvaluationObserver,
-            ObservableEvaluator,
-            JsonLineObserver,
-            ConsoleObserver,
-            MetricsCollector,
-        )
-        assert ObservableEvaluator is not None
-        assert EvaluationObserver is not None
-        assert JsonLineObserver is not None
-        assert ConsoleObserver is not None
-        assert MetricsCollector is not None
+    def test_the_top_level_names_are_the_observer_module_s_own(self):
+        import hushspec
+        from hushspec import observer as observer_module
+
+        for name in (
+            "EvaluationObserver",
+            "ObservableEvaluator",
+            "JsonLineObserver",
+            "ConsoleObserver",
+            "MetricsCollector",
+        ):
+            assert name in hushspec.__all__
+            assert getattr(hushspec, name) is getattr(observer_module, name)

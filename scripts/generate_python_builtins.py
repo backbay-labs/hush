@@ -6,21 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+
+from generator_support import ROOT, PANIC_NAME, all_builtin_names, builtin_yaml
 
 
-ROOT = Path(__file__).resolve().parent.parent
-RULESETS_DIR = ROOT / "rulesets"
 OUTPUT = ROOT / "packages" / "python" / "hushspec" / "builtins.py"
-
-BUILTIN_NAMES = [
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-]
 
 
 def render() -> str:
@@ -34,7 +24,9 @@ def render() -> str:
         "BUILTIN_NAMES = (",
     ]
 
-    for name in BUILTIN_NAMES:
+    names = all_builtin_names()
+
+    for name in names:
         lines.append(f"    {json.dumps(name)},")
 
     lines.extend(
@@ -45,25 +37,36 @@ def render() -> str:
         ]
     )
 
-    for name in BUILTIN_NAMES:
-        yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
-        lines.append(f"    {json.dumps(name)}: {json.dumps(yaml_content, ensure_ascii=False)},")
+    for name in names:
+        lines.append(
+            f"    {json.dumps(name)}: {json.dumps(builtin_yaml(name), ensure_ascii=False)},"
+        )
 
     lines.extend(
         [
             "}",
             "",
+            "#: The emergency deny-all policy the panic protocol enforces (core spec 6.2),",
+            "#: from rulesets/panic.yaml. Not a built-in name: ``extends: builtin:panic``",
+            "#: does not resolve.",
+            f"PANIC_POLICY_YAML = {json.dumps(builtin_yaml(PANIC_NAME), ensure_ascii=False)}",
+            "",
             "",
             "def load_builtin(name: str) -> HushSpec | None:",
             '    """Parse the built-in ruleset for ``name`` (with or without the',
-            '    ``builtin:`` prefix), or return ``None`` if the name is unknown."""',
+            '    ``builtin:`` prefix), or return ``None`` if the name is unknown.',
+            "",
+            "    A ruleset that is present but does not parse raises: an embedded document",
+            "    is generated from ``rulesets/``, so a failure there is a broken build, and",
+            '    reporting it as ``None`` would surface downstream as "unknown builtin".',
+            '    """',
             "    resolved = name[len('builtin:'):] if name.startswith('builtin:') else name",
             "    yaml = _BUILTIN_RULESETS.get(resolved)",
             "    if yaml is None:",
             "        return None",
             "    ok, parsed = parse(yaml)",
             "    if not ok:",
-            "        return None",
+            "        raise ValueError(f'built-in ruleset {resolved!r} does not parse: {parsed}')",
             "    return parsed",
             "",
         ]

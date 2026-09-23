@@ -1,0 +1,8 @@
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: locked
+    states:
+      locked:
+        capabilities: []
+    transitions: []

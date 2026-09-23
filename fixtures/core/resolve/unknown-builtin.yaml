@@ -1,0 +1,9 @@
+hushspec_resolve: 0.1.0
+description: a reference no loader can serve is rejected, never resolved as the leaf alone
+policy:
+  hushspec: 0.1.0
+  name: dangling
+  extends: builtin:no-such-ruleset
+expect:
+  resolves: false
+  rejects: not_found

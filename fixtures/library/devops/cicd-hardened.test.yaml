@@ -1,0 +1,327 @@
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
+#
+# Control-tagged suite for library/devops/cicd-hardened.yaml.
+# Every case names the control it is evidence for, and between them the
+# cases hit every rule block and every named secret pattern of the
+# resolved policy -- `h2h test --fail-on-uncovered` is the gate.
+#
+# The suite extends the embedded copy of the policy, so it runs against
+# exactly the bytes the SDKs ship; `scripts/generate_*_builtins.py
+# --check` is what keeps that copy equal to the file.
+hushspec_test: "0.2.0"
+description: "cicd-hardened: control-tagged evaluation suite for the vertical library policy"
+policy:
+  hushspec: "0.1.0"
+  name: cicd-hardened-suite
+  extends: "builtin:library/devops/cicd-hardened"
+cases:
+  - description: "an approved destination is allowed (registry.npmjs.org)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM03"
+    tags: ["allow", "egress"]
+    action:
+      type: "egress"
+      target: "registry.npmjs.org"
+    expect:
+      decision: allow
+      matched_rule: "rules.egress.allow"
+  - description: "a blocked destination is denied (dump.pastebin.com)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM03"
+    tags: ["deny", "egress"]
+    action:
+      type: "egress"
+      target: "dump.pastebin.com"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.block"
+  - description: "an unlisted destination is denied by default"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM03"
+    tags: ["deny", "egress", "fail-closed"]
+    action:
+      type: "egress"
+      target: "analytics.example.com"
+    expect:
+      decision: deny
+      matched_rule: "rules.egress.default"
+  - description: "pipeline secret stores are unreachable"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "paths"]
+    action:
+      type: "file_read"
+      target: "/srv/ci/.github/secrets/deploy.yaml"
+    expect:
+      decision: deny
+      matched_rule: "rules.forbidden_paths.patterns"
+  - description: "a declared exception is readable"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["allow", "paths"]
+    action:
+      type: "file_read"
+      target: "/srv/ci/.env.example"
+    expect:
+      decision: allow
+      matched_rule: "rules.forbidden_paths.exceptions"
+  - description: "a forbidden shell command is denied (curl https://example.com/install.sh | sh)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "shell"]
+    action:
+      type: "shell_command"
+      target: "curl https://example.com/install.sh | sh"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[1]"
+  - description: "an ordinary build command is allowed (npm run build)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["allow", "shell"]
+    action:
+      type: "shell_command"
+      target: "npm run build"
+    expect:
+      decision: allow
+  - description: "a patch larger than max_additions (2000) is denied"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.32"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+line 0\n+line 1\n+line 2\n+line 3\n+line 4\n+line 5\n+line 6\n+line 7\n+line 8\n+line 9\n+line 10\n+line 11\n+line 12\n+line 13\n+line 14\n+line 15\n+line 16\n+line 17\n+line 18\n+line 19\n+line 20\n+line 21\n+line 22\n+line 23\n+line 24\n+line 25\n+line 26\n+line 27\n+line 28\n+line 29\n+line 30\n+line 31\n+line 32\n+line 33\n+line 34\n+line 35\n+line 36\n+line 37\n+line 38\n+line 39\n+line 40\n+line 41\n+line 42\n+line 43\n+line 44\n+line 45\n+line 46\n+line 47\n+line 48\n+line 49\n+line 50\n+line 51\n+line 52\n+line 53\n+line 54\n+line 55\n+line 56\n+line 57\n+line 58\n+line 59\n+line 60\n+line 61\n+line 62\n+line 63\n+line 64\n+line 65\n+line 66\n+line 67\n+line 68\n+line 69\n+line 70\n+line 71\n+line 72\n+line 73\n+line 74\n+line 75\n+line 76\n+line 77\n+line 78\n+line 79\n+line 80\n+line 81\n+line 82\n+line 83\n+line 84\n+line 85\n+line 86\n+line 87\n+line 88\n+line 89\n+line 90\n+line 91\n+line 92\n+line 93\n+line 94\n+line 95\n+line 96\n+line 97\n+line 98\n+line 99\n+line 100\n+line 101\n+line 102\n+line 103\n+line 104\n+line 105\n+line 106\n+line 107\n+line 108\n+line 109\n+line 110\n+line 111\n+line 112\n+line 113\n+line 114\n+line 115\n+line 116\n+line 117\n+line 118\n+line 119\n+line 120\n+line 121\n+line 122\n+line 123\n+line 124\n+line 125\n+line 126\n+line 127\n+line 128\n+line 129\n+line 130\n+line 131\n+line 132\n+line 133\n+line 134\n+line 135\n+line 136\n+line 137\n+line 138\n+line 139\n+line 140\n+line 141\n+line 142\n+line 143\n+line 144\n+line 145\n+line 146\n+line 147\n+line 148\n+line 149\n+line 150\n+line 151\n+line 152\n+line 153\n+line 154\n+line 155\n+line 156\n+line 157\n+line 158\n+line 159\n+line 160\n+line 161\n+line 162\n+line 163\n+line 164\n+line 165\n+line 166\n+line 167\n+line 168\n+line 169\n+line 170\n+line 171\n+line 172\n+line 173\n+line 174\n+line 175\n+line 176\n+line 177\n+line 178\n+line 179\n+line 180\n+line 181\n+line 182\n+line 183\n+line 184\n+line 185\n+line 186\n+line 187\n+line 188\n+line 189\n+line 190\n+line 191\n+line 192\n+line 193\n+line 194\n+line 195\n+line 196\n+line 197\n+line 198\n+line 199\n+line 200\n+line 201\n+line 202\n+line 203\n+line 204\n+line 205\n+line 206\n+line 207\n+line 208\n+line 209\n+line 210\n+line 211\n+line 212\n+line 213\n+line 214\n+line 215\n+line 216\n+line 217\n+line 218\n+line 219\n+line 220\n+line 221\n+line 222\n+line 223\n+line 224\n+line 225\n+line 226\n+line 227\n+line 228\n+line 229\n+line 230\n+line 231\n+line 232\n+line 233\n+line 234\n+line 235\n+line 236\n+line 237\n+line 238\n+line 239\n+line 240\n+line 241\n+line 242\n+line 243\n+line 244\n+line 245\n+line 246\n+line 247\n+line 248\n+line 249\n+line 250\n+line 251\n+line 252\n+line 253\n+line 254\n+line 255\n+line 256\n+line 257\n+line 258\n+line 259\n+line 260\n+line 261\n+line 262\n+line 263\n+line 264\n+line 265\n+line 266\n+line 267\n+line 268\n+line 269\n+line 270\n+line 271\n+line 272\n+line 273\n+line 274\n+line 275\n+line 276\n+line 277\n+line 278\n+line 279\n+line 280\n+line 281\n+line 282\n+line 283\n+line 284\n+line 285\n+line 286\n+line 287\n+line 288\n+line 289\n+line 290\n+line 291\n+line 292\n+line 293\n+line 294\n+line 295\n+line 296\n+line 297\n+line 298\n+line 299\n+line 300\n+line 301\n+line 302\n+line 303\n+line 304\n+line 305\n+line 306\n+line 307\n+line 308\n+line 309\n+line 310\n+line 311\n+line 312\n+line 313\n+line 314\n+line 315\n+line 316\n+line 317\n+line 318\n+line 319\n+line 320\n+line 321\n+line 322\n+line 323\n+line 324\n+line 325\n+line 326\n+line 327\n+line 328\n+line 329\n+line 330\n+line 331\n+line 332\n+line 333\n+line 334\n+line 335\n+line 336\n+line 337\n+line 338\n+line 339\n+line 340\n+line 341\n+line 342\n+line 343\n+line 344\n+line 345\n+line 346\n+line 347\n+line 348\n+line 349\n+line 350\n+line 351\n+line 352\n+line 353\n+line 354\n+line 355\n+line 356\n+line 357\n+line 358\n+line 359\n+line 360\n+line 361\n+line 362\n+line 363\n+line 364\n+line 365\n+line 366\n+line 367\n+line 368\n+line 369\n+line 370\n+line 371\n+line 372\n+line 373\n+line 374\n+line 375\n+line 376\n+line 377\n+line 378\n+line 379\n+line 380\n+line 381\n+line 382\n+line 383\n+line 384\n+line 385\n+line 386\n+line 387\n+line 388\n+line 389\n+line 390\n+line 391\n+line 392\n+line 393\n+line 394\n+line 395\n+line 396\n+line 397\n+line 398\n+line 399\n+line 400\n+line 401\n+line 402\n+line 403\n+line 404\n+line 405\n+line 406\n+line 407\n+line 408\n+line 409\n+line 410\n+line 411\n+line 412\n+line 413\n+line 414\n+line 415\n+line 416\n+line 417\n+line 418\n+line 419\n+line 420\n+line 421\n+line 422\n+line 423\n+line 424\n+line 425\n+line 426\n+line 427\n+line 428\n+line 429\n+line 430\n+line 431\n+line 432\n+line 433\n+line 434\n+line 435\n+line 436\n+line 437\n+line 438\n+line 439\n+line 440\n+line 441\n+line 442\n+line 443\n+line 444\n+line 445\n+line 446\n+line 447\n+line 448\n+line 449\n+line 450\n+line 451\n+line 452\n+line 453\n+line 454\n+line 455\n+line 456\n+line 457\n+line 458\n+line 459\n+line 460\n+line 461\n+line 462\n+line 463\n+line 464\n+line 465\n+line 466\n+line 467\n+line 468\n+line 469\n+line 470\n+line 471\n+line 472\n+line 473\n+line 474\n+line 475\n+line 476\n+line 477\n+line 478\n+line 479\n+line 480\n+line 481\n+line 482\n+line 483\n+line 484\n+line 485\n+line 486\n+line 487\n+line 488\n+line 489\n+line 490\n+line 491\n+line 492\n+line 493\n+line 494\n+line 495\n+line 496\n+line 497\n+line 498\n+line 499\n+line 500\n+line 501\n+line 502\n+line 503\n+line 504\n+line 505\n+line 506\n+line 507\n+line 508\n+line 509\n+line 510\n+line 511\n+line 512\n+line 513\n+line 514\n+line 515\n+line 516\n+line 517\n+line 518\n+line 519\n+line 520\n+line 521\n+line 522\n+line 523\n+line 524\n+line 525\n+line 526\n+line 527\n+line 528\n+line 529\n+line 530\n+line 531\n+line 532\n+line 533\n+line 534\n+line 535\n+line 536\n+line 537\n+line 538\n+line 539\n+line 540\n+line 541\n+line 542\n+line 543\n+line 544\n+line 545\n+line 546\n+line 547\n+line 548\n+line 549\n+line 550\n+line 551\n+line 552\n+line 553\n+line 554\n+line 555\n+line 556\n+line 557\n+line 558\n+line 559\n+line 560\n+line 561\n+line 562\n+line 563\n+line 564\n+line 565\n+line 566\n+line 567\n+line 568\n+line 569\n+line 570\n+line 571\n+line 572\n+line 573\n+line 574\n+line 575\n+line 576\n+line 577\n+line 578\n+line 579\n+line 580\n+line 581\n+line 582\n+line 583\n+line 584\n+line 585\n+line 586\n+line 587\n+line 588\n+line 589\n+line 590\n+line 591\n+line 592\n+line 593\n+line 594\n+line 595\n+line 596\n+line 597\n+line 598\n+line 599\n+line 600\n+line 601\n+line 602\n+line 603\n+line 604\n+line 605\n+line 606\n+line 607\n+line 608\n+line 609\n+line 610\n+line 611\n+line 612\n+line 613\n+line 614\n+line 615\n+line 616\n+line 617\n+line 618\n+line 619\n+line 620\n+line 621\n+line 622\n+line 623\n+line 624\n+line 625\n+line 626\n+line 627\n+line 628\n+line 629\n+line 630\n+line 631\n+line 632\n+line 633\n+line 634\n+line 635\n+line 636\n+line 637\n+line 638\n+line 639\n+line 640\n+line 641\n+line 642\n+line 643\n+line 644\n+line 645\n+line 646\n+line 647\n+line 648\n+line 649\n+line 650\n+line 651\n+line 652\n+line 653\n+line 654\n+line 655\n+line 656\n+line 657\n+line 658\n+line 659\n+line 660\n+line 661\n+line 662\n+line 663\n+line 664\n+line 665\n+line 666\n+line 667\n+line 668\n+line 669\n+line 670\n+line 671\n+line 672\n+line 673\n+line 674\n+line 675\n+line 676\n+line 677\n+line 678\n+line 679\n+line 680\n+line 681\n+line 682\n+line 683\n+line 684\n+line 685\n+line 686\n+line 687\n+line 688\n+line 689\n+line 690\n+line 691\n+line 692\n+line 693\n+line 694\n+line 695\n+line 696\n+line 697\n+line 698\n+line 699\n+line 700\n+line 701\n+line 702\n+line 703\n+line 704\n+line 705\n+line 706\n+line 707\n+line 708\n+line 709\n+line 710\n+line 711\n+line 712\n+line 713\n+line 714\n+line 715\n+line 716\n+line 717\n+line 718\n+line 719\n+line 720\n+line 721\n+line 722\n+line 723\n+line 724\n+line 725\n+line 726\n+line 727\n+line 728\n+line 729\n+line 730\n+line 731\n+line 732\n+line 733\n+line 734\n+line 735\n+line 736\n+line 737\n+line 738\n+line 739\n+line 740\n+line 741\n+line 742\n+line 743\n+line 744\n+line 745\n+line 746\n+line 747\n+line 748\n+line 749\n+line 750\n+line 751\n+line 752\n+line 753\n+line 754\n+line 755\n+line 756\n+line 757\n+line 758\n+line 759\n+line 760\n+line 761\n+line 762\n+line 763\n+line 764\n+line 765\n+line 766\n+line 767\n+line 768\n+line 769\n+line 770\n+line 771\n+line 772\n+line 773\n+line 774\n+line 775\n+line 776\n+line 777\n+line 778\n+line 779\n+line 780\n+line 781\n+line 782\n+line 783\n+line 784\n+line 785\n+line 786\n+line 787\n+line 788\n+line 789\n+line 790\n+line 791\n+line 792\n+line 793\n+line 794\n+line 795\n+line 796\n+line 797\n+line 798\n+line 799\n+line 800\n+line 801\n+line 802\n+line 803\n+line 804\n+line 805\n+line 806\n+line 807\n+line 808\n+line 809\n+line 810\n+line 811\n+line 812\n+line 813\n+line 814\n+line 815\n+line 816\n+line 817\n+line 818\n+line 819\n+line 820\n+line 821\n+line 822\n+line 823\n+line 824\n+line 825\n+line 826\n+line 827\n+line 828\n+line 829\n+line 830\n+line 831\n+line 832\n+line 833\n+line 834\n+line 835\n+line 836\n+line 837\n+line 838\n+line 839\n+line 840\n+line 841\n+line 842\n+line 843\n+line 844\n+line 845\n+line 846\n+line 847\n+line 848\n+line 849\n+line 850\n+line 851\n+line 852\n+line 853\n+line 854\n+line 855\n+line 856\n+line 857\n+line 858\n+line 859\n+line 860\n+line 861\n+line 862\n+line 863\n+line 864\n+line 865\n+line 866\n+line 867\n+line 868\n+line 869\n+line 870\n+line 871\n+line 872\n+line 873\n+line 874\n+line 875\n+line 876\n+line 877\n+line 878\n+line 879\n+line 880\n+line 881\n+line 882\n+line 883\n+line 884\n+line 885\n+line 886\n+line 887\n+line 888\n+line 889\n+line 890\n+line 891\n+line 892\n+line 893\n+line 894\n+line 895\n+line 896\n+line 897\n+line 898\n+line 899\n+line 900\n+line 901\n+line 902\n+line 903\n+line 904\n+line 905\n+line 906\n+line 907\n+line 908\n+line 909\n+line 910\n+line 911\n+line 912\n+line 913\n+line 914\n+line 915\n+line 916\n+line 917\n+line 918\n+line 919\n+line 920\n+line 921\n+line 922\n+line 923\n+line 924\n+line 925\n+line 926\n+line 927\n+line 928\n+line 929\n+line 930\n+line 931\n+line 932\n+line 933\n+line 934\n+line 935\n+line 936\n+line 937\n+line 938\n+line 939\n+line 940\n+line 941\n+line 942\n+line 943\n+line 944\n+line 945\n+line 946\n+line 947\n+line 948\n+line 949\n+line 950\n+line 951\n+line 952\n+line 953\n+line 954\n+line 955\n+line 956\n+line 957\n+line 958\n+line 959\n+line 960\n+line 961\n+line 962\n+line 963\n+line 964\n+line 965\n+line 966\n+line 967\n+line 968\n+line 969\n+line 970\n+line 971\n+line 972\n+line 973\n+line 974\n+line 975\n+line 976\n+line 977\n+line 978\n+line 979\n+line 980\n+line 981\n+line 982\n+line 983\n+line 984\n+line 985\n+line 986\n+line 987\n+line 988\n+line 989\n+line 990\n+line 991\n+line 992\n+line 993\n+line 994\n+line 995\n+line 996\n+line 997\n+line 998\n+line 999\n+line 1000\n+line 1001\n+line 1002\n+line 1003\n+line 1004\n+line 1005\n+line 1006\n+line 1007\n+line 1008\n+line 1009\n+line 1010\n+line 1011\n+line 1012\n+line 1013\n+line 1014\n+line 1015\n+line 1016\n+line 1017\n+line 1018\n+line 1019\n+line 1020\n+line 1021\n+line 1022\n+line 1023\n+line 1024\n+line 1025\n+line 1026\n+line 1027\n+line 1028\n+line 1029\n+line 1030\n+line 1031\n+line 1032\n+line 1033\n+line 1034\n+line 1035\n+line 1036\n+line 1037\n+line 1038\n+line 1039\n+line 1040\n+line 1041\n+line 1042\n+line 1043\n+line 1044\n+line 1045\n+line 1046\n+line 1047\n+line 1048\n+line 1049\n+line 1050\n+line 1051\n+line 1052\n+line 1053\n+line 1054\n+line 1055\n+line 1056\n+line 1057\n+line 1058\n+line 1059\n+line 1060\n+line 1061\n+line 1062\n+line 1063\n+line 1064\n+line 1065\n+line 1066\n+line 1067\n+line 1068\n+line 1069\n+line 1070\n+line 1071\n+line 1072\n+line 1073\n+line 1074\n+line 1075\n+line 1076\n+line 1077\n+line 1078\n+line 1079\n+line 1080\n+line 1081\n+line 1082\n+line 1083\n+line 1084\n+line 1085\n+line 1086\n+line 1087\n+line 1088\n+line 1089\n+line 1090\n+line 1091\n+line 1092\n+line 1093\n+line 1094\n+line 1095\n+line 1096\n+line 1097\n+line 1098\n+line 1099\n+line 1100\n+line 1101\n+line 1102\n+line 1103\n+line 1104\n+line 1105\n+line 1106\n+line 1107\n+line 1108\n+line 1109\n+line 1110\n+line 1111\n+line 1112\n+line 1113\n+line 1114\n+line 1115\n+line 1116\n+line 1117\n+line 1118\n+line 1119\n+line 1120\n+line 1121\n+line 1122\n+line 1123\n+line 1124\n+line 1125\n+line 1126\n+line 1127\n+line 1128\n+line 1129\n+line 1130\n+line 1131\n+line 1132\n+line 1133\n+line 1134\n+line 1135\n+line 1136\n+line 1137\n+line 1138\n+line 1139\n+line 1140\n+line 1141\n+line 1142\n+line 1143\n+line 1144\n+line 1145\n+line 1146\n+line 1147\n+line 1148\n+line 1149\n+line 1150\n+line 1151\n+line 1152\n+line 1153\n+line 1154\n+line 1155\n+line 1156\n+line 1157\n+line 1158\n+line 1159\n+line 1160\n+line 1161\n+line 1162\n+line 1163\n+line 1164\n+line 1165\n+line 1166\n+line 1167\n+line 1168\n+line 1169\n+line 1170\n+line 1171\n+line 1172\n+line 1173\n+line 1174\n+line 1175\n+line 1176\n+line 1177\n+line 1178\n+line 1179\n+line 1180\n+line 1181\n+line 1182\n+line 1183\n+line 1184\n+line 1185\n+line 1186\n+line 1187\n+line 1188\n+line 1189\n+line 1190\n+line 1191\n+line 1192\n+line 1193\n+line 1194\n+line 1195\n+line 1196\n+line 1197\n+line 1198\n+line 1199\n+line 1200\n+line 1201\n+line 1202\n+line 1203\n+line 1204\n+line 1205\n+line 1206\n+line 1207\n+line 1208\n+line 1209\n+line 1210\n+line 1211\n+line 1212\n+line 1213\n+line 1214\n+line 1215\n+line 1216\n+line 1217\n+line 1218\n+line 1219\n+line 1220\n+line 1221\n+line 1222\n+line 1223\n+line 1224\n+line 1225\n+line 1226\n+line 1227\n+line 1228\n+line 1229\n+line 1230\n+line 1231\n+line 1232\n+line 1233\n+line 1234\n+line 1235\n+line 1236\n+line 1237\n+line 1238\n+line 1239\n+line 1240\n+line 1241\n+line 1242\n+line 1243\n+line 1244\n+line 1245\n+line 1246\n+line 1247\n+line 1248\n+line 1249\n+line 1250\n+line 1251\n+line 1252\n+line 1253\n+line 1254\n+line 1255\n+line 1256\n+line 1257\n+line 1258\n+line 1259\n+line 1260\n+line 1261\n+line 1262\n+line 1263\n+line 1264\n+line 1265\n+line 1266\n+line 1267\n+line 1268\n+line 1269\n+line 1270\n+line 1271\n+line 1272\n+line 1273\n+line 1274\n+line 1275\n+line 1276\n+line 1277\n+line 1278\n+line 1279\n+line 1280\n+line 1281\n+line 1282\n+line 1283\n+line 1284\n+line 1285\n+line 1286\n+line 1287\n+line 1288\n+line 1289\n+line 1290\n+line 1291\n+line 1292\n+line 1293\n+line 1294\n+line 1295\n+line 1296\n+line 1297\n+line 1298\n+line 1299\n+line 1300\n+line 1301\n+line 1302\n+line 1303\n+line 1304\n+line 1305\n+line 1306\n+line 1307\n+line 1308\n+line 1309\n+line 1310\n+line 1311\n+line 1312\n+line 1313\n+line 1314\n+line 1315\n+line 1316\n+line 1317\n+line 1318\n+line 1319\n+line 1320\n+line 1321\n+line 1322\n+line 1323\n+line 1324\n+line 1325\n+line 1326\n+line 1327\n+line 1328\n+line 1329\n+line 1330\n+line 1331\n+line 1332\n+line 1333\n+line 1334\n+line 1335\n+line 1336\n+line 1337\n+line 1338\n+line 1339\n+line 1340\n+line 1341\n+line 1342\n+line 1343\n+line 1344\n+line 1345\n+line 1346\n+line 1347\n+line 1348\n+line 1349\n+line 1350\n+line 1351\n+line 1352\n+line 1353\n+line 1354\n+line 1355\n+line 1356\n+line 1357\n+line 1358\n+line 1359\n+line 1360\n+line 1361\n+line 1362\n+line 1363\n+line 1364\n+line 1365\n+line 1366\n+line 1367\n+line 1368\n+line 1369\n+line 1370\n+line 1371\n+line 1372\n+line 1373\n+line 1374\n+line 1375\n+line 1376\n+line 1377\n+line 1378\n+line 1379\n+line 1380\n+line 1381\n+line 1382\n+line 1383\n+line 1384\n+line 1385\n+line 1386\n+line 1387\n+line 1388\n+line 1389\n+line 1390\n+line 1391\n+line 1392\n+line 1393\n+line 1394\n+line 1395\n+line 1396\n+line 1397\n+line 1398\n+line 1399\n+line 1400\n+line 1401\n+line 1402\n+line 1403\n+line 1404\n+line 1405\n+line 1406\n+line 1407\n+line 1408\n+line 1409\n+line 1410\n+line 1411\n+line 1412\n+line 1413\n+line 1414\n+line 1415\n+line 1416\n+line 1417\n+line 1418\n+line 1419\n+line 1420\n+line 1421\n+line 1422\n+line 1423\n+line 1424\n+line 1425\n+line 1426\n+line 1427\n+line 1428\n+line 1429\n+line 1430\n+line 1431\n+line 1432\n+line 1433\n+line 1434\n+line 1435\n+line 1436\n+line 1437\n+line 1438\n+line 1439\n+line 1440\n+line 1441\n+line 1442\n+line 1443\n+line 1444\n+line 1445\n+line 1446\n+line 1447\n+line 1448\n+line 1449\n+line 1450\n+line 1451\n+line 1452\n+line 1453\n+line 1454\n+line 1455\n+line 1456\n+line 1457\n+line 1458\n+line 1459\n+line 1460\n+line 1461\n+line 1462\n+line 1463\n+line 1464\n+line 1465\n+line 1466\n+line 1467\n+line 1468\n+line 1469\n+line 1470\n+line 1471\n+line 1472\n+line 1473\n+line 1474\n+line 1475\n+line 1476\n+line 1477\n+line 1478\n+line 1479\n+line 1480\n+line 1481\n+line 1482\n+line 1483\n+line 1484\n+line 1485\n+line 1486\n+line 1487\n+line 1488\n+line 1489\n+line 1490\n+line 1491\n+line 1492\n+line 1493\n+line 1494\n+line 1495\n+line 1496\n+line 1497\n+line 1498\n+line 1499\n+line 1500\n+line 1501\n+line 1502\n+line 1503\n+line 1504\n+line 1505\n+line 1506\n+line 1507\n+line 1508\n+line 1509\n+line 1510\n+line 1511\n+line 1512\n+line 1513\n+line 1514\n+line 1515\n+line 1516\n+line 1517\n+line 1518\n+line 1519\n+line 1520\n+line 1521\n+line 1522\n+line 1523\n+line 1524\n+line 1525\n+line 1526\n+line 1527\n+line 1528\n+line 1529\n+line 1530\n+line 1531\n+line 1532\n+line 1533\n+line 1534\n+line 1535\n+line 1536\n+line 1537\n+line 1538\n+line 1539\n+line 1540\n+line 1541\n+line 1542\n+line 1543\n+line 1544\n+line 1545\n+line 1546\n+line 1547\n+line 1548\n+line 1549\n+line 1550\n+line 1551\n+line 1552\n+line 1553\n+line 1554\n+line 1555\n+line 1556\n+line 1557\n+line 1558\n+line 1559\n+line 1560\n+line 1561\n+line 1562\n+line 1563\n+line 1564\n+line 1565\n+line 1566\n+line 1567\n+line 1568\n+line 1569\n+line 1570\n+line 1571\n+line 1572\n+line 1573\n+line 1574\n+line 1575\n+line 1576\n+line 1577\n+line 1578\n+line 1579\n+line 1580\n+line 1581\n+line 1582\n+line 1583\n+line 1584\n+line 1585\n+line 1586\n+line 1587\n+line 1588\n+line 1589\n+line 1590\n+line 1591\n+line 1592\n+line 1593\n+line 1594\n+line 1595\n+line 1596\n+line 1597\n+line 1598\n+line 1599\n+line 1600\n+line 1601\n+line 1602\n+line 1603\n+line 1604\n+line 1605\n+line 1606\n+line 1607\n+line 1608\n+line 1609\n+line 1610\n+line 1611\n+line 1612\n+line 1613\n+line 1614\n+line 1615\n+line 1616\n+line 1617\n+line 1618\n+line 1619\n+line 1620\n+line 1621\n+line 1622\n+line 1623\n+line 1624\n+line 1625\n+line 1626\n+line 1627\n+line 1628\n+line 1629\n+line 1630\n+line 1631\n+line 1632\n+line 1633\n+line 1634\n+line 1635\n+line 1636\n+line 1637\n+line 1638\n+line 1639\n+line 1640\n+line 1641\n+line 1642\n+line 1643\n+line 1644\n+line 1645\n+line 1646\n+line 1647\n+line 1648\n+line 1649\n+line 1650\n+line 1651\n+line 1652\n+line 1653\n+line 1654\n+line 1655\n+line 1656\n+line 1657\n+line 1658\n+line 1659\n+line 1660\n+line 1661\n+line 1662\n+line 1663\n+line 1664\n+line 1665\n+line 1666\n+line 1667\n+line 1668\n+line 1669\n+line 1670\n+line 1671\n+line 1672\n+line 1673\n+line 1674\n+line 1675\n+line 1676\n+line 1677\n+line 1678\n+line 1679\n+line 1680\n+line 1681\n+line 1682\n+line 1683\n+line 1684\n+line 1685\n+line 1686\n+line 1687\n+line 1688\n+line 1689\n+line 1690\n+line 1691\n+line 1692\n+line 1693\n+line 1694\n+line 1695\n+line 1696\n+line 1697\n+line 1698\n+line 1699\n+line 1700\n+line 1701\n+line 1702\n+line 1703\n+line 1704\n+line 1705\n+line 1706\n+line 1707\n+line 1708\n+line 1709\n+line 1710\n+line 1711\n+line 1712\n+line 1713\n+line 1714\n+line 1715\n+line 1716\n+line 1717\n+line 1718\n+line 1719\n+line 1720\n+line 1721\n+line 1722\n+line 1723\n+line 1724\n+line 1725\n+line 1726\n+line 1727\n+line 1728\n+line 1729\n+line 1730\n+line 1731\n+line 1732\n+line 1733\n+line 1734\n+line 1735\n+line 1736\n+line 1737\n+line 1738\n+line 1739\n+line 1740\n+line 1741\n+line 1742\n+line 1743\n+line 1744\n+line 1745\n+line 1746\n+line 1747\n+line 1748\n+line 1749\n+line 1750\n+line 1751\n+line 1752\n+line 1753\n+line 1754\n+line 1755\n+line 1756\n+line 1757\n+line 1758\n+line 1759\n+line 1760\n+line 1761\n+line 1762\n+line 1763\n+line 1764\n+line 1765\n+line 1766\n+line 1767\n+line 1768\n+line 1769\n+line 1770\n+line 1771\n+line 1772\n+line 1773\n+line 1774\n+line 1775\n+line 1776\n+line 1777\n+line 1778\n+line 1779\n+line 1780\n+line 1781\n+line 1782\n+line 1783\n+line 1784\n+line 1785\n+line 1786\n+line 1787\n+line 1788\n+line 1789\n+line 1790\n+line 1791\n+line 1792\n+line 1793\n+line 1794\n+line 1795\n+line 1796\n+line 1797\n+line 1798\n+line 1799\n+line 1800\n+line 1801\n+line 1802\n+line 1803\n+line 1804\n+line 1805\n+line 1806\n+line 1807\n+line 1808\n+line 1809\n+line 1810\n+line 1811\n+line 1812\n+line 1813\n+line 1814\n+line 1815\n+line 1816\n+line 1817\n+line 1818\n+line 1819\n+line 1820\n+line 1821\n+line 1822\n+line 1823\n+line 1824\n+line 1825\n+line 1826\n+line 1827\n+line 1828\n+line 1829\n+line 1830\n+line 1831\n+line 1832\n+line 1833\n+line 1834\n+line 1835\n+line 1836\n+line 1837\n+line 1838\n+line 1839\n+line 1840\n+line 1841\n+line 1842\n+line 1843\n+line 1844\n+line 1845\n+line 1846\n+line 1847\n+line 1848\n+line 1849\n+line 1850\n+line 1851\n+line 1852\n+line 1853\n+line 1854\n+line 1855\n+line 1856\n+line 1857\n+line 1858\n+line 1859\n+line 1860\n+line 1861\n+line 1862\n+line 1863\n+line 1864\n+line 1865\n+line 1866\n+line 1867\n+line 1868\n+line 1869\n+line 1870\n+line 1871\n+line 1872\n+line 1873\n+line 1874\n+line 1875\n+line 1876\n+line 1877\n+line 1878\n+line 1879\n+line 1880\n+line 1881\n+line 1882\n+line 1883\n+line 1884\n+line 1885\n+line 1886\n+line 1887\n+line 1888\n+line 1889\n+line 1890\n+line 1891\n+line 1892\n+line 1893\n+line 1894\n+line 1895\n+line 1896\n+line 1897\n+line 1898\n+line 1899\n+line 1900\n+line 1901\n+line 1902\n+line 1903\n+line 1904\n+line 1905\n+line 1906\n+line 1907\n+line 1908\n+line 1909\n+line 1910\n+line 1911\n+line 1912\n+line 1913\n+line 1914\n+line 1915\n+line 1916\n+line 1917\n+line 1918\n+line 1919\n+line 1920\n+line 1921\n+line 1922\n+line 1923\n+line 1924\n+line 1925\n+line 1926\n+line 1927\n+line 1928\n+line 1929\n+line 1930\n+line 1931\n+line 1932\n+line 1933\n+line 1934\n+line 1935\n+line 1936\n+line 1937\n+line 1938\n+line 1939\n+line 1940\n+line 1941\n+line 1942\n+line 1943\n+line 1944\n+line 1945\n+line 1946\n+line 1947\n+line 1948\n+line 1949\n+line 1950\n+line 1951\n+line 1952\n+line 1953\n+line 1954\n+line 1955\n+line 1956\n+line 1957\n+line 1958\n+line 1959\n+line 1960\n+line 1961\n+line 1962\n+line 1963\n+line 1964\n+line 1965\n+line 1966\n+line 1967\n+line 1968\n+line 1969\n+line 1970\n+line 1971\n+line 1972\n+line 1973\n+line 1974\n+line 1975\n+line 1976\n+line 1977\n+line 1978\n+line 1979\n+line 1980\n+line 1981\n+line 1982\n+line 1983\n+line 1984\n+line 1985\n+line 1986\n+line 1987\n+line 1988\n+line 1989\n+line 1990\n+line 1991\n+line 1992\n+line 1993\n+line 1994\n+line 1995\n+line 1996\n+line 1997\n+line 1998\n+line 1999\n+line 2000\n+line 2001\n+line 2002\n+line 2003\n+line 2004\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.max_additions"
+  - description: "a patch that weakens a control is denied"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.32"
+    tags: ["deny", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+chmod 777 /srv/app\n"
+    expect:
+      decision: deny
+      matched_rule: "rules.patch_integrity.forbidden_patterns[3]"
+  - description: "a small balanced patch is allowed"
+    controls:
+      - framework: iso-27001-2022
+        control_id: "A.8.32"
+    tags: ["allow", "patch"]
+    action:
+      type: "patch_apply"
+      target: "/srv/app/service.py"
+      content: "+added one\n+added two\n-removed one\n"
+    expect:
+      decision: allow
+  - description: "an allowlisted tool is allowed (build)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["allow", "tools"]
+    action:
+      type: "tool_call"
+      target: "build"
+    expect:
+      decision: allow
+      matched_rule: "rules.tool_access.allow"
+  - description: "a blocked tool is denied (deploy_production)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "deploy_production"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.block"
+  - description: "a tool requiring confirmation warns (publish)"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["warn", "tools"]
+    action:
+      type: "tool_call"
+      target: "publish"
+    expect:
+      decision: warn
+      matched_rule: "rules.tool_access.require_confirmation"
+  - description: "an unlisted tool is denied in allowlist mode"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "tools", "fail-closed"]
+    action:
+      type: "tool_call"
+      target: "browse_web"
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.allow"
+  - description: "tool arguments above max_args_size (1048576) are denied"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM06"
+    tags: ["deny", "tools"]
+    action:
+      type: "tool_call"
+      target: "build"
+      args_size: 1048577
+    expect:
+      decision: deny
+      matched_rule: "rules.tool_access.max_args_size"
+  - description: "the scanner denies aws_access_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "aws_access_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_access_key"
+  - description: "the scanner denies aws_secret_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "aws_secret_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "aws_secret_access_key = wJalrXUtnFEMIbK7MDENGbbPxRfiCYEXAMPLEKEYA"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.aws_secret_key"
+  - description: "the scanner denies github_actions_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "github_actions_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "ghs_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_actions_token"
+  - description: "the scanner denies github_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "github_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_token"
+  - description: "the scanner denies github_fine_grained_pat in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "github_fine_grained_pat"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "github_pat_11ABCDEFG0aBcDeFgHiJkL_mNoPqRsTuVwXyZ0123456789abcdefghij"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.github_fine_grained_pat"
+  - description: "the scanner denies npm_token in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "npm_token"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "npm_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.npm_token"
+  - description: "the scanner denies private_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "private_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "-----BEGIN RSA PRIVATE KEY-----"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.private_key"
+  - description: "the scanner denies docker_auth in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "docker_auth"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "docker_password = A1b2C3d4E5f6G7h8J9k0"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.docker_auth"
+  - description: "the scanner denies gcp_service_account in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "gcp_service_account"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "\"type\": \"service_account\""
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.gcp_service_account"
+  - description: "the scanner denies generic_api_key in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "generic_api_key"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "api_key: A1b2C3d4E5f6G7h8J9k0L1m2N3p4Q5r6"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.generic_api_key"
+  - description: "the scanner denies connection_string in written content"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["deny", "secrets", "connection_string"]
+    action:
+      type: "file_write"
+      target: "/srv/app/notes/handoff.md"
+      content: "postgres://svc:pw@build.internal/app"
+    expect:
+      decision: deny
+      matched_rule: "rules.secret_patterns.patterns.connection_string"
+  - description: "a secret under a skip path is not scanned"
+    controls:
+      - framework: owasp-llm-top10-2025
+        control_id: "LLM02"
+    tags: ["allow", "secrets"]
+    action:
+      type: "file_write"
+      target: "/srv/app/test/srv/app/fixture_keys.py"
+      content: "AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: allow

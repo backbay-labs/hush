@@ -1,0 +1,60 @@
+hushspec_test: "0.1.0"
+description: "A backslash ends the URL authority exactly as a slash does, so a crafted userinfo cannot smuggle a blocked host past an allowlist (core spec 3.14.2)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      allow:
+        - allowed.com
+      default: block
+    browser_automation:
+      enabled: true
+      allowed_domains:
+        - allowed.com
+      allowed_verbs:
+        - navigate
+cases:
+  - description: "a backslash before the at sign ends the authority: the host is the blocked one"
+    action:
+      type: egress
+      target: 'http://blocked.com\@allowed.com/x'
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "the same without a scheme"
+    action:
+      type: egress
+      target: 'blocked.com\@allowed.com'
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "a backslash after the host ends the authority like a slash would"
+    action:
+      type: egress
+      target: 'http://allowed.com\x'
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "ordinary userinfo is still removed"
+    action:
+      type: egress
+      target: 'https://user:pw@allowed.com/path'
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "a browser navigation reads the destination the same way"
+    action:
+      type: browser_action
+      target: navigate
+      url: 'http://blocked.com\@allowed.com/x'
+    expect:
+      decision: deny
+      matched_rule: rules.browser_automation.allowed_domains
+  - description: "a browser navigation to the allowed host"
+    action:
+      type: browser_action
+      target: navigate
+      url: 'http://allowed.com/x'
+    expect:
+      decision: allow
+      matched_rule: rules.browser_automation

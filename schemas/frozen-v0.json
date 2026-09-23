@@ -1,0 +1,21 @@
+{
+  "frozen_lineage": "0.x",
+  "files": {
+    "hushspec-core.v0.schema.json": "sha256:664df8ccd7b4127f9f56bc247c1d268ca745b9890e762fc57a97cb4481641574",
+    "hushspec-posture.v0.schema.json": "sha256:3a884b3ce98ff168cacbbf3ed968034152d733800cc647fad2fded7074bdde83",
+    "hushspec-origins.v0.schema.json": "sha256:ab6797e3cfa7c1cc891b54df776f92698500811f366a50ad77170e68ee89c643",
+    "hushspec-detection.v0.schema.json": "sha256:962d0f15b966155367f974eea71109c8b9ff2c406fe5e34ce6dde672a143190a",
+    "hushspec-evaluator-test.v0.schema.json": "sha256:07b6ec578fdfeaa748db5bd2e111d3bfdc245a228ef299ff2e5af9067dd5103c",
+    "hushspec-hash-vector.v0.schema.json": "sha256:b3e019e6a2add8e9d0a4ec734f7bc4b470114ef5e731a2cfb3a03b57ed072171",
+    "hushspec-receipt.v0.schema.json": "sha256:28acbc5c8be87d5201c5c568f2e571f7a78ef822a09ec73d2465bd5c64e40c5b",
+    "hushspec-log-entry.v0.schema.json": "sha256:ed5c0e22ef202cb957bd2f82c675f1ac6c701feb7d941f0986cf03923c4b767e",
+    "hushspec-signature.v0.schema.json": "sha256:cc092946b1eb67a3efe1d85b79d60a030ba8760c12606c1217602bab9f51f32f",
+    "hushspec-keyring.v0.schema.json": "sha256:9d568431bfea782f5eab21db2c86ed292b78b0f9310fab4d1e4b852348584ba9",
+    "hushspec-bundle.v0.schema.json": "sha256:e3aca3f8a906f0aae6bf8cb76fa68721c9923b4f8a14527379e55df328677372",
+    "hushspec-report.v0.schema.json": "sha256:adb729f6637eae1d51ff32457af4d92e2dad096f12f443992caa82fe63f545d6",
+    "hushspec-error-codes.v0.schema.json": "sha256:6ec914d5deae5ff1e3cbbbea841d7f21c5aa17e8acc092072b4e92a188503413",
+    "hushspec-merge-vector.v0.schema.json": "sha256:c179ca44a3a55fb643d4a43b8d273fb2a65e3804e95bbd4fc4e74870553fd92f",
+    "hushspec-conformance-report.v0.schema.json": "sha256:6aa04ed7ebc537ac0a02d0a92da2c5d8ee0cbc19904d327b535a6cecbe834da8",
+    "hushspec-framework-registry.v0.schema.json": "sha256:da96f8c91f7271255d6cfca94a206a7dfe88cd6fbe5c25e94039498901ccaf20"
+  }
+}

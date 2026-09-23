@@ -1,0 +1,49 @@
+hushspec_test: "0.1.0"
+description: "Warn severity warns; the highest matched severity wins regardless of pattern order (core spec 3.4)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        - name: warn_token
+          pattern: "WARNTOKEN"
+          severity: warn
+        - name: crit_token
+          pattern: "CRITTOKEN"
+          severity: critical
+        - name: err_token
+          pattern: "ERRTOKEN"
+          severity: error
+cases:
+  - description: "a warn-severity match produces warn"
+    action:
+      type: file_write
+      target: "/repo/a.txt"
+      content: "WARNTOKEN"
+    expect:
+      decision: warn
+      matched_rule: rules.secret_patterns.patterns.warn_token
+  - description: "a later critical match outranks an earlier warn match"
+    action:
+      type: file_write
+      target: "/repo/a.txt"
+      content: "WARNTOKEN CRITTOKEN"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.crit_token
+  - description: "an error match outranks a warn match"
+    action:
+      type: file_write
+      target: "/repo/a.txt"
+      content: "WARNTOKEN ERRTOKEN"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.err_token
+  - description: "critical outranks error when both match"
+    action:
+      type: file_write
+      target: "/repo/a.txt"
+      content: "ERRTOKEN CRITTOKEN"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.crit_token

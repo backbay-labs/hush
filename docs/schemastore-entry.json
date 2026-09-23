@@ -1,13 +1,52 @@
 {
-  "name": "HushSpec",
-  "description": "Portable security rules for AI agent runtimes",
-  "url": "https://hushspec.dev/schemas/hushspec-core.v0.schema.json",
-  "fileMatch": [
-    "hushspec.yaml",
-    "hushspec.yml",
-    ".hushspec.yaml",
-    ".hushspec.yml",
-    "*.hushspec.yaml",
-    "*.hushspec.yml"
+  "$comment": "Catalog entries prepared for SchemaStore (https://github.com/SchemaStore/schemastore), to be inserted into src/api/json/catalog.json's `schemas` array, which is sorted by `name`. Each entry carries only the keys that array accepts -- `name`, `description`, `fileMatch`, `url` -- so the array below can be pasted verbatim; this `$comment` and the `schemas` wrapper are local and are not part of a submission. Every `url` is the `$id` the schema document itself declares. See docs/src/guides/editor-setup.md for the submission checklist and the fallback that works before the host is live.",
+  "schemas": [
+    {
+      "name": "HushSpec",
+      "description": "Agentic compliance as code: portable policy spec for AI agent security controls",
+      "fileMatch": [
+        "hushspec.yaml",
+        "hushspec.yml",
+        ".hushspec.yaml",
+        ".hushspec.yml",
+        "*.hushspec.yaml",
+        "*.hushspec.yml"
+      ],
+      "url": "https://hushspec.org/schemas/hushspec-core.v1.schema.json"
+    },
+    {
+      "name": "HushSpec Decision Receipt",
+      "description": "Tamper-evident record of one HushSpec policy evaluation: the policy by content hash, the action, the decision, and the rules that produced it",
+      "fileMatch": [
+        "*.receipt.json"
+      ],
+      "url": "https://hushspec.org/schemas/hushspec-receipt.v1.schema.json"
+    },
+    {
+      "name": "HushSpec Evaluator Test",
+      "description": "Evaluator test suite for a HushSpec policy: cases with an action, a runtime context, and the decision expected of any conformant engine",
+      "fileMatch": [
+        "*.hushspec.test.yaml",
+        "*.hushspec.test.yml",
+        "**/fixtures/**/*.test.yaml"
+      ],
+      "url": "https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json"
+    },
+    {
+      "name": "HushSpec Log Entry",
+      "description": "One entry of a hash-linked HushSpec receipt log, as a standalone JSON document; a .jsonl stream holds one of these per line",
+      "fileMatch": [
+        "*.log-entry.json"
+      ],
+      "url": "https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json"
+    },
+    {
+      "name": "HushSpec Policy Bundle",
+      "description": "Signed attestation over a resolved HushSpec policy: a DSSE envelope carrying an in-toto statement with the policy, its extends chain, and the resolver that produced them",
+      "fileMatch": [
+        "*.bundle.json"
+      ],
+      "url": "https://hushspec.org/schemas/hushspec-bundle.v1.schema.json"
+    }
   ]
 }

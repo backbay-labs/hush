@@ -1,0 +1,50 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7001-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:85dd0a1230779b70cf89d553337fbcb7eeb65d80cb712a94185623be39d0aaa2"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/src/config.js",
+    "content_hash": "sha256:8fefe692f690a3173176ecdff4318225afaeb97fdd6f60c866ed823d59221665",
+    "content_size": 6
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.ascii_digits",
+  "reason": "content matched secret pattern 'ascii_digits'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.ascii_digits",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'ascii_digits'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

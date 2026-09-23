@@ -1,0 +1,24 @@
+# Hop 3 of 3 (the leaf). core 4.2: merge is pairwise from the root to the
+# leaf, so the result is merge(merge(base, mid), child) -- not merge(base,
+# child). Each hop pins the one below it by digest (core 2.3), so the chain is
+# resolved rather than merged directly and every pin is checked on the way.
+#
+# What the leaf proves: `rules.egress` replaces the *mid* block (the root's
+# is already gone), `rules.tool_access` replaces the root's, `secret_patterns`
+# is inherited from the mid hop untouched, and `forbidden_paths` survives two
+# hops from the root.
+hushspec: "0.2.0"
+name: project-leaf
+extends: "mid.yaml#sha256:015d3b3ba928706fc07b6b12f8ee820512ee5133bf39df7706f7b937988814be"
+rules:
+  egress:
+    allow:
+      - "c.example.com"
+    default: block
+  tool_access:
+    allow:
+      - read_file
+    block: []
+    require_confirmation:
+      - git_push
+    default: block

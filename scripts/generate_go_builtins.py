@@ -6,21 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+
+from generator_support import ROOT, all_builtin_names, builtin_yaml
 
 
-ROOT = Path(__file__).resolve().parent.parent
-RULESETS_DIR = ROOT / "rulesets"
 OUTPUT = ROOT / "packages" / "go" / "hushspec" / "builtins.go"
-
-BUILTIN_NAMES = [
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-]
 
 
 def render() -> str:
@@ -34,7 +24,11 @@ def render() -> str:
         "",
         "package hushspec",
         "",
-        'import "strings"',
+        "import (",
+        '\t"errors"',
+        '\t"fmt"',
+        '\t"strings"',
+        ")",
         "",
         "var builtinRulesets = map[string]string{",
     ]
@@ -43,31 +37,54 @@ def render() -> str:
     # is padded with spaces so every value starts one column past the widest
     # `"key":`. Replicate that here so the output is gofmt-clean without needing
     # gofmt on PATH (the Generated Sources CI job has only Python).
-    key_col = {name: len(json.dumps(name)) + 1 for name in BUILTIN_NAMES}  # +1 for ':'
+    names = all_builtin_names()
+    key_col = {name: len(json.dumps(name)) + 1 for name in names}  # +1 for ':'
     value_col = max(key_col.values()) + 1
 
-    for name in BUILTIN_NAMES:
-        yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
+    for name in names:
         pad = " " * (value_col - key_col[name])
-        lines.append(f"\t{json.dumps(name)}:{pad}{json.dumps(yaml_content, ensure_ascii=False)},")
+        lines.append(
+            f"\t{json.dumps(name)}:{pad}"
+            f"{json.dumps(builtin_yaml(name), ensure_ascii=False)},"
+        )
 
     lines.extend(
         [
             "}",
             "",
+            "// BuiltinNames are the canonical names of the embedded policies:",
+            '// the rulesets/ presets, then the vertical library as',
+            '// "library/<vertical>/<name>".',
+            "var BuiltinNames = []string{",
+        ]
+    )
+
+    for name in names:
+        lines.append(f"\t{json.dumps(name)},")
+
+    lines.extend(
+        [
+            "}",
+            "",
+            "// ErrUnknownBuiltin reports a name that is not an embedded policy.",
+            'var ErrUnknownBuiltin = errors.New("unknown built-in ruleset")',
+            "",
             "// LoadBuiltin parses the built-in ruleset for name (with or without the",
-            '// "builtin:" prefix) and reports whether the name was found.',
-            "func LoadBuiltin(name string) (*HushSpec, bool) {",
+            '// "builtin:" prefix). An unknown name wraps [ErrUnknownBuiltin]; an embedded',
+            "// ruleset that does not parse reports its parse error, since the document is",
+            "// generated from rulesets/ and a failure there is a broken build, not an",
+            "// unknown built-in.",
+            "func LoadBuiltin(name string) (*HushSpec, error) {",
             '\tresolved := strings.TrimPrefix(name, "builtin:")',
             "\tyaml, ok := builtinRulesets[resolved]",
             "\tif !ok {",
-            "\t\treturn nil, false",
+            '\t\treturn nil, fmt.Errorf("%w: %s", ErrUnknownBuiltin, resolved)',
             "\t}",
             "\tspec, err := Parse(yaml)",
             "\tif err != nil {",
-            "\t\treturn nil, false",
+            '\t\treturn nil, fmt.Errorf("built-in ruleset %q does not parse: %w", resolved, err)',
             "\t}",
-            "\treturn spec, true",
+            "\treturn spec, nil",
             "}",
             "",
         ]

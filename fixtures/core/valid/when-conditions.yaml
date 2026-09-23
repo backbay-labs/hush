@@ -1,0 +1,35 @@
+# Every condition form is accepted on a rule block (core spec 3.13).
+hushspec: "0.1.0"
+name: when-conditions
+rules:
+  shell_commands:
+    when:
+      context:
+        environment: production
+      time_window:
+        start: "22:00"
+        end: "06:00"
+        timezone: "America/New_York"
+        days: [mon, tue, wed, thu, fri]
+    forbidden_patterns:
+      - "rm[ \\t]+-rf[ \\t]+/"
+  egress:
+    when:
+      any_of:
+        - context:
+            user.role: contractor
+        - all_of:
+            - context:
+                deployment.region: eu-west-1
+            - not:
+                context:
+                  agent.type: batch
+    allow: ["api.example.com"]
+    default: block
+  tool_access:
+    when:
+      time_window:
+        start: "09:00"
+        end: "17:00"
+    block: [deploy]
+    default: allow

@@ -1,0 +1,107 @@
+hushspec_signing_vectors: 0.1.0
+description: Verification vectors for spec/hushspec-signing.md. `now` is the verifier's clock for the case; `last_seen_version`
+  is the verifier's recorded policy_version for the policy name, when rollback protection applies. Expected reason
+  codes are defined in spec section 6.4.
+defaults:
+  keyring: keys/keyring.json
+  now: '2026-09-15T12:00:00.000Z'
+  max_clock_skew_seconds: 300
+cases:
+- name: basic
+  policy: policies/basic.yaml
+  signature: policies/basic.sig
+  expect: valid
+- name: reformatted-yaml-still-verifies
+  policy: policies/reformatted.yaml
+  signature: policies/reformatted.sig
+  expect: valid
+- name: extends-chain-resolved-before-hashing
+  policy: policies/extends-child.yaml
+  signature: policies/extends-child.sig
+  expect: valid
+  note: content_hash covers the RESOLVED document (builtin:default merged in); policies/extends-child.resolved.json
+    shows it
+- name: rollback-protection-passes-when-newer
+  policy: policies/basic.yaml
+  signature: policies/basic.sig
+  last_seen_version: 3
+  expect: valid
+- name: tampered-content
+  policy: policies/tampered.yaml
+  signature: policies/tampered.sig
+  expect:
+    invalid: content_hash_mismatch
+- name: untrusted-key
+  policy: policies/basic.yaml
+  signature: policies/untrusted-key.sig
+  expect:
+    invalid: unknown_key_id
+- name: expired
+  policy: policies/basic.yaml
+  signature: policies/expired.sig
+  expect:
+    invalid: expired
+- name: signed-in-future
+  policy: policies/basic.yaml
+  signature: policies/signed-in-future.sig
+  expect:
+    invalid: signed_at_in_future
+- name: rollback
+  policy: policies/basic.yaml
+  signature: policies/rollback.sig
+  last_seen_version: 4
+  expect:
+    invalid: policy_version_rollback
+- name: raw-bytes-hash-rejected
+  policy: policies/basic.yaml
+  signature: policies/raw-bytes-hash.sig
+  expect:
+    invalid: content_hash_mismatch
+  note: a 0.1-style signature over the file bytes carries a content_hash that is not the canonical hash
+- name: bad-algorithm
+  policy: policies/basic.yaml
+  signature: policies/bad-algorithm.sig
+  expect:
+    invalid: unsupported_algorithm
+- name: bad-format-version
+  policy: policies/basic.yaml
+  signature: policies/bad-format-version.sig
+  expect:
+    invalid: unsupported_format_version
+- name: corrupt-signature
+  policy: policies/basic.yaml
+  signature: policies/corrupt-signature.sig
+  expect:
+    invalid: signature_mismatch
+- name: edited-envelope
+  policy: policies/basic.yaml
+  signature: policies/edited-envelope.sig
+  expect:
+    invalid: signature_mismatch
+- name: retired-key
+  policy: policies/basic.yaml
+  signature: policies/basic.sig
+  keyring: keys/keyring-retired.json
+  expect:
+    invalid: key_retired
+- name: revoked-key
+  policy: policies/basic.yaml
+  signature: policies/basic.sig
+  keyring: keys/keyring-revoked.json
+  expect:
+    invalid: key_revoked
+- name: impossible-signed-at-date
+  policy: policies/basic.yaml
+  signature: policies/impossible-date.sig
+  expect:
+    invalid: malformed_envelope
+  note: February 30 is not a calendar date, so the shape check of section 6.2 fails before any
+    signature check; an engine that normalized it would compare expiry and retirement against
+    March 2
+- name: leap-second-signed-at
+  policy: policies/basic.yaml
+  signature: policies/leap-second.sig
+  expect:
+    invalid: malformed_envelope
+  note: second 60 is a leap second, not an instant the `[0-5][0-9]` pattern of the schema admits, so
+    the shape check of section 6.2 fails before any signature check

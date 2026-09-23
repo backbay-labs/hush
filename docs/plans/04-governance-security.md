@@ -1,11 +1,13 @@
 # RFC-04: Governance, Policy Signing, Emergency Overrides, and ReDoS Protection
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Authors:** Security Architecture Team
 **Date:** 2026-03-15
 **HushSpec Version:** 0.1.0
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). Governance/signing/panic artifacts are implemented on the open stack, not merged or published. Enterprise RBAC/OIDC/LDAP, lifecycle service, and keyless/X.509 scope remain explicit deferrals; provider watch recovery has a local verification record, with hosted qualification pending.
 
 ## 1. Executive Summary
 

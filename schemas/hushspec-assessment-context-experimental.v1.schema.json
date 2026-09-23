@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-assessment-context-experimental.v1.schema.json",
+  "title": "HushSpec assessment-context-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "hushspec_assessment_context",
+    "assessment_plan",
+    "system_security_plan",
+    "resolved_catalog"
+  ],
+  "properties": {
+    "hushspec_assessment_context": {
+      "const": "0.1.0"
+    },
+    "assessment_plan": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "system_security_plan": {
+      "$ref": "#/$defs/ArtifactRef"
+    },
+    "resolved_catalog": {
+      "$ref": "#/$defs/ArtifactRef"
+    }
+  },
+  "$defs": {
+    "ArtifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

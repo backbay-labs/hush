@@ -1,0 +1,31 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.3/3.4: origins projected against the origins schema; default_behavior materializes\
+  \ to deny and the DataPolicy/BridgePolicy booleans materialize; the presence-significant `match: {}`\
+  \ default profile survives, while overlay lists written empty are omitted"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "tool_access":
+      "allow":
+      - "read_file"
+  "extensions":
+    "origins":
+      "profiles":
+      - "id": "fallback"
+        "match": {}
+        "tool_access":
+          "allow": []
+        "egress":
+          "block": []
+      - "id": "slack-incident"
+        "match":
+          "provider": "slack"
+          "tags":
+          - "incident"
+        "data":
+          "redact_before_send": true
+        "bridge":
+          "allow_cross_origin": true
+          "allowed_targets": []
+canonical: "{\"extensions\":{\"origins\":{\"default_behavior\":\"deny\",\"profiles\":[{\"id\":\"fallback\",\"match\":{}},{\"bridge\":{\"allow_cross_origin\":true,\"require_approval\":false},\"data\":{\"allow_external_sharing\":false,\"block_sensitive_outputs\":false,\"redact_before_send\":true},\"id\":\"slack-incident\",\"match\":{\"provider\":\"slack\",\"tags\":[\"incident\"]}}]}},\"hushspec\":\"0.1.0\",\"rules\":{\"tool_access\":{\"allow\":[\"read_file\"],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"require_confirmation\":[]}}}"
+content_hash: "sha256:717d4408ad704df25f14fe134720949065e8ed21983aa747c350b83610b48417"

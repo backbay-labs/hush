@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Parse a HushSpec file with the Python SDK and emit normalized JSON."""
+"""Parse a HushSpec file with the Python SDK and print its own canonical form."""
 
 from __future__ import annotations
 
-import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "python"))
 
-from hushspec import parse_or_raise  # noqa: E402
+from hushspec import canonical_json, parse_or_raise  # noqa: E402
 
 
 def main() -> int:
@@ -20,7 +20,9 @@ def main() -> int:
 
     path = Path(sys.argv[1])
     spec = parse_or_raise(path.read_text())
-    print(json.dumps(spec.to_dict(), sort_keys=True))
+    # The document's own canonical form: ``extends`` and ``merge_strategy`` are
+    # resolution instructions, not policy (canonical spec 3).
+    print(canonical_json(replace(spec, extends=None, merge_strategy=None)))
     return 0
 
 

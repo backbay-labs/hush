@@ -6,14 +6,92 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)build artifacts for"
+        description: "Release tag (planned tag for a dry run; existing tag for publication)"
         required: true
+      dry-run:
+        description: "Build and verify artifacts without any release, registry or Homebrew publication"
+        type: boolean
+        default: true
+      ref:
+        description: "Full candidate commit SHA, required for dry runs and forbidden for publication"
+        required: false
+      allow-unsigned:
+        description: "Build policy bundles without a HushSpec signature when POLICY_SIGNING_KEY is not configured"
+        type: boolean
+        default: false
+
+# Read-only by default; the jobs that publish widen it themselves.
+permissions:
+  contents: read
 
 env:
   TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs['dry-run'] || false }}
+  CANDIDATE_REF: ${{ inputs.ref }}
 
 jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - name: Validate tag format
+        id: selection
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
+          case "$DRY_RUN" in
+            true)
+              [[ "$CANDIDATE_REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::dry runs require a full candidate commit SHA"; exit 1; }
+              checkout_ref="$CANDIDATE_REF"
+              ;;
+            false)
+              [ -z "$CANDIDATE_REF" ] || { echo "::error::publication must use the release tag, not a ref override"; exit 1; }
+              checkout_ref="refs/tags/$TAG"
+              ;;
+            *) echo "::error::invalid dry-run mode"; exit 1 ;;
+          esac
+          printf 'checkout_ref=%s\n' "$checkout_ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.selection.outputs.checkout_ref }}
+      - name: Pin release candidate
+        id: candidate
+        shell: bash
+        run: |
+          sha="$(git rev-parse HEAD)"
+          if [ "$DRY_RUN" = true ] && [ "$sha" != "$CANDIDATE_REF" ]; then
+            echo "::error::checkout does not match the requested candidate"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import tomllib
+          expected = os.environ["TAG"][1:]
+          versions = {
+              "Rust": tomllib.loads(pathlib.Path("Cargo.toml").read_text())["workspace"]["package"]["version"],
+              "npm": json.loads(pathlib.Path("packages/hushspec/package.json").read_text())["version"],
+              "Python": tomllib.loads(pathlib.Path("packages/python/pyproject.toml").read_text())["project"]["version"],
+          }
+          for package, version in versions.items():
+              if version != expected:
+                  raise SystemExit(f"{package} version {version} does not match tag version {expected}")
+          PY
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: candidate
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.candidate.outputs.sha }}
+
   build:
+    needs: [candidate, ci]
     strategy:
       fail-fast: true
       matrix:
@@ -31,16 +109,22 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --locked
+        run: cargo install cross --version 0.2.5 --locked
       - name: Build
         shell: bash
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
+          CROSS_BUILD_ENV_PASSTHROUGH: H2H_GIT_SHA
         run: |
           # --locked builds from the committed Cargo.lock so release binaries
           # are reproducible and pinned (no fresh dependency resolution at
@@ -58,28 +142,248 @@ jobs:
           mkdir "$stage"
           cp "target/${{ matrix.target }}/release/${bin}" LICENSE README.md "$stage/"
           tar -czf "${stage}.tar.gz" "$stage"
+      - name: Smoke-test executable
+        shell: bash
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
+          CROSS_BUILD_ENV_PASSTHROUGH: H2H_GIT_SHA
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: |
+          bin="h2h"; [ "${{ runner.os }}" = "Windows" ] && bin="h2h.exe"
+          if [ "${{ matrix.cross }}" = true ]; then
+            # Execute the built binary using Cross's QEMU image directly.
+            # Invoking `cross run` also writes rustup status to stdout, even
+            # in quiet mode. No build/launcher output belongs in the JSON.
+            # This is emulated execution, not a native ARM64 runner.
+            runner=(docker run --rm --network=none --volume "$PWD:/work:ro" --workdir /work
+              ghcr.io/cross-rs/aarch64-unknown-linux-gnu:0.2.5 /linux-runner aarch64)
+            "${runner[@]}" "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
+            "${runner[@]}" "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml
+          else
+            "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
+            "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml
+          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          actual = json.loads(pathlib.Path("cli-version.json").read_text())
+          expected = {"git_sha": os.environ["H2H_GIT_SHA"], "version": os.environ["TAG"][1:], "target": os.environ["EXPECTED_TARGET"]}
+          for field, value in expected.items():
+              if actual.get(field) != value:
+                  raise SystemExit(f"artifact {field} mismatch: {actual.get(field)!r} != {value!r}")
+          print(json.dumps(actual, sort_keys=True))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: h2h-${{ matrix.target }}
           path: h2h-*.tar.gz
           retention-days: 3
 
+  # Every shipped policy gets a bundle: a DSSE / in-toto attestation carrying
+  # the *resolved* document, every extends hop's hash, and the resolver that
+  # produced them (spec/hushspec-bundle.md). Consumers of library/ and
+  # rulesets/ can then verify what they are enforcing without re-resolving.
+  bundles:
+    needs: [candidate, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate tag format
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build h2h
+        env:
+          H2H_GIT_SHA: ${{ needs.candidate.outputs.sha }}
+        run: cargo build -p hushspec-cli --release --locked
+      - name: Bundle every library and ruleset policy
+        shell: bash
+        env:
+          POLICY_SIGNING_KEY: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) && secrets.POLICY_SIGNING_KEY || '' }}
+          # The public half of POLICY_SIGNING_KEY, which `h2h keygen` writes
+          # alongside it. It is not secret, and the gate below verifies the
+          # signatures this step produces against it.
+          POLICY_SIGNING_PUBLIC_KEY: ${{ !(github.event_name == 'workflow_dispatch' && inputs['dry-run']) && vars.POLICY_SIGNING_PUBLIC_KEY || '' }}
+          ALLOW_UNSIGNED: ${{ github.event.inputs.allow-unsigned }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bundles
+          key_file="${RUNNER_TEMP}/policy-signing.key.pem"
+          pub_file="${RUNNER_TEMP}/policy-signing.pub.pem"
+          trap 'rm -f "$key_file"' EXIT
+          key_args=()
+          if [ "$DRY_RUN" = true ]; then
+            ./target/release/h2h keygen --output-dir "$RUNNER_TEMP" --name policy-signing
+            key_args=(--key "$key_file")
+          elif [ -n "${POLICY_SIGNING_KEY}" ]; then
+            # Exactly one trailing newline, whether or not the secret carries
+            # one: the strict PEM decoder wants the END line terminated and
+            # nothing after it.
+            printf '%s\n' "${POLICY_SIGNING_KEY%$'\n'}" > "$key_file"
+            chmod 600 "$key_file"
+            key_args=(--key "$key_file")
+            if [ -z "${POLICY_SIGNING_PUBLIC_KEY}" ]; then
+              echo "::error::POLICY_SIGNING_KEY is set but the repository variable POLICY_SIGNING_PUBLIC_KEY is not, so nothing can verify what this step signs. Set it to the .pub.pem that h2h keygen wrote next to the signing key."
+              exit 1
+            fi
+            printf '%s\n' "${POLICY_SIGNING_PUBLIC_KEY%$'\n'}" > "$pub_file"
+          elif [ "${ALLOW_UNSIGNED}" = "true" ]; then
+            echo "::warning::POLICY_SIGNING_KEY is unset and allow-unsigned was requested; the bundles carry no HushSpec signature and rely on the build provenance attestation alone"
+          else
+            echo "::error::POLICY_SIGNING_KEY is not configured. An unsigned bundle is not evidence: set the secret, or re-run this workflow with allow-unsigned to publish bundles that carry no HushSpec signature."
+            exit 1
+          fi
+          # Pin created_at to the tagged commit so re-running this workflow for
+          # the same tag reproduces every bundle byte for byte.
+          created_at="$(git log -1 --format=%cI)"
+          shopt -s nullglob globstar
+          count=0
+          for policy in library/**/*.yaml rulesets/*.yaml; do
+            # library/healthcare/hipaa-base.yaml -> library-healthcare-hipaa-base.bundle.json:
+            # flat names survive upload-artifact and cannot collide.
+            out="dist/bundles/$(printf '%s' "${policy%.yaml}" | tr '/' '-').bundle.json"
+            ./target/release/h2h bundle create "$policy" "${key_args[@]}" \
+              --created-at "$created_at" --out "$out"
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::no policies matched library/**/*.yaml or rulesets/*.yaml"
+            exit 1
+          fi
+          echo "bundled $count policies"
+      - name: Check every bundle verifies
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          pub_file="${RUNNER_TEMP}/policy-signing.pub.pem"
+          for bundle in dist/bundles/*.bundle.json; do
+            if [ -f "$pub_file" ]; then
+              # Shape, signature and subject digest: what a consumer checks.
+              ./target/release/h2h bundle verify "$bundle" --key "$pub_file" >/dev/null
+            else
+              # An unsigned bundle has no signature to check, so all the gate
+              # can confirm is that the statement parses and reads back.
+              ./target/release/h2h bundle inspect "$bundle" >/dev/null
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: policy-bundles
+          path: dist/bundles/*.bundle.json
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' && inputs['dry-run']
+        with:
+          name: rehearsal-policy-public-key
+          path: ${{ runner.temp }}/policy-signing.pub.pem
+          retention-days: 3
+
+      # The conformance bundle: prose, schemas, vectors and the manifest that
+      # pins them, so a third party can claim a level from the download alone
+      # (spec/hushspec-core.md section 8). Built here rather than in the
+      # release job because that job deliberately has no checkout -- every file
+      # in its workspace ships, and anything outside subject-path would ship
+      # unattested.
+      - name: Build the conformance bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --release --locked -p hushspec-testkit --bin hushspec-testkit -- \
+            bundle --root . --out dist/hushspec-conformance.tar.gz
+          # Name the artifact for the corpus version the manifest declares, so
+          # the release asset says which spec version it tests.
+          version="$(python3 -c "import json;print(json.load(open('fixtures/MANIFEST.json'))['fixtures_version'])")"
+          mv dist/hushspec-conformance.tar.gz "dist/hushspec-conformance-${version}.tar.gz"
+          # The bundle is reproducible: the same tree must give the same bytes,
+          # so a second build is a standing check of that promise.
+          cargo run --release --locked -p hushspec-testkit --bin hushspec-testkit -- \
+            bundle --root . --out dist/second.tar.gz
+          cmp "dist/hushspec-conformance-${version}.tar.gz" dist/second.tar.gz
+          rm dist/second.tar.gz
+          ls -l "dist/hushspec-conformance-${version}.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: conformance-bundle
+          path: dist/hushspec-conformance-*.tar.gz
+          retention-days: 3
+
   release:
-    needs: build
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
+    needs: [candidate, ci, build, bundles]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
+      - name: Confirm tag still identifies the qualified candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.candidate.outputs.sha }}
+        run: |
+          actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
+          [ "$actual_sha" = "$CANDIDATE_SHA" ] || { echo "::error::release tag moved after qualification"; exit 1; }
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: policy-bundles
+      - uses: actions/download-artifact@v4
+        with:
+          name: conformance-bundle
+      - name: Stage policy bundles
+        shell: bash
+        run: |
+          # upload-artifact flattens to the glob's parent, so the bundles land
+          # at the workspace root; put them back under dist/bundles/ so the
+          # release assets keep the layout the bundle job produced.
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist/bundles
+          for bundle in *.bundle.json; do mv "$bundle" dist/bundles/; done
+          ls -1 dist/bundles
       - name: Checksums
         run: sha256sum h2h-*.tar.gz > SHA256SUMS
+      - name: Verify every release asset is covered by the attestation
+        run: |
+          # This job's workspace contains exactly the files that get uploaded
+          # to the release (no checkout happens here), so anything present but
+          # outside the attestation's subject-path would ship unattested.
+          shopt -s nullglob
+          attested=(h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json)
+          echo "attested subjects (${#attested[@]}):"
+          printf '  %s\n' "${attested[@]}"
+          status=0
+          while IFS= read -r f; do
+            f="${f#./}"
+            case " ${attested[*]} " in
+              *" $f "*) ;;
+              *) echo "::error::release asset '$f' is not covered by subject-path"; status=1 ;;
+            esac
+          done < <(find . -type f)
+          exit "$status"
+      # Attest every file the "Upload to release" step publishes -- the platform
+      # tarballs, the conformance bundle, SHA256SUMS, *and* the policy bundles.
+      # Attesting only the tarballs would leave the checksum file, which is what
+      # installers (Homebrew, scripted installs) actually trust, unverifiable;
+      # leaving the bundles out would ship compliance evidence with no
+      # provenance of its own.
       - uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "h2h-*.tar.gz"
+          subject-path: |
+            h2h-*.tar.gz
+            hushspec-conformance-*.tar.gz
+            SHA256SUMS
+            dist/bundles/*.bundle.json
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,15 +393,19 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" h2h-*.tar.gz SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "$TAG" h2h-*.tar.gz hushspec-conformance-*.tar.gz SHA256SUMS dist/bundles/*.bundle.json --repo "$GITHUB_REPOSITORY" --clobber
 
   homebrew:
-    needs: release
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
+    needs: [candidate, release]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
       - name: Regenerate checksums locally
         run: sha256sum h2h-*.tar.gz > SHA256SUMS
@@ -119,15 +427,19 @@ jobs:
             --title "h2h ${TAG}" --body "Automated formula update for ${TAG}."
 
   npm-cli:
-    needs: release
+    if: github.event_name != 'workflow_dispatch' || !inputs['dry-run']
+    needs: [candidate, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
+          pattern: h2h-*
           merge-multiple: true
       - uses: actions/setup-node@v4
         with:
@@ -141,3 +453,34 @@ jobs:
         run: |
           for d in out/cli-*; do (cd "$d" && npm publish --access public --provenance); done
           (cd out/cli && npm publish --access public --provenance)
+
+  docker:
+    needs: [candidate, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.candidate.outputs.sha }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: true
+          tags: |
+            ghcr.io/backbay-labs/h2h:${{ env.TAG }}
+            ghcr.io/backbay-labs/h2h:latest

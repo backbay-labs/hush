@@ -1,0 +1,1089 @@
+//! Hash-linked receipt log (spec/hushspec-log.md, format 0.1).
+//!
+//! A log is a JSON Lines file of [`LogEntry`] records. Each entry carries a
+//! sequence number, the hash of the previous entry, its own hash over its
+//! canonical form, and optionally an Ed25519 signature over that hash. A
+//! verifier can therefore detect a line that was edited, deleted, inserted,
+//! or reordered, without any other source of truth.
+//!
+//! Entries wrap a [`DecisionReceipt`] or a [`PolicyEvent`] (which policy was
+//! loaded or swapped in, with its provenance) so the log proves not only what
+//! was decided but what was in force when.
+//!
+//! Writers exclude each other through the `<path>.lock` sentinel of log spec 4
+//! alone. The advisory `flock` the same section recommends underneath it needs
+//! a platform binding this crate does not carry: the library parses, hashes and
+//! verifies with no operating-system dependency, and a kernel lock bought at
+//! the price of one would trade a property every platform has for a property
+//! only some do. The sentinel is the lock all four SDKs share, so it is the one
+//! that decides who may write.
+
+use serde::{Deserialize, Serialize};
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use crate::canonical::{self, CanonicalError};
+use crate::receipt::{
+    DecisionReceipt, EnforcementMode, PolicySummary, RECEIPT_VERSION, format_timestamp,
+};
+use crate::sink::{ReceiptSink, SinkError};
+use crate::version::HUSHSPEC_VERSION;
+
+#[cfg(feature = "signing")]
+use crate::signing::{Envelope, Keyring, SigningKey, VerifyOptions, sign_content_hash};
+
+/// The log-entry format this module writes and verifies.
+pub const LOG_VERSION: &str = "0.1";
+
+/// `prev_hash` of the first entry of a log that continues nothing.
+pub const GENESIS_HASH: &str =
+    "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Load-time conditions reported by [`verify_log`] besides the signing spec's
+/// reason codes.
+pub const REASON_UNSIGNED: &str = "entry_unsigned";
+
+// --------------------------------------------------------------------------
+// Wire types
+// --------------------------------------------------------------------------
+
+/// What an entry wraps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryType {
+    Receipt,
+    PolicyLoaded,
+    PolicySwapped,
+    LogStarted,
+}
+
+/// The SDK that wrote an entry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SdkInfo {
+    pub name: String,
+    pub version: String,
+}
+
+impl SdkInfo {
+    /// This crate.
+    #[must_use]
+    pub fn this_sdk() -> Self {
+        Self {
+            name: "hushspec-rs".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyEventKind {
+    Loaded,
+    Swapped,
+}
+
+/// A policy-in-effect record (log spec 6): what was enforced from this
+/// moment on, with the same identity a receipt carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyEvent {
+    pub event: PolicyEventKind,
+    /// RFC 3339 UTC, millisecond precision.
+    pub timestamp: String,
+    pub policy: PolicySummary,
+    pub enforcement_mode: EnforcementMode,
+    pub sdk: SdkInfo,
+    /// The HushSpec version the engine implements.
+    pub spec_version: String,
+    /// For `swapped`: the content hash of the policy that was replaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_content_hash: Option<String>,
+}
+
+impl PolicyEvent {
+    /// A `loaded` event for `policy`, stamped now.
+    #[must_use]
+    pub fn loaded(policy: PolicySummary, enforcement_mode: EnforcementMode) -> Self {
+        Self {
+            event: PolicyEventKind::Loaded,
+            timestamp: format_timestamp(chrono::Utc::now()),
+            policy,
+            enforcement_mode,
+            sdk: SdkInfo::this_sdk(),
+            spec_version: HUSHSPEC_VERSION.to_string(),
+            previous_content_hash: None,
+        }
+    }
+
+    /// A `swapped` event: `policy` replaces the policy with `previous` hash.
+    #[must_use]
+    pub fn swapped(
+        policy: PolicySummary,
+        enforcement_mode: EnforcementMode,
+        previous_content_hash: String,
+    ) -> Self {
+        Self {
+            event: PolicyEventKind::Swapped,
+            previous_content_hash: Some(previous_content_hash),
+            ..Self::loaded(policy, enforcement_mode)
+        }
+    }
+}
+
+/// The first entry of a rotated log file: where the chain came from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogStarted {
+    pub timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_file: Option<String>,
+    /// The last `entry_hash` of the previous file; equals this entry's
+    /// `prev_hash`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_entry_hash: Option<String>,
+}
+
+/// An entry signature: the 0.2 signature envelope (signing spec 4) whose
+/// `content_hash` is the entry's `entry_hash`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogSignature {
+    pub format_version: String,
+    pub algorithm: String,
+    pub key_id: String,
+    pub signed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_name: Option<String>,
+    pub content_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
+    pub signature: String,
+}
+
+/// One line of a log.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LogEntry {
+    pub log_version: String,
+    /// Starts at 1 in every file and increases by exactly 1.
+    pub seq: u64,
+    /// `entry_hash` of the previous entry, or [`GENESIS_HASH`].
+    pub prev_hash: String,
+    pub entry_type: EntryType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<DecisionReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_event: Option<PolicyEvent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_started: Option<LogStarted>,
+    /// `sha256:` over the canonical form of this entry without `entry_hash`
+    /// and `signature`.
+    pub entry_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<LogSignature>,
+}
+
+impl LogEntry {
+    /// Recompute the hash this entry should carry.
+    ///
+    /// # Errors
+    ///
+    /// [`CanonicalError`] when the entry cannot be serialized.
+    pub fn compute_entry_hash(&self) -> Result<String, CanonicalError> {
+        let mut value = serde_json::to_value(self)
+            .map_err(|error| CanonicalError::Serialize(error.to_string()))?;
+        if let Some(object) = value.as_object_mut() {
+            object.remove("entry_hash");
+            object.remove("signature");
+        }
+        Ok(canonical::digest(&canonical::serialize_jcs(&value)?))
+    }
+
+    /// Whether exactly the payload named by `entry_type` is present.
+    #[must_use]
+    pub fn payload_matches_type(&self) -> bool {
+        let (receipt, event, started) = (
+            self.receipt.is_some(),
+            self.policy_event.is_some(),
+            self.log_started.is_some(),
+        );
+        match self.entry_type {
+            EntryType::Receipt => receipt && !event && !started,
+            EntryType::PolicyLoaded => {
+                !receipt
+                    && !started
+                    && self
+                        .policy_event
+                        .as_ref()
+                        .is_some_and(|e| e.event == PolicyEventKind::Loaded)
+            }
+            EntryType::PolicySwapped => {
+                !receipt
+                    && !started
+                    && self
+                        .policy_event
+                        .as_ref()
+                        .is_some_and(|e| e.event == PolicyEventKind::Swapped)
+            }
+            EntryType::LogStarted => started && !receipt && !event,
+        }
+    }
+}
+
+/// What an entry wraps, when appending.
+#[derive(Clone, Debug)]
+pub enum Payload {
+    Receipt(Box<DecisionReceipt>),
+    PolicyEvent(Box<PolicyEvent>),
+    LogStarted(LogStarted),
+}
+
+// --------------------------------------------------------------------------
+// Chained sink
+// --------------------------------------------------------------------------
+
+struct ChainState {
+    path: PathBuf,
+    seq: u64,
+    prev_hash: String,
+}
+
+/// Appends hash-linked entries to a JSON Lines file, fsyncing each one.
+///
+/// Opening an existing file continues its chain from the last entry. Appends
+/// are serialized in-process by a mutex and across processes by the
+/// `<path>.lock` sentinel every SDK takes (log spec 4); a lock held longer
+/// than [`ChainedFileSink::LOCK_TIMEOUT`] is reported as an error rather than
+/// bypassed. Each entry's `seq` and `prev_hash` come from the file's current
+/// last entry, read while that lock is held, so a second sink or process
+/// writing the same log extends the chain instead of forking it. Rotation
+/// ([`ChainedFileSink::rotate`]) carries the chain into the new file through a
+/// `log_started` entry.
+pub struct ChainedFileSink {
+    state: Mutex<ChainState>,
+    /// Fixed instant for `log_started` timestamps and signature `signed_at`
+    /// (conformance vectors); production sinks use the wall clock.
+    clock: Option<chrono::DateTime<chrono::Utc>>,
+    #[cfg(feature = "signing")]
+    signer: Option<SigningKey>,
+}
+
+impl ChainedFileSink {
+    /// How long to wait for another process's lock before failing.
+    pub const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Open (or create) the log at `path` and continue its chain.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError::Io`] for I/O failures, [`SinkError::Chain`] when the
+    /// existing file's last line is not a log entry.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, SinkError> {
+        let path = path.as_ref().to_path_buf();
+        let (seq, prev_hash) = match last_entry(&path)? {
+            Some(entry) => (entry.seq, entry.entry_hash),
+            None => (0, GENESIS_HASH.to_string()),
+        };
+        Ok(Self {
+            state: Mutex::new(ChainState {
+                path,
+                seq,
+                prev_hash,
+            }),
+            clock: None,
+            #[cfg(feature = "signing")]
+            signer: None,
+        })
+    }
+
+    /// Use a fixed instant for `log_started` timestamps and signatures.
+    #[must_use]
+    pub fn with_clock(mut self, clock: chrono::DateTime<chrono::Utc>) -> Self {
+        self.clock = Some(clock);
+        self
+    }
+
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.clock.unwrap_or_else(chrono::Utc::now)
+    }
+
+    /// Sign every entry with `key` (signing spec 4, over `entry_hash`).
+    #[cfg(feature = "signing")]
+    #[must_use]
+    pub fn with_signer(mut self, key: SigningKey) -> Self {
+        self.signer = Some(key);
+        self
+    }
+
+    /// The file currently being written.
+    #[must_use]
+    pub fn path(&self) -> PathBuf {
+        self.state().path.clone()
+    }
+
+    /// The last sequence number and entry hash written (or the genesis
+    /// values for an empty log).
+    #[must_use]
+    pub fn head(&self) -> (u64, String) {
+        let state = self.state();
+        (state.seq, state.prev_hash.clone())
+    }
+
+    /// Observe the chain head, recovering from a poisoned lock.
+    ///
+    /// A sink must never break enforcement, so reading the head of a log whose
+    /// previous writer panicked reports what is there rather than panicking in
+    /// turn. Writers go through [`Self::state_mut`], which refuses instead.
+    fn state(&self) -> std::sync::MutexGuard<'_, ChainState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Take the chain head for writing, refusing a poisoned lock.
+    ///
+    /// A panic between bumping `seq` and storing `entry_hash` would leave the
+    /// head describing an entry that was never written, so appending onto it
+    /// would produce a chain that cannot verify. Fail closed instead.
+    fn state_mut(&self) -> Result<std::sync::MutexGuard<'_, ChainState>, SinkError> {
+        self.state.lock().map_err(|_| {
+            SinkError::Chain(
+                "log state is poisoned: a previous append panicked, so the chain head \
+                 cannot be trusted to continue the log"
+                    .to_string(),
+            )
+        })
+    }
+
+    /// Append one entry.
+    ///
+    /// The chain head is re-read from the file under the write lock, so an
+    /// entry continues what the file holds rather than what this sink last
+    /// wrote. A tail that cannot be parsed fails the append: continuing past
+    /// it would leave a second, unlinked chain in the file.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkError::Io`], [`SinkError::Serialization`], or
+    /// [`SinkError::Chain`].
+    pub fn append(&self, payload: Payload) -> Result<LogEntry, SinkError> {
+        let mut state = self.state_mut()?;
+        let entry = self.append_to(
+            &state.path.clone(),
+            (state.seq, state.prev_hash.clone()),
+            payload,
+        )?;
+        state.seq = entry.seq;
+        state.prev_hash.clone_from(&entry.entry_hash);
+        Ok(entry)
+    }
+
+    /// Write one entry to `path`, continuing from `cached` when the file holds
+    /// no entry of its own, and return it without touching the chain head.
+    ///
+    /// The caller commits the head, so an append that fails leaves the sink
+    /// describing the file it was describing before.
+    fn append_to(
+        &self,
+        path: &Path,
+        cached: (u64, String),
+        payload: Payload,
+    ) -> Result<LogEntry, SinkError> {
+        // The lock file lives next to the log, so the directory has to exist
+        // for the lock itself to be creatable.
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent)?;
+        }
+        with_file_lock(path, || {
+            // A missing or empty file means a fresh log, or a rotation whose
+            // `log_started` entry is about to seed the new file; both continue
+            // from the head this sink carries.
+            let (seq, prev_hash) = match last_entry(path)? {
+                Some(head) => (head.seq, head.entry_hash),
+                None => cached,
+            };
+            let mut entry = LogEntry {
+                log_version: LOG_VERSION.to_string(),
+                seq: seq + 1,
+                prev_hash,
+                entry_type: match &payload {
+                    Payload::Receipt(_) => EntryType::Receipt,
+                    Payload::PolicyEvent(event) => match event.event {
+                        PolicyEventKind::Loaded => EntryType::PolicyLoaded,
+                        PolicyEventKind::Swapped => EntryType::PolicySwapped,
+                    },
+                    Payload::LogStarted(_) => EntryType::LogStarted,
+                },
+                receipt: None,
+                policy_event: None,
+                log_started: None,
+                entry_hash: String::new(),
+                signature: None,
+            };
+            match payload {
+                Payload::Receipt(receipt) => entry.receipt = Some(*receipt),
+                Payload::PolicyEvent(event) => entry.policy_event = Some(*event),
+                Payload::LogStarted(started) => entry.log_started = Some(started),
+            }
+            entry.entry_hash = entry
+                .compute_entry_hash()
+                .map_err(|error| SinkError::Chain(error.to_string()))?;
+            // Signing belongs under the lock too: the signature covers
+            // `entry_hash`, which depends on the `prev_hash` just read.
+            #[cfg(feature = "signing")]
+            if let Some(key) = &self.signer {
+                let options = crate::signing::SignOptions {
+                    signed_at: Some(self.now()),
+                    ..Default::default()
+                };
+                let envelope = sign_content_hash(&entry.entry_hash, key, &options)
+                    .map_err(|error| SinkError::Chain(error.to_string()))?;
+                entry.signature = Some(LogSignature::from(&envelope));
+            }
+
+            let mut line = serde_json::to_string(&entry)?;
+            line.push('\n');
+            let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+            file.write_all(line.as_bytes())?;
+            file.sync_all()?;
+            Ok(entry)
+        })
+    }
+
+    /// Record a policy-in-effect event (log spec 6).
+    ///
+    /// # Errors
+    ///
+    /// As [`ChainedFileSink::append`].
+    pub fn record_policy_event(&self, event: &PolicyEvent) -> Result<LogEntry, SinkError> {
+        self.append(Payload::PolicyEvent(Box::new(event.clone())))
+    }
+
+    /// Start writing to `new_path`, whose first entry is a `log_started`
+    /// record naming the file this chain continues from and its last hash.
+    /// Sequence numbers restart at 1 in the new file; `prev_hash` carries over.
+    ///
+    /// The switch is committed only once that entry is on disk. A rotation
+    /// that cannot write it leaves the sink on the old file, still linked and
+    /// still verifiable, rather than on a new one whose first receipt would
+    /// continue nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`ChainedFileSink::append`]; the new file must not already exist.
+    pub fn rotate(&self, new_path: impl AsRef<Path>) -> Result<LogEntry, SinkError> {
+        let new_path = new_path.as_ref().to_path_buf();
+        if new_path.exists() {
+            return Err(SinkError::Chain(format!(
+                "cannot rotate into existing file {}",
+                new_path.display()
+            )));
+        }
+        // The switch and the `log_started` entry happen under one lock: a
+        // concurrent send must not slip a receipt into the new file ahead of
+        // the record that links it to the old one (log spec 5).
+        let mut state = self.state_mut()?;
+        // Only the file name: logs are moved between hosts, and a path
+        // would leak the writer's layout for no verification benefit.
+        let previous_file = state
+            .path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| state.path.display().to_string());
+        let link = |previous_entry_hash: String| {
+            self.append_to(
+                &new_path,
+                (0, previous_entry_hash.clone()),
+                Payload::LogStarted(LogStarted {
+                    timestamp: format_timestamp(self.now()),
+                    previous_file: Some(previous_file.clone()),
+                    // Always recorded, the genesis value included (log spec 5):
+                    // a verifier given both files compares it against the
+                    // previous file's last hash, and an omitted member is not
+                    // that hash.
+                    previous_entry_hash: Some(previous_entry_hash),
+                }),
+            )
+        };
+        // The link names the old file's last hash as it is on disk, not as
+        // this sink last saw it: another writer sharing the file may have
+        // appended since. The old file stays locked until the new file's
+        // first entry is written, so nothing can extend it past the link.
+        let cached = state.prev_hash.clone();
+        let entry = if state.path.exists() {
+            let old_path = state.path.clone();
+            with_file_lock(&old_path, || {
+                let head = last_entry(&old_path)?;
+                link(head.map_or(cached, |head| head.entry_hash))
+            })?
+        } else {
+            link(cached)?
+        };
+        state.path = new_path;
+        state.seq = entry.seq;
+        state.prev_hash.clone_from(&entry.entry_hash);
+        Ok(entry)
+    }
+}
+
+impl ReceiptSink for ChainedFileSink {
+    fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+        self.append(Payload::Receipt(Box::new(receipt.clone())))
+            .map(|_| ())
+    }
+
+    fn record_policy_event(&self, event: &PolicyEvent) -> Result<(), SinkError> {
+        ChainedFileSink::record_policy_event(self, event).map(|_| ())
+    }
+}
+
+// An entry signature is exactly an envelope. Both conversions destructure
+// exhaustively, with no `..` rest pattern, so a member added to either type
+// stops the build here instead of vanishing on the way into or out of a log.
+#[cfg(feature = "signing")]
+impl From<&Envelope> for LogSignature {
+    fn from(envelope: &Envelope) -> Self {
+        let Envelope {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = envelope.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
+    }
+}
+
+#[cfg(feature = "signing")]
+impl From<&LogSignature> for Envelope {
+    fn from(entry_signature: &LogSignature) -> Self {
+        let LogSignature {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        } = entry_signature.clone();
+        Self {
+            format_version,
+            algorithm,
+            key_id,
+            signed_at,
+            expires_at,
+            policy_version,
+            policy_name,
+            content_hash,
+            signer,
+            signature,
+        }
+    }
+}
+
+/// Read the last non-empty line of `path` as an entry, or `None` for a
+/// missing or empty file.
+fn last_entry(path: &Path) -> Result<Option<LogEntry>, SinkError> {
+    let Some(line) = last_line(path)? else {
+        return Ok(None);
+    };
+    serde_json::from_str::<LogEntry>(&line)
+        .map(Some)
+        .map_err(|error| {
+            SinkError::Chain(format!(
+                "last line of {} is not a log entry: {error}",
+                path.display()
+            ))
+        })
+}
+
+/// How much of the tail to read at a time when looking for the last line.
+const TAIL_CHUNK_BYTES: u64 = 8 * 1024;
+
+/// The last non-empty line of `path`, read by seeking back from the end.
+///
+/// Every append reads the head this way, so the cost has to be the size of one
+/// entry rather than the size of the log.
+fn last_line(path: &Path) -> Result<Option<String>, SinkError> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(SinkError::Io(error)),
+    };
+    let mut end = file.seek(SeekFrom::End(0))?;
+    let mut tail: Vec<u8> = Vec::new();
+    while end > 0 {
+        let start = end.saturating_sub(TAIL_CHUNK_BYTES);
+        let mut chunk = vec![0u8; (end - start) as usize];
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(&mut chunk)?;
+        chunk.extend_from_slice(&tail);
+        tail = chunk;
+        end = start;
+        if let Some(line) = last_line_of(&tail, end == 0) {
+            return String::from_utf8(line.to_vec()).map(Some).map_err(|error| {
+                SinkError::Chain(format!(
+                    "last line of {} is not UTF-8: {error}",
+                    path.display()
+                ))
+            });
+        }
+    }
+    Ok(None)
+}
+
+/// The last non-empty line inside `buffer`, or `None` when it may still begin
+/// earlier in the file. `at_start` says `buffer` reaches the file's first byte,
+/// so a line with no newline before it is already complete.
+fn last_line_of(buffer: &[u8], at_start: bool) -> Option<&[u8]> {
+    let last = buffer
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())?;
+    let trimmed = &buffer[..=last];
+    match trimmed.iter().rposition(|byte| *byte == b'\n') {
+        Some(index) => Some(&trimmed[index + 1..]),
+        None if at_start => Some(trimmed),
+        None => None,
+    }
+}
+
+/// Run `f` while holding `<path>.lock`, created atomically with `O_EXCL`.
+///
+/// This is the lock every SDK takes (log spec 4), so writers in different
+/// languages exclude each other. A stale lock -- one a writer that died left
+/// behind -- times out rather than being bypassed: breaking a lock this
+/// process cannot prove is stale would let two writers interleave chains and
+/// corrupt both (log spec 9).
+fn with_file_lock<T>(
+    path: &Path,
+    f: impl FnOnce() -> Result<T, SinkError>,
+) -> Result<T, SinkError> {
+    let lock_path = PathBuf::from(format!("{}.lock", path.display()));
+    let start = Instant::now();
+    loop {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                if start.elapsed() > ChainedFileSink::LOCK_TIMEOUT {
+                    return Err(SinkError::Chain(format!(
+                        "timed out waiting for {}",
+                        lock_path.display()
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(SinkError::Io(error)),
+        }
+    }
+    // Release through `Drop`: a panic inside `f` would otherwise leave the
+    // lock file behind, and every later append would wait out `LOCK_TIMEOUT`
+    // and then fail permanently.
+    struct LockGuard(PathBuf);
+    impl Drop for LockGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let _guard = LockGuard(lock_path);
+    f()
+}
+
+// --------------------------------------------------------------------------
+// Verification
+// --------------------------------------------------------------------------
+
+/// What a verifier trusts and demands.
+#[derive(Default)]
+pub struct LogVerifyOptions {
+    /// Every entry must carry a signature that verifies.
+    pub require_signatures: bool,
+    /// Keys to verify entry signatures against. When absent, signed entries
+    /// are counted but not verified (an error under `require_signatures`).
+    #[cfg(feature = "signing")]
+    pub keyring: Option<Keyring>,
+    #[cfg(feature = "signing")]
+    pub verify: Option<VerifyOptions>,
+}
+
+/// Summary of a verified log.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LogVerifyReport {
+    pub files: usize,
+    pub entries: usize,
+    pub receipts: usize,
+    pub policy_events: usize,
+    pub signed: usize,
+    pub verified_signatures: usize,
+    pub last_seq: u64,
+    pub last_entry_hash: String,
+}
+
+/// Why a log did not verify. `file` and `line` locate the first break.
+#[derive(Debug, thiserror::Error)]
+#[error("{file}:{line}: {message}")]
+pub struct LogError {
+    pub file: String,
+    pub line: usize,
+    pub message: String,
+}
+
+/// Verify one log file's text.
+///
+/// # Errors
+///
+/// [`LogError`] naming the first line that breaks the chain.
+pub fn verify_log(
+    name: &str,
+    text: &str,
+    options: &LogVerifyOptions,
+) -> Result<LogVerifyReport, LogError> {
+    verify_logs(&[(name, text)], options)
+}
+
+/// Verify a sequence of rotated log files in order: each file after the
+/// first must start with a `log_started` entry whose `previous_entry_hash`
+/// is the previous file's last hash.
+///
+/// # Errors
+///
+/// [`LogError`] naming the first line that breaks the chain.
+pub fn verify_logs(
+    files: &[(&str, &str)],
+    options: &LogVerifyOptions,
+) -> Result<LogVerifyReport, LogError> {
+    let mut report = LogVerifyReport {
+        last_entry_hash: GENESIS_HASH.to_string(),
+        ..LogVerifyReport::default()
+    };
+    let mut carried_hash: Option<String> = None;
+
+    for (index, (name, text)) in files.iter().enumerate() {
+        report.files += 1;
+        let mut expected_seq = 1u64;
+        let mut prev_hash = carried_hash
+            .clone()
+            .unwrap_or_else(|| GENESIS_HASH.to_string());
+        let mut any = false;
+
+        for (line_index, line) in text.lines().enumerate() {
+            let line_no = line_index + 1;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let fail = |message: String| LogError {
+                file: (*name).to_string(),
+                line: line_no,
+                message,
+            };
+            // The entry is read from the line's own JSON object, which is also
+            // what step 7 hashes: hashing a re-serialization of the typed entry
+            // would cover the members this SDK materializes rather than the
+            // ones the file holds.
+            let document: serde_json::Value =
+                serde_json::from_str(line).map_err(|e| fail(format!("not a log entry: {e}")))?;
+            let entry = LogEntry::deserialize(&document)
+                .map_err(|e| fail(entry_parse_message(&document, &e)))?;
+            if entry.log_version != LOG_VERSION {
+                return Err(fail(format!(
+                    "unsupported log_version {:?}, expected {LOG_VERSION:?}",
+                    entry.log_version
+                )));
+            }
+            if entry.seq != expected_seq {
+                return Err(fail(format!(
+                    "sequence gap: expected seq {expected_seq}, found {}",
+                    entry.seq
+                )));
+            }
+            if !entry.payload_matches_type() {
+                return Err(fail(format!(
+                    "payload does not match entry_type {:?}",
+                    entry.entry_type
+                )));
+            }
+            if let Some(problem) = log_scalar_problem(&document, "") {
+                return Err(fail(format!("not a log entry: {problem}")));
+            }
+            if expected_seq == 1 && index > 0 {
+                let Some(started) = &entry.log_started else {
+                    return Err(fail(
+                        "a continued file must start with a log_started entry".into(),
+                    ));
+                };
+                if started.previous_entry_hash.as_deref() != carried_hash.as_deref() {
+                    return Err(fail(
+                        "log_started.previous_entry_hash does not match the previous file's last hash"
+                            .into(),
+                    ));
+                }
+            }
+            if expected_seq == 1
+                && let Some(started) = &entry.log_started
+                && let Some(previous) = &started.previous_entry_hash
+                && index == 0
+            {
+                // The first file of a set may itself continue an earlier
+                // file the verifier was not given; its prev_hash must then
+                // be that file's last hash.
+                prev_hash.clone_from(previous);
+            }
+            if entry.prev_hash != prev_hash {
+                return Err(fail(format!(
+                    "prev_hash {} does not link to the previous entry {}",
+                    entry.prev_hash, prev_hash
+                )));
+            }
+            let recomputed = entry_hash_of_document(&document)
+                .map_err(|e| fail(format!("cannot canonicalize entry: {e}")))?;
+            if recomputed != entry.entry_hash {
+                return Err(fail(format!(
+                    "entry_hash {} does not match the entry's canonical form ({recomputed})",
+                    entry.entry_hash
+                )));
+            }
+            if let Some(receipt) = &entry.receipt {
+                if receipt.receipt_version != RECEIPT_VERSION {
+                    return Err(fail(format!(
+                        "receipt_version {:?} is not {RECEIPT_VERSION:?}",
+                        receipt.receipt_version
+                    )));
+                }
+                // The entry hash covers whatever JSON the line held, so a
+                // hash-consistent line can still carry something that is not a
+                // receipt; the payload has to validate, not merely name the
+                // version (log spec 8, step 8).
+                let problems = crate::receipt::document_problems(
+                    document.get("receipt").unwrap_or(&serde_json::Value::Null),
+                    receipt,
+                );
+                if !problems.is_empty() {
+                    return Err(fail(format!(
+                        "receipt does not validate against the 0.2 receipt schema: {}",
+                        problems.join("; ")
+                    )));
+                }
+                report.receipts += 1;
+            }
+            if entry.policy_event.is_some() {
+                report.policy_events += 1;
+            }
+            match &entry.signature {
+                None => {
+                    if options.require_signatures {
+                        return Err(fail(format!("{REASON_UNSIGNED}: signatures are required")));
+                    }
+                }
+                Some(signature) => {
+                    report.signed += 1;
+                    if signature.content_hash != entry.entry_hash {
+                        return Err(fail(
+                            "signature.content_hash does not name this entry's entry_hash".into(),
+                        ));
+                    }
+                    #[cfg(feature = "signing")]
+                    {
+                        match &options.keyring {
+                            Some(keyring) => {
+                                let envelope = Envelope::from(signature);
+                                let verify = options.verify.clone().unwrap_or_default();
+                                crate::signing::verify_content_hash(
+                                    &envelope,
+                                    Some(&entry.entry_hash),
+                                    keyring,
+                                    &verify,
+                                )
+                                .map_err(|e| fail(format!("signature: {e}")))?;
+                                report.verified_signatures += 1;
+                            }
+                            None if options.require_signatures => {
+                                return Err(fail(
+                                    "no_keyring: cannot verify a required signature".into(),
+                                ));
+                            }
+                            None => {}
+                        }
+                    }
+                    #[cfg(not(feature = "signing"))]
+                    if options.require_signatures {
+                        return Err(fail(
+                            "signing_unavailable: cannot verify a required signature".into(),
+                        ));
+                    }
+                }
+            }
+            prev_hash.clone_from(&entry.entry_hash);
+            expected_seq += 1;
+            any = true;
+            report.entries += 1;
+            report.last_seq = entry.seq;
+            report.last_entry_hash.clone_from(&entry.entry_hash);
+        }
+        if !any && index > 0 {
+            return Err(LogError {
+                file: (*name).to_string(),
+                line: 0,
+                message: "continued file is empty".to_string(),
+            });
+        }
+        carried_hash = Some(prev_hash);
+    }
+    Ok(report)
+}
+
+/// Scalar constraints that typed deserialization cannot enforce. Validate the
+/// original document because deserialization collapses optional nulls to None.
+/// Receipt internals are opaque to this schema and checked separately.
+fn log_scalar_problem(value: &serde_json::Value, path: &str) -> Option<String> {
+    use serde_json::Value;
+    match value {
+        Value::Null => return Some(format!("{path} must not be null")),
+        Value::Object(members) => {
+            for (key, child) in members {
+                if path.is_empty() && key == "receipt" && !child.is_null() {
+                    continue;
+                }
+                let where_ = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path}.{key}")
+                };
+                if let Some(problem) = log_scalar_problem(child, &where_) {
+                    return Some(problem);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                if let Some(problem) = log_scalar_problem(child, &format!("{path}[{index}]")) {
+                    return Some(problem);
+                }
+            }
+        }
+        Value::String(text) => {
+            let key = path.rsplit('.').next().unwrap_or(path);
+            let valid = match key {
+                "prev_hash"
+                | "entry_hash"
+                | "content_hash"
+                | "previous_content_hash"
+                | "previous_entry_hash"
+                | "key_id" => crate::receipt::is_content_hash(text),
+                "timestamp" | "signed_at" | "expires_at" | "verified_at" => {
+                    crate::receipt::is_millisecond_timestamp(text)
+                }
+                "spec_version" => {
+                    let parts: Vec<_> = text.split('.').collect();
+                    parts.len() == 3
+                        && matches!(parts[0], "0" | "1")
+                        && parts[1..].iter().all(|part| {
+                            !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                        })
+                }
+                "source" | "previous_file" | "policy_name" | "signer" => !text.is_empty(),
+                _ if path == "signature.format_version" => text == "0.2",
+                _ if path == "signature.algorithm" => text == "ed25519",
+                _ if path == "signature.signature" => {
+                    text.len() == 86
+                        && text
+                            .bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                }
+                _ if path.starts_with("policy_event.sdk.") => !text.is_empty(),
+                _ => true,
+            };
+            if !valid {
+                return Some(format!("{path} does not satisfy the log-entry schema"));
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+/// The `entry_hash` one line should carry: `sha256:` over the RFC 8785
+/// canonical form of the object with `entry_hash` and `signature` removed.
+fn entry_hash_of_document(document: &serde_json::Value) -> Result<String, CanonicalError> {
+    let mut document = document.clone();
+    if let Some(object) = document.as_object_mut() {
+        object.remove("entry_hash");
+        object.remove("signature");
+    }
+    Ok(canonical::digest(&canonical::serialize_jcs(&document)?))
+}
+
+/// Why a line is not a log entry.
+///
+/// A `receipt` member of the wrong shape is named as such (log spec 8, step 8)
+/// rather than reported as an opaque parse failure, so every SDK reports the
+/// same break for the same line.
+fn entry_parse_message(document: &serde_json::Value, error: &serde_json::Error) -> String {
+    if let Some(receipt) = document.get("receipt")
+        && let Err(receipt_error) = DecisionReceipt::from_document(receipt)
+    {
+        return format!(
+            "receipt does not validate against the 0.2 receipt schema: {receipt_error}"
+        );
+    }
+    format!("not a log entry: {error}")
+}
+
+/// Verify the log files at `paths`, in order.
+///
+/// # Errors
+///
+/// [`LogError`] with `line: 0` for a file that cannot be read, otherwise as
+/// [`verify_logs`].
+pub fn verify_log_files(
+    paths: &[impl AsRef<Path>],
+    options: &LogVerifyOptions,
+) -> Result<LogVerifyReport, LogError> {
+    let mut texts = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = path.as_ref();
+        let text = fs::read_to_string(path).map_err(|e| LogError {
+            file: path.display().to_string(),
+            line: 0,
+            message: format!("cannot read: {e}"),
+        })?;
+        texts.push((path.display().to_string(), text));
+    }
+    let borrowed: Vec<(&str, &str)> = texts
+        .iter()
+        .map(|(name, text)| (name.as_str(), text.as_str()))
+        .collect();
+    verify_logs(&borrowed, options)
+}

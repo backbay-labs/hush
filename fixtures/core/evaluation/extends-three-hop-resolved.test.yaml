@@ -1,0 +1,75 @@
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
+hushspec_test: "0.1.0"
+description: "core 2.3, 4.2 and 5: the evaluation half of the three-hop chain in fixtures/core/merge/three-hop-chain/. The policy below is the resolved output of base.yaml <- mid.yaml <- child-three-hop.yaml; the cases show that a decision made against it really does come from all three hops -- the root's forbidden_paths, the middle hop's secret_patterns, and the leaf's egress and tool_access. An engine that merged only the leaf against the root, or stopped at the first hop, produces different decisions for these actions."
+policy:
+  hushspec: "0.2.0"
+  name: project-leaf
+  description: organisation baseline
+  rules:
+    forbidden_paths:
+      patterns:
+        - "**/.ssh/**"
+        - "**/.aws/**"
+      exceptions: []
+    egress:
+      allow:
+        - "c.example.com"
+      block: []
+      default: block
+    secret_patterns:
+      patterns:
+        - name: team_token
+          pattern: "TEAMTOKEN[0-9]+"
+          severity: error
+      skip_paths: []
+    tool_access:
+      allow:
+        - read_file
+      block: []
+      require_confirmation:
+        - git_push
+      default: block
+cases:
+  - description: "hop 1 (root): forbidden_paths survives two hops and denies"
+    action:
+      type: file_read
+      target: "/home/me/.ssh/id_rsa"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "hop 2 (middle): secret_patterns is inherited by a leaf that never mentions it, and denies"
+    action:
+      type: file_write
+      target: "/repo/src/a.txt"
+      content: "TEAMTOKEN7"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.team_token
+  - description: "hop 3 (leaf): the leaf's egress allowlist decides, not the middle hop's"
+    action:
+      type: egress
+      target: "c.example.com"
+    expect:
+      decision: allow
+      matched_rule: rules.egress.allow
+  - description: "hop 3 (leaf): a host the middle hop allowed is denied once the leaf replaces the block"
+    action:
+      type: egress
+      target: "b.example.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.default
+  - description: "hop 3 (leaf): tool_access replaces the root's, so the root's blocked tool now falls to the leaf's allowlist"
+    action:
+      type: tool_call
+      target: shell_exec
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.allow
+  - description: "hop 3 (leaf): the leaf's confirmation list warns"
+    action:
+      type: tool_call
+      target: git_push
+    expect:
+      decision: warn
+      matched_rule: rules.tool_access.require_confirmation

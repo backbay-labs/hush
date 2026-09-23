@@ -1,0 +1,61 @@
+hushspec_bundle_vectors: 0.1.0
+description: Verification vectors for spec/hushspec-bundle.md. Every bundle attests library/healthcare/hipaa-base.yaml
+  resolved through builtin:strict, with predicate.created_at pinned to 2026-09-15T12:00:00.000Z so the bundles are
+  byte-reproducible. `policy`, when present, is re-resolved and compared (check 4). Expected reason codes are
+  defined in spec section 5.4.
+defaults:
+  keyring: ../signing/keys/keyring.json
+  now: '2026-09-15T12:00:00.000Z'
+cases:
+- name: valid
+  bundle: bundles/valid.bundle.json
+  expect: valid
+- name: valid-with-policy
+  bundle: bundles/valid.bundle.json
+  policy: ../../library/healthcare/hipaa-base.yaml
+  expect: valid
+  note: check 4 re-resolves the policy and compares the canonical form and every chain hop's hash
+- name: tampered-payload
+  bundle: bundles/tampered-payload.bundle.json
+  expect:
+    invalid: dsse_signature_mismatch
+  note: created_at edited in transit; the statement still parses, so the failure is the signature and not the shape
+- name: wrong-key
+  bundle: bundles/wrong-key.bundle.json
+  expect:
+    invalid: unknown_key_id
+  note: signed with keys/test-untrusted, which the default keyring does not hold
+- name: revoked-key
+  bundle: bundles/valid.bundle.json
+  keyring: ../signing/keys/keyring-revoked.json
+  expect:
+    invalid: key_revoked
+  note: the keyring holds the signing key and has withdrawn it; a revoked key attests nothing
+- name: retired-key
+  bundle: bundles/valid.bundle.json
+  keyring: ../signing/keys/keyring-retired.json
+  expect:
+    invalid: key_retired
+  note: the entry's not_after is before predicate.created_at, so the key was already retired when the bundle was
+    produced
+- name: unsigned
+  bundle: bundles/unsigned.bundle.json
+  expect:
+    invalid: dsse_signature_mismatch
+  note: a DSSE envelope with an empty signatures array is well-formed and is not evidence
+- name: subject-digest-mismatch
+  bundle: bundles/subject-digest-mismatch.bundle.json
+  expect:
+    invalid: subject_digest_mismatch
+  note: correctly signed over a statement whose subject digest is not the digest of predicate.resolved
+- name: policy-mismatch
+  bundle: bundles/valid.bundle.json
+  policy: ../../library/finance/pci-dss.yaml
+  expect:
+    invalid: policy_mismatch
+  note: a valid bundle checked against a different policy
+- name: malformed-predicate-type
+  bundle: bundles/malformed-predicate-type.bundle.json
+  expect:
+    invalid: malformed_bundle
+  note: a predicate version this build does not know; closed by default even though the signature is good

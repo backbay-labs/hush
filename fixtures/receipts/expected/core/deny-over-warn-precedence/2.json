@@ -1,0 +1,46 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "deny-beats-warn",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:24da14803d5dfb9a8ad9264e487d0f1ef4e56db9e036bf10a388efb72baa2e18"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "upload_report",
+    "content_hash": "sha256:c822793e0dd8c2d92134eca240db9ca8b17c5165524edb58a25abfbc765e54d0",
+    "content_size": 9
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.hard_marker",
+  "reason": "content matched secret pattern 'hard_marker'",
+  "rule_trace": [
+    {
+      "rule_block": "tool_access",
+      "rule_path": "rules.tool_access.require_confirmation",
+      "outcome": "warn",
+      "evaluated": true,
+      "reason": "tool requires confirmation"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.hard_marker",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'hard_marker'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

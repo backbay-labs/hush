@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
+
+from generator_support import gofmt, rustfmt
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,10 +24,10 @@ def load_schema(filename: str) -> dict:
     return json.loads((SCHEMAS_DIR / filename).read_text())
 
 
-CORE = load_schema("hushspec-core.v0.schema.json")
-POSTURE = load_schema("hushspec-posture.v0.schema.json")
-ORIGINS = load_schema("hushspec-origins.v0.schema.json")
-DETECTION = load_schema("hushspec-detection.v0.schema.json")
+CORE = load_schema("hushspec-core.v1.schema.json")
+POSTURE = load_schema("hushspec-posture.v1.schema.json")
+ORIGINS = load_schema("hushspec-origins.v1.schema.json")
+DETECTION = load_schema("hushspec-detection.v1.schema.json")
 
 
 def top_props(schema: dict) -> list[str]:
@@ -54,6 +54,8 @@ CONTRACT = {
         "RULE_KEYS": def_props(CORE, "Rules"),
         "EXTENSION_KEYS": def_props(CORE, "Extensions"),
         "GOVERNANCE_METADATA_KEYS": def_props(CORE, "GovernanceMetadata"),
+        "CONTROL_MAPPING_KEYS": def_props(CORE, "ControlMapping"),
+        "CHANGELOG_ENTRY_KEYS": def_props(CORE, "ChangelogEntry"),
         "FORBIDDEN_PATH_KEYS": def_props(CORE, "ForbiddenPaths"),
         "PATH_ALLOWLIST_KEYS": def_props(CORE, "PathAllowlist"),
         "EGRESS_KEYS": def_props(CORE, "Egress"),
@@ -65,18 +67,26 @@ CONTRACT = {
         "COMPUTER_USE_KEYS": def_props(CORE, "ComputerUse"),
         "REMOTE_DESKTOP_KEYS": def_props(CORE, "RemoteDesktopChannels"),
         "INPUT_INJECTION_KEYS": def_props(CORE, "InputInjection"),
+        "BROWSER_AUTOMATION_KEYS": def_props(CORE, "BrowserAutomation"),
+        "CODE_EXECUTION_KEYS": def_props(CORE, "CodeExecution"),
+        "CONDITION_KEYS": def_props(CORE, "Condition"),
+        "TIME_WINDOW_KEYS": def_props(CORE, "TimeWindow"),
+        "RATE_CONDITION_KEYS": def_props(CORE, "RateCondition"),
         "POSTURE_KEYS": top_props(POSTURE),
         "POSTURE_STATE_KEYS": def_props(POSTURE, "PostureState"),
         "POSTURE_TRANSITION_KEYS": def_props(POSTURE, "PostureTransition"),
         "ORIGINS_KEYS": top_props(ORIGINS),
         "ORIGIN_PROFILE_KEYS": def_props(ORIGINS, "OriginProfile"),
         "ORIGIN_MATCH_KEYS": def_props(ORIGINS, "OriginMatch"),
+        "ORIGIN_TOOL_ACCESS_OVERLAY_KEYS": def_props(ORIGINS, "ToolAccessRule"),
+        "ORIGIN_EGRESS_OVERLAY_KEYS": def_props(ORIGINS, "EgressRule"),
         "ORIGIN_DATA_KEYS": def_props(ORIGINS, "DataPolicy"),
         "ORIGIN_BUDGET_KEYS": def_props(ORIGINS, "OriginBudgets"),
         "BRIDGE_POLICY_KEYS": def_props(ORIGINS, "BridgePolicy"),
         "BRIDGE_TARGET_KEYS": def_props(ORIGINS, "BridgeTarget"),
         "DETECTION_KEYS": top_props(DETECTION),
         "PROMPT_INJECTION_KEYS": def_props(DETECTION, "PromptInjectionDetection"),
+        "PROMPT_INJECTION_HEURISTICS_KEYS": def_props(DETECTION, "PromptInjectionHeuristics"),
         "JAILBREAK_KEYS": def_props(DETECTION, "JailbreakDetection"),
         "THREAT_INTEL_KEYS": def_props(DETECTION, "ThreatIntelDetection"),
     },
@@ -108,6 +118,20 @@ TS_TYPE_NAMES = {
     "DETECTION_LEVELS": "DetectionLevelValue",
     "CLASSIFICATIONS": "ClassificationValue",
     "LIFECYCLE_STATES": "LifecycleStateValue",
+}
+
+
+# Object key sets the Go SDK consults. Go refuses an unknown member with
+# decoder.KnownFields(true) on the typed model, so it reads a key set only
+# where a check runs outside that decode: the raw-document validator and the
+# rule-path check in the guard. Emitting the rest would publish exported names
+# nothing reads.
+GO_OBJECT_KEY_SETS = {
+    "RULE_KEYS",
+    "EXTENSION_KEYS",
+    "CONTROL_MAPPING_KEYS",
+    "CHANGELOG_ENTRY_KEYS",
+    "RATE_CONDITION_KEYS",
 }
 
 
@@ -178,6 +202,8 @@ def render_go() -> str:
     ]
 
     for name, values in CONTRACT["objects"].items():
+        if name not in GO_OBJECT_KEY_SETS:
+            continue
         lines.append(f"var {go_name(name)} = map[string]struct{{}}{{")
         for value in values:
             lines.append(f'\t"{value}": {{}},')
@@ -196,18 +222,7 @@ def render_go() -> str:
         lines.extend(["}", ""])
 
     content = "\n".join(lines).rstrip() + "\n"
-    gofmt = shutil.which("gofmt")
-    if gofmt is None:
-        return content
-
-    result = subprocess.run(
-        [gofmt],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return gofmt(content)
 
 
 def render_rust() -> str:
@@ -224,18 +239,7 @@ def render_rust() -> str:
         lines.append("")
 
     content = "\n".join(lines).rstrip() + "\n"
-    rustfmt = shutil.which("rustfmt")
-    if rustfmt is None:
-        return content
-
-    result = subprocess.run(
-        [rustfmt, "--emit", "stdout", "--edition", "2021"],
-        input=content,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return result.stdout
+    return rustfmt(content)
 
 
 def go_name(name: str) -> str:

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HushSpec is a portable, open specification for declaring security rules at the tool boundary of AI agent runtimes. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced. The spec is runtime-agnostic and can be consumed by any enforcement engine.
+HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced. The spec is runtime-agnostic and can be consumed by any enforcement engine.
 
 **Design Philosophy:** Fail-closed. Invalid documents must be rejected at parse time; ambiguous rules deny access.
 
@@ -23,7 +23,10 @@ hush/
 │   ├── python/        # Python (hushspec)
 │   └── go/            # Go (hushspec)
 ├── rulesets/          # Example and built-in ruleset YAML files
+├── library/           # Vertical policy library, embedded as builtins
 ├── fixtures/          # Test fixtures (valid/invalid documents, edge cases)
+├── generated/         # Cross-SDK contract data the generators consume
+├── scripts/           # Generators and checks CI runs with --check
 └── docs/              # Documentation source (mdBook)
 ```
 
@@ -110,17 +113,39 @@ h2h diff old.yaml new.yaml
 # Format policy files canonically
 h2h fmt policy.yaml
 
-# Sign / verify / keygen
+# Print the canonical content hash (portable policy identity)
+h2h hash policy.yaml
+h2h hash policy.yaml --format canonical
+
+# Sign / verify / keygen (signature format 0.2)
 h2h keygen
-h2h sign policy.yaml --key h2h.key
-h2h verify policy.yaml --key h2h.pub
+h2h sign policy.yaml --key h2h.key.pem --expires-in 90d
+h2h verify policy.yaml --key h2h.pub.pem
+h2h verify policy.yaml --keyring keyring.json --last-seen-version 4
+
+# Signed policy bundles (DSSE / in-toto)
+h2h bundle create policy.yaml --key h2h.key.pem --out policy.bundle.json
+h2h bundle verify policy.bundle.json --keyring keyring.json --policy policy.yaml
+h2h bundle inspect policy.bundle.json
+
+# Evidence chain: hash-linked log and decision receipts
+h2h log verify audit.jsonl
+h2h receipts verify receipt.json --policy policy.yaml --keyring keyring.json
+
+# Governance metadata, static analysis and compliance evidence
+h2h audit policy.yaml --controls
+h2h schema core
+h2h report audit.jsonl --policy policy.yaml --format json
+h2h panic status
+h2h completions zsh
+h2h version
 ```
 
 ### Conformance Testkit
 
 ```bash
 # Run conformance tests against fixtures
-cargo run -p hushspec-testkit -- --fixtures fixtures
+cargo run -p hushspec-testkit --bin hushspec-testkit -- --fixtures fixtures
 ```
 
 ### Differential Fuzzing & Benchmarks

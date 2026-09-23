@@ -1,0 +1,105 @@
+# HushSpec error-code registry
+#
+# The stable identifiers a conformant implementation reports when it refuses a
+# document. Every `invalid/` vector in `fixtures/` carries a
+# `<name>.expect.yaml` sidecar naming the code its rejection MUST carry, so
+# "the document was rejected" can be checked as "rejected for this reason".
+#
+# This registry describes shipped behavior: every reference SDK emits these
+# codes, `h2h validate --format json` surfaces them, and Core Section 8 Level 1
+# requires an implementation to name the registered code for every `invalid/`
+# vector, not merely to reject it.
+#
+# Stability: a registered code's meaning never changes. A code may gain
+# `superseded_by` and stop being emitted; it is never reused for a different
+# condition.
+#
+# Schema: schemas/hushspec-error-codes.v1.schema.json
+registry_version: "0.1.0"
+
+codes:
+  - code: E000
+    summary: "Input could not be read"
+    description: >-
+      The policy file does not exist, or reading it failed. A transport-level
+      failure, not a statement about the document: nothing was parsed.
+    phase: io
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E001
+    summary: "YAML parse error"
+    description: >-
+      The input is not a single YAML 1.2 Core document that deserializes into
+      the HushSpec model. Covers syntax errors, YAML profile violations
+      (anchors, merge keys, duplicate keys, multi-document streams; core
+      Section 2.4), a missing required field, an unknown field at any nesting
+      level, a value of the wrong type, and an unknown enum variant -- all of
+      which are parse-time refusals because every HushSpec struct denies
+      unknown fields.
+    phase: parse
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E002
+    summary: "Unsupported hushspec version"
+    description: >-
+      The document's `hushspec` field names a version this engine does not
+      accept. An engine declaring support for `X.Y` accepts every `X.Y.*`
+      (core Section 10), so this is reported only for an unknown major or
+      minor, or for a value that is not a three-part version at all.
+    phase: validate
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E003
+    summary: "Duplicate secret pattern name"
+    description: >-
+      Two entries of `rules.secret_patterns.patterns` share a `name`. Names
+      identify the matched rule in a decision and in a receipt's `rule_trace`,
+      so they must be unique within a document (core Section 3.4).
+    phase: validate
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E004
+    summary: "Constraint violation"
+    description: >-
+      A structural constraint of core Section 7 or of an extension module is
+      violated: a `when` condition that nests too deeply or names a bad
+      timezone, day, or time; a posture `initial` that names no defined state;
+      a posture timeout transition with no `after`; a duplicate origins profile
+      id; an origins `match` enum value outside its module's set; a detection
+      threshold outside its range; a `metadata.controls` entry with an
+      ill-formed framework id or an empty `rule_paths`.
+    phase: validate
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E005
+    summary: "Invalid regular expression"
+    description: >-
+      A pattern field holds a regular expression outside the HushSpec regex
+      profile (core Section 3.14): a construct the RE2 subset excludes
+      (lookaround, backreferences), a non-leading inline flag group, a
+      non-ASCII shorthand class, or a nested unbounded quantifier that would
+      backtrack catastrophically on the SDKs with backtracking engines.
+    phase: validate
+    emitted_by: ["h2h validate", "h2h lint"]
+
+  - code: E010
+    summary: "Extends resolution failed"
+    description: >-
+      The `extends` chain could not be resolved: a reference no loader serves,
+      a `#sha256:` pin that does not match the referenced document's content
+      hash, a malformed pin, a cycle, a chain deeper than the depth cap, or a
+      hop that fails a required signature check (core Section 2.3).
+    phase: resolve
+    emitted_by: ["h2h validate --strict", "h2h lint"]
+
+  - code: E011
+    summary: "Invalid governance date"
+    description: >-
+      A `metadata` date field (`approval_date`, `effective_date`,
+      `expiry_date`, `next_review_date`, a `changelog[].date`) is not an
+      ISO 8601 calendar date (`YYYY-MM-DD`).
+      Dates are compared as strings throughout the toolchain, so any other
+      shape would compare wrong rather than fail, and an expired policy could
+      read as current.
+    phase: validate
+    emitted_by: ["h2h validate", "h2h lint"]

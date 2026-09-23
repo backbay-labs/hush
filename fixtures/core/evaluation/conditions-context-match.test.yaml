@@ -1,0 +1,131 @@
+hushspec_test: "0.1.0"
+description: "when.context comparison: scalar equality, membership in either direction, array intersection, and exact number comparison (core spec 3.13)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    shell_commands:
+      when:
+        context:
+          user.role: [admin, operator]
+      forbidden_patterns:
+        - "rm[ \\t]+-rf[ \\t]+/"
+    egress:
+      when:
+        context:
+          user.groups: platform
+      block: ["evil.example.com"]
+      default: allow
+    tool_access:
+      when:
+        context:
+          custom.ratio: 0.3
+      block: [deploy]
+      default: allow
+    forbidden_paths:
+      when:
+        all_of:
+          - context:
+              custom.tier: 2
+          - context:
+              custom.limit: 1.0
+      patterns: ["/etc/**"]
+cases:
+  - description: "expected array, scalar context value: the block is active when the array lists it"
+    context:
+      user:
+        role: admin
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "expected array, array context value: a shared element makes the block active"
+    context:
+      user:
+        role: [viewer, operator]
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: deny
+      matched_rule: "rules.shell_commands.forbidden_patterns[0]"
+  - description: "expected array, array context value: disjoint arrays leave the block inert"
+    context:
+      user:
+        role: [viewer, auditor]
+    action:
+      type: shell_command
+      target: "rm -rf /"
+    expect:
+      decision: allow
+  - description: "expected scalar, array context value: membership makes the block active"
+    context:
+      user:
+        groups: [platform, sre]
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: deny
+      matched_rule: rules.egress.block
+  - description: "expected scalar, array context value: a scalar absent from the array leaves the block inert"
+    context:
+      user:
+        groups: [sre]
+    action:
+      type: egress
+      target: "evil.example.com"
+    expect:
+      decision: allow
+  - description: "numbers compare exactly: an equal double makes the block active"
+    context:
+      custom:
+        ratio: 0.3
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.block
+  - description: "numbers compare exactly: the nearest double above 0.3 does not match and the block is inert"
+    context:
+      custom:
+        ratio: 0.30000000000000004
+    action:
+      type: tool_call
+      target: deploy
+    expect:
+      decision: allow
+  - description: "numbers compare by value: a float context value equals the integer the document wrote"
+    context:
+      custom:
+        tier: 2.0
+        limit: 1
+    action:
+      type: file_write
+      target: /etc/passwd
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "numbers compare by value: an integer context value equals the float the document wrote"
+    context:
+      custom:
+        tier: 2
+        limit: 1.0
+    action:
+      type: file_write
+      target: /etc/passwd
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "numbers compare by value: a different integer leaves the block inert"
+    context:
+      custom:
+        tier: 3
+        limit: 1
+    action:
+      type: file_write
+      target: /etc/passwd
+    expect:
+      decision: allow

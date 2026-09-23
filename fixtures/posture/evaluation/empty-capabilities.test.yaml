@@ -1,0 +1,98 @@
+hushspec_test: "0.1.0"
+description: "A state with an empty capabilities list denies every capability-requiring action; ungated action types are unaffected (posture spec 3)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+    egress:
+      default: allow
+  extensions:
+    posture:
+      initial: open
+      states:
+        open:
+          capabilities: [file_access, file_write, egress, shell, tool_call, patch]
+        locked:
+          capabilities: []
+      transitions: []
+cases:
+  - description: "open state permits a tool call"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: open
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.default
+      posture:
+        current: open
+        next: open
+  - description: "locked state denies a tool call"
+    action:
+      type: tool_call
+      target: read_file
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+      posture:
+        current: locked
+        next: locked
+  - description: "locked state denies a file read"
+    action:
+      type: file_read
+      target: "/proj/a.txt"
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+  - description: "locked state denies a file write"
+    action:
+      type: file_write
+      target: "/proj/a.txt"
+      content: "x"
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+  - description: "locked state denies egress"
+    action:
+      type: egress
+      target: "api.example.com"
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+  - description: "locked state denies a shell command"
+    action:
+      type: shell_command
+      target: "ls"
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+  - description: "locked state denies a patch"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: "+a\n"
+      posture:
+        current: locked
+    expect:
+      decision: deny
+      matched_rule: extensions.posture.states.locked.capabilities
+  - description: "computer_use is not gated by posture capabilities"
+    action:
+      type: computer_use
+      target: "remote.session.connect"
+      posture:
+        current: locked
+    expect:
+      decision: allow

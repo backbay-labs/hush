@@ -1,0 +1,183 @@
+hushspec_test: "0.1.0"
+description: "HushSpec regex profile: identical dialect semantics across the four SDKs"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        # ASCII-only \\d: Rust's and Python's Unicode \\d also match
+        # Arabic-Indic digits; the profile pins \\d to [0-9].
+        - name: ascii_digits
+          pattern: "key\\d{3}"
+          severity: critical
+        # End-of-text $: Python's bare $ also matches just before a trailing
+        # newline; the profile anchors at end of text only.
+        - name: end_anchor
+          pattern: "token$"
+          severity: critical
+    shell_commands:
+      forbidden_patterns:
+        # ASCII word boundary: Rust and Python treat U+00E9 as a word character
+        # (no boundary before "foo"); under the profile's ASCII \\w the
+        # boundary is there, so the pattern matches.
+        - "\\bfoo\\b"
+        # `.` excludes only \\n -- JavaScript's `.` also excludes \\r.
+        - "a.b"
+        # ASCII whitespace including \\v and excluding NBSP: JavaScript's
+        # \\s includes NBSP, Go's RE2 \\s omits \\v.
+        - "c\\sd"
+        # `.` counts code points, not UTF-16 code units: an astral character is
+        # one `.`, never two. JavaScript strings are UTF-16, so a translation
+        # that let `.` fall back to a single code unit would match here.
+        - "^x..$"
+        - "^y.$"
+        # A negated class and a negated shorthand are "one code point outside
+        # this set", so they take an astral character whole as well.
+        - "^z[^a]$"
+        - "^w\\D$"
+        # The `i` flag folds ASCII letters only: an engine applying the full
+        # Unicode simple case-folding table would also match U+017F (long s)
+        # and U+212A (Kelvin sign) here.
+        - "(?i)^sk$"
+        # An astral character inside a class is one scalar value, never either
+        # half of its UTF-16 surrogate pair.
+        - "^[\U0001F600a]$"
+        - "^[^\U0001F600]$"
+cases:
+  - description: "allow key followed by Arabic-Indic digits (ASCII \\d does not match)"
+    action:
+      type: file_write
+      target: "/src/config.js"
+      content: "key\u0661\u0662\u0663"
+    expect:
+      decision: allow
+  - description: "deny key followed by ASCII digits"
+    action:
+      type: file_write
+      target: "/src/config.js"
+      content: "key123"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.ascii_digits
+  - description: "allow token with a trailing newline ($ is end of text, not end of line)"
+    action:
+      type: file_write
+      target: "/src/auth.js"
+      content: "token\n"
+    expect:
+      decision: allow
+  - description: "deny token at end of text"
+    action:
+      type: file_write
+      target: "/src/auth.js"
+      content: "token"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.end_anchor
+  - description: "deny non-ASCII letter before foo (ASCII word boundary matches)"
+    action:
+      type: shell_command
+      target: "\u00e9foo"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[0]
+  - description: "deny carriage return between a and b (. excludes only newline)"
+    action:
+      type: shell_command
+      target: "a\rb"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[1]
+  - description: "allow non-breaking space between c and d (\\s is ASCII)"
+    action:
+      type: shell_command
+      target: "c\u00a0d"
+    expect:
+      decision: allow
+  - description: "deny vertical tab between c and d (\\s includes \\v)"
+    action:
+      type: shell_command
+      target: "c\u000bd"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[2]
+  - description: "allow foo inside an ASCII word (no ASCII word boundary)"
+    action:
+      type: shell_command
+      target: "xfooy"
+    expect:
+      decision: allow
+  - description: "allow newline between a and b (. never matches newline)"
+    action:
+      type: shell_command
+      target: "a\nb"
+    expect:
+      decision: allow
+  - description: "allow two dots against a single astral character (one code point, not two)"
+    action:
+      type: shell_command
+      target: "x\U0001F600"
+    expect:
+      decision: allow
+  - description: "deny two dots against two BMP characters"
+    action:
+      type: shell_command
+      target: "xab"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[3]
+  - description: "deny one dot against a single astral character"
+    action:
+      type: shell_command
+      target: "y\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[4]
+  - description: "deny a negated class against a single astral character"
+    action:
+      type: shell_command
+      target: "z\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[5]
+  - description: "deny a negated shorthand against a single astral character"
+    action:
+      type: shell_command
+      target: "w\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[6]
+  - description: "deny an ASCII-cased subject under (?i)"
+    action:
+      type: shell_command
+      target: "SK"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[7]
+  - description: "allow the long s and the Kelvin sign under (?i) (ASCII folding only)"
+    action:
+      type: shell_command
+      target: "\u017f\u212a"
+    expect:
+      decision: allow
+  - description: "deny an astral class member against that character"
+    action:
+      type: shell_command
+      target: "\U0001F600"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[8]
+  - description: "deny the same class against its other, BMP member"
+    action:
+      type: shell_command
+      target: "a"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[8]
+  - description: "deny one astral character against a negated astral class"
+    action:
+      type: shell_command
+      target: "\U0001F64F"
+    expect:
+      decision: deny
+      matched_rule: rules.shell_commands.forbidden_patterns[9]

@@ -1,12 +1,14 @@
 # RFC 02: Audit Trail and Decision Receipts
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Authors:** Security Architecture Team
 **Date:** 2026-03-15
 **HushSpec Version:** 0.1.0
 **Affects:** Core Specification (Section 6, Section 8), All SDKs (Rust, TypeScript, Python, Go)
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). Receipt, log, signing, and sink artifacts exist on the open RFC 09 stack. The schema-invalid policy-event repair has a local verification record; retention/backend/collector scope and hosted evidence-chain qualification remain unestablished.
 
 ## Table of Contents
 

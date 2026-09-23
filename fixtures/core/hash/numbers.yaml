@@ -1,0 +1,25 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 4.3: ES6 number formatting; whole-valued floats print as integers (10.0 -> 10),\
+  \ fractions keep the shortest round-trip form, and integers are plain"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "patch_integrity":
+      "max_additions": 250
+      "max_deletions": 0
+      "max_imbalance_ratio": 10.0
+    "tool_access":
+      "max_args_size": 1048576
+    "code_execution":
+      "max_execution_time_ms": 2500
+      "max_scan_bytes": 65536
+  "extensions":
+    "detection":
+      "threat_intel":
+        "enabled": true
+        "similarity_threshold": 0.35
+        "top_k": 3
+      "jailbreak":
+        "block_threshold": 90
+canonical: "{\"extensions\":{\"detection\":{\"jailbreak\":{\"block_threshold\":90,\"enabled\":true,\"max_input_bytes\":200000,\"warn_threshold\":50},\"threat_intel\":{\"enabled\":true,\"similarity_threshold\":0.35,\"top_k\":3}}},\"hushspec\":\"0.1.0\",\"rules\":{\"code_execution\":{\"enabled\":false,\"language_allowlist\":[],\"max_execution_time_ms\":2500,\"max_scan_bytes\":65536,\"module_denylist\":[],\"network_access\":false},\"patch_integrity\":{\"enabled\":true,\"forbidden_patterns\":[],\"max_additions\":250,\"max_deletions\":0,\"max_imbalance_ratio\":10,\"require_balance\":false},\"tool_access\":{\"allow\":[],\"block\":[],\"default\":\"allow\",\"enabled\":true,\"max_args_size\":1048576,\"require_confirmation\":[]}}}"
+content_hash: "sha256:43b036f914c27e40e49ece8c8725eaee05d465c31cdebc7cb8bfebcf8b2498de"

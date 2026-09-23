@@ -1,0 +1,52 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7002-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:c64c6702c991066c2354e6b16304f901edb74da1ccfb920d2836cefae4c09b31"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "read_file"
+  },
+  "decision": "deny",
+  "matched_rule": "extensions.posture.states.locked.capabilities",
+  "reason": "posture 'locked' does not allow capability 'tool_call'",
+  "rule_trace": [
+    {
+      "rule_block": "posture_capability",
+      "rule_path": "extensions.posture.states.locked.capabilities",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "posture 'locked' does not allow capability 'tool_call'"
+    },
+    {
+      "rule_block": "tool_access",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "short-circuited by posture deny"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "short-circuited by posture deny"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  },
+  "posture": {
+    "current": "locked",
+    "next": "locked"
+  }
+}

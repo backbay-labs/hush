@@ -1,0 +1,6 @@
+# A file must contain exactly one YAML document (core spec 2.4).
+hushspec: "0.1.0"
+name: first
+---
+hushspec: "0.1.0"
+name: second

@@ -1,0 +1,12 @@
+hushspec: "0.1.0"
+extensions:
+  origins:
+    default_behavior: minimal_profile
+    profiles:
+      - id: email-external
+        match:
+          provider: email
+          visibility: public
+        egress:
+          allow: []
+          default: block

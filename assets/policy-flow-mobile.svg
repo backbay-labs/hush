@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="684" viewBox="0 0 480 684" role="img" aria-labelledby="title desc">
+  <title id="title">From policy to proof</title>
+  <desc id="desc">Declare a YAML policy, enforce it at the runtime boundary, and record a receipt binding the decision to the resolved policy hash.</desc>
+  <defs>
+    <linearGradient id="background" x2="0" y2="1"><stop stop-color="#111310"/><stop offset="1" stop-color="#191a15"/></linearGradient>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1L7 4L1 7" fill="none" stroke="#bfa574" stroke-width="1.2"/></marker>
+  </defs>
+  <rect width="480" height="684" rx="4" fill="url(#background)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="240" y="40" text-anchor="middle" font-size="11" letter-spacing="3" fill="#bfa574">THE POLICY LIFECYCLE</text>
+    <g fill="#1c1e18" stroke="#bfa574" stroke-opacity=".3">
+      <rect x="28" y="65" width="424" height="158" rx="5"/>
+      <rect x="28" y="257" width="424" height="158" rx="5"/>
+      <rect x="28" y="449" width="424" height="158" rx="5"/>
+    </g>
+    <path d="M240 228V249M240 420V441" stroke="#bfa574" marker-end="url(#arrow)"/>
+    <g font-size="12" letter-spacing="2.4" fill="#bfa574">
+      <text x="50" y="91">01 / DECLARE</text>
+      <text x="50" y="283">02 / ENFORCE</text>
+      <text x="50" y="475">03 / RECORD</text>
+    </g>
+    <g font-family="Georgia, 'Times New Roman', serif" font-size="27" fill="#eee5d3">
+      <text x="50" y="125">The policy</text>
+      <text x="50" y="317">The boundary</text>
+      <text x="50" y="509">The receipt</text>
+    </g>
+    <g font-family="'Liberation Mono', Consolas, monospace" font-size="15" fill="#c8c5b8">
+      <text x="50" y="155">hushspec: <tspan fill="#c9b17e">"1.0.0"</tspan></text>
+      <text x="50" y="178">rules: { egress: { default: <tspan fill="#d6a094">block</tspan> } }</text>
+      <text x="50" y="539">decision + policy.content_hash</text>
+      <text x="50" y="562">rule_trace + enforcement</text>
+    </g>
+    <g font-size="15" text-anchor="middle">
+      <rect x="50" y="337" width="88" height="29" rx="3" fill="#a6ba9b" fill-opacity=".1" stroke="#a6ba9b" stroke-opacity=".3"/>
+      <text x="94" y="357" fill="#b9c9af">allow</text>
+      <rect x="150" y="337" width="88" height="29" rx="3" fill="#c9b17e" fill-opacity=".1" stroke="#c9b17e" stroke-opacity=".3"/>
+      <text x="194" y="357" fill="#d8c192">warn</text>
+      <rect x="250" y="337" width="88" height="29" rx="3" fill="#cc9384" fill-opacity=".1" stroke="#cc9384" stroke-opacity=".3"/>
+      <text x="294" y="357" fill="#d6a094">deny</text>
+    </g>
+    <g font-size="15" fill="#bcb7a7">
+      <text x="50" y="203">YAML you can version and review.</text>
+      <text x="50" y="394">Your runtime acts on the decision.</text>
+      <text x="50" y="587">Hash, sign, chain, and verify.</text>
+    </g>
+    <text x="240" y="650" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-size="18" fill="#c9b17e">One format. Four SDKs.</text>
+  </g>
+</svg>

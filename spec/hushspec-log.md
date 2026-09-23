@@ -1,0 +1,78 @@
+# HushSpec Receipt Log Specification
+
+**Version:** 1.0.0
+**Status:** Stable
+**Date:** 2026-09-15
+**Companion to:** Decision Receipt 0.2, Policy Signing 0.2, Canonical Form 1.0.0
+
+---
+
+## 1. Introduction
+
+A decision receipt proves one evaluation. A receipt **log** proves a sequence of them: that nothing was removed, inserted, edited, or reordered between the first entry and the last, and which policy was in force at every point. This specification defines the log-entry format and the policy-in-effect record that a log carries alongside receipts.
+
+The key words "MUST", "MUST NOT", "SHOULD", and "MAY" are to be interpreted as described in RFC 2119.
+
+## 2. Conformance
+
+A writer conforms if every entry it emits validates against `schemas/hushspec-log-entry.v1.schema.json`, links to the previous entry as Section 4 requires, and carries a correct `entry_hash`. A verifier conforms if it accepts every file under `fixtures/log/valid/` and rejects every file under `fixtures/log/invalid/` with the first breaking line identified.
+
+## 3. File layout
+
+A log is a JSON Lines file: one entry per line, UTF-8, `\n`-terminated. Blank lines are ignored. Writers MUST append whole lines and MUST flush each line to durable storage before reporting the entry as written. A log file MUST have one writer at a time.
+
+## 4. Entry structure
+
+| Field | Required | Semantics |
+|---|---|---|
+| `log_version` | yes | `"0.1"`. Verifiers MUST reject unknown values. |
+| `seq` | yes | 1 for the first entry of a file, then exactly +1 per entry. |
+| `prev_hash` | yes | The previous entry's `entry_hash`. The first entry of a log that continues nothing carries the genesis value `sha256:` followed by 64 zeros. |
+| `entry_type` | yes | `receipt`, `policy_loaded`, `policy_swapped`, or `log_started`. Exactly the payload member it names is present. |
+| `receipt` | when `receipt` | A format 0.2 decision receipt, verbatim. |
+| `policy_event` | when `policy_loaded` / `policy_swapped` | Section 6. |
+| `log_started` | when `log_started` | Section 5. |
+| `entry_hash` | yes | `sha256:` over the RFC 8785 canonical form (Canonical Form specification, Section 4; no projection) of the entry with `entry_hash` and `signature` removed. |
+| `signature` | no | A policy-signature envelope (Signing specification, Section 4) whose `content_hash` is this entry's `entry_hash`. |
+
+Because `prev_hash` is inside the hashed content, every entry's hash commits to the entire history before it. Editing any earlier line changes its `entry_hash` and breaks the link the next line declares.
+
+A writer MUST derive `seq` and `prev_hash` from the file's current last entry while it holds the write lock, not from a head cached when it opened the file, so that two writers of the same log never build entries from the same predecessor and fork the chain.
+
+The write lock is a **sentinel file** named by appending `.lock` to the log's path, created with `O_EXCL` so that creating it is acquiring it and removing it is releasing it. Every implementation MUST use this lock, because it is the one mechanism available in every language and on every platform, and a lock one writer cannot see is not a lock. A writer whose platform also offers an advisory lock on an open file (`flock`) SHOULD hold one on the log file as well, taken after the sentinel: the kernel releases it even if the writer dies, and it excludes a writer that takes only the advisory lock. A writer that cannot acquire the lock within a bounded wait MUST fail the append; it MUST NOT break a sentinel it cannot prove is stale, because two writers appending to one file interleave chains and corrupt both.
+
+## 5. Rotation
+
+A writer MAY start a new file at any time. The new file's first entry MUST be a `log_started` entry with `seq: 1`, `prev_hash` equal to the previous file's last `entry_hash`, and `log_started.previous_entry_hash` repeating that value (with `previous_file` naming the file, when known). `previous_entry_hash` is recorded even when the previous file was empty and the value is therefore the genesis hash: a verifier compares it against the previous file's last hash, and an omitted member is not that hash. A verifier given the files in order MUST check that each file's first entry links to the previous file's last hash. A verifier given only the later file MUST accept the chain from `log_started.previous_entry_hash` onward; it cannot vouch for what came before.
+
+## 6. Policy-in-effect records
+
+An enforcement point MUST write a `policy_loaded` entry when it starts enforcing a policy and a `policy_swapped` entry when it replaces one (hot reload, panic policy), before any receipt evaluated under the new policy. The `policy_event` carries the same `policy` identity a receipt does (Receipt specification, Section 4.2: content hash, `extends_chain`, `signature` outcome), the `enforcement_mode` in force, the SDK name and version, and the HushSpec version the engine implements. `policy_swapped` also names the `previous_content_hash`. A reader can therefore map every receipt to the exact policy in force by walking back to the nearest policy event.
+
+## 7. Signing
+
+When a writer holds a signing key it SHOULD sign every entry: `signature` is the 0.2 envelope produced over the entry hash exactly as a policy signature is produced over a policy hash (Signing specification, Section 4.2), with `content_hash` set to `entry_hash`. A verifier with a keyring MUST verify every signed entry with the ordered checks of Signing specification, Section 6.2 and MUST report a signed entry it cannot verify as a break. A verifier configured to require signatures MUST reject an unsigned entry (reason `entry_unsigned`).
+
+## 8. Verification algorithm
+
+For each file in order, for each non-blank line in order:
+
+1. Parse the entry; it MUST validate against `schemas/hushspec-log-entry.v1.schema.json`, so an unknown field, a member the schema requires and the entry lacks, and a member outside the JSON type or closed enum the schema gives it are each a break.
+2. `log_version` MUST be `"0.1"`.
+3. `seq` MUST equal the expected value (1, then previous + 1).
+4. Exactly the payload named by `entry_type` MUST be present.
+5. For `seq` 1 of a continued file, the entry MUST be `log_started` and its `previous_entry_hash` MUST equal the previous file's last hash.
+6. `prev_hash` MUST equal the previous entry's `entry_hash` (or the genesis value, or the carried hash).
+7. Recomputing `entry_hash` from the canonical form MUST reproduce the stored value.
+8. A `receipt` payload MUST carry `receipt_version` `"0.2"` and validate against the receipt schema.
+9. `signature`, when present, MUST name this entry's `entry_hash` and verify against the keyring when one is supplied.
+
+The first failing step identifies the break by file and line. Test vectors: `fixtures/log/valid/`, `fixtures/log/invalid/`.
+
+## 9. Security considerations
+
+The security considerations for the whole specification family, including the shared threats this section relies on, are collected in `hushspec-security.md`.
+
+- **Truncation.** Deleting entries from the end of a log leaves a valid chain. Detecting truncation needs an external anchor: the `entry_hash` a signer published, a receipt's presence in another system, or a `policy_swapped` entry expected on a schedule. Writers SHOULD publish the head hash periodically.
+- **Key custody.** An entry signature proves the writer held the key; it does not prove the clock. Auditors weigh `timestamp` by the receipt's `time_source`.
+- **Locking.** Two writers appending to one file interleave chains and corrupt both. Section 4 defines the lock: a `<path>.lock` sentinel every implementation takes, plus an advisory lock on the log file where the platform has one. A writer that cannot acquire it fails rather than bypasses it, so a sentinel left behind by a writer that died is a condition for an operator to clear, not one a second writer may assume.

@@ -1,0 +1,13 @@
+hushspec: "0.2.0"
+name: changelog-unknown-key
+description: "Core 2.5: unknown keys inside a metadata.changelog entry are rejected"
+metadata:
+  changelog:
+    - version: "1"
+      date: "2026-01-01"
+      summary: "First revision"
+      reason: "not a field"
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # Compliance: HIPAA Security Rule (45 CFR 164.312), Privacy Rule (45 CFR 164.502)
 #
 # DISCLAIMER: Starting point only. Organizations MUST customize and have this
@@ -218,3 +218,42 @@ rules:
       - git_commit
     default: block
     max_args_size: 524288
+
+# Structured control mappings (core spec 2.5). These are declarative metadata:
+# they never influence evaluation. `h2h lint` checks that every rule block is
+# mapped (L011), that every path resolves (L012), and that the framework and
+# control ids are in spec/registries/frameworks.yaml (L013).
+metadata:
+  controls:
+    - framework: hipaa-2013
+      control_id: "164.312(a)(1)"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.tool_access
+      notes: "Access Control. PHI directories and credential stores are unreachable; the tool allowlist denies by default."
+    - framework: hipaa-2013
+      control_id: "164.312(b)"
+      rule_paths:
+        - rules.forbidden_paths.patterns
+      notes: "Audit Controls. HIPAA audit log directories are forbidden paths, so the agent cannot alter the audit record."
+    - framework: hipaa-2013
+      control_id: "164.312(c)(1)"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Integrity. Patch size, balance, and forbidden-pattern limits block wholesale rewrites of clinical code."
+    - framework: hipaa-2013
+      control_id: "164.312(e)(1)"
+      rule_paths:
+        - rules.egress
+      notes: "Transmission Security. Egress defaults to block; only approved EHR/FHIR and registry endpoints are allowed."
+    - framework: hipaa-2013
+      control_id: "164.502"
+      rule_paths:
+        - rules.egress.block
+        - rules.shell_commands
+      notes: "Minimum Necessary. Paste sites, consumer storage, social and AI endpoints are blocked, as are database dump and exfiltration commands."
+    - framework: hipaa-2013
+      control_id: "164.514(b)(2)"
+      rule_paths:
+        - rules.secret_patterns
+      notes: "De-identification. Patterns detect the 18 HIPAA identifiers plus infrastructure secrets."

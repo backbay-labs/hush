@@ -52,7 +52,7 @@ func TestInvalidRegexSyntaxSecretPatterns(t *testing.T) {
 	}
 	found := false
 	for _, err := range result.Errors {
-		if err.Code == "INVALID_REGEX" {
+		if err.Kind == "INVALID_REGEX" && err.Code == ErrorCodeInvalidRegex {
 			found = true
 			break
 		}
@@ -147,7 +147,7 @@ func TestGoRegexpRejectsLookbehind(t *testing.T) {
 }
 
 func TestBuiltInRulesetsPassValidation(t *testing.T) {
-	rulesetDir := filepath.Join("..", "..", "..", "rulesets")
+	rulesetDir := filepath.Join(fixtureRepoRoot(t), "rulesets")
 	rulesetFiles := []string{
 		"default.yaml",
 		"strict.yaml",
@@ -217,8 +217,4 @@ func TestAcceptsSafeQuantifierShapes(t *testing.T) {
 			t.Errorf("safe pattern %q should pass validation", pattern)
 		}
 	}
-}
-
-func floatPtr(f float64) *float64 {
-	return &f
 }

@@ -1,0 +1,8 @@
+# YAML merge keys are rejected (core spec 2.4).
+hushspec: "0.1.0"
+rules:
+  egress: &base
+    allow: ["api.example.com"]
+    default: block
+  browser_automation:
+    <<: *base

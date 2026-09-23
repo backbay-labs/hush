@@ -1,0 +1,16 @@
+hushspec_resolve: 0.1.0
+description: 'a document with no extends resolves to itself: one chain link, the leaf, recorded as memory'
+policy:
+  hushspec: 0.1.0
+  name: leaf-only
+  rules:
+    egress:
+      allow:
+      - api.example.com
+      default: block
+expect:
+  resolves: true
+  content_hash: sha256:526992589d039ef6e8d215f6d57828deba276075a52be315b4cbea5cdd946ea3
+  chain:
+  - source: memory
+    content_hash: sha256:526992589d039ef6e8d215f6d57828deba276075a52be315b4cbea5cdd946ea3

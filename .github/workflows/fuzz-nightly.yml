@@ -5,6 +5,10 @@ on:
     - cron: '17 3 * * *'
   workflow_dispatch:
 
+# The job only reads the repository and uploads its own artifacts.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -41,6 +45,11 @@ jobs:
       - name: Install Python package
         run: pip install -e "packages/python[dev]"
 
+      # Receipts are compared by default: every case's format 0.2 receipt is
+      # hashed by each SDK under the bundle's fixed audit inputs, and a
+      # diverging case is re-run with `--emit-receipts` so the report names the
+      # member the two receipts first differ on. `--ignore-receipts` would
+      # turn that off; nightly must not.
       - name: Deep differential fuzz (random seed, minimized fixture candidates)
         run: |
           cargo run --release -p hushspec-testkit --bin hushspec-difftest -- \
@@ -50,7 +59,10 @@ jobs:
             --emit-fixtures target/difftest/fixture-candidates \
             --report target/difftest/report.json
 
-      - name: Upload run artifacts (bundles, report, fixture candidates)
+      # The report carries each divergence's receipts and first differing
+      # member; the bundles replay the run; the fixture candidates are the
+      # minimized repros. Uploaded on failure too -- especially on failure.
+      - name: Upload run artifacts (bundles, receipts, report, fixture candidates)
         if: always()
         uses: actions/upload-artifact@v4
         with:

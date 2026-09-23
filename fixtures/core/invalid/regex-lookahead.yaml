@@ -1,0 +1,10 @@
+# A lookahead assertion. Lookaround is outside the RE2 subset the HushSpec
+# regex profile is built on, and a backtracking engine can take exponential
+# time on one, so all four SDKs must reject this document with the same code.
+hushspec: "0.1.0"
+rules:
+  secret_patterns:
+    patterns:
+      - name: lookahead
+        pattern: "(?=secret)[0-9A-Za-z]+"
+        severity: critical

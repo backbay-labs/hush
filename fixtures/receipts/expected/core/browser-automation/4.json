@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7004-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:5a8ca3fba4da25f17f8b64956d668da65179a54a5fe733cabb234df5a08f9b1c"
+  },
+  "action": {
+    "type": "browser_action",
+    "target": "type",
+    "content_hash": "sha256:457643f44d19aed85fd756aa50cc0cd6b57376d4e8f5a72f9f85972a522002a3",
+    "content_size": 20
+  },
+  "decision": "deny",
+  "matched_rule": "rules.browser_automation.credential_detection",
+  "reason": "typed input matched built-in credential detector 'aws_access_key'",
+  "rule_trace": [
+    {
+      "rule_block": "browser_automation",
+      "rule_path": "rules.browser_automation.credential_detection",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "typed input matched built-in credential detector 'aws_access_key'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

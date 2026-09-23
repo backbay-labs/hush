@@ -1,0 +1,5 @@
+# The version field must be a string; a YAML float is rejected (core spec 2.2, 2.4).
+hushspec: 0.1
+rules:
+  egress:
+    default: block

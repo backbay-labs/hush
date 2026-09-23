@@ -1,0 +1,68 @@
+hushspec_test: "0.1.0"
+description: "require_balance ratio semantics for non-zero counts (core spec 3.5)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    patch_integrity:
+      require_balance: true
+      max_imbalance_ratio: 3.0
+cases:
+  - description: "a balanced patch is allowed"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        +a
+        +b
+        -c
+        -d
+    expect:
+      decision: allow
+  - description: "a ratio equal to the limit is allowed"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        +a
+        +b
+        +c
+        -d
+    expect:
+      decision: allow
+  - description: "a ratio above the limit is denied"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        +a
+        +b
+        +c
+        +d
+        -e
+    expect:
+      decision: deny
+      matched_rule: rules.patch_integrity.max_imbalance_ratio
+  - description: "the +++ header is not counted as an addition"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        +++ b/a.txt
+        +a
+        +b
+        +c
+        -d
+    expect:
+      decision: allow
+  - description: "the --- header is not counted as a deletion"
+    action:
+      type: patch_apply
+      target: "/proj/a.txt"
+      content: |
+        --- a/a.txt
+        -a
+        -b
+        -c
+        +d
+    expect:
+      decision: allow

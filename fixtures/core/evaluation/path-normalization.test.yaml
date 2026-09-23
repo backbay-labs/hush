@@ -1,0 +1,58 @@
+hushspec_test: "0.1.0"
+description: "Path glob semantics -- literal brackets, globstar segment counts, case sensitivity, single-star scope (core spec 3.1, 3.14.1)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    forbidden_paths:
+      patterns:
+        - "/logs/[old]/**"
+        - "/proj/**/secret.txt"
+        - "/Secrets/**"
+        - "/tmp/*.log"
+cases:
+  - description: "square brackets in a pattern are literal characters"
+    action:
+      type: file_read
+      target: "/logs/[old]/a.txt"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "square brackets do not form a character class"
+    action:
+      type: file_read
+      target: "/logs/o/a.txt"
+    expect:
+      decision: allow
+  - description: "a globstar segment matches zero segments"
+    action:
+      type: file_read
+      target: "/proj/secret.txt"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "a globstar segment matches many segments"
+    action:
+      type: file_read
+      target: "/proj/a/b/c/secret.txt"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "matching is case-sensitive"
+    action:
+      type: file_read
+      target: "/secrets/x"
+    expect:
+      decision: allow
+  - description: "single star matches within one segment"
+    action:
+      type: file_read
+      target: "/tmp/a.log"
+    expect:
+      decision: deny
+      matched_rule: rules.forbidden_paths.patterns
+  - description: "single star does not cross a separator"
+    action:
+      type: file_read
+      target: "/tmp/sub/a.log"
+    expect:
+      decision: allow

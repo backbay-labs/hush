@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-engine-request-experimental.v1.schema.json",
+  "title": "Experimental external engine request 0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "input"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
+    "input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "input": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"operation": {"enum": ["parse", "validate", "canonicalize"]}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/policy"}}}},
+    {"if": {"properties": {"operation": {"const": "merge"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/merge"}}}},
+    {"if": {"properties": {"operation": {"const": "resolve"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/resolve"}}}},
+    {"if": {"properties": {"operation": {"const": "evaluate"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/evaluate"}}}}
+  ],
+  "$defs": {
+    "documents": {"type": "object", "maxProperties": 4096, "additionalProperties": {"type": "string"}},
+    "policy": {"type": "object", "additionalProperties": false, "required": ["policy"], "properties": {"policy": {"type": "string"}}},
+    "merge": {"type": "object", "additionalProperties": false, "required": ["base", "child"], "properties": {"base": {"type": "string"}, "child": {"type": "string"}}},
+    "resolve": {
+      "type": "object", "additionalProperties": false, "required": ["policy", "source", "documents"],
+      "properties": {"policy": {"type": "string"}, "source": {"type": "string", "minLength": 1}, "documents": {"$ref": "#/$defs/documents"}}
+    },
+    "evaluate": {
+      "type": "object", "additionalProperties": false, "required": ["policy", "action", "source", "documents"],
+      "properties": {
+        "policy": {"type": "string"}, "action": {"type": "object"},
+        "source": {"type": "string", "minLength": 1}, "documents": {"$ref": "#/$defs/documents"}
+      }
+    }
+  }
+}

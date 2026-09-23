@@ -16,7 +16,7 @@ describe('parse', () => {
     const result = parse('hushspec: "0.1.0"\nunknown_field: true\n');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown top-level field');
+      expect(result.error).toContain('unknown field `unknown_field`');
     }
   });
 
@@ -24,7 +24,7 @@ describe('parse', () => {
     const result = parse('hushspec: "0.1.0"\nrules:\n  nonexistent_rule:\n    enabled: true\n');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown rule');
+      expect(result.error).toContain('rules: unknown field `nonexistent_rule`');
     }
   });
 
@@ -38,7 +38,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.egress');
+      expect(result.error).toContain('rules.egress: unknown field `extra_field`');
     }
   });
 
@@ -62,10 +62,8 @@ rules:
     expect(result.ok).toBe(false);
   });
 
-  // browser_automation / code_execution are phase-gated guards whose
-  // contents used to pass through validateRules unchecked (any shape was
-  // accepted, unlike every other rules.* block). Mirrors the sibling
-  // "unknown nested rule fields" / "invalid field types" cases above.
+  // browser_automation and code_execution deny unknown members and check
+  // field types like every other `rules.*` block (core spec 2.4).
   it('rejects unknown field in rules.browser_automation', () => {
     const result = parse(`
 hushspec: "0.1.0"
@@ -76,7 +74,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.browser_automation');
+      expect(result.error).toContain('rules.browser_automation: unknown field `extra_field`');
     }
   });
 
@@ -117,7 +115,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unknown field at rules.code_execution');
+      expect(result.error).toContain('rules.code_execution: unknown field `extra_field`');
     }
   });
 
@@ -247,7 +245,56 @@ describe('validate', () => {
     const spec = parseOrThrow('hushspec: "99.0.0"\n');
     const result = validate(spec);
     expect(result.valid).toBe(false);
-    expect(result.errors[0].code).toBe('unsupported_version');
+    expect(result.errors[0].code).toBe('E002');
+  });
+
+  // Core spec 2: `name` is optional, but a present one must not be empty --
+  // a bundle's subject and a receipt's policy summary both carry it, and an
+  // empty name names nothing. The v1 core schema says the same with
+  // `minLength: 1`; the shared vector is `fixtures/core/invalid/empty-name.yaml`.
+  // The constraint arrived with 1.0 (versioning spec 10), so a 0.x document is
+  // held to the frozen format, which allows an empty name.
+  describe('name', () => {
+    it('rejects an empty name with E004', () => {
+      const result = validate({ hushspec: '1.0.0', name: '' });
+      expect(result.valid).toBe(false);
+      expect(result.errors[0].code).toBe('E004');
+      expect(result.errors[0].message).toBe('name: must not be empty when present');
+    });
+
+    it('refuses the document at parse time, before it can be evaluated', () => {
+      const result = parse('hushspec: "1.0.0"\nname: ""\n');
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe('E004');
+      expect(result.error).toContain('name: must not be empty');
+    });
+
+    it('rejects an empty name only in the 1.0 document format', () => {
+      // The one validation difference between the 0.2 and 1.0 formats
+      // (versioning spec 10), so it is gated on the declared major version.
+      for (const version of ['0.1.0', '0.2.0', '0.2.7']) {
+        expect(validate({ hushspec: version, name: '' }).valid, version).toBe(true);
+      }
+      for (const version of ['1.0.0', '1.0.3']) {
+        expect(validate({ hushspec: version, name: '' }).valid, version).toBe(false);
+      }
+    });
+
+    it('holds a version it cannot read to the current format', () => {
+      // Unsupported and unreadable versions are refused on their own account;
+      // an unreadable one must never be a way to relax a constraint.
+      const result = validate({ hushspec: 'not-a-version', name: '' });
+      expect(result.errors.map((error) => error.code)).toContain('E004');
+    });
+
+    it('accepts an absent name and a non-empty one', () => {
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\n')).valid).toBe(true);
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: a\n')).valid).toBe(true);
+      // Whitespace is a name; only the empty string is refused, exactly as
+      // the schema's `minLength: 1` reads.
+      expect(validate(parseOrThrow('hushspec: "1.0.0"\nname: " "\n')).valid).toBe(true);
+    });
   });
 
   it('rejects duplicate secret pattern names', () => {
@@ -272,12 +319,10 @@ rules:
     expect(result.warnings).toContain('no rules section present');
   });
 
-  // Spec item A (wave-3): NaN fails every `<= 0`/`> 0` bounds check (NaN
-  // comparisons are always false), which would otherwise let
-  // `max_imbalance_ratio: .nan` slip past the `minExclusive: 0` range check
-  // and then make `require_balance` fail OPEN at evaluation time (`ratio >
-  // NaN` is always false too). Reject non-finite floats before/along with
-  // the range check so this can never reach evaluation.
+  // Every comparison against NaN is false, so `max_imbalance_ratio: .nan`
+  // would slip past the `minExclusive: 0` range check and then make
+  // `require_balance` fail OPEN at evaluation time (`ratio > NaN` is false
+  // too). Non-finite floats are refused before a value can reach evaluation.
   describe('rejects non-finite floats', () => {
     it('rejects max_imbalance_ratio: .nan', () => {
       const result = parse(`

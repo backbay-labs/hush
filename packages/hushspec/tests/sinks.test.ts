@@ -3,6 +3,8 @@ import { readFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { DecisionReceipt } from '../src/receipt.js';
+import type { PolicyEvent } from '../src/log.js';
+import { HUSHSPEC_VERSION, SDK_NAME, SDK_VERSION } from '../src/version.js';
 import {
   FileReceiptSink,
   ConsoleReceiptSink,
@@ -10,6 +12,7 @@ import {
   MultiSink,
   CallbackSink,
   NullSink,
+  type ReceiptSink,
 } from '../src/sinks.js';
 
 // ---------------------------------------------------------------------------
@@ -18,13 +21,18 @@ import {
 
 function makeReceipt(decision: 'allow' | 'warn' | 'deny'): DecisionReceipt {
   return {
-    receipt_id: 'test-receipt-001',
+    receipt_version: '0.2',
+    receipt_id: '01994b7e-2c1a-7c3e-8f4a-0123456789ab',
     timestamp: '2026-03-15T00:00:00.000Z',
-    hushspec_version: '0.1.0',
+    time_source: 'system',
+    policy: {
+      name: 'test-policy',
+      spec_version: '0.1.0',
+      content_hash: `sha256:${'ab'.repeat(32)}`,
+    },
     action: {
       type: 'tool_call',
       target: 'test_tool',
-      content_redacted: false,
     },
     decision,
     matched_rule: 'rules.tool_access.allow',
@@ -32,18 +40,14 @@ function makeReceipt(decision: 'allow' | 'warn' | 'deny'): DecisionReceipt {
     rule_trace: [
       {
         rule_block: 'tool_access',
+        rule_path: 'rules.tool_access.allow',
         outcome: 'allow',
-        matched_rule: 'rules.tool_access.allow',
-        reason: 'tool is explicitly allowed',
         evaluated: true,
+        reason: 'tool is explicitly allowed',
       },
     ],
-    policy: {
-      name: 'test-policy',
-      version: '0.1.0',
-      content_hash: 'abc123',
-    },
-    evaluation_duration_us: 42,
+    enforcement: { mode: 'enforce', outcome: decision === 'allow' ? 'allowed' : 'blocked' },
+    duration_us: 42,
   };
 }
 
@@ -74,7 +78,7 @@ describe('FileReceiptSink', () => {
     expect(lines).toHaveLength(2);
 
     const parsed1 = JSON.parse(lines[0]);
-    expect(parsed1.receipt_id).toBe('test-receipt-001');
+    expect(parsed1.receipt_id).toBe('01994b7e-2c1a-7c3e-8f4a-0123456789ab');
     expect(parsed1.decision).toBe('allow');
 
     const parsed2 = JSON.parse(lines[1]);
@@ -137,6 +141,21 @@ describe('FilteredSink', () => {
   });
 });
 
+function makePolicyEvent(): PolicyEvent {
+  return {
+    event: 'loaded',
+    timestamp: '2026-03-15T00:00:00.000Z',
+    policy: {
+      name: 'test-policy',
+      spec_version: '0.2.0',
+      content_hash: `sha256:${'ab'.repeat(32)}`,
+    },
+    enforcement_mode: 'enforce',
+    sdk: { name: SDK_NAME, version: SDK_VERSION },
+    spec_version: HUSHSPEC_VERSION,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // MultiSink
 // ---------------------------------------------------------------------------
@@ -156,13 +175,35 @@ describe('MultiSink', () => {
     expect(count2).toBe(2);
   });
 
-  it('continues after error in one sink', () => {
+  it('delivers to every sink after one fails, then reports the first failure', () => {
     let count = 0;
     const failingSink = new CallbackSink(() => { throw new Error('test error'); });
     const countingSink = new CallbackSink(() => { count++; });
 
     const multi = new MultiSink([failingSink, countingSink]);
-    expect(() => multi.send(makeReceipt('allow'))).not.toThrow();
+    expect(() => multi.send(makeReceipt('allow'))).toThrow(/sink CallbackSink: test error/);
+    expect(count).toBe(1);
+  });
+
+  it('reports the first failure of a policy event too', () => {
+    let count = 0;
+    const failingSink: ReceiptSink = {
+      send() {},
+      recordPolicyEvent() {
+        throw new Error('no space left on device');
+      },
+    };
+    const countingSink: ReceiptSink = {
+      send() {},
+      recordPolicyEvent() {
+        count++;
+      },
+    };
+
+    const multi = new MultiSink([failingSink, countingSink]);
+    expect(() => multi.recordPolicyEvent(makePolicyEvent())).toThrow(
+      /no space left on device/,
+    );
     expect(count).toBe(1);
   });
 });

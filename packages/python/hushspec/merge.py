@@ -10,6 +10,7 @@ from hushspec.extensions import (
     OriginsExtension,
     PostureExtension,
     PromptInjectionDetection,
+    PromptInjectionHeuristics,
     ThreatIntelDetection,
 )
 from hushspec.rules import Rules
@@ -17,10 +18,27 @@ from hushspec.schema import HushSpec, MergeStrategy
 
 
 def merge(base: HushSpec, child: HushSpec) -> HushSpec:
+    """Fold a base and a child overlay into one resolved document (core spec 2.3).
+
+    ``extends`` and ``merge_strategy`` are resolution instructions, not policy:
+    the merge consumes both, so the document that comes back declares neither,
+    under every strategy. The canonical projection drops ``merge_strategy`` and
+    refuses ``extends`` anyway, so dropping them here moves no hash.
+
+    Top-level ``metadata`` is replaced wholesale, never field-merged: a child
+    that declares ``metadata`` supplies the entire object (the base's
+    ``approved_by``, ``controls`` and the rest are gone even if the child
+    restates none of them), and a child that declares none inherits the base's
+    object unchanged. This holds under ``merge`` and ``deep_merge`` alike --
+    deep merging descends into ``extensions``, not into governance metadata,
+    because a half-inherited approval record would attest to something no one
+    approved.
+    """
     strategy = child.merge_strategy or MergeStrategy.DEEP_MERGE
     if strategy == MergeStrategy.REPLACE:
         result = copy.deepcopy(child)
         result.extends = None
+        result.merge_strategy = None
         return result
     deep = strategy == MergeStrategy.DEEP_MERGE
     return _merge_with_strategy(base, child, deep)
@@ -32,16 +50,14 @@ def _merge_with_strategy(base: HushSpec, child: HushSpec, deep: bool) -> HushSpe
         name=child.name if child.name is not None else base.name,
         description=child.description if child.description is not None else base.description,
         extends=None,
-        merge_strategy=child.merge_strategy,
+        merge_strategy=None,
         rules=_merge_rules(base.rules, child.rules),
         extensions=(
             _merge_extensions_deep(base.extensions, child.extensions)
             if deep
             else _merge_extensions_merge(base.extensions, child.extensions)
         ),
-        # Merge top-level metadata child-over-parent like every other field
-        # (mirrors Rust `child.metadata.clone().or_else(|| base.metadata..)`);
-        # previously it was dropped from the merged result entirely.
+        # Whole-object replacement, not a field merge: see `merge`.
         metadata=(
             copy.deepcopy(child.metadata)
             if child.metadata is not None
@@ -247,6 +263,23 @@ def _merge_prompt_injection(
             child.max_scan_bytes
             if child.max_scan_bytes is not None
             else base.max_scan_bytes
+        ),
+        heuristics=_merge_injection_heuristics(base.heuristics, child.heuristics),
+    )
+
+
+def _merge_injection_heuristics(
+    base: Optional[PromptInjectionHeuristics],
+    child: Optional[PromptInjectionHeuristics],
+) -> Optional[PromptInjectionHeuristics]:
+    if child is None:
+        return copy.deepcopy(base) if base is not None else None
+    if base is None:
+        return copy.deepcopy(child)
+    return PromptInjectionHeuristics(
+        enabled=child.enabled if child.enabled is not None else base.enabled,
+        min_score=(
+            child.min_score if child.min_score is not None else base.min_score
         ),
     )
 

@@ -1,0 +1,9 @@
+# A POSIX bracket expression. Rust and Go read `[[:alpha:]]` as a POSIX
+# character class; JavaScript and Python read it as a class of `[`, `:`, `a`,
+# `l`, `p`, `h` followed by a literal `]`. The HushSpec regex profile allows
+# no unescaped `[` inside a class, so all four SDKs must reject this document.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    forbidden_patterns:
+      - "rm[[:alpha:]]+"

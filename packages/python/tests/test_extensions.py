@@ -1,6 +1,8 @@
 from hushspec import (
-    HushSpec,
+    DetectionLevel,
     OriginDefaultBehavior,
+    PostureContext,
+    compile_policy,
     merge,
     parse,
     parse_or_raise,
@@ -273,11 +275,10 @@ extensions:
 
 
 class TestOriginMatchEmptyField:
-    """S2: an origin match free-text field present with an empty string value
-    is a degenerate, unrepresentable-consistently constraint and must be
-    rejected at validation -- matching Go's raw validator, which already
-    rejects this. The enum fields space_type/visibility already reject "" as
-    an invalid enum value (unaffected by this fix)."""
+    """An origin match free-text field present with an empty string value is a
+    degenerate constraint with no consistent meaning, so validation rejects it.
+    The enum fields space_type/visibility already reject "" as an invalid enum
+    value."""
 
     def test_rejects_empty_provider(self):
         yaml = """
@@ -430,7 +431,7 @@ extensions:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "similarity_threshold must be <= 1" in err
+        assert "similarity_threshold must be between 0.0 and 1.0" in err
 
     def test_validate_detection_prompt_injection_threshold_warning(self):
         yaml = """
@@ -648,3 +649,166 @@ extensions:
         assert result.is_valid, f"errors: {result.errors}"
         assert spec.rules is not None
         assert spec.extensions is not None
+
+
+class TestTransitionPriority:
+    """Posture spec 5.3: a `from` that names the current state outranks
+    the wildcard, whatever the document order; among equals, document order.
+
+    Vector: fixtures/posture/evaluation/transition-priority.test.yaml.
+    """
+
+    POLICY = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [tool_call]
+      locked:
+        capabilities: []
+    transitions:
+      - from: "*"
+        to: locked
+        on: critical_violation
+      - from: standard
+        to: restricted
+        on: critical_violation
+      - from: standard
+        to: locked
+        on: critical_violation
+"""
+
+    def _next(self, current: str) -> str:
+        policy = compile_policy(parse_or_raise(self.POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current=current, signal="critical_violation")
+        )
+        assert posture is not None
+        return posture.next
+
+    def test_a_named_from_wins_over_a_wildcard_listed_before_it(self):
+        assert self._next("standard") == "restricted"
+
+    def test_the_wildcard_still_applies_where_no_named_transition_matches(self):
+        assert self._next("restricted") == "locked"
+
+    SAME_FROM_POLICY = """
+hushspec: "0.1.0"
+extensions:
+  posture:
+    initial: standard
+    states:
+      standard:
+        capabilities: [tool_call]
+      restricted:
+        capabilities: [tool_call]
+      locked:
+        capabilities: []
+    transitions:
+      - from: standard
+        to: restricted
+        on: critical_violation
+      - from: standard
+        to: locked
+        on: critical_violation
+"""
+
+    def test_among_equals_document_order_wins(self):
+        # No wildcard here, so only document order can decide: two `from:
+        # standard` transitions share the trigger and the first one written
+        # fires.
+        policy = compile_policy(parse_or_raise(self.SAME_FROM_POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current="standard", signal="critical_violation")
+        )
+        assert posture is not None
+        assert posture.next == "restricted"
+
+    def test_no_matching_trigger_holds_the_state(self):
+        policy = compile_policy(parse_or_raise(self.POLICY))
+        posture = policy.resolve_posture(
+            None, PostureContext(current="standard", signal="user_approval")
+        )
+        assert posture is not None and posture.next == "standard"
+
+
+class TestDetectionMerge:
+    """`extensions.detection` merges field by field, heuristics included."""
+
+    BASE = """
+hushspec: "0.2.0"
+name: base
+extensions:
+  detection:
+    prompt_injection:
+      enabled: true
+      warn_at_or_above: suspicious
+      heuristics:
+        enabled: false
+        min_score: 70
+"""
+
+    def _merged(self, child_yaml: str):
+        merged = merge(parse_or_raise(self.BASE), parse_or_raise(child_yaml))
+        return merged.extensions.detection.prompt_injection
+
+    def test_a_child_that_says_nothing_keeps_the_base_heuristics(self):
+        # A child overriding an unrelated field must not silently switch the
+        # normative heuristic detector back on: the base disabled it.
+        injection = self._merged(
+            'hushspec: "0.2.0"\n'
+            "name: child\n"
+            "extensions:\n"
+            "  detection:\n"
+            "    prompt_injection:\n"
+            "      max_scan_bytes: 1000\n"
+        )
+        assert injection.max_scan_bytes == 1000
+        assert injection.warn_at_or_above == DetectionLevel.SUSPICIOUS
+        assert injection.heuristics is not None
+        assert injection.heuristics.enabled is False
+        assert injection.heuristics.min_score == 70
+
+    def test_a_child_overrides_one_heuristics_field_and_inherits_the_other(self):
+        injection = self._merged(
+            'hushspec: "0.2.0"\n'
+            "name: child\n"
+            "extensions:\n"
+            "  detection:\n"
+            "    prompt_injection:\n"
+            "      heuristics:\n"
+            "        enabled: true\n"
+        )
+        assert injection.heuristics.enabled is True
+        assert injection.heuristics.min_score == 70
+
+    def test_a_child_supplies_heuristics_the_base_omits(self):
+        base = parse_or_raise(
+            'hushspec: "0.2.0"\nname: base\n'
+            "extensions:\n  detection:\n    prompt_injection:\n      enabled: true\n"
+        )
+        child = parse_or_raise(
+            'hushspec: "0.2.0"\nname: child\n'
+            "extensions:\n  detection:\n    prompt_injection:\n"
+            "      heuristics:\n        min_score: 55\n"
+        )
+        injection = merge(base, child).extensions.detection.prompt_injection
+        assert injection.heuristics.min_score == 55
+
+
+def test_a_negative_heuristic_floor_fails_typed_validation() -> None:
+    from hushspec import parse, validate
+
+    ok, spec = parse(
+        'hushspec: "1.0.0"\nname: floor\nextensions:\n  detection:\n'
+        "    prompt_injection:\n      heuristics:\n        min_score: 5\n"
+    )
+    assert ok
+    spec.extensions.detection.prompt_injection.heuristics.min_score = -1
+    result = validate(spec)
+    assert not result.is_valid
+    assert any("min_score must be between 0 and 100" in error.message for error in result.errors)

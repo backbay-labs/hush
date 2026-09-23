@@ -1,6 +1,6 @@
 # HushSpec
 
-HushSpec is a portable, open specification for declaring security rules at the tool boundary of AI agent runtimes. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced.
+HushSpec is agentic compliance as code: a portable, open specification for declaring, enforcing, and proving the security controls an AI agent operates under. It defines **what** security rules an agent operates under, without prescribing **how** those rules are enforced.
 
 ## Why HushSpec?
 
@@ -14,7 +14,7 @@ AI agents interact with tools — file systems, network APIs, shell commands, MC
 ## A Minimal Example
 
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: my-policy
 
 rules:
@@ -42,4 +42,4 @@ HushSpec defines the **portable rule language**. Engines like [Clawdstrike](http
 
 ## Current Status
 
-HushSpec v0.1.0 — unstable. Breaking changes may occur between minor versions. The spec will stabilize at v1.0.0.
+HushSpec 1.0.0 is stable. The document format, evaluation semantics, canonical form, wire formats, error and reason codes, closed registries, and grammars are frozen for the 1.x series; a minor version only adds ([versioning](reference/versioning.md)).

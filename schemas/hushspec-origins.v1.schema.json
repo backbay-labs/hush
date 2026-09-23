@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-origins.v1.schema.json",
+  "title": "HushSpec Origins Extension v1",
+  "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "default_behavior": {
+      "type": "string",
+      "enum": [
+        "deny",
+        "minimal_profile"
+      ],
+      "default": "deny",
+      "description": "Behavior when no profile matches. \"deny\" blocks unmatched origins; \"minimal_profile\" proceeds under base policy."
+    },
+    "profiles": {
+      "type": "array",
+      "description": "Origin profiles, each with match criteria and policy overrides.",
+      "items": {
+        "$ref": "#/$defs/OriginProfile"
+      }
+    }
+  },
+  "$defs": {
+    "OriginProfile": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "additionalProperties": false,
+      "description": "An origin profile that narrows the base policy for matching requests.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this profile."
+        },
+        "match": {
+          "$ref": "#/$defs/OriginMatch"
+        },
+        "posture": {
+          "type": "string",
+          "description": "Initial posture state for this origin. Must reference a state in extensions.posture.states."
+        },
+        "tool_access": {
+          "$ref": "#/$defs/ToolAccessRule"
+        },
+        "egress": {
+          "$ref": "#/$defs/EgressRule"
+        },
+        "data": {
+          "$ref": "#/$defs/DataPolicy"
+        },
+        "budgets": {
+          "$ref": "#/$defs/OriginBudgets"
+        },
+        "bridge": {
+          "$ref": "#/$defs/BridgePolicy"
+        },
+        "explanation": {
+          "type": "string"
+        }
+      }
+    },
+    "OriginMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Criteria for matching an incoming request to this profile.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Source provider. Standard values: slack, teams, github, jira, email, discord, webhook, custom."
+        },
+        "tenant_id": {
+          "type": "string",
+          "description": "Tenant or workspace identifier."
+        },
+        "space_id": {
+          "type": "string",
+          "description": "Channel, room, or repository identifier. Highest priority match field."
+        },
+        "space_type": {
+          "type": "string",
+          "enum": [
+            "channel",
+            "group",
+            "dm",
+            "thread",
+            "issue",
+            "ticket",
+            "pull_request",
+            "email_thread"
+          ],
+          "description": "Type of space the request originated from."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "internal",
+            "public",
+            "external_shared"
+          ],
+          "description": "Visibility level of the source space."
+        },
+        "external_participants": {
+          "type": "boolean",
+          "description": "Whether external participants are present in the source space."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tags that must ALL be present on the source (AND semantics)."
+        },
+        "sensitivity": {
+          "type": "string",
+          "description": "Sensitivity classification of the source context."
+        },
+        "actor_role": {
+          "type": "string",
+          "description": "Role of the requesting actor (e.g., admin, member, guest)."
+        }
+      }
+    },
+    "ToolAccessRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tool access overrides for this origin. Composes with base rules.tool_access via intersection (allow) and union (block).",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool name allowlist. Intersected with base allowlist."
+        },
+        "block": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tool name blocklist. Unioned with base blocklist."
+        },
+        "require_confirmation": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tools requiring user/operator approval. Unioned with base list."
+        },
+        "default": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "block"
+          ],
+          "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
+        },
+        "max_args_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum argument payload size in bytes. The smaller of base and origin applies.",
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "EgressRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Egress overrides for this origin. Composes with base rules.egress via intersection (allow) and union (block).",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Domain allowlist. Intersected with base allowlist."
+        },
+        "block": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Domain blocklist. Unioned with base blocklist."
+        },
+        "default": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "block"
+          ],
+          "description": "Default decision. If either base or origin specifies \"block\", effective default is \"block\"."
+        }
+      }
+    },
+    "DataPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Data handling controls for this origin context.",
+      "properties": {
+        "allow_external_sharing": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether content may be shared outside the origin context."
+        },
+        "redact_before_send": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether sensitive content must be redacted before output."
+        },
+        "block_sensitive_outputs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether outputs containing sensitive patterns are blocked."
+        }
+      }
+    },
+    "OriginBudgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Budget overrides for this origin. The smaller of base and origin values applies.",
+      "properties": {
+        "tool_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of tool/MCP invocations.",
+          "maximum": 9007199254740991
+        },
+        "egress_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of outbound network requests.",
+          "maximum": 9007199254740991
+        },
+        "shell_commands": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of shell command executions.",
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "BridgePolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls for cross-origin data flow.",
+      "properties": {
+        "allow_cross_origin": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether cross-origin data flow is permitted."
+        },
+        "allowed_targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BridgeTarget"
+          },
+          "description": "Specific destinations permitted for cross-origin data flow."
+        },
+        "require_approval": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether cross-origin flows require user/operator approval."
+        }
+      }
+    },
+    "BridgeTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A permitted destination for cross-origin data flow.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Target provider."
+        },
+        "space_type": {
+          "type": "string",
+          "enum": [
+            "channel",
+            "group",
+            "dm",
+            "thread",
+            "issue",
+            "ticket",
+            "pull_request",
+            "email_thread"
+          ],
+          "description": "Target space type."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Required tags on the target (AND semantics)."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "private",
+            "internal",
+            "public",
+            "external_shared"
+          ],
+          "description": "Required visibility level of the target."
+        }
+      }
+    }
+  }
+}

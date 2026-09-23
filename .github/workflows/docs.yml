@@ -10,18 +10,73 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
+  # Checks relative links inside the book source and the top-level README,
+  # plus the external URLs they point at. Deliberately NOT a dependency of
+  # `deploy`: an external site going down should not block a docs release.
+  #
+  # lychee (rather than the mdbook-linkcheck backend) so that `mdbook build
+  # docs` keeps working for contributors and for the CI docs job without an
+  # extra backend binary on PATH.
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          # Code blocks are not checked (no --include-verbatim): the example
+          # policies carry `$schema=` comments pointing at a host that is not
+          # serving yet. Exclusions live in .lycheeignore, one justified line
+          # each.
+          #
+          # Run on `main`, where the many github.com/backbay-labs/hush links
+          # resolve. On a branch whose files have not merged yet they 404, so
+          # a local run is only meaningful for the links a branch adds, not as
+          # a pass/fail count.
+          args: >-
+            --no-progress
+            --max-retries 3
+            --accept 200,204,206,429
+            --exclude-path docs/book
+            'docs/src/**/*.md'
+            README.md
+          fail: true
+          jobSummary: true
+          # Authenticates GitHub links so the many github.com/backbay-labs/hush
+          # references do not trip the unauthenticated rate limit.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publishes the book with a schema mirror. The canonical v1 host is the
+  # separate Vercel website at hushspec.org, not this Pages deployment.
+  #
+  # `main` only. `workflow_dispatch` is offered so a maintainer can re-run a
+  # deploy without an empty commit, but a dispatch can be raised from any
+  # branch, and publishing its `schemas/` as the current documentation mirror
+  # would expose documents that no commit on `main` ever contained.
+  #
+  # A deploy is never cancelled: `cancel-in-progress` would abort
+  # `deploy-pages` mid-publish, which leaves the Pages deployment in progress
+  # and blocks the run that superseded it. Queuing behind the previous deploy
+  # costs a few minutes; cancelling costs the environment. The group is on
+  # this job rather than the workflow so a second push does not also kill the
+  # link check, which shares nothing with it.
   deploy:
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
 
       - uses: peaceiris/actions-mdbook@v2
         with:
@@ -30,12 +85,14 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
-      - name: Publish schemas at their $id URLs
+      - name: Include schema and registry mirrors
+        env:
+          HUSHSPEC_COMMIT: ${{ github.sha }}
         run: |
-          mkdir -p docs/book/schemas
+          mkdir -p docs/book/schemas docs/book/registries
           cp schemas/*.json docs/book/schemas/
-
-      - uses: actions/configure-pages@v5
+          cp spec/registries/*.yaml docs/book/registries/
+          python3 scripts/build_schema_index.py --out docs/book/schemas/index.json
 
       - uses: actions/upload-pages-artifact@v3
         with:

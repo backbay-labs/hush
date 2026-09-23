@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
+hushspec_test: "0.1.0"
+description: "core 3.7: tool_access.max_args_size is an inclusive ceiling -- an argument payload at the limit passes, one byte over is denied, and the limit is checked before the allow, block and require_confirmation lists so an oversized payload cannot be waved through by an allowlisted tool name."
+policy:
+  hushspec: "0.2.0"
+  name: tool-args-ceiling
+  rules:
+    tool_access:
+      allow:
+        - read_file
+      block:
+        - shell_exec
+      require_confirmation:
+        - git_push
+      default: block
+      max_args_size: 1024
+cases:
+  - description: "an allowlisted tool well under the limit is allowed"
+    action:
+      type: tool_call
+      target: read_file
+      args_size: 16
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
+  - description: "an argument payload exactly at max_args_size is allowed"
+    action:
+      type: tool_call
+      target: read_file
+      args_size: 1024
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow
+  - description: "one byte over max_args_size is denied"
+    action:
+      type: tool_call
+      target: read_file
+      args_size: 1025
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.max_args_size
+      reason: "tool arguments exceeded max_args_size"
+  - description: "the size ceiling is checked before require_confirmation, so an oversized confirmed tool denies rather than warns"
+    action:
+      type: tool_call
+      target: git_push
+      args_size: 4096
+    expect:
+      decision: deny
+      matched_rule: rules.tool_access.max_args_size
+  - description: "an action with no args_size is treated as zero and is not caught by the ceiling"
+    action:
+      type: tool_call
+      target: read_file
+    expect:
+      decision: allow
+      matched_rule: rules.tool_access.allow

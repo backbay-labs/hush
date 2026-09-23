@@ -1,0 +1,12 @@
+# A one-digit hour field.
+# A time_window bound is exactly two ASCII digits per component
+# (schemas/hushspec-core.v1.schema.json $defs.TimeWindow), so "9:05" is not a
+# time and the document is refused.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      time_window:
+        start: "9:05"
+        end: "17:00"
+    forbidden_patterns: ["mkfs"]

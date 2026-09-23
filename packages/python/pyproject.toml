@@ -4,26 +4,55 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hushspec"
-version = "0.1.1"
-description = "Portable specification for AI agent security rules"
+version = "1.0.0"
+description = "Agentic compliance as code: portable policy spec for AI agent security controls"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 readme = "README.md"
 keywords = ["ai", "security", "policy", "agent", "hushspec", "guardrails"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Security",
     "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
 ]
-dependencies = ["pyyaml>=6.0"]
+dependencies = [
+    "pyyaml>=6.0",
+    # conditions.py resolves `time_window.timezone` through `zoneinfo`, which
+    # reads the *system* tz database. Windows has none, and slim/distroless
+    # container images routinely omit it, so a timezone-scoped rule would fail
+    # to resolve there. `tzdata` ships the IANA database as a wheel, which
+    # zoneinfo falls back to automatically.
+    "tzdata",
+]
 
 [project.urls]
 Homepage = "https://github.com/backbay-labs/hush"
 Repository = "https://github.com/backbay-labs/hush"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-cov"]
+# Ed25519 policy signing (spec/hushspec-signing.md) and bundle verification
+# (spec/hushspec-bundle.md). The standard library has no Ed25519, so the
+# signature operations need a real crypto backend; it is optional because
+# parsing, evaluation and hashing do not. Without it,
+# `hushspec.signing.sign_policy`/`verify_policy` and
+# `hushspec.bundle.verify_bundle` raise `SigningUnavailable` rather than
+# reporting an unverified signature as good.
+signing = ["cryptography>=42"]
+dev = ["pytest>=7.0", "pytest-cov", "cryptography>=42", "jsonschema[format]>=4.0"]
+
+[tool.setuptools.packages.find]
+include = ["hushspec", "hushspec.*"]
+
+[tool.setuptools.package-data]
+hushspec = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

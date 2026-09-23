@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "0.1.0"
 name: cicd
 description: Security rules for CI/CD pipelines
@@ -21,16 +21,11 @@ rules:
       - "**/.github/secrets/**"
       - "**/.gitlab-ci-secrets/**"
       - "**/.circleci/secrets/**"
-    exceptions:
-      - "**/.github/workflows/**"
-      - "**/.gitlab-ci.yml"
-      - "**/.circleci/config.yml"
 
   egress:
     allow:
       # Package registries
       - "*.npmjs.org"
-      - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
       - "crates.io"

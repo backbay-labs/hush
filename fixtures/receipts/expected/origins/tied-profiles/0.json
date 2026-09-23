@@ -1,0 +1,64 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:c7c9fc4c4e69a97d652b36fa7a1d7f94d103dd2aadc060bf31d5792805fde042"
+  },
+  "action": {
+    "type": "tool_call",
+    "target": "ticket_search",
+    "origin": {
+      "provider": "teams",
+      "tenant_id": "contoso"
+    }
+  },
+  "decision": "allow",
+  "matched_rule": "extensions.origins.profiles.contoso-allow-first.tool_access.allow",
+  "reason": "tool is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "origin_profile",
+      "rule_path": "extensions.origins.profiles.contoso-allow-first",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "origin profile selected"
+    },
+    {
+      "rule_block": "posture_capability",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "posture capabilities satisfied"
+    },
+    {
+      "rule_block": "tool_access",
+      "rule_path": "extensions.origins.profiles.contoso-allow-first.tool_access.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "tool is explicitly allowed"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "origin_profile": "contoso-allow-first",
+  "posture": {
+    "current": "standard",
+    "next": "standard"
+  }
+}

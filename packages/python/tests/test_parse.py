@@ -1,12 +1,14 @@
 import time
 
+import pytest
+
 from hushspec import (
     DefaultAction,
     DetectionExtension,
+    EvaluationAction,
     Extensions,
     GovernanceMetadata,
     HushSpec,
-    MergeStrategy,
     PatchIntegrityRule,
     PostureExtension,
     PostureState,
@@ -14,6 +16,9 @@ from hushspec import (
     Rules,
     ThreatIntelDetection,
     TransitionTrigger,
+    content_hash,
+    evaluate,
+    is_supported,
     merge,
     parse,
     parse_or_raise,
@@ -48,11 +53,8 @@ name: test
 hushspec: "0.1.0"
 unknown_field: true
 """
-        try:
+        with pytest.raises(ValueError, match="unknown field `unknown_field`"):
             parse_or_raise(yaml)
-            assert False, "Expected ValueError"
-        except ValueError as e:
-            assert "unknown top-level field" in str(e)
 
 
 class TestParseWithRules:
@@ -108,7 +110,7 @@ unknown_field: true
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown top-level field" in err
+        assert "unknown field `unknown_field`" in err
 
     def test_reject_unknown_rule(self):
         yaml = """
@@ -120,7 +122,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown rule" in err
+        assert "unknown field `nonexistent_rule` at rules" in err
 
     def test_reject_unknown_extension(self):
         yaml = """
@@ -132,7 +134,7 @@ extensions:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown extension" in err
+        assert "unknown field `nonexistent_extension` at extensions" in err
 
     def test_reject_unknown_nested_field(self):
         yaml = """
@@ -145,7 +147,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "unknown field at rules.egress" in err
+        assert "unknown field `extra_field` at rules.egress" in err
 
     def test_reject_invalid_bool_type(self):
         yaml = """
@@ -158,7 +160,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "rules.egress.enabled must be a boolean" in err
+        assert "rules.egress.enabled: invalid type, expected a boolean" in err
 
     def test_missing_hushspec_version(self):
         yaml = """
@@ -202,6 +204,80 @@ hushspec: "99.0.0"
         result = validate(spec)
         assert not result.is_valid
         assert any("unsupported" in str(e) for e in result.errors)
+
+    def test_empty_name_only_refused_in_the_1_0_format(self):
+        """Core spec 2 requires a present ``name`` to be non-empty, but only
+        from the 1.0 document format: the frozen 0.x format allows ``name: ""``,
+        the one validation difference between the two (versioning spec 10).
+        """
+        for version in ("0.1.0", "0.2.0", "0.2.7"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            assert validate(spec).is_valid, version
+        for version in ("1.0.0", "1.0.3"):
+            spec = parse_or_raise(f'hushspec: "{version}"\nname: ""\n')
+            result = validate(spec)
+            assert not result.is_valid, version
+            assert any(
+                "name: must not be empty when present" in str(error)
+                for error in result.errors
+            )
+
+    def test_empty_name_under_an_unreadable_version(self):
+        """A version that cannot be read as MAJOR.MINOR.PATCH is refused on its
+        own account, and must never be a way to relax a constraint as well.
+        """
+        spec = HushSpec(hushspec="not-a-version", name="")
+        codes = [error.code for error in validate(spec).errors]
+        assert "E004" in codes
+
+    @pytest.mark.parametrize(
+        ("yaml", "expected"),
+        [
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress: null\n',
+                "rules.egress: invalid type, expected an object",
+            ),
+            (
+                'hushspec: "1.0.0"\nname: null\n',
+                "name: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\ndescription: null\n',
+                "description: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nmetadata:\n  author: null\n',
+                "metadata.author: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n      capability: null\n',
+                "rules.egress.when.capability: invalid type, expected a string",
+            ),
+            (
+                'hushspec: "1.0.0"\nrules:\n  egress:\n    when:\n'
+                "      all_of:\n        - rate: null\n",
+                "rules.egress.when.all_of[0].rate: invalid type, expected an object",
+            ),
+        ],
+    )
+    def test_a_written_null_is_refused_for_a_declared_property(self, yaml, expected):
+        """Canonical spec 2.2: no HushSpec property is nullable, so a written
+        null is a value of the wrong type rather than an absent property.
+        """
+        with pytest.raises(ValueError) as caught:
+            parse_or_raise(yaml)
+        assert expected in str(caught.value)
+
+    def test_a_null_inside_a_context_value_is_a_leaf(self):
+        """``when.context`` holds values to compare against the runtime
+        context, so a null there is data, not a property of the format.
+        """
+        yaml = (
+            'hushspec: "1.0.0"\nrules:\n  egress:\n    default: block\n'
+            "    when:\n      context:\n        user.tenant: null\n"
+        )
+        when = parse_or_raise(yaml).rules.egress.when
+        assert when["context"] == {"user.tenant": None}
 
     def test_parse_rejects_duplicate_secret_pattern_names(self):
         yaml = """
@@ -291,10 +367,10 @@ rules:
         assert "max_imbalance_ratio must be > 0" in err
 
     def test_validate_imbalance_ratio_nan_rejected(self):
-        # YAML `.nan` fails every `<= 0` / `> 0` bounds check (NaN comparisons
-        # are always false), so without an explicit isfinite check this used
-        # to pass validation and then make `require_balance` fail OPEN
-        # (`ratio > NaN` is also always false).
+        # YAML `.nan` passes every `<= 0` / `> 0` bounds check (NaN
+        # comparisons are always false), so a bounds check alone would admit
+        # it and then make `require_balance` fail open (`ratio > NaN` is also
+        # always false). An explicit isfinite check is what rejects it.
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -307,9 +383,9 @@ rules:
         assert "finite" in err
 
     def test_validate_imbalance_ratio_infinity_rejected(self):
-        # +Infinity is a distinct silent-pass bug from NaN: this field has no
-        # upper bound (only `min_exclusive=0`), and `Infinity <= 0` is False,
-        # so +Infinity used to slip through validation entirely.
+        # +Infinity passes for a different reason than NaN: the field has no
+        # upper bound (only `min_exclusive=0`) and `Infinity <= 0` is False,
+        # so only the isfinite check refuses it.
         yaml = """
 hushspec: "0.1.0"
 rules:
@@ -459,8 +535,8 @@ hushspec: "0.1.0"
         assert merged.name == "base-name"
 
     def test_merge_metadata_child_over_parent(self):
-        # S1: metadata must merge child-over-parent like every other field
-        # (it was previously dropped from the merged result entirely).
+        # Metadata merges child-over-parent like every other field
+        # (core spec 2.3).
         base = parse_or_raise("""
 hushspec: "0.1.0"
 name: base
@@ -531,14 +607,12 @@ rules:
 
 
 
-# Phase-gated guards: browser_automation / code_execution raw validation
+# browser_automation / code_execution raw validation
 #
-# raw_validate.py previously had no validator for these two rule blocks (only
-# RULE_KEYS listed them as known top-level keys), so malformed content --
-# wrong-typed fields, out-of-range bounds, unsafe regex in
-# extra_credential_patterns -- sailed through parse()'s pre-check and landed
-# untype-checked in the dataclass via from_dict(). These mirror the checks
-# already applied to every other rule block.
+# Both rule blocks get the same pre-decode treatment as every other block:
+# wrong-typed fields, out-of-range bounds and unsafe regex in
+# extra_credential_patterns are refused by parse()'s pre-check rather than
+# reaching the dataclass unchecked via from_dict().
 
 
 class TestBrowserAutomationValidation:
@@ -551,7 +625,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.browser_automation.enabled must be a boolean" in err
+        assert "rules.browser_automation.enabled: invalid type, expected a boolean" in err
 
     def test_rejects_unknown_field(self):
         yaml = """
@@ -563,7 +637,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "unknown field at rules.browser_automation" in err
+        assert "unknown field `bogus_field` at rules.browser_automation" in err
 
     def test_rejects_non_array_allowed_domains(self):
         yaml = """
@@ -574,7 +648,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.browser_automation.allowed_domains must be an array" in err
+        assert "rules.browser_automation.allowed_domains: invalid type, expected an array" in err
 
     def test_rejects_unsafe_regex_in_extra_credential_patterns(self):
         yaml = """
@@ -587,7 +661,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "nested unbounded quantifier" in err
 
     def test_accepts_valid_browser_automation_rule(self):
         yaml = """
@@ -620,7 +694,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "rules.code_execution.enabled must be a boolean" in err
+        assert "rules.code_execution.enabled: invalid type, expected a boolean" in err
 
     def test_rejects_unknown_field(self):
         yaml = """
@@ -632,7 +706,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "unknown field at rules.code_execution" in err
+        assert "unknown field `bogus_field` at rules.code_execution" in err
 
     def test_rejects_zero_max_scan_bytes(self):
         yaml = """
@@ -679,12 +753,11 @@ rules:
 
 
 
-# D11: posture transition duration must be ASCII-digit only
+# A posture transition duration is ASCII digits only.
 #
-# `^\d+[smhd]$` used Python's Unicode-aware \d, so a fullwidth or
-# Arabic-indic digit run (e.g. "４s", "٤s") was wrongly accepted as a valid
-# duration -- TS (JS \d is ASCII-only) and Go (RE2 \d is ASCII-only by
-# default) already rejected these. [0-9] makes Python agree.
+# Python's `\d` is Unicode-aware, so `^\d+[smhd]$` would accept a fullwidth or
+# Arabic-indic digit run (e.g. "４s", "٤s") as a well-formed duration. The
+# pattern spells the digit class `[0-9]`, so only ASCII digits are accepted.
 
 
 class TestDurationAsciiOnly:
@@ -767,23 +840,23 @@ extensions:
         assert any("must match" in str(e) for e in result.errors)
 
 
-# YAML loader robustness (parity with the Rust/TS/Go SDKs)
+# YAML loader robustness
 #
-# PyYAML's `safe_load` is more permissive than the YAML parsers behind the
-# other three SDKs in three ways that a fail-closed parser must not tolerate:
-# it silently accepts duplicate mapping keys (last-wins), has no alias/anchor
-# expansion cap (a "billion laughs" bomb blows up our post-parse tree walks),
-# and lets deeply nested flow YAML surface an uncaught RecursionError instead
-# of a clean parse error. `parse()` now hardens all three.
+# PyYAML's `safe_load` is more permissive than the HushSpec YAML profile
+# (core spec 2.4) in three ways a fail-closed parser must not tolerate: it
+# silently accepts duplicate mapping keys (last-wins), has no alias/anchor
+# expansion cap (a "billion laughs" bomb would blow up the post-parse tree
+# walks), and lets deeply nested flow YAML surface an uncaught RecursionError
+# instead of a clean parse error. `parse()` closes all three.
 
 
 class TestYamlRobustness:
     def test_rejects_duplicate_top_level_keys(self):
-        # PyYAML would keep the last value; Rust/TS/Go reject duplicates.
+        # PyYAML would keep the last value; the profile rejects duplicates.
         ok, err = parse('hushspec: "0.1.0"\nname: a\nname: b\n')
         assert ok is False
         assert isinstance(err, str)
-        assert "duplicate key" in err
+        assert "duplicate entry with key" in err
 
     def test_rejects_duplicate_nested_keys(self):
         yaml = """
@@ -796,7 +869,7 @@ rules:
         ok, err = parse(yaml)
         assert ok is False
         assert isinstance(err, str)
-        assert "duplicate key" in err
+        assert "duplicate entry with key" in err
 
     def test_anchor_bomb_fails_fast(self):
         # A nested-anchor bomb: tiny source text whose alias-expanded size is
@@ -829,8 +902,9 @@ rules:
         assert ok is False
         assert isinstance(err, str)
 
-    def test_legitimate_anchors_still_resolve(self):
-        # A small, non-malicious anchor/alias document must still parse fine.
+    def test_anchors_are_rejected_by_the_yaml_profile(self):
+        # Core spec 2.4: anchors are outside the HushSpec YAML profile, even
+        # in a small non-malicious document, so every SDK rejects them.
         yaml = """
 hushspec: "0.1.0"
 name: anchored
@@ -841,9 +915,246 @@ rules:
     block: []
     default: block
 """
-        ok, spec = parse(yaml)
+        ok, err = parse(yaml)
+        assert ok is False
+        assert "anchors are not allowed" in err
+
+
+class TestYamlProfile:
+    """Core spec 2.4: the accepted YAML dialect."""
+
+    def test_rejects_aliases(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  forbidden_paths:\n"
+            "    patterns: &secrets\n"
+            '      - "**/.env"\n'
+            "    exceptions: *secrets\n"
+        )
+        assert ok is False
+        assert "are not allowed (YAML profile)" in err
+
+    def test_rejects_merge_keys(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    <<: {default: block}\n"
+        )
+        assert ok is False
+        assert "merge keys are not allowed" in err
+
+    def test_rejects_multi_document_streams(self):
+        ok, err = parse(
+            'hushspec: "0.2.0"\nname: first\n---\nhushspec: "0.2.0"\nname: second\n'
+        )
+        assert ok is False
+        assert "multi-document streams are not allowed" in err
+
+    def test_accepts_a_leading_directive_end_marker(self):
+        ok, spec = parse('---\nhushspec: "0.2.0"\nname: only\n')
         assert ok is True
-        assert isinstance(spec, HushSpec)
-        assert spec.rules is not None
-        assert spec.rules.egress is not None
-        assert spec.rules.egress.allow == ["api.example.com"]
+        assert spec.name == "only"
+
+    def test_rejects_yaml_1_1_booleans(self):
+        for literal in ("yes", "no", "on", "off"):
+            ok, err = parse(
+                f'hushspec: "0.2.0"\nrules:\n  egress:\n    enabled: {literal}\n'
+                "    default: block\n"
+            )
+            assert ok is False, literal
+            assert "expected a boolean" in err, literal
+
+    def test_still_accepts_core_booleans(self):
+        for literal, expected in (("true", True), ("false", False), ("True", True)):
+            ok, spec = parse(
+                f'hushspec: "0.2.0"\nrules:\n  egress:\n    enabled: {literal}\n'
+                "    default: block\n"
+            )
+            assert ok is True, literal
+            assert spec.rules.egress.enabled is expected, literal
+
+    def test_a_bare_on_key_stays_a_string(self):
+        # `on:` is the posture transition trigger field; under YAML 1.1 PyYAML
+        # would turn it into the boolean key True.
+        ok, spec = parse(
+            'hushspec: "0.2.0"\n'
+            "extensions:\n"
+            "  posture:\n"
+            "    initial: standard\n"
+            "    states:\n"
+            "      standard:\n"
+            "        capabilities: [tool_call]\n"
+            "      locked:\n"
+            "        capabilities: []\n"
+            "    transitions:\n"
+            "      - from: standard\n"
+            "        to: locked\n"
+            "        on: user_denial\n"
+        )
+        assert ok is True
+        assert spec.extensions.posture.transitions[0].on.value == "user_denial"
+
+    def test_rejects_tab_indentation(self):
+        ok, err = parse('hushspec: "0.2.0"\nrules:\n\tegress:\n\t\tdefault: block\n')
+        assert ok is False
+        assert "YAML parse error" in err
+
+    def test_rejects_documents_over_the_size_cap(self):
+        oversized = 'hushspec: "0.2.0"\nname: "' + "x" * (1024 * 1024) + '"\n'
+        ok, err = parse(oversized)
+        assert ok is False
+        assert "maximum size" in err
+
+    def test_rejects_nesting_past_the_depth_cap(self):
+        body = 'hushspec: "0.2.0"\nrules:\n  shell_commands:\n    when:\n'
+        indent = 6
+        for _ in range(40):
+            body += " " * indent + "not:\n"
+            indent += 2
+        body += " " * indent + "context: {a: 1}\n"
+        ok, err = parse(body)
+        assert ok is False
+        assert "maximum depth" in err
+
+    def test_rejects_an_integer_beyond_the_safe_range(self):
+        # Canonical spec 4.3: an integer a double cannot hold exactly has no
+        # faithful canonical form, so it is refused rather than rounded.
+        ok, err = parse(
+            'hushspec: "0.2.0"\nmetadata:\n  policy_version: 9007199254740993\n'
+        )
+        assert ok is False
+        assert "exceeds the safe range (2^53-1)" in err
+        assert "metadata.policy_version" in err
+
+        ok, err = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    default: block\n"
+            "    when:\n"
+            "      context:\n"
+            "        budget: -9007199254740993\n"
+        )
+        assert ok is False
+        assert "exceeds the safe range (2^53-1)" in err
+
+    def test_accepts_the_largest_safe_integer_and_any_float(self):
+        ok, _ = parse('hushspec: "0.2.0"\nmetadata:\n  policy_version: 9007199254740991\n')
+        assert ok is True
+        # Float syntax names the double itself, so it carries no bound.
+        ok, _ = parse(
+            'hushspec: "0.2.0"\n'
+            "rules:\n"
+            "  egress:\n"
+            "    default: block\n"
+            "    when:\n"
+            "      context:\n"
+            "        budget: 1.0e+21\n"
+        )
+        assert ok is True
+
+
+class TestVersionAcceptance:
+    """Core spec 2.2: an engine supporting minor X.Y accepts every X.Y.Z."""
+
+    def test_accepts_every_patch_of_a_supported_minor(self):
+        for version in ("0.1.0", "0.1.1", "0.1.99", "0.2.0", "0.2.7", "1.0.0", "1.0.3"):
+            assert is_supported(version) is True, version
+            ok, spec = parse(f'hushspec: "{version}"\nname: v\n')
+            assert ok is True, version
+            assert validate(spec).is_valid, version
+
+    def test_rejects_unsupported_or_malformed_versions(self):
+        for version in ("0.3.0", "1.7.0", "2.0.0", "0.1", "0.1.0.0", "0.1.x", "+0.1.0", ""):
+            assert is_supported(version) is False, version
+
+    def test_a_one_point_zero_document_is_evaluated_as_a_zero_point_two_one(self):
+        # Core spec 10.2: 1.0 freezes the 0.2 semantics without changing them,
+        # so one document declared under either version validates alike and
+        # reaches the same decision by the same rule.
+        def document(version: str) -> str:
+            return f"""
+hushspec: "{version}"
+name: version-equivalence
+rules:
+  forbidden_paths:
+    patterns:
+      - "**/.ssh/**"
+  egress:
+    allow:
+      - api.example.com
+    default: block
+  tool_access:
+    block:
+      - shell_exec
+    default: allow
+"""
+
+        zero = parse_or_raise(document("0.2.0"))
+        one = parse_or_raise(document("1.0.0"))
+        assert validate(zero).is_valid
+        assert validate(one).is_valid
+
+        actions = [
+            ("file_read", "/home/agent/.ssh/id_ed25519"),
+            ("egress", "api.example.com"),
+            ("egress", "blocked.example.net"),
+            ("tool_call", "shell_exec"),
+        ]
+        for action_type, target in actions:
+            action = EvaluationAction(type=action_type, target=target)
+            under_zero = evaluate(zero, action)
+            under_one = evaluate(one, action)
+            assert under_one.decision == under_zero.decision, (action_type, target)
+            assert under_one.matched_rule == under_zero.matched_rule, (
+                action_type,
+                target,
+            )
+            assert under_one.reason == under_zero.reason, (action_type, target)
+
+        denied = evaluate(
+            one, EvaluationAction(type="file_read", target="/home/agent/.ssh/id_rsa")
+        )
+        assert denied.decision == "deny"
+        assert denied.matched_rule == "rules.forbidden_paths.patterns"
+
+        # The `hushspec` field is part of the canonical form, so the two
+        # hashes differ; what must not differ is the decisions they hash.
+        assert content_hash(zero) != content_hash(one)
+
+    def test_unsupported_version_names_the_supported_minors(self):
+        spec = parse_or_raise('hushspec: "0.9.0"\nname: v\n')
+        result = validate(spec)
+        assert not result.is_valid
+        message = str(result.errors[0])
+        assert message.startswith("unsupported hushspec version: 0.9.0")
+        assert "0.1, 0.2, 1.0" in message
+        assert result.errors[0].kind == "unsupported_version"
+        # And the registry code the shared `invalid/` sidecars pin.
+        assert result.errors[0].code == "E002"
+
+
+def test_major_version_is_bounded_to_an_unsigned_32_bit_integer() -> None:
+    from hushspec.version import major_version
+
+    assert major_version("4294967295.0.0") == 4294967295
+    assert major_version("00000000001.0.0") == 1
+    assert major_version("4294967296.0.0") is None
+    # Never converted: a digit string this long would exceed the interpreter's
+    # conversion limit and raise instead of answering.
+    assert major_version("9" * 5000 + ".0.0") is None
+
+
+def test_an_oversized_major_with_an_empty_name_is_a_version_error() -> None:
+    from hushspec import validate
+
+    # Validation answers with the version error rather than raising on the
+    # conversion; the unreadable version is also held to the current format's
+    # name constraint, so that error is reported beside it.
+    ok, spec = parse('hushspec: "' + "9" * 5000 + '.0.0"\nname: ""\n')
+    assert ok
+    result = validate(spec)
+    assert not result.is_valid
+    assert any(error.code == "E002" for error in result.errors)

@@ -1,0 +1,12 @@
+# core 4.1 (`replace`): the child replaces the base outright. The base's
+# prompt_injection, jailbreak and threat_intel configuration is discarded
+# rather than overlaid, so only what the child declares remains.
+hushspec: "0.1.0"
+extends: base
+merge_strategy: replace
+extensions:
+  detection:
+    jailbreak:
+      enabled: true
+      warn_threshold: 10
+      block_threshold: 20

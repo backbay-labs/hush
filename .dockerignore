@@ -1,0 +1,32 @@
+# The Dockerfile only COPYs Cargo.toml, Cargo.lock and crates/ -- this file
+# keeps everything else out of the build context sent to the daemon.
+.git
+.github
+.claude
+
+target/
+out/
+node_modules/
+dist/
+coverage/
+coverage-out/
+
+docs/
+docs/book/
+spec/
+schemas/
+rulesets/
+library/
+fixtures/
+generated/
+assets/
+packages/
+scripts/
+
+*.md
+!crates/**/README.md
+
+Dockerfile
+.dockerignore
+.pre-commit-hooks.yaml
+action.yml

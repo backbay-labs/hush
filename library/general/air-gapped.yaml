@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # Does not replace OS-level network controls or firewall rules.
 hushspec: "0.1.0"
 name: air-gapped
@@ -67,3 +67,36 @@ rules:
     require_balance: false
     max_imbalance_ratio: 1.0
     forbidden_patterns: []
+
+# Structured control mappings (core spec 2.5). This policy is an isolation
+# posture rather than a regulated framework, so it maps to ISO/IEC 27001
+# Annex A and the OWASP LLM Top 10. Declarative metadata only: mappings never
+# influence evaluation.
+metadata:
+  controls:
+    - framework: iso-27001-2022
+      control_id: "A.5.15"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.tool_access
+      notes: "Access control. Credential stores are unreachable and tools are read-only."
+    - framework: iso-27001-2022
+      control_id: "A.8.12"
+      rule_paths:
+        - rules.secret_patterns
+      notes: "Data leakage prevention. Credential patterns are detected before they can be written out."
+    - framework: iso-27001-2022
+      control_id: "A.8.20"
+      rule_paths:
+        - rules.egress
+      notes: "Networks security. Every egress target is blocked -- the allow and block lists are empty and the default is block."
+    - framework: iso-27001-2022
+      control_id: "A.8.32"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Change management. Patch size limits keep offline changes reviewable."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM06"
+      rule_paths:
+        - rules.shell_commands
+      notes: "Excessive Agency. Shell execution is blocked outright."

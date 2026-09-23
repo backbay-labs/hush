@@ -1,19 +1,30 @@
+import sys
+import time
+from pathlib import Path
+
 import pytest
+import yaml
 
 from hushspec import HushGuard, HushSpecDenied
+from hushspec.canonical import canonical_json_value
 from hushspec.evaluate import (
     Decision,
     EvaluationAction,
     EvaluationResult,
     activate_panic,
-    deactivate_panic,
 )
 from hushspec.middleware import HushGuard as HushGuardDirect
 from hushspec.adapters.langchain import hush_tool
-from hushspec.middleware import EnforcementConfig, matches_rule_path_prefix
+from hushspec.middleware import (
+    POLICY_PROVIDER_RULE,
+    POLICY_SIGNATURE_RULE,
+    EnforcementConfig,
+    matches_rule_path_prefix,
+)
 from hushspec.observer import EvaluationObserver
-from hushspec.sinks import ReceiptSink
-from hushspec.parse import parse_or_raise
+from hushspec.receipt import AuditConfig
+from hushspec.sinks import NullSink, ReceiptSink
+from hushspec.parse import CoreSafeLoader, parse_or_raise
 
 
 # Shared policies
@@ -24,10 +35,8 @@ hushspec: "0.1.0"
 name: allow-all
 rules:
   tool_access:
-    allow: ["*"]
     default: allow
   egress:
-    allow: ["*"]
     default: allow
 """
 
@@ -72,12 +81,14 @@ rules:
 
 
 class TestHushGuardFromYaml:
-    def test_creates_guard_from_valid_yaml(self):
+    def test_holds_the_parsed_policy(self):
         guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
-        assert isinstance(guard, HushGuard)
+        assert guard.policy.name == "allow-all"
+        assert guard.refusal is None
+        assert guard.compiled.spec is guard.policy
 
     def test_raises_on_invalid_yaml(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="mapping values are not allowed"):
             HushGuard.from_yaml("not: valid: yaml: {")
 
 
@@ -109,10 +120,12 @@ class TestHushGuardCheck:
 
 
 class TestHushGuardEnforce:
-    def test_does_not_raise_for_allowed_actions(self):
+    def test_lets_an_allowed_action_through_without_raising(self):
         guard = HushGuard.from_yaml(ALLOW_ALL_POLICY)
         action = EvaluationAction(type="tool_call", target="any_tool")
-        guard.enforce(action)  # should not raise
+        guard.enforce(action)
+        assert guard.gate(action).proceed is True
+        assert guard.gate(action).result.decision == Decision.ALLOW
 
     def test_raises_hushspec_denied_for_denied_actions(self):
         guard = HushGuard.from_yaml(DENY_SHELL_POLICY)
@@ -161,7 +174,12 @@ class TestHushGuardWarnHandler:
     def test_enforce_passes_when_on_warn_returns_true(self):
         guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=lambda r, a: True)
         action = EvaluationAction(type="tool_call", target="risky_tool")
-        guard.enforce(action)  # should not raise
+        guard.enforce(action)
+        # The confirmation approved the action; the decision itself stands.
+        outcome = guard.gate(action)
+        assert outcome.proceed is True
+        assert outcome.result.decision == Decision.WARN
+        assert outcome.enforcement.outcome == "confirmed"
 
 
 class TestHushGuardSwapPolicy:
@@ -177,11 +195,19 @@ class TestHushGuardSwapPolicy:
 
 class TestHushGuardActionMappers:
     def test_map_tool_call_creates_correct_action(self):
-        action = HushGuard.map_tool_call("my_tool", {"key": "value"})
+        args = {"key": "value"}
+        action = HushGuard.map_tool_call("my_tool", args)
         assert action.type == "tool_call"
         assert action.target == "my_tool"
-        assert action.args_size is not None
-        assert action.args_size > 0
+        # Core spec 3.7: UTF-8 bytes of the canonical JSON of the arguments.
+        assert action.args_size == len(canonical_json_value(args).encode("utf-8"))
+
+    def test_map_tool_call_measures_non_ascii_arguments_in_bytes(self):
+        args = {"who": "\u00fcbermensch"}
+        action = HushGuard.map_tool_call("my_tool", args)
+        canonical = canonical_json_value(args)
+        assert action.args_size == len(canonical.encode("utf-8"))
+        assert action.args_size == len(canonical) + 1
 
     def test_map_tool_call_without_args_has_none_args_size(self):
         action = HushGuard.map_tool_call("my_tool")
@@ -298,6 +324,25 @@ class TestEnforcementConfigValidation:
         with pytest.raises(ValueError, match="monitor mode requires an observer or a receipt sink"):
             HushGuard.from_yaml(ALLOW_ALL_POLICY, enforcement=EnforcementConfig(mode="monitor"))
 
+    def test_rejects_monitor_mode_with_a_sink_but_no_auditing(self):
+        # With auditing off no receipt is built, so the sink is handed nothing
+        # and the shadow decision leaves no trace at all.
+        with pytest.raises(ValueError, match="monitor mode requires an observer or a receipt sink"):
+            HushGuard.from_yaml(
+                ALLOW_ALL_POLICY,
+                enforcement=EnforcementConfig(mode="monitor"),
+                sink=NullSink(),
+                audit=AuditConfig(enabled=False),
+            )
+
+        # An observer still reports every decision, whatever auditing records.
+        HushGuard.from_yaml(
+            ALLOW_ALL_POLICY,
+            enforcement=EnforcementConfig(mode="monitor"),
+            observer=_NoopObserver(),
+            audit=AuditConfig(enabled=False),
+        )
+
     def test_rejects_unknown_rule_names_in_override_keys(self):
         with pytest.raises(ValueError, match="unknown rule in enforcement override 'rules.egres'"):
             HushGuard.from_yaml(
@@ -329,7 +374,7 @@ class TestEnforcementConfigValidation:
                 overrides={"rules.egress": "enforce", "extensions.posture": "monitor"},
             ),
         )
-        assert isinstance(guard, HushGuard)
+        assert guard.enforcement_mode == "monitor"
 
     def test_rejects_typo_in_extension_segment(self):
         with pytest.raises(
@@ -349,7 +394,7 @@ class TestEnforcementConfigValidation:
             observer=_NoopObserver(),
             enforcement=EnforcementConfig(overrides={"extensions.posture.states": "monitor"}),
         )
-        assert isinstance(guard, HushGuard)
+        assert guard.enforcement_mode == "enforce"
 
     def test_accepts_extensions_detection_as_override_key(self):
         guard = HushGuard.from_yaml(
@@ -357,7 +402,7 @@ class TestEnforcementConfigValidation:
             observer=_NoopObserver(),
             enforcement=EnforcementConfig(overrides={"extensions.detection": "monitor"}),
         )
-        assert isinstance(guard, HushGuard)
+        assert guard.enforcement_mode == "enforce"
 
 
 # Monitor mode gate
@@ -469,9 +514,6 @@ class TestMonitorModeGate:
 
 
 class TestPanicSupremacy:
-    def teardown_method(self):
-        deactivate_panic()
-
     def test_monitor_guard_blocks_while_panic_active(self):
         guard = HushGuard.from_yaml(
             ALLOW_ALL_POLICY,
@@ -615,6 +657,52 @@ class _ExplodingSink(ReceiptSink):
         raise RuntimeError("sink down")
 
 
+@pytest.mark.parametrize("sink_fails", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+def test_callback_failure_records_blocked_warn(sink_fails, error_type):
+    marker = error_type("confirmation unavailable")
+    action = EvaluationAction(type="tool_call", target="risky_tool")
+    declined = _CaptureSink()
+    HushGuard.from_yaml(DENY_SHELL_POLICY, sink=declined).gate(action)
+
+    class AttemptSink(_CaptureSink):
+        def send(self, receipt):
+            super().send(receipt)
+            if sink_fails:
+                raise RuntimeError("sink unavailable")
+
+    sink = AttemptSink()
+
+    def fail(_result, _action):
+        raise marker
+
+    guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=fail, sink=sink)
+    with pytest.raises(error_type) as caught:
+        guard.gate(action)
+    assert caught.value is marker
+    assert len(sink.receipts) == 1
+    receipt = sink.receipts[0]
+    assert receipt.decision == Decision.WARN
+    assert receipt.enforcement.mode == "enforce"
+    assert receipt.enforcement.outcome == "blocked"
+    assert receipt.reason == declined.receipts[0].reason
+    assert receipt.rule_trace == declined.receipts[0].rule_trace
+
+
+def test_keyboard_interrupt_is_outside_callback_receipt_guarantee():
+    marker = KeyboardInterrupt()
+    sink = _CaptureSink()
+
+    def interrupt(_result, _action):
+        raise marker
+
+    guard = HushGuard.from_yaml(DENY_SHELL_POLICY, on_warn=interrupt, sink=sink)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        guard.gate(EvaluationAction(type="tool_call", target="risky_tool"))
+    assert caught.value is marker
+    assert sink.receipts == []
+
+
 class TestReceiptSinkIntegration:
     def test_gate_sends_tagged_receipt_to_sink(self):
         sink = _CaptureSink()
@@ -631,15 +719,19 @@ class TestReceiptSinkIntegration:
         assert receipt.enforcement is not None
         assert receipt.enforcement.mode == "monitor"
         assert receipt.enforcement.outcome == "would_block"
-        assert len(receipt.policy.content_hash) == 64
+        assert receipt.policy.content_hash.startswith("sha256:")
+        assert len(receipt.policy.content_hash) == len("sha256:") + 64
 
-    def test_evaluate_sends_untagged_receipt(self):
+    def test_evaluate_sends_a_receipt_with_the_implied_disposition(self):
+        # `evaluate()` applies nothing, but a 0.2 receipt must still say what
+        # would happen (receipt spec 4.7): a deny under enforce is `blocked`.
         sink = _CaptureSink()
         guard = HushGuard.from_yaml(DENY_SHELL_POLICY, sink=sink)
         result = guard.evaluate(EvaluationAction(type="tool_call", target="dangerous_tool"))
         assert result.decision == Decision.DENY
         assert len(sink.receipts) == 1
-        assert sink.receipts[0].enforcement is None
+        assert sink.receipts[0].enforcement.mode == "enforce"
+        assert sink.receipts[0].enforcement.outcome == "blocked"
 
     def test_throwing_sink_never_breaks_enforcement(self):
         guard = HushGuard.from_yaml(
@@ -655,29 +747,25 @@ class TestReceiptSinkIntegration:
             enforcement=EnforcementConfig(mode="monitor"),
             sink=_CaptureSink(),
         )
-        assert isinstance(guard, HushGuard)
+        assert guard.enforcement_mode == "monitor"
 
-    def test_enforcement_api_importable_from_top_level(self):
-        from hushspec import (
-            EnforcementConfig as EC,
-            EnforcementSummary,
-            GateOutcome,
-            matches_rule_path_prefix as mrpp,
-        )
+    def test_the_top_level_enforcement_names_are_the_module_s_own(self):
+        import hushspec
+        from hushspec import middleware, receipt
 
-        assert EC is EnforcementConfig
-        assert callable(mrpp)
-        assert EnforcementSummary is not None
-        assert GateOutcome is not None
+        assert hushspec.EnforcementConfig is middleware.EnforcementConfig
+        assert hushspec.GateOutcome is middleware.GateOutcome
+        assert hushspec.matches_rule_path_prefix is middleware.matches_rule_path_prefix
+        assert hushspec.EnforcementSummary is receipt.EnforcementSummary
 
 
 # detection in the sink/audit path
 #
 # _run_evaluation()'s sink branch builds its receipt with evaluate_audited(),
-# which consults only the core rules -- so _apply_detection() folds the
-# detection extension in afterward (mirroring the Rust CLI's apply_detection),
-# making a sink-configured guard apply detection identically to the sink-free
-# path: the enforced decision AND the emitted receipt both reflect detection.
+# which routes through the detection pipeline itself, so a sink-configured
+# guard applies detection identically to the sink-free path: the enforced
+# decision AND the emitted receipt reflect it, and the receipt carries the
+# per-detector `detection_trace` of receipt spec 4.6.
 
 
 class TestDetectionInSinkPath:
@@ -704,12 +792,17 @@ class TestDetectionInSinkPath:
         receipt = sink.receipts[0]
         assert receipt.decision == Decision.DENY
         assert receipt.matched_rule == "detection"
-        detection_entries = [
-            e for e in receipt.rule_trace if e.rule_block == "detection"
-        ]
-        assert len(detection_entries) == 1
-        assert detection_entries[0].outcome == "deny"
-        assert detection_entries[0].evaluated is True
+        # `detection` is not one of the schema's closed rule_block ids: what
+        # the detectors did is recorded in `detection_trace` instead.
+        assert all(e.rule_block != "detection" for e in receipt.rule_trace)
+        assert receipt.detection_trace is not None
+        # Both prompt-injection detectors fire on this content: the regex one
+        # and the normative heuristic one (detection spec 3.5).
+        fired = [d for d in receipt.detection_trace if d.matched]
+        assert len(fired) == 2
+        assert fired[0].detector_id == "regex_injection@1"
+        assert fired[0].category == "prompt_injection"
+        assert fired[0].level in ("high", "critical")
 
     def test_sink_receipt_unchanged_for_clean_content(self):
         sink = _CaptureSink()
@@ -732,3 +825,143 @@ class TestDetectionInSinkPath:
         assert receipt.decision == Decision.ALLOW
         assert receipt.matched_rule == "rules.tool_access.allow"
         assert all(e.rule_block != "detection" for e in receipt.rule_trace)
+        # The pipeline ran, so the trace is present and nothing matched
+        # (receipt spec 4.6: absent, not empty, means it did not run).
+        assert receipt.detection_trace is not None
+        assert all(not d.matched for d in receipt.detection_trace)
+
+
+class TestConcurrentPolicySwap:
+    """A hot reload is atomic from an evaluating thread's point of view."""
+
+    ALLOW = (
+        'hushspec: "0.2.0"\nname: allow-all\n'
+        "rules:\n  tool_access:\n    default: allow\n"
+    )
+    DENY = (
+        'hushspec: "0.2.0"\nname: deny-all\n'
+        "rules:\n  tool_access:\n    default: block\n"
+    )
+
+    def test_a_receipt_never_pairs_one_policy_with_another_policy_hash(self):
+        import threading
+
+        from hushspec import (
+            Decision,
+            EnforcementConfig,
+            EvaluationAction,
+            resolve_with_options_or_raise,
+        )
+
+        received: list = []
+
+        class Collect:
+            def send(self, receipt):
+                received.append(receipt)
+
+            def record_policy_event(self, event):
+                pass
+
+        allow = resolve_with_options_or_raise(parse_or_raise(self.ALLOW))
+        deny = resolve_with_options_or_raise(parse_or_raise(self.DENY))
+        by_hash = {
+            allow.content_hash: Decision.ALLOW,
+            deny.content_hash: Decision.DENY,
+        }
+
+        guard = HushGuard(
+            allow,
+            sink=Collect(),
+            enforcement=EnforcementConfig(mode="monitor"),
+        )
+        action = EvaluationAction(type="tool_call", target="anything")
+        stop = threading.Event()
+
+        def evaluate_loop():
+            while not stop.is_set():
+                guard.gate(action)
+
+        def swap_loop():
+            resolutions = (deny, allow)
+            index = 0
+            while not stop.is_set():
+                guard.swap_resolution(resolutions[index % 2])
+                index += 1
+
+        # A short switch interval widens the window in which a swap can land
+        # between two reads of the guard's state.
+        previous = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        threads = [threading.Thread(target=evaluate_loop) for _ in range(3)]
+        threads.append(threading.Thread(target=swap_loop))
+        try:
+            for thread in threads:
+                thread.start()
+            time.sleep(0.5)
+        finally:
+            stop.set()
+            for thread in threads:
+                thread.join(5.0)
+            sys.setswitchinterval(previous)
+
+        assert received, "no receipts were produced"
+        mismatched = [
+            receipt
+            for receipt in received
+            if by_hash.get(receipt.policy.content_hash) != receipt.decision
+        ]
+        assert not mismatched, (
+            f"{len(mismatched)} of {len(received)} receipts named a policy that "
+            "did not produce their decision"
+        )
+
+    def test_a_swap_clears_an_earlier_refusal_atomically(self):
+        from hushspec import (
+            Decision,
+            EvaluationAction,
+            resolve_with_options_or_raise,
+        )
+
+        signed_policy = parse_or_raise(self.ALLOW)
+        guard = HushGuard(signed_policy)
+        assert guard.refusal is None
+        resolution = resolve_with_options_or_raise(parse_or_raise(self.DENY))
+        guard.swap_resolution(resolution)
+        assert guard.refusal is None
+        assert guard.policy.name == "deny-all"
+        assert guard.resolution is resolution
+        assert (
+            guard.evaluate(EvaluationAction(type="tool_call", target="x")).decision
+            == Decision.DENY
+        )
+
+
+class TestReservedMatchedRules:
+    """The reserved ``matched_rule`` values, against the published registry.
+
+    ``spec/registries/rule-paths.yaml`` is the normative list, so renaming a
+    constant here fails rather than quietly leaving the registry describing a
+    value no receipt carries.
+    """
+
+    @staticmethod
+    def _reserved() -> set[str]:
+        registry = Path(__file__).resolve().parents[3] / "spec/registries/rule-paths.yaml"
+        if not registry.is_file():
+            pytest.skip(f"{registry} is not available outside the repository")
+        document = yaml.load(registry.read_text(encoding="utf-8"), Loader=CoreSafeLoader)
+        return {
+            entry["id"]
+            for entry in document["entries"]
+            if entry.get("kind") == "reserved_matched_rule"
+        }
+
+    def test_the_refused_policy_rule_is_registered(self) -> None:
+        assert POLICY_SIGNATURE_RULE in self._reserved()
+
+    def test_the_provider_rule_is_registered(self) -> None:
+        # This guard never issues that denial itself: its policy provider
+        # pushes each reload into `swap_resolution`, so a failed reload leaves
+        # the policy already in force (core spec 6.2). A reader of receipts an
+        # enforcement point of the other kind emitted still needs the spelling.
+        assert POLICY_PROVIDER_RULE in self._reserved()

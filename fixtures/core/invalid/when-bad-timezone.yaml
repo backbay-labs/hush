@@ -1,0 +1,10 @@
+# A timezone that is neither an IANA identifier nor a fixed offset is a parse error (core spec 3.13).
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      time_window:
+        start: "09:00"
+        end: "17:00"
+        timezone: "Mars/Olympus_Mons"
+    forbidden_patterns: ["mkfs"]

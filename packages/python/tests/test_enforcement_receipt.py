@@ -1,4 +1,3 @@
-import dataclasses
 import json
 
 from hushspec.evaluate import Decision, EvaluationAction, EvaluationResult
@@ -15,25 +14,34 @@ rules:
 """
 
 
-def test_evaluate_audited_never_sets_enforcement():
+def test_evaluate_audited_records_the_implied_disposition():
+    # Receipt spec 4.7: `enforcement` is required in 0.2. With no enforcement
+    # point, a deny is `blocked` (a decision without a disposition is not
+    # evidence that a control operated).
     from hushspec.receipt import AuditConfig, evaluate_audited
 
     spec = parse_or_raise(POLICY)
     action = EvaluationAction(type="tool_call", target="dangerous_tool")
     receipt = evaluate_audited(spec, action, AuditConfig())
     assert receipt.decision == Decision.DENY
-    assert receipt.enforcement is None
+    assert receipt.enforcement.mode == "enforce"
+    assert receipt.enforcement.outcome == "blocked"
 
 
 def test_enforcement_summary_serializes_on_receipt():
-    from hushspec.receipt import AuditConfig, EnforcementSummary, evaluate_audited
+    from hushspec.receipt import (
+        AuditConfig,
+        EnforcementSummary,
+        evaluate_audited,
+        receipt_to_dict,
+    )
 
     spec = parse_or_raise(POLICY)
     action = EvaluationAction(type="tool_call", target="dangerous_tool")
     receipt = evaluate_audited(spec, action, AuditConfig())
     receipt.enforcement = EnforcementSummary(mode="monitor", outcome="would_block")
 
-    payload = json.loads(json.dumps(dataclasses.asdict(receipt), default=str))
+    payload = json.loads(json.dumps(receipt_to_dict(receipt)))
     assert payload["enforcement"] == {"mode": "monitor", "outcome": "would_block"}
     assert payload["decision"] == "deny"
 

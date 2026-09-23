@@ -5,11 +5,12 @@
 //!   a `change_type` of "unchanged" or one of "tightened"/"relaxed"/
 //!   "escalated"/"demoted" -- there is no top-level `"changes"` wrapper).
 //! - Idempotence: running `--fix` a second time is a byte-for-byte no-op.
-//! - The shipped corpus (below) happens to be fully clean today, so its loop
-//!   alone never actually exercises a fix -- every `--fix` call in it is a
-//!   no-op and the assertions that follow check nothing.
-//!   `fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied`
-//!   covers that gap using a fixture with a genuine fixable duplicate.
+//!
+//! Over the shipped corpus this pins that `--fix` never rewrites a policy that
+//! has nothing to fix. A corpus entry that *does* acquire a fixable finding
+//! would start exercising the neutrality check too, and until then
+//! `fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied` drives
+//! it from a fixture with a genuine fixable duplicate.
 use assert_cmd::Command;
 
 #[test]
@@ -21,11 +22,19 @@ fn fix_is_decision_neutral_and_idempotent_for_all_shipped_policies() {
         let copy = dir.path().join(&name);
         std::fs::copy(&entry, &copy).unwrap();
 
+        // The exit code carries the remaining semantic findings, which a
+        // shipped policy is allowed to have; what must hold is that `--fix`
+        // left the bytes alone.
         let _ = Command::cargo_bin("h2h")
             .unwrap()
             .args(["lint", copy.to_str().unwrap(), "--fix"])
-            .assert(); // exit code may be nonzero if semantic findings remain -- that's fine
+            .assert();
 
+        assert_eq!(
+            std::fs::read(&entry).unwrap(),
+            std::fs::read(&copy).unwrap(),
+            "{name} has a fixable finding: the shipped corpus must be fix-clean"
+        );
         assert_neutral_and_idempotent(&name, &entry, &copy);
     }
 }
@@ -77,7 +86,7 @@ fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
 fn fix_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();
     let modeline =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
     let content = format!(
         "{modeline}\nhushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
     );
@@ -121,7 +130,7 @@ fn dry_run_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();
     let policy = dir.path().join("modeline-dry-run.yaml");
     let modeline =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
     std::fs::write(
         &policy,
         format!(
@@ -243,6 +252,56 @@ fn dry_run_never_writes_and_previews_what_fix_would_do() {
     );
 }
 
+/// `--dry-run` writes nothing, so its report and exit code must describe the
+/// file on disk: the findings it still holds, and no applied fixes.
+#[test]
+fn dry_run_reports_the_document_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let policy = dir.path().join("dupe.yaml");
+    std::fs::write(
+        &policy,
+        "hushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n",
+    )
+    .unwrap();
+
+    let dry_run = Command::cargo_bin("h2h")
+        .unwrap()
+        .args([
+            "lint",
+            policy.to_str().unwrap(),
+            "--dry-run",
+            "--format",
+            "json",
+            "--fail-on-warnings",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        dry_run.status.code(),
+        Some(1),
+        "the unwritten document still holds the warning"
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&dry_run.stdout).expect("json lint report");
+    let file = &report[0];
+    assert_eq!(
+        file["fixed"].as_array().map(Vec::len),
+        Some(0),
+        "nothing was written, so nothing was fixed: {file}"
+    );
+    let codes: Vec<&str> = file["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter_map(|finding| finding["code"].as_str())
+        .collect();
+    assert!(
+        codes.contains(&"L008"),
+        "the duplicate is still in the file: {codes:?}"
+    );
+}
+
 #[test]
 fn fix_and_dry_run_are_mutually_exclusive() {
     let dir = tempfile::tempdir().unwrap();
@@ -267,10 +326,11 @@ fn never_rewrites_a_file_that_failed_to_parse() {
     .unwrap();
     let before = std::fs::read(&policy).unwrap();
 
-    let _ = Command::cargo_bin("h2h")
+    Command::cargo_bin("h2h")
         .unwrap()
         .args(["lint", policy.to_str().unwrap(), "--fix"])
-        .assert();
+        .assert()
+        .failure();
 
     assert_eq!(
         before,

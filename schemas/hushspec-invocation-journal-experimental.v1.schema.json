@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-invocation-journal-experimental.v1.schema.json",
+  "title": "Experimental trusted invocation evidence 0.1.0",
+  "description": "A separate signed invocation entry or closing checkpoint. Structural validation alone is not verification: consumers must validate embedded policies and 0.2 receipts, signatures, sequence, immutable bindings and state transitions. Missing terminal evidence means unknown execution outcome.",
+  "oneOf": [{"$ref": "#/$defs/entry"}, {"$ref": "#/$defs/checkpoint"}],
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "time": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"},
+    "natural": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "hashes": {"type": "array", "minItems": 1, "maxItems": 17, "items": {"$ref": "#/$defs/hash"}},
+    "signature": {
+      "type": "object", "additionalProperties": false,
+      "required": ["format_version", "algorithm", "key_id", "signed_at", "content_hash", "signature"],
+      "properties": {
+        "format_version": {"const": "0.2"}, "algorithm": {"const": "ed25519"},
+        "key_id": {"$ref": "#/$defs/hash"}, "signed_at": {"$ref": "#/$defs/time"},
+        "expires_at": {"$ref": "#/$defs/time"}, "content_hash": {"$ref": "#/$defs/hash"},
+        "signature": {"type": "string", "pattern": "^[A-Za-z0-9_-]{86}$"},
+        "policy_name": {"type": "string"}, "policy_version": {"$ref": "#/$defs/natural"}, "signer": {"type": "string"}
+      }
+    },
+    "engine": {
+      "type": "object", "additionalProperties": false, "required": ["name", "version"],
+      "properties": {
+        "name": {"$ref": "#/$defs/reason"}, "version": {"$ref": "#/$defs/reason"},
+        "artifact_sha256": {"$ref": "#/$defs/hash"}, "qualification_sha256": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "required": ["call_id", "generation", "policy_hash", "target", "arguments_hash", "effects_hash", "panic_epoch", "global_panic_epoch"],
+      "properties": {
+        "call_id": {"$ref": "#/$defs/uuid"}, "generation": {"$ref": "#/$defs/generation"},
+        "policy_hash": {"$ref": "#/$defs/hash"}, "arguments_hash": {"$ref": "#/$defs/hash"}, "effects_hash": {"$ref": "#/$defs/hash"},
+        "target": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^mcp:[a-z][a-z0-9_-]{0,63}/.+$"},
+        "panic_epoch": {"$ref": "#/$defs/natural"}, "global_panic_epoch": {"$ref": "#/$defs/natural"}
+      }
+    },
+    "context": {"type": "object", "required": ["current_time"], "properties": {"current_time": {"$ref": "#/$defs/time"}}},
+    "action": {
+      "type": "object", "additionalProperties": false, "required": ["type", "target", "context"],
+      "properties": {
+        "type": {"enum": ["tool_call", "file_read", "file_write", "patch_apply", "egress"]},
+        "target": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "context": {"$ref": "#/$defs/context"}, "content": {"type": "string"},
+        "args_size": {"$ref": "#/$defs/natural"}, "url": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "tool_call"}}}, "then": {"required": ["args_size"]}},
+        {"if": {"properties": {"type": {"enum": ["file_write", "patch_apply"]}}}, "then": {"required": ["content"]}}
+      ]
+    },
+    "event": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false,
+          "required": ["type", "generation", "status", "policy", "envelope", "engine"],
+          "properties": {
+            "type": {"const": "policy"}, "generation": {"$ref": "#/$defs/generation"}, "status": {"const": "accepted"},
+            "policy": {"type": "object", "description": "Resolved policy, separately validated against the current core schema and authenticated."},
+            "envelope": {"$ref": "#/$defs/signature"}, "engine": {"$ref": "#/$defs/engine"}
+          }
+        },
+        {"type": "object", "additionalProperties": false, "required": ["type", "generation", "status", "reason"],
+          "properties": {"type": {"const": "policy"}, "generation": {"$ref": "#/$defs/generation"}, "status": {"const": "refused"}, "reason": {"$ref": "#/$defs/reason"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "epoch", "active"],
+          "properties": {"type": {"const": "panic"}, "epoch": {"$ref": "#/$defs/natural"}, "active": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "call_id", "reason"],
+          "properties": {"type": {"enum": ["rejected", "blocked"]}, "call_id": {"$ref": "#/$defs/uuid"}, "reason": {"$ref": "#/$defs/reason"}}},
+        {"allOf": [{"$ref": "#/$defs/binding"}, {"type": "object", "required": ["type", "arguments", "actions", "context"],
+          "properties": {"type": {"const": "attempt"}, "arguments": {"type": "object"},
+            "actions": {"type": "array", "minItems": 2, "maxItems": 17, "items": {"$ref": "#/$defs/action"}}, "context": {"$ref": "#/$defs/context"}}}], "unevaluatedProperties": false},
+        {"type": "object", "additionalProperties": false, "required": ["type", "call_id", "aggregate", "confirmation", "receipts", "receipt_hashes"],
+          "properties": {
+            "type": {"const": "decision"}, "call_id": {"$ref": "#/$defs/uuid"}, "aggregate": {"enum": ["allow", "warn", "deny"]},
+            "confirmation": {"enum": ["not_required", "confirmed", "refused", "error", "timeout"]},
+            "receipts": {"type": "array", "minItems": 1, "maxItems": 17, "items": {"type": "object"},
+              "description": "Every item is separately validated as a format 0.2 decision receipt and bound to its action/policy."},
+            "receipt_hashes": {"$ref": "#/$defs/hashes"}
+          }
+        },
+        {"allOf": [{"$ref": "#/$defs/binding"}, {"type": "object", "required": ["type", "receipt_ids", "receipt_hashes"],
+          "properties": {"type": {"const": "permit"}, "receipt_hashes": {"$ref": "#/$defs/hashes"},
+            "receipt_ids": {"type": "array", "minItems": 1, "maxItems": 17, "items": {"$ref": "#/$defs/uuid"}}}}], "unevaluatedProperties": false},
+        {"type": "object", "additionalProperties": false, "required": ["type", "call_id", "outcome"],
+          "properties": {"type": {"const": "terminal"}, "call_id": {"$ref": "#/$defs/uuid"},
+            "outcome": {"enum": ["completed", "error", "aborted_before_dispatch"]}, "reason": {"$ref": "#/$defs/reason"}}}
+      ]
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "format_version", "stream_id", "sequence", "previous_hash", "timestamp", "event", "entry_hash", "signature"],
+      "properties": {
+        "kind": {"const": "hush.invocation.entry"}, "format_version": {"const": "0.1.0"}, "stream_id": {"$ref": "#/$defs/uuid"},
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 20000}, "previous_hash": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]},
+        "timestamp": {"$ref": "#/$defs/time"}, "event": {"$ref": "#/$defs/event"}, "entry_hash": {"$ref": "#/$defs/hash"}, "signature": {"$ref": "#/$defs/signature"}
+      }
+    },
+    "checkpoint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "format_version", "stream_id", "entry_count", "head_hash", "closed", "timestamp", "signature"],
+      "properties": {
+        "kind": {"const": "hush.invocation.checkpoint"}, "format_version": {"const": "0.1.0"}, "stream_id": {"$ref": "#/$defs/uuid"},
+        "entry_count": {"type": "integer", "minimum": 0, "maximum": 20000}, "head_hash": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/hash"}]},
+        "closed": {"const": true}, "timestamp": {"$ref": "#/$defs/time"}, "signature": {"$ref": "#/$defs/signature"}
+      }
+    }
+  }
+}

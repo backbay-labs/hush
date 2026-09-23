@@ -1,16 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   evaluate,
   activatePanic,
+  checkPanicSentinel,
   deactivatePanic,
   isPanicActive,
   panicPolicy,
 } from '../src/evaluate.js';
 import { parseOrThrow } from '../src/parse.js';
 import type { HushSpec } from '../src/schema.js';
+
+const PANIC_SOURCE = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../../rulesets/panic.yaml',
+);
 
 describe('panic mode', () => {
   let originalCwd: string;
@@ -80,9 +87,23 @@ describe('panic mode', () => {
     expect(result.decision).toBe('allow');
   });
 
+  it('treats a sentinel path that runs through a file as present', () => {
+    // A path component that is not a directory is not a definite "not found":
+    // the switch fails closed on it, as every SDK does.
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'hush-sentinel-'));
+    try {
+      const file = path.join(dir, 'file');
+      writeFileSync(file, '');
+      expect(checkPanicSentinel(path.join(file, 'sentinel'))).toBe(true);
+      expect(isPanicActive()).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('panicPolicy returns a valid HushSpec', () => {
     const spec = panicPolicy();
-    expect(spec.hushspec).toBe('0.1.0');
+    expect(spec).toEqual(parseOrThrow(readFileSync(PANIC_SOURCE, 'utf8')));
     expect(spec.name).toBe('__hushspec_panic__');
     expect(spec.rules).toBeDefined();
     expect(spec.rules!.forbidden_paths).toBeDefined();
@@ -120,17 +141,13 @@ describe('panic mode', () => {
     expect(result.decision).toBe('deny');
   });
 
-  // DRIFT-GUARD: panicPolicy() is a YAML document (rulesets/panic.yaml,
-  // mirrored as PANIC_POLICY_YAML in src/evaluate.ts), not a hardcoded
-  // decision -- unlike the global activatePanic()/isPanicActive() switch
-  // tested above, it is only as deny-all as the rule blocks it declares. It
-  // was previously missing an `input_injection` block entirely, so
-  // evaluateInputInjection() fell through to its "no rule configured" allow
-  // default and an `input_inject` action was ALLOWED under the emergency
-  // deny-all policy. Assert deny for input_inject plus one action of every
-  // other governed rule type, so a future accidental drop of any block from
-  // PANIC_POLICY_YAML (or rulesets/panic.yaml drifting out of sync with it)
-  // is caught here instead of silently reopening a hole in panic mode.
+  // panicPolicy() is a YAML document (PANIC_POLICY_YAML in src/builtin.ts,
+  // generated from rulesets/panic.yaml), not a hardcoded decision like the global
+  // activatePanic()/isPanicActive() switch above: it is only as deny-all as
+  // the rule blocks it declares. A block dropped from it would leave its
+  // action type with no rule configured, which evaluates to allow -- a hole
+  // in the emergency policy. One action of every governed type is asserted
+  // here so that drift is caught rather than silently reopening one.
   it('panic policy denies input injection and every other governed action type', () => {
     const spec = panicPolicy();
     const actions = [

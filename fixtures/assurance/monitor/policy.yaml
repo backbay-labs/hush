@@ -1,0 +1,11 @@
+hushspec: '1.0.0'
+name: synthetic-pilot
+rules:
+  tool_access:
+    require_confirmation: [risky_tool]
+    default: block
+metadata:
+  controls:
+    - framework: pilot
+      control_id: tool-access
+      rule_paths: [rules.tool_access]

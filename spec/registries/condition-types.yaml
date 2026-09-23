@@ -1,0 +1,41 @@
+# HushSpec condition-type registry
+#
+# Normative companion to spec/hushspec-core.md Section 3.13. Lists the
+# members a `when` condition object may carry. Parsers reject any other key.
+#
+# Status: closed.
+#
+# Schema: schemas/hushspec-registry-condition-types.v0.schema.json
+registry: condition-types
+registry_version: "1.0.0"
+status: closed
+
+entries:
+  - id: time_window
+    kind: predicate
+    summary: Active during a daily time window in a named zone
+    spec: core 3.13
+  - id: context
+    kind: predicate
+    summary: Active when the runtime context carries the given key-value pairs
+    spec: core 3.13
+  - id: capability
+    kind: predicate
+    summary: Active when the effective posture state grants the capability
+    spec: core 3.13
+  - id: rate
+    kind: predicate
+    summary: Active when an engine-supplied counter compares as specified
+    spec: core 3.13
+  - id: all_of
+    kind: combinator
+    summary: Every listed condition holds
+    spec: core 3.13
+  - id: any_of
+    kind: combinator
+    summary: At least one listed condition holds
+    spec: core 3.13
+  - id: not
+    kind: combinator
+    summary: The nested condition does not hold
+    spec: core 3.13

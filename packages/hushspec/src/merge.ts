@@ -10,12 +10,29 @@ import type {
   ThreatIntelDetection,
 } from './extensions.js';
 
+/**
+ * Fold a base and a child overlay into one resolved document (Core section
+ * 2.3).
+ *
+ * `extends` and `merge_strategy` are resolution instructions, not policy: the
+ * merge consumes both, so the document that comes back declares neither, under
+ * every strategy. `canonicalJson` drops `merge_strategy` and refuses `extends`
+ * anyway, so dropping them here moves no hash.
+ *
+ * Top-level `metadata` is replaced wholesale, never field-merged: a child that
+ * declares `metadata` supplies the entire object (the base's `approved_by`,
+ * `controls` and the rest are gone even if the child restates none of them),
+ * and a child that declares none inherits the base's object unchanged. This
+ * holds under `merge` and `deep_merge` alike -- deep merging descends into
+ * `extensions`, not into governance metadata, because a half-inherited
+ * approval record would attest to something no one approved.
+ */
 export function merge(base: HushSpec, child: HushSpec): HushSpec {
   const strategy: MergeStrategy = child.merge_strategy ?? 'deep_merge';
 
   switch (strategy) {
     case 'replace':
-      return { ...child, extends: undefined };
+      return { ...child, extends: undefined, merge_strategy: undefined };
     case 'merge':
       return mergeWithStrategy(base, child, false);
     case 'deep_merge':
@@ -52,14 +69,13 @@ function mergeWithStrategy(base: HushSpec, child: HushSpec, deep: boolean): Hush
     name: child.name ?? base.name,
     description: child.description ?? base.description,
     extends: undefined,
-    merge_strategy: child.merge_strategy,
+    merge_strategy: undefined,
     rules: mergedRules,
     extensions: deep
       ? mergeExtensionsDeep(base.extensions, child.extensions)
       : mergeExtensionsMerge(base.extensions, child.extensions),
-    // Top-level governance metadata is merged child-over-parent like every
-    // other field (matches Rust `merge_with_strategy`); the `replace` strategy
-    // above already carries the child's metadata via the spread.
+    // Whole-object replacement, not a field merge: see `merge`. The
+    // `replace` strategy above already carries the child's through its spread.
     metadata: child.metadata ?? base.metadata,
   };
 }
@@ -147,10 +163,27 @@ function mergeDetection(
   if (!base) return child;
 
   return {
-    prompt_injection: mergeObject(base.prompt_injection, child.prompt_injection),
+    prompt_injection: mergePromptInjection(base.prompt_injection, child.prompt_injection),
     jailbreak: mergeObject(base.jailbreak, child.jailbreak),
     threat_intel: mergeObject(base.threat_intel, child.threat_intel),
   };
+}
+
+/**
+ * `prompt_injection`, whose `heuristics` is itself merged field by field
+ * (detection spec 8.1): a child that sets only `min_score` keeps the base's
+ * `enabled` rather than replacing the whole block.
+ */
+function mergePromptInjection(
+  base: PromptInjectionDetection | undefined,
+  child: PromptInjectionDetection | undefined,
+): PromptInjectionDetection | undefined {
+  const merged = mergeObject(base, child);
+  if (merged === undefined) return undefined;
+  const baseHeuristics = base?.heuristics;
+  const childHeuristics = child?.heuristics;
+  if (baseHeuristics === undefined || childHeuristics === undefined) return merged;
+  return { ...merged, heuristics: { ...baseHeuristics, ...childHeuristics } };
 }
 
 function mergeObject<T extends PromptInjectionDetection | JailbreakDetection | ThreatIntelDetection>(

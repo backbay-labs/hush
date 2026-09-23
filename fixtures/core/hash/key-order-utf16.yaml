@@ -1,0 +1,31 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 4.1: object keys sort by UTF-16 code units, not by code point or by document\
+  \ order; the free-form `when.context` map and posture state names carry the non-ASCII keys"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "egress":
+      "when":
+        "context":
+          "z": 1
+          "a": 2
+          "€": 3
+          "\U0001F600": 4
+          "Z": 5
+          "é": 6
+      "allow":
+      - "api.example.com"
+  "extensions":
+    "posture":
+      "initial": "normal"
+      "states":
+        "élevated":
+          "capabilities":
+          - "egress"
+        "normal":
+          "capabilities":
+          - "egress"
+        "Zed": {}
+      "transitions": []
+canonical: "{\"extensions\":{\"posture\":{\"initial\":\"normal\",\"states\":{\"Zed\":{},\"normal\":{\"capabilities\":[\"egress\"]},\"élevated\":{\"capabilities\":[\"egress\"]}},\"transitions\":[]}},\"hushspec\":\"0.1.0\",\"rules\":{\"egress\":{\"allow\":[\"api.example.com\"],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"context\":{\"Z\":5,\"a\":2,\"z\":1,\"é\":6,\"€\":3,\"😀\":4}}}}}"
+content_hash: "sha256:a1296158f146cf92ea8fc63348437ec0342b704914825a7508b87d516bc8457a"

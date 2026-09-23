@@ -6,6 +6,30 @@ export type MergeStrategy = MergeStrategyValue;
 export type Classification = ClassificationValue;
 export type LifecycleState = LifecycleStateValue;
 
+/**
+ * One compliance control mapped onto the parts of the document that implement
+ * it. Declarative only: mappings never influence evaluation.
+ *
+ * `rule_paths` entries are dot paths into the resolved document, optionally
+ * ending in a `[name]` selector that picks one list entry by its `name`/`id`
+ * field -- `rules`, `rules.egress`, `rules.egress.allow`,
+ * `rules.secret_patterns.patterns[ssn]`, `extensions.posture`.
+ */
+export interface ControlMapping {
+  framework: string;
+  control_id: string;
+  rule_paths: string[];
+  notes?: string;
+}
+
+/** One revision of the policy. Advisory metadata: no effect on evaluation. */
+export interface ChangelogEntry {
+  version: string;
+  date: string;
+  author?: string;
+  summary: string;
+}
+
 /** Informational only -- has no impact on evaluation. */
 export interface GovernanceMetadata {
   author?: string;
@@ -17,6 +41,12 @@ export interface GovernanceMetadata {
   policy_version?: number;
   effective_date?: string;
   expiry_date?: string;
+  owner?: string;
+  reviewers?: string[];
+  next_review_date?: string;
+  changelog?: ChangelogEntry[];
+  supersedes?: string;
+  controls?: ControlMapping[];
 }
 
 export interface HushSpec {

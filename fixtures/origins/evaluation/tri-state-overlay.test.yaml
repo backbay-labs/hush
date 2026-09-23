@@ -1,0 +1,38 @@
+hushspec_test: "0.1.0"
+description: "A profile overlay that omits default inherits the base default; an overlay block list is unioned with the base (origins spec 4)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    egress:
+      default: allow
+  extensions:
+    origins:
+      default_behavior: minimal_profile
+      profiles:
+        - id: shared
+          match:
+            provider: slack
+          egress:
+            block:
+              - "*.evil.com"
+cases:
+  - description: "a host blocked by the overlay is denied"
+    action:
+      type: egress
+      target: "bad.evil.com"
+      origin:
+        provider: slack
+    expect:
+      decision: deny
+      matched_rule: extensions.origins.profiles.shared.egress.block
+      origin_profile: shared
+  - description: "an overlay without a default field inherits the base default of allow"
+    action:
+      type: egress
+      target: "api.other.com"
+      origin:
+        provider: slack
+    expect:
+      decision: allow
+      matched_rule: rules.egress.default
+      origin_profile: shared

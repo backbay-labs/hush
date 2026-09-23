@@ -1,0 +1,50 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7003-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:85dd0a1230779b70cf89d553337fbcb7eeb65d80cb712a94185623be39d0aaa2"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/src/auth.js",
+    "content_hash": "sha256:3c469e9d6c5875d37a43f353d4f88e61fcf812c66eee3457465a40b0da4153e0",
+    "content_size": 5
+  },
+  "decision": "deny",
+  "matched_rule": "rules.secret_patterns.patterns.end_anchor",
+  "reason": "content matched secret pattern 'end_anchor'",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no forbidden_paths rule configured"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.end_anchor",
+      "outcome": "deny",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'end_anchor'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

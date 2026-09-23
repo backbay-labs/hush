@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-receipt.v1.schema.json",
+  "title": "HushSpec Decision Receipt v0.2",
+  "description": "A self-contained, tamper-evident record of one HushSpec policy evaluation. Normative prose: spec/hushspec-receipt.md. A receipt identifies the resolved policy by content hash (spec/hushspec-canonical.md), the actor on whose behalf the action was evaluated, the action (never its content), the decision and why, the rule blocks and detectors that ran, and how the runtime applied the decision. Field order in this file is documentation order; receipts are hashed in canonical form (RFC 8785).",
+  "type": "object",
+  "required": [
+    "receipt_version",
+    "receipt_id",
+    "timestamp",
+    "time_source",
+    "policy",
+    "action",
+    "decision",
+    "rule_trace",
+    "enforcement"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "receipt_version": {
+      "type": "string",
+      "const": "0.2",
+      "description": "Receipt format version. Verifiers MUST reject receipts with an unknown value."
+    },
+    "receipt_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUID version 7 (RFC 9562), lowercase. Time-ordered so receipts sort by creation without relying on the timestamp field."
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+      "format": "date-time",
+      "description": "Evaluation time, RFC 3339 in UTC with exactly millisecond precision and a Z suffix (e.g. 2026-09-15T08:30:00.123Z). Fixed precision so the same instant has one canonical spelling in every SDK."
+    },
+    "time_source": {
+      "type": "string",
+      "enum": [
+        "system",
+        "monotonic_adjusted",
+        "trusted",
+        "unknown"
+      ],
+      "description": "Where the timestamp came from: the local system clock; a monotonic clock re-based on the system clock at startup; a trusted time source (NTP-disciplined, TPM, or roughtree/roughtime attestation); or unknown. Auditors weigh timestamps by this field."
+    },
+    "actor": {
+      "$ref": "#/$defs/Actor"
+    },
+    "policy": {
+      "$ref": "#/$defs/PolicySummary"
+    },
+    "action": {
+      "$ref": "#/$defs/ActionSummary"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "warn",
+        "deny"
+      ],
+      "description": "The evaluated policy decision (core spec section 6), independent of enforcement."
+    },
+    "matched_rule": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The rule path that determined the decision (e.g. rules.tool_access.block, __unknown_action_type__, __hushspec_panic__). Absent when no rule matched (a default-allow)."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable explanation of the decision."
+    },
+    "rule_trace": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RuleEvaluation"
+      },
+      "description": "Every rule block consulted, in evaluation order, as recorded during evaluation (not reconstructed afterwards). Blocks that were not applicable to the action type are not listed; blocks that were applicable but inert (disabled, or a false `when`) are listed with outcome skip."
+    },
+    "detection_trace": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DetectorEvaluation"
+      },
+      "description": "Detectors that ran, in order. Absent when the evaluation did not run the detection pipeline; empty when it ran and no detector was enabled."
+    },
+    "enforcement": {
+      "$ref": "#/$defs/EnforcementSummary"
+    },
+    "origin_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the origin profile selected during evaluation, when the origins extension matched one."
+    },
+    "posture": {
+      "$ref": "#/$defs/PostureResult"
+    },
+    "duration_us": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wall-clock evaluation time in microseconds, excluding receipt construction. Informational; excluded from nothing (it is covered by the receipt hash like every other field)."
+    }
+  },
+  "$defs": {
+    "ContentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "A content hash in the wire form defined by spec/hushspec-canonical.md section 5."
+    },
+    "Actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Who the action was evaluated for. Every field is optional because runtimes differ in what identity they have; an enforcement point SHOULD populate as many as it knows.",
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier of the agent (deployment, bot, or model instance) whose action was evaluated."
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identifier of the conversation, run, or job the action belongs to. Receipts from one session share this value."
+        },
+        "principal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The human or service identity the agent acts on behalf of (user id, email, service account)."
+        },
+        "runtime": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The enforcing runtime and version, e.g. hushspec-ts/0.2.0 or clawdstrike/1.4.2."
+        }
+      }
+    },
+    "PolicySummary": {
+      "type": "object",
+      "required": [
+        "spec_version",
+        "content_hash"
+      ],
+      "additionalProperties": false,
+      "description": "Identity of the resolved policy the decision was evaluated against.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The policy's `name` field, when present."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The policy's `metadata.policy_version`, when present."
+        },
+        "spec_version": {
+          "type": "string",
+          "pattern": "^(0|1)\\.[0-9]+\\.[0-9]+$",
+          "description": "The policy's `hushspec` version field."
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "Content hash of the resolved policy (spec/hushspec-canonical.md). The value that joins a receipt to a signature envelope and to a policy bundle."
+        },
+        "extends_chain": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChainLink"
+          },
+          "description": "The documents that were merged to produce the resolved policy, root first, leaf last. Absent when the policy had no `extends`. Each link's hash is the content hash of that document canonicalized on its own (unresolved fragments are canonicalized with their own `extends` stripped)."
+        },
+        "signature": {
+          "$ref": "#/$defs/SignatureStatus"
+        }
+      }
+    },
+    "ChainLink": {
+      "type": "object",
+      "required": [
+        "source",
+        "content_hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The reference as written or resolved by the loader: builtin:default, a file path, an https URL, or the leaf's own source."
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        }
+      }
+    },
+    "SignatureStatus": {
+      "type": "object",
+      "required": [
+        "verified"
+      ],
+      "additionalProperties": false,
+      "description": "Outcome of policy signature verification at load time (spec/hushspec-signing.md). Absent when the runtime did not attempt verification.",
+      "properties": {
+        "verified": {
+          "type": "boolean",
+          "description": "True only when a signature was present, its key was in the trusted keyring, and every check in the signing spec passed."
+        },
+        "key_id": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "The signing key id (sha256 of the SPKI DER) the signature named, when a signature was present."
+        },
+        "verified_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]\\.[0-9]{3}Z$",
+          "format": "date-time",
+          "description": "When verification ran, same format as `timestamp`."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why verification failed, when `verified` is false."
+        }
+      }
+    },
+    "ActionSummary": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "description": "The evaluated action. Content is never stored; only its hash and size are, so a receipt log can prove what was evaluated without containing secrets.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Action type as evaluated (core spec section 5), including unknown or custom types that were denied."
+        },
+        "target": {
+          "type": "string",
+          "description": "The action target as supplied (path, host, tool name, command). Not normalized; the evaluator normalizes internally."
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "sha256 of the UTF-8 bytes of the action content, when content was supplied."
+        },
+        "content_size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size of the action content in bytes, when content was supplied."
+        },
+        "args_size": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Serialized size of tool-call arguments in bytes, when the runtime measured it (tool_access.max_args_size)."
+        },
+        "origin": {
+          "type": "object",
+          "description": "The origin descriptor supplied with the action (origins extension), verbatim."
+        },
+        "context": {
+          "type": "object",
+          "description": "The runtime context supplied with the action (core spec section 3.13), verbatim minus any fields the runtime redacts."
+        }
+      }
+    },
+    "RuleEvaluation": {
+      "type": "object",
+      "required": [
+        "rule_block",
+        "outcome",
+        "evaluated"
+      ],
+      "additionalProperties": false,
+      "description": "One rule block's contribution, recorded as it happened.",
+      "properties": {
+        "rule_block": {
+          "type": "string",
+          "enum": [
+            "forbidden_paths",
+            "path_allowlist",
+            "egress",
+            "secret_patterns",
+            "patch_integrity",
+            "shell_commands",
+            "tool_access",
+            "computer_use",
+            "remote_desktop_channels",
+            "input_injection",
+            "browser_automation",
+            "code_execution",
+            "posture_capability",
+            "origin_profile",
+            "panic",
+            "unknown_action_type",
+            "default"
+          ],
+          "description": "The block or engine stage that produced this entry. The twelve rule-block ids match the keys of `rules`; posture_capability, origin_profile, panic, unknown_action_type, and default are engine stages defined in spec/hushspec-receipt.md section 4.3."
+        },
+        "rule_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The specific rule path that produced the outcome (e.g. rules.secret_patterns.patterns.aws_key), when one did."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "warn",
+            "deny",
+            "skip"
+          ],
+          "description": "This block's own decision, before aggregation. skip means the block was applicable but inert (disabled or a false `when`)."
+        },
+        "evaluated": {
+          "type": "boolean",
+          "description": "True when the block's matching logic ran; false for skip entries."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why this block produced this outcome."
+        }
+      }
+    },
+    "DetectorEvaluation": {
+      "type": "object",
+      "required": [
+        "detector_id",
+        "category",
+        "score",
+        "level"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "detector_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable detector identifier, e.g. regex_injection@1 (detection spec)."
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "prompt_injection",
+            "jailbreak",
+            "data_exfiltration",
+            "threat_intel"
+          ],
+          "description": "Detection category the detector reports under."
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Normalized score in [0, 1]."
+        },
+        "level": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "suspicious",
+            "high",
+            "critical"
+          ],
+          "description": "Level the score mapped to under the policy's thresholds."
+        },
+        "matched": {
+          "type": "boolean",
+          "description": "True when the detector's finding contributed to the decision (met the warn or block threshold)."
+        }
+      }
+    },
+    "EnforcementSummary": {
+      "type": "object",
+      "required": [
+        "mode",
+        "outcome"
+      ],
+      "additionalProperties": false,
+      "description": "What the enforcement point did with the decision. Required in 0.2: a receipt without an enforcement disposition cannot serve as evidence that a control operated. Pure evaluations (no enforcement point, e.g. `h2h eval`) record mode enforce and the outcome implied by the decision.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "enforce",
+            "monitor"
+          ],
+          "description": "Effective enforcement mode after overrides and panic resolution. Panic always enforces."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "allowed",
+            "confirmed",
+            "blocked",
+            "would_block"
+          ],
+          "description": "allowed: the action proceeded on an allow; confirmed: a warn was approved through a confirmation channel; blocked: execution was prevented; would_block: monitor mode let a warn or deny proceed."
+        }
+      }
+    },
+    "PostureResult": {
+      "type": "object",
+      "required": [
+        "current",
+        "next"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Posture state active during evaluation."
+        },
+        "next": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Posture state after any signal-triggered transition; equals current when none occurred."
+        }
+      }
+    }
+  }
+}

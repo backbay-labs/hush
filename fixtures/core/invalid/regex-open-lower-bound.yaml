@@ -1,0 +1,9 @@
+# A quantifier with an open lower bound. Python's `re` reads `{,3}` as
+# `{0,3}`; Rust, JavaScript and Go read the whole brace as literal text, so
+# the same pattern matches different subjects. The HushSpec regex profile
+# excludes it, so all four SDKs must reject this document.
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    forbidden_patterns:
+      - "rm -rf /a{,3}"

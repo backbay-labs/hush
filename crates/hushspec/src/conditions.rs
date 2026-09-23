@@ -1,19 +1,27 @@
-//! Conditional rules system for HushSpec.
+//! Conditional rules system for HushSpec (core spec 3.13).
 //!
-//! Provides a `Condition` type that can be attached to rule blocks via the
-//! `when` field. Conditions evaluate against a `RuntimeContext` to determine
-//! whether a rule block is active.
+//! A `Condition` gates whether a rule block is active. Conditions are a
+//! document field (`when`) on every rule block; the out-of-band map accepted by
+//! [`evaluate_with_context`](crate::evaluate_with_context) is kept as an
+//! override that is ANDed with each block's own `when`.
 //!
 //! Design principles:
-//! - **Fail-closed**: missing context fields cause conditions to evaluate to `false`.
+//! - **Fail-closed toward enforcement**: a missing context field makes the
+//!   condition false (the block goes inert), but a condition the engine cannot
+//!   evaluate at all -- unresolvable time zone, unparsable `current_time`, a
+//!   malformed `HH:MM` that escaped validation, or nesting past the depth cap --
+//!   leaves the block ACTIVE.
 //! - **Deterministic**: same context + condition = same result, always.
 //! - **Not Turing-complete**: fixed predicate types composed with AND/OR/NOT.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Maximum allowed nesting depth for compound conditions.
-const MAX_NESTING_DEPTH: usize = 8;
+/// Maximum allowed nesting depth for compound conditions (core spec 3.13).
+pub const MAX_NESTING_DEPTH: usize = 8;
+
+/// Day abbreviations accepted in `time_window.days`.
+pub const DAY_ABBREVIATIONS: &[&str] = &["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 /// A condition that gates whether a rule block is active.
 ///
@@ -45,6 +53,43 @@ pub struct Condition {
     /// The sub-condition must be false (NOT).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not: Option<Box<Condition>>,
+
+    /// The effective posture state must grant this capability (core spec
+    /// 3.13). Unevaluable -- and therefore held -- when the policy has no
+    /// posture extension.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capability: Option<String>,
+
+    /// A runtime counter compared against a threshold (core spec 3.13).
+    /// Unevaluable -- and therefore held -- when the context carries no such
+    /// counter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate: Option<RateCondition>,
+}
+
+/// Rate condition: compares an engine-supplied counter with a threshold.
+///
+/// HushSpec never stores state; the engine owns the window and supplies the
+/// current count in `RuntimeContext::counters`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RateCondition {
+    /// Name of the counter in `RuntimeContext::counters`.
+    pub counter: String,
+    /// Non-negative threshold the counter is compared against.
+    pub threshold: u64,
+    /// `gte`: true when `counter >= threshold`; `lt`: true when `counter < threshold`.
+    pub comparison: RateComparison,
+}
+
+/// How a [`RateCondition`] compares the counter with its threshold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RateComparison {
+    /// The counter is at or above the threshold.
+    Gte,
+    /// The counter is below the threshold.
+    Lt,
 }
 
 /// Time window condition: activates a rule block during specific time periods.
@@ -69,7 +114,8 @@ pub struct TimeWindowCondition {
 /// Conditions reference context fields using dot-delimited paths (e.g.,
 /// `user.role`, `environment`). The engine populates this struct from its
 /// runtime environment.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimeContext {
     /// User attributes (id, role, tier, groups, department, etc.).
     #[serde(default)]
@@ -99,72 +145,299 @@ pub struct RuntimeContext {
     #[serde(default)]
     pub custom: HashMap<String, serde_json::Value>,
 
+    /// Engine-maintained counters consulted by `rate` conditions (core spec
+    /// 3.13). The engine owns the window; HushSpec only compares.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub counters: HashMap<String, u64>,
+
     /// Current time override for testing (ISO 8601).
     /// If `None`, the system clock is used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_time: Option<String>,
 }
 
-/// Missing context fields cause the condition to evaluate to false (fail-closed).
+/// Whether a block gated by `condition` is active: `true` unless the
+/// condition evaluates to `false` (core spec 3.13).
+///
+/// Missing context fields make a `context` predicate false. A predicate the
+/// engine cannot evaluate is unevaluable and holds, so the block stays active;
+/// `not`, `all_of` and `any_of` propagate unevaluable rather than turning it
+/// into a boolean.
+///
+/// A `capability` predicate is unevaluable through this entry point (no
+/// posture state is known); use [`evaluate_condition_with_capabilities`] from
+/// an evaluator that has resolved the effective posture state.
 pub fn evaluate_condition(condition: &Condition, context: &RuntimeContext) -> bool {
-    evaluate_condition_depth(condition, context, 0)
+    evaluate_condition_depth(condition, context, None, 0).is_active()
 }
 
-fn evaluate_condition_depth(condition: &Condition, context: &RuntimeContext, depth: usize) -> bool {
+/// [`evaluate_condition`] with the capabilities the effective posture state
+/// grants: `None` when the policy has no posture extension (a `capability`
+/// predicate is then unevaluable and holds), `Some(list)` otherwise (an
+/// unknown state grants nothing, so the predicate is false).
+pub fn evaluate_condition_with_capabilities(
+    condition: &Condition,
+    context: &RuntimeContext,
+    capabilities: Option<&[String]>,
+) -> bool {
+    evaluate_condition_depth(condition, context, capabilities, 0).is_active()
+}
+
+/// What a condition evaluates to (core spec 3.13).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Verdict {
+    True,
+    False,
+    /// The engine lacks what the predicate needs -- a posture extension, a
+    /// counter, a clock it can read. Never switches a block off.
+    Unevaluable,
+}
+
+impl Verdict {
+    fn from_bool(value: bool) -> Self {
+        if value { Self::True } else { Self::False }
+    }
+
+    /// A block is inert only on an evaluated `false`.
+    fn is_active(self) -> bool {
+        self != Self::False
+    }
+
+    fn negate(self) -> Self {
+        match self {
+            Self::True => Self::False,
+            Self::False => Self::True,
+            Self::Unevaluable => Self::Unevaluable,
+        }
+    }
+
+    /// AND: `false` wins, then unevaluable, then `true`.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::False, _) | (_, Self::False) => Self::False,
+            (Self::Unevaluable, _) | (_, Self::Unevaluable) => Self::Unevaluable,
+            (Self::True, Self::True) => Self::True,
+        }
+    }
+
+    /// OR: `true` wins, then unevaluable, then `false`.
+    fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::True, _) | (_, Self::True) => Self::True,
+            (Self::Unevaluable, _) | (_, Self::Unevaluable) => Self::Unevaluable,
+            (Self::False, Self::False) => Self::False,
+        }
+    }
+}
+
+/// Parse-time validation of a condition (core spec 3.13): unknown keys are
+/// rejected by serde; this checks `HH:MM` fields, the timezone, the day
+/// abbreviations, and the nesting depth. Returns one message per violation,
+/// each prefixed with `path` (for example `rules.egress.when`).
+pub fn validate_condition(condition: &Condition, path: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    validate_condition_depth(condition, path, 0, &mut errors);
+    errors
+}
+
+fn validate_condition_depth(
+    condition: &Condition,
+    path: &str,
+    depth: usize,
+    errors: &mut Vec<String>,
+) {
     if depth > MAX_NESTING_DEPTH {
-        // Exceeded maximum nesting depth -- fail-closed.
-        return false;
+        errors.push(format!(
+            "{path}: conditions nest deeper than the maximum of {MAX_NESTING_DEPTH} levels"
+        ));
+        return;
+    }
+    if let Some(tw) = &condition.time_window {
+        for (field, value) in [("start", &tw.start), ("end", &tw.end)] {
+            if parse_hhmm(value).is_none() {
+                errors.push(format!(
+                    "{path}.time_window.{field}: {value:?} is not a valid HH:MM time"
+                ));
+            }
+        }
+        if let Some(tz) = tw.timezone.as_deref()
+            && !timezone_is_known(tz)
+        {
+            errors.push(format!(
+                "{path}.time_window.timezone: {tz:?} is neither an IANA time zone nor a fixed offset"
+            ));
+        }
+        for day in &tw.days {
+            if !DAY_ABBREVIATIONS
+                .iter()
+                .any(|known| day.eq_ignore_ascii_case(known))
+            {
+                errors.push(format!(
+                    "{path}.time_window.days: {day:?} is not one of mon, tue, wed, thu, fri, sat, sun"
+                ));
+            }
+        }
+    }
+    if let Some(name) = &condition.capability
+        && !is_capability_identifier(name)
+    {
+        errors.push(format!(
+            "{path}.capability: {name:?} is not a capability identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)"
+        ));
+    }
+    if let Some(rate) = &condition.rate
+        && !is_capability_identifier(&rate.counter)
+    {
+        errors.push(format!(
+            "{path}.rate.counter: {:?} is not a counter identifier (lowercase ASCII letters, digits and underscores in dot-separated segments that start with a letter)",
+            rate.counter
+        ));
+    }
+    if let Some(all) = &condition.all_of {
+        for (index, child) in all.iter().enumerate() {
+            validate_condition_depth(child, &format!("{path}.all_of[{index}]"), depth + 1, errors);
+        }
+    }
+    if let Some(any) = &condition.any_of {
+        for (index, child) in any.iter().enumerate() {
+            validate_condition_depth(child, &format!("{path}.any_of[{index}]"), depth + 1, errors);
+        }
+    }
+    if let Some(not) = &condition.not {
+        validate_condition_depth(not, &format!("{path}.not"), depth + 1, errors);
+    }
+}
+
+/// The identifier grammar shared by posture capabilities and rate counters
+/// (core spec 3.13): one or more dot-separated segments, each a lowercase
+/// ASCII letter followed by lowercase letters, digits or underscores.
+pub fn is_capability_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('.').all(|segment| {
+            let mut chars = segment.chars();
+            matches!(chars.next(), Some('a'..='z'))
+                && chars.all(|c| matches!(c, 'a'..='z' | '0'..='9' | '_'))
+        })
+}
+
+/// Whether `tz` is an IANA identifier known to this engine, a known alias, or
+/// a fixed `+HH:MM` / `-HH:MM` offset.
+pub fn timezone_is_known(tz: &str) -> bool {
+    use std::str::FromStr;
+    chrono_tz::Tz::from_str(tz).is_ok() || parse_timezone_offset(tz).is_some()
+}
+
+fn evaluate_condition_depth(
+    condition: &Condition,
+    context: &RuntimeContext,
+    capabilities: Option<&[String]>,
+    depth: usize,
+) -> Verdict {
+    if depth > MAX_NESTING_DEPTH {
+        // Validation rejects this at parse time; an out-of-band condition that
+        // exceeds the depth cannot be evaluated, and an unevaluable condition
+        // must not switch a control off (core spec 3.13).
+        return Verdict::Unevaluable;
     }
 
-    if let Some(tw) = &condition.time_window
-        && !check_time_window(tw, context)
-    {
-        return false;
+    // The fields of one condition object are ANDed. An evaluated `false`
+    // settles the object, so later fields are not consulted.
+    let mut verdict = Verdict::True;
+
+    if let Some(tw) = &condition.time_window {
+        verdict = verdict.and(check_time_window(tw, context));
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
-    if let Some(ctx) = &condition.context
-        && !check_context_match(ctx, context)
-    {
-        return false;
+    if let Some(ctx) = &condition.context {
+        verdict = verdict.and(Verdict::from_bool(check_context_match(ctx, context)));
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
-    if let Some(all) = &condition.all_of
-        && !all
-            .iter()
-            .all(|c| evaluate_condition_depth(c, context, depth + 1))
-    {
-        return false;
+    // `capability`: unevaluable without a posture extension; otherwise the
+    // effective state must list the capability.
+    if let Some(name) = &condition.capability {
+        verdict = verdict.and(match capabilities {
+            None => Verdict::Unevaluable,
+            Some(granted) => Verdict::from_bool(granted.iter().any(|granted| granted == name)),
+        });
+        if verdict == Verdict::False {
+            return verdict;
+        }
+    }
+
+    // `rate`: unevaluable when the engine supplied no such counter.
+    if let Some(rate) = &condition.rate {
+        verdict = verdict.and(match context.counters.get(&rate.counter) {
+            None => Verdict::Unevaluable,
+            Some(&count) => Verdict::from_bool(match rate.comparison {
+                RateComparison::Gte => count >= rate.threshold,
+                RateComparison::Lt => count < rate.threshold,
+            }),
+        });
+        if verdict == Verdict::False {
+            return verdict;
+        }
+    }
+
+    if let Some(all) = &condition.all_of {
+        let combined = all.iter().fold(Verdict::True, |acc, c| {
+            acc.and(evaluate_condition_depth(
+                c,
+                context,
+                capabilities,
+                depth + 1,
+            ))
+        });
+        verdict = verdict.and(combined);
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
     if let Some(any) = &condition.any_of
         && !any.is_empty()
-        && !any
-            .iter()
-            .any(|c| evaluate_condition_depth(c, context, depth + 1))
     {
-        return false;
+        let combined = any.iter().fold(Verdict::False, |acc, c| {
+            acc.or(evaluate_condition_depth(
+                c,
+                context,
+                capabilities,
+                depth + 1,
+            ))
+        });
+        verdict = verdict.and(combined);
+        if verdict == Verdict::False {
+            return verdict;
+        }
     }
 
-    if let Some(not_cond) = &condition.not
-        && evaluate_condition_depth(not_cond, context, depth + 1)
-    {
-        return false;
+    if let Some(not_cond) = &condition.not {
+        verdict = verdict
+            .and(evaluate_condition_depth(not_cond, context, capabilities, depth + 1).negate());
     }
 
-    true
+    verdict
 }
 
-fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> bool {
+fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> Verdict {
+    // A window the engine cannot evaluate -- unresolvable time zone,
+    // unparsable current_time, or a malformed HH:MM that escaped validation --
+    // is unevaluable and leaves the block active (core spec 3.13).
     let now = resolve_current_time(context, tw.timezone.as_deref());
     let Some((hour, minute, day_of_week)) = now else {
-        return false;
+        return Verdict::Unevaluable;
     };
 
     let Some((start_h, start_m)) = parse_hhmm(&tw.start) else {
-        return false;
+        return Verdict::Unevaluable;
     };
     let Some((end_h, end_m)) = parse_hhmm(&tw.end) else {
-        return false;
+        return Verdict::Unevaluable;
     };
 
     let current_minutes = hour as u32 * 60 + minute as u32;
@@ -180,39 +453,38 @@ fn check_time_window(tw: &TimeWindowCondition, context: &RuntimeContext) -> bool
         };
         let day_abbrev = day_abbreviation(effective_day);
         if !tw.days.iter().any(|d| d.eq_ignore_ascii_case(day_abbrev)) {
-            return false;
+            return Verdict::False;
         }
     }
 
     if start_minutes == end_minutes {
-        return true;
+        return Verdict::True;
     }
 
-    if start_minutes < end_minutes {
+    Verdict::from_bool(if start_minutes < end_minutes {
         current_minutes >= start_minutes && current_minutes < end_minutes
     } else {
         // Wraps midnight (e.g., 22:00 to 06:00)
         current_minutes >= start_minutes || current_minutes < end_minutes
-    }
+    })
 }
 
+/// A `time_window` bound, which is exactly two ASCII digits per component
+/// (`schemas/hushspec-core.v1.schema.json` `$defs.TimeWindow`). `9:05`,
+/// `09:5`, `009:05` and `+9:00` are all outside that shape, so they are not
+/// times: validation refuses them and an evaluator that meets one leaves the
+/// window unevaluable and the rule block active (core spec 3.13).
 fn parse_hhmm(s: &str) -> Option<(u8, u8)> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    // Reject any HH:MM component that is not pure ASCII digits. `u8::from_str`
-    // otherwise accepts a leading `+` (e.g. `+9:00`), which the TS (`^\d+$`) and
-    // Python (strict-uint) parsers reject; without this the same token would be
-    // an active window in Rust but permanently inactive there. A non-digit
-    // component fails to parse -> the time-window condition is inert (fail-closed).
-    for part in &parts {
-        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+    let (hours, minutes) = s.split_once(':')?;
+    let field = |part: &str| -> Option<u8> {
+        let bytes = part.as_bytes();
+        if bytes.len() != 2 || !bytes.iter().all(u8::is_ascii_digit) {
             return None;
         }
-    }
-    let hour: u8 = parts[0].parse().ok()?;
-    let minute: u8 = parts[1].parse().ok()?;
+        Some((bytes[0] - b'0') * 10 + (bytes[1] - b'0'))
+    };
+    let hour = field(hours)?;
+    let minute = field(minutes)?;
     if hour > 23 || minute > 59 {
         return None;
     }
@@ -235,12 +507,39 @@ fn day_abbreviation(day: u32) -> &'static str {
 /// Returns `(hour, minute, day_of_week)` where day_of_week is 0=Mon..6=Sun.
 fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Option<(u8, u8, u32)> {
     use chrono::{Datelike, FixedOffset, NaiveDateTime, Timelike, Utc};
+    use regex::Regex;
     use std::str::FromStr;
 
     let utc_now = if let Some(ref time_str) = context.current_time {
+        let parts = Regex::new(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]+)?(?:Z|[+-]([0-9]{2}):([0-9]{2}))?$")
+            .ok()?
+            .captures(time_str)?;
+        let year = parts.get(1)?.as_str().parse::<i32>().ok()?;
+        let hour = parts.get(4)?.as_str().parse::<u32>().ok()?;
+        let minute = parts.get(5)?.as_str().parse::<u32>().ok()?;
+        let second = parts.get(6)?.as_str().parse::<u32>().ok()?;
+        if year < 1
+            || hour > 23
+            || minute > 59
+            || second > 59
+            || parts.get(7).is_some_and(|hours| {
+                hours
+                    .as_str()
+                    .parse::<u32>()
+                    .map_or(true, |value| value > 23)
+            })
+            || parts.get(8).is_some_and(|minutes| {
+                minutes
+                    .as_str()
+                    .parse::<u32>()
+                    .map_or(true, |value| value > 59)
+            })
+        {
+            return None;
+        }
         if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(time_str) {
             dt.with_timezone(&Utc)
-        } else if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S") {
+        } else if let Ok(dt) = NaiveDateTime::parse_from_str(time_str, "%Y-%m-%dT%H:%M:%S%.f") {
             dt.and_utc()
         } else {
             return None;
@@ -248,6 +547,9 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
     } else {
         Utc::now()
     };
+    if utc_now.year() < 1 || utc_now.year() > 9999 {
+        return None;
+    }
 
     let tz = timezone.unwrap_or("UTC");
     let adjusted = if let Ok(tz) = chrono_tz::Tz::from_str(tz) {
@@ -257,6 +559,9 @@ fn resolve_current_time(context: &RuntimeContext, timezone: Option<&str>) -> Opt
         let offset = FixedOffset::east_opt(offset_minutes.saturating_mul(60))?;
         utc_now.with_timezone(&offset)
     };
+    if adjusted.year() < 1 || adjusted.year() > 9999 {
+        return None;
+    }
     let hour = adjusted.hour() as u8;
     let minute = adjusted.minute() as u8;
     let day_of_week = adjusted.weekday().num_days_from_monday();
@@ -298,20 +603,33 @@ fn parse_timezone_offset(tz: &str) -> Option<i32> {
     }
 }
 
+/// Minutes for a fixed offset body, the part of a `timezone` after its sign:
+/// `HH` or `HH:MM`, two ASCII digits per field (core spec 3.13).
+///
+/// Anything else is not an offset. A zone that cannot be resolved leaves the
+/// rule block active, so accepting a one-digit field, a missing colon or a
+/// second sign here would resolve a zone another engine refuses and could
+/// switch a control off.
 fn parse_offset_value(s: &str) -> Option<i32> {
-    if let Some((hours, minutes)) = s.split_once(':') {
-        let hours = hours.parse::<i32>().ok()?;
-        let minutes = minutes.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) || !(0..=59).contains(&minutes) {
-            return None;
+    let (hours, minutes) = match s.split_once(':') {
+        Some((hours, minutes)) => (hours, minutes),
+        None => (s, "00"),
+    };
+    let hours = parse_two_digits(hours)?;
+    let minutes = parse_two_digits(minutes)?;
+    if hours > 23 || minutes > 59 {
+        return None;
+    }
+    Some(hours * 60 + minutes)
+}
+
+/// Exactly two ASCII digits as a number, or `None`.
+fn parse_two_digits(field: &str) -> Option<i32> {
+    match field.as_bytes() {
+        [tens @ b'0'..=b'9', ones @ b'0'..=b'9'] => {
+            Some(i32::from(tens - b'0') * 10 + i32::from(ones - b'0'))
         }
-        Some(hours.saturating_mul(60).saturating_add(minutes))
-    } else {
-        let hours = s.parse::<i32>().ok()?;
-        if !(0..=23).contains(&hours) {
-            return None;
-        }
-        Some(hours.saturating_mul(60))
+        _ => None,
     }
 }
 
@@ -364,29 +682,30 @@ fn resolve_map_field(
     }
 }
 
-/// Match an actual context value against an expected value.
+/// Leaf-level scalar equality for a `context` predicate (core spec 3.13).
 ///
-/// Matching rules:
-/// - String: exact equality
-/// - Boolean: exact equality
-/// - Integer: exact numeric equality
-/// - Array of expected values: actual must match at least one listed value
-/// - Scalar expected vs array actual: true if scalar is a member of the array
+/// `expected` is always a non-array scalar here -- array unwrapping happens one
+/// level up, in [`matches_scalar_or_membership`]. Strings and booleans compare
+/// exactly, and a boolean is never numeric. Numbers compare by exact value with
+/// no tolerance, so `0.3` does not match `0.30000000000000004`, and by value
+/// alone: the integer `1` and the float `1.0` are the same number, whichever
+/// spelling the document or the runtime context used.
 fn values_equal(actual: &serde_json::Value, expected: &serde_json::Value) -> bool {
     match expected {
         serde_json::Value::String(expected_str) => actual.as_str() == Some(expected_str.as_str()),
         serde_json::Value::Bool(expected_bool) => actual.as_bool() == Some(*expected_bool),
-        serde_json::Value::Number(expected_num) => {
-            if let Some(expected_i64) = expected_num.as_i64() {
-                actual.as_i64() == Some(expected_i64)
-            } else if let Some(expected_f64) = expected_num.as_f64() {
-                actual
-                    .as_f64()
-                    .is_some_and(|n| (n - expected_f64).abs() < f64::EPSILON)
-            } else {
-                false
+        serde_json::Value::Number(expected_num) => match actual {
+            serde_json::Value::Number(actual_num) => {
+                match (actual_num.as_i64(), expected_num.as_i64()) {
+                    (Some(a), Some(e)) => a == e,
+                    _ => match (actual_num.as_f64(), expected_num.as_f64()) {
+                        (Some(a), Some(e)) => a == e,
+                        _ => false,
+                    },
+                }
             }
-        }
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -456,8 +775,37 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
+    }
+
+    fn ctx_with_custom(key: &str, value: serde_json::Value) -> RuntimeContext {
+        RuntimeContext {
+            custom: HashMap::from([(key.to_string(), value)]),
+            ..Default::default()
+        }
+    }
+
+    fn context_condition(key: &str, expected: serde_json::Value) -> Condition {
+        Condition {
+            context: Some(HashMap::from([(key.to_string(), expected)])),
+            ..Condition::default()
+        }
+    }
+
+    #[test]
+    fn context_numbers_compare_exactly() {
+        let cond = context_condition("custom.ratio", serde_json::json!(0.3));
+        assert!(evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.3))
+        ));
+        assert!(!evaluate_condition(
+            &cond,
+            &ctx_with_custom("ratio", serde_json::json!(0.300_000_000_000_000_04))
+        ));
     }
 
     #[test]
@@ -471,6 +819,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond, &ctx_with_env("staging")));
     }
@@ -486,6 +836,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         // Empty context -- missing field should fail.
         assert!(!evaluate_condition(&cond, &RuntimeContext::default()));
@@ -502,6 +854,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_user_role("admin")));
         assert!(!evaluate_condition(&cond, &ctx_with_user_role("viewer")));
@@ -518,6 +872,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
         assert!(evaluate_condition(&cond, &ctx_with_env("staging")));
@@ -546,6 +902,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -561,6 +919,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         let ctx = RuntimeContext {
             session: HashMap::from([("action_count".to_string(), serde_json::json!(2))]),
@@ -580,6 +940,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         let ctx = RuntimeContext {
             request: HashMap::from([("interactive".to_string(), serde_json::json!(true))]),
@@ -603,6 +965,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -622,6 +986,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond, &ctx));
     }
@@ -648,6 +1014,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond_weekday, &ctx));
 
@@ -662,6 +1030,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(!evaluate_condition(&cond_weekend, &ctx));
     }
@@ -686,6 +1056,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx_late));
         assert!(evaluate_condition(&cond, &ctx_early));
@@ -706,6 +1078,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &ctx));
     }
@@ -775,11 +1149,13 @@ mod tests {
     }
 
     #[test]
-    fn time_window_leading_plus_start_is_inert() {
+    fn time_window_leading_plus_start_keeps_block_active() {
         // A leading `+` in an HH:MM token (`+9:00`) must fail to parse, matching
-        // the TS/Python parsers, so the time-window condition is inert
-        // (fail-closed) rather than treating it as 09:00 and activating.
-        let ctx = ctx_with_time("2026-01-14T10:30:00Z");
+        // the TS/Python parsers. Validation rejects it at parse time; if it
+        // reaches evaluation the window cannot be evaluated, and an unevaluable
+        // condition leaves the block ACTIVE (core spec 3.13), so the condition
+        // holds rather than switching the control off.
+        let ctx = ctx_with_time("2026-01-14T20:30:00Z");
         let cond = Condition {
             time_window: Some(TimeWindowCondition {
                 start: "+9:00".to_string(),
@@ -791,12 +1167,30 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
-        assert!(!evaluate_condition(&cond, &ctx));
+        assert!(evaluate_condition(&cond, &ctx));
+        assert!(!validate_condition(&cond, "rules.x.when").is_empty());
     }
 
     #[test]
-    fn time_window_invalid_timezone_fails_closed() {
+    fn fixed_offset_grammar_is_two_digit_fields() {
+        for zone in ["+05:30", "-08:00", "+05", "-08", "+00:00"] {
+            assert!(timezone_is_known(zone), "{zone} should conform");
+        }
+        // A zone the engine cannot resolve leaves the rule block active, so an
+        // offset another engine refuses must not resolve here either.
+        for zone in ["+5", "+0530", "+5:0", "++5", "+05:3", "+ 5:30", "+05:30 "] {
+            assert!(!timezone_is_known(zone), "{zone} should be refused");
+        }
+    }
+
+    #[test]
+    fn time_window_invalid_timezone_keeps_block_active() {
+        // An unresolvable time zone MUST NOT switch a security control off
+        // (core spec 3.13): the window is treated as satisfied. Validation
+        // rejects the zone at parse time.
         let ctx = ctx_with_time("2026-01-14T13:30:00Z");
         let cond = Condition {
             time_window: Some(TimeWindowCondition {
@@ -807,7 +1201,54 @@ mod tests {
             }),
             ..Default::default()
         };
-        assert!(!evaluate_condition(&cond, &ctx));
+        assert!(evaluate_condition(&cond, &ctx));
+        let errors = validate_condition(&cond, "rules.x.when");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("timezone"), "{errors:?}");
+    }
+
+    #[test]
+    fn validate_condition_reports_each_violation() {
+        let cond = Condition {
+            time_window: Some(TimeWindowCondition {
+                start: "25:00".to_string(),
+                end: "17:60".to_string(),
+                timezone: Some("+05:30".to_string()),
+                days: vec!["Mon".to_string(), "funday".to_string()],
+            }),
+            ..Default::default()
+        };
+        let errors = validate_condition(&cond, "rules.shell_commands.when");
+        assert_eq!(errors.len(), 3, "{errors:?}");
+        assert!(errors.iter().any(|e| e.contains("time_window.start")));
+        assert!(errors.iter().any(|e| e.contains("time_window.end")));
+        assert!(errors.iter().any(|e| e.contains("funday")));
+
+        let mut deep = Condition {
+            context: Some(HashMap::new()),
+            ..Default::default()
+        };
+        for _ in 0..(MAX_NESTING_DEPTH + 1) {
+            deep = Condition {
+                not: Some(Box::new(deep)),
+                ..Default::default()
+            };
+        }
+        let errors = validate_condition(&deep, "rules.egress.when");
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].contains("nest deeper"), "{errors:?}");
+
+        let mut ok = Condition {
+            context: Some(HashMap::new()),
+            ..Default::default()
+        };
+        for _ in 0..MAX_NESTING_DEPTH {
+            ok = Condition {
+                not: Some(Box::new(ok)),
+                ..Default::default()
+            };
+        }
+        assert!(validate_condition(&ok, "rules.egress.when").is_empty());
     }
 
     #[test]
@@ -833,6 +1274,8 @@ mod tests {
             ]),
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         let mut ctx = ctx_with_env("production");
@@ -869,6 +1312,8 @@ mod tests {
                 },
             ]),
             not: None,
+            capability: None,
+            rate: None,
         };
 
         assert!(evaluate_condition(&cond, &ctx_with_env("production")));
@@ -900,6 +1345,8 @@ mod tests {
                 )])),
                 ..Default::default()
             })),
+            capability: None,
+            rate: None,
         };
 
         assert!(!evaluate_condition(&cond, &ctx_with_env("production")));
@@ -951,6 +1398,8 @@ mod tests {
             ]),
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         // 10:00 UTC Wed, production, admin
@@ -989,8 +1438,11 @@ mod tests {
                 ..Default::default()
             };
         }
-        // Should fail because nesting depth is exceeded.
-        assert!(!evaluate_condition(&cond, &ctx_with_env("production")));
+        // Validation rejects this document; if such a condition still reaches
+        // evaluation (out-of-band map) it cannot be evaluated, and an
+        // unevaluable condition leaves the block active (core spec 3.13).
+        assert!(evaluate_condition(&cond, &ctx_with_env("production")));
+        assert!(!validate_condition(&cond, "rules.x.when").is_empty());
     }
 
     #[test]
@@ -1009,6 +1461,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
 
         let yaml = serde_yaml::to_string(&cond).unwrap();
@@ -1024,6 +1478,8 @@ mod tests {
             all_of: None,
             any_of: None,
             not: None,
+            capability: None,
+            rate: None,
         };
         assert!(evaluate_condition(&cond, &RuntimeContext::default()));
     }

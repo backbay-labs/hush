@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # Hardened CI/CD pipeline policy.
 #
 # DISCLAIMER: Customize the egress allowlist and tool access for your
@@ -25,7 +25,6 @@ rules:
       - "**/.aws/**"
       - "**/.env"
       - "**/.env.*"
-      - "**/.env.local"
       - "**/.git-credentials"
       - "**/.gnupg/**"
       - "**/.kube/**"
@@ -42,9 +41,6 @@ rules:
       - "**/secrets*"
       - "**/service-account*.json"
     exceptions:
-      - "**/.github/workflows/**"
-      - "**/.gitlab-ci.yml"
-      - "**/.circleci/config.yml"
       - "**/.env.example"
       - "**/.env.template"
 
@@ -52,7 +48,6 @@ rules:
     allow:
       # Package registries
       - "*.npmjs.org"
-      - "registry.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
       - "crates.io"
@@ -68,7 +63,6 @@ rules:
       - "*.ecr.aws"
       - "ghcr.io"
       # Code hosting
-      - "api.github.com"
       - "github.com"
       - "*.githubusercontent.com"
       - "gitlab.com"
@@ -100,6 +94,13 @@ rules:
         pattern: "(?i)aws_secret_access_key[ \\t\\n\\r\\f]*[:=][ \\t\\n\\r\\f]*[A-Za-z0-9/+=]{40}"
         severity: critical
         description: "AWS secret key in pipeline content"
+      # The first matching pattern names the finding, so the specific
+      # Actions-token shape is listed before the general `gh[opsur]_` one it
+      # would otherwise be reported as.
+      - name: github_actions_token
+        pattern: "ghs_[A-Za-z0-9]{36}"
+        severity: critical
+        description: "GitHub Actions installation token"
       - name: github_token
         pattern: "gh[opsur]_[A-Za-z0-9]{36}"
         severity: critical
@@ -107,10 +108,6 @@ rules:
       - name: github_fine_grained_pat
         pattern: "github_pat_[0-9a-zA-Z_]{50,}"
         severity: critical
-      - name: github_actions_token
-        pattern: "ghs_[A-Za-z0-9]{36}"
-        severity: critical
-        description: "GitHub Actions installation token"
       - name: npm_token
         pattern: "npm_[A-Za-z0-9]{36}"
         severity: critical
@@ -184,3 +181,32 @@ rules:
       - git_push
     default: block
     max_args_size: 1048576
+
+# Structured control mappings (core spec 2.5). This policy is operational
+# hardening rather than a regulated framework, so it maps to the OWASP LLM
+# Top 10 and ISO/IEC 27001 Annex A. Declarative metadata only: mappings never
+# influence evaluation.
+metadata:
+  controls:
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM02"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.secret_patterns
+      notes: "Sensitive Information Disclosure. CI credential stores are unreachable and pipeline token patterns are detected."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM03"
+      rule_paths:
+        - rules.egress
+      notes: "Supply Chain. Egress is restricted to package registries and build services."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM06"
+      rule_paths:
+        - rules.tool_access
+        - rules.shell_commands
+      notes: "Excessive Agency. Tools are limited to build and test operations; deploy and credential commands are blocked."
+    - framework: iso-27001-2022
+      control_id: "A.8.32"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Change management. Patch limits keep pipeline changes reviewable."

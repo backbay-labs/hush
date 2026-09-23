@@ -6,21 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
+
+from generator_support import ROOT, PANIC_NAME, all_builtin_names, builtin_yaml
 
 
-ROOT = Path(__file__).resolve().parent.parent
-RULESETS_DIR = ROOT / "rulesets"
 OUTPUT = ROOT / "packages" / "hushspec" / "src" / "builtin.ts"
-
-BUILTIN_NAMES = [
-    "default",
-    "strict",
-    "permissive",
-    "ai-agent",
-    "cicd",
-    "remote-desktop",
-]
 
 
 def render() -> str:
@@ -33,7 +23,9 @@ def render() -> str:
         "export const BUILTIN_NAMES = [",
     ]
 
-    for name in BUILTIN_NAMES:
+    names = all_builtin_names()
+
+    for name in names:
         lines.append(f"  {json.dumps(name)},")
 
     lines.extend(
@@ -46,14 +38,29 @@ def render() -> str:
         ]
     )
 
-    for name in BUILTIN_NAMES:
-        yaml_content = (RULESETS_DIR / f"{name}.yaml").read_text()
-        lines.append(f"  {json.dumps(name)}: {json.dumps(yaml_content, ensure_ascii=False)},")
+    for name in names:
+        lines.append(
+            f"  {json.dumps(name)}: {json.dumps(builtin_yaml(name), ensure_ascii=False)},"
+        )
 
     lines.extend(
         [
             "};",
             "",
+            "/**",
+            " * The emergency deny-all policy the panic protocol enforces (core spec 6.2),",
+            " * from rulesets/panic.yaml. Not a built-in name: `extends: builtin:panic`",
+            " * does not resolve.",
+            " */",
+            f"export const PANIC_POLICY_YAML = {json.dumps(builtin_yaml(PANIC_NAME), ensure_ascii=False)};",
+            "",
+            "/**",
+            " * The built-in ruleset for `name` (with or without the `builtin:` prefix),",
+            " * or `null` for a name that is not built in.",
+            " *",
+            " * An embedded ruleset that does not parse throws: it is generated from",
+            " * rulesets/, so a failure there is a broken build, not an unknown built-in.",
+            " */",
             "export function loadBuiltin(name: string): HushSpec | null {",
             "  const resolved = name.startsWith('builtin:') ? name.slice(8) : name;",
             "",
@@ -64,8 +71,9 @@ def render() -> str:
             "  const yaml = BUILTIN_RULESETS[resolved as BuiltinName];",
             "  try {",
             "    return parseOrThrow(yaml);",
-            "  } catch {",
-            "    return null;",
+            "  } catch (error) {",
+            "    const message = error instanceof Error ? error.message : String(error);",
+            "    throw new Error(`built-in ruleset '${resolved}' does not parse: ${message}`);",
             "  }",
             "}",
             "",

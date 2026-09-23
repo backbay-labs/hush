@@ -1,17 +1,42 @@
 # HushSpec Master Roadmap
 
-**Version:** 1.1
-**Date:** 2026-03-15
-**Status:** Active
+**Version:** 1.3 (historical roadmap)
+**Date:** 2026-09-15; reconciled 2026-09-22
+**Status:** Historical planning record; current delivery state is [STATUS.md](STATUS.md)
 **Maintainer:** HushSpec Core Team
 
-This document is the single entry point for understanding the HushSpec development roadmap. It synthesizes eight RFC documents into a unified plan with phasing, dependencies, milestones, and gap coverage.
+> This document preserves the original RFC planning scope and older assessments. It is not a current release statement. Use [the delivery ledger](STATUS.md) for implemented-on-branch, locally tested, hosted-qualified, merged, and published states; use [RFC 09](09-compliance-as-code-plan.md) for active work packages.
 
 ---
 
-## 1. Vision Statement
+## 0. Delivery status after the 2026-09-22 reconciliation
 
-### Where We Are (v0.1.0)
+**The specification/source was declared Stable 1.0; the 1.0 release is not
+merged, tagged, or published.** The reviewed baseline is `wave-6` at `a0637cb`;
+it is an open PR #10 stack above open PRs #5-9, while `main` remains `5227b89`.
+No hosted CI run existed for that baseline at review. No predecessor result
+qualifies this repair revision; hosted status belongs to checks attached to the
+eventual exact commit.
+
+This repair revision has a local verification record for the seven review
+findings and the cross-SDK/documentation checks in [STATUS.md](STATUS.md). The
+complete Rust workspace suite also passed. Hosted CI records its status against
+the exact commit. Merge, tag, and publication
+remain separate release gates.
+
+The following former "Waves 0-5" release summary was removed because it
+collapsed the source/spec Stable declaration, source presence, historical CI,
+merge, and publication into one "declared", "landed", "shipped", and
+"parity" claim. Historical phase and scope material below is retained as a
+requirements record, not current release evidence.
+
+---
+
+## 1. Historical vision and gap analysis
+
+> **Historical snapshot:** The assertions and checkboxes in Sections 1-8 were authored for earlier planning snapshots. They are retained to preserve the original requirements, but they do not supersede the current ledger or make a release claim. In particular, a checked historical item means an artifact was reported at that time, not that the open stack is corrected, exact-SHA hosted-qualified, merged, or published.
+
+### Where We Were Assessing (v0.1.0)
 
 HushSpec v0.1.0 is a draft specification with four SDK implementations (Rust, TypeScript, Python, Go) that can:
 
@@ -19,45 +44,49 @@ HushSpec v0.1.0 is a draft specification with four SDK implementations (Rust, Ty
 - **Validate** documents against structural and semantic rules
 - **Merge** documents using three strategies (`replace`, `merge`, `deep_merge`)
 - **Resolve** single-inheritance `extends` chains from local filesystem, builtins, and HTTP sources
-- **Evaluate** actions against policies in all four SDKs (Level 3 conformance)
+- **Evaluate** actions against policies in all four SDKs (now Level 5 conformance; see Section 0)
 - **Audit** evaluation decisions with structured receipts and rule traces
 - **Detect** prompt injection, jailbreak, and exfiltration patterns via pluggable detectors
-- **Sign** and **verify** policies with Ed25519 keys
-- **Observe** evaluation events with structured logging and metrics collectors
+- **Sign** and **verify** policies with Ed25519 keys in all four SDKs and the `h2h` CLI (Rust behind the `signing` feature, Python behind the `signing` extra), with verification on load
+- **Observe** evaluation events with structured logging and metrics collectors in all four SDKs
 
-The spec covers 10 core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection) and three extension modules (posture, origins, detection). A CLI tool (`hushspec`) provides 10 subcommands for validation, testing, linting, diffing, formatting, scaffolding, signing, verification, key generation, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI, and MCP. SDKs are not yet published to package registries.
+The spec covers twelve core rule blocks (forbidden_paths, path_allowlist, egress, secret_patterns, patch_integrity, shell_commands, tool_access, computer_use, remote_desktop_channels, input_injection, browser_automation, code_execution) and three extension modules (posture, origins, detection). The `h2h` CLI provides 22 subcommands spanning validation, hashing, testing, linting, diffing, formatting, scaffolding, governance audit, signing, verification, key generation, bundles, log and receipt verification, compliance reporting, and emergency override. Framework adapters exist for Claude/Anthropic, OpenAI and MCP in TypeScript, Python and Go, plus Vercel AI SDK and LangChain in TypeScript and LangChain and CrewAI in Python. SDKs are not yet published to package registries.
 
 ### Where We Need to Be
 
 Production adoption requires HushSpec to be a complete, trusted, and ergonomic security framework:
 
-- Every SDK must evaluate policies identically (Level 3 conformance across all four languages) -- **DONE**
+- Every SDK must evaluate policies identically (Level 3 across all four languages; all four now reach Level 5) -- **DONE**
 - Operators must have audit trails that satisfy SOC2, HIPAA, PCI-DSS, and FedRAMP requirements
 - Policy authors must have CLI tooling for validation, testing, linting, and diffing -- **DONE**
-- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **DONE** (HTTPS, file watching, polling)
+- Policies must be loadable from remote sources with caching, hot reload, and integrity verification -- **Partial** (HTTPS loading with ETag caching ships in all four SDKs, behind the `http` feature in Rust and as opt-in loaders in Python and Go. File-watching and polling hot reload, and signature verification on load, ship in all four. No S3, GCS, Azure, Vault, or git loader exists in any SDK)
 - Detection extensions must have working implementations, not just schema fields -- **DONE**
-- Enterprise deployments must have governance, signing, RBAC, and emergency override capabilities -- **Partial** (signing and panic mode done; RBAC in progress)
+- Enterprise deployments must have governance, signing, RBAC, and emergency override capabilities -- **Partial** (Ed25519 signing implemented in the Rust SDK and `h2h` CLI only; panic mode done in Rust and Go; separation-of-duties and RBAC/OIDC/LDAP integration not implemented)
 - Regulated industries must have vetted, compliance-mapped policy templates to start from
 - The spec must reach v1.0 with a stability guarantee
 
 ### The Gap Analysis
 
-A production-readiness assessment identified 16 gaps between HushSpec v0.1.0 and the capabilities required for adoption in enterprise and regulated environments. These gaps drove the creation of eight RFC documents totaling 20,905 lines of specification. Every gap is addressed by at least one RFC; many are addressed by multiple RFCs working in concert. As of the completion of Phases 0-4, 14 of 16 gaps are fully closed, 1 is partially addressed, and 1 is in progress.
+A production-readiness assessment identified 16 gaps between HushSpec v0.1.0 and the capabilities required for adoption in enterprise and regulated environments. These gaps drove the creation of eight RFC documents totaling 20,905 lines of specification. Every gap is addressed by at least one RFC; many are addressed by multiple RFCs working in concert. As of the 2026-09-14 code review, 11 of 16 gaps are fully closed, 4 are partially addressed, and 1 is in progress.
 
 ---
 
-## 2. Gap Coverage Matrix
+## 2. Historical Gap Coverage Matrix
+
+> **Historical record, assessed 2026-09-14.** The statuses below describe the tree
+> as of that assessment and are not updated in place. Section 0 records where the
+> code stands.
 
 | # | Gap | Description | RFC(s) | Status |
 |---|-----|-------------|--------|--------|
 | 1 | No evaluation engine in non-Rust SDKs | TypeScript, Python, and Go SDKs can parse and validate but cannot evaluate actions against policies | RFC-01 | **Complete** |
-| 2 | No audit trail / decision receipts | No standardized format for recording evaluation decisions; compliance and incident response are impossible | RFC-02 | **Complete** |
+| 2 | No audit trail / decision receipts | No standardized format for recording evaluation decisions; compliance and incident response are impossible | RFC-02 | **Complete** (`content_hash` is not yet byte-identical across the four SDKs -- each computes it over a different serialization; tracked in RFC 09 P2-01/P2-02) |
 | 3 | No extends resolution interaction | Unclear how `resolve()` feeds into `evaluate()`; no documentation of the end-to-end pipeline | RFC-01, RFC-08 | **Complete** |
-| 4 | No runtime integration examples | No middleware patterns, framework adapters, or tool-calling loop examples showing real-world usage | RFC-01, RFC-05 | **Complete** |
-| 5 | No remote policy loading | `extends` resolution only supports local filesystem; no HTTPS, S3, git, or registry sources | RFC-08 | **Complete** |
-| 6 | No detection logic | Detection extension fields (prompt injection, jailbreak, threat intel) are parsed but never evaluated | RFC-06 | **Complete** |
-| 7 | No observability hooks | The evaluator returns results but emits no structured events, metrics, or telemetry | RFC-06, RFC-02 | **Complete** |
-| 8 | No policy signing or provenance | Policies distributed across teams and CI/CD pipelines cannot be verified for integrity or authenticity | RFC-04 | **Complete** |
+| 4 | No runtime integration examples | No middleware patterns, framework adapters, or tool-calling loop examples showing real-world usage | RFC-01, RFC-05 | **Complete** (`HushGuard` in TypeScript and Python; adapters in TypeScript) |
+| 5 | No remote policy loading | `extends` resolution only supports local filesystem; no HTTPS, S3, git, or registry sources | RFC-08 | **Partial** (HTTPS loading ships in all four SDKs; no S3, GCS, Azure, Vault, or git loader exists; hot reload ships in TypeScript only) |
+| 6 | No detection logic | Detection extension fields (prompt injection, jailbreak, threat intel) are parsed but never evaluated | RFC-06 | **Complete** (regex-based prompt-injection/jailbreak detectors ship in all four SDKs; `threat_intel` remains unwired -- `detection.rs:528-530`) |
+| 7 | No observability hooks | The evaluator returns results but emits no structured events, metrics, or telemetry | RFC-06, RFC-02 | **Partial** (`EvaluationObserver`/`ObservableEvaluator`/`MetricsCollector` ship in TypeScript and Python only; not in Rust or Go) |
+| 8 | No policy signing or provenance | Policies distributed across teams and CI/CD pipelines cannot be verified for integrity or authenticity | RFC-04 | **Partial** (Ed25519 signing/verification ships in the Rust SDK, feature-gated, and the `h2h` CLI only; not ported to TypeScript, Python, or Go; signed `extends` chains are not verified during resolution) |
 | 9 | No emergency override / kill switch | No mechanism to instantly restrict all agent activity without redeploying policies | RFC-04 | **Complete** |
 | 10 | No ReDoS protection | User-authored regexes in policies can cause catastrophic backtracking in non-Rust SDKs | RFC-04 | **Complete** |
 | 11 | No governance / RBAC | No control over who can author, approve, and deploy policies; no separation of duties | RFC-04 | **Partial** |
@@ -110,9 +139,9 @@ graph TD
     RFC04["RFC-04<br/>Governance/Signing"]
     RFC07["RFC-07<br/>Conditional Rules/Library"]
 
-    style RFC08 fill:#34a853,color:#fff
+    style RFC08 fill:#fbbc04,color:#000
     style RFC01 fill:#34a853,color:#fff
-    style RFC04 fill:#34a853,color:#fff
+    style RFC04 fill:#fbbc04,color:#000
     style RFC07 fill:#fbbc04,color:#000
     style RFC02 fill:#34a853,color:#fff
     style RFC03 fill:#34a853,color:#fff
@@ -136,9 +165,13 @@ graph TD
 
 ---
 
-## 4. Phased Roadmap
+## 4. Historical Phased Roadmap
 
-### Phase 0: Foundation (Weeks 1-4) -- Complete
+> **Historical record, assessed 2026-09-14.** The phase tables below describe the
+> tree as of that assessment and are not updated in place. Section 0 records where
+> the code stands.
+
+### Phase 0: Foundation (Weeks 1-4) -- Historical assessment
 
 **Goal:** Establish the two foundational capabilities that all other work depends on: formalized extends resolution and a cross-SDK evaluation engine.
 
@@ -172,7 +205,7 @@ graph TD
 
 ---
 
-### Phase 1: Core Capabilities (Weeks 5-10) -- Complete
+### Phase 1: Core Capabilities (Weeks 5-10) -- Historical assessment
 
 **Goal:** Deliver the audit trail specification, the first CLI commands, and ReDoS protection -- the minimum capabilities needed for teams to start using HushSpec in staging environments.
 
@@ -180,8 +213,8 @@ graph TD
 
 | Item | RFC | Effort | Description |
 |---|---|---|---|
-| Receipt format spec + JSON Schema | RFC-02 Phase 1 | 3 weeks | `hushspec-receipt.v0.schema.json`, `hushspec-log-entry.v0.schema.json`, Level 4 conformance definition |
-| Rust receipt generation | RFC-02 Phase 2 | 4 weeks | `evaluate_audited()`, rule trace, detection trace, policy summary, receipt signing |
+| Receipt format spec + JSON Schema | RFC-02 Phase 1 | 3 weeks | `hushspec-receipt.v0.schema.json` ships in `schemas/`. `hushspec-log-entry.v0.schema.json` does **not** exist yet (tracked in RFC 09 P2-05); no formal "Level 4" conformance level is defined in the spec today |
+| Rust receipt generation | RFC-02 Phase 2 | 4 weeks | `evaluate_audited()`, rule trace, detection trace, policy summary. (Receipt *signing* is not implemented -- only policy signing exists, see below.) |
 | `hushspec validate` + `hushspec init` CLI | RFC-03 Phase 1 | 2 weeks | Schema validation, policy scaffolding, YAML/JSON output |
 | `hushspec test` CLI | RFC-03 Phase 2 | 2 weeks | Evaluation test runner with YAML test suites, TAP output |
 | ReDoS protection | RFC-04 Phase 1 | 2 weeks | RE2 subset validation in all SDKs, regex complexity lint, `regex_timeout_ms` config field |
@@ -210,7 +243,7 @@ graph TD
 
 ---
 
-### Phase 2: Developer Experience (Weeks 11-16) -- Complete
+### Phase 2: Developer Experience (Weeks 11-16) -- Historical assessment
 
 **Goal:** Complete the CLI toolchain, ship runtime integration adapters for major frameworks, and enable remote policy loading from cloud storage.
 
@@ -218,42 +251,42 @@ graph TD
 
 | Item | RFC | Effort | Description |
 |---|---|---|---|
-| Receipt port to TypeScript, Python, Go | RFC-02 Phase 3 | 5 weeks | Audit trail in all SDKs with cross-language receipt compatibility |
+| Receipt port to TypeScript, Python, Go | RFC-02 Phase 3 | 5 weeks | Audit trail in all SDKs. Receipt shape is consistent, but `content_hash` is **not** byte-compatible across languages (each SDK canonicalizes the policy differently -- see RFC 09 P2-01/P2-02) |
 | `hushspec fmt` CLI | RFC-03 Phase 3 | 1 week | Canonical YAML formatting |
 | `hushspec lint` CLI | RFC-03 Phase 4 | 2 weeks | Dead rule detection, pattern overlap, security score, ReDoS check |
 | `hushspec diff` CLI | RFC-03 Phase 5 | 2 weeks | Effective decision change analysis between policy versions |
-| Generic middleware (HushGuard) | RFC-05 Phase 1 | 2 weeks | `HushGuard` class in all SDKs with load/evaluate/enforce lifecycle |
+| Generic middleware (HushGuard) | RFC-05 Phase 1 | 2 weeks | `HushGuard` class in TypeScript and Python only; not yet in Rust or Go |
 | Claude/Anthropic adapter | RFC-05 Phase 2 | 1 week | `SecureAnthropicClient` with tool mapping |
 | LangChain adapter | RFC-05 Phase 3 | 1 week | `HushSpecTool`, `HushSpecCallbackHandler` |
-| Cloud storage loaders (S3, GCS, Azure) | RFC-08 Phase 3 | 2 weeks | `S3Loader`, `GCSLoader`, `AzureBlobLoader` behind feature flags |
-| Hot reload (file watching + polling) | RFC-08 Phase 4 | 2 weeks | `PolicyWatcher`, `PolicyPoller`, atomic swap |
+| Cloud storage loaders (S3, GCS, Azure) | RFC-08 Phase 3 | 2 weeks | **Not implemented.** No `S3Loader`, `GCSLoader`, or `AzureBlobLoader` exists in any SDK; only file, builtin, and HTTPS loaders ship today |
+| Hot reload (file watching + polling) | RFC-08 Phase 4 | 2 weeks | `PolicyWatcher`, `PolicyPoller`, atomic swap -- **TypeScript only**; not implemented in Rust, Python, or Go |
 
 #### Dependencies Satisfied
 
 - RFC-02 audit trail is available in all four SDKs
 - RFC-03 CLI is feature-complete for policy authors
 - RFC-05 runtime integration is available for framework adopters
-- RFC-08 remote loading supports the most common production deployment patterns
+- RFC-08 remote loading supports HTTPS-based production deployment patterns
 
 #### Gaps Closed
 
-- **Gap #2** -- Audit trail in all SDKs (complete)
+- **Gap #2** -- Audit trail in all SDKs (receipt shape complete; hashes not yet byte-compatible)
 - **Gap #4** -- Runtime integration examples and adapters
-- **Gap #5** -- Remote policy loading (HTTPS, S3, GCS, Azure)
+- **Gap #5** -- Remote policy loading (HTTPS only; S3/GCS/Azure/Vault/git loaders not implemented -- see RFC 09 P0-01)
 - **Gap #13** -- Policy linting
 - **Gap #14** -- Policy diffing
 
 #### Milestone Criteria
 
-- [x] All four SDKs produce byte-compatible receipts for identical inputs
+- [ ] All four SDKs produce byte-compatible receipts for identical inputs (each SDK computes `content_hash` over a different serialization today -- Rust `receipt.rs:191-196`, TS `receipt.ts:127`, Python `receipt.py:189`, Go `receipt.go:143`; see RFC 09 P2-01/P2-02)
 - [x] `hushspec lint` detects at least 10 categories of policy issues
 - [x] `hushspec diff` shows effective decision changes between two policy files
-- [x] At least 2 framework adapters (Claude, LangChain) are functional with examples
-- [x] Policies load from S3/HTTPS with caching and hot reload
+- [x] At least 2 framework adapters (Claude, LangChain) are functional with examples (TypeScript)
+- [ ] Policies load from S3/HTTPS with caching and hot reload (HTTPS with ETag caching ships in all four SDKs; hot reload ships in TypeScript only; no S3 loader exists)
 
 ---
 
-### Phase 3: Security Hardening (Weeks 17-22) -- Complete
+### Phase 3: Security Hardening (Weeks 17-22) -- Historical assessment
 
 **Goal:** Add cryptographic policy signing, emergency override capabilities, and the detection reference implementation -- making HushSpec suitable for security-critical deployments.
 
@@ -263,35 +296,35 @@ graph TD
 |---|---|---|---|
 | Emergency override protocol | RFC-04 Phase 2 | 2 weeks | Panic mode specification, file-based sentinel, signal-based activation, API endpoint |
 | Policy metadata schema extension | RFC-04 Phase 3 | 3 weeks | `Metadata`, `SignatureBlock`, `LifecycleState` types in all SDKs, content hash computation |
-| Policy signing specification | RFC-04 Phase 4 | 4 weeks | Ed25519 signing/verification in all SDKs, `hushspec sign`/`hushspec verify` CLI, Sigstore integration |
+| Policy signing specification | RFC-04 Phase 4 | 4 weeks | Ed25519 signing/verification in the Rust SDK (feature-gated) and `hushspec sign`/`hushspec verify` CLI; not yet ported to TypeScript, Python, or Go; no Sigstore integration |
 | Detector interface + regex-based detectors | RFC-06 Phase 1 | 4 weeks | `Detector` trait, `DetectorRegistry`, regex-based injection/jailbreak/PII detectors in Rust |
-| Observability hooks in Rust SDK | RFC-06 Phase 2 | 3 weeks | `EvaluationObserver` trait, JSON log/metrics/webhook observers, Prometheus recording rules |
-| Telemetry hooks in all SDKs | RFC-02 Phase 4 | 3 weeks | `ReceiptSink` interfaces, metric counters, decision log envelope, AUDIT summaries |
+| Observability hooks in Rust SDK | RFC-06 Phase 2 | 3 weeks | `EvaluationObserver` trait -- shipped in TypeScript and Python, not in Rust or Go; no Prometheus recording rules or webhook observer ship today |
+| Telemetry hooks in all SDKs | RFC-02 Phase 4 | 3 weeks | `ReceiptSink` interfaces, metric counters, decision log envelope in all four SDKs |
 
 #### Dependencies Satisfied
 
-- Policy signing is available for CI/CD integration
+- Policy signing is available for CI/CD integration via the Rust SDK and CLI
 - Detection pipeline is functional in the Rust SDK
-- Observability hooks enable monitoring in production
+- Observability hooks enable monitoring in TypeScript and Python deployments
 
 #### Gaps Closed
 
 - **Gap #6** -- Detection logic (Rust reference implementation)
-- **Gap #7** -- Observability hooks
-- **Gap #8** -- Policy signing and provenance
+- **Gap #7** -- Observability hooks (TypeScript, Python only)
+- **Gap #8** -- Policy signing and provenance (Rust SDK and CLI only)
 - **Gap #9** -- Emergency override / kill switch
 
 #### Milestone Criteria
 
 - [x] `hushspec sign` and `hushspec verify` work with Ed25519 keys
-- [x] Signed extends chains are verified during resolution (fail-closed on invalid signature)
+- [ ] Signed extends chains are verified during resolution (fail-closed on invalid signature) -- `resolve()` does not check signatures today; `verify_policy` is only invoked from `h2h verify` (see RFC 09 P2-08)
 - [x] Panic mode activates within one evaluation cycle
 - [x] Regex-based prompt injection and jailbreak detectors ship with versioned pattern libraries
-- [x] Prometheus metrics and structured log observers are functional
+- [ ] Prometheus metrics and structured log observers are functional (structured log/console/metrics observers exist in TypeScript and Python; no Prometheus recording rules ship)
 
 ---
 
-### Phase 4: Enterprise Features (Weeks 23-30) -- Complete
+### Phase 4: Enterprise Features (Weeks 23-30) -- Historical assessment
 
 **Goal:** Deliver enterprise governance capabilities, detection across all SDKs, conditional rules, and the initial vertical policy library.
 
@@ -299,39 +332,39 @@ graph TD
 
 | Item | RFC | Effort | Description |
 |---|---|---|---|
-| Governance tooling | RFC-04 Phase 5 | 6 weeks | Policy lifecycle state machine, `hushspec audit` CLI, separation of duties, RBAC config schema |
+| Governance tooling | RFC-04 Phase 5 | 6 weeks | Policy lifecycle state machine, `hushspec audit` CLI (advisory only -- always exits 0), RBAC config schema. Separation-of-duties (author != approver) enforcement is **not implemented** (`governance.rs` has no such check) |
 | Enterprise RBAC integration | RFC-04 Phase 6 | 8 weeks | OIDC, LDAP, SCIM integration hooks, policy management API |
 | Detection port to TypeScript, Python, Go | RFC-06 Phase 3 | 3 weeks | Detector interface and regex-based detectors in all SDKs |
-| Heuristic + ML detector reference | RFC-06 Phase 4 | 3 weeks | `HeuristicInjectionDetector`, multi-turn jailbreak, crescendo attack detection |
-| Condition system design + implementation | RFC-07 Phases 1-3 | 9 weeks | `when` field schema, time/context/capability/rate conditions, compound conditions in Rust |
-| Condition port to all SDKs | RFC-07 Phase 4 | 5 weeks | Condition evaluation in TypeScript, Python, Go |
-| Initial vertical policy library | RFC-07 Phase 5 | 5 weeks | HIPAA, SOC2, PCI-DSS, FedRAMP, FERPA, general-purpose policies |
-| Additional framework adapters | RFC-05 Phase 5 | 3 weeks | OpenAI, Vercel AI SDK, CrewAI, MCP adapters |
-| Reference receipt sinks | RFC-02 Phase 5 | 5 weeks | File, console, OTLP sinks in all SDKs |
-| VaultLoader + GitLoader | RFC-08 Phase 5 | 2 weeks | HashiCorp Vault and git repository policy loading |
+| Heuristic + ML detector reference | RFC-06 Phase 4 | 3 weeks | **Not implemented.** No `HeuristicInjectionDetector`, multi-turn jailbreak, or crescendo-attack detection exists in any SDK; only regex-based detectors ship |
+| Condition system design + implementation | RFC-07 Phases 1-3 | 9 weeks | Conditions (`time_window`, `context`, `all_of`, `any_of`, `not`) exist only as a side-channel argument to `evaluate_with_context` in Rust (`evaluate.rs:141-146`), **not** as an in-document `when` field and **not** in the schema. No `capability` or `rate` conditions exist |
+| Condition port to all SDKs | RFC-07 Phase 4 | 5 weeks | Side-channel condition evaluation ported to TypeScript, Python, Go |
+| Initial vertical policy library | RFC-07 Phase 5 | 5 weeks | HIPAA, SOC2, PCI-DSS, FedRAMP, FERPA, general-purpose policies published in `library/` |
+| Additional framework adapters | RFC-05 Phase 5 | 3 weeks | OpenAI, MCP adapters (TypeScript). Vercel AI SDK and CrewAI adapters not implemented |
+| Reference receipt sinks | RFC-02 Phase 5 | 5 weeks | File, console, filtered, multi, callback, and null sinks ship in all four SDKs. **No OTLP sink exists in any SDK** |
+| VaultLoader + GitLoader | RFC-08 Phase 5 | 2 weeks | **Not implemented.** No HashiCorp Vault or git-repository loader exists in any SDK |
 
 #### Dependencies Satisfied
 
-- RBAC and governance tooling is available for enterprise adoption
+- Lifecycle metadata and advisory governance tooling are available; RBAC/SoD enforcement is not
 - Detection is available in all four SDKs
-- Conditional rules enable environment-aware policies
+- Side-channel conditions enable environment-aware evaluation in Rust; not yet a portable document field
 - Vertical policy library provides compliance-mapped starting points
 
 #### Gaps Closed
 
 - **Gap #6** -- Detection logic in all SDKs (complete)
-- **Gap #11** -- Governance / RBAC (partial -- signing and lifecycle done; full OIDC/LDAP integration ongoing)
-- **Gap #15** -- Conditional rules (in progress -- schema defined, Rust implementation underway)
-- **Gap #16** -- Vertical policy library (initial set published)
+- **Gap #11** -- Governance / RBAC (partial -- policy signing shipped in the Rust SDK and CLI only; lifecycle metadata and advisory `h2h audit` exist; separation-of-duties enforcement and OIDC/LDAP integration not started)
+- **Gap #15** -- Conditional rules (in progress -- `time_window`/`context`/`all_of`/`any_of`/`not` conditions exist only as a side-channel argument to `evaluate_with_context`, not as an in-document `when` field, and are not in the schema)
+- **Gap #16** -- Vertical policy library (initial set published in `library/`)
 
 #### Milestone Criteria
 
-- [x] Separation of duties enforced: author != approver
+- [ ] Separation of duties enforced: author != approver (not implemented; `governance.rs` has no such check and `h2h audit` always exits 0)
 - [ ] At least one identity integration (OIDC) is functional
 - [x] Detection produces identical decisions across all four SDKs
-- [ ] `when` field supports time_window, context, capability, rate, and compound conditions
-- [x] At least 5 vertical policies (HIPAA, SOC2, PCI-DSS, FedRAMP, general) are published
-- [x] OpenAI and MCP adapters are functional
+- [ ] `when` field supports time_window, context, capability, rate, and compound conditions (today: `time_window`/`context`/`all_of`/`any_of`/`not` exist only as a side-channel argument, not a document field; no `capability` or `rate` conditions; not in the schema)
+- [x] At least 5 vertical policies (HIPAA, SOC2, PCI-DSS, FedRAMP, general) are published (in `library/`)
+- [x] OpenAI and MCP adapters are functional (TypeScript)
 
 ---
 
@@ -351,7 +384,7 @@ graph TD
 | Policy registry | RFC-07 Phase 8 / RFC-08 Phase 8 | 6 weeks | Registry API, `hushspec policy list/fetch`, `registry:` extends support |
 | Push-based reload + observability | RFC-08 Phase 6 | 2 weeks | Webhook-based policy reload, loader metrics |
 | Shared cache layer | RFC-08 Phase 7 | 1 week | Redis-backed L3 cache, request coalescing |
-| Conditional rules completion | RFC-07 Phase 4 | Ongoing | Complete `when` field support across all SDKs |
+| Conditional rules completion | RFC-07 Phase 4 | Ongoing | Promote conditions to an in-document `when` field, schema-defined, across all SDKs |
 | OIDC/LDAP RBAC integration | RFC-04 Phase 6 | Ongoing | Complete identity provider integration |
 | v1.0 spec stabilization | All | Ongoing | Breaking change freeze, spec prose review, schema finalization |
 
@@ -370,7 +403,9 @@ graph TD
 
 ---
 
-## 5. Completed Deliverables
+## 5. Historical Deliverables Inventory
+
+> The tables below identify artifacts described by the prior plan. They are not a current "completed" ledger: refer to [STATUS.md](STATUS.md) for implementation, qualification, merge, and release states, including the unresolved defects that narrow several of these claims.
 
 ### Phase 0 -- Foundation
 
@@ -385,7 +420,7 @@ graph TD
 
 | Deliverable | SDKs | Notes |
 |---|---|---|
-| `hushspec-receipt.v0.schema.json` | N/A (spec) | Receipt format standardized |
+| `hushspec-receipt.v0.schema.json` | N/A (spec) | Receipt format standardized. (`hushspec-log-entry.v0.schema.json` does not exist yet.) |
 | `evaluate_audited()` with rule traces | Rust (initial) | Zero overhead when disabled |
 | `hushspec validate` CLI | Rust CLI | Schema validation with exit code semantics |
 | `hushspec test` CLI | Rust CLI | YAML test suites, TAP output |
@@ -397,7 +432,7 @@ graph TD
 
 | Deliverable | SDKs | Notes |
 |---|---|---|
-| `evaluate_audited()` cross-SDK | All 4 SDKs | Byte-compatible receipts |
+| `evaluate_audited()` cross-SDK | All 4 SDKs | Rule trace + policy summary in all 4 SDKs; `content_hash` is not yet byte-compatible across SDKs (RFC 09 P2-02) |
 | `hushspec fmt` CLI | Rust CLI | Canonical YAML formatting |
 | `hushspec lint` CLI | Rust CLI | 10+ lint categories |
 | `hushspec diff` CLI | Rust CLI | Effective decision change analysis |
@@ -428,7 +463,7 @@ graph TD
 |---|---|---|
 | Detection port | TypeScript, Python, Go | `evaluate_with_detection()` in all SDKs |
 | `ObservableEvaluator` | TypeScript, Python | `JsonLineObserver`, `ConsoleObserver`, `MetricsCollector` |
-| Vertical policy library | N/A | 8 policies: HIPAA, SOC2, PCI-DSS, FedRAMP, FERPA, general, default, panic |
+| Vertical policy library (`library/`) | N/A | 8 compliance policies: HIPAA Base, SOC2 Base, PCI-DSS, FedRAMP Base, FERPA Student, CI/CD Hardened, Air-Gapped, Recommended. Distinct from the 7 generic profiles in `rulesets/` (default, strict, permissive, ai-agent, cicd, remote-desktop, panic) |
 | OpenAI + MCP adapters | TypeScript | `createOpenAIGuard`, `createMCPGuard` |
 
 ---
@@ -466,55 +501,55 @@ graph TD
 
 ---
 
-## 8. Success Criteria
+## 8. Historical Success Criteria
 
-HushSpec is **production-ready** when all of the following criteria are met:
+This is the original aspirational checklist, not a present-tense production-readiness declaration. Its historical checks must be read with the Section 0 boundary: current release closure requires repaired acceptance findings, hosted exact-SHA qualification, merge, and authorized publication as recorded in [STATUS.md](STATUS.md). RFC 09's flagship checklist remains deliberately blank until those gates are met.
 
 ### Specification
 
 - [ ] v1.0 specification published with stability guarantee (no breaking changes without major version bump)
-- [x] All 10 rule blocks and 3 extensions have normative prose with test vectors
+- [x] All 12 rule blocks and 3 extensions have normative prose with test vectors
 - [x] Decision receipt format is part of the specification artifact set
-- [ ] Conditional rules (`when` field) are specified and schema-defined
+- [x] Conditional rules (`when` field) are specified and schema-defined (core spec 3.13; `time_window`, `context`, `all_of`/`any_of`/`not`, `capability` (D19) and `rate` (D19), all in `hushspec-core.v0.schema.json` and implemented in four SDKs)
 
 ### SDKs
 
-- [x] All four SDKs (Rust, TypeScript, Python, Go) at Level 3 conformance (parse, validate, merge, resolve, evaluate)
+- [x] All four SDKs (Rust, TypeScript, Python, Go) at Level 3 conformance (parse, validate, merge, resolve, evaluate) -- and now at **Level 5** (Attested): receipts, canonical hashing, signing, verify-on-load, the hash-linked log, receipt signing and bundle verification
 - [x] Cross-SDK conformance verified by shared fixture corpus (100% pass rate)
-- [x] Audit trail (Level 4 conformance) implemented in all SDKs
+- [x] Audit trail (decision receipts) implemented in all SDKs
 - [x] Detection pipeline functional in all SDKs with regex-based reference detectors
-- [ ] Published to package registries (crates.io, npm, PyPI, pkg.go.dev)
+- [ ] Published to package registries (crates.io, npm, PyPI, pkg.go.dev) -- `publish.yml` is written and `cargo package` / `npm pack` / `python -m build` succeed, but no `v0.x` tag has been cut, so nothing is published yet
 
 ### CLI
 
-- [ ] `hushspec` CLI binary available via Homebrew, npm, cargo install, and pre-built binaries
-- [x] Six subcommands operational: `validate`, `test`, `lint`, `diff`, `fmt`, `init`
-- [x] `hushspec sign` and `hushspec verify` for policy signing workflows
+- [ ] `h2h` CLI binary available via Homebrew, npm, cargo install, and pre-built binaries -- `release.yml`, the tap formula, the npm shim and the Dockerfile exist, but they first produce artifacts on the first tagged release; `cargo install hushspec-cli` from source works today
+- [x] Six subcommands operational: `validate`, `test`, `lint`, `diff`, `fmt`, `init` -- 22 ship today (adding `resolve`, `hash`, `eval`, `explain`, `audit`, `schema`, `sign`, `verify`, `keygen`, `bundle`, `log`, `receipts`, `report`, `panic`, `completions`, `version`)
+- [x] `h2h sign` and `h2h verify` for policy signing workflows (signature format 0.2 over the resolved policy's content hash, with keyrings, expiry and rollback protection)
 
 ### Runtime Integration
 
-- [x] `HushGuard` middleware pattern documented and implemented in all SDKs
-- [x] At least 3 framework adapters shipped (Claude/Anthropic, OpenAI, MCP)
-- [x] Remote policy loading from HTTPS and at least one cloud storage provider
+- [x] `HushGuard` middleware pattern implemented in all SDKs (Go spells the type `Guard`), with enforcement modes, per-rule overrides, the warn confirmation channel, the refused state and policy-event records
+- [x] At least 3 framework adapters shipped (Claude/Anthropic, OpenAI, MCP) in TypeScript, Python and Go, plus Vercel AI SDK and LangChain.js in TypeScript and LangChain and CrewAI in Python
+- [ ] Remote policy loading from HTTPS and at least one cloud storage provider -- HTTPS only, and only in Rust (`http` feature) and TypeScript; no S3, GCS, Azure, Vault or git loader exists in any SDK
 
 ### Security and Governance
 
-- [x] Policy signing with Ed25519 functional in all SDKs
-- [x] Emergency override / panic mode specified and reference implementation available
+- [x] Policy signing with Ed25519 functional in all SDKs -- all four are conforming verifiers over all 17 `fixtures/signing/vectors.yaml` cases, verify on load, and sign and verify receipts. Rust needs the `signing` Cargo feature; Python needs the `signing` extra, without which the entry points raise `SigningUnavailable` rather than reporting an unverified signature as good
+- [x] Emergency override / panic mode specified and reference implementation available in all four SDKs, with a sentinel file that fails closed on an I/O error
 - [x] ReDoS protection enforced during validation in all SDKs
-- [ ] Separation of duties (author != approver) enforceable via tooling
+- [x] Separation of duties (author != approver) enforceable via tooling -- `GOV_SOD_VIOLATION` from `h2h audit` (with `--strict` making it fatal), alongside `GOV_UNAPPROVED_STATE`, `GOV_REVIEW_OVERDUE`, `GOV_CHANGELOG_ORDER` and `GOV_SELF_SUPERSEDES`; `h2h sign` refuses a policy that is not `approved` or `deployed` without `--allow-unapproved`
 
 ### Policy Library
 
-- [x] At least 5 vertical policies published (HIPAA, SOC2, PCI-DSS, FedRAMP, general-purpose)
-- [ ] Each vertical policy includes compliance mapping documentation
-- [x] All library policies pass validation and have evaluation test suites
+- [x] At least 5 vertical policies published (HIPAA, SOC2, PCI-DSS, FedRAMP, general-purpose) (in `library/`)
+- [x] Each vertical policy includes compliance mapping documentation -- all eight carry machine-readable `metadata.controls[]` entries naming frameworks registered in `spec/registries/frameworks.yaml`, checked by lint `L011`-`L013` and surfaced by `h2h audit --controls`
+- [x] All library policies pass validation and have evaluation test suites -- `fixtures/library/<vertical>/<name>.test.yaml`, 198 control-tagged cases across the eight policies, run in CI with `--fail-on-uncovered` so every declared rule path is exercised
 
 ### Observability
 
 - [x] Decision receipt generation with <10 microsecond overhead
-- [x] At least 2 receipt sinks available (file, OTLP)
-- [x] Prometheus metric definitions published with recording rules and alert examples
+- [x] At least 2 receipt sinks available -- seven in every SDK (`FileReceiptSink`, `StderrReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`, `NullSink`, `ChainedFileSink`) plus an OTLP/HTTP sink
+- [ ] Prometheus metric definitions published with recording rules and alert examples -- the four series are emitted by every SDK's `MetricsCollector` and documented in `docs/src/guides/runtime-integration.md`, but no recording rules or alert examples are published
 
 ---
 
@@ -530,3 +565,4 @@ HushSpec is **production-ready** when all of the following criteria are met:
 | 06 | [`docs/plans/06-detection-observability.md`](./06-detection-observability.md) | Pluggable detector interface, regex/heuristic reference implementations, and observability hook system |
 | 07 | [`docs/plans/07-conditional-rules-library.md`](./07-conditional-rules-library.md) | `when` condition system (time, context, capability, rate) and vertical policy library (HIPAA, SOC2, PCI-DSS, FedRAMP, FERPA) |
 | 08 | [`docs/plans/08-extends-remote-loading.md`](./08-extends-remote-loading.md) | Extends resolution algorithm, 6 reference types, pluggable loaders, multi-layer caching, and hot reload |
+| 09 | [`docs/plans/09-compliance-as-code-plan.md`](./09-compliance-as-code-plan.md) | Compliance-as-code plan (v0.2 -> v1.0): fail-closed correctness fixes, canonical hashing, cross-SDK signing and verify-on-load, evidence chain, conformance program, and the spec 1.0 freeze -- the source of truth for the gaps this roadmap now flags |

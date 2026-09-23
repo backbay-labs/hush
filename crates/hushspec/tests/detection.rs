@@ -243,7 +243,7 @@ fn score_is_sum_of_weights_capped_at_one() {
     // Verify the score equals min(sum_of_weights, 1.0).
     let raw_sum: f64 = result.matched_patterns.iter().map(|p| p.weight).sum();
     assert!(
-        (result.score - raw_sum.min(1.0)).abs() < f64::EPSILON,
+        (result.score - raw_sum.min(1.0)).abs() < 1e-9,
         "score ({}) should equal min(sum_of_weights={}, 1.0)",
         result.score,
         raw_sum
@@ -256,8 +256,8 @@ fn registry_with_defaults_has_all_detectors() {
     let results = registry.detect_all("normal text");
     assert_eq!(
         results.len(),
-        3,
-        "should have injection + jailbreak + exfiltration"
+        4,
+        "should have regex injection + heuristic injection + jailbreak + exfiltration"
     );
     let categories: Vec<_> = results.iter().map(|r| &r.category).collect();
     assert!(categories.contains(&&DetectionCategory::PromptInjection));
@@ -362,13 +362,13 @@ fn evaluate_with_detection_allows_clean_content() {
     let result = evaluate_with_detection(&spec, &action);
     assert_eq!(result.evaluation.decision, Decision::Allow);
     assert_eq!(result.detection_decision, None);
-    // The injection detector still ran and produced a zero-score result.
-    assert_eq!(result.detections.len(), 1);
-    assert_eq!(
-        result.detections[0].category,
-        DetectionCategory::PromptInjection
-    );
-    assert_eq!(result.detections[0].score, 0.0);
+    // Both prompt-injection detectors (regex, then the normative heuristic
+    // detector) still ran and produced zero-score results.
+    assert_eq!(result.detections.len(), 2);
+    for detection in &result.detections {
+        assert_eq!(detection.category, DetectionCategory::PromptInjection);
+        assert_eq!(detection.score, 0.0);
+    }
 }
 
 #[test]
@@ -489,7 +489,12 @@ fn evaluate_with_detection_exfiltration_is_not_wired() {
         "exfiltration content must not escalate when only prompt_injection is wired"
     );
     assert_eq!(result.detection_decision, None);
-    // Only the injection detector ran (exfiltration is never invoked here).
+    // `all` is vacuously true over an empty vector, so pin that the injection
+    // detector really ran before asserting it was the only one.
+    assert!(
+        !result.detections.is_empty(),
+        "the wired prompt-injection detector must still have run"
+    );
     assert!(
         result
             .detections

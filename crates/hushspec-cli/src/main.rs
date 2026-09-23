@@ -1,15 +1,33 @@
 mod cmd_audit;
+mod cmd_bundle;
+mod cmd_completions;
 mod cmd_diff;
 mod cmd_eval;
 mod cmd_fmt;
+mod cmd_hash;
 mod cmd_init;
 mod cmd_keygen;
 mod cmd_lint;
+mod cmd_log;
 mod cmd_panic;
+mod cmd_receipts;
+mod cmd_report;
+mod cmd_resolve;
+mod cmd_schema;
 mod cmd_sign;
 mod cmd_test;
 mod cmd_validate;
 mod cmd_verify;
+mod cmd_version;
+mod controls;
+mod generated_frameworks;
+mod generated_schemas;
+mod input;
+mod oscal_context;
+mod oscal_report;
+mod report_controls;
+mod report_evidence;
+mod verify_opts;
 
 use clap::{Parser, Subcommand};
 
@@ -21,7 +39,7 @@ use clap::{Parser, Subcommand};
     propagate_version = true,
     after_help = "psst... keep it down out there"
 )]
-struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
@@ -30,8 +48,12 @@ struct Cli {
 enum Commands {
     /// Display governance metadata and run advisory checks
     Audit(cmd_audit::AuditArgs),
+    /// Create, verify, and inspect signed policy bundles (DSSE / in-toto)
+    Bundle(cmd_bundle::BundleArgs),
     /// Validate policy files against the HushSpec schema
     Validate(cmd_validate::ValidateArgs),
+    /// Print a policy with its extends chain fully resolved and merged
+    Resolve(cmd_resolve::ResolveArgs),
     /// Run evaluation test suites against policies
     Test(cmd_test::TestArgs),
     /// Evaluate a single action against a policy
@@ -46,6 +68,8 @@ enum Commands {
     Diff(cmd_diff::DiffArgs),
     /// Format policy files canonically
     Fmt(cmd_fmt::FmtArgs),
+    /// Print the content hash of a policy's canonical form
+    Hash(cmd_hash::HashArgs),
     /// Manage emergency panic mode (deny-all kill switch)
     Panic(cmd_panic::PanicArgs),
     /// Sign a policy file with an Ed25519 key
@@ -54,6 +78,18 @@ enum Commands {
     Verify(cmd_verify::VerifyArgs),
     /// Generate a new Ed25519 keypair for policy signing
     Keygen(cmd_keygen::KeygenArgs),
+    /// Print a published HushSpec JSON Schema
+    Schema(cmd_schema::SchemaArgs),
+    /// Generate a shell completion script
+    Completions(cmd_completions::CompletionsArgs),
+    /// Print CLI, build, and spec version information
+    Version(cmd_version::VersionArgs),
+    /// Verify a hash-linked receipt log
+    Log(cmd_log::LogArgs),
+    /// Verify decision receipts against a policy and a keyring
+    Receipts(cmd_receipts::ReceiptsArgs),
+    /// Aggregate receipts into a compliance evidence report
+    Report(cmd_report::ReportArgs),
 }
 
 fn main() {
@@ -61,7 +97,9 @@ fn main() {
 
     let exit_code = match cli.command {
         Commands::Audit(args) => cmd_audit::run(args),
+        Commands::Bundle(args) => cmd_bundle::run(args),
         Commands::Validate(args) => cmd_validate::run(args),
+        Commands::Resolve(args) => cmd_resolve::run(args),
         Commands::Test(args) => cmd_test::run(args),
         Commands::Eval(args) => cmd_eval::run(args),
         Commands::Explain(args) => cmd_eval::run_explain(args),
@@ -69,10 +107,17 @@ fn main() {
         Commands::Lint(args) => cmd_lint::run(args),
         Commands::Diff(args) => cmd_diff::run(args),
         Commands::Fmt(args) => cmd_fmt::run(args),
+        Commands::Hash(args) => cmd_hash::run(args),
         Commands::Panic(args) => cmd_panic::run(args),
         Commands::Sign(args) => cmd_sign::run(args),
         Commands::Verify(args) => cmd_verify::run(args),
         Commands::Keygen(args) => cmd_keygen::run(args),
+        Commands::Schema(args) => cmd_schema::run(args),
+        Commands::Completions(args) => cmd_completions::run(args),
+        Commands::Version(args) => cmd_version::run(args),
+        Commands::Log(args) => cmd_log::run(args),
+        Commands::Receipts(args) => cmd_receipts::run(args),
+        Commands::Report(args) => cmd_report::run(args),
     };
 
     std::process::exit(exit_code);

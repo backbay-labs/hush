@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # Compliance: AICPA Trust Services Criteria (SOC2 Type II)
 # Maps to: CC6.1, CC6.3, CC7.1, CC7.2, CC8.1
 #
@@ -71,7 +71,6 @@ rules:
       - "github.com"
       - "*.githubusercontent.com"
       # Package registries
-      - "registry.npmjs.org"
       - "*.npmjs.org"
       - "pypi.org"
       - "files.pythonhosted.org"
@@ -157,7 +156,8 @@ rules:
     require_balance: true
     max_imbalance_ratio: 5.0
     forbidden_patterns:
-      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls|audit|logging|monitoring)"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(security|auth|ssl|tls)"
+      - "(?i)disable[ \\t\\n\\r\\f_\\-]?(audit|logging|monitoring)"
       - "(?i)skip[ \\t\\n\\r\\f_\\-]?(verify|validation|check|audit|test)"
       - "(?i)rm[ \\t\\n\\r\\f]+-rf[ \\t\\n\\r\\f]+/"
       - "(?i)chmod[ \\t\\n\\r\\f]+777"
@@ -197,3 +197,36 @@ rules:
       - deploy
     default: block
     max_args_size: 524288
+
+# Structured control mappings (core spec 2.5). Declarative metadata only: they
+# never influence evaluation. `h2h lint` enforces full rule-block coverage
+# (L011), path resolution (L012), and registry conformance (L013).
+metadata:
+  controls:
+    - framework: soc2-tsc-2017
+      control_id: "CC6.1"
+      rule_paths:
+        - rules.forbidden_paths
+        - rules.egress
+      notes: "Logical access controls. Credential stores and production config are unreachable; egress defaults to block."
+    - framework: soc2-tsc-2017
+      control_id: "CC6.3"
+      rule_paths:
+        - rules.tool_access
+      notes: "Access is restricted to the tools the role requires; everything else is denied by default."
+    - framework: soc2-tsc-2017
+      control_id: "CC7.1"
+      rule_paths:
+        - rules.secret_patterns
+        - rules.shell_commands
+      notes: "Detection of unauthorized change and credential exposure in content and commands."
+    - framework: soc2-tsc-2017
+      control_id: "CC7.2"
+      rule_paths:
+        - rules.egress.allow
+      notes: "Monitoring. Observability endpoints stay reachable so security events continue to be shipped."
+    - framework: soc2-tsc-2017
+      control_id: "CC8.1"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Change management. Patch size, balance, and forbidden-pattern limits keep changes reviewable."

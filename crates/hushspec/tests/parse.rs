@@ -1,4 +1,4 @@
-use hushspec::{HushSpec, validate};
+use hushspec::{BUILTIN_NAMES, HushSpec, load_builtin, validate};
 
 #[test]
 fn parse_minimal_valid() {
@@ -68,6 +68,39 @@ rules:
 }
 
 #[test]
+fn parse_refusal_keeps_original_source_location() {
+    let yaml = "# editor modeline\nhushspec: '1.0.0'\ndescription: folded\n  text\nname: café-😀\nbogus_field: true\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    assert!(error.to_string().contains("unknown field `bogus_field`"));
+    assert_eq!(error.location().unwrap().line(), 6);
+}
+
+#[test]
+fn normalized_integer_refusal_is_not_replaced_by_an_earlier_float_error() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  patch_integrity:\n    max_additions: 10.0\n    bogus_field: true\n";
+    let error = HushSpec::parse(yaml).unwrap_err().to_string();
+    assert!(error.contains("unknown field `bogus_field`"), "{error}");
+    assert!(!error.contains("floating point"), "{error}");
+}
+
+#[test]
+fn identical_scalar_refusal_does_not_report_an_earlier_fields_location() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  patch_integrity:\n    max_additions: 010\n    max_deletions: '010'\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    if let Some(location) = error.location() {
+        assert_eq!(location.line(), 5, "{error}");
+    }
+}
+
+#[test]
+fn negative_rate_threshold_keeps_the_positioned_type_refusal() {
+    let yaml = "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      rate: {counter: requests, threshold: -1, comparison: lt}\n";
+    let error = HushSpec::parse(yaml).unwrap_err();
+    assert!(error.to_string().contains("invalid type"), "{error}");
+    assert_eq!(error.location().unwrap().line(), 5);
+}
+
+#[test]
 fn validate_unsupported_version() {
     let yaml = r#"
 hushspec: "99.0.0"
@@ -75,6 +108,41 @@ hushspec: "99.0.0"
     let spec = HushSpec::parse(yaml).unwrap();
     let result = validate(&spec);
     assert!(!result.is_valid());
+}
+
+/// Core spec 2 requires a present `name` to be non-empty, but only from the
+/// 1.0 document format: the frozen 0.x format allows `name: ""`, which is the
+/// one validation difference between the two (spec/versioning.md section 10).
+#[test]
+fn validate_empty_name_only_in_the_1_0_format() {
+    for version in ["0.1.0", "0.2.0", "0.2.7"] {
+        let yaml = format!("hushspec: \"{version}\"\nname: \"\"\n");
+        let spec = HushSpec::parse(&yaml).unwrap();
+        assert!(validate(&spec).is_valid(), "{version} should accept it");
+    }
+    for version in ["1.0.0", "1.0.3"] {
+        let yaml = format!("hushspec: \"{version}\"\nname: \"\"\n");
+        let spec = HushSpec::parse(&yaml).unwrap();
+        assert!(!validate(&spec).is_valid(), "{version} should refuse it");
+    }
+}
+
+/// A version that cannot be read as `MAJOR.MINOR.PATCH` is refused on its own
+/// account, and must never be a way to relax a constraint as well.
+#[test]
+fn validate_empty_name_under_an_unreadable_version() {
+    let spec = HushSpec::parse("hushspec: \"not-a-version\"\nname: \"\"\n").unwrap();
+    let messages: Vec<String> = validate(&spec)
+        .errors
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("name: must not be empty when present")),
+        "{messages:?}"
+    );
 }
 
 #[test]
@@ -137,7 +205,9 @@ rules:
   patch_integrity:
     max_imbalance_ratio: .nan
 "#;
-    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(HushSpec::parse(yaml).is_err());
+    // Directly constructed models must also fail validation.
+    let spec: HushSpec = serde_yaml::from_str(yaml).unwrap();
     assert!(
         spec.rules
             .as_ref()
@@ -171,7 +241,8 @@ extensions:
     threat_intel:
       similarity_threshold: .inf
 "#;
-    let spec = HushSpec::parse(yaml).unwrap();
+    assert!(HushSpec::parse(yaml).is_err());
+    let spec: HushSpec = serde_yaml::from_str(yaml).unwrap();
     let result = validate(&spec);
     assert!(!result.is_valid());
     assert!(
@@ -353,21 +424,21 @@ rules:
 #[test]
 fn validate_builtin_rulesets_pass() {
     // All built-in rulesets must have valid, RE2-compatible regex patterns.
-    let rulesets = [
-        include_str!("../../../rulesets/default.yaml"),
-        include_str!("../../../rulesets/strict.yaml"),
-        include_str!("../../../rulesets/permissive.yaml"),
-        include_str!("../../../rulesets/ai-agent.yaml"),
-        include_str!("../../../rulesets/cicd.yaml"),
-        include_str!("../../../rulesets/remote-desktop.yaml"),
-    ];
-    for (i, yaml) in rulesets.iter().enumerate() {
+    // The YAML comes from the embedded table (generated from rulesets/*.yaml by
+    // scripts/generate_rust_builtins.py) rather than `include_str!`, so this
+    // exercises exactly the bytes the published crate ships.
+    assert!(
+        !BUILTIN_NAMES.is_empty(),
+        "built-in table must not be empty"
+    );
+    for name in BUILTIN_NAMES {
+        let yaml = load_builtin(name).unwrap_or_else(|| panic!("ruleset {name} is not embedded"));
         let spec =
-            HushSpec::parse(yaml).unwrap_or_else(|e| panic!("ruleset {i} failed to parse: {e}"));
+            HushSpec::parse(yaml).unwrap_or_else(|e| panic!("ruleset {name} failed to parse: {e}"));
         let result = validate(&spec);
         assert!(
             result.is_valid(),
-            "ruleset {i} failed validation: {:?}",
+            "ruleset {name} failed validation: {:?}",
             result.errors
         );
     }

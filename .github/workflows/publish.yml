@@ -11,6 +11,17 @@ on:
         description: 'Dry run (no actual publish)'
         type: boolean
         default: false
+      pypi-auth:
+        description: 'PyPI authentication (token must be explicitly selected; no automatic fallback)'
+        type: choice
+        default: trusted
+        options:
+          - trusted
+          - token
+
+# Read-only by default; the jobs that need more widen it themselves.
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,6 +30,9 @@ jobs:
   # ── Gate: run full CI first ──────────────────────────────────────────
   ci:
     name: CI Gate
+    permissions:
+      contents: read
+      security-events: write
     uses: ./.github/workflows/ci.yml
 
   # ── Rust: publish hushspec then hushspec-cli to crates.io ──────────
@@ -36,28 +50,18 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Stage rulesets for crate packaging
-        run: |
-          # hushspec crate uses include_str! to embed rulesets from workspace root.
-          # cargo publish only packages files within the crate directory, so we
-          # copy rulesets alongside the source before packaging.
-          cp -r rulesets crates/hushspec/rulesets
-
-      - name: Patch include_str paths for publish
-        run: |
-          # Rewrite include_str!("../../../rulesets/...") to include_str!("../rulesets/...")
-          # so paths resolve within the packaged crate directory.
-          sed -i 's|include_str!("../../../rulesets/|include_str!("../rulesets/|g' \
-            crates/hushspec/src/resolve.rs \
-            crates/hushspec/src/panic.rs
+      # Packaging the workspace resolves unpublished sibling crates together
+      # and builds their extracted archives without uploading anything.
+      - name: Verify Rust packages together
+        if: inputs.dry_run
+        run: cargo package --workspace --locked
 
       - name: Publish hushspec (library)
+        if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            cargo publish -p hushspec --allow-dirty --dry-run
-          elif cargo publish -p hushspec --allow-dirty 2>publish_err.log; then
+          if cargo publish -p hushspec --locked 2>publish_err.log; then
             cat publish_err.log
           elif grep -qiE "already (uploaded|exists)" publish_err.log; then
             cat publish_err.log
@@ -72,14 +76,43 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         run: sleep 30
 
-      - name: Publish hushspec-cli (h2h binary)
+      # The conformance runner is part of the published surface: a third party
+      # claiming a level needs the tool that produces the report, not just the
+      # vectors. Same already-published tolerance as hushspec above, so a rerun
+      # for a partially published version does not fail the job.
+      - name: Publish hushspec-testkit (conformance runner)
+        if: ${{ !inputs.dry_run }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
         run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            cargo publish -p hushspec-cli --dry-run
+          if cargo publish -p hushspec-testkit --locked 2>publish_err.log; then
+            cat publish_err.log
+          elif grep -qiE "already (uploaded|exists)" publish_err.log; then
+            cat publish_err.log
+            echo "::warning::hushspec-testkit version already on crates.io; continuing"
           else
-            cargo publish -p hushspec-cli
+            cat publish_err.log >&2
+            echo "::error::hushspec-testkit publish failed (not an already-published error)"
+            exit 1
+          fi
+
+      # Same already-published tolerance as the two steps above, so a rerun
+      # for an already-published version does not fail the job at its last
+      # step.
+      - name: Publish hushspec-cli (h2h binary)
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: |
+          if cargo publish -p hushspec-cli --locked 2>publish_err.log; then
+            cat publish_err.log
+          elif grep -qiE "already (uploaded|exists)" publish_err.log; then
+            cat publish_err.log
+            echo "::warning::hushspec-cli version already on crates.io; continuing"
+          else
+            cat publish_err.log >&2
+            echo "::error::hushspec-cli publish failed (not an already-published error)"
+            exit 1
           fi
 
   # ── npm: publish @hushspec/core ────────────────────────────────────
@@ -121,15 +154,53 @@ jobs:
             npm publish --access public --provenance
           fi
 
-  # ── PyPI: publish hushspec ─────────────────────────────────────────
+  # Trusted publishing is the default. Explicit token mode uses PYPI_TOKEN
+  # without PyPI attestations; an OIDC failure never falls back to a token.
+  # The trusted publisher for the PyPI project "hushspec" must name:
+  #
+  #   Owner:             backbay-labs
+  #   Repository:        hush
+  #   Workflow filename: publish.yml
+  #   Environment:       (none)
+  #
+  # See https://docs.pypi.org/trusted-publishers/. Moving or renaming this
+  # workflow requires updating the trusted publisher to match.
   pypi:
     name: Publish Python package
     needs: ci
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to mint the OIDC token PyPI exchanges for an upload credential.
+      id-token: write
     if: >-
       contains(github.event.inputs.packages, 'pypi') ||
       contains(github.event.inputs.packages, 'all')
     steps:
+      - name: Select PyPI authentication
+        id: authentication
+        env:
+          PYPI_AUTH: ${{ inputs['pypi-auth'] }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PYPI_TOKEN: ${{ !inputs.dry_run && inputs['pypi-auth'] == 'token' && secrets.PYPI_TOKEN || '' }}
+        run: |
+          case "$PYPI_AUTH" in
+            trusted|token) ;;
+            *) echo "::error::Unknown PyPI authentication method"; exit 1 ;;
+          esac
+          case "$DRY_RUN" in
+            true) method=dry-run ;;
+            false)
+              method="$PYPI_AUTH"
+              if [ "$method" = token ] && [ -z "$PYPI_TOKEN" ]; then
+                echo "::error::Token mode requires the PYPI_TOKEN repository secret"
+                exit 1
+              fi
+              ;;
+            *) echo "::error::Invalid dry-run mode"; exit 1 ;;
+          esac
+          printf 'method=%s\n' "$method" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -143,15 +214,26 @@ jobs:
         working-directory: packages/python
         run: python -m build
 
-      - name: Publish to PyPI
+      - name: Check distributions
         working-directory: packages/python
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: |
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            twine check dist/*
-            echo "Dry run — skipping upload"
-          else
-            twine upload dist/*
-          fi
+        run: twine check dist/*
+
+      - name: Publish to PyPI with trusted publishing
+        if: steps.authentication.outputs.method == 'trusted'
+        # Pinned to a commit: this step runs with id-token: write, so a
+        # mutable ref would let a change upstream mint an upload token.
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: packages/python/dist
+
+      - name: Publish to PyPI with explicitly selected token
+        if: steps.authentication.outputs.method == 'token'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: packages/python/dist
+          password: ${{ secrets.PYPI_TOKEN }}
+          attestations: false
+
+      - name: Dry run — skipping upload
+        if: steps.authentication.outputs.method == 'dry-run'
+        run: echo "Dry run — distributions built and checked, upload skipped"

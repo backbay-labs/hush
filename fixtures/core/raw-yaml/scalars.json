@@ -1,0 +1,746 @@
+[
+  {
+    "id": "leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 010\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 10,
+    "decision": "deny",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":10}}}}}"
+  },
+  {
+    "id": "leading-zero-nine",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 09\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 9,
+    "decision": "allow",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":9}}}}}"
+  },
+  {
+    "id": "positive-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: +010\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 10,
+    "decision": "deny",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":10}}}}}"
+  },
+  {
+    "id": "octal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 0o12\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 10,
+    "decision": "deny",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":10}}}}}"
+  },
+  {
+    "id": "hex",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 0xA\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 10,
+    "decision": "deny",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":10}}}}}"
+  },
+  {
+    "id": "zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 000\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 0,
+    "decision": "allow",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":0}}}}}"
+  },
+  {
+    "id": "safe-max",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 9007199254740991\n        comparison: lt\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "rate",
+      "threshold"
+    ],
+    "value": 9007199254740991,
+    "decision": "deny",
+    "canonical": "{\"hushspec\":\"1.0.0\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":9007199254740991}}}}}"
+  },
+  {
+    "id": "quoted-decimal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: \"010\"\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "single-quoted-octal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: '0o12'\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "sexagesimal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 1:20\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "binary",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 0b1010\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "underscores",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 1_0\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "signed-hex",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: +0xA\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "negative",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: -010\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "unsafe-decimal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 9007199254740992\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "unsafe-octal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 0o400000000000000000\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "unsafe-hex",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 0x20000000000000\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "huge-integer",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 999999999999999999999999999999999999\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "null",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: null\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "boolean",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: true\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "fractional",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    default: block\n    when:\n      rate:\n        counter: requests\n        threshold: 10.5\n        comparison: lt\n",
+    "accept": false
+  },
+  {
+    "id": "scalar-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 010\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-octal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 0o12\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-hex",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 0xA\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-sexagesimal",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1:20\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "1:20"
+  },
+  {
+    "id": "scalar-binary",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 0b1010\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "0b1010"
+  },
+  {
+    "id": "scalar-underscores",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1_0\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "1_0"
+  },
+  {
+    "id": "scalar-signed-hex",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: -0xA\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "-0xA"
+  },
+  {
+    "id": "scalar-capital-prefix",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 0XA\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "0XA"
+  },
+  {
+    "id": "scalar-integral-float",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 10.0\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1e1\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-positive-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1e+1\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-negative-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1e-1\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 0.1
+  },
+  {
+    "id": "scalar-exponent-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 01e1\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-trailing-dot",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 10.\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 10
+  },
+  {
+    "id": "scalar-leading-dot",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: .5\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 0.5
+  },
+  {
+    "id": "scalar-large-float",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1.0e+21\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 1e+21
+  },
+  {
+    "id": "scalar-negative-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: -0.0\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": 0
+  },
+  {
+    "id": "scalar-quoted",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: '010'\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "010"
+  },
+  {
+    "id": "scalar-double-quoted-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: \"1e1\"\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "1e1"
+  },
+  {
+    "id": "scalar-yes",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: yes\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "yes"
+  },
+  {
+    "id": "scalar-on",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: on\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "on"
+  },
+  {
+    "id": "scalar-true",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: TRUE\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": true
+  },
+  {
+    "id": "scalar-false",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: False\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": false
+  },
+  {
+    "id": "scalar-null",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: NULL\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": null
+  },
+  {
+    "id": "scalar-timestamp",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 2026-09-22\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "2026-09-22"
+  },
+  {
+    "id": "scalar-unicode",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: café\n",
+    "accept": true,
+    "value_path": [
+      "rules",
+      "egress",
+      "when",
+      "context",
+      "custom.value"
+    ],
+    "value": "café"
+  },
+  {
+    "id": "scalar-nan",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: .nan\n",
+    "accept": false
+  },
+  {
+    "id": "scalar-inf",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: .inf\n",
+    "accept": false
+  },
+  {
+    "id": "scalar-negative-inf",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: -.Inf\n",
+    "accept": false
+  },
+  {
+    "id": "scalar-overflow",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 1e309\n",
+    "accept": false
+  },
+  {
+    "id": "scalar-unsafe-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules:\n  egress:\n    when:\n      context:\n        custom.value: 09007199254740992\n",
+    "accept": false
+  },
+  {
+    "id": "threshold-safe-max-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: 9007199254740991.0, comparison: lt}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "rate", "threshold"],
+    "value": 9007199254740991,
+    "decision": "deny"
+  },
+  {
+    "id": "threshold-unsafe-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: 9007199254740992.0, comparison: lt}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "threshold-unsafe-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {all_of: [{rate: {counter: requests, threshold: 9.007199254740993e15, comparison: lt}}]}}}\n",
+    "accept": false
+  },
+  {
+    "id": "threshold-negative-safe-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: -9007199254740991.0, comparison: lt}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "threshold-host-width-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: 18446744073709551616.0, comparison: lt}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "context-float-beyond-safe",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: 9007199254740992.0}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": 9007199254740992
+  },
+  {
+    "id": "context-negative-float-beyond-safe",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: -9007199254740992.0}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": -9007199254740992
+  },
+  {
+    "id": "number-field-large-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {patch_integrity: {max_imbalance_ratio: 1e21}}\n",
+    "accept": true,
+    "value_path": ["rules", "patch_integrity", "max_imbalance_ratio"],
+    "value": 1e21
+  },
+  {
+    "id": "posture-integral-float-budget",
+    "yaml": "hushspec: '1.0.0'\nextensions: {posture: {initial: open, states: {open: {budgets: {requests: 1e1}}}, transitions: []}}\n",
+    "accept": true,
+    "value_path": ["extensions", "posture", "states", "open", "budgets", "requests"],
+    "value": 10
+  },
+  {
+    "id": "posture-unsafe-float-budget",
+    "yaml": "hushspec: '1.0.0'\nextensions: {posture: {initial: open, states: {open: {budgets: {max_imbalance_ratio: 1e16}}}, transitions: []}}\n",
+    "accept": false
+  },
+  {
+    "id": "unicode-prefix-and-quoted-sibling",
+    "yaml": "hushspec: '1.0.0'\nname: café-😀\ndescription: '010'\nrules: {egress: {when: {rate: {counter: requests, threshold: 010, comparison: lt}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "rate", "threshold"],
+    "value": 10,
+    "decision": "deny",
+    "canonical": "{\"description\":\"010\",\"hushspec\":\"1.0.0\",\"name\":\"café-😀\",\"rules\":{\"egress\":{\"allow\":[],\"block\":[],\"default\":\"block\",\"enabled\":true,\"when\":{\"rate\":{\"comparison\":\"lt\",\"counter\":\"requests\",\"threshold\":10}}}}}"
+  },
+  {
+    "id": "tagged-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: !!int 010, comparison: lt}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "rate", "threshold"],
+    "value": 10,
+    "decision": "deny"
+  },
+  {
+    "id": "tagged-string-numeric",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: !!str 010, comparison: lt}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-nonfinite",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!float .inf}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "numeric-name-is-not-string",
+    "yaml": "hushspec: '1.0.0'\nname: 010\n",
+    "accept": false
+  },
+  {
+    "id": "boolean-name-is-not-string",
+    "yaml": "hushspec: '1.0.0'\nname: true\n",
+    "accept": false
+  },
+  {
+    "id": "quoted-boolean-is-not-boolean",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {enabled: 'true'}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-legacy-boolean-field",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {enabled: !!bool yes}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-legacy-boolean-context",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!bool on}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-invalid-boolean-context",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!bool nonsense}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-invalid-null-context",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!null nonsense}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-valid-boolean-context",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!bool TRUE}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": true
+  },
+  {
+    "id": "tagged-valid-null-context",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!null NULL}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": null
+  },
+  {
+    "id": "nested-condition-context-fraction",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {not: {any_of: [{context: {custom.value: 1.5}}]}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "not", "any_of", "0", "context", "custom.value"],
+    "value": 1.5
+  },
+  {
+    "id": "nested-condition-context-large-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {all_of: [{not: {context: {custom.value: 1e21}}}]}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "all_of", "0", "not", "context", "custom.value"],
+    "value": 1e21
+  },
+  {
+    "id": "tagged-timestamp-is-not-core",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!timestamp 2020-01-01}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "custom-tag-is-not-core",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !thing 010}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "tagged-float-leading-zero",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!float 010}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": 10
+  },
+  {
+    "id": "tagged-float-radix-is-invalid",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: !!float 0x10}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "non-specific-scalar-tag-is-string",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {context: {custom.value: ! 010}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "context", "custom.value"],
+    "value": "010"
+  },
+  {
+    "id": "custom-mapping-tag-is-not-core",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {not: {context: {custom.value: !thing {x: 1}}}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "custom-sequence-tag-is-not-core",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {not: {context: {custom.value: !thing [1]}}}}}\n",
+    "accept": false
+  },
+  {
+    "id": "threshold-integral-float",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: 10.0, comparison: lt}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "rate", "threshold"],
+    "value": 10,
+    "decision": "deny"
+  },
+  {
+    "id": "threshold-exponent",
+    "yaml": "hushspec: '1.0.0'\nrules: {egress: {when: {rate: {counter: requests, threshold: 1e1, comparison: lt}}}}\n",
+    "accept": true,
+    "value_path": ["rules", "egress", "when", "rate", "threshold"],
+    "value": 10,
+    "decision": "deny"
+  }
+]

@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
+hushspec_test: "0.2.0"
+description: "expect.receipt (evaluator-test 0.2): the members a case spells must equal the format 0.2 receipt produced under the fixed inputs of fixtures/receipts/expected/README.md"
+policy:
+  hushspec: "0.1.0"
+  name: receipt-expectation
+  rules:
+    egress:
+      allow:
+        - "api.example.com"
+      default: block
+    secret_patterns:
+      patterns:
+        - name: aws
+          pattern: "AKIA[0-9A-Z]{16}"
+          severity: critical
+cases:
+  - description: "an allowed egress produces an allow receipt naming the policy and the rule"
+    tags: ["receipt", "allow"]
+    action:
+      type: egress
+      target: "api.example.com"
+    expect:
+      decision: allow
+      receipt:
+        receipt_version: "0.2"
+        time_source: trusted
+        decision: allow
+        matched_rule: rules.egress.allow
+        policy:
+          spec_version: "0.1.0"
+          content_hash: "sha256:b20f10662d8ef79eba5e275c43fb94641bd8ec0e6348f3663d7ecc0535e534a1"
+        action:
+          type: egress
+          target: "api.example.com"
+        enforcement:
+          mode: enforce
+          outcome: allowed
+  - description: "a denied write hashes the content instead of recording it"
+    tags: ["receipt", "deny"]
+    action:
+      type: file_write
+      target: "/srv/app/config.env"
+      content: "AWS=AKIAABCDEFGHIJKLMNOP"
+    expect:
+      decision: deny
+      receipt:
+        decision: deny
+        matched_rule: rules.secret_patterns.patterns.aws
+        reason: "content matched secret pattern 'aws'"
+        action:
+          type: file_write
+          target: "/srv/app/config.env"
+          content_hash: "sha256:1ae81d179d0467050b1531a7324b36fe175eaec96154e0b9673934dec34f8eb4"
+          content_size: 24
+        enforcement:
+          mode: enforce
+          outcome: blocked

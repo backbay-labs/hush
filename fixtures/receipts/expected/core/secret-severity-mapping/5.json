@@ -1,0 +1,45 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7005-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "secret-severity-map",
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:10f0aac2b1dcc5476cc5557e352be13b2daf5eb41f5f6cb6493a6f6edb59459d"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com",
+    "content_hash": "sha256:2404a10ebd56d0c97aded05bfff62e74af7258a6ca0e4c1e8de169abf5a854a8",
+    "content_size": 10
+  },
+  "decision": "warn",
+  "matched_rule": "rules.secret_patterns.patterns.warn_token",
+  "reason": "content matched secret pattern 'warn_token'",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no egress rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "rule_path": "rules.secret_patterns.patterns.warn_token",
+      "outcome": "warn",
+      "evaluated": true,
+      "reason": "content matched secret pattern 'warn_token'"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

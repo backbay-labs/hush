@@ -1,0 +1,41 @@
+hushspec: "0.2.0"
+name: with-control-mappings
+description: "Core 2.5: metadata.controls maps compliance controls onto rule paths and never influences evaluation"
+metadata:
+  author: "security@example.com"
+  classification: internal
+  controls:
+    # Whole-document mapping: `rules` covers every rule block.
+    - framework: soc2-tsc-2017
+      control_id: CC6.1
+      rule_paths:
+        - rules
+      notes: "Logical access controls are implemented by the policy as a whole."
+    # Block-level and field-level mappings.
+    - framework: hipaa-2013
+      control_id: "164.312(e)(1)"
+      rule_paths:
+        - rules.egress
+        - rules.egress.allow
+    # A selector picks one named list entry.
+    - framework: hipaa-2013
+      control_id: "164.514(b)(2)(i)"
+      rule_paths:
+        - rules.secret_patterns.patterns[ssn]
+    # An unregistered framework id is a valid document (lint flags it, L013).
+    - framework: acme-internal-1.0
+      control_id: SEC-42
+      rule_paths:
+        - rules.tool_access
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block
+  secret_patterns:
+    patterns:
+      - name: ssn
+        pattern: "[0-9]{3}-[0-9]{2}-[0-9]{4}"
+        severity: critical
+  tool_access:
+    allow: ["read_file"]
+    default: block

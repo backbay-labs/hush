@@ -1,12 +1,12 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { parseOrThrow } from '../src/parse.js';
 import { resolve, resolveFromFile, createCompositeLoader } from '../src/resolve.js';
 import { loadBuiltin, BUILTIN_NAMES } from '../src/builtin.js';
-import { createHttpLoader, isPrivateIp } from '../src/http-loader.js';
+import { validate } from '../src/validate.js';
 
 describe('resolve', () => {
   it('resolves extends chains from the filesystem', () => {
@@ -106,9 +106,9 @@ name: parent
     }
   });
 
-  // Parity fix (v3, item S2): a long *acyclic* extends chain used to recurse
-  // unbounded (cycle detection only catches exact repeats). The resolver now
-  // caps the chain at depth 32 and fails closed with a clean error.
+  // Cycle detection only catches exact repeats, so a long *acyclic* chain
+  // would recurse unbounded. The resolver caps it at depth 32 and fails
+  // closed with a clean error.
   it('errors cleanly on an extends chain deeper than the cap (40 levels)', () => {
     const depth = 40;
     const load = (reference: string) => {
@@ -147,12 +147,29 @@ name: parent
   });
 });
 
+/**
+ * A `rulesets/` preset is named for its file (`strict`); a library policy is
+ * embedded under `library/<vertical>/<name>` and names itself with the last
+ * segment (`hipaa-base`), because the prefix is a location, not a rename.
+ */
+function builtinDocumentName(builtin: string): string {
+  return builtin.slice(builtin.lastIndexOf('/') + 1);
+}
+
+/** The canonical file a builtin name was generated from. */
+function builtinSourcePath(builtin: string): string {
+  return builtin.startsWith('library/')
+    ? `../../../${builtin}.yaml`
+    : `../../../rulesets/${builtin}.yaml`;
+}
+
 describe('builtin loader', () => {
-  it('resolves all 6 built-in rulesets', () => {
+  it('resolves every embedded policy', () => {
+    expect(BUILTIN_NAMES.length).toBeGreaterThan(6);
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(name);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
       expect(spec!.hushspec).toBe('0.1.0');
     }
   });
@@ -161,8 +178,17 @@ describe('builtin loader', () => {
     for (const name of BUILTIN_NAMES) {
       const spec = loadBuiltin(`builtin:${name}`);
       expect(spec).not.toBeNull();
-      expect(spec!.name).toBe(name);
+      expect(spec!.name).toBe(builtinDocumentName(name));
     }
+  });
+
+  it('embeds the vertical library under its library/ prefix', () => {
+    const spec = loadBuiltin('builtin:library/healthcare/hipaa-base');
+    expect(spec).not.toBeNull();
+    expect(spec!.name).toBe('hipaa-base');
+    // The embedded leaf still declares its own base; resolving is what
+    // materializes the full document.
+    expect(spec!.extends).toBe('builtin:strict');
   });
 
   it('returns null for unknown builtins', () => {
@@ -188,7 +214,7 @@ describe('builtin loader', () => {
   it('matches the canonical built-in ruleset YAML', () => {
     for (const name of BUILTIN_NAMES) {
       const expected = YAML.parse(
-        readFileSync(new URL(`../../../rulesets/${name}.yaml`, import.meta.url), 'utf8'),
+        readFileSync(new URL(builtinSourcePath(name), import.meta.url), 'utf8'),
       );
       expect(loadBuiltin(name)).toEqual(expected);
     }
@@ -242,46 +268,42 @@ name: custom-strict
   });
 });
 
-describe('http loader', () => {
-  it('rejects private IPv6 targets before fetching', async () => {
-    const mockFetch = vi.fn();
-    vi.stubGlobal('fetch', mockFetch);
-    const loader = createHttpLoader();
+describe('resolved documents validate', () => {
+  // `merge()` clears the fields it consumes by setting them to `undefined`
+  // rather than deleting them, so a resolved document reaches `validate()` as
+  // `{ ..., extends: undefined }`. `key in obj` counts that as present, which
+  // would make `validate(resolve(spec))` fail with "extends must be a
+  // string" for a document every other SDK accepts.
+  it('accepts a document whose extends chain has just been flattened', () => {
+    const spec = parseOrThrow('hushspec: "0.2.0"\nextends: "builtin:default"\n');
+    const resolved = resolve(spec);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
 
-    await expect(loader('https://[fc00::1]/policy.yaml')).rejects.toThrow('SSRF protection');
-    await expect(loader('https://[fe80::1]/policy.yaml')).rejects.toThrow('SSRF protection');
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-});
+    expect('extends' in resolved.value).toBe(true);
+    expect(resolved.value.extends).toBeUndefined();
 
-// Parity fix (v3, item S3): the SSRF filter recognized the IPv4-*mapped* form
-// (`::ffff:a.b.c.d`) but not the deprecated IPv4-*compatible* form (`::a.b.c.d`
-// / `::hextet:hextet`, all high bits zero), so `::a9fe:a9fe` (169.254.169.254
-// cloud metadata) and `::7f00:1` (127.0.0.1 loopback) were not flagged. The
-// low 32 bits are now extracted as IPv4 and run through the IPv4 private check.
-describe('isPrivateIp: IPv4-compatible IPv6 (SSRF)', () => {
-  it('flags the deprecated IPv4-compatible form (::a.b.c.d / ::hextet:hextet)', () => {
-    expect(isPrivateIp('::a9fe:a9fe')).toBe(true); // 169.254.169.254 cloud metadata
-    expect(isPrivateIp('::7f00:1')).toBe(true); // 127.0.0.1 loopback
-    expect(isPrivateIp('::0.0.0.0')).toBe(true); // all-zero unspecified
-    expect(isPrivateIp('::a0a:a0a')).toBe(true); // 10.10.10.10 private
+    const validation = validate(resolved.value);
+    expect(validation.errors).toEqual([]);
+    expect(validation.valid).toBe(true);
   });
 
-  it('still flags the IPv4-mapped form and native private ranges', () => {
-    expect(isPrivateIp('::ffff:169.254.169.254')).toBe(true);
-    expect(isPrivateIp('::ffff:a9fe:a9fe')).toBe(true);
-    expect(isPrivateIp('::1')).toBe(true);
-    expect(isPrivateIp('::')).toBe(true);
-    expect(isPrivateIp('fc00::1')).toBe(true);
-    expect(isPrivateIp('fe80::1')).toBe(true);
-    expect(isPrivateIp('127.0.0.1')).toBe(true);
+  it('still rejects an extends that is present with a non-string value', () => {
+    const validation = validate({ hushspec: '0.2.0', extends: 42 } as never);
+    expect(validation.valid).toBe(false);
+    expect(validation.errors.some(error => error.message.includes('extends'))).toBe(true);
   });
 
-  it('leaves genuine public IPs public', () => {
-    expect(isPrivateIp('8.8.8.8')).toBe(false);
-    expect(isPrivateIp('1.1.1.1')).toBe(false);
-    expect(isPrivateIp('2606:4700:4700::1111')).toBe(false);
-    // ::2606:4700 -> 38.6.71.0 is a PUBLIC IPv4, so the compatible form stays public.
-    expect(isPrivateIp('::2606:4700')).toBe(false);
+  // Core section 2.3: a document that declares `merge_strategy` without
+  // `extends` never reaches `merge`, and resolution still hands back a
+  // document carrying neither resolution instruction.
+  it('drops merge_strategy from a one-hop chain', () => {
+    const spec = parseOrThrow('hushspec: "0.1.0"\nname: leaf\nmerge_strategy: replace\n');
+    const resolved = resolve(spec);
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+
+    expect(resolved.value.extends).toBeUndefined();
+    expect(resolved.value.merge_strategy).toBeUndefined();
   });
 });

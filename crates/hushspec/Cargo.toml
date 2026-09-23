@@ -2,8 +2,9 @@
 name = "hushspec"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
-description = "Portable specification types for AI agent security rules"
+description = "Agentic compliance as code: portable policy spec for AI agent security controls"
 repository = "https://github.com/backbay-labs/hush"
 readme = "README.md"
 keywords = ["ai", "security", "policy", "agent", "hushspec"]
@@ -12,30 +13,48 @@ categories = ["config", "parser-implementations"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+saphyr-parser = "0.0.12"
 serde_json = "1"
 thiserror = "2"
 regex = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
+unicode-normalization = "0.1"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], optional = true }
 url = { version = "2", optional = true }
-ed25519-dalek = { version = "2", features = ["rand_core"], optional = true }
+ed25519-dalek = { version = "2", features = ["rand_core", "pkcs8", "pem"], optional = true }
 base64 = { version = "0.22", optional = true }
 rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
+# Path-only, so `cargo package` drops it: the testkit depends on this crate,
+# and the resolve-vector reader they share lives there because two runners
+# read the same fixture directory.
+hushspec-testkit = { path = "../hushspec-testkit" }
 pretty_assertions = "1"
 criterion = "0.5"
 jsonschema = { version = "0.18", features = ["draft202012"] }
+proptest = "1"
+tempfile = "3"
 
 [[bench]]
 name = "evaluation"
 harness = false
 
+[[example]]
+name = "guarded_agent"
+required-features = ["otlp"]
+
+[package.metadata.docs.rs]
+all-features = true
+
 [features]
-default = ["std"]
-std = []
+default = []
 http = ["dep:reqwest", "dep:url"]
 signing = ["dep:ed25519-dalek", "dep:base64", "dep:rand"]
+# OTLP/HTTP export of receipts and policy events (crates/hushspec/src/otlp.rs).
+# Reuses the `http` feature's blocking reqwest client, so it adds no new
+# dependency of its own.
+otlp = ["http"]

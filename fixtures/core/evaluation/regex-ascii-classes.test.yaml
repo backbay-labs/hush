@@ -1,0 +1,44 @@
+hushspec_test: "0.1.0"
+description: "Explicit ASCII classes behave identically in every engine (core spec 3.14.3)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    secret_patterns:
+      patterns:
+        - name: ascii_digits
+          pattern: "id[0-9]{3}"
+          severity: critical
+        - name: ascii_space
+          pattern: "key[ \\t]="
+          severity: critical
+cases:
+  - description: "an explicit ASCII digit class matches ASCII digits"
+    action:
+      type: file_write
+      target: "/tmp/a.txt"
+      content: "id123"
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.ascii_digits
+  - description: "an explicit ASCII digit class does not match Arabic-Indic digits"
+    action:
+      type: file_write
+      target: "/tmp/a.txt"
+      content: "id١٢٣"
+    expect:
+      decision: allow
+  - description: "an explicit space class matches a tab"
+    action:
+      type: file_write
+      target: "/tmp/a.txt"
+      content: "key\t="
+    expect:
+      decision: deny
+      matched_rule: rules.secret_patterns.patterns.ascii_space
+  - description: "an explicit space class does not match a no-break space"
+    action:
+      type: file_write
+      target: "/tmp/a.txt"
+      content: "key ="
+    expect:
+      decision: allow

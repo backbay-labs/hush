@@ -1,0 +1,27 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01994b7e-2c25-7555-9555-0123456789ab",
+  "timestamp": "2026-09-15T08:30:01.000Z",
+  "time_source": "system",
+  "policy": {
+    "spec_version": "0.2.0",
+    "content_hash": "sha256:9aa550f8eed15366ce9db38b22818179d79c382fa6423f159ef0b228aca25108"
+  },
+  "action": {
+    "type": "egress"
+  },
+  "decision": "deny",
+  "matched_rule": "rules.egress.default",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.default",
+      "outcome": "deny",
+      "evaluated": true
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "blocked"
+  }
+}

@@ -163,6 +163,7 @@ class Rules:
 @dataclass
 class ForbiddenPathsRule:
     enabled: bool = True
+    when: dict | None = None
     patterns: list[str] = field(default_factory=list)
     exceptions: list[str] = field(default_factory=list)
 
@@ -170,6 +171,7 @@ class ForbiddenPathsRule:
     def from_dict(cls, data: dict) -> ForbiddenPathsRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             patterns=[item for item in data.get('patterns') or []],
             exceptions=[item for item in data.get('exceptions') or []],
         )
@@ -177,6 +179,8 @@ class ForbiddenPathsRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.patterns:
             data['patterns'] = [item for item in self.patterns]
         if self.exceptions:
@@ -186,6 +190,7 @@ class ForbiddenPathsRule:
 @dataclass
 class PathAllowlistRule:
     enabled: bool = False
+    when: dict | None = None
     read: list[str] = field(default_factory=list)
     write: list[str] = field(default_factory=list)
     patch: list[str] = field(default_factory=list)
@@ -194,6 +199,7 @@ class PathAllowlistRule:
     def from_dict(cls, data: dict) -> PathAllowlistRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             read=[item for item in data.get('read') or []],
             write=[item for item in data.get('write') or []],
             patch=[item for item in data.get('patch') or []],
@@ -202,6 +208,8 @@ class PathAllowlistRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.read:
             data['read'] = [item for item in self.read]
         if self.write:
@@ -213,6 +221,7 @@ class PathAllowlistRule:
 @dataclass
 class EgressRule:
     enabled: bool = True
+    when: dict | None = None
     allow: list[str] = field(default_factory=list)
     block: list[str] = field(default_factory=list)
     default: DefaultAction = DefaultAction.BLOCK
@@ -221,6 +230,7 @@ class EgressRule:
     def from_dict(cls, data: dict) -> EgressRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             allow=[item for item in data.get('allow') or []],
             block=[item for item in data.get('block') or []],
             default=DefaultAction((data.get('default') if data.get('default') is not None else DefaultAction.BLOCK.value)),
@@ -229,6 +239,8 @@ class EgressRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.allow:
             data['allow'] = [item for item in self.allow]
         if self.block:
@@ -264,6 +276,7 @@ class SecretPattern:
 @dataclass
 class SecretPatternsRule:
     enabled: bool = True
+    when: dict | None = None
     patterns: list[SecretPattern] = field(default_factory=list)
     skip_paths: list[str] = field(default_factory=list)
 
@@ -271,6 +284,7 @@ class SecretPatternsRule:
     def from_dict(cls, data: dict) -> SecretPatternsRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             patterns=[SecretPattern.from_dict(item) for item in data.get('patterns') or []],
             skip_paths=[item for item in data.get('skip_paths') or []],
         )
@@ -278,6 +292,8 @@ class SecretPatternsRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.patterns:
             data['patterns'] = [item.to_dict() for item in self.patterns]
         if self.skip_paths:
@@ -287,6 +303,7 @@ class SecretPatternsRule:
 @dataclass
 class PatchIntegrityRule:
     enabled: bool = True
+    when: dict | None = None
     max_additions: int = 1000
     max_deletions: int = 500
     forbidden_patterns: list[str] = field(default_factory=list)
@@ -297,6 +314,7 @@ class PatchIntegrityRule:
     def from_dict(cls, data: dict) -> PatchIntegrityRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             max_additions=(data.get('max_additions') if data.get('max_additions') is not None else 1000),
             max_deletions=(data.get('max_deletions') if data.get('max_deletions') is not None else 500),
             forbidden_patterns=[item for item in data.get('forbidden_patterns') or []],
@@ -307,6 +325,8 @@ class PatchIntegrityRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         data['max_additions'] = self.max_additions
         data['max_deletions'] = self.max_deletions
         if self.forbidden_patterns:
@@ -318,18 +338,22 @@ class PatchIntegrityRule:
 @dataclass
 class ShellCommandsRule:
     enabled: bool = True
+    when: dict | None = None
     forbidden_patterns: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> ShellCommandsRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             forbidden_patterns=[item for item in data.get('forbidden_patterns') or []],
         )
 
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.forbidden_patterns:
             data['forbidden_patterns'] = [item for item in self.forbidden_patterns]
         return data
@@ -337,6 +361,7 @@ class ShellCommandsRule:
 @dataclass
 class ToolAccessRule:
     enabled: bool = True
+    when: dict | None = None
     allow: list[str] = field(default_factory=list)
     block: list[str] = field(default_factory=list)
     require_confirmation: list[str] = field(default_factory=list)
@@ -347,6 +372,7 @@ class ToolAccessRule:
     def from_dict(cls, data: dict) -> ToolAccessRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else True),
+            when=(data.get('when') if data.get('when') is not None else None),
             allow=[item for item in data.get('allow') or []],
             block=[item for item in data.get('block') or []],
             require_confirmation=[item for item in data.get('require_confirmation') or []],
@@ -357,6 +383,8 @@ class ToolAccessRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.allow:
             data['allow'] = [item for item in self.allow]
         if self.block:
@@ -371,6 +399,7 @@ class ToolAccessRule:
 @dataclass
 class ComputerUseRule:
     enabled: bool = False
+    when: dict | None = None
     mode: ComputerUseMode = ComputerUseMode.GUARDRAIL
     allowed_actions: list[str] = field(default_factory=list)
 
@@ -378,6 +407,7 @@ class ComputerUseRule:
     def from_dict(cls, data: dict) -> ComputerUseRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             mode=ComputerUseMode((data.get('mode') if data.get('mode') is not None else ComputerUseMode.GUARDRAIL.value)),
             allowed_actions=[item for item in data.get('allowed_actions') or []],
         )
@@ -385,6 +415,8 @@ class ComputerUseRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         data['mode'] = self.mode.value
         if self.allowed_actions:
             data['allowed_actions'] = [item for item in self.allowed_actions]
@@ -393,6 +425,7 @@ class ComputerUseRule:
 @dataclass
 class RemoteDesktopChannelsRule:
     enabled: bool = False
+    when: dict | None = None
     clipboard: bool = False
     file_transfer: bool = False
     audio: bool = True
@@ -402,6 +435,7 @@ class RemoteDesktopChannelsRule:
     def from_dict(cls, data: dict) -> RemoteDesktopChannelsRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             clipboard=(data.get('clipboard') if data.get('clipboard') is not None else False),
             file_transfer=(data.get('file_transfer') if data.get('file_transfer') is not None else False),
             audio=(data.get('audio') if data.get('audio') is not None else True),
@@ -411,6 +445,8 @@ class RemoteDesktopChannelsRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         data['clipboard'] = self.clipboard
         data['file_transfer'] = self.file_transfer
         data['audio'] = self.audio
@@ -420,6 +456,7 @@ class RemoteDesktopChannelsRule:
 @dataclass
 class InputInjectionRule:
     enabled: bool = False
+    when: dict | None = None
     allowed_types: list[str] = field(default_factory=list)
     require_postcondition_probe: bool = False
 
@@ -427,6 +464,7 @@ class InputInjectionRule:
     def from_dict(cls, data: dict) -> InputInjectionRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             allowed_types=[item for item in data.get('allowed_types') or []],
             require_postcondition_probe=(data.get('require_postcondition_probe') if data.get('require_postcondition_probe') is not None else False),
         )
@@ -434,6 +472,8 @@ class InputInjectionRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.allowed_types:
             data['allowed_types'] = [item for item in self.allowed_types]
         data['require_postcondition_probe'] = self.require_postcondition_probe
@@ -442,6 +482,7 @@ class InputInjectionRule:
 @dataclass
 class BrowserAutomationRule:
     enabled: bool = False
+    when: dict | None = None
     allowed_domains: list[str] = field(default_factory=list)
     blocked_domains: list[str] = field(default_factory=list)
     allowed_verbs: list[str] = field(default_factory=list)
@@ -452,6 +493,7 @@ class BrowserAutomationRule:
     def from_dict(cls, data: dict) -> BrowserAutomationRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             allowed_domains=[item for item in data.get('allowed_domains') or []],
             blocked_domains=[item for item in data.get('blocked_domains') or []],
             allowed_verbs=[item for item in data.get('allowed_verbs') or []],
@@ -462,6 +504,8 @@ class BrowserAutomationRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.allowed_domains:
             data['allowed_domains'] = [item for item in self.allowed_domains]
         if self.blocked_domains:
@@ -476,6 +520,7 @@ class BrowserAutomationRule:
 @dataclass
 class CodeExecutionRule:
     enabled: bool = False
+    when: dict | None = None
     language_allowlist: list[str] = field(default_factory=list)
     module_denylist: list[str] = field(default_factory=list)
     network_access: bool = False
@@ -486,6 +531,7 @@ class CodeExecutionRule:
     def from_dict(cls, data: dict) -> CodeExecutionRule:
         return cls(
             enabled=(data.get('enabled') if data.get('enabled') is not None else False),
+            when=(data.get('when') if data.get('when') is not None else None),
             language_allowlist=[item for item in data.get('language_allowlist') or []],
             module_denylist=[item for item in data.get('module_denylist') or []],
             network_access=(data.get('network_access') if data.get('network_access') is not None else False),
@@ -496,6 +542,8 @@ class CodeExecutionRule:
     def to_dict(self) -> dict:
         data: dict = {}
         data['enabled'] = self.enabled
+        if self.when is not None:
+            data['when'] = self.when
         if self.language_allowlist:
             data['language_allowlist'] = [item for item in self.language_allowlist]
         if self.module_denylist:
@@ -626,8 +674,8 @@ class OriginProfile:
     id: str
     match_rules: OriginMatch | None = None
     posture: str | None = None
-    tool_access: ToolAccessRule | None = None
-    egress: EgressRule | None = None
+    tool_access: OriginToolAccessOverlay | None = None
+    egress: OriginEgressOverlay | None = None
     data: OriginDataPolicy | None = None
     budgets: OriginBudgets | None = None
     bridge: BridgePolicy | None = None
@@ -639,8 +687,8 @@ class OriginProfile:
             id=data['id'],
             match_rules=(OriginMatch.from_dict(data.get('match')) if data.get('match') is not None else None),
             posture=(data.get('posture') if data.get('posture') is not None else None),
-            tool_access=(ToolAccessRule.from_dict(data.get('tool_access')) if data.get('tool_access') is not None else None),
-            egress=(EgressRule.from_dict(data.get('egress')) if data.get('egress') is not None else None),
+            tool_access=(OriginToolAccessOverlay.from_dict(data.get('tool_access')) if data.get('tool_access') is not None else None),
+            egress=(OriginEgressOverlay.from_dict(data.get('egress')) if data.get('egress') is not None else None),
             data=(OriginDataPolicy.from_dict(data.get('data')) if data.get('data') is not None else None),
             budgets=(OriginBudgets.from_dict(data.get('budgets')) if data.get('budgets') is not None else None),
             bridge=(BridgePolicy.from_dict(data.get('bridge')) if data.get('bridge') is not None else None),
@@ -666,6 +714,62 @@ class OriginProfile:
             data['bridge'] = self.bridge.to_dict()
         if self.explanation is not None:
             data['explanation'] = self.explanation
+        return data
+
+@dataclass
+class OriginToolAccessOverlay:
+    allow: list[str] = field(default_factory=list)
+    block: list[str] = field(default_factory=list)
+    require_confirmation: list[str] = field(default_factory=list)
+    default: DefaultAction | None = None
+    max_args_size: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> OriginToolAccessOverlay:
+        return cls(
+            allow=[item for item in data.get('allow') or []],
+            block=[item for item in data.get('block') or []],
+            require_confirmation=[item for item in data.get('require_confirmation') or []],
+            default=(DefaultAction(data.get('default')) if data.get('default') is not None else None),
+            max_args_size=(data.get('max_args_size') if data.get('max_args_size') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        if self.allow:
+            data['allow'] = [item for item in self.allow]
+        if self.block:
+            data['block'] = [item for item in self.block]
+        if self.require_confirmation:
+            data['require_confirmation'] = [item for item in self.require_confirmation]
+        if self.default is not None:
+            data['default'] = self.default.value
+        if self.max_args_size is not None:
+            data['max_args_size'] = self.max_args_size
+        return data
+
+@dataclass
+class OriginEgressOverlay:
+    allow: list[str] = field(default_factory=list)
+    block: list[str] = field(default_factory=list)
+    default: DefaultAction | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> OriginEgressOverlay:
+        return cls(
+            allow=[item for item in data.get('allow') or []],
+            block=[item for item in data.get('block') or []],
+            default=(DefaultAction(data.get('default')) if data.get('default') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        if self.allow:
+            data['allow'] = [item for item in self.allow]
+        if self.block:
+            data['block'] = [item for item in self.block]
+        if self.default is not None:
+            data['default'] = self.default.value
         return data
 
 @dataclass
@@ -841,6 +945,7 @@ class PromptInjectionDetection:
     warn_at_or_above: DetectionLevel | None = None
     block_at_or_above: DetectionLevel | None = None
     max_scan_bytes: int | None = None
+    heuristics: PromptInjectionHeuristics | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> PromptInjectionDetection:
@@ -849,6 +954,7 @@ class PromptInjectionDetection:
             warn_at_or_above=(DetectionLevel(data.get('warn_at_or_above')) if data.get('warn_at_or_above') is not None else None),
             block_at_or_above=(DetectionLevel(data.get('block_at_or_above')) if data.get('block_at_or_above') is not None else None),
             max_scan_bytes=(data.get('max_scan_bytes') if data.get('max_scan_bytes') is not None else None),
+            heuristics=(PromptInjectionHeuristics.from_dict(data.get('heuristics')) if data.get('heuristics') is not None else None),
         )
 
     def to_dict(self) -> dict:
@@ -861,6 +967,28 @@ class PromptInjectionDetection:
             data['block_at_or_above'] = self.block_at_or_above.value
         if self.max_scan_bytes is not None:
             data['max_scan_bytes'] = self.max_scan_bytes
+        if self.heuristics is not None:
+            data['heuristics'] = self.heuristics.to_dict()
+        return data
+
+@dataclass
+class PromptInjectionHeuristics:
+    enabled: bool | None = None
+    min_score: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> PromptInjectionHeuristics:
+        return cls(
+            enabled=(data.get('enabled') if data.get('enabled') is not None else None),
+            min_score=(data.get('min_score') if data.get('min_score') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        if self.enabled is not None:
+            data['enabled'] = self.enabled
+        if self.min_score is not None:
+            data['min_score'] = self.min_score
         return data
 
 @dataclass
@@ -920,6 +1048,56 @@ class ThreatIntelDetection:
         return data
 
 @dataclass
+class ControlMapping:
+    framework: str
+    control_id: str
+    rule_paths: list[str]
+    notes: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ControlMapping:
+        return cls(
+            framework=data['framework'],
+            control_id=data['control_id'],
+            rule_paths=[item for item in data.get('rule_paths', [])],
+            notes=(data.get('notes') if data.get('notes') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['framework'] = self.framework
+        data['control_id'] = self.control_id
+        data['rule_paths'] = [item for item in self.rule_paths]
+        if self.notes is not None:
+            data['notes'] = self.notes
+        return data
+
+@dataclass
+class ChangelogEntry:
+    version: str
+    date: str
+    summary: str
+    author: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ChangelogEntry:
+        return cls(
+            version=data['version'],
+            date=data['date'],
+            summary=data['summary'],
+            author=(data.get('author') if data.get('author') is not None else None),
+        )
+
+    def to_dict(self) -> dict:
+        data: dict = {}
+        data['version'] = self.version
+        data['date'] = self.date
+        data['summary'] = self.summary
+        if self.author is not None:
+            data['author'] = self.author
+        return data
+
+@dataclass
 class GovernanceMetadata:
     author: str | None = None
     approved_by: str | None = None
@@ -930,6 +1108,12 @@ class GovernanceMetadata:
     policy_version: int | None = None
     effective_date: str | None = None
     expiry_date: str | None = None
+    owner: str | None = None
+    reviewers: list[str] = field(default_factory=list)
+    next_review_date: str | None = None
+    changelog: list[ChangelogEntry] = field(default_factory=list)
+    supersedes: str | None = None
+    controls: list[ControlMapping] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict) -> GovernanceMetadata:
@@ -943,6 +1127,12 @@ class GovernanceMetadata:
             policy_version=(data.get('policy_version') if data.get('policy_version') is not None else None),
             effective_date=(data.get('effective_date') if data.get('effective_date') is not None else None),
             expiry_date=(data.get('expiry_date') if data.get('expiry_date') is not None else None),
+            owner=(data.get('owner') if data.get('owner') is not None else None),
+            reviewers=[item for item in data.get('reviewers') or []],
+            next_review_date=(data.get('next_review_date') if data.get('next_review_date') is not None else None),
+            changelog=[ChangelogEntry.from_dict(item) for item in data.get('changelog') or []],
+            supersedes=(data.get('supersedes') if data.get('supersedes') is not None else None),
+            controls=[ControlMapping.from_dict(item) for item in data.get('controls') or []],
         )
 
     def to_dict(self) -> dict:
@@ -965,4 +1155,16 @@ class GovernanceMetadata:
             data['effective_date'] = self.effective_date
         if self.expiry_date is not None:
             data['expiry_date'] = self.expiry_date
+        if self.owner is not None:
+            data['owner'] = self.owner
+        if self.reviewers:
+            data['reviewers'] = [item for item in self.reviewers]
+        if self.next_review_date is not None:
+            data['next_review_date'] = self.next_review_date
+        if self.changelog:
+            data['changelog'] = [item.to_dict() for item in self.changelog]
+        if self.supersedes is not None:
+            data['supersedes'] = self.supersedes
+        if self.controls:
+            data['controls'] = [item.to_dict() for item in self.controls]
         return data

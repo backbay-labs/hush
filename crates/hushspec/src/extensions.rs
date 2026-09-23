@@ -1,6 +1,7 @@
 pub use crate::generated_models::{
     BridgePolicy, BridgeTarget, DetectionExtension, DetectionLevel, Extensions, JailbreakDetection,
-    OriginBudgets, OriginDataPolicy, OriginDefaultBehavior, OriginMatch, OriginProfile,
-    OriginsExtension, PostureExtension, PostureState, PostureTransition, PromptInjectionDetection,
-    ThreatIntelDetection, TransitionTrigger,
+    OriginBudgets, OriginDataPolicy, OriginDefaultBehavior, OriginEgressOverlay, OriginMatch,
+    OriginProfile, OriginToolAccessOverlay, OriginsExtension, PostureExtension, PostureState,
+    PostureTransition, PromptInjectionDetection, PromptInjectionHeuristics, ThreatIntelDetection,
+    TransitionTrigger,
 };

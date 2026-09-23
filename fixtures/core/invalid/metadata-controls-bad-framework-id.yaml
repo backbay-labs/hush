@@ -1,0 +1,13 @@
+# Core 2.5: framework MUST match ^[a-z0-9][a-z0-9.-]*$.
+hushspec: "0.2.0"
+name: controls-bad-framework-id
+metadata:
+  controls:
+    - framework: "SOC2 TSC 2017"
+      control_id: CC6.1
+      rule_paths:
+        - rules.egress
+rules:
+  egress:
+    allow: ["api.example.com"]
+    default: block

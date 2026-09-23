@@ -165,10 +165,10 @@ fn eval_resolves_extends_chain() {
 }
 
 #[test]
-fn eval_unknown_action_type_allows_with_stderr_note() {
-    // The reference evaluator allows unknown action types ("no reference
-    // evaluator rule for this action type"); the CLI mirrors that and
-    // surfaces likely typos on stderr without changing stdout or the code.
+fn eval_unknown_action_type_denies_with_stderr_note() {
+    // The reference evaluator denies unknown action types fail-closed
+    // (`__unknown_action_type__`, core spec Section 5); the CLI mirrors that
+    // and surfaces likely typos on stderr.
     let dir = TempDir::new().unwrap();
     let policy = write_file(&dir, "policy.yaml", EVAL_POLICY);
     h2h()
@@ -176,8 +176,9 @@ fn eval_unknown_action_type_allows_with_stderr_note() {
         .arg(&policy)
         .args(["--type", "frobnicate", "--target", "anything"])
         .assert()
-        .code(0)
-        .stdout(predicate::str::contains("ALLOW"))
+        .code(1)
+        .stdout(predicate::str::contains("DENY"))
+        .stdout(predicate::str::contains("__unknown_action_type__"))
         .stderr(predicate::str::contains("not a reference action type"));
 }
 
@@ -311,6 +312,7 @@ rules:
     default: block
 extensions:
   origins:
+    default_behavior: minimal_profile
     profiles:
       - id: "public-channel"
         match:
@@ -457,6 +459,20 @@ fn eval_action_json_conflicts_with_field_flags() {
         .args(["--action-json", r#"{"type": "egress"}"#, "--type", "egress"])
         .assert()
         .code(2);
+
+    // `--context` shapes the action too, so it conflicts like the rest rather
+    // than silently overwriting the context inside the document.
+    h2h()
+        .arg("eval")
+        .arg(&policy)
+        .args([
+            "--action-json",
+            r#"{"type": "egress", "context": {"tags": ["a"]}}"#,
+            "--context",
+            r#"{"tags": ["b"]}"#,
+        ])
+        .assert()
+        .code(2);
 }
 
 #[test]
@@ -499,7 +515,9 @@ fn eval_explain_renders_rule_trace() {
         .stdout(predicate::str::contains("Policy: explain-fixture"))
         .stdout(predicate::str::contains("Rule trace:"))
         .stdout(predicate::str::contains("forbidden_paths"))
-        .stdout(predicate::str::contains("short-circuited by prior deny"))
+        // Every applicable block is evaluated (core spec 6.1): the allowlist
+        // still runs after the forbidden-path deny.
+        .stdout(predicate::str::contains("path_allowlist"))
         .stdout(predicate::str::contains("Precedence:"))
         .stdout(predicate::str::contains("Decision: DENY"));
 }
@@ -596,7 +614,9 @@ fn eval_format_json_emits_deterministic_report() {
     assert_eq!(report["decision"], "deny");
     assert_eq!(report["matched_rule"], "rules.egress.default");
     assert_eq!(report["action"]["type"], "egress");
-    assert_eq!(report["policy"]["content_hash"].as_str().unwrap().len(), 64);
+    let content_hash = report["policy"]["content_hash"].as_str().unwrap();
+    assert!(content_hash.starts_with("sha256:") && content_hash.len() == 71);
+    assert_eq!(report["enforcement"]["outcome"], "blocked");
     assert!(!report["rule_trace"].as_array().unwrap().is_empty());
     assert!(report.get("receipt_id").is_none());
     assert!(report.get("timestamp").is_none());
@@ -627,7 +647,7 @@ fn eval_format_receipt_conforms_to_receipt_schema() {
     assert!(receipt["receipt_id"].is_string());
 
     let schema_text =
-        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v1.schema.json"))
             .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
     // Explicit options (rather than relying on the draft's default) so format
@@ -676,7 +696,7 @@ fn eval_format_receipt_schema_rejects_invalid_timestamp() {
     receipt["timestamp"] = serde_json::Value::String("not-a-date".to_string());
 
     let schema_text =
-        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v0.schema.json"))
+        fs::read_to_string(workspace_root().join("schemas/hushspec-receipt.v1.schema.json"))
             .unwrap();
     let schema: serde_json::Value = serde_json::from_str(&schema_text).unwrap();
     let compiled = jsonschema::JSONSchema::options()

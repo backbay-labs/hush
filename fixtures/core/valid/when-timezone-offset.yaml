@@ -1,0 +1,20 @@
+# Both fixed-offset shapes are accepted on a `time_window` (core spec 3.13):
+# a sign and then HH:MM, or a sign and then HH alone.
+hushspec: "0.1.0"
+name: when-timezone-offset
+rules:
+  shell_commands:
+    when:
+      time_window:
+        start: "09:00"
+        end: "17:00"
+        timezone: "+05:30"
+    forbidden_patterns: ["mkfs"]
+  tool_access:
+    when:
+      time_window:
+        start: "09:00"
+        end: "17:00"
+        timezone: "-08"
+    block: [deploy]
+    default: allow

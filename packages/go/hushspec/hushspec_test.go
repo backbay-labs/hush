@@ -16,8 +16,8 @@ name: test
 	if spec.HushSpecVersion != "0.1.0" {
 		t.Fatalf("expected hushspec version 0.1.0, got %q", spec.HushSpecVersion)
 	}
-	if spec.Name != "test" {
-		t.Fatalf("expected name test, got %q", spec.Name)
+	if stringValue(spec.Name) != "test" {
+		t.Fatalf("expected name test, got %q", stringValue(spec.Name))
 	}
 	if !Validate(spec).IsValid() {
 		t.Fatal("expected minimal document to validate")
@@ -160,9 +160,13 @@ rules:
 	}
 }
 
-func TestParseDefaultsOriginProfileNestedRuleEnabledFlags(t *testing.T) {
+// TestParseKeepsOriginProfileOverlaysTriState locks in origins spec 4: an
+// origin profile rule block is a tri-state overlay, not a rule block. It carries no `enabled`
+// flag, and an omitted `default` stays unset so the base document's default is
+// inherited rather than a `block` being materialized.
+func TestParseKeepsOriginProfileOverlaysTriState(t *testing.T) {
 	spec, err := Parse(`
-hushspec: "0.1.0"
+hushspec: "0.2.0"
 extensions:
   origins:
     profiles:
@@ -171,23 +175,55 @@ extensions:
           provider: slack
         tool_access:
           allow: [github_search]
-          default: block
         egress:
           allow: ["api.github.com"]
+      - id: teams
+        match:
+          provider: teams
+        tool_access:
           default: block
+        egress:
+          default: allow
 `)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if spec.Extensions == nil || spec.Extensions.Origins == nil || len(spec.Extensions.Origins.Profiles) != 1 {
-		t.Fatal("expected origins profile to parse")
+	if spec.Extensions == nil || spec.Extensions.Origins == nil || len(spec.Extensions.Origins.Profiles) != 2 {
+		t.Fatal("expected origins profiles to parse")
 	}
-	profile := spec.Extensions.Origins.Profiles[0]
-	if profile.ToolAccess == nil || !profile.ToolAccess.Enabled {
-		t.Fatal("expected omitted origins.profile.tool_access.enabled to default to true")
+	slack := spec.Extensions.Origins.Profiles[0]
+	if slack.ToolAccess == nil || slack.ToolAccess.Default != nil {
+		t.Fatalf("expected omitted origins.profile.tool_access.default to stay unset, got %v", slack.ToolAccess.Default)
 	}
-	if profile.Egress == nil || !profile.Egress.Enabled {
-		t.Fatal("expected omitted origins.profile.egress.enabled to default to true")
+	if slack.Egress == nil || slack.Egress.Default != nil {
+		t.Fatalf("expected omitted origins.profile.egress.default to stay unset, got %v", slack.Egress.Default)
+	}
+	teams := spec.Extensions.Origins.Profiles[1]
+	if teams.ToolAccess == nil || teams.ToolAccess.Default == nil || *teams.ToolAccess.Default != DefaultActionBlock {
+		t.Fatal("expected a stated origins.profile.tool_access.default to be preserved")
+	}
+	if teams.Egress == nil || teams.Egress.Default == nil || *teams.Egress.Default != DefaultActionAllow {
+		t.Fatal("expected a stated origins.profile.egress.default to be preserved")
+	}
+}
+
+// TestParseRejectsEnabledOnOriginProfileOverlay locks in that the overlay has
+// no `enabled` field at all: a document that sets one is a parse error.
+func TestParseRejectsEnabledOnOriginProfileOverlay(t *testing.T) {
+	_, err := Parse(`
+hushspec: "0.2.0"
+extensions:
+  origins:
+    profiles:
+      - id: slack
+        match:
+          provider: slack
+        tool_access:
+          enabled: true
+          allow: [github_search]
+`)
+	if err == nil {
+		t.Fatal("expected `enabled` on an origin profile overlay to be rejected")
 	}
 }
 
@@ -228,14 +264,11 @@ func TestValidateInvalidPostureInitial(t *testing.T) {
 	}
 }
 
-// TestValidateRejectsNonFiniteMaxImbalanceRatio locks in the shared
-// wave-3 fix (spec item A): every float-typed config field must reject NaN
-// and +/-Infinity at validation time. Before this fix, `.nan` failed every
-// `<= 0` bounds check (NaN comparisons are always false), so it silently
-// passed validation and then made `require_balance` fail OPEN at evaluation
-// time (`ratio > NaN` is also always false) -- and, separately, made
-// json.Marshal error on the NaN when hashing the policy for a receipt,
-// silently dropping content_hash. Rejecting it here closes both holes.
+// Every float-typed configuration field rejects NaN and infinities at
+// validation time. A NaN would pass every `<= 0` bounds check, since a
+// comparison with NaN is always false, and would then make
+// `require_balance` fail open at evaluation time for the same reason, while
+// json.Marshal refuses it when the policy is hashed for a receipt.
 func TestValidateRejectsNonFiniteMaxImbalanceRatio(t *testing.T) {
 	cases := []struct {
 		name string
@@ -247,18 +280,17 @@ func TestValidateRejectsNonFiniteMaxImbalanceRatio(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec, err := Parse(`
+			_, err := Parse(`
 hushspec: "0.1.0"
 rules:
   patch_integrity:
     max_imbalance_ratio: ` + tc.yaml + `
 `)
-			if err != nil {
-				t.Fatalf("unexpected parse error: %v", err)
+			if err == nil {
+				t.Fatal("expected non-finite scalar to fail parsing")
 			}
-			if spec.Rules == nil || spec.Rules.PatchIntegrity == nil || spec.Rules.PatchIntegrity.MaxImbalanceRatio == nil {
-				t.Fatal("expected max_imbalance_ratio to parse")
-			}
+			value := map[string]float64{"nan": math.NaN(), "positive infinity": math.Inf(1), "negative infinity": math.Inf(-1)}[tc.name]
+			spec := &HushSpec{HushSpecVersion: "0.1.0", Rules: &Rules{PatchIntegrity: &PatchIntegrityRule{MaxImbalanceRatio: &value}}}
 			result := Validate(spec)
 			if result.IsValid() {
 				t.Fatalf("expected max_imbalance_ratio: %s to fail validation", tc.yaml)
@@ -267,10 +299,8 @@ rules:
 	}
 }
 
-// TestValidateRejectsNonFiniteSimilarityThreshold mirrors the
-// max_imbalance_ratio test above for extensions.detection.threat_intel.
-// similarity_threshold, the other float-typed config field the shared
-// wave-3 fix names explicitly.
+// extensions.detection.threat_intel.similarity_threshold is the other
+// float-typed configuration field and rejects non-finite values the same way.
 func TestValidateRejectsNonFiniteSimilarityThreshold(t *testing.T) {
 	nan := math.NaN()
 	spec := &HushSpec{
@@ -303,7 +333,10 @@ func TestValidateDetectionTopK(t *testing.T) {
 	}
 }
 
-func TestMergeReplaceClearsExtends(t *testing.T) {
+// TestMergeReplaceClearsResolutionFields covers core spec 2.3: a resolved
+// document declares neither `extends` nor `merge_strategy`, `replace`
+// included.
+func TestMergeReplaceClearsResolutionFields(t *testing.T) {
 	base := mustParse(t, `
 hushspec: "0.1.0"
 name: base
@@ -324,11 +357,11 @@ rules:
 `)
 
 	merged := Merge(base, child)
-	if merged.Extends != "" {
-		t.Fatalf("expected replace merge to clear extends, got %q", merged.Extends)
+	if merged.Extends != nil {
+		t.Fatalf("expected replace merge to clear extends, got %q", *merged.Extends)
 	}
-	if merged.MergeStrategy != MergeStrategyReplace {
-		t.Fatalf("expected merge strategy replace, got %q", merged.MergeStrategy)
+	if merged.MergeStrategy != "" {
+		t.Fatalf("expected replace merge to clear merge_strategy, got %q", merged.MergeStrategy)
 	}
 	if merged.Rules == nil || merged.Rules.Egress != nil || merged.Rules.ToolAccess == nil {
 		t.Fatal("expected replace merge to keep only child rules")
@@ -398,8 +431,8 @@ extensions:
 `)
 
 	merged := Merge(base, child)
-	if merged.Extends != "" {
-		t.Fatalf("expected merged spec to clear extends, got %q", merged.Extends)
+	if merged.Extends != nil {
+		t.Fatalf("expected merged spec to clear extends, got %q", *merged.Extends)
 	}
 	if merged.Rules == nil || merged.Rules.ForbiddenPaths == nil || merged.Rules.Egress == nil {
 		t.Fatal("expected deep merge to preserve base rules and add child rules")
@@ -461,11 +494,9 @@ extensions:
 	}
 }
 
-// TestMergeMetadataChildOverParent covers parity fix S1: a resolved policy's
-// top-level metadata must be the child's when the child sets any, and fall
-// back to the base's when the child has none (matching Rust's
-// `child.metadata.clone().or_else(|| base.metadata.clone())`). Go previously
-// kept the base's metadata unconditionally, ignoring the child's.
+// TestMergeMetadataChildOverParent locks in core spec 4.2: a resolved policy's
+// top-level metadata is the child's when the child sets any, and falls back to
+// the base's when the child has none.
 func TestMergeMetadataChildOverParent(t *testing.T) {
 	base := mustParse(t, `
 hushspec: "0.1.0"
@@ -482,7 +513,7 @@ metadata:
 `)
 
 	merged := Merge(base, child)
-	if merged.Metadata == nil || merged.Metadata.Author != "b" {
+	if merged.Metadata == nil || stringValue(merged.Metadata.Author) != "b" {
 		t.Fatalf("expected child metadata.author to win, got %+v", merged.Metadata)
 	}
 
@@ -492,7 +523,7 @@ name: child
 extends: base
 `)
 	fallback := Merge(base, childNoMetadata)
-	if fallback.Metadata == nil || fallback.Metadata.Author != "a" {
+	if fallback.Metadata == nil || stringValue(fallback.Metadata.Author) != "a" {
 		t.Fatalf("expected base metadata to be preserved when child has none, got %+v", fallback.Metadata)
 	}
 }

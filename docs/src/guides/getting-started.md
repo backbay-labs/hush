@@ -11,28 +11,33 @@
 | Cargo (from source) | `cargo install hushspec-cli` |
 | Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
 
-> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
-
 This installs the `h2h` command.
 
-The Rust crate and TypeScript package are not published yet. For now, consume
-the reference implementations directly from a local checkout of this repo.
+Each SDK is published at 1.0.0.
 
 ### Rust
 
-Add a path dependency, or point Cargo at the Git repository:
-
 ```toml
 [dependencies]
-hushspec = { path = "../hush/crates/hushspec" }
+hushspec = "1.0"
 ```
 
 ### TypeScript / Node.js
 
-Install the package from a local checkout:
+```bash
+npm install @hushspec/core
+```
+
+### Python
 
 ```bash
-npm install ../hush/packages/hushspec
+pip install hushspec
+```
+
+### Go
+
+```bash
+go get github.com/backbay-labs/hush/packages/go@v1.0.0
 ```
 
 ## Parsing a Document

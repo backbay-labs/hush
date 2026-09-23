@@ -1,30 +1,102 @@
+// Reference evaluator for HushSpec 0.2 (core spec Sections 3, 5, and 6).
+//
+// Evaluation of one action is:
+//  1. extension guards (panic, origins `default_behavior`, posture capability),
+//  2. every applicable rule block for the action type -- present, `enabled`,
+//     and with a satisfied `when` condition -- evaluated in the order of the
+//     Section 5 table, never short-circuiting on an allow,
+//  3. aggregation: deny beats warn beats allow; matched_rule/reason come from
+//     the first block in evaluation order whose decision equals the aggregate
+//     and which named a rule.
+//
+// Unknown action types deny (`__unknown_action_type__`). Hosts and paths are
+// normalized as specified in Section 3.14 before any pattern is consulted.
+
 package hushspec
 
 import (
 	"fmt"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
+	"golang.org/x/text/unicode/norm"
 )
 
+// Decision is what the evaluator concluded about one action (core spec 6).
 type Decision string
 
 const (
+	// DecisionAllow permits the action.
 	DecisionAllow Decision = "allow"
-	DecisionWarn  Decision = "warn"
-	DecisionDeny  Decision = "deny"
+	// DecisionWarn permits the action pending confirmation; with no
+	// confirmation channel it is a deny (core spec 6).
+	DecisionWarn Decision = "warn"
+	// DecisionDeny refuses the action.
+	DecisionDeny Decision = "deny"
 )
+
+// UnknownActionTypeRule is the matched_rule reported when the action type is
+// unknown to the specification (core spec 5).
+const UnknownActionTypeRule = "__unknown_action_type__"
+
+// PanicRule is the matched_rule reported when the emergency panic protocol is
+// active.
+const PanicRule = "__hushspec_panic__"
 
 // EvaluationAction is the input to the reference evaluator.
 type EvaluationAction struct {
-	Type     string          `json:"type" yaml:"type"`
-	Target   string          `json:"target,omitempty" yaml:"target,omitempty"`
-	Content  string          `json:"content,omitempty" yaml:"content,omitempty"`
-	Origin   *OriginContext  `json:"origin,omitempty" yaml:"origin,omitempty"`
-	Posture  *PostureContext `json:"posture,omitempty" yaml:"posture,omitempty"`
-	ArgsSize *int            `json:"args_size,omitempty" yaml:"args_size,omitempty"`
+	Type   string `json:"type" yaml:"type"`
+	Target string `json:"target,omitempty" yaml:"target,omitempty"`
+	// Content is the payload scanned by secret_patterns, patch_integrity,
+	// browser_automation's credential detector, code_execution's module
+	// denylist and the detection extension.
+	//
+	// A pointer because *presence* is load-bearing, not just emptiness: core
+	// spec 3.4 scans `egress` and `tool_call` "only when `content` is
+	// present", so an explicitly empty payload is still scanned (and a pattern
+	// that matches the empty string still fires) while an absent one leaves
+	// the block unevaluated. A plain string would conflate the two.
+	Content *string `json:"content,omitempty" yaml:"content,omitempty"`
+	// URL is the navigation destination of a browser_action (core spec 3.11).
+	// A nil URL skips the destination-host check entirely; a present-but-empty
+	// URL is an unusable host that matches no pattern.
+	URL *string `json:"url,omitempty" yaml:"url,omitempty"`
+	// Network reports whether a code_exec call requests network access
+	// (core spec 3.12).
+	Network *bool `json:"network,omitempty" yaml:"network,omitempty"`
+	// TimeoutMs is the execution time a code_exec call requests, in
+	// milliseconds (core spec 3.12).
+	TimeoutMs *int            `json:"timeout_ms,omitempty" yaml:"timeout_ms,omitempty"`
+	Origin    *OriginContext  `json:"origin,omitempty" yaml:"origin,omitempty"`
+	Posture   *PostureContext `json:"posture,omitempty" yaml:"posture,omitempty"`
+	ArgsSize  *int            `json:"args_size,omitempty" yaml:"args_size,omitempty"`
+	// Context is the runtime context consulted by `when` conditions (core spec
+	// 3.13). When absent, conditions see an empty context and the engine clock.
+	Context *RuntimeContext `json:"context,omitempty" yaml:"context,omitempty"`
 }
 
+// HasContent reports whether the action carries a content payload at all,
+// independent of whether that payload is empty (core spec 3.4).
+func (a *EvaluationAction) HasContent() bool {
+	return a != nil && a.Content != nil
+}
+
+// ContentOrEmpty is the action's content payload, or "" when it carries none.
+// Use it where the scan itself is wanted; use HasContent for applicability.
+func (a *EvaluationAction) ContentOrEmpty() string {
+	if a == nil || a.Content == nil {
+		return ""
+	}
+	return *a.Content
+}
+
+// OriginContext describes where an action came from, for origin profile
+// selection (origins spec 3). Every field is optional; a profile's `match`
+// constrains the ones it names.
 type OriginContext struct {
 	Provider             string   `json:"provider,omitempty" yaml:"provider,omitempty"`
 	TenantID             string   `json:"tenant_id,omitempty" yaml:"tenant_id,omitempty"`
@@ -37,15 +109,19 @@ type OriginContext struct {
 	ActorRole            string   `json:"actor_role,omitempty" yaml:"actor_role,omitempty"`
 }
 
+// PostureContext is the posture state an action is evaluated under, and the
+// signal that may move it (posture spec 5).
 type PostureContext struct {
 	// Current is a pointer so an explicitly-supplied empty string ("") is
-	// distinguishable from an absent field, mirroring Rust's Option<String>.
-	// An empty/unknown current state is an unknown posture state (fail-closed
-	// deny), while an absent field falls back to the posture's initial state.
+	// distinguishable from an absent field: an empty or unknown current state
+	// is an unknown posture state (a fail-closed deny), while an absent field
+	// falls back to the posture's initial state.
 	Current *string `json:"current,omitempty" yaml:"current,omitempty"`
 	Signal  string  `json:"signal,omitempty" yaml:"signal,omitempty"`
 }
 
+// EvaluationResult is the evaluator's answer for one action: the aggregate
+// decision and the rule that produced it.
 type EvaluationResult struct {
 	Decision      Decision       `json:"decision" yaml:"decision"`
 	MatchedRule   string         `json:"matched_rule,omitempty" yaml:"matched_rule,omitempty"`
@@ -54,9 +130,18 @@ type EvaluationResult struct {
 	Posture       *PostureResult `json:"posture,omitempty" yaml:"posture,omitempty"`
 }
 
+// PostureResult is the posture state in force for an evaluation and the state
+// the action's signal moves it to.
 type PostureResult struct {
 	Current string `json:"current" yaml:"current"`
 	Next    string `json:"next" yaml:"next"`
+}
+
+// TracedEvaluation is an evaluation result together with its recorded rule
+// trace, in evaluation order, so receipts reflect exactly what ran.
+type TracedEvaluation struct {
+	Result EvaluationResult `json:"result"`
+	Trace  []RuleEvaluation `json:"trace"`
 }
 
 type pathOperation int
@@ -72,836 +157,1005 @@ type patchStats struct {
 	deletions int
 }
 
-// Evaluate runs the reference evaluator: checks panic mode, resolves origin
-// and posture context, then dispatches to the appropriate rule evaluator.
+// Evaluate runs the reference evaluator against a resolved document.
+//
+// `when` conditions are evaluated against action.Context (an empty context and
+// the engine clock when absent).
+//
+// The document is compiled on the fly (and memoized), so a caller evaluating
+// many actions against one policy should hold a [CompiledPolicy] from
+// [CompilePolicy] and call its methods instead.
 func Evaluate(spec *HushSpec, action *EvaluationAction) EvaluationResult {
+	return EvaluateTraced(spec, action, nil, nil).Result
+}
+
+// EvaluateTraced is the full evaluation with the recorded rule trace (used by
+// receipts and `h2h explain`). The explicit context replaces action.Context;
+// out-of-band conditions keyed by rule-block name are ANDed with each block's
+// own `when` (core spec 3.13).
+func EvaluateTraced(
+	spec *HushSpec,
+	action *EvaluationAction,
+	context *RuntimeContext,
+	conditions map[string]*Condition,
+) TracedEvaluation {
+	return cachedCompile(spec).EvaluateTraced(action, context, conditions)
+}
+
+// blockDecision is the decision contributed by one rule block. An empty
+// matchedRule means the block named no rule.
+type blockDecision struct {
+	decision    Decision
+	matchedRule string
+	reason      string
+}
+
+func allowDecision(matchedRule, reason string) blockDecision {
+	return blockDecision{decision: DecisionAllow, matchedRule: matchedRule, reason: reason}
+}
+
+func warnDecision(matchedRule, reason string) blockDecision {
+	return blockDecision{decision: DecisionWarn, matchedRule: matchedRule, reason: reason}
+}
+
+func denyDecision(matchedRule, reason string) blockDecision {
+	return blockDecision{decision: DecisionDeny, matchedRule: matchedRule, reason: reason}
+}
+
+// inactive records why an applicable block was not evaluated.
+type inactive struct{ reason string }
+
+var (
+	inactiveDisabled           = &inactive{reason: "rule disabled"}
+	inactiveConditionFalse     = &inactive{reason: "when condition is false"}
+	inactiveOutOfBandCondition = &inactive{reason: "out-of-band condition is false"}
+)
+
+type evaluator struct {
+	policy     *CompiledPolicy
+	action     *EvaluationAction
+	context    *RuntimeContext
+	conditions map[string]*Condition
+	trace      []RuleEvaluation
+	// capabilities is what the effective posture state grants, resolved once
+	// per evaluation before the active-block mask is derived: `when`
+	// conditions can name a capability (core spec 3.13), so posture -- and the
+	// origins profile it may come from -- is settled first.
+	capabilities grantedCapabilities
+}
+
+// blockMask is the set of applicable blocks that are active for one
+// evaluation: a bit per [blockID] that is present, applicable to this action,
+// enabled, and whose in-document `when` plus any out-of-band condition hold.
+// Inactive blocks carry the reason the trace records. It is derived once per
+// evaluation rather than re-derived per block, and never copies the document.
+type blockMask struct {
+	active  uint32
+	reasons [blockCount]*inactive
+}
+
+func (m *blockMask) isActive(block blockID) bool {
+	return m.active&(1<<uint(block)) != 0
+}
+
+func (e *evaluator) run() TracedEvaluation {
 	if IsPanicActive() {
-		return EvaluationResult{
-			Decision:    DecisionDeny,
-			MatchedRule: "__hushspec_panic__",
-			Reason:      "emergency panic mode is active",
-		}
+		e.record("panic", RuleOutcomeDeny, PanicRule, "emergency panic mode is active", true)
+		return e.finish(DecisionDeny, PanicRule, "emergency panic mode is active", "", nil)
 	}
 
-	matchedProfile := selectOriginProfile(spec, action.Origin)
-	var originProfileID string
+	blocks, known := applicableBlocks(e.action.Type)
+	if !known {
+		reason := fmt.Sprintf("action type '%s' is unknown to the specification", e.action.Type)
+		e.record("default", RuleOutcomeDeny, UnknownActionTypeRule, reason, true)
+		return e.finish(DecisionDeny, UnknownActionTypeRule, reason, "", nil)
+	}
+
+	policy := e.policy
+
+	// Origins guard: select a profile or apply default_behavior.
+	origins := policy.origins
+	matchedProfile := origins.selectProfile(e.action.Origin)
+	originProfileID := ""
 	if matchedProfile != nil {
-		originProfileID = matchedProfile.ID
+		originProfileID = matchedProfile.id
 	}
-	posture := resolvePosture(spec, matchedProfile, action.Posture)
-
-	if denied := postureCapabilityGuard(action, posture, spec, originProfileID); denied != nil {
-		return *denied
-	}
-
-	switch action.Type {
-	case "tool_call":
-		return evaluateToolCall(spec, action, matchedProfile, posture, originProfileID)
-	case "egress":
-		return evaluateEgress(spec, action, matchedProfile, posture, originProfileID)
-	case "file_read":
-		return evaluateFileRead(spec, action, posture, originProfileID)
-	case "file_write":
-		return evaluateFileWrite(spec, action, posture, originProfileID)
-	case "patch_apply":
-		return evaluatePatch(spec, action, posture, originProfileID)
-	case "shell_command":
-		return evaluateShellCommand(spec, action, posture, originProfileID)
-	case "computer_use":
-		return evaluateComputerUse(spec, action, posture, originProfileID)
-	case "input_inject":
-		return evaluateInputInjection(spec, action, posture, originProfileID)
-	default:
-		return allowResult("", "no reference evaluator rule for this action type", originProfileID, posture)
-	}
-}
-
-func evaluateToolCall(
-	spec *HushSpec,
-	action *EvaluationAction,
-	matchedProfile *OriginProfile,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	var baseRule *ToolAccessRule
-	var profileRule *ToolAccessRule
-	var profilePrefix string
-
-	if spec.Rules != nil && spec.Rules.ToolAccess != nil && spec.Rules.ToolAccess.Enabled {
-		baseRule = spec.Rules.ToolAccess
-	}
-	if matchedProfile != nil && matchedProfile.ToolAccess != nil && matchedProfile.ToolAccess.Enabled {
-		profileRule = matchedProfile.ToolAccess
-		profilePrefix = profileRulePrefix(matchedProfile.ID, "tool_access")
+	if origins != nil && matchedProfile == nil && origins.defaultBehavior == OriginDefaultBehaviorDeny {
+		const reason = "no origin profile matched and default_behavior is deny"
+		e.record("origins", RuleOutcomeDeny, "extensions.origins.default_behavior", reason, true)
+		e.skipAll(blocks, "short-circuited by origins deny")
+		return e.finish(DecisionDeny, "extensions.origins.default_behavior", reason, "", nil)
 	}
 
-	if baseRule == nil && profileRule == nil {
-		return allowResult("", "", originProfileID, posture)
+	// Posture guard.
+	posture := resolvePosture(policy.posture, matchedProfile, e.action.Posture)
+	// `when` conditions see the effective posture state (capability
+	// predicates), so the capabilities it grants are settled before the
+	// active-block mask is derived below.
+	e.capabilities = postureCapabilities(policy.posture, posture)
+	if denied := e.postureCapabilityGuard(posture); denied != nil {
+		e.skipAll(blocks, "short-circuited by posture deny")
+		return e.finish(DecisionDeny, denied.matchedRule, denied.reason, originProfileID, posture)
 	}
 
-	if limit, matchedRule, ok := smallestToolArgLimit(baseRule, profileRule, profilePrefix); ok {
-		actual := 0
-		if action.ArgsSize != nil {
-			actual = *action.ArgsSize
+	if e.action.Type == "custom" {
+		// Only a posture state granting the `custom` capability can vouch for
+		// an engine-defined action (core spec Section 5).
+		if posture == nil {
+			const reason = "custom actions require a posture state granting the custom capability"
+			e.record("default", RuleOutcomeDeny, UnknownActionTypeRule, reason, true)
+			return e.finish(DecisionDeny, UnknownActionTypeRule, reason, originProfileID, nil)
 		}
-		if actual > limit {
-			return denyResult(
-				matchedRule,
-				"tool arguments exceeded max_args_size",
-				originProfileID, posture,
-			)
-		}
+		return e.finish(DecisionAllow, "", "", originProfileID, posture)
 	}
 
-	target := action.Target
-	if baseRule != nil && findFirstMatch(target, baseRule.Block) >= 0 {
-		return denyResult("rules.tool_access.block", "tool is explicitly blocked", originProfileID, posture)
-	}
-	if profileRule != nil && findFirstMatch(target, profileRule.Block) >= 0 {
-		return denyResult(profilePrefix+".block", "tool is explicitly blocked", originProfileID, posture)
-	}
-
-	if baseRule != nil && findFirstMatch(target, baseRule.RequireConfirmation) >= 0 {
-		return warnResult("rules.tool_access.require_confirmation", "tool requires confirmation", originProfileID, posture)
-	}
-	if profileRule != nil && findFirstMatch(target, profileRule.RequireConfirmation) >= 0 {
-		return warnResult(profilePrefix+".require_confirmation", "tool requires confirmation", originProfileID, posture)
-	}
-
-	baseHasAllow := baseRule != nil && hasPatterns(baseRule.Allow)
-	profileHasAllow := profileRule != nil && hasPatterns(profileRule.Allow)
-	baseAllowMatch := !baseHasAllow || (baseRule != nil && findFirstMatch(target, baseRule.Allow) >= 0)
-	profileAllowMatch := !profileHasAllow || (profileRule != nil && findFirstMatch(target, profileRule.Allow) >= 0)
-	if (baseHasAllow || profileHasAllow) && baseAllowMatch && profileAllowMatch {
-		matchedRule := ""
-		if profileHasAllow {
-			matchedRule = profilePrefix + ".allow"
-		} else if baseHasAllow {
-			matchedRule = "rules.tool_access.allow"
-		}
-		return allowResult(matchedRule, "tool is explicitly allowed", originProfileID, posture)
-	}
-
-	defaultAction := DefaultActionAllow
-	if (baseRule != nil && baseRule.Default == DefaultActionBlock) || (profileRule != nil && profileRule.Default == DefaultActionBlock) {
-		defaultAction = DefaultActionBlock
-	}
-	matchedRule := ""
-	if profileRule != nil {
-		matchedRule = profilePrefix + ".default"
-	} else if baseRule != nil {
-		matchedRule = "rules.tool_access.default"
-	}
-
-	if defaultAction == DefaultActionBlock {
-		return denyResult(matchedRule, "tool matched default block", originProfileID, posture)
-	}
-	return allowResult(matchedRule, "tool matched default allow", originProfileID, posture)
-}
-
-func evaluateEgress(
-	spec *HushSpec,
-	action *EvaluationAction,
-	matchedProfile *OriginProfile,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	var baseRule *EgressRule
-	var profileRule *EgressRule
-	var profilePrefix string
-
-	if spec.Rules != nil && spec.Rules.Egress != nil && spec.Rules.Egress.Enabled {
-		baseRule = spec.Rules.Egress
-	}
-	if matchedProfile != nil && matchedProfile.Egress != nil && matchedProfile.Egress.Enabled {
-		profileRule = matchedProfile.Egress
-		profilePrefix = profileRulePrefix(matchedProfile.ID, "egress")
-	}
-
-	if baseRule == nil && profileRule == nil {
-		return allowResult("", "", originProfileID, posture)
-	}
-
-	target := action.Target
-	if baseRule != nil && findFirstMatch(target, baseRule.Block) >= 0 {
-		return denyResult("rules.egress.block", "domain is explicitly blocked", originProfileID, posture)
-	}
-	if profileRule != nil && findFirstMatch(target, profileRule.Block) >= 0 {
-		return denyResult(profilePrefix+".block", "domain is explicitly blocked", originProfileID, posture)
-	}
-
-	baseHasAllow := baseRule != nil && hasPatterns(baseRule.Allow)
-	profileHasAllow := profileRule != nil && hasPatterns(profileRule.Allow)
-	baseAllowMatch := !baseHasAllow || (baseRule != nil && findFirstMatch(target, baseRule.Allow) >= 0)
-	profileAllowMatch := !profileHasAllow || (profileRule != nil && findFirstMatch(target, profileRule.Allow) >= 0)
-	if (baseHasAllow || profileHasAllow) && baseAllowMatch && profileAllowMatch {
-		matchedRule := ""
-		if profileHasAllow {
-			matchedRule = profilePrefix + ".allow"
-		} else if baseHasAllow {
-			matchedRule = "rules.egress.allow"
-		}
-		return allowResult(matchedRule, "domain is explicitly allowed", originProfileID, posture)
-	}
-
-	defaultAction := DefaultActionAllow
-	if (baseRule != nil && baseRule.Default == DefaultActionBlock) || (profileRule != nil && profileRule.Default == DefaultActionBlock) {
-		defaultAction = DefaultActionBlock
-	}
-	matchedRule := ""
-	if profileRule != nil {
-		matchedRule = profilePrefix + ".default"
-	} else if baseRule != nil {
-		matchedRule = "rules.egress.default"
-	}
-
-	if defaultAction == DefaultActionBlock {
-		return denyResult(matchedRule, "domain matched default block", originProfileID, posture)
-	}
-	return allowResult(matchedRule, "domain matched default allow", originProfileID, posture)
-}
-
-func evaluateFileRead(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if result := evaluatePathGuards(spec, action.Target, pathOperationRead, posture, originProfileID); result != nil {
-		return *result
-	}
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluateFileWrite(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if result := evaluatePathGuards(spec, action.Target, pathOperationWrite, posture, originProfileID); result != nil {
-		return *result
-	}
-
-	if spec.Rules != nil && spec.Rules.SecretPatterns != nil {
-		return evaluateSecretPatterns(spec.Rules.SecretPatterns, action.Target, action.Content, posture, originProfileID)
-	}
-
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluatePatch(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if result := evaluatePathGuards(spec, action.Target, pathOperationPatch, posture, originProfileID); result != nil {
-		return *result
-	}
-
-	if spec.Rules != nil && spec.Rules.PatchIntegrity != nil {
-		return evaluatePatchIntegrity(spec.Rules.PatchIntegrity, action.Content, posture, originProfileID)
-	}
-
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluateShellCommand(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if spec.Rules != nil && spec.Rules.ShellCommands != nil {
-		return evaluateShellRule(spec.Rules.ShellCommands, action.Target, posture, originProfileID)
-	}
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluateComputerUse(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	var computerUseResult *EvaluationResult
-	if spec.Rules != nil && spec.Rules.ComputerUse != nil {
-		result := evaluateComputerUseRule(spec.Rules.ComputerUse, action.Target, posture, originProfileID)
-		computerUseResult = &result
-	}
-	var remoteDesktopResult *EvaluationResult
-	if spec.Rules != nil && spec.Rules.RemoteDesktopChannels != nil {
-		if result := evaluateRemoteDesktopChannelsRule(spec.Rules.RemoteDesktopChannels, action.Target, posture, originProfileID); result != nil {
-			remoteDesktopResult = result
-		}
-	}
-
-	switch {
-	case computerUseResult != nil && remoteDesktopResult != nil:
-		return moreRestrictiveResult(*computerUseResult, *remoteDesktopResult)
-	case computerUseResult != nil:
-		return *computerUseResult
-	case remoteDesktopResult != nil:
-		return *remoteDesktopResult
-	default:
-		return allowResult("", "", originProfileID, posture)
-	}
-}
-
-func evaluateInputInjection(
-	spec *HushSpec,
-	action *EvaluationAction,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if spec.Rules != nil && spec.Rules.InputInjection != nil {
-		return evaluateInputInjectionRule(spec.Rules.InputInjection, action.Target, posture, originProfileID)
-	}
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluateToolAccessRule(
-	rule *ToolAccessRule,
-	prefix string,
-	target string,
-	argsSize *int,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if rule == nil {
-		return allowResult("", "", originProfileID, posture)
-	}
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
-	}
-
-	if rule.MaxArgsSize != nil {
-		actual := 0
-		if argsSize != nil {
-			actual = *argsSize
-		}
-		if actual > *rule.MaxArgsSize {
-			return denyResult(
-				prefixedRule(prefix, "max_args_size"),
-				"tool arguments exceeded max_args_size",
-				originProfileID, posture,
-			)
-		}
-	}
-
-	if findFirstMatch(target, rule.Block) >= 0 {
-		return denyResult(
-			prefixedRule(prefix, "block"),
-			"tool is explicitly blocked",
-			originProfileID, posture,
-		)
-	}
-	if findFirstMatch(target, rule.RequireConfirmation) >= 0 {
-		return warnResult(
-			prefixedRule(prefix, "require_confirmation"),
-			"tool requires confirmation",
-			originProfileID, posture,
-		)
-	}
-	if findFirstMatch(target, rule.Allow) >= 0 {
-		return allowResult(
-			prefixedRule(prefix, "allow"),
-			"tool is explicitly allowed",
-			originProfileID, posture,
-		)
-	}
-
-	def := rule.Default
-	if def == "" {
-		def = DefaultActionAllow
-	}
-	switch def {
-	case DefaultActionBlock:
-		return denyResult(
-			prefixedRule(prefix, "default"),
-			"tool matched default block",
-			originProfileID, posture,
-		)
-	default: // DefaultActionAllow
-		return allowResult(
-			prefixedRule(prefix, "default"),
-			"tool matched default allow",
-			originProfileID, posture,
-		)
-	}
-}
-
-func evaluateEgressRule(
-	rule *EgressRule,
-	prefix string,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
-	}
-
-	if findFirstMatch(target, rule.Block) >= 0 {
-		return denyResult(
-			prefixedRule(prefix, "block"),
-			"domain is explicitly blocked",
-			originProfileID, posture,
-		)
-	}
-	if findFirstMatch(target, rule.Allow) >= 0 {
-		return allowResult(
-			prefixedRule(prefix, "allow"),
-			"domain is explicitly allowed",
-			originProfileID, posture,
-		)
-	}
-
-	switch rule.Default {
-	case DefaultActionAllow:
-		return allowResult(
-			prefixedRule(prefix, "default"),
-			"domain matched default allow",
-			originProfileID, posture,
-		)
-	default: // DefaultActionBlock or empty
-		return denyResult(
-			prefixedRule(prefix, "default"),
-			"domain matched default block",
-			originProfileID, posture,
-		)
-	}
-}
-
-func evaluateSecretPatterns(
-	rule *SecretPatternsRule,
-	target string,
-	content string,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
-	}
-
-	if findFirstMatch(target, rule.SkipPaths) >= 0 {
-		return allowResult(
-			"rules.secret_patterns.skip_paths",
-			"path is excluded from secret scanning",
-			originProfileID, posture,
-		)
-	}
-
-	for _, pattern := range rule.Patterns {
-		re, err := regexp.Compile(pattern.Pattern)
-		if err != nil {
+	// Block evaluation and aggregation (core spec 6.1).
+	normalizedPath := NormalizePath(e.action.Target)
+	mask := e.computeMask(blocks, matchedProfile)
+	decisions := make([]blockDecision, 0, len(blocks))
+	for _, block := range blocks {
+		if !mask.isActive(block) {
+			e.record(blockNames[block], RuleOutcomeSkip, "", mask.reasons[block].reason, false)
 			continue
 		}
-		if re.MatchString(content) {
-			return denyResult(
-				fmt.Sprintf("rules.secret_patterns.patterns.%s", pattern.Name),
-				fmt.Sprintf("content matched secret pattern '%s'", pattern.Name),
-				originProfileID, posture,
-			)
-		}
+		decision := e.evaluateBlock(block, matchedProfile, normalizedPath)
+		e.record(blockNames[block], outcomeFromDecision(decision.decision), decision.matchedRule, decision.reason, true)
+		decisions = append(decisions, decision)
 	}
 
-	return allowResult("", "", originProfileID, posture)
+	aggregate := DecisionAllow
+	for _, decision := range decisions {
+		if decisionRank(decision.decision) > decisionRank(aggregate) {
+			aggregate = decision.decision
+		}
+	}
+	matchedRule, reason := "", ""
+	for _, decision := range decisions {
+		if decision.decision == aggregate && decision.matchedRule != "" {
+			matchedRule, reason = decision.matchedRule, decision.reason
+			break
+		}
+	}
+	return e.finish(aggregate, matchedRule, reason, originProfileID, posture)
 }
 
-func evaluatePatchIntegrity(
-	rule *PatchIntegrityRule,
-	content string,
+func (e *evaluator) finish(
+	decision Decision,
+	matchedRule, reason, originProfile string,
 	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
+) TracedEvaluation {
+	return TracedEvaluation{
+		Result: EvaluationResult{
+			Decision:      decision,
+			MatchedRule:   matchedRule,
+			Reason:        reason,
+			OriginProfile: originProfile,
+			Posture:       posture,
+		},
+		Trace: e.trace,
 	}
+}
 
-	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
+func (e *evaluator) record(block string, outcome RuleOutcome, matchedRule, reason string, evaluated bool) {
+	e.trace = append(e.trace, RuleEvaluation{
+		RuleBlock:   block,
+		Outcome:     outcome,
+		MatchedRule: matchedRule,
+		Reason:      reason,
+		Evaluated:   evaluated,
+	})
+}
+
+func (e *evaluator) skipAll(blocks []blockID, reason string) {
+	for _, block := range blocks {
+		e.record(blockNames[block], RuleOutcomeSkip, "", reason, false)
+	}
+}
+
+// computeMask derives the active-block mask for this evaluation. Applicability
+// is checked in the order the specification states it -- presence, then the
+// action-shaped preconditions, then `enabled` and the conditions -- so an
+// inactive block carries the reason the trace records for that order.
+func (e *evaluator) computeMask(blocks []blockID, profile *compiledOriginProfile) blockMask {
+	var mask blockMask
+	for _, block := range blocks {
+		if reason := e.blockInactive(block, profile); reason != nil {
+			mask.reasons[block] = reason
 			continue
 		}
-		if re.MatchString(content) {
-			return denyResult(
-				fmt.Sprintf("rules.patch_integrity.forbidden_patterns[%d]", index),
-				"patch content matched a forbidden pattern",
-				originProfileID, posture,
-			)
+		mask.active |= 1 << uint(block)
+	}
+	return mask
+}
+
+func (e *evaluator) blockInactive(block blockID, profile *compiledOriginProfile) *inactive {
+	policy := e.policy
+	present := policy.gates[block].present
+
+	switch block {
+	case blockSecretPatterns:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		// egress and tool_call are scanned only when they carry content. The
+		// block is configured, so the trace says the scan was not consulted
+		// rather than that no scan exists -- checked before `enabled` and the
+		// conditions, as the reference implementation checks it.
+		pathBearing := e.action.Type == "file_write" || e.action.Type == "patch_apply"
+		if !pathBearing && !e.action.HasContent() {
+			return inactiveContentNotSupplied[block]
+		}
+		return e.activity(block)
+
+	case blockToolAccess:
+		overlay := profile != nil && profile.toolAccess != nil
+		if !present && !overlay {
+			return inactiveAbsentBlocks[block]
+		}
+		if !present {
+			// An overlay alone carries no `enabled`/`when` of its own.
+			return nil
+		}
+		return e.activity(block)
+
+	case blockEgress:
+		overlay := profile != nil && profile.egress != nil
+		if !present && !overlay {
+			return inactiveAbsentBlocks[block]
+		}
+		if !present {
+			return nil
+		}
+		return e.activity(block)
+
+	case blockRemoteDesktopChannels:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		if reason := e.activity(block); reason != nil {
+			return reason
+		}
+		// A target that names no channel leaves the configured block
+		// unevaluated, which the trace distinguishes from an absent block.
+		if remoteDesktopChannel(e.action.Target) == "" {
+			return inactiveTargetNotAChannel[block]
+		}
+		return nil
+
+	default:
+		if !present {
+			return inactiveAbsentBlocks[block]
+		}
+		return e.activity(block)
+	}
+}
+
+// activity reports whether a present block is active: enabled, and its `when`
+// plus any out-of-band condition hold for the runtime context.
+func (e *evaluator) activity(block blockID) *inactive {
+	gate := &e.policy.gates[block]
+	if !gate.enabled {
+		return inactiveDisabled
+	}
+	if gate.when != nil && evaluateConditionDepth(gate.when, e.context, e.capabilities, 0) == verdictFalse {
+		return inactiveConditionFalse
+	}
+	if len(e.conditions) > 0 {
+		condition, ok := e.conditions[blockNames[block]]
+		if ok && condition != nil && evaluateConditionDepth(condition, e.context, e.capabilities, 0) == verdictFalse {
+			return inactiveOutOfBandCondition
+		}
+	}
+	return nil
+}
+
+// evaluateBlock runs one active rule block against the action. Applicability
+// was settled by [evaluator.computeMask]; every block reached here is present
+// and active.
+func (e *evaluator) evaluateBlock(
+	block blockID,
+	matchedProfile *compiledOriginProfile,
+	normalizedPath string,
+) blockDecision {
+	policy := e.policy
+	action := e.action
+
+	switch block {
+	case blockForbiddenPaths:
+		return policy.forbiddenPaths.evaluate(normalizedPath)
+
+	case blockPathAllowlist:
+		operation := pathOperationWrite
+		switch action.Type {
+		case "file_read":
+			operation = pathOperationRead
+		case "patch_apply":
+			operation = pathOperationPatch
+		}
+		return policy.pathAllowlist.evaluate(normalizedPath, operation)
+
+	case blockSecretPatterns:
+		// skip_paths only applies to the path-bearing action types; an egress
+		// or tool_call payload has no path to exclude.
+		var skipPath *string
+		if action.Type == "file_write" || action.Type == "patch_apply" {
+			skipPath = &normalizedPath
+		}
+		return policy.secretPatterns.evaluate(skipPath, action.ContentOrEmpty())
+
+	case blockPatchIntegrity:
+		return policy.patchIntegrity.evaluate(action.ContentOrEmpty())
+
+	case blockShellCommands:
+		return policy.shellCommands.evaluate(action.Target)
+
+	case blockToolAccess:
+		var overlay *compiledToolAccessOverlay
+		if matchedProfile != nil {
+			overlay = matchedProfile.toolAccess
+		}
+		return evaluateToolAccess(policy.toolAccess, overlay, action)
+
+	case blockEgress:
+		var overlay *compiledEgressOverlay
+		if matchedProfile != nil {
+			overlay = matchedProfile.egress
+		}
+		return evaluateEgressRule(policy.egress, overlay, NormalizeHost(action.Target))
+
+	case blockComputerUse:
+		return policy.computerUse.evaluate(action.Target)
+
+	case blockRemoteDesktopChannels:
+		return evaluateRemoteDesktopChannels(policy.remoteDesktop, action.Target)
+
+	case blockInputInjection:
+		return evaluateInputInjection(policy.inputInjection, action.Target)
+
+	case blockBrowserAutomation:
+		return policy.browser.evaluate(action)
+
+	case blockCodeExecution:
+		return evaluateCodeExecution(policy.codeExecution, action)
+
+	default:
+		return allowDecision("", "")
+	}
+}
+
+// postureCapabilityGuard denies when the current posture state is not
+// declared, or lacks the capability the action type requires. The state is
+// looked up first, so an unknown state denies even the action types the
+// capability table does not gate (posture spec 3.3).
+func (e *evaluator) postureCapabilityGuard(posture *PostureResult) *blockDecision {
+	if posture == nil || e.policy.posture == nil {
+		return nil
+	}
+	currentState, ok := e.policy.posture.States[posture.Current]
+	if !ok {
+		rule := fmt.Sprintf("extensions.posture.states.%s", posture.Current)
+		reason := fmt.Sprintf("unknown posture state '%s'", posture.Current)
+		e.record("posture_capability", RuleOutcomeDeny, rule, reason, true)
+		denied := denyDecision(rule, reason)
+		return &denied
+	}
+
+	capability := requiredCapability(e.action.Type)
+	if capability == "" {
+		return nil
+	}
+
+	for _, granted := range currentState.Capabilities {
+		if granted == capability {
+			e.record("posture_capability", RuleOutcomeAllow, "", "posture capabilities satisfied", true)
+			return nil
+		}
+	}
+
+	rule := fmt.Sprintf("extensions.posture.states.%s.capabilities", posture.Current)
+	reason := fmt.Sprintf("posture '%s' does not allow capability '%s'", posture.Current, capability)
+	e.record("posture_capability", RuleOutcomeDeny, rule, reason, true)
+	denied := denyDecision(rule, reason)
+	return &denied
+}
+
+// ---------------------------------------------------------------------------
+// Rule blocks
+// ---------------------------------------------------------------------------
+
+func (c *compiledForbiddenPaths) evaluate(path string) blockDecision {
+	if c.exceptions.matches(path) {
+		return allowDecision("rules.forbidden_paths.exceptions", "path matched an explicit exception")
+	}
+	if c.patterns.matches(path) {
+		return denyDecision("rules.forbidden_paths.patterns", "path matched a forbidden pattern")
+	}
+	return allowDecision("", "path did not match any forbidden pattern")
+}
+
+func (c *compiledPathAllowlist) evaluate(path string, operation pathOperation) blockDecision {
+	patterns := c.write
+	switch operation {
+	case pathOperationRead:
+		patterns = c.read
+	case pathOperationPatch:
+		patterns = c.patch
+	}
+	if patterns.matches(path) {
+		return allowDecision("rules.path_allowlist", "path matched allowlist")
+	}
+	return denyDecision("rules.path_allowlist", "path did not match allowlist")
+}
+
+func severityRank(severity Severity) int {
+	switch severity {
+	case SeverityWarn:
+		return 1
+	case SeverityError:
+		return 2
+	case SeverityCritical:
+		return 3
+	default:
+		return 0
+	}
+}
+
+// evaluate scans content and maps the highest matched severity to a decision
+// (core spec 3.4): critical and error deny, warn warns. A pattern that would not compile
+// under the HushSpec regex profile denies the action rather than being skipped
+// (core spec 3.14.3) -- the rejection was recorded at compile time.
+func (c *compiledSecretPatterns) evaluate(skipPath *string, content string) blockDecision {
+	if skipPath != nil && c.skipPaths.matches(*skipPath) {
+		return allowDecision("rules.secret_patterns.skip_paths", "path is excluded from secret scanning")
+	}
+
+	bestRank := 0
+	var best *compiledSecretPattern
+	for index := range c.patterns {
+		pattern := &c.patterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
+		}
+		if !pattern.re.MatchString(content) {
+			continue
+		}
+		// Strictly greater keeps the first pattern in document order among
+		// those at the highest matched severity.
+		if best == nil || pattern.rank > bestRank {
+			bestRank, best = pattern.rank, pattern
+		}
+	}
+
+	if best == nil {
+		return allowDecision("", "content did not match any secret pattern")
+	}
+	if best.severity == SeverityWarn {
+		return warnDecision(best.matchRule, best.matchReason)
+	}
+	return denyDecision(best.matchRule, best.matchReason)
+}
+
+func (c *compiledPatchIntegrity) evaluate(content string) blockDecision {
+	rule := c.rule
+	for index := range c.forbiddenPatterns {
+		pattern := &c.forbiddenPatterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
+		}
+		if pattern.re.MatchString(content) {
+			return denyDecision(pattern.matchRule, pattern.matchReason)
 		}
 	}
 
 	stats := computePatchStats(content)
 	if stats.additions > rule.MaxAdditions {
-		return denyResult(
-			"rules.patch_integrity.max_additions",
-			"patch additions exceeded max_additions",
-			originProfileID, posture,
-		)
+		return denyDecision("rules.patch_integrity.max_additions", "patch additions exceeded max_additions")
 	}
 	if stats.deletions > rule.MaxDeletions {
-		return denyResult(
-			"rules.patch_integrity.max_deletions",
-			"patch deletions exceeded max_deletions",
-			originProfileID, posture,
-		)
+		return denyDecision("rules.patch_integrity.max_deletions", "patch deletions exceeded max_deletions")
 	}
-	if rule.RequireBalance && rule.MaxImbalanceRatio != nil {
-		ratio := imbalanceRatio(stats.additions, stats.deletions)
-		if ratio > *rule.MaxImbalanceRatio {
-			return denyResult(
+	if rule.RequireBalance {
+		// Core spec 3.5 item 4: exactly one side at zero is an infinite
+		// imbalance ratio and denies regardless of the configured limit.
+		if (stats.additions == 0) != (stats.deletions == 0) {
+			return denyDecision(
 				"rules.patch_integrity.max_imbalance_ratio",
-				"patch exceeded max imbalance ratio",
-				originProfileID, posture,
+				"patch has changes on only one side; the imbalance ratio is infinite",
 			)
 		}
-	}
-
-	return allowResult("", "", originProfileID, posture)
-}
-
-func evaluateShellRule(
-	rule *ShellCommandsRule,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
-	}
-
-	for index, pattern := range rule.ForbiddenPatterns {
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			continue
-		}
-		if re.MatchString(target) {
-			return denyResult(
-				fmt.Sprintf("rules.shell_commands.forbidden_patterns[%d]", index),
-				"shell command matched a forbidden pattern",
-				originProfileID, posture,
-			)
+		if stats.additions > 0 && stats.deletions > 0 {
+			// applyParseDefaults materializes max_imbalance_ratio, so a parsed
+			// document always carries the limit. A document assembled in
+			// memory may not, and an absent value means the schema default
+			// (core spec 3.5), the same limit the other engines apply.
+			limit := defaultMaxImbalanceRatio
+			if rule.MaxImbalanceRatio != nil {
+				limit = *rule.MaxImbalanceRatio
+			}
+			larger := math.Max(float64(stats.additions), float64(stats.deletions))
+			smaller := math.Min(float64(stats.additions), float64(stats.deletions))
+			if larger/smaller > limit {
+				return denyDecision("rules.patch_integrity.max_imbalance_ratio", "patch exceeded max imbalance ratio")
+			}
 		}
 	}
 
-	return allowResult("", "", originProfileID, posture)
+	return allowDecision("", "patch passed integrity checks")
 }
 
-func evaluateComputerUseRule(
-	rule *ComputerUseRule,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
+func (c *compiledShellCommands) evaluate(command string) blockDecision {
+	for index := range c.forbiddenPatterns {
+		pattern := &c.forbiddenPatterns[index]
+		if pattern.err != nil {
+			return denyDecision(pattern.errRule, pattern.errReason)
+		}
+		if pattern.re.MatchString(command) {
+			return denyDecision(pattern.matchRule, pattern.matchReason)
+		}
+	}
+	return allowDecision("", "command did not match any forbidden pattern")
+}
+
+// evaluateToolAccess compares tool names as exact, case-sensitive strings after
+// NFC normalization (core spec 3.7); glob and regex metacharacters are
+// literal. The policy's lists were NFC-folded at compile time, so only the
+// action's tool name is folded here.
+func evaluateToolAccess(
+	base *compiledToolAccess,
+	overlay *compiledToolAccessOverlay,
+	action *EvaluationAction,
+) blockDecision {
+	tool := norm.NFC.String(action.Target)
+	overlayPrefix := ""
+	if overlay != nil {
+		overlayPrefix = overlay.prefix
 	}
 
-	for _, allowed := range rule.AllowedActions {
+	// 1. max_args_size: the smaller of the two when both are specified.
+	limit, limitRule, hasLimit := 0, "", false
+	if base != nil && base.rule.MaxArgsSize != nil {
+		limit, limitRule, hasLimit = *base.rule.MaxArgsSize, "rules.tool_access.max_args_size", true
+	}
+	if overlay != nil && overlay.overlay.MaxArgsSize != nil {
+		if !hasLimit || *overlay.overlay.MaxArgsSize < limit {
+			limit, limitRule, hasLimit = *overlay.overlay.MaxArgsSize, overlayPrefix+".max_args_size", true
+		}
+	}
+	if hasLimit {
+		actual := 0
+		if action.ArgsSize != nil {
+			actual = *action.ArgsSize
+		}
+		if actual > limit {
+			return denyDecision(limitRule, "tool arguments exceeded max_args_size")
+		}
+	}
+
+	// 2. block: union of both lists.
+	if base != nil && slices.Contains(base.block, tool) {
+		return denyDecision("rules.tool_access.block", "tool is explicitly blocked")
+	}
+	if overlay != nil && slices.Contains(overlay.block, tool) {
+		return denyDecision(overlayPrefix+".block", "tool is explicitly blocked")
+	}
+
+	// 3. require_confirmation: union of both lists.
+	if base != nil && slices.Contains(base.requireConfirmation, tool) {
+		return warnDecision("rules.tool_access.require_confirmation", "tool requires confirmation")
+	}
+	if overlay != nil && slices.Contains(overlay.requireConfirmation, tool) {
+		return warnDecision(overlayPrefix+".require_confirmation", "tool requires confirmation")
+	}
+
+	// 4/5. allowlist mode: intersection when both lists are non-empty.
+	baseAllow := base != nil && len(base.allow) > 0
+	overlayAllow := overlay != nil && len(overlay.allow) > 0
+	if baseAllow || overlayAllow {
+		if baseAllow && !slices.Contains(base.allow, tool) {
+			return denyDecision("rules.tool_access.allow", "tool is not in the allowlist")
+		}
+		if overlayAllow && !slices.Contains(overlay.allow, tool) {
+			return denyDecision(overlayPrefix+".allow", "tool is not in the allowlist")
+		}
+		matchedRule := "rules.tool_access.allow"
+		if overlayAllow {
+			matchedRule = overlayPrefix + ".allow"
+		}
+		return allowDecision(matchedRule, "tool is explicitly allowed")
+	}
+
+	// 6. default: block when the base says block or the overlay specifies block.
+	baseDefault := DefaultActionAllow
+	if base != nil && base.rule.Default != "" {
+		baseDefault = base.rule.Default
+	}
+	var overlayDefault *DefaultAction
+	if overlay != nil {
+		overlayDefault = overlay.overlay.Default
+	}
+	effective := DefaultActionAllow
+	if baseDefault == DefaultActionBlock || (overlayDefault != nil && *overlayDefault == DefaultActionBlock) {
+		effective = DefaultActionBlock
+	}
+	matchedRule := defaultRulePath(
+		base != nil, baseDefault, overlayDefault, effective,
+		"rules.tool_access.default", overlayPrefix, overlay != nil,
+	)
+	if effective == DefaultActionBlock {
+		return denyDecision(matchedRule, "tool matched default block")
+	}
+	return allowDecision(matchedRule, "tool matched default allow")
+}
+
+// defaultRulePath names the object whose `default` field determined the
+// effective value.
+func defaultRulePath(
+	basePresent bool,
+	baseDefault DefaultAction,
+	overlayDefault *DefaultAction,
+	effective DefaultAction,
+	basePath, overlayPrefix string,
+	overlayPresent bool,
+) string {
+	if !overlayPresent {
+		return basePath
+	}
+	overlayPath := overlayPrefix + ".default"
+	if effective == DefaultActionBlock {
+		if basePresent && baseDefault == DefaultActionBlock {
+			return basePath
+		}
+		return overlayPath
+	}
+	if basePresent || overlayDefault == nil {
+		return basePath
+	}
+	return overlayPath
+}
+
+func evaluateEgressRule(
+	base *compiledEgress,
+	overlay *compiledEgressOverlay,
+	host *string,
+) blockDecision {
+	overlayPrefix := ""
+	if overlay != nil {
+		overlayPrefix = overlay.prefix
+	}
+
+	// 1. block: union of both lists.
+	if base != nil && base.block.matches(host) {
+		return denyDecision("rules.egress.block", "domain is explicitly blocked")
+	}
+	if overlay != nil && overlay.block.matches(host) {
+		return denyDecision(overlayPrefix+".block", "domain is explicitly blocked")
+	}
+
+	// 2. allow: intersection when both lists are non-empty.
+	baseAllow := base != nil && len(base.allow) > 0
+	overlayAllow := overlay != nil && len(overlay.allow) > 0
+	if baseAllow || overlayAllow {
+		baseOK := !baseAllow || base.allow.matches(host)
+		overlayOK := !overlayAllow || overlay.allow.matches(host)
+		if baseOK && overlayOK {
+			matchedRule := "rules.egress.allow"
+			if overlayAllow {
+				matchedRule = overlayPrefix + ".allow"
+			}
+			return allowDecision(matchedRule, "domain is explicitly allowed")
+		}
+	}
+
+	// 3. default.
+	baseDefault := DefaultActionBlock
+	if base != nil && base.rule.Default != "" {
+		baseDefault = base.rule.Default
+	}
+	var overlayDefault *DefaultAction
+	if overlay != nil {
+		overlayDefault = overlay.overlay.Default
+	}
+	effective := DefaultActionAllow
+	if baseDefault == DefaultActionBlock || (overlayDefault != nil && *overlayDefault == DefaultActionBlock) {
+		effective = DefaultActionBlock
+	}
+	matchedRule := defaultRulePath(
+		base != nil, baseDefault, overlayDefault, effective,
+		"rules.egress.default", overlayPrefix, overlay != nil,
+	)
+	if effective == DefaultActionBlock {
+		return denyDecision(matchedRule, "domain matched default block")
+	}
+	return allowDecision(matchedRule, "domain matched default allow")
+}
+
+func (c *compiledComputerUse) evaluate(target string) blockDecision {
+	for _, allowed := range c.rule.AllowedActions {
 		if allowed == target {
-			return allowResult(
-				"rules.computer_use.allowed_actions",
-				"computer-use action is explicitly allowed",
-				originProfileID, posture,
-			)
+			return allowDecision("rules.computer_use.allowed_actions", "computer-use action is explicitly allowed")
 		}
 	}
-
-	mode := rule.Mode
-	if mode == "" {
-		mode = ComputerUseModeGuardrail
+	if c.mode == ComputerUseModeObserve {
+		return allowDecision("rules.computer_use.mode", "observe mode does not block unlisted actions")
 	}
-	switch mode {
-	case ComputerUseModeObserve:
-		return allowResult(
-			"rules.computer_use.mode",
-			"observe mode does not block unlisted actions",
-			originProfileID, posture,
-		)
-	case ComputerUseModeFailClosed:
-		return denyResult(
-			"rules.computer_use.mode",
-			"fail_closed mode denies unlisted actions",
-			originProfileID, posture,
-		)
-	default: // guardrail
-		return warnResult(
-			"rules.computer_use.mode",
-			"guardrail mode warns on unlisted actions",
-			originProfileID, posture,
-		)
-	}
+	// guardrail and fail_closed have identical semantics (core spec 3.8).
+	return denyDecision("rules.computer_use.mode", "unlisted computer-use action is denied")
 }
 
-func evaluateRemoteDesktopChannelsRule(
-	rule *RemoteDesktopChannelsRule,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) *EvaluationResult {
-	if !rule.Enabled {
-		return nil
-	}
-
-	field := ""
-	allowed := false
+// remoteDesktopChannel names the remote_desktop_channels field a target
+// selects, or "" when the target names no channel and the block does not apply.
+func remoteDesktopChannel(target string) string {
 	switch target {
 	case "remote.clipboard":
-		field = "clipboard"
-		allowed = rule.Clipboard
+		return "clipboard"
 	case "remote.file_transfer":
-		field = "file_transfer"
-		allowed = rule.FileTransfer
+		return "file_transfer"
 	case "remote.audio":
-		field = "audio"
-		allowed = rule.Audio
+		return "audio"
 	case "remote.drive_mapping":
-		field = "drive_mapping"
+		return "drive_mapping"
+	default:
+		return ""
+	}
+}
+
+func evaluateRemoteDesktopChannels(rule *RemoteDesktopChannelsRule, target string) blockDecision {
+	field := remoteDesktopChannel(target)
+	allowed := false
+	switch field {
+	case "clipboard":
+		allowed = rule.Clipboard
+	case "file_transfer":
+		allowed = rule.FileTransfer
+	case "audio":
+		allowed = rule.Audio
+	case "drive_mapping":
 		allowed = rule.DriveMapping
 	default:
-		return nil
+		// Unreachable: applicability already rejected an unnamed channel.
+		return allowDecision("", "")
 	}
-
-	var result EvaluationResult
+	matchedRule := "rules.remote_desktop_channels." + field
 	if allowed {
-		result = allowResult(
-			"rules.remote_desktop_channels."+field,
-			fmt.Sprintf("remote desktop channel '%s' is enabled", field),
-			originProfileID,
-			posture,
-		)
-	} else {
-		result = denyResult(
-			"rules.remote_desktop_channels."+field,
-			fmt.Sprintf("remote desktop channel '%s' is disabled", field),
-			originProfileID,
-			posture,
-		)
+		return allowDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is enabled", field))
 	}
-	return &result
+	return denyDecision(matchedRule, fmt.Sprintf("remote desktop channel '%s' is disabled", field))
 }
 
-func evaluateInputInjectionRule(
-	rule *InputInjectionRule,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) EvaluationResult {
-	if !rule.Enabled {
-		return allowResult("", "", originProfileID, posture)
-	}
-
+func evaluateInputInjection(rule *InputInjectionRule, target string) blockDecision {
 	if len(rule.AllowedTypes) == 0 {
-		return denyResult(
+		return denyDecision(
 			"rules.input_injection.allowed_types",
 			"input injection is not allowed when allowed_types is empty",
-			originProfileID,
-			posture,
 		)
 	}
+	for _, allowed := range rule.AllowedTypes {
+		if allowed == target {
+			return allowDecision("rules.input_injection.allowed_types", "input injection type is explicitly allowed")
+		}
+	}
+	return denyDecision("rules.input_injection.allowed_types", "input injection type is not allowed")
+}
 
-	for _, allowedType := range rule.AllowedTypes {
-		if allowedType == target {
-			return allowResult(
-				"rules.input_injection.allowed_types",
-				"input injection type is explicitly allowed",
-				originProfileID,
-				posture,
-			)
+// builtinCredentialPattern is one built-in credential detector consulted by
+// browser_automation when credential_detection is true (core spec 3.11).
+type builtinCredentialPattern struct {
+	name    string
+	pattern string
+	// re is the pattern compiled under the regex profile. The patterns are
+	// constants of this package, so one that does not compile is a defect in
+	// the package and panics at load rather than detecting nothing; every
+	// entry of builtinCredentialPatterns therefore carries a compiled regex.
+	re *regexp.Regexp
+}
+
+// builtinCredentialPatterns are the built-in credential detectors. Documents
+// needing portable detection list their own patterns in
+// extra_credential_patterns. The set is static, so it is compiled once at
+// package initialization rather than per browser action.
+var builtinCredentialPatterns = compileBuiltinCredentialPatterns([]builtinCredentialPattern{
+	{"aws_access_key", "(AKIA|ASIA)[0-9A-Z]{16}", nil},
+	{"github_token", "gh[opsur]_[A-Za-z0-9]{36}", nil},
+	{"github_fine_grained_pat", "github_pat_[0-9a-zA-Z_]{50,}", nil},
+	{"openai_key", "sk-[A-Za-z0-9_-]{20,}", nil},
+	{"slack_token", "xox[baprs]-[0-9A-Za-z-]{10,}", nil},
+	{"private_key", `-----BEGIN[ \t]+(RSA[ \t]+|EC[ \t]+|OPENSSH[ \t]+)?PRIVATE[ \t]+KEY-----`, nil},
+	{"jwt", `eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`, nil},
+})
+
+// The patterns are constants of this package, so one that does not compile is
+// a defect in the package itself and is reported when it loads rather than
+// silently detecting nothing.
+func compileBuiltinCredentialPatterns(patterns []builtinCredentialPattern) []builtinCredentialPattern {
+	for index := range patterns {
+		re, err := CompileProfileRegex(patterns[index].pattern)
+		if err != nil {
+			panic(fmt.Sprintf("built-in credential pattern %s does not compile: %v", patterns[index].name, err))
+		}
+		patterns[index].re = re
+	}
+	return patterns
+}
+
+func (c *compiledBrowserAutomation) evaluate(action *EvaluationAction) blockDecision {
+	rule := c.rule
+	verb := action.Target
+
+	// 1. verb allowlist (exact match).
+	if len(rule.AllowedVerbs) > 0 {
+		found := false
+		for _, allowed := range rule.AllowedVerbs {
+			if allowed == verb {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return denyDecision("rules.browser_automation.allowed_verbs", "browser verb is not in the allowlist")
 		}
 	}
 
-	return denyResult(
-		"rules.input_injection.allowed_types",
-		"input injection type is not allowed",
-		originProfileID,
-		posture,
-	)
-}
-
-func evaluatePathGuards(
-	spec *HushSpec,
-	target string,
-	operation pathOperation,
-	posture *PostureResult,
-	originProfileID string,
-) *EvaluationResult {
-	if spec.Rules == nil {
-		return nil
-	}
-
-	forbiddenExceptionMatched := false
-
-	if spec.Rules.ForbiddenPaths != nil {
-		denied, exceptionMatched := evaluateForbiddenPaths(spec.Rules.ForbiddenPaths, target, posture, originProfileID)
-		if denied != nil {
-			return denied
+	// 2. destination host.
+	if action.URL != nil {
+		host := NormalizeHost(*action.URL)
+		if c.blockedDomains.matches(host) {
+			return denyDecision("rules.browser_automation.blocked_domains", "destination host is explicitly blocked")
 		}
-		forbiddenExceptionMatched = exceptionMatched
-	}
-
-	if spec.Rules.PathAllowlist != nil {
-		if result := evaluatePathAllowlist(spec.Rules.PathAllowlist, target, operation, posture, originProfileID); result != nil {
-			return result
+		if len(c.allowedDomains) > 0 && !c.allowedDomains.matches(host) {
+			return denyDecision("rules.browser_automation.allowed_domains", "destination host is not in the allowlist")
 		}
 	}
 
-	if forbiddenExceptionMatched {
-		result := allowResult(
-			"rules.forbidden_paths.exceptions",
-			"path matched an explicit exception",
-			originProfileID, posture,
-		)
-		return &result
-	}
-
-	return nil
-}
-
-func evaluateForbiddenPaths(
-	rule *ForbiddenPathsRule,
-	target string,
-	posture *PostureResult,
-	originProfileID string,
-) (*EvaluationResult, bool) {
-	if !rule.Enabled {
-		return nil, false
-	}
-
-	if findFirstMatch(target, rule.Exceptions) >= 0 {
-		return nil, true
-	}
-
-	if findFirstMatch(target, rule.Patterns) >= 0 {
-		result := denyResult(
-			"rules.forbidden_paths.patterns",
-			"path matched a forbidden pattern",
-			originProfileID, posture,
-		)
-		return &result, false
-	}
-
-	return nil, false
-}
-
-func evaluatePathAllowlist(
-	rule *PathAllowlistRule,
-	target string,
-	operation pathOperation,
-	posture *PostureResult,
-	originProfileID string,
-) *EvaluationResult {
-	if !rule.Enabled {
-		return nil
-	}
-
-	var patterns []string
-	switch operation {
-	case pathOperationRead:
-		patterns = rule.Read
-	case pathOperationWrite:
-		patterns = rule.Write
-	case pathOperationPatch:
-		if len(rule.Patch) > 0 {
-			patterns = rule.Patch
-		} else {
-			patterns = rule.Write
+	// 3. credential detection on typed input.
+	if rule.CredentialDetection && action.HasContent() {
+		content := action.ContentOrEmpty()
+		for index := range builtinCredentialPatterns {
+			builtin := &builtinCredentialPatterns[index]
+			if builtin.re.MatchString(content) {
+				return denyDecision(
+					"rules.browser_automation.credential_detection",
+					fmt.Sprintf("typed input matched built-in credential detector '%s'", builtin.name),
+				)
+			}
+		}
+		for index := range c.extraCredentialPatterns {
+			pattern := &c.extraCredentialPatterns[index]
+			if pattern.err != nil {
+				return denyDecision(pattern.errRule, pattern.errReason)
+			}
+			if pattern.re.MatchString(content) {
+				return denyDecision(pattern.matchRule, pattern.matchReason)
+			}
 		}
 	}
 
-	if findFirstMatch(target, patterns) >= 0 {
-		result := allowResult(
-			"rules.path_allowlist",
-			"path matched allowlist",
-			originProfileID, posture,
-		)
-		return &result
-	}
-
-	result := denyResult(
-		"rules.path_allowlist",
-		"path did not match allowlist",
-		originProfileID, posture,
-	)
-	return &result
+	return allowDecision("rules.browser_automation", "browser action is permitted")
 }
 
-// postureCapabilityGuard denies if the current posture state lacks the
-// capability required by the action type.
-func postureCapabilityGuard(
-	action *EvaluationAction,
-	posture *PostureResult,
-	spec *HushSpec,
-	originProfileID string,
-) *EvaluationResult {
-	if posture == nil {
-		return nil
-	}
-	if spec.Extensions == nil || spec.Extensions.Posture == nil {
-		return nil
-	}
-	postureExtension := spec.Extensions.Posture
+func evaluateCodeExecution(rule *CodeExecutionRule, action *EvaluationAction) blockDecision {
+	language := action.Target
 
-	capability := requiredCapability(action.Type)
-	if capability == "" {
-		return nil
-	}
-
-	currentState, ok := postureExtension.States[posture.Current]
-	if !ok {
-		result := denyResult(
-			fmt.Sprintf("extensions.posture.states.%s", posture.Current),
-			fmt.Sprintf("unknown posture state '%s'", posture.Current),
-			originProfileID,
-			posture,
-		)
-		return &result
-	}
-
-	for _, cap := range currentState.Capabilities {
-		if cap == capability {
-			return nil
+	// 1. language allowlist (exact, case-sensitive).
+	if len(rule.LanguageAllowlist) > 0 {
+		found := false
+		for _, allowed := range rule.LanguageAllowlist {
+			if allowed == language {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return denyDecision("rules.code_execution.language_allowlist", "language is not in the allowlist")
 		}
 	}
 
-	result := denyResult(
-		fmt.Sprintf("extensions.posture.states.%s.capabilities", posture.Current),
-		fmt.Sprintf("posture '%s' does not allow capability '%s'", posture.Current, capability),
-		originProfileID,
-		posture,
-	)
-	return &result
+	// 2. network access.
+	if action.Network != nil && *action.Network && !rule.NetworkAccess {
+		return denyDecision(
+			"rules.code_execution.network_access",
+			"network access is not permitted for code execution",
+		)
+	}
+
+	// 3. execution time bound.
+	if rule.MaxExecutionTimeMs != nil && action.TimeoutMs != nil && *action.TimeoutMs > *rule.MaxExecutionTimeMs {
+		return denyDecision(
+			"rules.code_execution.max_execution_time_ms",
+			"requested execution time exceeds max_execution_time_ms",
+		)
+	}
+
+	// 4. module denylist: literal word match within the scanned prefix.
+	if action.HasContent() {
+		scanned := action.ContentOrEmpty()
+		if rule.MaxScanBytes != nil && *rule.MaxScanBytes < len(scanned) {
+			end := *rule.MaxScanBytes
+			for end > 0 && !isUTF8Boundary(scanned, end) {
+				end--
+			}
+			scanned = scanned[:end]
+		}
+		for _, module := range rule.ModuleDenylist {
+			if containsWord(scanned, module) {
+				return denyDecision(
+					"rules.code_execution.module_denylist",
+					fmt.Sprintf("code references denied module '%s'", module),
+				)
+			}
+		}
+	}
+
+	return allowDecision("rules.code_execution", "code execution is permitted")
 }
 
-// resolvePosture determines the current and next posture state from the
-// origin profile, action context, and posture extension (in priority order).
+// isUTF8Boundary reports whether index sits on a UTF-8 character boundary of s.
+func isUTF8Boundary(s string, index int) bool {
+	if index <= 0 || index >= len(s) {
+		return true
+	}
+	return s[index]&0xC0 != 0x80
+}
+
+// containsWord reports whether word occurs in text bounded by non-[A-Za-z0-9_]
+// characters or the text boundaries (core spec 3.12 step 4).
+func containsWord(text, word string) bool {
+	if word == "" {
+		return false
+	}
+	isWordByte := func(b byte) bool {
+		return b == '_' || (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+	}
+	start := 0
+	for start <= len(text)-len(word) {
+		offset := strings.Index(text[start:], word)
+		if offset < 0 {
+			return false
+		}
+		at := start + offset
+		end := at + len(word)
+		beforeOK := at == 0 || !isWordByte(text[at-1])
+		afterOK := end == len(text) || !isWordByte(text[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		start = at + 1
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------
+// Posture and origins
+// ---------------------------------------------------------------------------
+
+func originDefaultBehavior(origins *OriginsExtension) OriginDefaultBehavior {
+	// The specified default is deny (origins spec 2.1).
+	if origins.DefaultBehavior == nil {
+		return OriginDefaultBehaviorDeny
+	}
+	return *origins.DefaultBehavior
+}
+
+// resolvePosture determines the current and next posture state from the origin
+// profile, action context, and posture extension (in priority order).
 func resolvePosture(
-	spec *HushSpec,
-	matchedProfile *OriginProfile,
+	postureExtension *PostureExtension,
+	matchedProfile *compiledOriginProfile,
 	postureCtx *PostureContext,
 ) *PostureResult {
-	if spec.Extensions == nil || spec.Extensions.Posture == nil {
+	if postureExtension == nil {
 		return nil
 	}
-	postureExtension := spec.Extensions.Posture
 
-	// Mirror Rust's resolve_posture priority: the matched profile's posture
-	// wins, then the action context's current (a present-but-empty "" is a real
-	// value, not a fallback trigger), then the posture extension's initial
-	// state. Using an explicit `set` flag rather than emptiness keeps an
-	// explicit empty current from silently falling through to `initial`.
+	// The matched profile's posture wins, then the action context's current (a
+	// present-but-empty "" is a real value, not a fallback trigger), then the
+	// posture extension's initial state.
 	current := ""
 	set := false
-	if matchedProfile != nil && matchedProfile.Posture != nil {
-		current = *matchedProfile.Posture
-		set = true
+	if matchedProfile != nil && matchedProfile.posture != nil {
+		current, set = *matchedProfile.posture, true
 	}
 	if !set && postureCtx != nil && postureCtx.Current != nil {
-		current = *postureCtx.Current
-		set = true
+		current, set = *postureCtx.Current, true
 	}
 	if !set {
 		current = postureExtension.Initial
@@ -923,90 +1177,72 @@ func resolvePosture(
 }
 
 func nextPostureState(posture *PostureExtension, current string, signal string) string {
-	for _, transition := range posture.Transitions {
-		if transition.From != "*" && transition.From != current {
-			continue
+	// Posture spec 5.3: a transition whose `from` names the current state
+	// outranks one whose `from` is "*"; among equals, document order.
+	match := func(wildcard bool) (string, bool) {
+		for _, transition := range posture.Transitions {
+			fromMatches := transition.From == current
+			if wildcard {
+				fromMatches = transition.From == "*"
+			}
+			if !fromMatches || string(transition.On) != signal {
+				continue
+			}
+			return transition.To, true
 		}
-		if string(transition.On) != signal {
-			continue
-		}
-		return transition.To
+		return "", false
 	}
-	return ""
+	if to, found := match(false); found {
+		return to
+	}
+	to, _ := match(true)
+	return to
 }
 
-// selectOriginProfile returns the highest-scoring origin profile for the
-// given context, or nil if none match.
-func selectOriginProfile(spec *HushSpec, origin *OriginContext) *OriginProfile {
-	if origin == nil {
-		return nil
+// postureCapabilities is what the effective posture state grants, for
+// `capability` conditions (core spec 3.13): unknown when the policy has no
+// posture extension (the predicate is then unevaluable and holds), and an
+// unknown state grants nothing.
+func postureCapabilities(extension *PostureExtension, posture *PostureResult) grantedCapabilities {
+	if extension == nil || posture == nil {
+		return grantedCapabilities{}
 	}
-	if spec.Extensions == nil || spec.Extensions.Origins == nil {
-		return nil
+	state, ok := extension.States[posture.Current]
+	if !ok {
+		return grantedCapabilities{known: true}
 	}
-	profiles := spec.Extensions.Origins.Profiles
-
-	bestScore := -1
-	var bestProfile *OriginProfile
-
-	for i := range profiles {
-		profile := &profiles[i]
-		if profile.Match == nil {
-			continue
-		}
-		score := matchOrigin(profile.Match, origin)
-		if score < 0 {
-			continue
-		}
-		if score > bestScore {
-			bestScore = score
-			bestProfile = profile
-		}
-	}
-
-	return bestProfile
+	return grantedCapabilities{known: true, list: state.Capabilities}
 }
 
-// matchOrigin returns -1 if any field mismatches, or a non-negative
-// specificity score (higher = more fields matched).
-func matchOrigin(rules *OriginMatch, origin *OriginContext) int {
-	score := 0
-
-	if rules.Provider != "" {
-		if origin.Provider != rules.Provider {
-			return -1
+// matchOrigin returns the number of `match` fields satisfied by origin, or
+// ok=false when any present field is not satisfied. `tags` counts as one field
+// and there is no per-field weighting (origins spec 3).
+func matchOrigin(rules *OriginMatch, origin *OriginContext) (int, bool) {
+	count := 0
+	checkString := func(expected *string, actual string) bool {
+		if expected == nil {
+			return true
 		}
-		score += 4
+		if actual != *expected {
+			return false
+		}
+		count++
+		return true
 	}
-	if rules.TenantID != "" {
-		if origin.TenantID != rules.TenantID {
-			return -1
-		}
-		score += 6
-	}
-	if rules.SpaceID != "" {
-		if origin.SpaceID != rules.SpaceID {
-			return -1
-		}
-		score += 8
-	}
-	if rules.SpaceType != "" {
-		if origin.SpaceType != rules.SpaceType {
-			return -1
-		}
-		score += 4
-	}
-	if rules.Visibility != "" {
-		if origin.Visibility != rules.Visibility {
-			return -1
-		}
-		score += 4
+	if !checkString(rules.Provider, origin.Provider) ||
+		!checkString(rules.TenantID, origin.TenantID) ||
+		!checkString(rules.SpaceID, origin.SpaceID) ||
+		!checkString(rules.SpaceType, origin.SpaceType) ||
+		!checkString(rules.Visibility, origin.Visibility) ||
+		!checkString(rules.Sensitivity, origin.Sensitivity) ||
+		!checkString(rules.ActorRole, origin.ActorRole) {
+		return 0, false
 	}
 	if rules.ExternalParticipants != nil {
 		if origin.ExternalParticipants == nil || *origin.ExternalParticipants != *rules.ExternalParticipants {
-			return -1
+			return 0, false
 		}
-		score += 2
+		count++
 	}
 	if len(rules.Tags) > 0 {
 		for _, tag := range rules.Tags {
@@ -1018,35 +1254,19 @@ func matchOrigin(rules *OriginMatch, origin *OriginContext) int {
 				}
 			}
 			if !found {
-				return -1
+				return 0, false
 			}
 		}
-		score += len(rules.Tags)
+		count++
 	}
-	if rules.Sensitivity != "" {
-		if origin.Sensitivity != rules.Sensitivity {
-			return -1
-		}
-		score += 4
-	}
-	if rules.ActorRole != "" {
-		if origin.ActorRole != rules.ActorRole {
-			return -1
-		}
-		score += 4
-	}
-
-	// NOTE: a match rule with all fields absent legitimately matches every
-	// origin with score 0 (Rust/TS/Python return Some(0) here), so we must NOT
-	// treat score 0 as "no match". The D4 divergence -- a present-but-empty
-	// match field like `provider: ""`, which the reference SDKs treat as a real
-	// (unsatisfiable) constraint -- is instead rejected at parse
-	// (validateRawDocument), because the generated Go model collapses an empty
-	// string and an absent field into the same "" and cannot distinguish them
-	// here at evaluation time.
-	return score
+	// A match rule with all fields absent legitimately matches every origin
+	// with count 0 (the explicit `match: {}` default profile), so count 0 must
+	// NOT be read as "no match".
+	return count, true
 }
 
+// requiredCapability names the posture capability each action type requires
+// (posture spec 3.3).
 func requiredCapability(actionType string) string {
 	switch actionType {
 	case "file_read":
@@ -1061,45 +1281,15 @@ func requiredCapability(actionType string) string {
 		return "tool_call"
 	case "egress":
 		return "egress"
+	case "custom":
+		return "custom"
 	default:
 		return ""
 	}
 }
 
-func prefixedRule(prefix, suffix string) string {
-	if prefix == "" {
-		return ""
-	}
-	return prefix + "." + suffix
-}
-
 func profileRulePrefix(profileID, field string) string {
 	return fmt.Sprintf("extensions.origins.profiles.%s.%s", profileID, field)
-}
-
-func hasPatterns(patterns []string) bool {
-	return len(patterns) > 0
-}
-
-func smallestToolArgLimit(baseRule, profileRule *ToolAccessRule, profilePrefix string) (int, string, bool) {
-	limit := 0
-	matchedRule := ""
-	ok := false
-
-	if baseRule != nil && baseRule.MaxArgsSize != nil {
-		limit = *baseRule.MaxArgsSize
-		matchedRule = "rules.tool_access.max_args_size"
-		ok = true
-	}
-	if profileRule != nil && profileRule.MaxArgsSize != nil {
-		if !ok || *profileRule.MaxArgsSize < limit {
-			limit = *profileRule.MaxArgsSize
-			matchedRule = profilePrefix + ".max_args_size"
-			ok = true
-		}
-	}
-
-	return limit, matchedRule, ok
 }
 
 func decisionRank(decision Decision) int {
@@ -1115,108 +1305,450 @@ func decisionRank(decision Decision) int {
 	}
 }
 
-func moreRestrictiveResult(left, right EvaluationResult) EvaluationResult {
-	leftRank := decisionRank(left.Decision)
-	rightRank := decisionRank(right.Decision)
-	if rightRank > leftRank {
-		return right
-	}
-	if leftRank > rightRank {
-		return left
-	}
-	if right.MatchedRule != "" {
-		return right
-	}
-	return left
-}
+// ---------------------------------------------------------------------------
+// Path globs (core spec 3.14.1)
+// ---------------------------------------------------------------------------
 
-func allowResult(matchedRule, reason, originProfile string, posture *PostureResult) EvaluationResult {
-	return EvaluationResult{
-		Decision:      DecisionAllow,
-		MatchedRule:   matchedRule,
-		Reason:        reason,
-		OriginProfile: originProfile,
-		Posture:       posture,
-	}
-}
-
-func warnResult(matchedRule, reason, originProfile string, posture *PostureResult) EvaluationResult {
-	return EvaluationResult{
-		Decision:      DecisionWarn,
-		MatchedRule:   matchedRule,
-		Reason:        reason,
-		OriginProfile: originProfile,
-		Posture:       posture,
-	}
-}
-
-func denyResult(matchedRule, reason, originProfile string, posture *PostureResult) EvaluationResult {
-	return EvaluationResult{
-		Decision:      DecisionDeny,
-		MatchedRule:   matchedRule,
-		Reason:        reason,
-		OriginProfile: originProfile,
-		Posture:       posture,
-	}
-}
-
-func findFirstMatch(target string, patterns []string) int {
-	for i, pattern := range patterns {
-		if globMatches(pattern, target) {
-			return i
+// NormalizePath normalizes a filesystem path for matching (core spec 3.14.1):
+// NFC, `\` to `/`, collapsed separators, lexical `.`/`..` resolution,
+// no trailing `/`. It is deliberately lexical -- it never touches the
+// filesystem and never applies OS-specific rules.
+func NormalizePath(target string) string {
+	unified := strings.ReplaceAll(norm.NFC.String(target), `\`, "/")
+	absolute := strings.HasPrefix(unified, "/")
+	segments := make([]string, 0, 8)
+	for _, segment := range strings.Split(unified, "/") {
+		switch segment {
+		case "", ".":
+			// Dropped.
+		case "..":
+			if len(segments) > 0 && segments[len(segments)-1] != ".." {
+				segments = segments[:len(segments)-1]
+			} else if !absolute {
+				segments = append(segments, "..")
+			}
+		default:
+			segments = append(segments, segment)
 		}
 	}
-	return -1
+	joined := strings.Join(segments, "/")
+	if absolute {
+		return "/" + joined
+	}
+	return joined
 }
 
-// globMatches tests whether target matches a glob pattern.
-// * matches non-/ characters, ** matches everything, ? matches one character.
-func globMatches(pattern, target string) bool {
-	var regex strings.Builder
-	regex.WriteByte('^')
-
-	chars := []rune(pattern)
-	for i := 0; i < len(chars); i++ {
-		ch := chars[i]
+// pathGlobRegex compiles a path glob (core spec 3.14.1) into an anchored
+// regex. `?` and `*` never cross `/`; `**` spans zero or more segments; `[` and
+// `{` are literal.
+func pathGlobRegex(pattern string) (*regexp.Regexp, error) {
+	chars := []rune(norm.NFC.String(pattern))
+	var out strings.Builder
+	out.WriteByte('^')
+	for index := 0; index < len(chars); {
+		ch := chars[index]
+		if ch == '*' && index+1 < len(chars) && chars[index+1] == '*' {
+			atSegmentStart := index == 0 || chars[index-1] == '/'
+			if atSegmentStart && index+2 < len(chars) && chars[index+2] == '/' {
+				// `**/`: zero or more complete leading segments.
+				out.WriteString("(?:[^/]*/)*")
+				index += 3
+			} else {
+				out.WriteString(".*")
+				index += 2
+			}
+			continue
+		}
 		switch ch {
 		case '*':
-			if i+1 < len(chars) && chars[i+1] == '*' {
-				if i+2 < len(chars) && chars[i+2] == '/' {
-					// "**/" matches any number of leading path segments,
-					// including zero, so "**/.env" matches both ".env" and
-					// "a/b/.env".
-					i += 2
-					regex.WriteString("(?:.*/)?")
-				} else {
-					i++
-					regex.WriteString(".*")
-				}
-			} else {
-				regex.WriteString("[^/]*")
-			}
+			out.WriteString("[^/]*")
 		case '?':
-			regex.WriteByte('.')
-		case '.', '+', '(', ')', '{', '}', '[', ']', '^', '$', '|', '\\':
-			regex.WriteByte('\\')
-			regex.WriteRune(ch)
+			out.WriteString("[^/]")
 		default:
-			regex.WriteRune(ch)
+			out.WriteString(regexp.QuoteMeta(string(ch)))
 		}
+		index++
 	}
-	regex.WriteByte('$')
+	out.WriteByte('$')
+	return regexp.Compile(out.String())
+}
 
-	re, err := regexp.Compile(regex.String())
+// PathGlobMatches reports whether an already-normalized path matches the path
+// glob pattern. It compiles the glob on every call; the evaluator matches
+// against a [compiledGlobSet] built once by [CompilePolicy] instead.
+func PathGlobMatches(pattern, path string) bool {
+	re, err := pathGlobRegex(pattern)
 	if err != nil {
 		return false
 	}
-	return re.MatchString(target)
+	return re.MatchString(path)
 }
 
-// computePatchStats counts +/- lines in unified diff content, skipping
-// file header lines (+++ / ---).
+// ---------------------------------------------------------------------------
+// Host patterns (core spec 3.14.2)
+// ---------------------------------------------------------------------------
+
+// NormalizeHost reduces an egress target (host, `host:port`, or URL) to a
+// normalized host (core spec 3.14.2): lowercased, scheme, userinfo, path,
+// query, port, and trailing dot removed, non-ASCII labels in IDNA A-label
+// (punycode) form. It returns nil when the target cannot be reduced to a
+// syntactically valid host, in which case it matches nothing.
+func NormalizeHost(target string) *string {
+	target = strings.TrimSpace(target)
+	authority := target
+	if index := strings.Index(authority, "://"); index >= 0 {
+		authority = authority[index+3:]
+	}
+	// A backslash ends the authority exactly as a slash does (core spec
+	// 3.14.2), the way a browser reads a special-scheme URL.
+	if end := strings.IndexAny(authority, `/\?#`); end >= 0 {
+		authority = authority[:end]
+	}
+	if at := strings.LastIndex(authority, "@"); at >= 0 {
+		authority = authority[at+1:]
+	}
+	if authority == "" {
+		return nil
+	}
+
+	if strings.HasPrefix(authority, "[") {
+		rest := authority[1:]
+		closing := strings.Index(rest, "]")
+		if closing < 0 {
+			return nil
+		}
+		inner := rest[:closing]
+		if inner == "" {
+			return nil
+		}
+		for index := 0; index < len(inner); index++ {
+			b := inner[index]
+			if !isASCIIHexByte(b) && b != ':' && b != '.' {
+				return nil
+			}
+		}
+		result := "[" + asciiLower(inner) + "]"
+		return &result
+	}
+
+	host := authority
+	if colon := strings.LastIndex(host, ":"); colon >= 0 {
+		port := host[colon+1:]
+		if port != "" && isASCIIDigits(port) {
+			host = host[:colon]
+		}
+	}
+	if strings.Contains(host, ":") {
+		return nil
+	}
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return nil
+	}
+
+	labels := strings.Split(host, ".")
+	normalizedLabels := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if label == "" {
+			return nil
+		}
+		normalized, ok := normalizeHostLabel(label)
+		if !ok {
+			return nil
+		}
+		normalizedLabels = append(normalizedLabels, normalized)
+	}
+	normalized := strings.Join(normalizedLabels, ".")
+	for index := 0; index < len(normalized); index++ {
+		b := normalized[index]
+		isAlnum := (b >= '0' && b <= '9') || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+		if !isAlnum && b != '-' && b != '.' && b != '_' {
+			return nil
+		}
+	}
+	return &normalized
+}
+
+func isASCIIHexByte(b byte) bool {
+	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+}
+
+// asciiLower lowercases only the ASCII letters of s; non-ASCII code points are
+// left untouched, where strings.ToLower would fold them too.
+func asciiLower(s string) string {
+	var out []byte
+	for index := 0; index < len(s); index++ {
+		b := s[index]
+		if b >= 'A' && b <= 'Z' {
+			if out == nil {
+				out = []byte(s)
+			}
+			out[index] = b + ('a' - 'A')
+		}
+	}
+	if out == nil {
+		return s
+	}
+	return string(out)
+}
+
+func isASCIIString(s string) bool {
+	for index := 0; index < len(s); index++ {
+		if s[index] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// unicodeLower applies the full Unicode lowercase mapping -- the one that
+// expands U+0130 to `i` plus a combining dot and writes a word-final sigma as
+// U+03C2 -- rather than the per-rune simple mapping of strings.ToLower. Host
+// normalization (core spec 3.14.2) folds case before punycode encoding, so the
+// mapping has to be the one every HushSpec SDK applies or the same target
+// reduces to a different host here than elsewhere.
+func unicodeLower(s string) string {
+	return cases.Lower(language.Und).String(s)
+}
+
+// normalizeHostLabel normalizes one host label: ASCII lowercase, or the IDNA
+// A-label (punycode) of the NFC-normalized, lowercased label when it is not
+// ASCII. No UTS-46 mapping is applied -- this is RFC 3492 punycode over NFC.
+func normalizeHostLabel(label string) (string, bool) {
+	if isASCIIString(label) {
+		return asciiLower(label), true
+	}
+	folded := norm.NFC.String(unicodeLower(label))
+	if isASCIIString(folded) {
+		return folded, true
+	}
+	encoded, ok := PunycodeEncode(folded)
+	if !ok {
+		return "", false
+	}
+	return "xn--" + encoded, true
+}
+
+// normalizeHostPattern applies steps 5-7 of core spec 3.14.2 to a pattern,
+// preserving `*`.
+func normalizeHostPattern(pattern string) string {
+	pattern = strings.TrimSpace(pattern)
+	pattern = strings.TrimSuffix(pattern, ".")
+	if strings.HasPrefix(pattern, "[") {
+		return asciiLower(pattern)
+	}
+	labels := strings.Split(pattern, ".")
+	for index, label := range labels {
+		if isASCIIString(label) {
+			labels[index] = asciiLower(label)
+			continue
+		}
+		if normalized, ok := normalizeHostLabel(label); ok {
+			labels[index] = normalized
+		} else {
+			labels[index] = unicodeLower(label)
+		}
+	}
+	return strings.Join(labels, ".")
+}
+
+func isIPv4Literal(host string) bool {
+	octets := strings.Split(host, ".")
+	if len(octets) != 4 {
+		return false
+	}
+	for _, octet := range octets {
+		if octet == "" || len(octet) > 3 || !isASCIIDigits(octet) {
+			return false
+		}
+		value := 0
+		for index := 0; index < len(octet); index++ {
+			value = value*10 + int(octet[index]-'0')
+		}
+		if value > 255 {
+			return false
+		}
+	}
+	return true
+}
+
+func isIPLiteral(host string) bool {
+	return strings.HasPrefix(host, "[") || isIPv4Literal(host)
+}
+
+// hostPatternSource is the anchored regex source of an already-normalized host
+// pattern (core spec 3.14.2): `*` is one or more non-dot characters, `**` one
+// or more characters including dots, everything else literal.
+func hostPatternSource(pattern string) string {
+	chars := []rune(pattern)
+	var out strings.Builder
+	out.Grow(len(pattern) + 8)
+	out.WriteByte('^')
+	for index := 0; index < len(chars); {
+		if chars[index] == '*' {
+			if index+1 < len(chars) && chars[index+1] == '*' {
+				out.WriteString(".+")
+				index += 2
+			} else {
+				out.WriteString("[^.]+")
+				index++
+			}
+			continue
+		}
+		out.WriteString(regexp.QuoteMeta(string(chars[index])))
+		index++
+	}
+	out.WriteByte('$')
+	return out.String()
+}
+
+// HostPatternMatches reports whether a normalized host matches a host pattern
+// (core spec 3.14.2). IP literals match only an exact entry. It normalizes and
+// compiles the pattern on every call; the evaluator matches against a
+// [compiledHostSet] built once by [CompilePolicy] instead.
+func HostPatternMatches(pattern, host string) bool {
+	return compileHostPattern(pattern).matches(host)
+}
+
+// PunycodeEncode is the RFC 3492 punycode encoding of one label, without the
+// `xn--` prefix. It returns ok=false when the label cannot be encoded.
+func PunycodeEncode(input string) (string, bool) {
+	const (
+		base        = uint32(36)
+		tmin        = uint32(1)
+		tmax        = uint32(26)
+		skew        = uint32(38)
+		damp        = uint32(700)
+		initialBias = uint32(72)
+		initialN    = uint32(128)
+	)
+
+	adapt := func(delta uint32, numPoints uint32, firstTime bool) uint32 {
+		if firstTime {
+			delta /= damp
+		} else {
+			delta /= 2
+		}
+		delta += delta / numPoints
+		k := uint32(0)
+		for delta > ((base-tmin)*tmax)/2 {
+			delta /= base - tmin
+			k += base
+		}
+		return k + (((base - tmin + 1) * delta) / (delta + skew))
+	}
+
+	digit := func(value uint32) byte {
+		if value < 26 {
+			return byte('a' + value)
+		}
+		return byte('0' + (value - 26))
+	}
+
+	codePoints := []rune(input)
+	output := make([]byte, 0, len(input)*2)
+	for _, cp := range codePoints {
+		if cp < 128 {
+			output = append(output, byte(cp))
+		}
+	}
+	basicCount := uint32(len(output))
+	handled := basicCount
+	if basicCount > 0 {
+		output = append(output, '-')
+	}
+
+	n := initialN
+	delta := uint32(0)
+	bias := initialBias
+	for int(handled) < len(codePoints) {
+		m := uint32(0)
+		found := false
+		for _, cp := range codePoints {
+			if uint32(cp) >= n && (!found || uint32(cp) < m) {
+				m, found = uint32(cp), true
+			}
+		}
+		if !found {
+			return "", false
+		}
+		add, ok := checkedMul(m-n, handled+1)
+		if !ok {
+			return "", false
+		}
+		delta, ok = checkedAdd(delta, add)
+		if !ok {
+			return "", false
+		}
+		n = m
+		for _, cp := range codePoints {
+			if uint32(cp) < n {
+				if delta, ok = checkedAdd(delta, 1); !ok {
+					return "", false
+				}
+			}
+			if uint32(cp) == n {
+				q := delta
+				for k := base; ; k += base {
+					t := tmax
+					switch {
+					case k <= bias:
+						t = tmin
+					case k >= bias+tmax:
+						t = tmax
+					default:
+						t = k - bias
+					}
+					if q < t {
+						break
+					}
+					output = append(output, digit(t+(q-t)%(base-t)))
+					q = (q - t) / (base - t)
+				}
+				output = append(output, digit(q))
+				bias = adapt(delta, handled+1, handled == basicCount)
+				delta = 0
+				handled++
+			}
+		}
+		if delta, ok = checkedAdd(delta, 1); !ok {
+			return "", false
+		}
+		if n, ok = checkedAdd(n, 1); !ok {
+			return "", false
+		}
+	}
+	return string(output), true
+}
+
+func checkedAdd(a, b uint32) (uint32, bool) {
+	sum := a + b
+	if sum < a {
+		return 0, false
+	}
+	return sum, true
+}
+
+func checkedMul(a, b uint32) (uint32, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	product := a * b
+	if product/a != b {
+		return 0, false
+	}
+	return product, true
+}
+
+// ---------------------------------------------------------------------------
+// Patch statistics
+// ---------------------------------------------------------------------------
+
+// computePatchStats counts +/- lines in unified diff content, skipping file
+// header lines (+++ / ---).
 func computePatchStats(content string) patchStats {
 	var stats patchStats
-	for _, line := range strings.Split(content, "\n") {
+	for _, line := range splitLines(content) {
 		if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
 			continue
 		}
@@ -1229,17 +1761,16 @@ func computePatchStats(content string) patchStats {
 	return stats
 }
 
-func imbalanceRatio(additions, deletions int) float64 {
-	if additions == 0 && deletions == 0 {
-		return 0.0
+// splitLines splits content on \n, strips a trailing \r from each line, and
+// yields no final empty line for content ending in a newline.
+func splitLines(content string) []string {
+	if content == "" {
+		return nil
 	}
-	if additions == 0 {
-		return float64(deletions)
+	trimmed := strings.TrimSuffix(content, "\n")
+	lines := strings.Split(trimmed, "\n")
+	for index, line := range lines {
+		lines[index] = strings.TrimSuffix(line, "\r")
 	}
-	if deletions == 0 {
-		return float64(additions)
-	}
-	larger := math.Max(float64(additions), float64(deletions))
-	smaller := math.Min(float64(additions), float64(deletions))
-	return larger / smaller
+	return lines
 }

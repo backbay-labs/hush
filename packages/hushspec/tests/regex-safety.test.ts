@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parse } from '../src/parse.js';
 import { validate, isSafeRegex } from '../src/validate.js';
+import { compileProfileRegex } from '../src/regex.js';
 import { parseOrThrow } from '../src/parse.js';
 
 // ---------------------------------------------------------------------------
@@ -33,8 +34,10 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('^\\bfoo\\b$')).toBe(true);
   });
 
-  it('accepts \\0 (null character, not a backreference)', () => {
-    expect(isSafeRegex('\\0')).toBe(true);
+  // `\0` is not a backreference, but it is not a profile escape either: the
+  // profile spells a code point `\xHH`, so the pattern is outside it.
+  it('rejects \\0, which is not a profile escape', () => {
+    expect(isSafeRegex('\\0')).toBe(false);
   });
 
   it('rejects backreferences (\\1)', () => {
@@ -81,12 +84,9 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('a?+')).toBe(false);
   });
 
-  // Cross-SDK parity fix (spec item S3): the bare possessive check used to be
-  // a raw substring over the whole pattern (`\*\+|\+\+|\?\+`), which matched
-  // these possessive-*looking* character sequences even though they sit
-  // inside a character class as ordinary literal members, not a quantifier.
-  // hasPossessiveQuantifier is class-aware, so it never evaluates them as a
-  // quantifier candidate in the first place.
+  // Inside a character class these possessive-*looking* sequences are
+  // ordinary literal members, not a quantifier. The scan is class-aware, so
+  // it never considers them as a quantifier candidate.
   it('does not misread possessive-looking characters inside a class as possessive ([*+])', () => {
     expect(isSafeRegex('[*+]')).toBe(true);
   });
@@ -99,9 +99,8 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('[+*]')).toBe(true);
   });
 
-  // Cross-SDK parity fix (spec item S2): possessive *brace* quantifiers were
-  // the one shape the existing possessive check missed (`*+`/`++`/`?+` were
-  // already rejected above, but `{n}+`/`{n,}+`/`{n,m}+` slipped through).
+  // The brace forms are possessive quantifiers too, and are rejected on the
+  // same footing as the bare `*+` / `++` / `?+` above.
   it('rejects possessive brace quantifier {n}+', () => {
     expect(isSafeRegex('a{2}+')).toBe(false);
   });
@@ -129,10 +128,9 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('[a{2}+]')).toBe(true);
   });
 
-  // Cross-SDK parity fix (spec item S2): \Z and \z end-of-string anchors
-  // have differing semantics across Rust/Python/Go and are treated as
-  // literal letters by JavaScript RegExp; reject both so policies anchor
-  // with $ instead.
+  // Engines disagree about what the \Z and \z end-of-string anchors mean,
+  // and JavaScript RegExp reads them as literal letters; both are rejected
+  // so a policy anchors with $ instead.
   it('rejects \\Z end-of-string anchor', () => {
     expect(isSafeRegex('foo\\Z')).toBe(false);
   });
@@ -141,12 +139,9 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('foo\\z')).toBe(false);
   });
 
-  // Cross-SDK parity fix (spec item S3): the anchor check used to be a raw
-  // substring (`\\Z|\\z`) over the whole pattern, which could not distinguish
-  // the `\Z` anchor (one backslash then Z) from an escaped backslash followed
-  // by a literal Z -- the pattern text `\\Z` (two backslash characters then
-  // Z), which matches a literal `\` then a literal `Z` and is not an anchor
-  // at all. hasEndAnchorEscape consumes the escaped pair before ever
+  // The `\Z` anchor (one backslash then Z) and the pattern text `\\Z` (two
+  // backslash characters then Z, matching a literal `\` then a literal `Z`)
+  // are different patterns. The scan consumes an escaped pair before ever
   // reconsidering the following character, so it tells the two apart.
   it('accepts an escaped backslash followed by a literal Z (not an anchor)', () => {
     expect(isSafeRegex('\\\\Z')).toBe(true);
@@ -156,24 +151,22 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('\\\\z')).toBe(true);
   });
 
-  // Cross-SDK parity regression fix (v3, item 2): `\Z`/`\z` INSIDE a character
-  // class. JavaScript `RegExp` is the only SDK engine that accepts `[\Z]`/`[\z]`
-  // (reading the escape as a literal letter); Rust `regex`, Python `re`, and Go
-  // RE2 all reject them at compile time. Those three lean on that compile-time
-  // rejection (their scanners skip in-class `\Z`), but TS `isSafeRegex` has no
-  // compile backstop -- `new RegExp('[\\Z]')` succeeds -- so hasEndAnchorEscape
-  // must flag in-class `\Z`/`\z` itself to keep the net accept/reject identical.
-  // A prior wave over-corrected here and accepted `[\Z]`; this re-rejects it.
+  // `\Z`/`\z` inside a character class is an escaped literal letter rather
+  // than an anchor, and `new RegExp('[\\Z]')` succeeds where every other
+  // engine rejects the escape, so the profile refuses it and so does this.
   it('rejects \\Z inside a character class ([\\Z])', () => {
     expect(isSafeRegex('[\\Z]')).toBe(false);
+    expect(() => compileProfileRegex('[\\Z]')).toThrow('anchor with');
   });
 
   it('rejects \\z inside a character class ([\\z])', () => {
     expect(isSafeRegex('[\\z]')).toBe(false);
+    expect(() => compileProfileRegex('[\\z]')).toThrow('anchor with');
   });
 
   it('rejects \\Z inside a non-empty character class ([x\\Z])', () => {
     expect(isSafeRegex('[x\\Z]')).toBe(false);
+    expect(() => compileProfileRegex('[x\\Z]')).toThrow('anchor with');
   });
 
   // The escaped-literal `\\Z` (backslash-backslash then Z) is still NOT an
@@ -183,10 +176,9 @@ describe('isSafeRegex', () => {
     expect(isSafeRegex('[\\\\Z]')).toBe(true);
   });
 
-  // Cross-SDK parity fix (spec item S2): empty character classes compile
-  // successfully in JavaScript ([] matches nothing, [^] matches any
-  // character including newline) but are a compile error in Rust/Python/Go;
-  // reject both so validation agrees everywhere.
+  // Empty character classes compile in JavaScript ([] matches nothing, [^]
+  // matches any character including newline) but are a compile error in most
+  // engines; both are rejected so validation agrees everywhere.
   it('rejects empty character class []', () => {
     expect(isSafeRegex('a[]b')).toBe(false);
   });
@@ -213,21 +205,15 @@ describe('isSafeRegex', () => {
 });
 
 // ---------------------------------------------------------------------------
-// S3 parity fix: shared REJECT/ACCEPT list (cross-SDK parity spec, section
-// S3)
+// The shared REJECT/ACCEPT list
 //
-// Rust `disallowed_regex_feature` / Go `disallowedRegexFeature` are
-// escape/class-aware char scanners. TS's RE2_DISALLOWED used to check the
-// possessive-star (`*+`/`++`/`?+`) and `\Z`/`\z` forms as raw substrings over
-// the whole pattern, which over-rejected patterns the other three SDKs
-// accept (e.g. `[*+]`, where the possessive-looking characters are ordinary
-// class members, not a quantifier). hasPossessiveQuantifier and
-// hasEndAnchorEscape now scan the same escape/class-aware way Rust/Go do.
-// This block reproduces the exact shared REJECT/ACCEPT list from the parity
-// spec verbatim, so all four SDKs are verified against the identical set.
+// Every HushSpec SDK is held to the same list of patterns the regex profile
+// accepts and refuses, reproduced verbatim below. Deciding it needs
+// escape- and class-aware scanning rather than fixed substrings: `[*+]`, for
+// one, spells possessive-looking characters that are ordinary class members.
 // ---------------------------------------------------------------------------
 
-describe('S3 shared REJECT/ACCEPT list (cross-SDK parity)', () => {
+describe('shared REJECT/ACCEPT list', () => {
   const REJECT = [
     'a++',
     'a*+',
@@ -366,7 +352,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('not a HushSpec regex profile escape');
     }
   });
 
@@ -380,7 +366,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 
@@ -395,7 +381,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 
@@ -434,7 +420,7 @@ rules:
 `);
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('RE2');
+      expect(result.error).toContain('group form');
     }
   });
 });
@@ -517,13 +503,11 @@ describe('built-in ruleset patterns are RE2-safe', () => {
 // ---------------------------------------------------------------------------
 // Detection engine: exfiltration boundary patterns are RE2-safe
 //
-// The ssn/credit_card patterns in RegexExfiltrationDetector (src/detection.ts)
-// replaced `\b` digit-run boundaries with explicit ASCII non-digit boundaries
-// for cross-SDK parity (see detection-wiring spec §3). The ssn pattern's body
-// also uses `[0-9]` instead of `\d` (spec item S3), and email_address
-// replaced its `\b` word boundaries with explicit ASCII boundaries the same
-// way. These are built-in patterns (not parsed from policy YAML), but must
-// still stay within the RE2 subset like every other pattern in the repo.
+// `RegexExfiltrationDetector` spells its boundaries out as explicit ASCII
+// non-member classes rather than `\b`, and its digit runs as `[0-9]` rather
+// than `\d`, so a detector scores the same in every engine (detection spec
+// 3). They are built-in patterns rather than policy-authored ones, but they
+// stay inside the RE2 subset like every other pattern here.
 // ---------------------------------------------------------------------------
 
 describe('detection engine boundary patterns are RE2-safe', () => {

@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v0.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # DISCLAIMER: Review and customize for your environment. Add
 # organization-specific egress allowlists and forbidden paths as needed.
 hushspec: "0.1.0"
@@ -110,3 +110,32 @@ rules:
       - publish
     default: allow
     max_args_size: 1048576
+
+# Structured control mappings (core spec 2.5). This policy is a production
+# baseline rather than a regulated framework, so it maps to the OWASP LLM
+# Top 10 and the NIST AI RMF. Declarative metadata only: mappings never
+# influence evaluation.
+metadata:
+  controls:
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM02"
+      rule_paths:
+        - rules.secret_patterns
+        - rules.forbidden_paths
+      notes: "Sensitive Information Disclosure. Broad secret detection plus the inherited forbidden-path set."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM03"
+      rule_paths:
+        - rules.egress
+      notes: "Supply Chain. The inherited egress allowlist limits reachable registries and services."
+    - framework: owasp-llm-top10-2025
+      control_id: "LLM06"
+      rule_paths:
+        - rules.tool_access
+        - rules.shell_commands
+      notes: "Excessive Agency. Known-dangerous tools are blocked and destructive commands are denied."
+    - framework: nist-ai-rmf-1.0
+      control_id: "MANAGE 2.2"
+      rule_paths:
+        - rules.patch_integrity
+      notes: "Mechanisms sustain the value of the deployed system: patch limits keep agent-authored changes reviewable."

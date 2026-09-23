@@ -1,0 +1,43 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7000-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "name": "receipt-expectation",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:b20f10662d8ef79eba5e275c43fb94641bd8ec0e6348f3663d7ecc0535e534a1"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com"
+  },
+  "decision": "allow",
+  "matched_rule": "rules.egress.allow",
+  "reason": "domain is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "domain is explicitly allowed"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "content not supplied; secret_patterns not consulted"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

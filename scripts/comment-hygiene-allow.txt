@@ -1,0 +1,38 @@
+# Exemptions from scripts/check_comment_hygiene.py, one `path:pattern` per
+# line. `pattern` is the regex source exactly as PATTERNS spells it, or `*` for
+# every pattern. An entry that stops matching anything fails the check, so this
+# file cannot quietly rot.
+#
+# Keep this list as short as you can. A planning reference in published text is
+# nearly always a sentence that should have described the behavior instead.
+
+# The check spells every rule out, and its module docstring shows the kind of
+# sentence each rule exists to catch. Only the rules that hit their own source
+# are exempted, so an added rule that matches itself is a deliberate entry.
+scripts/check_comment_hygiene.py:RFC[- ]0?9\b
+scripts/check_comment_hygiene.py:\bP[0-6]-[0-9]{2}\b
+scripts/check_comment_hygiene.py:\bwave[- ][0-6]\b
+scripts/check_comment_hygiene.py:\bD[12]?[0-9]\b
+scripts/check_comment_hygiene.py:another agent
+scripts/check_comment_hygiene.py:other agents?
+scripts/check_comment_hygiene.py:port agents?
+scripts/check_comment_hygiene.py:the brief
+scripts/check_comment_hygiene.py:as instructed
+scripts/check_comment_hygiene.py:this task
+scripts/check_comment_hygiene.py:work package
+scripts/check_comment_hygiene.py:the fork
+scripts/check_comment_hygiene.py:\b(FIXME|HACK|TODO|XXX|TBD)\b
+scripts/check_comment_hygiene.py:Rust reference
+scripts/check_comment_hygiene.py:the oracle
+scripts/check_comment_hygiene.py:matching Rust
+scripts/check_comment_hygiene.py:Co-Authored
+scripts/check_comment_hygiene.py:Claude-Session
+
+# Test data: a secret pattern named after a task marker, and the text such a
+# pattern is meant to catch.
+fixtures/core/evaluation/rule-trace.test.yaml:\b(FIXME|HACK|TODO|XXX|TBD)\b
+packages/go/hushspec/compiled_test.go:\b(FIXME|HACK|TODO|XXX|TBD)\b
+
+# Source links identify the unreleased branch containing the documented code;
+# the branch name occurs only in URL targets, not capability or delivery prose.
+docs/src/reference/sdk-conformance.md:\bwave[- ][0-6]\b

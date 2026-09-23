@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from hushspec.evaluate import EvaluationAction
 from hushspec.middleware import HushGuard
+from hushspec.adapters._decorator import ActionMapper, guarded_tool
 
 
 def secure_tool(
     guard: HushGuard,
     tool_name: Optional[str] = None,
     action_type: str = "tool_call",
+    action_mapper: Optional[ActionMapper] = None,
 ) -> Callable:
     """Decorator for CrewAI tool functions with HushSpec enforcement.
 
@@ -24,19 +25,15 @@ def secure_tool(
     If ``tool_name`` is omitted the wrapped function's ``__name__`` is used.
     Raises :class:`~hushspec.middleware.HushSpecDenied` when the policy denies
     the action.
+
+    The wrapper keeps the wrapped function's signature and annotations, which
+    is what a framework reads to build the tool's argument schema.
+
+    ``tool_call`` actions use the configured tool name and the canonical size
+    of the function's actual positional and keyword arguments. A different
+    action type must provide ``action_mapper(args, kwargs)`` returning an
+    :class:`~hushspec.evaluate.EvaluationAction`; the mapper is explicit
+    because a Python function name cannot safely describe a command, path, or
+    network destination.
     """
-
-    def decorator(func: Callable) -> Callable:
-        name = tool_name or getattr(func, "__name__", "unknown")
-
-        def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
-            action = EvaluationAction(type=action_type, target=name)
-            guard.enforce(action)
-            return func(*args, **kwargs)
-
-        wrapper.__name__ = func.__name__  # type: ignore[attr-defined]
-        wrapper.__doc__ = func.__doc__
-        wrapper.__wrapped__ = func  # type: ignore[attr-defined]
-        return wrapper
-
-    return decorator
+    return guarded_tool(guard, tool_name, action_type, action_mapper)

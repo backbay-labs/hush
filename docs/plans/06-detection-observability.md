@@ -1,11 +1,13 @@
 # RFC 06: Detection Extension Implementation & Observability Hooks
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Authors:** Detection Engineering
 **Date:** 2026-03-15
 **HushSpec Version:** 0.1.0
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). Detector and observability source exists on the open stack. Dedicated PII/encoding/multiturn systems, threat-intelligence feeds, dashboards, and runbooks remain deferred rather than completed by this RFC's historical prose.
 
 ## 1. Executive Summary
 

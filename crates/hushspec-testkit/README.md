@@ -1,15 +1,90 @@
 # hushspec-testkit
 
-Conformance and differential-testing toolkit for HushSpec implementations.
+Conformance and differential-testing toolkit for [HushSpec](https://github.com/backbay-labs/hush),
+the portable specification for declaring, enforcing and proving the security
+controls an AI agent operates under.
+
+Its conformance runner replays the published corpus against the reference implementation in Rust, scores
+the run against the six conformance levels of `spec/hushspec-core.md` section
+8, and packages the corpus as a reproducible bundle a third party can download
+and run on their own engine.
 
 ## Binaries
 
 | Binary | Purpose |
 |---|---|
-| `hushspec-testkit` | Replay the shared fixture corpus (`--fixtures fixtures`) |
-| `hushspec-normalize` | Parse a policy and print normalized JSON (cross-SDK roundtrip check) |
+| `hushspec-testkit` | Replay the shared fixture corpus (`--fixtures fixtures`), write a conformance report, and package the conformance bundle |
 | `hushspec-gen` | Generate a portable differential case bundle (JSON) |
 | `hushspec-difftest` | Differential fuzz: run bundles through all four SDK evaluators and fail on divergence |
+
+## Conformance runs
+
+```bash
+# Replay the document corpus (levels 0-3)
+hushspec-testkit --fixtures fixtures
+
+# Add the evidence-chain vectors (levels 4 and 5) and write a report
+hushspec-testkit --fixtures fixtures --report report.json
+
+```
+
+The report validates against
+`schemas/hushspec-conformance-report.v1.schema.json` before it is written: it
+names the implementation, pins the corpus by the SHA-256 of
+`fixtures/MANIFEST.json`, gives an outcome for each of levels 0-5, and lists
+every vector it ran. `highest_level` is the largest N for which levels 0..=N
+all pass; a level with any unattempted vector is never a pass.
+
+The root command executes only the reference implementation in Rust. It rejects the
+former `--implementation`, `--implementation-version` and
+`--implementation-language` metadata overrides: relabeling a reference run
+does not test another engine. External engines need a harness that actually
+invokes them; use the experimental external command described below.
+The implementation version, testkit version and corpus manifest digest are
+separate identities, even when their version strings happen to match.
+
+## External engine runs
+
+```sh
+hushspec-testkit external --engine engine-profile.json --fixtures fixtures --out new-packet --level 3
+```
+
+This Linux-only controller executes a captured, SHA-256-pinned static ELF
+engine and grades its observations with no reference fallback. It retains
+`report.json`, a completion marker `execution.json`, captured images and inputs,
+all request/output bytes and every planned result slot. Existing output
+directories are refused. Exit 0 qualifies the requested level; 1 retains a
+nonqualifying packet; 2 indicates configuration/corpus/publication failure.
+
+From the repository, `python3 scripts/run_external_conformance.py --out
+target/go-conformance` builds and tests the first-party Go adapter.
+`python3 scripts/run_external_conformance.py --verify target/go-conformance/packet`
+checks offline integrity without executing images. Go bring-up is not
+independent-engine qualification. L4/L5, independent authorship and adoption
+remain separate gates. The engine is approved code, **not sandboxed**; the
+unsigned record is not authenticated provenance or a build attestation.
+See the [protocol and operator guide](https://github.com/backbay-labs/hush/blob/main/docs/src/reference/external-conformance.md)
+for schemas, examples, limits and trust boundaries.
+
+Reports also run the JSON case corpora that SDK unit tests consume:
+`core/raw-yaml/scalars.json` records parse acceptance at Level 0, decoded
+values at Level 1, optional decisions at Level 3, and optional canonical/hash
+assertions at Level 4;
+`log/schema-vectors.json` records one Level 5 verifier result per entry. A
+missing or malformed corpus is a failure, not an empty successful category.
+
+## The conformance bundle
+
+```bash
+hushspec-testkit bundle --root . --out hushspec-conformance-1.0.0.tar.gz
+```
+
+The archive holds `spec/`, `schemas/`, and `fixtures/` plus a README on
+running it against an implementation.
+It is reproducible -- sorted entries, fixed modes, zeroed mtimes, no gzip
+timestamp -- so the same tree always produces the same bytes and the digest in
+a release attestation means something. `release.yml` attaches it to every
+release.
 
 `hushspec-gen` and `hushspec-difftest` share one bundle generator, the
 `hushspec_testkit::gen` module (written `r#gen` in source, since `gen` is a
@@ -49,7 +124,7 @@ Exit codes: `0` no divergence, `1` divergence found, `2` infrastructure error
 {
   "hushspec_diff": "0.1.0",
   "seed": 42,
-  "generated_by": "hushspec-gen 0.1.1",
+  "generated_by": "hushspec-gen 1.0.0",
   "groups": [
     {
       "id": "g0001",
@@ -61,7 +136,7 @@ Exit codes: `0` no divergence, `1` divergence found, `2` infrastructure error
 ```
 
 Case keys are `"{group_id}/{action_id}"`. Every policy in a generated bundle
-passes `hushspec::validate` in the Rust reference implementation, so any SDK
+passes `hushspec::validate` in the reference implementation, so any SDK
 rejecting one is an acceptance divergence. Consumers must reject unknown
 bundle fields and unknown `hushspec_diff` versions (fail-closed).
 

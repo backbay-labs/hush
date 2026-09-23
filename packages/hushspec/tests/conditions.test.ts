@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   evaluateCondition,
-  evaluateWithContext,
+  timezoneIsKnown,
+  validateCondition,
+  validateConditions,
   type Condition,
   type RuntimeContext,
 } from '../src/conditions.js';
+import { evaluateWithContext } from '../src/evaluate.js';
 import type { HushSpec } from '../src/schema.js';
 
 // ---------------------------------------------------------------------------
@@ -106,11 +109,8 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctx)).toBe(true);
     });
 
-    // Cross-SDK parity fix (spec item S1): array expected vs array actual
-    // matches iff the sets intersect (Rust computes a non-empty membership
-    // overlap, not strict equality) -- mirrors
-    // crates/hushspec/src/conditions.rs `context_condition_array_or_match`
-    // combined with the array-actual path of `matches_scalar_or_membership`.
+    // An array expected value against an array actual value matches when the
+    // sets intersect, not when they are equal (core spec 3.13).
     it('array expected vs array actual matches when the sets intersect', () => {
       const ctx: RuntimeContext = {
         user: { groups: ['engineering', 'ml-team'] },
@@ -131,12 +131,9 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctx)).toBe(false);
     });
 
-    // Cross-SDK parity fix (spec item S1): expected array vs actual scalar
-    // matches iff the scalar is a member of the expected array, for number
-    // and bool actual values too (previously TS only handled string
-    // membership here). Mirrors crates/hushspec/src/conditions.rs
-    // `context_condition_array_or_match_numbers` /
-    // `context_condition_array_or_match_booleans`.
+    // An array expected value against a scalar actual value matches when the
+    // scalar is a member of the array, for numbers and booleans as well as
+    // strings (core spec 3.13).
     it('array of expected numbers matches a scalar actual number (membership)', () => {
       const ctx: RuntimeContext = {
         session: { action_count: 2 },
@@ -175,6 +172,14 @@ describe('evaluateCondition', () => {
         context: { 'request.interactive': [true] },
       };
       expect(evaluateCondition(cond, ctx)).toBe(false);
+    });
+
+    it('numbers compare exactly, with no tolerance', () => {
+      const cond: Condition = {
+        context: { 'custom.ratio': 0.3 },
+      };
+      expect(evaluateCondition(cond, { custom: { ratio: 0.3 } })).toBe(true);
+      expect(evaluateCondition(cond, { custom: { ratio: 0.30000000000000004 } })).toBe(false);
     });
   });
 
@@ -292,7 +297,9 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition(cond, ctxWithTime('2026-01-17T03:00:00Z'))).toBe(true);
     });
 
-    it('fails closed for unknown timezone identifiers', () => {
+    it('keeps the block active when the timezone cannot be resolved', () => {
+      // Core spec 3.13: a window the engine cannot evaluate must not switch a
+      // control off, so an unresolvable zone leaves the rule block ACTIVE.
       const cond: Condition = {
         time_window: {
           start: '09:00',
@@ -300,7 +307,28 @@ describe('evaluateCondition', () => {
           timezone: 'America/NeYork',
         },
       };
-      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(false);
+      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(true);
+    });
+
+    it('keeps the block active when current_time cannot be parsed', () => {
+      const cond: Condition = {
+        time_window: { start: '09:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, { current_time: 'not-a-timestamp' })).toBe(true);
+    });
+
+    it('keeps the block active when current_time has an impossible calendar date', () => {
+      const cond: Condition = {
+        time_window: { start: '09:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, { current_time: '2026-02-30T20:00:00Z' })).toBe(true);
+    });
+
+    it('keeps the block active for a malformed HH:MM that escaped validation', () => {
+      const cond: Condition = {
+        time_window: { start: '25:00', end: '17:00', timezone: 'UTC' },
+      };
+      expect(evaluateCondition(cond, ctxWithTime('2026-01-14T13:30:00Z'))).toBe(true);
     });
   });
 
@@ -398,13 +426,14 @@ describe('evaluateCondition', () => {
       expect(evaluateCondition({}, {})).toBe(true);
     });
 
-    it('max nesting depth exceeded fails closed', () => {
-      // Build deeply nested condition
-      let cond: Condition = { context: { environment: 'production' } };
+    it('keeps the block active past the nesting cap', () => {
+      // Validation rejects this at parse time; at evaluation time a condition
+      // the engine cannot evaluate must leave the block ACTIVE (core spec 3.13).
+      let cond: Condition = { context: { environment: 'nowhere' } };
       for (let i = 0; i < 12; i++) {
         cond = { all_of: [cond] };
       }
-      expect(evaluateCondition(cond, ctxWithEnv('production'))).toBe(false);
+      expect(evaluateCondition(cond, ctxWithEnv('production'))).toBe(true);
     });
   });
 });
@@ -460,9 +489,12 @@ describe('evaluateWithContext', () => {
     expect(result.decision).toBe('deny');
   });
 
+  // The target is on the block list, so the window decides the outcome: an
+  // allowlisted target would answer `allow` whether or not the condition was
+  // applied at all.
   it('tool access with time window condition', () => {
     const spec = makeToolAccessSpec();
-    const action = { type: 'tool_call', target: 'deploy' };
+    const action = { type: 'tool_call', target: 'danger_tool' };
     const conditions: Record<string, Condition> = {
       tool_access: {
         time_window: {
@@ -475,23 +507,34 @@ describe('evaluateWithContext', () => {
 
     const ctxInside: RuntimeContext = { current_time: '2026-01-14T10:00:00Z' };
     const resultInside = evaluateWithContext(spec, action, ctxInside, conditions);
-    expect(resultInside.decision).toBe('allow');
+    expect(resultInside.decision).toBe('deny');
 
     const ctxOutside: RuntimeContext = { current_time: '2026-01-14T20:00:00Z' };
     const resultOutside = evaluateWithContext(spec, action, ctxOutside, conditions);
     expect(resultOutside.decision).toBe('allow');
   });
 
+  // A context field the engine did not supply makes the predicate false, so
+  // the block is inert and the blocked target is not denied. The supplied
+  // context is asserted beside it, because a target the policy allows anyway
+  // would answer `allow` either way.
   it('missing context fails closed', () => {
     const spec = makeEgressSpec();
-    const action = { type: 'egress', target: 'api.openai.com' };
-    const ctx: RuntimeContext = {};
+    const action = { type: 'egress', target: 'evil.example.com' };
     const conditions: Record<string, Condition> = {
       egress: { context: { environment: 'production' } },
     };
 
-    const result = evaluateWithContext(spec, action, ctx, conditions);
-    expect(result.decision).toBe('allow');
+    const missing = evaluateWithContext(spec, action, {}, conditions);
+    expect(missing.decision).toBe('allow');
+
+    const supplied = evaluateWithContext(
+      spec,
+      action,
+      { environment: 'production' },
+      conditions,
+    );
+    expect(supplied.decision).toBe('deny');
   });
 
   it('compound condition', () => {
@@ -516,5 +559,162 @@ describe('evaluateWithContext', () => {
     const partialCtx: RuntimeContext = { environment: 'production' };
     const result2 = evaluateWithContext(spec, action, partialCtx, conditions);
     expect(result2.decision).toBe('allow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Parse-time validation (core spec 3.13)
+// ---------------------------------------------------------------------------
+
+describe('validateCondition', () => {
+  it('accepts every well-formed condition form', () => {
+    const condition: Condition = {
+      time_window: {
+        start: '22:00',
+        end: '06:00',
+        timezone: 'America/New_York',
+        days: ['mon', 'TUE', 'wed'],
+      },
+      any_of: [
+        { context: { 'user.role': 'contractor' } },
+        { all_of: [{ context: { 'deployment.region': 'eu-west-1' } }, { not: { context: { 'agent.type': 'batch' } } }] },
+      ],
+    };
+    expect(validateCondition(condition, 'rules.egress.when')).toEqual([]);
+  });
+
+  it('rejects an out-of-range HH:MM time', () => {
+    const errors = validateCondition(
+      { time_window: { start: '25:00', end: '06:00' } },
+      'rules.shell_commands.when',
+    );
+    expect(errors).toEqual([
+      'rules.shell_commands.when.time_window.start: "25:00" is not a valid HH:MM time',
+    ]);
+  });
+
+  it('rejects an unknown timezone but accepts a fixed offset', () => {
+    expect(
+      validateCondition(
+        { time_window: { start: '09:00', end: '17:00', timezone: 'Mars/Olympus_Mons' } },
+        'rules.egress.when',
+      ),
+    ).toEqual([
+      'rules.egress.when.time_window.timezone: "Mars/Olympus_Mons" is neither an IANA time zone nor a fixed offset',
+    ]);
+    expect(
+      validateCondition(
+        { time_window: { start: '09:00', end: '17:00', timezone: '+05:30' } },
+        'rules.egress.when',
+      ),
+    ).toEqual([]);
+  });
+
+  it('rejects a day outside mon..sun', () => {
+    const errors = validateCondition(
+      { time_window: { start: '09:00', end: '17:00', days: ['mon', 'funday'] } },
+      'rules.egress.when',
+    );
+    expect(errors).toEqual([
+      'rules.egress.when.time_window.days: "funday" is not one of mon, tue, wed, thu, fri, sat, sun',
+    ]);
+  });
+
+  it('rejects nesting deeper than eight levels', () => {
+    let condition: Condition = { context: { environment: 'production' } };
+    for (let i = 0; i < 9; i++) {
+      condition = { not: condition };
+    }
+    const errors = validateCondition(condition, 'rules.shell_commands.when');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('conditions nest deeper than the maximum of 8 levels');
+  });
+
+  it('accepts nesting at exactly the cap', () => {
+    let condition: Condition = { context: { environment: 'production' } };
+    for (let i = 0; i < 8; i++) {
+      condition = { not: condition };
+    }
+    expect(validateCondition(condition, 'rules.shell_commands.when')).toEqual([]);
+  });
+});
+
+describe('validateConditions', () => {
+  it('reports each offending rule block by path', () => {
+    const errors = validateConditions({
+      egress: { when: { time_window: { start: '09:00', end: '99:00' } } },
+      shell_commands: { when: { time_window: { start: '09:00', end: '17:00', days: ['xyz'] } } },
+      tool_access: { when: { context: { environment: 'production' } } },
+    });
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('rules.egress.when.time_window.end');
+    expect(errors[1]).toContain('rules.shell_commands.when.time_window.days');
+  });
+});
+
+describe('timezoneIsKnown', () => {
+  it('accepts IANA zones, UTC aliases and fixed offsets', () => {
+    for (const zone of ['UTC', 'GMT', 'Etc/UTC', 'America/New_York', 'Europe/London', '+05:30', '-08:00', 'IST']) {
+      expect(timezoneIsKnown(zone), zone).toBe(true);
+    }
+  });
+
+  it('rejects identifiers no engine can resolve', () => {
+    for (const zone of ['Mars/Olympus_Mons', 'Not/AZone', '+99:00', '']) {
+      expect(timezoneIsKnown(zone), zone).toBe(false);
+    }
+  });
+});
+
+describe('fixed-offset timezone grammar', () => {
+  it('accepts two-digit hour and minute fields', () => {
+    for (const zone of ['+05:30', '-08:00', '+05', '-08', '+00:00']) {
+      expect(timezoneIsKnown(zone), zone).toBe(true);
+    }
+  });
+
+  // A zone the engine cannot resolve leaves the rule block active (core spec
+  // 3.13), so an offset another engine refuses must not resolve here either.
+  it('rejects one-digit fields, a missing colon and a doubled sign', () => {
+    for (const zone of ['+5', '+0530', '+5:0', '++5', '+05:3', '+ 5:30', '+05:30 ']) {
+      expect(timezoneIsKnown(zone), zone).toBe(false);
+    }
+  });
+});
+
+describe('rate predicate', () => {
+  const gte: Condition = {
+    rate: { counter: 'shell_commands', threshold: 5, comparison: 'gte' },
+  };
+
+  it('compares at the threshold', () => {
+    expect(evaluateCondition(gte, { counters: { shell_commands: 4 } })).toBe(false);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 5 } })).toBe(true);
+    expect(evaluateCondition(gte, { counters: { shell_commands: 6 } })).toBe(true);
+  });
+
+  it('holds when the engine supplied no such counter', () => {
+    expect(evaluateCondition(gte, {})).toBe(true);
+    expect(evaluateCondition(gte, { counters: { egress_calls: 9 } })).toBe(true);
+  });
+
+  // A counter is a non-negative integer (core spec 3.13). Anything else is not
+  // a counter the engine supplied, so the predicate is unevaluable and the
+  // block stays active rather than being switched off by a malformed value.
+  it('holds when the counter is not a non-negative integer', () => {
+    const malformed: unknown[] = [
+      5.5,
+      -1,
+      -0.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '6',
+      true,
+      null,
+    ];
+    for (const value of malformed) {
+      const context = { counters: { shell_commands: value } } as unknown as RuntimeContext;
+      expect(evaluateCondition(gte, context), String(value)).toBe(true);
+    }
   });
 });

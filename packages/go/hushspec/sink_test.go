@@ -1,7 +1,9 @@
 package hushspec
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,33 +12,35 @@ import (
 )
 
 func makeTestReceipt(decision Decision) *DecisionReceipt {
+	duration := int64(42)
 	return &DecisionReceipt{
-		ReceiptID:       "test-receipt-001",
-		Timestamp:       "2026-03-15T00:00:00.000Z",
-		HushSpecVersion: "0.1.0",
+		ReceiptVersion: ReceiptVersion,
+		ReceiptID:      "01994b7e-2c1a-7c3e-8f4a-0123456789ab",
+		Timestamp:      "2026-03-15T00:00:00.000Z",
+		TimeSource:     TimeSourceSystem,
 		Action: ActionSummary{
-			Type:            "tool_call",
-			Target:          "test_tool",
-			ContentRedacted: false,
+			Type:   "tool_call",
+			Target: "test_tool",
 		},
 		Decision:    decision,
 		MatchedRule: "rules.tool_access.allow",
 		Reason:      "tool is explicitly allowed",
-		RuleTrace: []RuleEvaluation{
+		RuleTrace: []RuleTraceEntry{
 			{
-				RuleBlock:   "tool_access",
-				Outcome:     RuleOutcomeAllow,
-				MatchedRule: "rules.tool_access.allow",
-				Reason:      "tool is explicitly allowed",
-				Evaluated:   true,
+				RuleBlock: "tool_access",
+				RulePath:  "rules.tool_access.allow",
+				Outcome:   RuleOutcomeAllow,
+				Reason:    "tool is explicitly allowed",
+				Evaluated: true,
 			},
 		},
 		Policy: PolicySummary{
-			Name:        "test-policy",
-			Version:     "0.1.0",
-			ContentHash: "abc123",
+			Name:        strPtr("test-policy"),
+			SpecVersion: "0.1.0",
+			ContentHash: DigestOf("test-policy"),
 		},
-		EvaluationDurationUs: 42,
+		Enforcement: ImpliedEnforcement(decision, EnforcementModeEnforce),
+		DurationUs:  &duration,
 	}
 }
 
@@ -66,8 +70,8 @@ func TestFileReceiptSinkWritesJSONLines(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &r1); err != nil {
 		t.Fatalf("unmarshal line 1: %v", err)
 	}
-	if r1.ReceiptID != "test-receipt-001" {
-		t.Errorf("expected receipt_id test-receipt-001, got %q", r1.ReceiptID)
+	if r1.ReceiptID != "01994b7e-2c1a-7c3e-8f4a-0123456789ab" {
+		t.Errorf("expected receipt_id 01994b7e-2c1a-7c3e-8f4a-0123456789ab, got %q", r1.ReceiptID)
 	}
 
 	var r2 DecisionReceipt
@@ -179,6 +183,61 @@ func TestMultiSinkContinuesAfterError(t *testing.T) {
 	if count != 1 {
 		t.Errorf("counting sink should still execute, got count=%d", count)
 	}
+
+	var sinkErr *SinkError
+	if !errors.As(err, &sinkErr) {
+		t.Fatalf("expected a *SinkError, got %T", err)
+	}
+	if sinkErr.Sink != "CallbackSink" {
+		t.Errorf("the failure names the sink that refused, got %q", sinkErr.Sink)
+	}
+	if !strings.Contains(err.Error(), "test error") {
+		t.Errorf("the failure carries the sink's own error, got %q", err)
+	}
+}
+
+func TestMultiSinkFailureReachesTheObserversAsSinkError(t *testing.T) {
+	counted := 0
+	failing := NewCallbackSink(func(*DecisionReceipt) error {
+		return fmt.Errorf("no space left on device")
+	})
+	counting := NewCallbackSink(func(*DecisionReceipt) error {
+		counted++
+		return nil
+	})
+	observer := &recordingObserver{}
+	guard := newTestGuard(t, GuardOptions{
+		Sink:     NewMultiSink([]ReceiptSink{failing, counting}),
+		Observer: observer,
+	})
+
+	allowed, err := guard.Check(context.Background(), &EvaluationAction{
+		Type: "egress", Target: "api.github.com",
+	})
+	if err != nil {
+		t.Fatalf("a sink failure must not reach the caller, got %v", err)
+	}
+	if !allowed.Allowed() {
+		t.Fatal("the decision stands even when recording it failed")
+	}
+	if counted != 1 {
+		t.Fatalf("the sinks after the failing one still get the receipt, got %d", counted)
+	}
+
+	errs := observer.errors()
+	if len(errs) != 1 {
+		t.Fatalf("expected one sink failure report, got %d", len(errs))
+	}
+	event := errorObserverEvent(errs[0])
+	if event.Type != ObserverEventSinkError {
+		t.Fatalf("expected a %s event, got %s", ObserverEventSinkError, event.Type)
+	}
+	if !strings.Contains(event.Error, "CallbackSink") {
+		t.Errorf("the event names the child sink that refused, got %q", event.Error)
+	}
+	if !strings.Contains(event.Error, "no space left on device") {
+		t.Errorf("the event carries the child sink's own error, got %q", event.Error)
+	}
 }
 
 func TestNullSinkDoesNotCrash(t *testing.T) {
@@ -208,7 +267,7 @@ func TestCallbackSinkInvokesCallback(t *testing.T) {
 	if len(ids) != 2 {
 		t.Fatalf("expected 2 callbacks, got %d", len(ids))
 	}
-	if ids[0] != "test-receipt-001" || ids[1] != "test-receipt-001" {
+	if ids[0] != "01994b7e-2c1a-7c3e-8f4a-0123456789ab" || ids[1] != "01994b7e-2c1a-7c3e-8f4a-0123456789ab" {
 		t.Errorf("unexpected IDs: %v", ids)
 	}
 }

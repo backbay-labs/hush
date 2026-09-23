@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-evidence-inventory-experimental.v1.schema.json",
+  "title": "HushSpec evidence-inventory-experimental 0.1.0",
+  "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "inventory_version",
+    "run_id",
+    "window",
+    "acquired_from",
+    "streams"
+  ],
+  "properties": {
+    "inventory_version": {
+      "const": "0.1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "window": {
+      "$ref": "#/$defs/Window"
+    },
+    "acquired_from": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "streams": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/InventoryStream"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    }
+  },
+  "$defs": {
+    "Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "InventoryStream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "file_sha256s"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "file_sha256s": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Digest"
+          },
+          "minItems": 1,
+          "maxItems": 1024,
+          "uniqueItems": true
+        },
+        "log": {
+          "$ref": "#/$defs/LogBoundary"
+        }
+      }
+    },
+    "LogBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_prev_hash",
+        "end_file_sha256",
+        "end_seq",
+        "end_entry_hash"
+      ],
+      "properties": {
+        "start_prev_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "initial_policy_hash": {
+          "$ref": "#/$defs/Digest"
+        },
+        "end_file_sha256": {
+          "$ref": "#/$defs/Digest"
+        },
+        "end_seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_entry_hash": {
+          "$ref": "#/$defs/Digest"
+        }
+      }
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "Window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "since",
+        "until"
+      ],
+      "properties": {
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "until": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    }
+  }
+}

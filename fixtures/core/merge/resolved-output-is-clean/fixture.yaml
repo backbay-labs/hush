@@ -1,0 +1,7 @@
+description: >-
+  A resolved document carries no resolution instructions (core spec 2.3):
+  `extends` and `merge_strategy` say how a policy is assembled, not what it
+  permits, so resolution consumes both and the expected document declares
+  neither -- even though the child names a strategy explicitly. Its own
+  directory so the expectation stands on a base and a child that exist only to
+  state it.

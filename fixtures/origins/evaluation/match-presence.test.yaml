@@ -1,0 +1,62 @@
+hushspec_test: "0.1.0"
+description: "A profile without a match field is never a candidate; an empty match object is the lowest-priority default profile (origins spec 3)"
+policy:
+  hushspec: "0.1.0"
+  rules:
+    tool_access:
+      default: allow
+  extensions:
+    posture:
+      initial: standard
+      states:
+        standard:
+          capabilities: [tool_call]
+      transitions: []
+    origins:
+      default_behavior: minimal_profile
+      profiles:
+        - id: template-no-match
+          tool_access:
+            block: [deploy]
+            default: allow
+        - id: catch-all
+          match: {}
+          tool_access:
+            block: [ticket_search]
+            default: allow
+        - id: slack-only
+          match:
+            provider: slack
+          tool_access:
+            allow: [ticket_search]
+            default: allow
+cases:
+  - description: "a profile without a match field never matches, even though it is listed first"
+    action:
+      type: tool_call
+      target: deploy
+      origin:
+        provider: github
+    expect:
+      decision: allow
+      origin_profile: catch-all
+  - description: "an empty match object is the default profile"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: github
+    expect:
+      decision: deny
+      matched_rule: extensions.origins.profiles.catch-all.tool_access.block
+      origin_profile: catch-all
+  - description: "a profile with one matched field outranks the default profile"
+    action:
+      type: tool_call
+      target: ticket_search
+      origin:
+        provider: slack
+    expect:
+      decision: allow
+      matched_rule: extensions.origins.profiles.slack-only.tool_access.allow
+      origin_profile: slack-only

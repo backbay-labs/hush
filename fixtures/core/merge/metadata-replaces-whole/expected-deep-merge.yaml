@@ -1,0 +1,10 @@
+hushspec: "0.2.0"
+name: child-deep-merge
+metadata:
+  author: platform@example.com
+  policy_version: 8
+rules:
+  egress:
+    allow:
+      - "child.example.com"
+    default: block

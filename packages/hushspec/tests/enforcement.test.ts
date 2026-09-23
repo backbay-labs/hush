@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseOrThrow } from '../src/parse.js';
-import { evaluateAudited, DEFAULT_AUDIT_CONFIG } from '../src/receipt.js';
+import { evaluateAuditedSpec, DEFAULT_AUDIT_CONFIG } from '../src/receipt.js';
 import type { EnforcementSummary } from '../src/receipt.js';
 import { ObservableEvaluator } from '../src/observer.js';
 import type { EvaluationCompletedEvent, ObserverEvent } from '../src/observer.js';
@@ -16,30 +16,43 @@ rules:
 `;
 
 describe('receipt enforcement summary', () => {
-  it('evaluateAudited never sets enforcement', () => {
+  it('records the disposition a decision implies when there is no enforcement point', () => {
     const spec = parseOrThrow(POLICY);
-    const receipt = evaluateAudited(
+    const receipt = evaluateAuditedSpec(
       spec,
       { type: 'tool_call', target: 'dangerous_tool' },
       DEFAULT_AUDIT_CONFIG,
     );
     expect(receipt.decision).toBe('deny');
-    expect(receipt.enforcement).toBeUndefined();
+    // Required in 0.2, never absent: a warn or deny with no confirmation
+    // channel blocks (core spec 6, receipt spec 4.7).
+    expect(receipt.enforcement).toEqual({ mode: 'enforce', outcome: 'blocked' });
   });
 
-  it('serializes enforcement when set by an enforcement point', () => {
+  it('serializes enforcement supplied by an enforcement point', () => {
     const spec = parseOrThrow(POLICY);
-    const receipt = evaluateAudited(
+    const summary: EnforcementSummary = { mode: 'monitor', outcome: 'would_block' };
+    const receipt = evaluateAuditedSpec(
       spec,
       { type: 'tool_call', target: 'dangerous_tool' },
       DEFAULT_AUDIT_CONFIG,
+      { enforcement: summary },
     );
-    const summary: EnforcementSummary = { mode: 'monitor', outcome: 'would_block' };
-    receipt.enforcement = summary;
 
     const json = JSON.parse(JSON.stringify(receipt));
     expect(json.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
     expect(json.decision).toBe('deny');
+  });
+
+  it('monitor mode turns a block into would_block without an explicit summary', () => {
+    const spec = parseOrThrow(POLICY);
+    const receipt = evaluateAuditedSpec(
+      spec,
+      { type: 'tool_call', target: 'dangerous_tool' },
+      DEFAULT_AUDIT_CONFIG,
+      { enforcementMode: 'monitor' },
+    );
+    expect(receipt.enforcement).toEqual({ mode: 'monitor', outcome: 'would_block' });
   });
 });
 

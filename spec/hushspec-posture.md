@@ -1,9 +1,10 @@
 # HushSpec Posture Extension Specification
 
-**Version:** 0.1.0
-**Status:** Draft
-**Date:** 2026-03-15
-**Companion to:** HushSpec Core v0.1.0
+**Version:** 1.0.0
+**Status:** Stable
+**Date:** 2026-09-15
+**Companion to:** HushSpec Core 1.0.0
+**Supersedes:** 0.1.0 (2026-03-15). See Appendix C for the list of changes.
 
 ---
 
@@ -71,7 +72,13 @@ The `transitions` field is REQUIRED and MUST be an array of transition objects. 
 
 ## 3. Capabilities
 
-Capabilities declare what categories of action an agent may perform in a given state. When the posture extension is active and the current state's `capabilities` array is non-empty, only actions corresponding to a listed capability are permitted. If `capabilities` is absent or empty, no capability restriction is applied by the posture extension for that state.
+Capabilities declare what categories of action an agent may perform in a given state. A rule block's `when.capability` condition (Core Section 3.13) tests whether the effective state grants a capability, so a block can be gated on posture without being a capability guard itself. When the posture extension is active, an action that requires a capability (Section 3.3) is permitted by the posture guard only if the current state's `capabilities` array lists that capability. If `capabilities` is absent or empty, the state permits **no** capability-requiring action: every such action MUST be denied with `matched_rule` `extensions.posture.states.<state>.capabilities`. An empty capability list is the idiom for a locked-down state (see Appendix B); it is never "no restriction".
+
+An action whose `posture.current` names a state absent from `states` MUST be denied with `matched_rule` `extensions.posture.states.<state>` (fail-closed).
+
+The posture guard runs before core rule blocks (Core Section 6.1); a deny from it is final.
+
+Test vectors: `fixtures/posture/evaluation/posture-transitions.test.yaml`, `fixtures/posture/evaluation/empty-capabilities.test.yaml`, `fixtures/posture/evaluation/unknown-state-fail-closed.test.yaml`.
 
 ### 3.1 Standard Capabilities
 
@@ -90,6 +97,25 @@ The following capability identifiers are defined by this specification:
 ### 3.2 Forward Compatibility
 
 Engines MAY support additional capability identifiers beyond the standard set. Conformant validators SHOULD produce warnings (not errors) for unrecognized capabilities. This ensures that documents authored for engines with extended capability sets remain valid under stricter validators.
+
+### 3.3 Required Capability by Action Type
+
+The posture guard maps each core action type (Core Section 5) to the capability it requires:
+
+| Action type      | Required capability |
+|------------------|---------------------|
+| `file_read`      | `file_access`       |
+| `file_write`     | `file_write`        |
+| `patch_apply`    | `patch`             |
+| `shell_command`  | `shell`             |
+| `tool_call`      | `tool_call`         |
+| `egress`         | `egress`            |
+| `custom`         | `custom`            |
+| `computer_use`, `input_inject`, `browser_action`, `code_exec` | none (not gated by posture) |
+
+Action types not in this table are unknown and are denied by the core evaluator before the posture guard runs (Core Section 5).
+
+The guard looks the current state up before it consults this table: an action whose `posture.current` names a state absent from `states` is denied (Section 3) whatever its action type, including the types this table does not gate.
 
 ---
 
@@ -148,6 +174,8 @@ Transitions define how the state machine moves between states. Each transition f
 
 When multiple transitions match the same trigger from the same source state, the engine MUST select the most specific `from` match. A named state takes priority over `"*"`. If two transitions have equal specificity, the first transition in document order wins.
 
+Test vector: `fixtures/posture/evaluation/transition-priority.test.yaml`.
+
 ---
 
 ## 6. Validation Requirements
@@ -191,6 +219,12 @@ If the child defines `initial`, it overrides the base's `initial`. If the child 
 ### 7.4 Replace and Merge Strategies
 
 Under `replace` strategy, the child's posture object entirely replaces the base's. Under `merge` strategy, the child's posture object entirely replaces the base's (since posture is a single block under extensions).
+
+---
+
+## Security Considerations
+
+The security considerations for the whole specification family are collected in `hushspec-security.md`; the ones that bear on this extension are the panic sentinel and monitor mode (Security Sections 10 and 11) for posture, and remote resolution and canonicalization (Security Sections 4 and 12) for origin overlays.
 
 ---
 
@@ -250,3 +284,12 @@ extensions:
         to: "restricted"
         on: budget_exhausted
 ```
+
+## Appendix C. Changes from 0.1.0
+
+| Section | Change                                                                                                     |
+|---------|------------------------------------------------------------------------------------------------------------|
+| 3       | An absent or empty `capabilities` list denies every capability-requiring action. Version 0.1.0 said "no capability restriction is applied", which contradicted Appendix B's `locked` state and the implementations; the fail-closed reading is now normative. |
+| 3       | Unknown posture state and guard ordering made explicit.                                                     |
+| 3.3     | Required-capability table added; `custom` actions require the `custom` capability.                           |
+| 5.3     | For the same trigger, a transition whose `from` names the current state outranks one whose `from` is `"*"`; among equals, document order wins. Implementations previously took the first match in document order. Test vector: `fixtures/posture/evaluation/transition-priority.test.yaml`. |

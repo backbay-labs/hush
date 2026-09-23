@@ -1,0 +1,15 @@
+# core 2.5 and 4.1: under every merge strategy the child's `metadata` object,
+# when present, replaces the base's entirely. It is not field-merged: the
+# base's approved_by, approval_date, classification, lifecycle_state and
+# controls are all gone, even though the child restates none of them.
+hushspec: "0.2.0"
+name: child-metadata-replaces
+extends: base
+metadata:
+  author: platform@example.com
+  policy_version: 4
+rules:
+  egress:
+    allow:
+      - "b.example.com"
+    default: block

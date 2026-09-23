@@ -1,0 +1,29 @@
+"hushspec_hash_vector": "0.1.0"
+"description": "canonical 3.2 + core 3.13: `when` is projected like any object; time_window.timezone defaults\
+  \ to UTC, days without a default stays absent when omitted, nested all_of/not are projected recursively,\
+  \ context passes through unchanged"
+"policy":
+  "hushspec": "0.1.0"
+  "rules":
+    "shell_commands":
+      "when":
+        "all_of":
+        - "time_window":
+            "start": "22:00"
+            "end": "06:00"
+        - "not":
+            "context":
+              "environment": "production"
+              "user.role": "admin"
+        "any_of":
+        - "time_window":
+            "start": "00:00"
+            "end": "23:59"
+            "timezone": "Europe/Berlin"
+            "days":
+            - "sat"
+            - "sun"
+      "forbidden_patterns":
+      - "mkfs"
+canonical: "{\"hushspec\":\"0.1.0\",\"rules\":{\"shell_commands\":{\"enabled\":true,\"forbidden_patterns\":[\"mkfs\"],\"when\":{\"all_of\":[{\"time_window\":{\"end\":\"06:00\",\"start\":\"22:00\",\"timezone\":\"UTC\"}},{\"not\":{\"context\":{\"environment\":\"production\",\"user.role\":\"admin\"}}}],\"any_of\":[{\"time_window\":{\"days\":[\"sat\",\"sun\"],\"end\":\"23:59\",\"start\":\"00:00\",\"timezone\":\"Europe/Berlin\"}}]}}}}"
+content_hash: "sha256:16702c3634238e9bb14f4777617fb952331f71df9a2915b49311c9da86f8e484"

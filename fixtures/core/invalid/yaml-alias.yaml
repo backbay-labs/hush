@@ -1,0 +1,7 @@
+# Anchors and aliases are rejected (core spec 2.4).
+hushspec: "0.1.0"
+rules:
+  forbidden_paths:
+    patterns: &secrets
+      - "**/.env"
+    exceptions: *secrets

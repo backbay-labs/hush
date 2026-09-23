@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.org/schemas/hushspec-posture.v1.schema.json",
+  "title": "HushSpec Posture Extension v1",
+  "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
+  "type": "object",
+  "required": [
+    "initial",
+    "states",
+    "transitions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "initial": {
+      "type": "string",
+      "description": "Initial state name. Must reference a key in states."
+    },
+    "states": {
+      "type": "object",
+      "description": "Named states in the posture state machine.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/PostureState"
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "description": "Transitions between states, triggered by events.",
+      "items": {
+        "$ref": "#/$defs/PostureTransition"
+      }
+    }
+  },
+  "$defs": {
+    "PostureState": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A named state in the posture state machine.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Capability identifiers available in this state. Standard values: file_access, file_write, egress, shell, tool_call, patch, custom."
+        },
+        "budgets": {
+          "type": "object",
+          "description": "Budget limits keyed by budget key. Standard keys: file_writes, egress_calls, shell_commands, tool_calls, patches, custom_calls.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    },
+    "PostureTransition": {
+      "type": "object",
+      "required": [
+        "from",
+        "to",
+        "on"
+      ],
+      "additionalProperties": false,
+      "description": "A transition between posture states.",
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Source state name, or \"*\" to match any state."
+        },
+        "to": {
+          "type": "string",
+          "not": {
+            "const": "*"
+          },
+          "description": "Target state name. Must not be \"*\"."
+        },
+        "on": {
+          "type": "string",
+          "enum": [
+            "user_approval",
+            "user_denial",
+            "critical_violation",
+            "any_violation",
+            "timeout",
+            "budget_exhausted",
+            "pattern_match"
+          ],
+          "description": "Trigger that causes this transition."
+        },
+        "after": {
+          "type": "string",
+          "pattern": "^\\d+[smhd]$",
+          "description": "Duration string. Required when trigger is \"timeout\". Format: <number><unit> where unit is s, m, h, or d."
+        }
+      },
+      "if": {
+        "properties": {
+          "on": {
+            "const": "timeout"
+          }
+        },
+        "required": [
+          "on"
+        ]
+      },
+      "then": {
+        "required": [
+          "from",
+          "to",
+          "on",
+          "after"
+        ]
+      }
+    }
+  }
+}

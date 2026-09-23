@@ -1,127 +1,214 @@
 <p align="center">
-  <img src="assets/hero.png" alt="HushSpec" width="720" />
+  <picture>
+    <source media="(max-width: 600px)" srcset="assets/hero-mobile.svg" />
+    <img src="assets/hero.svg" alt="HushSpec. Agentic compliance as code. Declare the boundary. Carry the evidence." width="900" />
+  </picture>
 </p>
 
 <p align="center">
-  <strong>Portable, open specification for AI agent security rules</strong>
+  <a href="https://github.com/backbay-labs/hush/actions/workflows/ci.yml"><img src="https://github.com/backbay-labs/hush/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="spec/versioning.md"><img src="https://img.shields.io/badge/spec-1.0.0-c9b17e?style=flat-square&labelColor=20231d" alt="Specification 1.0.0"></a>
+  <a href="docs/src/reference/sdk-conformance.md"><img src="https://img.shields.io/badge/SDKs-Rust%20%C2%B7%20TypeScript%20%C2%B7%20Python%20%C2%B7%20Go-a9ba9b?style=flat-square&labelColor=20231d" alt="SDKs: Rust, TypeScript, Python, Go"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-c9b17e?style=flat-square&labelColor=20231d" alt="License: Apache-2.0"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/backbay-labs/hush/actions"><img src="https://github.com/backbay-labs/hush/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/backbay-labs/hush/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/spec-v0.1.1--alpha-orange.svg" alt="Spec Version">
-  <a href="https://crates.io/crates/hushspec"><img src="https://img.shields.io/crates/v/hushspec.svg" alt="crates.io"></a>
-  <a href="https://www.npmjs.com/package/@hushspec/core"><img src="https://img.shields.io/npm/v/@hushspec/core.svg" alt="npm"></a>
-  <a href="https://pypi.org/project/hushspec/"><img src="https://img.shields.io/pypi/v/hushspec.svg" alt="PyPI"></a>
+  <strong>Give your agents boundaries you can read. Get decisions you can verify.</strong>
 </p>
 
 <p align="center">
-  <a href="./spec/hushspec-core.md">Spec</a> &middot;
-  <a href="./docs/src/introduction.md">Docs</a> &middot;
-  <a href="./rulesets/">Rulesets</a> &middot;
-  <a href="./schemas/">JSON Schema</a>
+  <a href="#what-is-hushspec">What</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#quickstart">Quickstart</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#from-policy-to-proof">How it works</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#sdks-and-integrations">SDKs</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#policy-tooling">CLI</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="#policy-library">Policies</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="docs/src/introduction.md">Docs</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="spec/hushspec-core.md">Spec</a>
 </p>
 
 ---
 
-HushSpec is an open policy format for AI agent security rules. It defines **what** an agent may do at runtime, including filesystem access, network egress, tool usage, secret detection, and more, without prescribing **how** those controls must be enforced. That separation makes policies portable across runtimes, frameworks, and languages.
+## What is HushSpec?
 
-**v0.1.1-alpha** — The core spec, all four SDKs (Rust, TypeScript, Python, Go), and the `h2h` CLI are published and functional. Parse, validate, evaluate, merge, resolve, detect, sign, and audit your way through 10 rule types and 3 extension modules. The API surface is stabilizing but not yet frozen — expect refinements before v1.0.
+HushSpec is an open specification for the security controls an AI agent operates under.
+Write a policy in YAML, evaluate it in Rust, TypeScript, Python, or Go, and produce
+receipts that tie each decision to the policy behind it.
 
-## Quick Example
+It covers the things agents actually touch: files, networks, shells, tools, browsers,
+and code execution. The spec defines the rules and their meaning; your runtime
+enforces the boundary through `HushGuard` or its own integration.
 
+| Declare | Enforce | Prove |
+| :--- | :--- | :--- |
+| Reviewable YAML with reusable base policies and explicit permissions. | Consistent `allow`, `warn`, and `deny` decisions at the point of action. | Decision receipts, policy signatures, and verifiable logs. |
+
+**Spec 1.0.0 is stable.** The document format, evaluation semantics, canonical form,
+and wire formats are frozen for the 1.x series. See the
+[versioning policy](spec/versioning.md) and [SDK conformance matrix](docs/src/reference/sdk-conformance.md)
+for the contracts and their test coverage.
+
+The 1.0 SDK release is not yet published. See the [delivery status](docs/plans/STATUS.md)
+for implementation, qualification, and release evidence.
+
+The experimental [external conformance controller](docs/src/reference/external-conformance.md)
+tests a captured executable against the L0-L3 corpus and retains its inputs,
+outputs and identity. The Go adapter is first-party bring-up, not independent
+engine or runtime-boundary qualification.
+
+The experimental [trusted invocation coordinator](docs/src/reference/trusted-invocation.md)
+checks a host-qualified MCP tool and its effects against one authenticated policy
+snapshot, records a durable permit, then dispatches. Its isolated coding pilot
+tests real edits, blocked operations and crash evidence. This is a scoped
+first-party demonstration, not external adoption or general MCP containment.
+
+## Quickstart
+
+Build the `h2h` CLI from this checkout:
+
+```sh
+cargo install --path crates/hushspec-cli --locked
+```
+
+Save this as `policy.yaml`. It protects credentials, restricts network access,
+and asks for confirmation before a tool can write a file or push code.
+
+<!-- example: quickstart-policy -->
 ```yaml
-hushspec: "0.1.0"
+hushspec: "1.0.0"
 name: production-agent
 
 rules:
   forbidden_paths:
-    patterns:
-      - "**/.ssh/**"
-      - "**/.aws/**"
-      - "/etc/shadow"
+    patterns: ["**/.ssh/**", "**/.aws/**", "/etc/shadow"]
 
   egress:
-    allow:
-      - "api.openai.com"
-      - "*.anthropic.com"
-      - "api.github.com"
+    allow: ["api.openai.com", "*.anthropic.com", "api.github.com"]
     default: block
 
   tool_access:
+    allow: [file_read, search]
     block: [shell_exec, run_command]
     require_confirmation: [file_write, git_push]
-    default: allow
-
-  secret_patterns:
-    patterns:
-      - name: aws_key
-        pattern: "AKIA[0-9A-Z]{16}"
-        severity: critical
-    skip_paths: ["**/test/**"]
-
-  shell_commands:
-    forbidden_patterns:
-      - "rm\\s+-rf\\s+/"
-      - "curl.*\\|.*bash"
+    default: block
 ```
 
-## SDK Conformance
+Validate it, then try three decisions:
 
-All four SDKs implement the full HushSpec pipeline, from parse and validate through resolution and evaluation.
+```sh
+h2h validate policy.yaml
 
-| Capability | Rust | TypeScript | Python | Go |
-|---|:---:|:---:|:---:|:---:|
-| Parse + Validate (Level 1) | Yes | Yes | Yes | Yes |
-| Merge (Level 2) | Yes | Yes | Yes | Yes |
-| Resolve (Level 2+) | Yes | Yes | Yes | Yes |
-| Evaluate (Level 3) | Yes | Yes | Yes | Yes |
-| Audit Trail (Level 4) | Yes | Yes | Yes | Yes |
-| Detection | Yes | Yes | Yes | Yes |
-| Observability | Yes | Yes | Yes | Yes |
-| Receipt Sinks | Yes | Yes | Yes | Yes |
+h2h eval policy.yaml --type egress --target api.openai.com
+# allow
 
-## Installation
+h2h eval policy.yaml --type tool_call --target shell_exec
+# deny
 
-### CLI
-
-| Method | Command |
-|---|---|
-| Homebrew (macOS/Linux) | `brew install backbay-labs/tap/h2h` |
-| npm | `npm install -g @hushspec/cli` (or `npx @hushspec/cli validate policy.yaml`) |
-| Cargo (from source) | `cargo install hushspec-cli` |
-| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases) — `h2h-<tag>-<target>.tar.gz` + `SHA256SUMS`, provenance-attested |
-
-> Homebrew, npm, and prebuilt binaries become available starting with the first `v0.x` tag built by the release pipeline, once the release pipeline publishes artifacts, the tap formula, and the npm packages. Until then, install via Cargo.
-
-All methods install the `h2h` command. See [CLI Tool](#cli-tool) below.
-
-### Rust
-
-```toml
-[dependencies]
-hushspec = "0.1"
+h2h eval policy.yaml --type tool_call --target file_write
+# warn: confirmation required
 ```
 
-### TypeScript
+These commands evaluate actions; they do not execute them. `eval` exits with
+`0` for allow, `1` for deny, and `4` for warn. A runtime must handle the decision
+before dispatching the action. [Wire it into your agent →](#from-policy-to-proof)
 
-```bash
-npm install @hushspec/core
+<details>
+<summary><strong>More installation options</strong></summary>
+
+| Method | Install |
+| :--- | :--- |
+| Cargo | `cargo install hushspec-cli` |
+| Homebrew | `brew install backbay-labs/tap/h2h` |
+| npm | `npm install -g @hushspec/cli` |
+| Prebuilt binaries | [GitHub Releases](https://github.com/backbay-labs/hush/releases), with checksums and provenance attestations |
+
+Packaged installers depend on the release pipeline having published the corresponding
+artifacts. The source install above builds directly from this checkout.
+
+For a scaffolded policy and test suite, run `h2h init --preset default`.
+See the [first-policy guide](docs/src/guides/first-policy.md) for the complete workflow.
+
+</details>
+
+## From policy to proof
+
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="assets/policy-flow-mobile.svg" />
+    <img src="assets/policy-flow.svg" alt="Declare a YAML policy, enforce it at the runtime boundary, and record a receipt binding the decision to the resolved policy hash." width="900" />
+  </picture>
+</p>
+
+### Put the check before the action
+
+`HushGuard` loads the policy and brings evaluation, enforcement modes, confirmation,
+receipt sinks, and observers together. Call `enforce` before dispatching a tool:
+
+```typescript
+import { HushGuard } from '@hushspec/core';
+
+const guard = HushGuard.fromFile('./policy.yaml');
+
+guard.enforce({ type: 'tool_call', target: 'shell_exec' });
+// Throws HushSpecDenied under the quickstart policy.
 ```
 
-### Python
+A policy that fails required signature verification produces a refused guard:
+every action is denied with `__hushspec_policy_unverified__`. A failed hot reload
+keeps the last valid policy in force. Unknown fields and invalid documents are
+rejected explicitly.
 
-```bash
-pip install hushspec
+The enforcement boundary is the runtime's responsibility. HushSpec supplies the
+portable policy contract and SDK primitives to build it.
+[Runtime integration guide →](docs/src/guides/runtime-integration.md)
+
+### Keep the evidence with the decision
+
+Audited evaluation takes a resolved policy and returns a receipt containing its
+canonical `content_hash`, the decision, actor context, rule and detection traces,
+and enforcement disposition. Action content is represented by its hash and byte
+size, without embedding the raw content.
+
+```sh
+# Inspect the receipt for one evaluated action.
+h2h eval policy.yaml --type egress --target api.openai.com --format receipt
 ```
 
-### Go
+The evidence can travel beyond the runtime:
 
-```bash
-go get github.com/backbay-labs/hush/packages/go@main
-```
+| Artifact | What you can verify |
+| :--- | :--- |
+| [Policy signature](spec/hushspec-signing.md) | Which key signed the resolved policy, including its inherited rules. |
+| [Decision receipt](spec/hushspec-receipt.md) | Which policy and recorded rule outcomes produced the decision. |
+| [Receipt log](spec/hushspec-log.md) | Hash links between entries, with the first broken link identified by line. |
+| [Policy bundle](spec/hushspec-bundle.md) | A DSSE attestation over an in-toto statement describing the policy. |
 
-## Getting Started
+Ed25519 signatures cover the resolved policy's content hash, so reformatting a file
+preserves its signature while changing an inherited rule invalidates it. Signing,
+receipt verification, and bundle verification are available across all four SDKs;
+Rust requires the `signing` feature and Python the `signing` extra.
+
+## SDKs and integrations
+
+One policy language across four SDKs. The shared corpus checks evaluation,
+canonical bytes, policy hashes, and receipt formats across implementations.
+
+Until 1.0 is published, use this source checkout. The registry commands below
+are for the upcoming release, not currently available 1.0 packages.
+
+| SDK | Registry install after publication | Reference |
+| :--- | :--- | :--- |
+| Rust | `cargo add hushspec` | [Crate](crates/hushspec/README.md) |
+| TypeScript | `npm install @hushspec/core` | [Package](packages/hushspec/README.md) |
+| Python | `pip install hushspec` | [Package](packages/python/README.md) |
+| Go | `go get github.com/backbay-labs/hush/packages/go@v1.0.0` | [Module](packages/go/README.md) |
+
+The Go SDK release will use the nested `packages/go/v1.0.0` tag.
+For signing, use `hushspec = { version = "1.0", features = ["signing"] }` in Rust
+or `pip install "hushspec[signing]"` in Python.
+
+<details>
+<summary><strong>Start with your language: Rust · TypeScript · Python · Go</strong></summary>
 
 ### Rust
 
@@ -129,7 +216,7 @@ go get github.com/backbay-labs/hush/packages/go@main
 ```rust
 use hushspec::HushSpec;
 
-let yaml_str = "hushspec: \"0.1.0\"\nname: example\n";
+let yaml_str = "hushspec: \"1.0.0\"\nname: example\n";
 let spec = HushSpec::parse(yaml_str)?;
 let result = hushspec::validate(&spec);
 assert!(result.is_valid());
@@ -141,7 +228,7 @@ assert!(result.is_valid());
 ```typescript
 import { parseOrThrow, validate } from '@hushspec/core';
 
-const yamlString = 'hushspec: "0.1.0"\nname: example\n';
+const yamlString = 'hushspec: "1.0.0"\nname: example\n';
 const spec = parseOrThrow(yamlString);
 const result = validate(spec);
 console.log(result.valid); // true
@@ -153,7 +240,7 @@ console.log(result.valid); // true
 ```python
 from hushspec import parse_or_raise, validate
 
-yaml_string = 'hushspec: "0.1.0"\nname: example\n'
+yaml_string = 'hushspec: "1.0.0"\nname: example\n'
 spec = parse_or_raise(yaml_string)
 result = validate(spec)
 assert result.is_valid
@@ -169,7 +256,7 @@ import (
     "github.com/backbay-labs/hush/packages/go/hushspec"
 )
 
-yamlString := "hushspec: \"0.1.0\"\nname: example\n"
+yamlString := "hushspec: \"1.0.0\"\nname: example\n"
 spec, err := hushspec.Parse(yamlString)
 if err != nil {
     panic(err)
@@ -178,320 +265,199 @@ result := hushspec.Validate(spec)
 fmt.Println(result.IsValid())
 ```
 
-## Evaluation
+</details>
 
-Each SDK exposes an `evaluate()` function that takes a parsed spec and an action, then returns a decision (`allow`, `warn`, or `deny`) plus matched rule details.
+### Framework adapters
 
-```typescript
-import { parseOrThrow, evaluate } from '@hushspec/core';
+Adapters translate tool calls into HushSpec actions without importing the framework
+they adapt. Use the same policy across agent stacks.
 
-const spec = parseOrThrow(policyYaml);
-const result = evaluate(spec, { type: 'egress', target: 'api.openai.com' });
-// result.decision === 'allow' | 'warn' | 'deny'
-// result.matched_rule === 'egress'
-```
+| Framework | TypeScript | Python | Go |
+| :--- | :---: | :---: | :---: |
+| Claude / Anthropic | ✓ | ✓ | ✓ |
+| OpenAI | ✓ | ✓ | ✓ |
+| MCP | ✓ | ✓ | ✓ |
+| LangChain | ✓ | ✓ | - |
+| Vercel AI SDK | ✓ | - | - |
+| CrewAI | - | ✓ | - |
 
-```python
-from hushspec import parse_or_raise, evaluate
+Rust applications can start from the
+[`guarded_agent` example](crates/hushspec/examples/guarded_agent.rs).
+[Adapter entry points →](docs/src/reference/sdk-api.md#framework-adapters)
 
-spec = parse_or_raise(policy_yaml)
-result = evaluate(spec, {"type": "egress", "target": "api.openai.com"})
-assert result.decision in ("allow", "warn", "deny")
-```
+The existing adapters evaluate actions; they do not own dispatch or contain tool
+servers. For an opt-in TypeScript dispatch boundary, see the
+[trusted invocation pilot](docs/src/reference/trusted-invocation.md).
 
-## HushGuard Middleware
+<details>
+<summary><strong>SDK parity, optional features, and conformance</strong></summary>
 
-`HushGuard` wraps policy loading and evaluation behind a simple `evaluate`, `check`, and `enforce` interface for application code.
+All four SDKs reach **Level 5 (Attested)** against the shared vector corpus with
+signing enabled. The [conformance matrix](docs/src/reference/sdk-conformance.md)
+names the test files behind each claim; the [API contract](docs/src/reference/sdk-api.md)
+maps the public entry points.
 
-```typescript
-import { HushGuard } from '@hushspec/core';
+| Capability | Availability |
+| :--- | :--- |
+| Parse, validate, merge, resolve, and compiled evaluation | All four SDKs |
+| Twelve rule blocks, three extensions, and `when` conditions | All four SDKs |
+| Reference detectors, including `heuristic_injection@1` | All four SDKs |
+| Canonical hashes, audited evaluation, and chained receipt logs | All four SDKs |
+| Policy and receipt signing; bundle verification | All four; Rust `signing` feature, Python `signing` extra |
+| Bundle creation | All four SDKs and `h2h bundle create` |
+| Guard, enforcement modes, observers, metrics, and receipt sinks | All four; Go names its guard `Guard` |
+| OTLP export | All four; Rust `otlp` feature |
+| HTTPS policy loading | Rust `http` feature, TypeScript; explicit loaders in Python and Go |
+| Policy providers, hot reload, and panic mode | All four SDKs |
 
-const guard = HushGuard.fromFile('./policy.yaml');
-guard.enforce({ type: 'tool_call', target: 'bash' }); // throws HushSpecDenied if denied
-```
+CI runs shared fixtures, canonical roundtrips, README snippet smoke tests, and
+differential evaluation over 500 generated policy groups. See the
+[workflow](.github/workflows/ci.yml) for the checks.
 
-```python
-from hushspec import HushGuard
+</details>
 
-guard = HushGuard.from_file("./policy.yaml")
-guard.enforce({"type": "tool_call", "target": "bash"})  # raises HushSpecDenied if denied
-```
+## Policy tooling
 
-## CLI Tool
+The `h2h` CLI covers the policy lifecycle in 22 commands.
 
-The `h2h` CLI covers the common policy workflow: validate, test, evaluate and explain single actions, lint, diff, format, initialize, sign, verify, and trigger panic mode.
+| Workflow | Commands |
+| :--- | :--- |
+| Author and inspect | `init` · `validate` · `lint` · `fmt` · `schema` · `resolve` · `diff` |
+| Evaluate and test | `eval` · `explain` · `test` |
+| Sign and verify | `keygen` · `hash` · `sign` · `verify` · `bundle` |
+| Audit and operate | `audit` · `log` · `receipts` · `report` · `panic` · `completions` · `version` |
 
-```bash
-# Validate a policy against the HushSpec schema
-h2h validate policy.yaml
-
-# Run evaluation test suites
-h2h test --fixtures ./tests/
-
-# Evaluate one action and explain the decision
-h2h eval policy.yaml --type egress --target api.example.com
+```sh
+# Show the rules behind a decision.
 h2h explain policy.yaml --type egress --target api.example.com
 
-# Static analysis and linting
-h2h lint policy.yaml
+# Fail CI when a policy change can relax a denial.
+h2h diff main.yaml pr.yaml --fail-on relaxed
 
-# Lint and auto-fix decision-neutral issues
-h2h lint policy.yaml --fix
+# Check your policy's control mappings.
+h2h audit policy.yaml --controls --strict
 
-# Compare two policies and show effective decision changes
-h2h diff old.yaml new.yaml
-
-# Format policy files canonically
-h2h fmt policy.yaml
-
-# Scaffold a new policy project
-h2h init --preset default
-
-# Sign a policy with Ed25519
-h2h sign policy.yaml --key h2h.key
-
-# Verify a policy signature
-h2h verify policy.yaml --key h2h.pub
-
-# Generate a new Ed25519 keypair
-h2h keygen
-
-# Emergency override (deny-all kill switch)
-h2h panic activate --sentinel /tmp/hushspec.panic
-h2h panic deactivate --sentinel /tmp/hushspec.panic
+# Verify a hash-linked receipt log.
+h2h log verify receipts.jsonl
 ```
 
-See [Installation](#installation) above for install options — Homebrew, npm, Cargo, or prebuilt binaries.
+The [CLI reference](docs/src/reference/cli.md) covers flags, JSON/SARIF/JUnit output,
+and exit codes. [Editor setup](docs/src/guides/editor-setup.md) adds schema validation
+and completions while you write.
 
 <details>
-<summary>Decision Receipts (Audit Trail)</summary>
-
-`evaluate_audited()` generates structured decision receipts with rule traces, policy summaries, and optional content redaction. Receipts conform to `hushspec-receipt.v0.schema.json` and are designed to support audit-heavy environments such as SOC 2, HIPAA, PCI-DSS, and FedRAMP.
-
-```typescript
-import { parseOrThrow, evaluateAudited } from '@hushspec/core';
-
-const spec = parseOrThrow(policyYaml);
-const receipt = evaluateAudited(spec, action, {
-  enabled: true,
-  include_rule_trace: true,
-  redact_content: false,
-});
-// receipt.decision, receipt.rule_evaluations, receipt.policy_summary
-```
-
-Receipt sinks (`FileReceiptSink`, `ConsoleReceiptSink`, `FilteredSink`, `MultiSink`, `CallbackSink`) are available in all four SDKs for routing receipts to storage, logging, or OTLP endpoints.
-
-</details>
-
-<details>
-<summary>Detection Pipeline</summary>
-
-The detection pipeline plugs prompt injection, jailbreak, and exfiltration checks into the evaluation flow. Regex-based reference detectors ship with all SDKs, and custom detectors can be registered through `DetectorRegistry`.
-
-```typescript
-import { parseOrThrow, evaluateWithDetection, DetectorRegistry } from '@hushspec/core';
-
-const registry = DetectorRegistry.withDefaults();
-const result = evaluateWithDetection(spec, action, registry, {
-  enabled: true,
-  prompt_injection_threshold: 0.5,
-});
-// result.detection_results contains matched patterns and confidence scores
-```
-
-</details>
-
-<details>
-<summary>Framework Adapters</summary>
-
-Prebuilt adapters translate framework-specific tool calls into HushSpec evaluation actions.
-
-| Framework | Adapter | SDK |
-|---|---|---|
-| Claude / Anthropic | `mapClaudeToolToAction`, `createSecureToolHandler` | TypeScript |
-| OpenAI | `mapOpenAIToolCall`, `createOpenAIGuard` | TypeScript |
-| MCP (Model Context Protocol) | `mapMCPToolCall`, `createMCPGuard` | TypeScript |
-
-```typescript
-import { HushGuard, mapClaudeToolToAction } from '@hushspec/core';
-
-const guard = HushGuard.fromFile('./policy.yaml');
-const action = mapClaudeToolToAction(toolUseBlock);
-guard.enforce(action);
-```
-
-</details>
-
-<details>
-<summary>Observability</summary>
-
-The `EvaluationObserver` interface and `ObservableEvaluator` wrapper emit structured events for every evaluation, policy load, and policy reload. Built-in observers include `JsonLineObserver`, `ConsoleObserver`, and `MetricsCollector`.
-
-```typescript
-import { ObservableEvaluator, JsonLineObserver, MetricsCollector } from '@hushspec/core';
-
-const evaluator = new ObservableEvaluator();
-evaluator.addObserver(new JsonLineObserver(process.stderr));
-evaluator.addObserver(new MetricsCollector());
-const result = evaluator.evaluate(spec, action);
-```
-
-</details>
-
-<details>
-<summary>Policy Signing</summary>
-
-Policies can be signed with Ed25519 keys and verified at load time. The CLI provides `sign`, `verify`, and `keygen` commands. The signature format conforms to `hushspec-signature.v0.schema.json`.
-
-```bash
-# Generate a keypair
-h2h keygen --output-dir mykeys
-
-# Sign a policy (creates policy.yaml.sig)
-h2h sign policy.yaml --key mykeys/h2h.key
-
-# Verify the signature
-h2h verify policy.yaml --key mykeys/h2h.pub
-```
-
-</details>
-
-<details>
-<summary>Emergency Override (Panic Mode)</summary>
-
-Panic mode is a deny-all kill switch that can be activated immediately without redeploying policies. You can trigger it with a sentinel file, the CLI, or an API call. While panic mode is active, every evaluation returns `deny`.
-
-```bash
-# Activate panic mode
-h2h panic activate --sentinel /tmp/hushspec.panic
-
-# Deactivate
-h2h panic deactivate --sentinel /tmp/hushspec.panic
-```
-
-```typescript
-import { activatePanic, deactivatePanic, isPanicActive } from '@hushspec/core';
-
-activatePanic();
-// All evaluate() calls now return deny
-deactivatePanic();
-```
-
-</details>
-
-<details>
-<summary>Policy Loading and Hot Reload</summary>
-
-Policies can be loaded from local files, HTTPS URLs (with ETag caching and SSRF protection), or built-in rulesets. `PolicyWatcher` and `PolicyPoller` support hot reload without restarting the process.
-
-```typescript
-import { PolicyWatcher, HushGuard } from '@hushspec/core';
-
-const guard = HushGuard.fromFile('./policy.yaml');
-const watcher = new PolicyWatcher('./policy.yaml', {
-  onChange: (newSpec) => guard.swapPolicy(newSpec),
-});
-watcher.start();
-```
-
-</details>
-
-## 10 Core Rules
-
-| Rule | Purpose |
-|------|---------|
-| `forbidden_paths` | Block access to sensitive filesystem paths |
-| `path_allowlist` | Allowlist-based read/write/patch access |
-| `egress` | Network egress control by domain |
-| `secret_patterns` | Detect secrets in file content |
-| `patch_integrity` | Validate diff safety (size limits, forbidden patterns) |
-| `shell_commands` | Block dangerous shell commands |
-| `tool_access` | Control tool/MCP invocations |
-| `computer_use` | Control CUA actions |
-| `remote_desktop_channels` | Control remote desktop side channels |
-| `input_injection` | Control input injection capabilities |
-
-## Extensions
-
-HushSpec supports optional extension modules for more advanced policy behavior:
-
-| Extension | Purpose |
-|-----------|---------|
-| **Posture** | Declarative state machine for capabilities and budgets |
-| **Origins** | Origin-aware policy projection (Slack, GitHub, email, etc.) |
-| **Detection** | Threshold config for prompt injection, jailbreak, threat intel |
+<summary><strong>Validate policies in GitHub Actions</strong></summary>
 
 ```yaml
-extensions:
-  posture:
-    initial: standard
-    states:
-      standard: { capabilities: [file_access, egress] }
-      restricted: { capabilities: [file_access] }
-    transitions:
-      - { from: "*", to: restricted, on: critical_violation }
-  detection:
-    prompt_injection:
-      block_at_or_above: high
+- uses: backbay-labs/hush@v1.0.0
+  with:
+    command: validate
+    paths: policies/**/*.yaml
 ```
 
-## Built-in Rulesets
+The [composite action](action.yml) downloads the matching CLI release and verifies
+its checksum and build provenance. Before release binaries are available, set
+`version: source` to build the CLI. The [CI integration guide](docs/src/guides/ci.md)
+also covers SARIF, JUnit, pre-commit hooks, and containers.
 
-Ready-to-use policies live in [`rulesets/`](./rulesets/):
+</details>
 
-| Ruleset | Description |
-|---------|-------------|
-| `default` | Balanced security for AI agent execution |
-| `strict` | Maximum security, minimal permissions |
-| `permissive` | Development-friendly, relaxed limits |
-| `ai-agent` | Optimized for AI coding assistants |
-| `cicd` | CI/CD pipeline security |
-| `remote-desktop` | Computer use agent sessions |
-| `panic` | Deny-all emergency override |
+## Policy library
 
-### Using with Clawdstrike
+Start with a built-in policy and extend it for your environment. Rulesets and
+library policies are embedded in all four SDKs.
 
-HushSpec documents load natively in [Clawdstrike](https://github.com/backbay-labs/clawdstrike):
+| Starting point | Policies |
+| :--- | :--- |
+| Everyday agents | [`default`](rulesets/default.yaml), [`ai-agent`](rulesets/ai-agent.yaml) |
+| Tighter or looser controls | [`strict`](rulesets/strict.yaml), [`permissive`](rulesets/permissive.yaml) |
+| Specialized environments | [`cicd`](rulesets/cicd.yaml), [`remote-desktop`](rulesets/remote-desktop.yaml) |
+| Emergency stop | [`panic`](rulesets/panic.yaml), plus the runtime deny-all kill switch |
+| Control-mapped templates | [Healthcare, finance, government, education, DevOps, and general policies](library/README.md) |
 
-```rust
-// Auto-detects HushSpec vs Clawdstrike-native format
-let policy = clawdstrike::Policy::from_yaml_auto(yaml)?;
+```yaml
+hushspec: "1.0.0"
+name: clinical-agent
+extends: "builtin:library/healthcare/hipaa-base"
 ```
 
-```bash
-# Convert between formats
-hush policy migrate policy.yaml --to hushspec
-```
+Library templates include structured control mappings and
+[control-tagged evaluation suites](fixtures/library/README.md). They are starting
+points for your environment, not compliance certifications.
 
-## Repo Structure
+<details>
+<summary><strong>Twelve rule blocks and three extensions</strong></summary>
 
-```text
-spec/              Normative specification, including core and extension docs
-schemas/           JSON Schema definitions
-crates/            Rust crates
-  hushspec/          Core library: parse, validate, merge, resolve, evaluate, detect, sign
-  hushspec-cli/      CLI tool
-  hushspec-testkit/  Conformance test runner
-packages/          Language SDKs for TypeScript, Python, and Go
-rulesets/          Built-in security rulesets
-fixtures/          Conformance and evaluation fixtures
-docs/              mdBook documentation site
-generated/         Generated shared SDK contract artifacts
-scripts/           Code generation and CI tooling
-```
+| Surface | Rule blocks |
+| :--- | :--- |
+| Files and content | `forbidden_paths`, `path_allowlist`, `secret_patterns`, `patch_integrity` |
+| Network | `egress` |
+| Tools and execution | `tool_access`, `shell_commands`, `code_execution` |
+| Browsers and desktops | `browser_automation`, `computer_use`, `remote_desktop_channels`, `input_injection` |
 
-## Design Principles
+Optional extensions add [posture](spec/hushspec-posture.md) state machines,
+[origin-aware](spec/hushspec-origins.md) policy projection, and
+[detection](spec/hushspec-detection.md) thresholds. Core rules stay declarative;
+extensions carry the additional behavior.
 
-- **Fail-closed**: Unknown fields are rejected, and invalid documents fail with explicit errors.
-- **Stateless**: Core rules are pure declarations with no runtime state.
-- **Engine-neutral**: The spec does not require a specific enforcement engine, detector, or plugin model.
-- **Extensible**: Posture, origins, and detection stay optional instead of bloating the core format.
+See the [rules reference](docs/src/rules-reference.md) and
+[action types](docs/src/action-types.md) for field-level details.
+
+</details>
+
+HushSpec policies also load natively in
+[Clawdstrike](docs/src/guides/clawdstrike.md).
 
 ## Specification
 
-The normative spec lives in [`spec/`](./spec/). JSON Schema definitions for programmatic validation are in [`schemas/`](./schemas/). Full documentation is in [`docs/`](./docs/src/introduction.md).
+The specification is the contract. The SDKs, schemas, and fixtures make it executable.
 
-## License
+| Read | For |
+| :--- | :--- |
+| [Core specification](spec/hushspec-core.md) | Document format, rule blocks, evaluation, and conformance |
+| [Canonical form](spec/hushspec-canonical.md) | Portable policy identity and RFC 8785 canonicalization |
+| [Receipts](spec/hushspec-receipt.md) · [Signing](spec/hushspec-signing.md) | Decision evidence, signature envelopes, keys, and verification |
+| [Bundles](spec/hushspec-bundle.md) · [Logs](spec/hushspec-log.md) | Policy attestations and hash-linked audit trails |
+| [Posture](spec/hushspec-posture.md) · [Origins](spec/hushspec-origins.md) · [Detection](spec/hushspec-detection.md) | Optional extension contracts |
+| [Grammars](spec/hushspec-grammars.md) · [JSON Schema](schemas/) | String formats and machine-readable validation |
+| [Security considerations](spec/hushspec-security.md) | Guidance for engines and policy authors |
+| [Versioning](spec/versioning.md) · [Errata](spec/errata.md) | Stability guarantees and specification corrections |
 
-Apache-2.0. See [LICENSE](./LICENSE).
+## Contributing
+
+The [contributor guide](CONTRIBUTING.md) covers setup, checks, and the fixture-first
+workflow for SDK changes. Specification changes follow the
+[governance process](GOVERNANCE.md); vulnerabilities go through
+[security reporting](SECURITY.md).
+
+<details>
+<summary><strong>Repository map</strong></summary>
+
+```text
+spec/        Normative specifications and registries
+schemas/     JSON Schema definitions
+crates/      Rust SDK, h2h CLI, and conformance testkit
+packages/    TypeScript, Python, and Go SDKs
+rulesets/    Built-in security policies
+library/     Control-mapped policy templates
+fixtures/    Shared conformance and evaluation vectors
+docs/        Guides, references, and mdBook sources
+generated/   Shared SDK contract artifacts
+scripts/     Code generation and CI checks
+```
+
+</details>
+
+---
+
+<p align="center">
+  <strong>HushSpec</strong><br />
+  <sub>Declare the boundary. Carry the evidence.</sub>
+</p>
+
+<p align="center">
+  <a href="LICENSE">Apache-2.0</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="CHANGELOG.md">Changelog</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="GOVERNANCE.md">Governance</a>&nbsp;&nbsp;&middot;&nbsp;&nbsp;
+  <a href="SECURITY.md">Security</a>
+</p>

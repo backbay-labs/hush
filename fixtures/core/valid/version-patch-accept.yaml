@@ -1,0 +1,6 @@
+# An engine supporting minor version 0.1 accepts every 0.1.Z document (core spec 2.2).
+hushspec: "0.1.1"
+name: patch-version
+rules:
+  egress:
+    default: block

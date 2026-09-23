@@ -1,5 +1,5 @@
 hushspec_test: "0.1.0"
-description: "Computer use guard evaluation"
+description: "Computer use guard evaluation: the guardrail denies unlisted actions (core spec 3.8)"
 policy:
   hushspec: "0.1.0"
   rules:
@@ -18,12 +18,12 @@ cases:
     expect:
       decision: allow
       matched_rule: rules.computer_use.allowed_actions
-  - description: "warn on unlisted action (guardrail mode)"
+  - description: "deny unlisted action (guardrail mode)"
     action:
       type: computer_use
       target: "remote.file_transfer"
     expect:
-      decision: warn
+      decision: deny
       matched_rule: rules.computer_use.mode
   - description: "allow input injection"
     action:

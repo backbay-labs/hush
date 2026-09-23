@@ -1,10 +1,12 @@
 # RFC 03: `hushspec` Policy CLI
 
-**Status:** Draft
+**Status:** Historical design record (Draft)
 **Date:** 2026-03-15
 **Author:** HushSpec Core Team
 
 ---
+
+> **Delivery status:** See [the delivery ledger](STATUS.md#numbered-plan-reconciliation). `h2h` source and tests provide substantial CLI capability on the open stack; registry distribution, first-release installation, and unshown original configuration/watch scope remain separate gates.
 
 ## 1. Executive Summary
 

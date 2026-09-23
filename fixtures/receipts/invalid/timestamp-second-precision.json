@@ -1,0 +1,38 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01994b7e-2c1a-7c3e-8f4a-0123456789ab",
+  "timestamp": "2026-09-15T08:30:00Z",
+  "time_source": "system",
+  "actor": {
+    "agent_id": "deploy-bot-3",
+    "session_id": "run-20260915-0042",
+    "principal": "alice@example.com",
+    "runtime": "hushspec-rs/0.2.0"
+  },
+  "policy": {
+    "name": "default",
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:1a61b3186d0d19d8f684b4ff98924785c39e0e8396d2f2588b4c111e9e82f2d5"
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com"
+  },
+  "decision": "allow",
+  "matched_rule": "rules.egress.allow",
+  "reason": "domain is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "domain is explicitly allowed"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "duration_us": 41
+}

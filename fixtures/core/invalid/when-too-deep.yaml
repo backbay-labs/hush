@@ -1,0 +1,17 @@
+# Conditions nested more than 8 levels deep are a parse error; this one nests 9 (core spec 3.13).
+hushspec: "0.1.0"
+rules:
+  shell_commands:
+    when:
+      not:
+        not:
+          not:
+            not:
+              not:
+                not:
+                  not:
+                    not:
+                      not:
+                        context:
+                          environment: production
+    forbidden_patterns: ["mkfs"]

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 
-from hushspec import is_safe_regex, parse, parse_or_raise, validate
+from hushspec import is_safe_regex, parse, validate
 
 
 
@@ -110,15 +110,13 @@ class TestIsSafeRegex:
 
 
 
-# S3: escape/character-class-aware portability scanner
+# Escape- and character-class-aware portability scanner
 #
-# The old `_RE2_DISALLOWED` raw-substring checks for possessive quantifiers
-# and \Z/\z anchors over-rejected patterns where the possessive-looking
-# characters sit inside a character class, or where \Z/\z is actually an
-# escaped backslash followed by a literal Z/z. `_disallowed_regex_feature`
-# (ported from Rust's `disallowed_regex_feature` in
-# crates/hushspec/src/validate.rs) is escape-aware and character-class-aware
-# and must ACCEPT/REJECT the identical shared list across all four SDKs.
+# A raw-substring scan for possessive quantifiers and \Z/\z anchors
+# over-rejects patterns where the possessive-looking characters sit inside a
+# character class, or where \Z/\z is an escaped backslash followed by a
+# literal Z/z. `_disallowed_regex_feature` tracks escapes and character
+# classes instead, and must accept and reject exactly this list in every SDK.
 
 
 class TestRegexPortabilityScanner:
@@ -135,8 +133,9 @@ class TestRegexPortabilityScanner:
         "[^]",
     ]
 
-    # Previously (wrongly) rejected by the raw-substring check; must now be
-    # accepted, same as Rust/Go already did.
+    # A raw-substring check rejects these wrongly: the possessive-looking
+    # characters sit inside a character class, and \\Z/\\z is an escaped
+    # backslash followed by a literal letter.
     ACCEPT = [
         "[*+]",
         "[?+]",
@@ -165,13 +164,9 @@ class TestRegexPortabilityScanner:
         # drifting apart. Patterns are serialized via yaml.safe_dump so
         # backslash-heavy patterns round-trip without manual YAML escaping.
         #
-        # Note: we only assert overall rejection (fail-closed), not that the
-        # error text names "RE2" specifically -- lowercase `\z` is not a
-        # recognized Python `re` escape at all (unlike `\Z`), so Python's own
-        # `re.compile` rejects it with a "bad escape" error before our
-        # portability scanner or the RE2-feature check ever runs. That is a
-        # pre-existing, engine-specific quirk unrelated to this scanner; the
-        # pattern is still correctly rejected either way.
+        # Only overall rejection is asserted, not the error text: Python's
+        # `re` rejects lowercase `\z` as a bad escape before the portability
+        # scanner runs.
         for pattern in self.REJECT:
             doc = {
                 "hushspec": "0.1.0",
@@ -262,7 +257,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "not a HushSpec regex profile escape" in err
 
     def test_rejects_lookahead_in_shell_commands(self):
         yaml = """
@@ -274,7 +269,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "group form" in err
 
     def test_rejects_possessive_brace_in_shell_commands(self):
         yaml = """
@@ -286,7 +281,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "possessive" in err
 
     def test_rejects_end_anchor_in_secret_patterns(self):
         yaml = """
@@ -300,7 +295,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "end-anchors" in err
 
     def test_rejects_empty_character_class_in_patch_integrity(self):
         yaml = """
@@ -313,7 +308,11 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "valid regular expression" in err
+        # Empty classes are a portability rejection (JavaScript accepts `[]`
+        # and `[^]`; the other three engines reject them), so they are reported
+        # by the shared portability pre-check rather than by Python's own
+        # `re.compile`.
+        assert "empty character class" in err
 
     def test_rejects_lookbehind_in_patch_integrity(self):
         yaml = """
@@ -326,7 +325,7 @@ rules:
 """
         ok, err = parse(yaml)
         assert ok is False
-        assert "RE2" in err
+        assert "group form" in err
 
     def test_accepts_all_valid_regex_fields(self):
         yaml = """

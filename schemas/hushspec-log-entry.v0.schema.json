@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-log-entry.v0.schema.json",
+  "$comment": "Frozen 0.x lineage. This file is retained for documents that declare a 0.x hushspec version and is not edited after HushSpec 1.0.0; the current schema is the .v1. file with the same name (spec/versioning.md).",
+  "title": "HushSpec Log Entry v0.1",
+  "description": "One line of a hash-linked receipt log (spec/hushspec-log.md). Each entry wraps a decision receipt or a policy-in-effect event, names the previous entry's hash, carries its own hash over its canonical form, and may carry an Ed25519 signature over that hash. A verifier detects edited, deleted, inserted, or reordered lines from the entries alone.",
+  "type": "object",
+  "required": [
+    "log_version",
+    "seq",
+    "prev_hash",
+    "entry_type",
+    "entry_hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "log_version": {
+      "type": "string",
+      "const": "0.1",
+      "description": "Log-entry format version. Verifiers MUST reject entries with an unknown value."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position in the file: 1 for the first entry, then strictly +1. A rotated file restarts at 1."
+    },
+    "prev_hash": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The previous entry's entry_hash. The first entry of an unbroken log carries the genesis value sha256:0000...0000; the first entry of a rotated file carries the previous file's last entry_hash (and repeats it in log_started.previous_entry_hash)."
+    },
+    "entry_type": {
+      "type": "string",
+      "enum": [
+        "receipt",
+        "policy_loaded",
+        "policy_swapped",
+        "log_started"
+      ],
+      "description": "Which payload member is present: exactly one of receipt, policy_event (for policy_loaded and policy_swapped), or log_started."
+    },
+    "receipt": {
+      "type": "object",
+      "description": "A format 0.2 decision receipt (entry_type receipt). Kept opaque here so this schema is self-contained; a verifier validates the member against schemas/hushspec-receipt.v0.schema.json separately."
+    },
+    "policy_event": {
+      "$ref": "#/$defs/PolicyEvent"
+    },
+    "log_started": {
+      "$ref": "#/$defs/LogStarted"
+    },
+    "entry_hash": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "sha256 over the RFC 8785 canonical form of this entry with entry_hash and signature removed."
+    },
+    "signature": {
+      "$ref": "#/$defs/EntrySignature"
+    }
+  },
+  "$defs": {
+    "ContentHash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "PolicyEvent": {
+      "type": "object",
+      "required": [
+        "event",
+        "timestamp",
+        "policy",
+        "enforcement_mode",
+        "sdk",
+        "spec_version"
+      ],
+      "additionalProperties": false,
+      "description": "A policy-in-effect record: the policy that was loaded or swapped in, with the same identity a receipt carries, so the log proves what was enforced and when it changed.",
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "loaded",
+            "swapped"
+          ]
+        },
+        "timestamp": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "policy": {
+          "$ref": "#/$defs/PolicySummary"
+        },
+        "enforcement_mode": {
+          "type": "string",
+          "enum": [
+            "enforce",
+            "monitor"
+          ]
+        },
+        "sdk": {
+          "type": "object",
+          "required": [
+            "name",
+            "version"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "spec_version": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$",
+          "description": "The HushSpec version the engine implements."
+        },
+        "previous_content_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "For swapped: the content hash of the policy that was replaced."
+        }
+      }
+    },
+    "LogStarted": {
+      "type": "object",
+      "required": [
+        "timestamp"
+      ],
+      "additionalProperties": false,
+      "description": "The first entry of a rotated file: where the chain came from.",
+      "properties": {
+        "timestamp": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "previous_file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previous_entry_hash": {
+          "$ref": "#/$defs/ContentHash",
+          "description": "The last entry_hash of the previous file; equals this entry's prev_hash."
+        }
+      }
+    },
+    "EntrySignature": {
+      "type": "object",
+      "required": [
+        "format_version",
+        "algorithm",
+        "key_id",
+        "signed_at",
+        "content_hash",
+        "signature"
+      ],
+      "additionalProperties": false,
+      "description": "A policy-signature envelope (spec/hushspec-signing.md section 4) whose content_hash is this entry's entry_hash.",
+      "properties": {
+        "format_version": {
+          "type": "string",
+          "const": "0.2"
+        },
+        "algorithm": {
+          "type": "string",
+          "const": "ed25519"
+        },
+        "key_id": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "signed_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "policy_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "policy_name": {
+          "type": "string"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "signer": {
+          "type": "string"
+        },
+        "signature": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "base64url without padding of the 64-byte Ed25519 signature."
+        }
+      }
+    },
+    "PolicySummary": {
+      "type": "object",
+      "required": [
+        "spec_version",
+        "content_hash"
+      ],
+      "additionalProperties": false,
+      "description": "Identity of the policy in effect: the same shape as a receipt's policy member (schemas/hushspec-receipt.v0.schema.json $defs.PolicySummary), duplicated so this schema is self-contained.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "spec_version": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "extends_chain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "source",
+              "content_hash"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "source": {
+                "type": "string",
+                "minLength": 1
+              },
+              "content_hash": {
+                "$ref": "#/$defs/ContentHash"
+              }
+            }
+          }
+        },
+        "signature": {
+          "type": "object",
+          "required": [
+            "verified"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "verified": {
+              "type": "boolean"
+            },
+            "key_id": {
+              "$ref": "#/$defs/ContentHash"
+            },
+            "verified_at": {
+              "$ref": "#/$defs/Timestamp"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

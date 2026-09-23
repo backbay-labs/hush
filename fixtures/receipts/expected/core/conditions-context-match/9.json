@@ -1,0 +1,51 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01a0a4f0-3200-7009-8000-000000000000",
+  "timestamp": "2026-09-15T12:00:00.000Z",
+  "time_source": "trusted",
+  "actor": {
+    "agent_id": "fixture-agent",
+    "session_id": "fixture-session",
+    "principal": "fixture@hushspec.dev",
+    "runtime": "hushspec-conformance/0.2"
+  },
+  "policy": {
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:735bcb8b2aab77d7e498247e69c83fae6eaa62107a8b6c23f46db4647104e85c"
+  },
+  "action": {
+    "type": "file_write",
+    "target": "/etc/passwd",
+    "context": {
+      "custom": {
+        "limit": 1,
+        "tier": 3
+      }
+    }
+  },
+  "decision": "allow",
+  "rule_trace": [
+    {
+      "rule_block": "forbidden_paths",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "when condition is false"
+    },
+    {
+      "rule_block": "path_allowlist",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no path_allowlist rule configured"
+    },
+    {
+      "rule_block": "secret_patterns",
+      "outcome": "skip",
+      "evaluated": false,
+      "reason": "no secret_patterns rule configured"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "receipt_version": "0.2",
+  "receipt_id": "01994b7e-2c1f-7c00-a000-0123456789ab",
+  "timestamp": "2026-09-15T08:30:00.123Z",
+  "time_source": "system",
+  "actor": {
+    "agent_id": "deploy-bot-3",
+    "session_id": "run-20260915-0042",
+    "principal": "alice@example.com",
+    "runtime": "hushspec-rs/0.2.0"
+  },
+  "policy": {
+    "name": "hipaa-base",
+    "version": 3,
+    "spec_version": "0.1.0",
+    "content_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "extends_chain": [
+      {
+        "source": "builtin:strict",
+        "content_hash": "sha256:9aa550f8eed15366ce9db38b22818179d79c382fa6423f159ef0b228aca25108"
+      },
+      {
+        "source": "library/healthcare/hipaa-base.yaml",
+        "content_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+      }
+    ],
+    "signature": {
+      "verified": true,
+      "key_id": "sha256:abababababababababababababababababababababababababababababababab",
+      "verified_at": "2026-09-15T08:00:00.000Z"
+    }
+  },
+  "action": {
+    "type": "egress",
+    "target": "api.example.com"
+  },
+  "decision": "allow",
+  "matched_rule": "rules.egress.allow",
+  "reason": "domain is explicitly allowed",
+  "rule_trace": [
+    {
+      "rule_block": "egress",
+      "rule_path": "rules.egress.allow",
+      "outcome": "allow",
+      "evaluated": true,
+      "reason": "domain is explicitly allowed"
+    }
+  ],
+  "enforcement": {
+    "mode": "enforce",
+    "outcome": "allowed"
+  },
+  "duration_us": 41
+}
