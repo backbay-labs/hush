@@ -83,8 +83,15 @@ These are working-tree checks, not public-registry installation evidence.
 
 The owner explicitly deferred revocation of the supplied credentials until after
 publication. No token values have been placed in source, artifacts or logs.
-PyPI trusted publishing, signing-key ownership/public trust anchor, Homebrew
-access and Pages/schema-domain availability need confirmation. Repository-secret
+At the owner's subsequent request, a dedicated production-policy signing key was
+generated and stored in the GitHub secret with a matching public repository
+variable and an owner-only backup outside the repository. The [public key](../../keys/hushspec-release-2026.pub.pem)
+has key ID `sha256:19d582aef8ee788f6742b33c3723ced7f7feade9a73c6a4e8b86bd406bbf706d`.
+Local/remote public fingerprints match; a signed default-policy bundle verifies
+with the committed public key and re-resolved policy. No private key is committed.
+
+PyPI trusted publishing, Homebrew access and Pages/schema-domain availability
+still need confirmation. Repository-secret
 names alone do not prove values or organization-level configuration. Main
 requires an approving review; there is no authorization to bypass it. No public
 tag, registry upload, Homebrew change or release has been made by this work.

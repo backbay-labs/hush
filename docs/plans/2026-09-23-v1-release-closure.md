@@ -49,7 +49,7 @@ declared distribution artifacts. Chio migration and Project D remain separate.
   deferred revocation until afterward. Never print secret values.
 - [ ] Owner confirms PyPI trusted publisher configuration for this repository
   and `publish.yml`, with no environment unless the workflow is updated too.
-- [ ] Owner supplies or approves production signing-key custody and trust anchor.
+- [x] Owner supplies or approves production signing-key custody and trust anchor.
 - [ ] Verify Homebrew publishing access or obtain an explicit scope deferral.
 - [ ] Verify Pages/custom-domain configuration and canonical schema URLs.
 
@@ -102,3 +102,11 @@ candidate qualification, integration and publication checkboxes remain separate.
 The deferred non-Linux testkit portability limitation does not expand the
 documented Linux-only external execution contract. Production CLI platforms
 must pass their own artifact builds and native smoke checks.
+
+The owner requested provisioning a new release-policy identity. The dedicated
+Ed25519 [public trust key](../../keys/hushspec-release-2026.pub.pem) and custody
+guidance are committed. `POLICY_SIGNING_KEY` and `POLICY_SIGNING_PUBLIC_KEY` are
+configured in GitHub. An owner-only backup is outside the repository. Public-key
+fingerprints agree locally/remotely, and a signed default-policy bundle verifies
+against the committed public key and the re-resolved policy. This is key setup,
+not a published release or verification of a hosted production signing job.
