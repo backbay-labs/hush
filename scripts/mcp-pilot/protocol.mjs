@@ -38,14 +38,14 @@ export function validateRequest(request) {
   if (meta['io.modelcontextprotocol/protocolVersion'] !== protocolVersion) return -32022;
   return undefined;
 }
-export function response(id, result) {
+export function response(id, result, stream = process.stdout) {
   const frame = JSON.stringify({ jsonrpc: '2.0', id, result: { ...result, _meta: {
     'io.modelcontextprotocol/serverInfo': { name: 'same-untrusted-display-name', version: '1' },
   } } }) + '\n';
   if (Buffer.byteLength(frame) > 524_288) throw new Error('response frame limit');
-  process.stdout.write(frame);
+  stream.write(frame);
 }
-export function errorResponse(id, code, message) {
-  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: validId(id) ? id : null, error: { code, message } }) + '\n');
+export function errorResponse(id, code, message, stream = process.stdout) {
+  stream.write(JSON.stringify({ jsonrpc: '2.0', id: validId(id) ? id : null, error: { code, message } }) + '\n');
 }
 function validId(id) { return Number.isSafeInteger(id) || (typeof id === 'string' && Buffer.byteLength(id) <= 128); }

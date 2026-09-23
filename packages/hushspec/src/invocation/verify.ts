@@ -175,6 +175,7 @@ function replay(jsonl: string, trust: InvocationTrust): Replay {
 /** Forensics only: even a valid fully-terminal prefix is not a closed run. */
 export function inspectInvocationJournal(jsonl: string, trust: InvocationTrust): InvocationVerification {
   const { lastTimestamp: _last, ...result } = replay(jsonl, trust);
+  if (trust.expectedHeadHash !== undefined) check(trust.expectedHeadHash === result.headHash, 'expected head mismatch');
   return result;
 }
 

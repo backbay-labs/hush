@@ -140,6 +140,8 @@ describe('invocation evidence replay', () => {
     expect(() => api.verifyInvocationJournal(prefix.jsonl, prefix.checkpoint, f.trust)).toThrow(/incomplete/);
     expect(api.inspectInvocationJournal(prefix.jsonl, f.trust)).toMatchObject({ complete: false,
       calls: [{ callId: f.callId, outcome: 'unknown' }] });
+    expect(() => api.inspectInvocationJournal(prefix.jsonl, { ...f.trust,
+      expectedHeadHash: `sha256:${'0'.repeat(64)}` })).toThrow(/head/);
   });
   it('rejects truncation, reordering, wrong stream/key and unknown signed fields', async () => {
     const f = await fixture(); const full = f.seal();
