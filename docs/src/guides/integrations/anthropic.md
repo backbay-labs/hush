@@ -29,7 +29,7 @@ TypeScript/Python `createSecureToolHandler` / `create_secure_tool_handler`
 evaluate; their names do not mean they execute or contain a tool.
 Go's `CreateSecureToolHandler` is a guarded handler wrapper.
 
-The [executable adapter test](../../../examples/sdks/typescript/adapters.mjs)
+The [executable adapter test](https://hushspec.org/docs-examples/sdks/typescript/adapters.mjs)
 calls `guard.enforce` before an owned handler. It rejects a text-editor read
 of a protected path and asserts that the handler never ran.
 Run it using the [OpenAI guide's local setup](openai.md#executable-boundary-test).

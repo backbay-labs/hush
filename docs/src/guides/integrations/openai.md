@@ -18,9 +18,9 @@ wraps an owned handler; inspect its returned error.
 
 ## Executable boundary test
 
-Download [adapters.mjs](../../../examples/sdks/typescript/adapters.mjs), the
-[package manifest](../../../examples/sdks/typescript/package.json), and the
-[quickstart policy](../../../examples/quickstart/policy.yaml), then run:
+Download [adapters.mjs](https://hushspec.org/docs-examples/sdks/typescript/adapters.mjs), the
+[package manifest](https://hushspec.org/docs-examples/sdks/typescript/package.json), and the
+[quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml), then run:
 
 ```sh
 npm install

@@ -1,7 +1,7 @@
 # Go SDK
 
 Use the Go SDK at a runtime boundary you own. This guide needs Go 1.22 or newer
-and the [quickstart policy](../../../examples/quickstart/policy.yaml).
+and the [quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml).
 
 The package is `github.com/backbay-labs/hush/packages/go/hushspec`. `Parse`, resolution and compilation return `(value, error)`. `Guard.Check` returns `(GuardDecision, error)`; stop on error, then branch on `Allowed()`. There is no exception-based enforcement API.
 
@@ -10,9 +10,9 @@ The package is `github.com/backbay-labs/hush/packages/go/hushspec`. `Parse`, res
 Create an empty directory. Download these files, preserving the listed relative
 paths, and place `policy.yaml` at the top of that directory:
 
-- [go.mod](../../../examples/sdks/go/go.mod)
-- [main.go](../../../examples/sdks/go/main.go)
-- [trust.go](../../../examples/sdks/go/trust.go)
+- [go.mod](https://hushspec.org/docs-examples/sdks/go/go.mod)
+- [main.go](https://hushspec.org/docs-examples/sdks/go/main.go)
+- [trust.go](https://hushspec.org/docs-examples/sdks/go/trust.go)
 
 The module version is `github.com/backbay-labs/hush/packages/go@v1.0.0`. Signing uses Go's standard cryptography support. The guard is named `Guard`, not `HushGuard`.
 

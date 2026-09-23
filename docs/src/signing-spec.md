@@ -14,8 +14,8 @@ Vectors: `fixtures/signing/vectors.yaml` lists eighteen cases signed with a publ
 
 ## Run the evidence lab
 
-Download [verify.py](../examples/evidence/verify.py) and the
-[quickstart policy](../examples/quickstart/policy.yaml) into one directory.
+Download [verify.py](https://hushspec.org/docs-examples/evidence/verify.py) and the
+[quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml) into one directory.
 With Python 3.10+ and the v1 CLI installed:
 
 ```sh

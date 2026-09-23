@@ -1,7 +1,7 @@
 # Python SDK
 
 Use the Python SDK at a runtime boundary you own. This guide needs Python 3.10 or newer
-and the [quickstart policy](../../../examples/quickstart/policy.yaml).
+and the [quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml).
 
 `parse` and `resolve_file` use `(ok, value_or_error)` tuples; `parse_or_raise` is the throwing variant. `validate(...).is_valid` is a property. `check` returns `bool`; `gate` returns an outcome with `proceed`. `enforce` raises `HushSpecDenied` before the handler.
 
@@ -10,9 +10,9 @@ and the [quickstart policy](../../../examples/quickstart/policy.yaml).
 Create an empty directory. Download these files, preserving the listed relative
 paths, and place `policy.yaml` at the top of that directory:
 
-- [requirements.txt](../../../examples/sdks/python/requirements.txt)
-- [main.py](../../../examples/sdks/python/main.py)
-- [trust.py](../../../examples/sdks/python/trust.py)
+- [requirements.txt](https://hushspec.org/docs-examples/sdks/python/requirements.txt)
+- [main.py](https://hushspec.org/docs-examples/sdks/python/main.py)
+- [trust.py](https://hushspec.org/docs-examples/sdks/python/trust.py)
 
 This example installs `hushspec[signing]==1.0.0`. The `signing` extra supplies the cryptography backend; without it, signing operations raise `SigningUnavailable`. On Windows activate the venv with `.venv\Scripts\Activate.ps1` instead.
 

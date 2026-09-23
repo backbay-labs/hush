@@ -22,8 +22,8 @@ For Windows, Homebrew, npm, Cargo, containers and SDKs, see [installation](insta
 ## 2. Create a workspace
 
 Create an empty directory and save these two downloads there:
-[policy.yaml](../../examples/quickstart/policy.yaml) and
-[policy.test.yaml](../../examples/quickstart/policy.test.yaml).
+[policy.yaml](https://hushspec.org/docs-examples/quickstart/policy.yaml) and
+[policy.test.yaml](https://hushspec.org/docs-examples/quickstart/policy.test.yaml).
 Keep their filenames. Open `policy.yaml` in your editor.
 
 The policy allows read/search tools, blocks `deploy`, requires confirmation for

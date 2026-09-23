@@ -480,6 +480,9 @@ jobs:
       - name: Build book
         run: mdbook build docs
 
+      - name: Check published example download targets
+        run: python3 scripts/test_book_downloads.py
+
       # The same commands the deploy runs (.github/workflows/docs.yml), so a
       # rename under schemas/ or spec/registries/, or a change that makes
       # build_schema_index.py refuse, fails on the pull request rather than

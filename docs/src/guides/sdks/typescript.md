@@ -1,7 +1,7 @@
 # TypeScript SDK
 
 Use the TypeScript SDK at a runtime boundary you own. This guide needs Node 18 or newer
-and the [quickstart policy](../../../examples/quickstart/policy.yaml).
+and the [quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml).
 
 The SDK has TypeScript types and runs in JavaScript too. `parseOrThrow` throws on invalid input; `validate` returns `{ valid, errors, warnings }`. `check` returns a boolean; `gate` returns `{ proceed, result, enforcement }`. `enforce` throws `HushSpecDenied` when blocked.
 
@@ -10,9 +10,9 @@ The SDK has TypeScript types and runs in JavaScript too. `parseOrThrow` throws o
 Create an empty directory. Download these files, preserving the listed relative
 paths, and place `policy.yaml` at the top of that directory:
 
-- [package.json](../../../examples/sdks/typescript/package.json)
-- [main.mjs](../../../examples/sdks/typescript/main.mjs)
-- [trust.mjs](../../../examples/sdks/typescript/trust.mjs)
+- [package.json](https://hushspec.org/docs-examples/sdks/typescript/package.json)
+- [main.mjs](https://hushspec.org/docs-examples/sdks/typescript/main.mjs)
+- [trust.mjs](https://hushspec.org/docs-examples/sdks/typescript/trust.mjs)
 
 `@hushspec/core@1.0.0` includes signing. The downloadable `.mjs` program is directly executable without a TypeScript transpiler; TypeScript applications can import the same APIs with typed actions.
 

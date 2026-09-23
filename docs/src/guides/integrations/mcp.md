@@ -20,9 +20,9 @@ both. See the [shared adapter contract](https://github.com/backbay-labs/hush/blo
 
 ## Run an owned dispatch example
 
-Use the [TypeScript example's package.json](../../../examples/sdks/typescript/package.json),
-[quickstart policy](../../../examples/quickstart/policy.yaml), and
-[mcp.mjs](../../../examples/sdks/typescript/mcp.mjs) in one empty directory:
+Use the [TypeScript example's package.json](https://hushspec.org/docs-examples/sdks/typescript/package.json),
+[quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml), and
+[mcp.mjs](https://hushspec.org/docs-examples/sdks/typescript/mcp.mjs) in one empty directory:
 
 ```sh
 npm install

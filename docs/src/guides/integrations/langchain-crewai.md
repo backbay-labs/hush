@@ -20,7 +20,7 @@ preserves the tool's prototype and fields. The returned proxy enforces before
 calling the original method. The callback handler asks the framework to raise
 errors and await handlers; verify that your selected executor respects both.
 
-Run [adapters.mjs](../../../examples/sdks/typescript/adapters.mjs) as described
+Run [adapters.mjs](https://hushspec.org/docs-examples/sdks/typescript/adapters.mjs) as described
 in the [structural adapter test](openai.md#executable-boundary-test). A blocked
 tool's asynchronous handler is never called.
 
@@ -32,7 +32,7 @@ For another action type, pass `action_mapper(args, kwargs)` returning an
 `EvaluationAction` with the correct type and a nonempty target.
 Do not infer filesystem authority from a Python function's name.
 
-Download [adapters.py](../../../examples/sdks/python/adapters.py) and use the
+Download [adapters.py](https://hushspec.org/docs-examples/sdks/python/adapters.py) and use the
 [Python SDK setup](../sdks/python.md). Run `python adapters.py policy.yaml`.
 The test covers both decorators, a protected-path mapper, and refusal when a
 non-tool action lacks a mapper. The dispatch list remains empty on every refusal.

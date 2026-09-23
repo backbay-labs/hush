@@ -6,7 +6,7 @@ This page explains that policy and how to extend it safely.
 
 ## Start with a complete document
 
-Save [the tested policy](../../examples/quickstart/policy.yaml) as `policy.yaml`:
+Save [the tested policy](https://hushspec.org/docs-examples/quickstart/policy.yaml) as `policy.yaml`:
 
 ```yaml
 hushspec: "1.0.0"
@@ -72,7 +72,7 @@ h2h validate --strict policy.yaml
 h2h test --policy policy.yaml policy.test.yaml
 ```
 
-Use the [quickstart test file](../../examples/quickstart/policy.test.yaml).
+Use the [quickstart test file](https://hushspec.org/docs-examples/quickstart/policy.test.yaml).
 Five cases pin read/search, protected path/deploy, and confirmation behavior.
 Use `h2h explain` to inspect a changed result; it keeps the evaluation exit
 code, including 1 for deny and 4 for warn.

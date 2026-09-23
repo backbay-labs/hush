@@ -1,7 +1,7 @@
 # Rust SDK
 
 Use the Rust SDK at a runtime boundary you own. This guide needs Rust 1.88 or newer
-and the [quickstart policy](../../../examples/quickstart/policy.yaml).
+and the [quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml).
 
 Rust returns `Result` for fallible operations. `HushGuard::check` returns a `GuardDecision`; branch on `allowed()`, or use `enforce` and handle `Denied` before dispatch.
 
@@ -10,9 +10,9 @@ Rust returns `Result` for fallible operations. `HushGuard::check` returns a `Gua
 Create an empty directory. Download these files, preserving the listed relative
 paths, and place `policy.yaml` at the top of that directory:
 
-- [Cargo.toml](../../../examples/sdks/rust/Cargo.toml)
-- [src/main.rs](../../../examples/sdks/rust/src/main.rs)
-- [src/trust.rs](../../../examples/sdks/rust/src/trust.rs)
+- [Cargo.toml](https://hushspec.org/docs-examples/sdks/rust/Cargo.toml)
+- [src/main.rs](https://hushspec.org/docs-examples/sdks/rust/src/main.rs)
+- [src/trust.rs](https://hushspec.org/docs-examples/sdks/rust/src/trust.rs)
 
 The example enables `features = ["signing"]`. Basic parsing and evaluation do not need that feature. HTTPS providers require `http`; OTLP requires `otlp`.
 

@@ -50,7 +50,7 @@ an untrusted hash shipped beside the receipt adds no authentication.
 ## A real-schema example
 
 The example below was emitted by `h2h 1.0.0` for the
-[quickstart policy](../examples/quickstart/policy.yaml). It is synthetic test
+[quickstart policy](https://hushspec.org/docs-examples/quickstart/policy.yaml). It is synthetic test
 evidence, not a production event. Its timestamp and duration describe that
 sample invocation; tests validate its schema and recheck the policy, action,
 decision, trace and enforcement fields against a fresh evaluation.
@@ -59,7 +59,7 @@ The CLI evaluates an action description; it does not open `/workspace/.env`.
 Here `blocked` is the disposition associated with that denied evaluation.
 An integrating runtime must still branch before its actual file operation.
 
-Download the [complete receipt](../examples/evidence/receipt.json).
+Download the [complete receipt](https://hushspec.org/docs-examples/evidence/receipt.json).
 
 <!-- docs-file: evidence-receipt docs/examples/evidence/receipt.json -->
 ```json
