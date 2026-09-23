@@ -16,7 +16,9 @@ declared distribution artifacts. Chio migration and Project D remain separate.
 - PyPI uses trusted publishing; do not silently introduce a token fallback.
 - Release policy signing requires an owner-approved key and separately retained
   public trust identity. A rehearsal key is disposable and not production trust.
-- No administrative bypass of required reviews or weakened verification gates.
+- The owner authorized admin merge of the cumulative candidate on 2026-09-23.
+  This waives the separate-maintainer approval requirement, not technical review,
+  unresolved correctness findings or exact-candidate verification gates.
 - Every released artifact must identify the qualified candidate; post-release
   checks must install from the actual registries, not local source.
 - Keep failed evidence and retries distinct. Do not declare a release from
@@ -55,7 +57,8 @@ declared distribution artifacts. Chio migration and Project D remain separate.
 
 ### 4. Integrate the cumulative candidate
 
-- [ ] Obtain the approving review required by `main` protection.
+- [x] Obtain owner authorization for admin merge in place of separate-maintainer
+  approval. Technical review and exact-candidate qualification still apply.
 - [ ] Integrate the repaired cumulative tree; do not publish intermediate older
   stack heads as if they contain later repairs.
 - [ ] Qualify the actual integration SHA with all required terminal checks.
@@ -110,3 +113,24 @@ configured in GitHub. An owner-only backup is outside the repository. Public-key
 fingerprints agree locally/remotely, and a signed default-policy bundle verifies
 against the committed public key and the re-resolved policy. This is key setup,
 not a published release or verification of a hosted production signing job.
+
+## Subsequent review and owner decisions
+
+The owner chose to preserve the log's nearest-preceding-policy-event guarantee:
+reload must wait for in-flight evaluations, confirmation callbacks and receipt
+delivery. All four guard repairs and regressions are implemented; exact-head
+qualification remains required. The owner approved the callback contract: observers run after the
+ordering gate releases; confirmation and sink callbacks cannot wait for that
+same guard. TypeScript rejects synchronous reentry before mutation.
+
+The owner requested a curl installer on their existing Vercel website. The live
+site is `hushspec.org`, with a local `../hush-ui` checkout. The owner confirmed
+the checkout and approved the installer design using `hushspec.org`: pinned
+GitHub archives, SHA-256 verification and a rootless `~/.local/bin` installation.
+This does not authorize changing frozen schema identifiers or imply Homebrew
+access is available.
+
+The supplied crates credential was retried and rejected with HTTP 401 and a
+token-format error. The existing GitHub `CRATES_TOKEN` was not overwritten and
+its validity remains unverified. Stored npm/PyPI credentials do not establish
+publish permission or PyPI trusted-publisher configuration.

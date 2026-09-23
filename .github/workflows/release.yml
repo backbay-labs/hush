@@ -153,8 +153,10 @@ jobs:
           if [ "${{ matrix.cross }}" = true ]; then
             # Cross supplies QEMU for this target. This is an emulated smoke
             # check, not evidence of execution on a native ARM64 runner.
-            cross run -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- version --format json > cli-version.json
-            cross run -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- validate rulesets/default.yaml
+            # Quiet also suppresses rustup's toolchain status on stdout,
+            # keeping the captured output a JSON document.
+            cross run --quiet -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- version --format json > cli-version.json
+            cross run --quiet -p hushspec-cli --release --locked --target "${{ matrix.target }}" -- validate rulesets/default.yaml
           else
             "target/${{ matrix.target }}/release/${bin}" version --format json > cli-version.json
             "target/${{ matrix.target }}/release/${bin}" validate rulesets/default.yaml

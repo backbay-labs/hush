@@ -45,11 +45,14 @@
 //!
 //! A guard is `Send + Sync` and takes `&self` everywhere: share one across an
 //! agent's worker threads behind an `Arc`. The policy lives behind an
-//! `RwLock<Arc<..>>`, so an evaluation takes the read lock only long enough to
-//! clone one `Arc` and a hot swap never blocks an in-flight decision.
+//! `RwLock<Arc<..>>`. A separate ordering gate lets evaluations run concurrently,
+//! but reload waits through confirmation and receipt delivery. Confirmation
+//! handlers and custom sinks must not re-enter this guard's evaluation/reload
+//! methods or wait for work requiring them. Observers run after gate release and
+//! may re-enter the guard. Sink failures still report evidence gaps.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::compiled::CompiledPolicy;
 use crate::evaluate::{Decision, EvaluationAction, EvaluationResult, PANIC_RULE};
@@ -529,7 +532,7 @@ impl HushGuardBuilder {
 
         let guard = HushGuard {
             policy: RwLock::new(Arc::new(policy)),
-            swapping: Mutex::new(()),
+            ordering: RwLock::new(()),
             enforcement,
             sink,
             observers,
@@ -544,7 +547,9 @@ impl HushGuardBuilder {
         // (log spec 6): a reader maps every receipt to the policy in force by
         // walking back to the nearest policy event.
         let summary = guard.policy_summary();
-        guard.emit_policy_event(PolicyEvent::loaded(summary.clone(), guard.enforcement.mode));
+        let error =
+            guard.emit_policy_event(PolicyEvent::loaded(summary.clone(), guard.enforcement.mode));
+        guard.notify_sink_failure(error);
         guard
             .observers
             .notify_policy_loaded(summary.name.as_deref(), &summary.content_hash);
@@ -555,11 +560,8 @@ impl HushGuardBuilder {
 /// An enforcement point. See the module documentation.
 pub struct HushGuard {
     policy: RwLock<Arc<GuardPolicy>>,
-    /// Serializes whole swaps, so two of them cannot interleave their
-    /// `policy_swapped` records. Held only by [`HushGuard::swap_policy`];
-    /// an evaluation never touches it, so a slow sink delays the next swap
-    /// rather than the next decision.
-    swapping: Mutex<()>,
+    /// A policy transition cannot split an evaluation from its receipt.
+    ordering: RwLock<()>,
     enforcement: EnforcementConfig,
     sink: Option<Box<dyn ReceiptSink>>,
     observers: ObservableEvaluator,
@@ -722,6 +724,7 @@ impl HushGuard {
     /// and unavailable storage cannot guarantee a receipt.
     #[must_use]
     pub fn check(&self, action: &EvaluationAction) -> GuardDecision {
+        let mut admission = Some(self.ordering.read().unwrap_or_else(|e| e.into_inner()));
         let policy = self.snapshot();
         let mut evaluated = self.run(&policy, action);
         let mode = self.effective_mode(&evaluated.result);
@@ -744,6 +747,7 @@ impl HushGuard {
                             };
                             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 self.record(
+                                    admission.take(),
                                     action,
                                     &evaluated.result,
                                     evaluated.duration_us,
@@ -774,7 +778,14 @@ impl HushGuard {
             receipt,
             duration_us,
         } = evaluated;
-        let receipt = self.record(action, &result, duration_us, receipt, Some(enforcement));
+        let receipt = self.record(
+            admission.take(),
+            action,
+            &result,
+            duration_us,
+            receipt,
+            Some(enforcement),
+        );
         GuardDecision {
             result,
             receipt,
@@ -817,6 +828,7 @@ impl HushGuard {
     /// too, and a panic or a refused policy still reads as enforced.
     #[must_use]
     pub fn evaluate(&self, action: &EvaluationAction) -> EvaluationResult {
+        let admission = self.ordering.read().unwrap_or_else(|e| e.into_inner());
         let policy = self.snapshot();
         let Evaluated {
             result,
@@ -825,7 +837,14 @@ impl HushGuard {
         } = self.run(&policy, action);
         let enforcement =
             EnforcementSummary::implied(result.decision, self.effective_mode(&result));
-        self.record(action, &result, duration_us, receipt, Some(enforcement));
+        self.record(
+            Some(admission),
+            action,
+            &result,
+            duration_us,
+            receipt,
+            Some(enforcement),
+        );
         result
     }
 
@@ -856,13 +875,9 @@ impl HushGuard {
         let name = next.name().map(str::to_string);
         let content_hash = summary.content_hash.clone();
 
-        // One swap at a time, all the way through the record. Without this,
-        // two swaps could take the write lock in one order and reach the sink
-        // in the other, and a reader walking back from a receipt to the
-        // nearest policy event would name the wrong policy (log spec 6).
-        // A poisoned lock means a previous swap panicked mid-record; the
-        // policy behind the `RwLock` is still one whole `Arc`, so continue.
-        let _serialized = match self.swapping.lock() {
+        // Wait for every old-policy receipt, then exclude evaluations and
+        // other swaps until the new policy event reaches the sink.
+        let serialized = match self.ordering.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -877,11 +892,13 @@ impl HushGuard {
             previous
         };
 
-        self.emit_policy_event(PolicyEvent::swapped(
+        let error = self.emit_policy_event(PolicyEvent::swapped(
             summary,
             self.enforcement.mode,
             previous_hash.clone(),
         ));
+        drop(serialized);
+        self.notify_sink_failure(error);
         self.observers.notify_policy_reloaded(
             name.as_deref(),
             &content_hash,
@@ -995,6 +1012,7 @@ impl HushGuard {
     /// tell the observers.
     fn record(
         &self,
+        admission: Option<RwLockReadGuard<'_, ()>>,
         action: &EvaluationAction,
         result: &EvaluationResult,
         duration_us: u64,
@@ -1004,14 +1022,17 @@ impl HushGuard {
         if let (Some(receipt), Some(enforcement)) = (receipt.as_mut(), enforcement) {
             receipt.enforcement = enforcement;
         }
+        let mut sink_error = None;
         if let (Some(sink), Some(receipt)) = (self.sink.as_ref(), receipt.as_ref()) {
             // A sink must never break enforcement: a full disk is not a reason
             // to let an action through, nor to stop one. The failure still
             // reaches the observers, so the gap in the evidence is visible.
             if let Err(error) = sink.send(receipt) {
-                self.report_sink_failure(sink.as_ref(), &error);
+                sink_error = Some(error);
             }
         }
+        drop(admission);
+        self.notify_sink_failure(sink_error);
         self.observers.notify_evaluation_completed(
             action,
             result,
@@ -1022,22 +1043,21 @@ impl HushGuard {
         receipt
     }
 
-    fn emit_policy_event(&self, event: PolicyEvent) {
-        if let Some(sink) = self.sink.as_ref() {
-            // Sinks must not break policy loading, either.
-            if let Err(error) = sink.record_policy_event(&event) {
-                self.report_sink_failure(sink.as_ref(), &error);
-            }
-        }
+    fn emit_policy_event(&self, event: PolicyEvent) -> Option<SinkError> {
+        self.sink
+            .as_ref()
+            .and_then(|sink| sink.record_policy_event(&event).err())
     }
 
     /// Put a sink failure on the observer channel as a `sink.error` event,
     /// named by the sink that refused.
-    fn report_sink_failure(&self, sink: &dyn ReceiptSink, error: &SinkError) {
-        self.observers.notify_error(ErrorEvent::sink_error(
-            error.to_string(),
-            Some(sink.name().to_string()),
-        ));
+    fn notify_sink_failure(&self, error: Option<SinkError>) {
+        if let (Some(sink), Some(error)) = (self.sink.as_ref(), error) {
+            self.observers.notify_error(ErrorEvent::sink_error(
+                error.to_string(),
+                Some(sink.name().to_string()),
+            ));
+        }
     }
 }
 
@@ -1054,6 +1074,7 @@ mod tests {
         EvaluationCompletedEvent, MetricsCollector, ObserverEventType, PolicyLoadedEvent,
     };
     use crate::sink::{FilteredSink, NullSink};
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     const EGRESS_POLICY: &str = r#"
@@ -1073,6 +1094,261 @@ rules:
     allow: ["deploy", "read_file"]
     require_confirmation: ["deploy"]
 "#;
+
+    #[test]
+    fn reload_waits_for_confirmation_and_records_old_receipt_first() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        struct OrderedSink(Arc<Mutex<Vec<(&'static str, String)>>>);
+        impl ReceiptSink for OrderedSink {
+            fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(("receipt", receipt.policy.content_hash.clone()));
+                Ok(())
+            }
+            fn record_policy_event(&self, event: &PolicyEvent) -> Result<(), SinkError> {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(("policy", event.policy.content_hash.clone()));
+                Ok(())
+            }
+        }
+        let entries = Arc::new(Mutex::new(Vec::new()));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Mutex::new(release_rx);
+        let guard = Arc::new(
+            HushGuard::builder()
+                .sink(Box::new(OrderedSink(entries.clone())))
+                .on_warn(move |_, _| {
+                    entered_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                    true
+                })
+                .build_from_policy(policy(WARN_POLICY))
+                .unwrap(),
+        );
+        let old = guard.content_hash();
+        let checking = guard.clone();
+        let check = std::thread::spawn(move || checking.check(&action("tool_call", "deploy")));
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let next = Resolution::from_resolved(&crate::HushSpec::parse(EGRESS_POLICY).unwrap(), None)
+            .unwrap();
+        let next_hash = next.content_hash.clone();
+        let swapping = guard.clone();
+        let (swapped_tx, swapped_rx) = mpsc::channel();
+        let swap = std::thread::spawn(move || {
+            swapping.swap_policy(next).unwrap();
+            swapped_tx.send(()).unwrap();
+        });
+        let completed_early = swapped_rx.recv_timeout(Duration::from_millis(200)).is_ok();
+        release_tx.send(()).unwrap();
+        assert!(check.join().unwrap().allowed());
+        swap.join().unwrap();
+        assert!(
+            !completed_early,
+            "reload passed an outstanding confirmation"
+        );
+        assert_eq!(
+            *entries.lock().unwrap(),
+            vec![
+                ("policy", old.clone()),
+                ("receipt", old),
+                ("policy", next_hash)
+            ]
+        );
+    }
+
+    #[test]
+    fn evaluations_and_reloads_wait_for_sink_delivery() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        struct BarrierSink {
+            event: bool,
+            armed: Arc<AtomicBool>,
+            entered: mpsc::Sender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+            entries: Arc<Mutex<Vec<(bool, String)>>>,
+        }
+        impl BarrierSink {
+            fn record(&self, event: bool, hash: &str) {
+                if event == self.event && self.armed.swap(false, Ordering::SeqCst) {
+                    self.entered.send(()).unwrap();
+                    self.release
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(5))
+                        .unwrap();
+                }
+                self.entries.lock().unwrap().push((event, hash.to_string()));
+            }
+        }
+        impl ReceiptSink for BarrierSink {
+            fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+                self.record(false, &receipt.policy.content_hash);
+                Ok(())
+            }
+            fn record_policy_event(&self, event: &PolicyEvent) -> Result<(), SinkError> {
+                self.record(true, &event.policy.content_hash);
+                Ok(())
+            }
+        }
+        for block_event in [false, true] {
+            let entries = Arc::new(Mutex::new(Vec::new()));
+            let armed = Arc::new(AtomicBool::new(false));
+            let (entered_tx, entered_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let guard = Arc::new(
+                HushGuard::builder()
+                    .sink(Box::new(BarrierSink {
+                        event: block_event,
+                        armed: armed.clone(),
+                        entered: entered_tx,
+                        release: Mutex::new(release_rx),
+                        entries: entries.clone(),
+                    }))
+                    .build_from_policy(policy(EGRESS_POLICY))
+                    .unwrap(),
+            );
+            armed.store(true, Ordering::SeqCst);
+            let run = |guard: Arc<HushGuard>, swap: bool| {
+                if swap {
+                    let next = Resolution::from_resolved(
+                        &crate::HushSpec::parse(WARN_POLICY).unwrap(),
+                        None,
+                    )
+                    .unwrap();
+                    guard.swap_policy(next).unwrap();
+                } else {
+                    let _ = guard.evaluate(&action("egress", "api.example.com"));
+                }
+            };
+            let first_guard = guard.clone();
+            let first = std::thread::spawn(move || run(first_guard, block_event));
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let (done_tx, done_rx) = mpsc::channel();
+            let second = std::thread::spawn(move || {
+                run(guard, !block_event);
+                done_tx.send(()).unwrap();
+            });
+            let early = done_rx.recv_timeout(Duration::from_millis(200)).is_ok();
+            release_tx.send(()).unwrap();
+            first.join().unwrap();
+            second.join().unwrap();
+            assert!(!early, "operation passed incomplete sink delivery");
+            let entries = entries.lock().unwrap();
+            let mut current = "";
+            for (event, hash) in entries.iter() {
+                if *event {
+                    current = hash;
+                } else {
+                    assert_eq!(hash, current, "{entries:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn observers_reenter_only_after_the_ordering_gate_releases() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{OnceLock, Weak, mpsc};
+        use std::time::Duration;
+
+        struct Reenter {
+            guard: OnceLock<Weak<HushGuard>>,
+            kind: &'static str,
+            entered: AtomicBool,
+        }
+        impl Reenter {
+            fn enter(&self, kind: &str) {
+                if kind != self.kind {
+                    return;
+                }
+                let Some(guard) = self.guard.get().and_then(Weak::upgrade) else {
+                    return;
+                };
+                if !self.entered.swap(true, Ordering::SeqCst) {
+                    if kind == "reload" {
+                        let _ = guard.evaluate(&action("egress", "api.example.com"));
+                    } else {
+                        guard
+                            .swap_policy(
+                                Resolution::from_resolved(
+                                    &crate::HushSpec::parse(WARN_POLICY).unwrap(),
+                                    None,
+                                )
+                                .unwrap(),
+                            )
+                            .unwrap();
+                    }
+                }
+            }
+        }
+        impl EvaluationObserver for Reenter {
+            fn on_policy_loaded(&self, _: &PolicyLoadedEvent) {
+                self.enter("reload");
+            }
+            fn on_evaluation(&self, _: &EvaluationCompletedEvent) {
+                self.enter("evaluation");
+            }
+            fn on_error(&self, _: &ErrorEvent) {
+                self.enter("error");
+            }
+        }
+        struct FailingSink;
+        impl ReceiptSink for FailingSink {
+            fn send(&self, _: &DecisionReceipt) -> Result<(), SinkError> {
+                Err(SinkError::Chain("unavailable".into()))
+            }
+        }
+        for kind in ["reload", "evaluation", "error"] {
+            let observer = Arc::new(Reenter {
+                guard: OnceLock::new(),
+                kind,
+                entered: AtomicBool::new(false),
+            });
+            let guard = Arc::new(
+                HushGuard::builder()
+                    .sink(Box::new(FailingSink))
+                    .observer(observer.clone())
+                    .build_from_policy(policy(EGRESS_POLICY))
+                    .unwrap(),
+            );
+            observer.guard.set(Arc::downgrade(&guard)).unwrap();
+            let (done_tx, done_rx) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                if kind == "reload" {
+                    guard
+                        .swap_policy(
+                            Resolution::from_resolved(
+                                &crate::HushSpec::parse(WARN_POLICY).unwrap(),
+                                None,
+                            )
+                            .unwrap(),
+                        )
+                        .unwrap();
+                } else {
+                    let _ = guard.evaluate(&action("egress", "api.example.com"));
+                }
+                done_tx.send(()).unwrap();
+            });
+            done_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("observer must not deadlock");
+            worker.join().unwrap();
+            assert!(observer.entered.load(Ordering::SeqCst));
+        }
+    }
 
     fn action(action_type: &str, target: &str) -> EvaluationAction {
         EvaluationAction {

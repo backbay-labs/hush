@@ -109,5 +109,48 @@ with the committed public key and re-resolved policy. No private key is committe
 PyPI trusted publishing, Homebrew access and Pages/schema-domain availability
 still need confirmation. Repository-secret
 names alone do not prove values or organization-level configuration. Main
-requires an approving review; there is no authorization to bypass it. No public
-tag, registry upload, Homebrew change or release has been made by this work.
+requires an approving review; the owner subsequently authorized admin merge in
+place of that approval. This does not waive unresolved technical findings or
+exact-candidate qualification. No public tag, registry upload, Homebrew change
+or release has been made by this work.
+
+## Subsequent artifact rehearsal and ordering review
+
+At `2a75cdf00e5f5a6f739c29ce25affd811ff6869a`, both PR CI runs succeeded.
+Release rehearsal `35886420607`, attempt 1, passed reusable CI and the bundle job.
+Linux x64 and macOS ARM64 builds passed. The ARM Linux smoke step failed; matrix
+fail-fast cancelled macOS Intel and Windows. All publication jobs skipped. This
+is an unsuccessful rehearsal, not five-platform qualification.
+
+The ARM executable built and successfully validated the default policy. Cross
+forwarded rustup's toolchain status to stdout ahead of the version JSON, causing
+the identity parser to reject the capture. Quiet mode suppresses that status
+without weakening SHA/version/target assertions. A regression reproduces the
+same JSON parse error before the repair; all nine workflow tests pass afterward.
+Another hosted rehearsal is still required.
+
+PR #11 then identified policy-event ordering races in Python, Go and Rust.
+Diagnostic tests also reproduce a TypeScript observer-ordering failure. The
+owner chose serialized reload rather than weakening the log contract. A fresh
+read-only design review additionally found TypeScript provider-pull adoption
+without a policy event. The local repairs now cover complete evaluations through
+receipt delivery under a separate ordering gate, exclusive policy transitions,
+provider adoption and observer callbacks after the ordering gate releases. The
+owner approved non-reentrant confirmation/sink callbacks; TypeScript throws on
+such reentry. Each SDK's initial regression failed before repair and passes
+locally afterward. Final review and exact-head CI are still required. Existing
+sink-failure behavior remains an evidence-gap boundary, not a guarantee that
+unavailable storage contains a complete log.
+
+The fresh implementation review found no blocking correctness issue. Two minor
+findings were corrected: threaded observer regressions now acquire the exclusive
+swap gate when reentering from evaluation/error callbacks, and the plan no longer
+describes completed repairs as missing. The runtime guide now documents waiting
+reload, callback constraints and the single-guard/synchronous-sink boundary.
+
+Local verification completed: Rust workspace 1,142 passed with one intentional
+ignored benchmark; latest guard tests 38 passed and all-features clippy passed.
+Python 3,041 passed with four skips and two subtests; TypeScript 2,462 passed with
+one opt-in Docker skip, build and lint passed; Go full race-enabled tests and vet
+passed. The nine workflow regressions pass. Hosted qualification must use the
+new commit, not the earlier candidate's successful PR CI.

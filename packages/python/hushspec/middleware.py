@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import time
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence, Union, TYPE_CHECKING
+from typing import Any, Callable, Iterator, Optional, Sequence, Union, TYPE_CHECKING
 
 from hushspec.compiled import CompiledPolicy, compile_policy
 from hushspec.evaluate import (
@@ -283,6 +285,13 @@ class HushSpecDenied(Exception):
 
 
 class HushGuard:
+    """An enforcement point with ordered policy events and decisions.
+
+    Reload waits for evaluations, confirmation and sink delivery to finish.
+    Confirmation handlers and custom sinks must not synchronously evaluate or
+    reload this same guard, or wait for another thread doing so. Observers run
+    outside the ordering lock and may re-enter the guard.
+    """
     """Fail-closed policy guard: wraps evaluate / check / enforce semantics."""
 
     def __init__(
@@ -377,6 +386,7 @@ class HushGuard:
                 resolution.content_hash if resolution is not None else None
             ),
         )
+        self._operation_lock = threading.Lock()
         self._on_warn: WarnHandler = on_warn or (lambda _r, _a: False)
         self._observable_evaluator = None
         if observer is not None:
@@ -393,7 +403,9 @@ class HushGuard:
         # The log records which policy came into force before any receipt
         # evaluated under it (log spec section 6). A refused guard loaded none.
         if self._state.refusal is None:
-            self._record_policy_event(loaded=True)
+            error = self._record_policy_event(loaded=True)
+            if error is not None:
+                self._report_sink_failure(error)
 
     @classmethod
     def from_file(
@@ -717,6 +729,23 @@ class HushGuard:
         return self._state.compiled
 
     def evaluate(self, action: EvaluationAction) -> EvaluationResult:
+        with self._operation() as notifications:
+            return self._evaluate_ordered(action, notifications)
+
+    @contextmanager
+    def _operation(self) -> Iterator[list[Callable[[], None]]]:
+        notifications: list[Callable[[], None]] = []
+        try:
+            with self._operation_lock:
+                yield notifications
+        finally:
+            # Deliver even on confirmation failure, after releasing the gate.
+            for notify in notifications:
+                notify()
+
+    def _evaluate_ordered(
+        self, action: EvaluationAction, notifications: list[Callable[[], None]]
+    ) -> EvaluationResult:
         # Always routes through _run_evaluation() (sink or not) so this is
         # detection-aware the same way gate()/check()/enforce() are -- a
         # guard must not answer differently from .evaluate() than from
@@ -734,11 +763,11 @@ class HushGuard:
             try:
                 self._sink.send(receipt)
             except Exception as exc:  # noqa: BLE001
-                self._report_sink_failure(exc)
+                notifications.append(lambda exc=exc: self._report_sink_failure(exc))
         if self._observable_evaluator is not None:
-            self._observable_evaluator.notify_evaluation_completed(
+            notifications.append(lambda: self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, receipt=receipt
-            )
+            ))
         return result
 
     def check(self, action: EvaluationAction) -> bool:
@@ -753,6 +782,12 @@ class HushGuard:
         """Evaluate, resolve the effective enforcement mode, record the
         outcome, and report whether execution may proceed. The single
         enforcement path: check() and enforce() delegate here."""
+        with self._operation() as notifications:
+            return self._gate_ordered(action, notifications)
+
+    def _gate_ordered(
+        self, action: EvaluationAction, notifications: list[Callable[[], None]]
+    ) -> GateOutcome:
         from hushspec.receipt import EnforcementSummary
 
         result, duration_us, receipt = self._run_evaluation(action)
@@ -769,7 +804,7 @@ class HushGuard:
                     try:
                         self._record(
                             action, result, duration_us,
-                            EnforcementSummary(mode=mode, outcome="blocked"), receipt,
+                            EnforcementSummary(mode=mode, outcome="blocked"), receipt, notifications,
                         )
                     except Exception:
                         # Preserve the original confirmation failure.
@@ -781,7 +816,7 @@ class HushGuard:
             outcome = "would_block" if proceed else "blocked"
 
         enforcement = EnforcementSummary(mode=mode, outcome=outcome)
-        self._record(action, result, duration_us, enforcement, receipt)
+        self._record(action, result, duration_us, enforcement, receipt, notifications)
         return GateOutcome(result=result, proceed=proceed, enforcement=enforcement)
 
     def _effective_mode(self, result: EvaluationResult) -> str:
@@ -889,6 +924,7 @@ class HushGuard:
         duration_us: int,
         enforcement: "EnforcementSummary",
         receipt: Optional["DecisionReceipt"],
+        notifications: list[Callable[[], None]],
     ) -> None:
         if receipt is not None:
             receipt.enforcement = enforcement
@@ -899,11 +935,11 @@ class HushGuard:
                 try:
                     self._sink.send(receipt)
                 except Exception as exc:  # noqa: BLE001
-                    self._report_sink_failure(exc)
+                    notifications.append(lambda exc=exc: self._report_sink_failure(exc))
         if self._observable_evaluator is not None:
-            self._observable_evaluator.notify_evaluation_completed(
+            notifications.append(lambda: self._observable_evaluator.notify_evaluation_completed(
                 action, result, duration_us, enforcement=enforcement, receipt=receipt
-            )
+            ))
 
     @staticmethod
     def map_tool_call(
@@ -954,10 +990,17 @@ class HushGuard:
         self._swap(self._adopt_resolution(resolution))
 
     def _swap(self, resolution: Resolution) -> None:
-        resolved = resolution.spec
         # Compile before anything is swapped in: the guard never holds a
         # policy it has not prepared.
         compiled = compile_policy(resolution, strict=False)
+        with self._operation() as notifications:
+            self._commit_policy(resolution, compiled, notifications)
+
+    def _commit_policy(
+        self, resolution: Resolution, compiled: CompiledPolicy,
+        notifications: list[Callable[[], None]],
+    ) -> None:
+        resolved = resolution.spec
         previous_hash = self._state.policy_hash
         # One store, so an evaluator on another thread sees either the whole
         # old policy or the whole new one. A swap that verifies also clears an
@@ -970,19 +1013,19 @@ class HushGuard:
             refused=None,
             policy_hash=resolution.content_hash,
         )
+        error = self._record_policy_event(loaded=False, previous_content_hash=previous_hash)
+        if error is not None:
+            notifications.append(lambda: self._report_sink_failure(error))
         if self._observable_evaluator is not None:
-            self._observable_evaluator.notify_policy_reloaded(
+            notifications.append(lambda: self._observable_evaluator.notify_policy_reloaded(
                 resolved.name,
                 resolution.content_hash,
                 previous_hash,
-            )
-        # The log must carry the swap before any receipt evaluated under the
-        # new policy (log spec section 6).
-        self._record_policy_event(loaded=False, previous_content_hash=previous_hash)
+            ))
 
     def _record_policy_event(
         self, *, loaded: bool, previous_content_hash: Optional[str] = None
-    ) -> None:
+    ) -> Optional[Exception]:
         """Write the policy-in-effect record for this load or swap.
 
         Goes through the sink, so a hash-linked log gets a `policy_loaded` /
@@ -1006,7 +1049,8 @@ class HushGuard:
         try:
             self._sink.record_policy_event(event)
         except Exception as exc:  # noqa: BLE001
-            self._report_sink_failure(exc)
+            return exc
+        return None
 
     def _report_sink_failure(self, exc: Exception) -> None:
         """Put a sink failure on the observer channel as ``sink.error``.

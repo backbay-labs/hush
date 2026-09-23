@@ -379,8 +379,34 @@ function resolutionFor(provider: PolicyProvider, spec: HushSpec): Resolution | u
   return resolution != null && resolution.spec === spec ? resolution : undefined;
 }
 
-/** Fail-closed: warn decisions without an onWarn handler are treated as deny. */
+/**
+ * Fail-closed: warn decisions without an onWarn handler are treated as deny.
+ * Confirmation, provider and sink callbacks must not synchronously evaluate or
+ * reload this same guard. Such reentry throws before mutation. Observers run
+ * after recording finishes and may re-enter the guard.
+ */
 export class HushGuard {
+  private notifications: (() => void)[] | null = null;
+
+  private ordered<T>(operation: () => T): T {
+    if (this.notifications !== null) {
+      throw new Error('reentrant guard evaluation or reload is not supported inside a confirmation, provider or sink callback');
+    }
+    const notifications: (() => void)[] = [];
+    this.notifications = notifications;
+    try {
+      return operation();
+    } finally {
+      this.notifications = null;
+      for (const notify of notifications) notify();
+    }
+  }
+
+  private notify(notification: () => void): void {
+    if (this.notifications === null) notification();
+    else this.notifications.push(notification);
+  }
+
   private policy: HushSpec;
   private onWarn: WarnHandler;
   private observableEvaluator: ObservableEvaluator | null = null;
@@ -633,6 +659,10 @@ export class HushGuard {
   }
 
   evaluate(action: EvaluationAction): EvaluationResult {
+    return this.ordered(() => this.evaluateOrdered(action));
+  }
+
+  private evaluateOrdered(action: EvaluationAction): EvaluationResult {
     const active = this.activePolicy();
     if ('decision' in active) {
       // Provider-failure (or signature-refusal) deny, audited exactly as
@@ -640,25 +670,25 @@ export class HushGuard {
       const enforcement = impliedEnforcement(active.decision, this.effectiveMode(active));
       const receipt = this.sink ? this.refusedReceipt(action, active, enforcement) : undefined;
       this.send(receipt);
-      this.observableEvaluator?.notifyEvaluationCompleted(
+      this.notify(() => this.observableEvaluator?.notifyEvaluationCompleted(
         action,
         active,
         0,
         undefined,
         receipt,
-      );
+      ));
       return active;
     }
     if (this.sink) {
       const { result, durationUs, receipt } = this.runEvaluation(active, action);
       this.send(receipt);
-      this.observableEvaluator?.notifyEvaluationCompleted(
+      this.notify(() => this.observableEvaluator?.notifyEvaluationCompleted(
         action,
         result,
         durationUs,
         undefined,
         receipt,
-      );
+      ));
       return result;
     }
     if (this.observableEvaluator) {
@@ -666,7 +696,7 @@ export class HushGuard {
       // and audit settings, then out on the same notification
       // ObservableEvaluator.evaluate() sends.
       const { result, durationUs } = this.runEvaluation(active, action);
-      this.observableEvaluator.notifyEvaluationCompleted(action, result, durationUs);
+      this.notify(() => this.observableEvaluator?.notifyEvaluationCompleted(action, result, durationUs));
       return result;
     }
     return this.runEvaluation(active, action).result;
@@ -689,10 +719,10 @@ export class HushGuard {
    * by the sink that refused.
    */
   private reportSinkFailure(error: unknown): void {
-    this.observableEvaluator?.notifySinkError(
+    this.notify(() => this.observableEvaluator?.notifySinkError(
       error instanceof Error ? error.message : String(error),
       this.sink?.constructor?.name,
-    );
+    ));
   }
 
   check(action: EvaluationAction): boolean {
@@ -712,6 +742,10 @@ export class HushGuard {
    * enforcement path: check() and enforce() delegate here.
    */
   gate(action: EvaluationAction): GateOutcome {
+    return this.ordered(() => this.gateOrdered(action));
+  }
+
+  private gateOrdered(action: EvaluationAction): GateOutcome {
     const active = this.activePolicy();
     if ('decision' in active) {
       // Provider failure or a policy that would not verify: no policy to run
@@ -883,13 +917,13 @@ export class HushGuard {
       receipt.enforcement = enforcement;
       this.send(receipt);
     }
-    this.observableEvaluator?.notifyEvaluationCompleted(
+    this.notify(() => this.observableEvaluator?.notifyEvaluationCompleted(
       action,
       result,
       durationUs,
       enforcement,
       receipt,
-    );
+    ));
   }
 
   static mapToolCall(toolName: string, args?: Record<string, unknown>): EvaluationAction {
@@ -917,6 +951,10 @@ export class HushGuard {
   }
 
   swapPolicy(newPolicy: HushSpec, resolution?: Resolution): void {
+    this.ordered(() => this.swapPolicyOrdered(newPolicy, resolution));
+  }
+
+  private swapPolicyOrdered(newPolicy: HushSpec, resolution?: Resolution): void {
     // Hot-reload is a policy load like any other: an unresolved or unverified
     // document is rejected here rather than swapped in. The throw propagates
     // to the provider's `onError`, leaving the policy already in force
@@ -937,23 +975,20 @@ export class HushGuard {
         unproven.status,
       );
     }
+    this.commitPolicy(next, compiledForResolution(next));
+  }
+
+  private commitPolicy(next: Resolution, compiled: CompiledPolicy): void {
     const resolved = next.spec;
     const previousHash = this.policyHash;
     this.policy = resolved;
     this.resolutionValue = next;
-    this.compiledValue = compiledForResolution(next);
+    this.compiledValue = compiled;
     this.policyHash = next.content_hash;
     // A policy that proved itself leaves the refused state: the document now
     // in force is one this guard was able to check (Signing section 6.5).
     this.refusal = null;
     this.rejectedReload = null;
-    if (this.observableEvaluator) {
-      this.observableEvaluator.notifyPolicyReloaded(
-        resolved.name,
-        this.policyHash,
-        previousHash ?? undefined,
-      );
-    }
     // Log spec 6: a `policy_swapped` record before any receipt evaluated
     // under the new policy, naming the hash it replaced.
     this.emitPolicyEvent(
@@ -963,6 +998,9 @@ export class HushGuard {
         previousHash ?? undefined,
       ),
     );
+    this.notify(() => this.observableEvaluator?.notifyPolicyReloaded(
+      resolved.name, next.content_hash, previousHash ?? undefined,
+    ));
   }
 
   /**
@@ -1064,12 +1102,7 @@ export class HushGuard {
         return undefined;
       }
       const compiled = compiledForResolution(next);
-      this.policy = current;
-      this.resolutionValue = next;
-      this.compiledValue = compiled;
-      this.policyHash = next.content_hash;
-      this.refusal = null;
-      this.rejectedReload = null;
+      this.commitPolicy(next, compiled);
       return undefined;
     } catch (error) {
       // A document that cannot be hashed or compiled is not a policy: deny
@@ -1096,11 +1129,11 @@ export class HushGuard {
     const announced = this.rejectedReload?.contentHash === resolution.content_hash;
     this.rejectedReload = { policy, contentHash: resolution.content_hash };
     if (announced) return;
-    this.observableEvaluator?.notifyPolicyLoadFailed(
+    this.notify(() => this.observableEvaluator?.notifyPolicyLoadFailed(
       `the reloaded policy carries no verified signature and this guard requires one: ` +
         `${unproven.status.reason ?? 'unverified'}`,
       unproven.source,
-    );
+    ));
   }
 }
 

@@ -83,6 +83,29 @@ class ReleaseCandidateTests(unittest.TestCase):
                 else:
                     self.assertNotEqual(result.returncode, 0, "wrong artifact identity was accepted")
 
+    def test_cross_smoke_keeps_toolchain_status_out_of_version_json(self):
+        target = "aarch64-unknown-linux-gnu"
+        for valid in (True, False):
+            with self.subTest(valid=valid), tempfile.TemporaryDirectory(prefix="hush-release-cross-smoke-") as temp:
+                root = Path(temp)
+                version = {"git_sha": "a" * 40 if valid else "wrong", "version": "1.0.0", "target": target}
+                cross = root / "cross"
+                # Cross 0.2.5 forwards rustup's toolchain status to stdout
+                # unless quiet mode is selected, before the program output.
+                cross.write_text(
+                    f"#!{sys.executable}\nimport sys\n"
+                    "if '--quiet' not in sys.argv: print('\\n  stable-x86_64-unknown-linux-gnu unchanged\\n')\n"
+                    f"if 'version' in sys.argv: print({json.dumps(version)!r})\n"
+                )
+                cross.chmod(0o755)
+                result = self.build_step("Smoke-test executable", root=root, target=target, cross="true",
+                                         extra_env={"PATH": str(root) + os.pathsep + os.environ["PATH"]})
+                if valid:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads((root / "cli-version.json").read_text()), version)
+                else:
+                    self.assertNotEqual(result.returncode, 0, "wrong artifact identity was accepted")
+
     def run_selection(self, *, dry_run: str, candidate: str, tag: str = "v1.0.0"):
         with tempfile.TemporaryDirectory(prefix="hush-release-selection-") as temp:
             output = Path(temp) / "output"

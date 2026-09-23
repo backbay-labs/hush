@@ -150,10 +150,12 @@ func (d GuardDecision) Allowed() bool {
 // Guard is an enforcement point: a compiled policy, the enforcement mode it
 // runs under, and the audit trail it writes.
 //
-// Safe for concurrent use. [Guard.SwapPolicy] replaces the policy in force
-// without stopping in-flight evaluations, which see either the old policy or
-// the new one, never a half-swapped mix.
+// Safe for concurrent use. Reload waits for evaluations, confirmation and
+// receipt delivery. OnWarn, Clock and custom sink callbacks must not re-enter
+// this guard's evaluation/reload methods or wait for work requiring them.
+// Observers run outside the ordering gate and may re-enter the guard.
 type Guard struct {
+	ordering   sync.RWMutex
 	mu         sync.RWMutex
 	resolution *Resolution
 	compiled   *CompiledPolicy
@@ -246,7 +248,7 @@ func NewGuard(resolution *Resolution, options GuardOptions) (*Guard, error) {
 	if guard.refusal != nil {
 		event.Policy = guard.unverifiedPolicySummary(resolution)
 	}
-	guard.emitPolicyEvent(&event)
+	guard.emitPolicyEvent(&event)()
 	guard.notifyPolicyLoaded(resolution, "")
 	return guard, nil
 }
@@ -590,9 +592,19 @@ func (g *Guard) decide(
 		}
 	}
 
+	g.ordering.RLock()
+	var notify func()
+	defer func() {
+		g.ordering.RUnlock()
+		if notify != nil {
+			notify()
+		}
+	}()
 	state := g.state()
 	if state.refusal != nil {
-		return g.refuse(state, action), nil
+		decision, notification := g.refuse(state, action)
+		notify = notification
+		return decision, nil
 	}
 
 	result, receipt, duration, err := g.runEvaluation(state, action)
@@ -629,7 +641,7 @@ func (g *Guard) decide(
 			// Fatal process failures and unavailable storage cannot promise it.
 			func() {
 				defer func() { _ = recover() }()
-				g.record(state, action, GuardDecision{
+				notify = g.record(state, action, GuardDecision{
 					Result: result, Receipt: receipt, Enforced: true, Enforcement: blocked,
 				}, duration)
 			}()
@@ -647,7 +659,7 @@ func (g *Guard) decide(
 		Enforced:    enforcement.Outcome != EnforcementOutcomeWouldBlock,
 		Enforcement: enforcement,
 	}
-	g.record(state, action, decision, duration)
+	notify = g.record(state, action, decision, duration)
 	return decision, nil
 }
 
@@ -688,7 +700,7 @@ func (g *Guard) runEvaluation(
 // the enforcement mode says -- a guard that cannot verify its policy has
 // nothing to monitor against, and letting monitor mode wave the action through
 // would be exactly the fail-open the spec forbids.
-func (g *Guard) refuse(state guardState, action *EvaluationAction) GuardDecision {
+func (g *Guard) refuse(state guardState, action *EvaluationAction) (GuardDecision, func()) {
 	result := EvaluationResult{
 		Decision:    DecisionDeny,
 		MatchedRule: PolicyUnverifiedRule,
@@ -712,8 +724,7 @@ func (g *Guard) refuse(state guardState, action *EvaluationAction) GuardDecision
 	}
 	// The record is the point of refusing rather than failing to construct:
 	// an agent that tried to act under an unverified policy leaves evidence.
-	g.record(state, action, decision, 0)
-	return decision
+	return decision, g.record(state, action, decision, 0)
 }
 
 func deniedDecision(result EvaluationResult) GuardDecision {
@@ -798,7 +809,8 @@ func effectiveMode(
 	return mode
 }
 
-// record sends the receipt to the sink and notifies the observer. Neither can
+// record sends the receipt and returns an observer notification to run after
+// releasing the ordering gate. Neither can
 // change the decision: a sink failure goes to the observers as a [SinkError]
 // and no further, and an observer failure is swallowed.
 func (g *Guard) record(
@@ -806,29 +818,31 @@ func (g *Guard) record(
 	action *EvaluationAction,
 	decision GuardDecision,
 	duration time.Duration,
-) {
+) func() {
 	var sinkErr error
 	if state.sink != nil && decision.Receipt != nil {
 		if err := state.sink.Send(decision.Receipt); err != nil {
 			sinkErr = &SinkError{Sink: sinkName(state.sink), Err: err}
 		}
 	}
-	if state.observer != nil {
-		enforcement := decision.Enforcement
-		observation := EvaluationObservation{
-			Action:      action,
-			Result:      decision.Result,
-			Enforcement: &enforcement,
-			Receipt:     decision.Receipt,
-			Duration:    duration,
-		}.redact()
-		notifyObserver(state.observer, func(observer EvaluationObserver) {
-			observer.OnEvaluation(observation)
-		})
-		if sinkErr != nil {
+	return func() {
+		if state.observer != nil {
+			enforcement := decision.Enforcement
+			observation := EvaluationObservation{
+				Action:      action,
+				Result:      decision.Result,
+				Enforcement: &enforcement,
+				Receipt:     decision.Receipt,
+				Duration:    duration,
+			}.redact()
 			notifyObserver(state.observer, func(observer EvaluationObserver) {
-				observer.OnError(sinkErr)
+				observer.OnEvaluation(observation)
 			})
+			if sinkErr != nil {
+				notifyObserver(state.observer, func(observer EvaluationObserver) {
+					observer.OnError(sinkErr)
+				})
+			}
 		}
 	}
 }
@@ -904,6 +918,14 @@ func (g *Guard) SwapPolicy(resolution *Resolution) error {
 		return fmt.Errorf("guard: policy does not compile: %w", err)
 	}
 
+	g.ordering.Lock()
+	var notify func()
+	defer func() {
+		g.ordering.Unlock()
+		if notify != nil {
+			notify()
+		}
+	}()
 	g.mu.Lock()
 	previous := ""
 	if g.resolution != nil {
@@ -918,26 +940,30 @@ func (g *Guard) SwapPolicy(resolution *Resolution) error {
 	g.mu.Unlock()
 
 	event := NewPolicySwappedEvent(resolution, mode, sdk, previous)
-	g.emitPolicyEvent(&event)
-	g.notifyPolicyLoaded(resolution, previous)
+	notifyError := g.emitPolicyEvent(&event)
+	notify = func() {
+		notifyError()
+		g.notifyPolicyLoaded(resolution, previous)
+	}
 	return nil
 }
 
 // emitPolicyEvent records which policy is in force. A sink that cannot carry
 // policy events is not an error, and a sink that fails must not stop the
 // policy from taking effect: the failure goes to the observer.
-func (g *Guard) emitPolicyEvent(event *PolicyEvent) {
+func (g *Guard) emitPolicyEvent(event *PolicyEvent) func() {
 	g.mu.RLock()
 	sink, observer := g.sink, g.observer
 	g.mu.RUnlock()
-	if sink == nil {
-		return
+	var err error
+	if sink != nil {
+		_, err = RecordPolicyEvent(sink, event)
 	}
-	if _, err := RecordPolicyEvent(sink, event); err != nil && observer != nil {
-		sinkErr := &SinkError{Sink: sinkName(sink), Err: err}
-		notifyObserver(observer, func(o EvaluationObserver) {
-			o.OnError(sinkErr)
-		})
+	return func() {
+		if err != nil && observer != nil {
+			sinkErr := &SinkError{Sink: sinkName(sink), Err: err}
+			notifyObserver(observer, func(o EvaluationObserver) { o.OnError(sinkErr) })
+		}
 	}
 }
 

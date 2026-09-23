@@ -62,10 +62,22 @@ guard.enforce(&action)?;                        // `Denied` error on refusal
 reaches the sink, stamped with the disposition the decision *implies*. Use it
 to shadow a policy the runtime is not yet acting on.
 
-A guard is `Send + Sync` and takes `&self` everywhere, so share one `Arc`
-across an agent's worker threads. The policy lives behind an `RwLock<Arc<..>>`:
-an evaluation takes the read lock only long enough to clone one `Arc`, and a
-hot swap never blocks an in-flight decision.
+A Rust guard is `Send + Sync` and takes `&self` everywhere, so share one `Arc`
+across an agent's worker threads. Rust and Go allow concurrent evaluations;
+Python serializes guard operations. In each threaded SDK, reload waits through
+in-flight evaluations, confirmation callbacks and receipt delivery. The new
+policy event is written before new-policy evaluations proceed. This keeps each
+successfully written receipt associated with its nearest preceding policy event.
+
+Confirmation handlers, custom sinks and Go's configurable receipt clock must
+not call the same guard's evaluation or reload methods, or wait for work that
+requires them. Observer callbacks run after the ordering gate releases and may
+re-enter the guard. TypeScript's synchronous guard rejects callback reentry with
+an error before mutation; defer such work until the current call returns.
+Use one guard per ordered evidence stream: sharing a sink between independent
+guards does not coordinate their policy transitions. Custom sinks must preserve
+the order of completed writes. Storage failures remain reported evidence gaps,
+not a guarantee that the log is complete.
 
 ## Configuring the guard
 
