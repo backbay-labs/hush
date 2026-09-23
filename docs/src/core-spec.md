@@ -8,8 +8,8 @@ A HushSpec document is a YAML file with these top-level fields:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `hushspec` | string | Yes | Spec version (e.g., `"0.2.0"`). Engines accept every patch version of a supported minor version. |
-| `name` | string | No | Human-readable policy name |
+| `hushspec` | string | Yes | Spec version (e.g., `"1.0.0"`). Engines accept every patch version of a supported minor version. |
+| `name` | string | No | Human-readable policy name; nonempty when present |
 | `description` | string | No | Policy description |
 | `extends` | string | No | Base policy reference. Never present in a resolved document. |
 | `merge_strategy` | string | No | `replace`, `merge`, or `deep_merge` (default). Never present in a resolved document. |
@@ -21,7 +21,31 @@ A HushSpec document is a YAML file with these top-level fields:
 
 Documents use YAML 1.2 Core: only `true`/`false` are booleans (`yes`/`no`/`on`/`off` are rejected where a boolean is required), one document per file, duplicate keys rejected, anchors/aliases/merge keys rejected, and engines enforce size, depth, and node-count limits.
 
+Quote the version and strings that resemble booleans, dates, or numbers. The
+portable numeric domain is IEEE-754 binary64 with safe integers; author integer
+limits no larger than `9007199254740991`. See [canonical numeric
+constraints](../../spec/hushspec-canonical.md) before hashing arbitrary metadata.
+
+## Minimal Valid Document
+
+```yaml
+hushspec: "1.0.0"
+name: minimal
+```
+
+This parses, but an empty policy is not a sandbox. Start with the [tested
+first policy](guides/first-policy.md) for concrete restrictions and a full example.
+
+## Design Principles
+
+A policy declares permissions. The evaluator computes a decision. The runtime
+owns the side effect and must enforce that decision before dispatch. Evidence
+records the policy identity and decision; it cannot prove that an uninstrumented
+tool was never called. See [runtime integration](guides/runtime-integration.md).
+
 ## Validation Rules
+
+The normative requirements are [core sections 2.4 and 7](../../spec/hushspec-core.md#7-validation-requirements).
 
 - The `hushspec` field **MUST** be present and be a string
 - Unknown fields **MUST** be rejected at every nesting level (fail-closed)
@@ -54,3 +78,27 @@ See the [Rules Reference](rules-reference.md) for detailed field documentation.
 - **Resolution** (Section 2.6): `extends` accepts `builtin:` names, filesystem paths, and `https:` URLs, each optionally pinned by digest. A chain is limited to 32 hops, cycles are rejected, and any loader failure refuses the resolution rather than evaluating the leaf alone.
 - **Enforcement** (Section 6.2): an enforcement point runs in `enforce` or `monitor` mode with per-rule-path overrides. Monitor mode is refused without a receipt sink or observer, and a panic denial or a refused-policy denial is always enforced.
 - **Panic mode** (Section 6.3): a latch, set programmatically or by a sentinel file, that denies every action with `__hushspec_panic__`. Checking the sentinel fails closed, and absence of the file never disarms the latch.
+
+## Decision Types and Precedence
+
+All applicable rules participate. `deny` outranks `warn`, which outranks `allow`;
+the first rule in evaluation order with the winning decision supplies
+`matched_rule`. A tool allowlist never bypasses content scanning.
+In enforce mode, `warn` requires positive confirmation. Without a confirmation
+channel, or after refusal, the action is blocked. This is a requirement of
+[core section 6](../../spec/hushspec-core.md#6-decision-types), not a recommendation.
+
+## Extensions
+
+[Posture](extensions/posture.md) gates capabilities and budgets;
+[origins](extensions/origins.md) narrows policy using trusted source context;
+[detection](extensions/detection.md) adds content-analysis contributions.
+The twelve rules, conditional blocks, and extensions are one evaluation, not
+independent permissions that can override a denial.
+
+## Versioning
+
+The policy document version is `1.0.0`. Receipt and signature envelopes remain
+`0.2`; logs and bundles remain `0.1`. See [versioning](reference/versioning.md)
+and [migration](guides/migration-v1.md). Changing a package version does not
+rewrite these wire identifiers.

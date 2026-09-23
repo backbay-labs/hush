@@ -22,7 +22,7 @@ Extensions use their companion-spec merge rules under `deep_merge`:
 
 ### `merge`
 
-For core `rules`, `merge` matches `deep_merge` in HushSpec v0.
+For core `rules`, `merge` matches `deep_merge` in HushSpec v1.
 
 For `extensions`, `merge` is shallower: if the child defines an extension block,
 that block replaces the base extension block entirely. Unspecified extension
@@ -33,6 +33,8 @@ blocks are still preserved from the base.
 The child document entirely replaces the base. No fields from the base are preserved.
 
 ## Example
+
+Each YAML block below is a complete file; save both in the same directory.
 
 ```yaml
 # base.yaml
@@ -58,6 +60,34 @@ rules:
 ```
 
 Result: `egress` uses child's config (`b.com`, allow). `forbidden_paths` preserved from base.
+
+## Resolution Order
+
+Resolve from the oldest base toward the leaf, applying each child's strategy at
+its hop. Three files `root.yaml -> team.yaml -> agent.yaml` do not concatenate
+lists: each explicitly supplied rule block replaces that block from the previous
+result. `extends` and `merge_strategy` disappear from the resolved output.
+Use `h2h resolve agent.yaml` and review the result before evaluating it.
+
+Cycles, missing bases, malformed pins, digest mismatches and chains beyond the
+32-hop limit refuse the whole load. Do not recover by evaluating only the leaf.
+See [core resolution](../../spec/hushspec-core.md#26-resolution-protocol).
+
+## Strategy Comparison
+
+| Child strategy | Core rule blocks | Extensions | Metadata |
+| --- | --- | --- | --- |
+| `deep_merge` | Replace supplied blocks; preserve others | Companion-specific merge | Replace whole object if supplied |
+| `merge` | Same core behavior | Replace supplied extension blocks | Replace whole object if supplied |
+| `replace` | Child only | Child only | Child only |
+
+## Extension Merge Rules
+
+For `deep_merge`, [posture](extensions/posture.md#merge-rules) replaces states by
+name and the transition list; [origins](extensions/origins.md#merge-rules)
+replaces profiles by ID; [detection](extensions/detection.md#merge-rules)
+merges subsection fields. This inheritance behavior is different from origin
+projection, which narrows a resolved policy for a request.
 
 ## Note on Merge Helpers
 

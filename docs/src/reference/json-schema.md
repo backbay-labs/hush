@@ -156,3 +156,73 @@ if a companion schema's root ever stops setting `additionalProperties: false`.
 The embedded copies are byte-for-byte the published companion files; the test
 suites compare them, so a companion schema and the copy inside the core schema
 cannot drift apart.
+
+## CLI and Editor Checks
+
+`h2h validate --strict policy.yaml` applies parsing and semantic validation;
+a YAML linter alone cannot establish either. A JSON Schema validator checks
+structure after YAML decoding, and therefore cannot recover duplicate keys or
+anchors that a permissive decoder already erased. Prefer the SDK or CLI parser.
+
+VS Code's YAML extension accepts the inline directive
+`# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json`.
+JetBrains editors can associate that URL with policy filenames in JSON Schema
+Mappings. For `yq`/Ajv pipelines, choose a YAML 1.2 decoder, retain parse-profile
+validation, and use the strict CLI gate before deployment. See [editor setup](../guides/editor-setup.md).
+
+<!-- generated-schema-inventory -->
+## Complete Published Schema Inventory
+
+Generated from release schema identities. Frozen v0 IDs retain `hushspec.dev`;
+retrieval mirrors are served on `hushspec.org`. The [JSON index](https://hushspec.org/schemas/index.json) carries every byte digest.
+
+| Schema | Declared identity |
+| --- | --- |
+| [hushspec-assessment-context-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-assessment-context-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-assessment-context-experimental.v1.schema.json` |
+| [hushspec-bundle.v0.schema.json](https://hushspec.org/schemas/hushspec-bundle.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-bundle.v0.schema.json` |
+| [hushspec-bundle.v1.schema.json](https://hushspec.org/schemas/hushspec-bundle.v1.schema.json) | `https://hushspec.org/schemas/hushspec-bundle.v1.schema.json` |
+| [hushspec-conformance-execution-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-conformance-execution-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-conformance-execution-experimental.v1.schema.json` |
+| [hushspec-conformance-report.v0.schema.json](https://hushspec.org/schemas/hushspec-conformance-report.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-conformance-report.v0.schema.json` |
+| [hushspec-conformance-report.v1.schema.json](https://hushspec.org/schemas/hushspec-conformance-report.v1.schema.json) | `https://hushspec.org/schemas/hushspec-conformance-report.v1.schema.json` |
+| [hushspec-core.v0.schema.json](https://hushspec.org/schemas/hushspec-core.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-core.v0.schema.json` |
+| [hushspec-core.v1.schema.json](https://hushspec.org/schemas/hushspec-core.v1.schema.json) | `https://hushspec.org/schemas/hushspec-core.v1.schema.json` |
+| [hushspec-detection.v0.schema.json](https://hushspec.org/schemas/hushspec-detection.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-detection.v0.schema.json` |
+| [hushspec-detection.v1.schema.json](https://hushspec.org/schemas/hushspec-detection.v1.schema.json) | `https://hushspec.org/schemas/hushspec-detection.v1.schema.json` |
+| [hushspec-engine-profile-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-engine-profile-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-engine-profile-experimental.v1.schema.json` |
+| [hushspec-engine-request-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-engine-request-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-engine-request-experimental.v1.schema.json` |
+| [hushspec-engine-response-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-engine-response-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-engine-response-experimental.v1.schema.json` |
+| [hushspec-error-codes.v0.schema.json](https://hushspec.org/schemas/hushspec-error-codes.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-error-codes.v0.schema.json` |
+| [hushspec-error-codes.v1.schema.json](https://hushspec.org/schemas/hushspec-error-codes.v1.schema.json) | `https://hushspec.org/schemas/hushspec-error-codes.v1.schema.json` |
+| [hushspec-evaluator-test.v0.schema.json](https://hushspec.org/schemas/hushspec-evaluator-test.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-evaluator-test.v0.schema.json` |
+| [hushspec-evaluator-test.v1.schema.json](https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json) | `https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json` |
+| [hushspec-evidence-inventory-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-evidence-inventory-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-evidence-inventory-experimental.v1.schema.json` |
+| [hushspec-evidence-profile-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-evidence-profile-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-evidence-profile-experimental.v1.schema.json` |
+| [hushspec-evidence-verification-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-evidence-verification-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-evidence-verification-experimental.v1.schema.json` |
+| [hushspec-framework-registry.v0.schema.json](https://hushspec.org/schemas/hushspec-framework-registry.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-framework-registry.v0.schema.json` |
+| [hushspec-framework-registry.v1.schema.json](https://hushspec.org/schemas/hushspec-framework-registry.v1.schema.json) | `https://hushspec.org/schemas/hushspec-framework-registry.v1.schema.json` |
+| [hushspec-hash-vector.v0.schema.json](https://hushspec.org/schemas/hushspec-hash-vector.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-hash-vector.v0.schema.json` |
+| [hushspec-hash-vector.v1.schema.json](https://hushspec.org/schemas/hushspec-hash-vector.v1.schema.json) | `https://hushspec.org/schemas/hushspec-hash-vector.v1.schema.json` |
+| [hushspec-invocation-journal-experimental.v1.schema.json](https://hushspec.org/schemas/hushspec-invocation-journal-experimental.v1.schema.json) | `https://hushspec.org/schemas/hushspec-invocation-journal-experimental.v1.schema.json` |
+| [hushspec-keyring.v0.schema.json](https://hushspec.org/schemas/hushspec-keyring.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-keyring.v0.schema.json` |
+| [hushspec-keyring.v1.schema.json](https://hushspec.org/schemas/hushspec-keyring.v1.schema.json) | `https://hushspec.org/schemas/hushspec-keyring.v1.schema.json` |
+| [hushspec-log-entry.v0.schema.json](https://hushspec.org/schemas/hushspec-log-entry.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-log-entry.v0.schema.json` |
+| [hushspec-log-entry.v1.schema.json](https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json) | `https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json` |
+| [hushspec-merge-vector.v0.schema.json](https://hushspec.org/schemas/hushspec-merge-vector.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-merge-vector.v0.schema.json` |
+| [hushspec-merge-vector.v1.schema.json](https://hushspec.org/schemas/hushspec-merge-vector.v1.schema.json) | `https://hushspec.org/schemas/hushspec-merge-vector.v1.schema.json` |
+| [hushspec-origins.v0.schema.json](https://hushspec.org/schemas/hushspec-origins.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-origins.v0.schema.json` |
+| [hushspec-origins.v1.schema.json](https://hushspec.org/schemas/hushspec-origins.v1.schema.json) | `https://hushspec.org/schemas/hushspec-origins.v1.schema.json` |
+| [hushspec-posture.v0.schema.json](https://hushspec.org/schemas/hushspec-posture.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-posture.v0.schema.json` |
+| [hushspec-posture.v1.schema.json](https://hushspec.org/schemas/hushspec-posture.v1.schema.json) | `https://hushspec.org/schemas/hushspec-posture.v1.schema.json` |
+| [hushspec-receipt.v0.schema.json](https://hushspec.org/schemas/hushspec-receipt.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-receipt.v0.schema.json` |
+| [hushspec-receipt.v1.schema.json](https://hushspec.org/schemas/hushspec-receipt.v1.schema.json) | `https://hushspec.org/schemas/hushspec-receipt.v1.schema.json` |
+| [hushspec-registry-action-types.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-action-types.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-action-types.v0.schema.json` |
+| [hushspec-registry-capabilities.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-capabilities.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-capabilities.v0.schema.json` |
+| [hushspec-registry-condition-types.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-condition-types.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-condition-types.v0.schema.json` |
+| [hushspec-registry-detectors.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-detectors.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-detectors.v0.schema.json` |
+| [hushspec-registry-media-types.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-media-types.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-media-types.v0.schema.json` |
+| [hushspec-registry-rule-blocks.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-rule-blocks.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-rule-blocks.v0.schema.json` |
+| [hushspec-registry-rule-paths.v0.schema.json](https://hushspec.org/schemas/hushspec-registry-rule-paths.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-registry-rule-paths.v0.schema.json` |
+| [hushspec-report.v0.schema.json](https://hushspec.org/schemas/hushspec-report.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-report.v0.schema.json` |
+| [hushspec-report.v1.schema.json](https://hushspec.org/schemas/hushspec-report.v1.schema.json) | `https://hushspec.org/schemas/hushspec-report.v1.schema.json` |
+| [hushspec-signature.v0.schema.json](https://hushspec.org/schemas/hushspec-signature.v0.schema.json) | `https://hushspec.dev/schemas/hushspec-signature.v0.schema.json` |
+| [hushspec-signature.v1.schema.json](https://hushspec.org/schemas/hushspec-signature.v1.schema.json) | `https://hushspec.org/schemas/hushspec-signature.v1.schema.json` |
