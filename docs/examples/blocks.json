@@ -215,12 +215,12 @@
     "runner": "scripts/test_docs_examples.py"
   },
   "docs/src/guides/getting-started.md:4": {
-    "sha256": "e060fd6a0a78d1880326cec51c7d807e08507c8b39c0ce9893377035e8acbbbe",
+    "sha256": "b4f4f23622e20b998c85abf1bc1dee9fc078acb1d7b6354edf2c35c8bf520a7f",
     "kind": "runnable",
     "runner": "scripts/test_docs_examples.py"
   },
   "docs/src/guides/getting-started.md:5": {
-    "sha256": "eeb3e2ebfc4f4d4be375935ec1ff45734b566acd93210a2a33b5ec091e5700b7",
+    "sha256": "46850d858f4dbd36b4ac5f0a3822473cde595899a055f547b81432c2d519a59e",
     "kind": "runnable",
     "runner": "scripts/test_docs_examples.py"
   },

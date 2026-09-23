@@ -59,6 +59,11 @@ class Quickstart(unittest.TestCase):
         (self.work/'bin').mkdir()
         (self.work/'bin/h2h').symlink_to(Path(H2H).resolve())
         started=time.monotonic()
+        # Readers paste successive blocks into the same shell. Preserve set -e
+        # and other state across the complete walkthrough, not only each block.
+        for shell in ('sh', 'bash'):
+            result=subprocess.run([shell,'-c','\n'.join(blocks)],cwd=self.work,env={**os.environ,'PATH':str(self.work/'bin')+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,shell+' sequential walkthrough: '+result.stdout+result.stderr)
         for block in blocks:
             result=subprocess.run(['sh','-c',block],cwd=self.work,env={**os.environ,'PATH':str(self.work/'bin')+os.pathsep+os.environ['PATH']},capture_output=True,text=True)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)

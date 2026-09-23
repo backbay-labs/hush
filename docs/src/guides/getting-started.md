@@ -59,16 +59,16 @@ denial is not mistaken for a broken tutorial.
 
 <!-- docs-run: quickstart -->
 ```sh
-h2h eval policy.yaml --type file_read --target /workspace/.env
-result=$?
+result=0
+h2h eval policy.yaml --type file_read --target /workspace/.env || result=$?
 test "$result" -eq 1 || exit 1
 
-h2h eval policy.yaml --type tool_call --target deploy
-result=$?
+result=0
+h2h eval policy.yaml --type tool_call --target deploy || result=$?
 test "$result" -eq 1 || exit 1
 
-h2h eval policy.yaml --type tool_call --target write_file
-result=$?
+result=0
+h2h eval policy.yaml --type tool_call --target write_file || result=$?
 test "$result" -eq 4 || exit 1
 ```
 
@@ -85,8 +85,8 @@ paths. With no confirmation channel, a warning is recorded as blocked.
 
 <!-- docs-run: quickstart -->
 ```sh
-h2h explain policy.yaml --type file_read --target /workspace/.env
-result=$?
+result=0
+h2h explain policy.yaml --type file_read --target /workspace/.env || result=$?
 test "$result" -eq 1 || exit 1
 ```
 
@@ -115,6 +115,30 @@ and a confirmed warning calls it exactly once.
 
 For MCP, start with [trusted action mapping](integrations/mcp.md). Do not treat
 an adapter's evaluation result as proof that all server effects were mediated.
+
+### Rust SDK
+
+[Install Rust SDK v1 and run the complete example](sdks/rust.md#install-and-run-the-complete-example)
+with `cargo add hushspec@1.0.0`. The guide covers parsing, validation, evaluation,
+resolution, guards and signing; the CLI installer does not install the library.
+
+### TypeScript SDK
+
+[Install TypeScript SDK v1 and run the complete example](sdks/typescript.md#install-and-run-the-complete-example)
+with `npm install @hushspec/core@1.0.0`. Continue there for parsing, validation,
+evaluation, adapters, guard confirmation and policy reload.
+
+### Python SDK
+
+[Install Python SDK v1 and run the complete example](sdks/python.md#install-and-run-the-complete-example)
+with `python -m pip install 'hushspec==1.0.0'`. Continue there for resolution,
+validation, evaluation, guards and adapters; signing uses the `signing` extra.
+
+### Go SDK
+
+[Install Go SDK v1 and run the complete example](sdks/go.md#install-and-run-the-complete-example)
+with `go get github.com/backbay-labs/hush/packages/go@v1.0.0`. The guide covers
+resolution, validation, evaluation, guards and signed receipts.
 
 ## Next steps
 

@@ -20,9 +20,13 @@ h2h <command> --help  # flags for one command
 h2h version           # CLI, build and spec versions
 ```
 
-## Exit codes
+## Installation
 
-Install the CLI through the [installation guide](../guides/installation.md).
+Install the CLI through the [installation guide](../guides/installation.md#cli-macos-and-linux).
+It includes the rootless installer, package managers, prebuilt binaries and
+Windows instructions. The installed command is `h2h`.
+
+## Exit codes
 
 | Code | Meaning |
 |---|---|
