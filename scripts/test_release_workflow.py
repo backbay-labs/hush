@@ -20,6 +20,42 @@ WORKFLOW = yaml.load(
 STEPS = WORKFLOW["jobs"]["candidate"]["steps"]
 
 
+class PythonPublishSelectionTests(unittest.TestCase):
+    def test_authentication_selection_fails_closed_without_leaking_credentials(self):
+        workflow = yaml.load(
+            (ROOT / ".github/workflows/publish.yml").read_text(), Loader=yaml.BaseLoader
+        )
+        selector = next((step for step in workflow["jobs"]["pypi"]["steps"]
+                         if step.get("id") == "authentication"), None)
+        self.assertIsNotNone(selector, "Python publication needs an explicit authentication selector")
+        cases = [
+            ("trusted", "false", "", "trusted"),
+            ("token", "false", "fixture-not-a-credential", "token"),
+            ("token", "false", "", None),
+            ("trusted", "true", "", "dry-run"),
+            ("token", "true", "", "dry-run"),
+            ("unknown", "false", "fixture-not-a-credential", None),
+            ("trusted", "invalid", "", None),
+        ]
+        for method, dry_run, credential, expected in cases:
+            with self.subTest(method=method, dry_run=dry_run, expected=expected), tempfile.TemporaryDirectory() as temp:
+                output = Path(temp) / "output"
+                result = subprocess.run(
+                    ["bash", "-e", "-o", "pipefail", "-c", selector["run"]],
+                    env={**os.environ, "PYPI_AUTH": method, "DRY_RUN": dry_run,
+                         "PYPI_TOKEN": credential, "GITHUB_OUTPUT": str(output)},
+                    capture_output=True, text=True, check=False,
+                )
+                if expected is None:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertFalse(output.exists())
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(output.read_text(), f"method={expected}\n")
+                if credential:
+                    self.assertNotIn(credential, result.stdout + result.stderr)
+
+
 class ReleaseCandidateTests(unittest.TestCase):
     def build_step(self, name, *, root, target, cross, extra_env=None):
         step = next(s for s in WORKFLOW["jobs"]["build"]["steps"] if s.get("name") == name)

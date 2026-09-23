@@ -11,6 +11,13 @@ on:
         description: 'Dry run (no actual publish)'
         type: boolean
         default: false
+      pypi-auth:
+        description: 'PyPI authentication (token must be explicitly selected; no automatic fallback)'
+        type: choice
+        default: trusted
+        options:
+          - trusted
+          - token
 
 # Read-only by default; the jobs that need more widen it themselves.
 permissions:
@@ -147,22 +154,17 @@ jobs:
             npm publish --access public --provenance
           fi
 
-  # ── PyPI: publish hushspec ─────────────────────────────────────────
-  # ── PyPI: publish hushspec via trusted publishing (OIDC) ───────────
-  #
-  # No API token is used or stored. PyPI mints a short-lived credential from
-  # this job's OIDC identity, which requires a trusted publisher configured on
-  # the PyPI project "hushspec":
+  # Trusted publishing is the default. Explicit token mode uses PYPI_TOKEN
+  # without PyPI attestations; an OIDC failure never falls back to a token.
+  # The trusted publisher for the PyPI project "hushspec" must name:
   #
   #   Owner:             backbay-labs
   #   Repository:        hush
   #   Workflow filename: publish.yml
   #   Environment:       (none)
   #
-  # See https://docs.pypi.org/trusted-publishers/. Until that publisher exists
-  # on PyPI, this job will fail at the upload step -- it will NOT silently fall
-  # back to a token. If the job is ever moved or renamed, the PyPI trusted
-  # publisher must be updated to match.
+  # See https://docs.pypi.org/trusted-publishers/. Moving or renaming this
+  # workflow requires updating the trusted publisher to match.
   pypi:
     name: Publish Python package
     needs: ci
@@ -175,6 +177,30 @@ jobs:
       contains(github.event.inputs.packages, 'pypi') ||
       contains(github.event.inputs.packages, 'all')
     steps:
+      - name: Select PyPI authentication
+        id: authentication
+        env:
+          PYPI_AUTH: ${{ inputs['pypi-auth'] }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PYPI_TOKEN: ${{ !inputs.dry_run && inputs['pypi-auth'] == 'token' && secrets.PYPI_TOKEN || '' }}
+        run: |
+          case "$PYPI_AUTH" in
+            trusted|token) ;;
+            *) echo "::error::Unknown PyPI authentication method"; exit 1 ;;
+          esac
+          case "$DRY_RUN" in
+            true) method=dry-run ;;
+            false)
+              method="$PYPI_AUTH"
+              if [ "$method" = token ] && [ -z "$PYPI_TOKEN" ]; then
+                echo "::error::Token mode requires the PYPI_TOKEN repository secret"
+                exit 1
+              fi
+              ;;
+            *) echo "::error::Invalid dry-run mode"; exit 1 ;;
+          esac
+          printf 'method=%s\n' "$method" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -192,14 +218,22 @@ jobs:
         working-directory: packages/python
         run: twine check dist/*
 
-      - name: Publish to PyPI
-        if: github.event.inputs.dry_run != 'true'
+      - name: Publish to PyPI with trusted publishing
+        if: steps.authentication.outputs.method == 'trusted'
         # Pinned to a commit: this step runs with id-token: write, so a
         # mutable ref would let a change upstream mint an upload token.
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: packages/python/dist
 
+      - name: Publish to PyPI with explicitly selected token
+        if: steps.authentication.outputs.method == 'token'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: packages/python/dist
+          password: ${{ secrets.PYPI_TOKEN }}
+          attestations: false
+
       - name: Dry run — skipping upload
-        if: github.event.inputs.dry_run == 'true'
+        if: steps.authentication.outputs.method == 'dry-run'
         run: echo "Dry run — distributions built and checked, upload skipped"

@@ -13,7 +13,9 @@ declared distribution artifacts. Chio migration and Project D remain separate.
 - The owner explicitly chose to revoke the supplied credentials after publication.
   Do not place credentials in source, artifacts or logs. Post-publication
   revocation remains an owner action, not a completed release gate.
-- PyPI uses trusted publishing; do not silently introduce a token fallback.
+- PyPI defaults to trusted publishing. The owner explicitly approved token mode
+  for this release; select it at dispatch, never as an automatic OIDC fallback.
+  Token-mode uploads do not carry PyPI trusted-publisher attestations.
 - Release policy signing requires an owner-approved key and separately retained
   public trust identity. A rehearsal key is disposable and not production trust.
 - The owner authorized admin merge of the cumulative candidate on 2026-09-23.
@@ -49,8 +51,8 @@ declared distribution artifacts. Chio migration and Project D remain separate.
 
 - [ ] Establish npm/crates credentials securely for publication; the owner has
   deferred revocation until afterward. Never print secret values.
-- [ ] Owner confirms PyPI trusted publisher configuration for this repository
-  and `publish.yml`, with no environment unless the workflow is updated too.
+- [x] Owner selects PyPI token authentication for this release. Upload permission
+  is still unverified; trusted publishing remains the default for future runs.
 - [x] Owner supplies or approves production signing-key custody and trust anchor.
 - [ ] Verify Homebrew publishing access or obtain an explicit scope deferral.
 - [ ] Verify Pages/custom-domain configuration and canonical schema URLs.
