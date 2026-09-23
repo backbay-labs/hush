@@ -1,4 +1,9 @@
 export type { HushSpec, MergeStrategy, GovernanceMetadata, ControlMapping, Classification, LifecycleState } from './schema.js';
+// Experimental, opt-in trusted invocation boundary. Legacy adapters are unchanged.
+export { snapshotJson, hashJson, type SnapshotLimits } from './invocation/json.js';
+export { InvocationRegistry, qualifiedToolTarget, type InvocationBinding, type InvocationArguments } from './invocation/registry.js';
+export { AuthenticatedPolicy, typescriptInvocationEngine, type InvocationEngine,
+  type PreparedInvocationEngine, type InvocationEngineIdentity } from './invocation/policy.js';
 export type {
   Rules,
   ForbiddenPathsRule,
