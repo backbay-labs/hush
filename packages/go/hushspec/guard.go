@@ -605,7 +605,34 @@ func (g *Guard) decide(
 		}), err
 	}
 	mode := effectiveMode(result, state.mode, state.overrides)
-	enforcement := gateOutcome(result, mode, action, gate, state.onWarn)
+	confirmed := false
+	if gate && result.Decision == DecisionWarn && mode != EnforcementModeMonitor && state.onWarn != nil {
+		func() {
+			completed := false
+			defer func() {
+				if completed {
+					return
+				}
+				original := recover()
+				blocked := EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeBlocked}
+				if receipt != nil {
+					receipt.Enforcement = blocked
+				}
+				// Attempt one receipt without replacing the confirmation panic.
+				// Fatal process failures and unavailable storage cannot promise it.
+				func() {
+					defer func() { _ = recover() }()
+					g.record(state, action, GuardDecision{
+						Result: result, Receipt: receipt, Enforced: true, Enforcement: blocked,
+					}, duration)
+				}()
+				panic(original)
+			}()
+			confirmed = state.onWarn(result, action)
+			completed = true
+		}()
+	}
+	enforcement := gateOutcome(result, mode, gate, confirmed)
 	if receipt != nil {
 		receipt.Enforcement = enforcement
 	}
@@ -700,9 +727,8 @@ func deniedDecision(result EvaluationResult) GuardDecision {
 func gateOutcome(
 	result EvaluationResult,
 	mode EnforcementMode,
-	action *EvaluationAction,
 	gate bool,
-	onWarn WarnHandler,
+	confirmed bool,
 ) EnforcementSummary {
 	if !gate {
 		return ImpliedEnforcement(result.Decision, mode)
@@ -714,7 +740,7 @@ func gateOutcome(
 		switch {
 		case mode == EnforcementModeMonitor:
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeWouldBlock}
-		case onWarn != nil && onWarn(result, action):
+		case confirmed:
 			return EnforcementSummary{Mode: mode, Outcome: EnforcementOutcomeConfirmed}
 		default:
 			// Fail closed: a warn nobody can confirm is a deny (core spec 6).

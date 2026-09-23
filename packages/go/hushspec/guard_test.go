@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -134,6 +135,96 @@ func TestGuardWarnConfirmedByHandler(t *testing.T) {
 	}
 	if sawAction == nil || sawAction.Target != "notes.txt" {
 		t.Fatal("the warn handler was not given the action")
+	}
+}
+
+func TestGuardWarnPanicRecordsBeforeResuming(t *testing.T) {
+	marker := errors.New("confirmation-marker")
+	sink := &recordingSink{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, OnWarn: func(EvaluationResult, *EvaluationAction) bool { panic(marker) }})
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		content := "token WARNME here"
+		_, _ = guard.Check(context.Background(), &EvaluationAction{Type: "file_write", Target: "a.txt", Content: &content})
+	}()
+	receipts, _ := sink.snapshot()
+	if recovered != marker || len(receipts) != 1 {
+		t.Fatalf("panic=%v receipts=%d", recovered, len(receipts))
+	}
+	if receipts[0].Decision != DecisionWarn || receipts[0].Enforcement.Outcome != EnforcementOutcomeBlocked {
+		t.Fatal("missing blocked warn")
+	}
+}
+
+type panicSendSink struct{ recordingSink }
+
+func (s *panicSendSink) Send(receipt *DecisionReceipt) error {
+	_ = s.recordingSink.Send(receipt)
+	panic("sink-marker")
+}
+
+func TestGuardWarnPanicSurvivesSinkPanicAndReuse(t *testing.T) {
+	marker := errors.New("confirmation-marker")
+	sink := &panicSendSink{}
+	content := "token WARNME here"
+	action := &EvaluationAction{Type: "file_write", Target: "a.txt", Content: &content}
+	baselineSink := &recordingSink{}
+	baseline, err := newTestGuard(t, GuardOptions{Sink: baselineSink}).Check(context.Background(), action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, OnWarn: func(EvaluationResult, *EvaluationAction) bool { panic(marker) }})
+	for count := 1; count <= 2; count++ {
+		var recovered any
+		func() {
+			defer func() { recovered = recover() }()
+			_, _ = guard.Check(context.Background(), action)
+		}()
+		receipts, _ := sink.snapshot()
+		if recovered != marker || len(receipts) != count {
+			t.Fatalf("panic=%v receipts=%d", recovered, len(receipts))
+		}
+		receipt := receipts[count-1]
+		if receipt.Reason != baseline.Receipt.Reason || !reflect.DeepEqual(receipt.RuleTrace, baseline.Receipt.RuleTrace) {
+			t.Fatal("policy explanation changed")
+		}
+		if receipt.Enforcement.Outcome != EnforcementOutcomeBlocked {
+			t.Fatal("not blocked")
+		}
+	}
+}
+
+func TestGuardWarnNilPanic(t *testing.T) {
+	sink := &recordingSink{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, OnWarn: func(EvaluationResult, *EvaluationAction) bool { panic(nil) }})
+	completed := false
+	func() {
+		defer func() { _ = recover() }()
+		content := "token WARNME here"
+		_, _ = guard.Check(context.Background(), &EvaluationAction{Type: "file_write", Target: "a.txt", Content: &content})
+		completed = true
+	}()
+	receipts, _ := sink.snapshot()
+	if completed || len(receipts) != 1 {
+		t.Fatalf("completed=%v receipts=%d", completed, len(receipts))
+	}
+	if receipts[0].Enforcement.Outcome != EnforcementOutcomeBlocked {
+		t.Fatal("not blocked")
+	}
+}
+
+func TestGuardWarnMonitorSkipsPanickingConfirmation(t *testing.T) {
+	sink := &recordingSink{}
+	guard := newTestGuard(t, GuardOptions{Sink: sink, EnforcementMode: EnforcementModeMonitor, OnWarn: func(EvaluationResult, *EvaluationAction) bool { panic("must not confirm") }})
+	content := "token WARNME here"
+	decision, err := guard.Check(context.Background(), &EvaluationAction{Type: "file_write", Target: "a.txt", Content: &content})
+	if err != nil || !decision.Allowed() || decision.Enforcement.Outcome != EnforcementOutcomeWouldBlock {
+		t.Fatalf("decision=%+v error=%v", decision, err)
+	}
+	receipts, _ := sink.snapshot()
+	if len(receipts) != 1 {
+		t.Fatal("missing monitor receipt")
 	}
 }
 

@@ -716,10 +716,14 @@ impl HushGuard {
     /// consults the `warn` confirmation channel, records the receipt through
     /// the sink, notifies observers, and reports whether the runtime may
     /// proceed.
+    ///
+    /// An unwinding confirmation panic attempts to record a blocked receipt
+    /// before resuming the original panic. Abort-mode panics, process failure
+    /// and unavailable storage cannot guarantee a receipt.
     #[must_use]
     pub fn check(&self, action: &EvaluationAction) -> GuardDecision {
         let policy = self.snapshot();
-        let evaluated = self.run(&policy, action);
+        let mut evaluated = self.run(&policy, action);
         let mode = self.effective_mode(&evaluated.result);
 
         let (enforced, outcome) = match evaluated.result.decision {
@@ -727,13 +731,37 @@ impl HushGuard {
             Decision::Warn if mode == EnforcementMode::Monitor => {
                 (false, EnforcementOutcome::WouldBlock)
             }
-            Decision::Warn => match &self.on_warn {
-                Some(handler) if handler(&evaluated.result, action) => {
+            Decision::Warn => {
+                let confirmed = self.on_warn.as_ref().is_some_and(|handler| {
+                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        handler(&evaluated.result, action)
+                    })) {
+                        Ok(confirmed) => confirmed,
+                        Err(payload) => {
+                            let blocked = EnforcementSummary {
+                                mode,
+                                outcome: EnforcementOutcome::Blocked,
+                            };
+                            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                self.record(
+                                    action,
+                                    &evaluated.result,
+                                    evaluated.duration_us,
+                                    evaluated.receipt.take(),
+                                    Some(blocked),
+                                )
+                            }));
+                            std::panic::resume_unwind(payload);
+                        }
+                    }
+                });
+                if confirmed {
                     (false, EnforcementOutcome::Confirmed)
+                } else {
+                    // Core spec 6: with no confirmation channel, a warn denies.
+                    (true, EnforcementOutcome::Blocked)
                 }
-                // Core spec 6: with no confirmation channel, a warn denies.
-                _ => (true, EnforcementOutcome::Blocked),
-            },
+            }
             Decision::Deny if mode == EnforcementMode::Monitor => {
                 (false, EnforcementOutcome::WouldBlock)
             }
@@ -1125,6 +1153,79 @@ rules:
         assert_eq!(decision.result.decision, Decision::Warn);
         assert!(!decision.allowed(), "core spec 6: warn fails closed");
         assert_eq!(decision.enforcement.outcome, EnforcementOutcome::Blocked);
+    }
+
+    #[test]
+    fn confirmation_panic_records_before_resuming() {
+        let sink = Arc::new(RecordingSink::default());
+        let guard = HushGuard::builder()
+            .sink(Box::new(SharedSink(sink.clone())))
+            .on_warn(|_, _| panic!("confirmation-marker"))
+            .build_from_policy(policy(WARN_POLICY))
+            .unwrap();
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guard.check(&action("tool_call", "deploy"))
+        }))
+        .unwrap_err();
+        assert_eq!(failure.downcast_ref::<&str>(), Some(&"confirmation-marker"));
+        let receipts = sink.receipts.lock().unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].decision, Decision::Warn);
+        assert_eq!(receipts[0].enforcement.outcome, EnforcementOutcome::Blocked);
+    }
+
+    #[test]
+    fn confirmation_panic_survives_sink_panic_and_guard_remains_usable() {
+        struct PanickingSink(Arc<RecordingSink>);
+        impl ReceiptSink for PanickingSink {
+            fn send(&self, receipt: &DecisionReceipt) -> Result<(), SinkError> {
+                self.0.send(receipt)?;
+                panic!("sink-marker");
+            }
+        }
+        let baseline = guard(WARN_POLICY)
+            .check(&action("tool_call", "deploy"))
+            .receipt
+            .unwrap();
+        let sink = Arc::new(RecordingSink::default());
+        let marker = Arc::new(17_u32);
+        let callback_marker = marker.clone();
+        let guard = HushGuard::builder()
+            .sink(Box::new(PanickingSink(sink.clone())))
+            .on_warn(move |_, _| std::panic::panic_any(callback_marker.clone()))
+            .build_from_policy(policy(WARN_POLICY))
+            .unwrap();
+        for count in 1..=2 {
+            let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                guard.check(&action("tool_call", "deploy"))
+            }))
+            .unwrap_err();
+            assert!(Arc::ptr_eq(
+                failure.downcast_ref::<Arc<u32>>().unwrap(),
+                &marker
+            ));
+            let receipts = sink.receipts.lock().unwrap();
+            assert_eq!(receipts.len(), count);
+            let receipt = receipts.last().unwrap();
+            assert_eq!(receipt.reason, baseline.reason);
+            assert_eq!(receipt.rule_trace, baseline.rule_trace);
+            assert_eq!(receipt.enforcement.outcome, EnforcementOutcome::Blocked);
+        }
+    }
+
+    #[test]
+    fn monitor_warn_never_invokes_panicking_confirmation() {
+        let sink = Arc::new(RecordingSink::default());
+        let guard = HushGuard::builder()
+            .sink(Box::new(SharedSink(sink.clone())))
+            .enforcement_mode(EnforcementMode::Monitor)
+            .on_warn(|_, _| panic!("monitor must not confirm"))
+            .build_from_policy(policy(WARN_POLICY))
+            .unwrap();
+        let decision = guard.check(&action("tool_call", "deploy"));
+        assert!(decision.allowed());
+        assert_eq!(decision.enforcement.outcome, EnforcementOutcome::WouldBlock);
+        assert_eq!(sink.receipts.lock().unwrap().len(), 1);
     }
 
     #[test]
