@@ -29,6 +29,8 @@ def safe_destination(root: Path, relative: str) -> Path:
 
 
 def export(root: Path, site: Path, release_ref: str, docs_ref: str, *, allow_incomplete=False) -> dict:
+    if site.is_symlink():
+        raise ValueError(f'symlink site root: {site}')
     release = git(root, 'rev-parse', '--verify', f'{release_ref}^{{commit}}').decode().strip()
     docs = git(root, 'rev-parse', '--verify', f'{docs_ref}^{{commit}}').decode().strip()
     if git(root, 'status', '--porcelain', '--untracked-files=all', '--', 'docs/src', 'docs/examples', 'spec'):

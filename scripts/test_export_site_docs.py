@@ -98,6 +98,13 @@ class ExportTests(unittest.TestCase):
             self.run_export()
         self.assertEqual(list(outside.iterdir()), [])
 
+    def test_site_root_symlink_refused(self):
+        alias=Path(self.temp.name)/'site-alias'
+        alias.symlink_to(self.site,target_is_directory=True)
+        with self.assertRaisesRegex(ValueError,'symlink'):
+            export(self.root,alias,self.release,self.docs)
+        self.assertFalse((self.site/'content/upstream').exists())
+
 
 if __name__ == '__main__':
     unittest.main()
