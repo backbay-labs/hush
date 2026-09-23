@@ -33,6 +33,13 @@ export class OwnedMcpConnection {
     this.#child = spawn(command, [...args], { cwd: options.cwd, env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: process.platform !== 'win32' });
     this.#exited = new Promise(resolve => {
+      this.#child.once('exit', () => {
+        // An escaped descendant may retain inherited pipes after the owned server dies.
+        // Close our endpoints so shutdown does not depend on that descendant's lifetime.
+        this.#fail(new Error('MCP child exited'));
+        this.#child.stdin.destroy(); this.#child.stdout.destroy(); this.#child.stderr.destroy();
+        this.#exit = true; resolve();
+      });
       this.#child.once('close', () => { this.#exit = true; this.#fail(new Error('MCP child exited')); resolve(); });
       this.#child.once('error', error => { this.#fail(error); resolve(); });
     });
@@ -47,6 +54,7 @@ export class OwnedMcpConnection {
 
   async discover(): Promise<Record<string, JsonValue>> {
     const result = await this.#request('server/discover', {});
+    if (this.#failure) throw this.#failure;
     if (result.resultType !== 'complete' || !Array.isArray(result.supportedVersions) ||
         !result.supportedVersions.includes(INVOCATION_MCP_VERSION) ||
         !result.capabilities || typeof result.capabilities !== 'object' || Array.isArray(result.capabilities)) {
@@ -56,6 +64,7 @@ export class OwnedMcpConnection {
   }
   async listTools(): Promise<Record<string, JsonValue>> {
     const result = await this.#request('tools/list', {});
+    if (this.#failure) throw this.#failure;
     if (result.resultType !== 'complete' || !Array.isArray(result.tools) || result.tools.length > 256) {
       this.#fail(new Error('malformed MCP tools list')); throw this.#failure;
     }
@@ -66,6 +75,7 @@ export class OwnedMcpConnection {
         typeof context.callId !== 'string' || !context.callId || Buffer.byteLength(context.callId) > 128) throw new Error('invalid MCP call identity');
     const captured = copyJson(args); jsonObject(captured);
     const result = await this.#request('tools/call', { name, arguments: captured }, context.callId);
+    if (this.#failure) throw this.#failure;
     if (result.resultType !== 'complete' || !Array.isArray(result.content) ||
         (result.isError !== undefined && typeof result.isError !== 'boolean') ||
         (result.structuredContent !== undefined && (result.structuredContent === null ||

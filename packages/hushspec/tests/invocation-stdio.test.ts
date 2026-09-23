@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as api from '../src/index.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const connections: any[] = [];
 afterEach(async () => { await Promise.all(connections.splice(0).map(c => c.close())); });
@@ -53,5 +56,24 @@ describe('owned MCP stdio connection', () => {
     await expect(c.callTool('x', {}, { callId: 'excess' })).rejects.toThrow(/pending/);
     await c.close(); await Promise.all(pending);
     await expect(c.listTools()).rejects.toThrow(/closed|unavailable/);
+  });
+  it('refuses a duplicate response detected before the request continuation runs', async () => {
+    const c = connection(String.raw`const out=JSON.stringify({jsonrpc:'2.0',id:request.id,result:{resultType:'complete',content:[]}})+'\n'; process.stdout.write(out+out);`);
+    await expect(c.callTool('x', {}, { callId: 'host' })).rejects.toThrow(/duplicate/);
+  });
+  it.skipIf(process.platform === 'win32')('bounds close when an escaped descendant retains server pipes', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hush-mcp-descendant-'));
+    const pidFile = path.join(root, 'pid');
+    let descendant: number | undefined;
+    try {
+      const c = connection(String.raw`const child=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},10000)'],{stdio:['ignore',1,2],detached:true}); require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(child.pid)); process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{resultType:'complete',content:[]}})+'\n'); process.exit(0);`);
+      await c.callTool('x', {}, { callId: 'host' }).catch(() => {});
+      descendant = Number(fs.readFileSync(pidFile, 'utf8'));
+      const outcome = await Promise.race([c.close().then(() => 'closed'), new Promise(resolve => setTimeout(() => resolve('timed_out'), 600))]);
+      expect(outcome).toBe('closed');
+    } finally {
+      if (descendant) { try { process.kill(descendant, 'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; } }
+      fs.rmSync(root, { recursive: true });
+    }
   });
 });
