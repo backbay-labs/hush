@@ -27,6 +27,7 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-engine-request-experimental.v1.schema.json` | Experimental digest-bound external engine request, without expected answers |
 | `hushspec-engine-response-experimental.v1.schema.json` | Experimental engine observation and echoed request binding |
 | `hushspec-conformance-execution-experimental.v1.schema.json` | Experimental execution packet completion record, artifact digests and planned result slots |
+| `hushspec-invocation-journal-experimental.v1.schema.json` | Experimental trusted invocation entries and closing checkpoints; embedded policies/receipts and state transitions require separate verification |
 | `hushspec-report.v1.schema.json` | Evidence report 0.1: an aggregation over receipts and policy-in-effect events for one window, emitted by `h2h report --format json` |
 | `hushspec-evidence-profile-experimental.v1.schema.json` | Experimental 0.1.0 operator scope, ordered sources, byte digests and signer authorization |
 | `hushspec-evidence-inventory-experimental.v1.schema.json` | Experimental 0.1.0 independently acquired stream inventory and boundaries |

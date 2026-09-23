@@ -4,6 +4,10 @@ export { snapshotJson, hashJson, type SnapshotLimits } from './invocation/json.j
 export { InvocationRegistry, qualifiedToolTarget, type InvocationBinding, type InvocationArguments } from './invocation/registry.js';
 export { AuthenticatedPolicy, typescriptInvocationEngine, type InvocationEngine,
   type PreparedInvocationEngine, type InvocationEngineIdentity } from './invocation/policy.js';
+export { FileInvocationJournal, type InvocationJournal, type InvocationAcknowledgment,
+  type InvocationEvent, type InvocationCheckpoint } from './invocation/journal.js';
+export { verifyInvocationJournal, inspectInvocationJournal, type InvocationTrust,
+  type InvocationVerification } from './invocation/verify.js';
 export type {
   Rules,
   ForbiddenPathsRule,
