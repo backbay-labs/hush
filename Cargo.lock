@@ -990,6 +990,7 @@ dependencies = [
  "flate2",
  "hushspec",
  "jsonschema",
+ "libc",
  "proptest",
  "serde",
  "serde_json",

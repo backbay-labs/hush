@@ -27,6 +27,10 @@ OUTPUT = ROOT / "crates" / "hushspec-testkit" / "src" / "generated_schemas.rs"
 
 #: (short name, file name) for every schema the testkit validates against.
 NEEDED = [
+    ("engine-profile", "hushspec-engine-profile-experimental.v1.schema.json"),
+    ("engine-request", "hushspec-engine-request-experimental.v1.schema.json"),
+    ("engine-response", "hushspec-engine-response-experimental.v1.schema.json"),
+    ("conformance-execution", "hushspec-conformance-execution-experimental.v1.schema.json"),
     ("conformance-report", "hushspec-conformance-report.v1.schema.json"),
     ("error-codes", "hushspec-error-codes.v1.schema.json"),
     ("evaluator-test", "hushspec-evaluator-test.v1.schema.json"),

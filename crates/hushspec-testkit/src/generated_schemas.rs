@@ -9,6 +9,22 @@
 /// Published file name for each short schema name, in canonical order.
 pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
     (
+        "engine-profile",
+        "hushspec-engine-profile-experimental.v1.schema.json",
+    ),
+    (
+        "engine-request",
+        "hushspec-engine-request-experimental.v1.schema.json",
+    ),
+    (
+        "engine-response",
+        "hushspec-engine-response-experimental.v1.schema.json",
+    ),
+    (
+        "conformance-execution",
+        "hushspec-conformance-execution-experimental.v1.schema.json",
+    ),
+    (
         "conformance-report",
         "hushspec-conformance-report.v1.schema.json",
     ),
@@ -20,6 +36,183 @@ pub const SCHEMA_FILE_NAMES: &[(&str, &str)] = &[
 
 /// Schema bodies, keyed by short name.
 const SCHEMA_BODIES: &[(&str, &str)] = &[
+    (
+        "engine-profile",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-engine-profile-experimental.v1.schema.json",
+  "title": "Experimental external engine profile 0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "implementation", "executable", "args", "error_codes"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "implementation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version", "language"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "language": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "executable": {"$ref": "#/$defs/file"},
+    "args": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 4096}},
+    "error_codes": {"enum": ["registry", "none"]},
+    "materials": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/file"}}
+  },
+  "$defs": {
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "engine-request",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-engine-request-experimental.v1.schema.json",
+  "title": "Experimental external engine request 0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "input"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
+    "input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "input": {"type": "object"}
+  },
+  "allOf": [
+    {"if": {"properties": {"operation": {"enum": ["parse", "validate", "canonicalize"]}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/policy"}}}},
+    {"if": {"properties": {"operation": {"const": "merge"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/merge"}}}},
+    {"if": {"properties": {"operation": {"const": "resolve"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/resolve"}}}},
+    {"if": {"properties": {"operation": {"const": "evaluate"}}},
+     "then": {"properties": {"input": {"$ref": "#/$defs/evaluate"}}}}
+  ],
+  "$defs": {
+    "documents": {"type": "object", "maxProperties": 4096, "additionalProperties": {"type": "string"}},
+    "policy": {"type": "object", "additionalProperties": false, "required": ["policy"], "properties": {"policy": {"type": "string"}}},
+    "merge": {"type": "object", "additionalProperties": false, "required": ["base", "child"], "properties": {"base": {"type": "string"}, "child": {"type": "string"}}},
+    "resolve": {
+      "type": "object", "additionalProperties": false, "required": ["policy", "source", "documents"],
+      "properties": {"policy": {"type": "string"}, "source": {"type": "string", "minLength": 1}, "documents": {"$ref": "#/$defs/documents"}}
+    },
+    "evaluate": {
+      "type": "object", "additionalProperties": false, "required": ["policy", "action", "source", "documents"],
+      "properties": {
+        "policy": {"type": "string"}, "action": {"type": "object"},
+        "source": {"type": "string", "minLength": 1}, "documents": {"$ref": "#/$defs/documents"}
+      }
+    }
+  }
+}
+"##,
+    ),
+    (
+        "engine-response",
+        r#"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-engine-response-experimental.v1.schema.json",
+  "title": "Experimental external engine response 0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "result"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
+    "input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "result": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"const": "ok"}, "value": {"type": "object"}}},
+      {"type": "object", "additionalProperties": false, "required": ["status", "phase", "diagnostic"], "properties": {
+        "status": {"const": "rejected"}, "phase": {"enum": ["parse", "validate", "resolve", "canonicalize"]},
+        "diagnostic": {"type": "string", "minLength": 1}, "code": {"type": "string", "minLength": 1, "maxLength": 128}
+      }},
+      {"type": "object", "additionalProperties": false, "required": ["status"], "properties": {"status": {"const": "unsupported"}}},
+      {"type": "object", "additionalProperties": false, "required": ["status", "diagnostic"], "properties": {"status": {"const": "error"}, "diagnostic": {"type": "string", "minLength": 1}}}
+    ]}
+  }
+}
+"#,
+    ),
+    (
+        "conformance-execution",
+        r##"{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
+  "title": "Experimental conformance execution record 0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "run_id", "implementation", "requested_level", "outcome", "generated_at", "declared_build_context", "controller", "engine", "profile", "manifest", "corpus", "builtins", "declared_materials", "args", "environment", "os", "architecture", "limits", "planned", "unattempted", "cases", "report", "limitations"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "implementation": {
+      "type": "object", "additionalProperties": false, "required": ["name", "version", "language"],
+      "properties": {"name": {"type": "string", "minLength": 1}, "version": {"type": "string", "minLength": 1}, "language": {"type": "string", "minLength": 1}}
+    },
+    "requested_level": {"type": "integer", "minimum": 0, "maximum": 3},
+    "outcome": {"enum": ["qualified", "not_qualified"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "declared_build_context": {"type": "object", "additionalProperties": false, "properties": {
+      "source_sha": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+      "ci_run": {"type": "string", "minLength": 1, "maxLength": 128}, "ci_attempt": {"type": "string", "minLength": 1, "maxLength": 128}
+    }},
+    "controller": {"$ref": "#/$defs/artifact"}, "engine": {"$ref": "#/$defs/artifact"},
+    "profile": {"$ref": "#/$defs/artifact"}, "manifest": {"$ref": "#/$defs/artifact"}, "report": {"$ref": "#/$defs/artifact"},
+    "corpus": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/artifact"}},
+    "builtins": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/artifact"}},
+    "declared_materials": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/artifact"}},
+    "args": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 4096}},
+    "environment": {"type": "object", "additionalProperties": false, "required": ["LANG", "LC_ALL", "TZ"], "properties": {"LANG": {"const": "C"}, "LC_ALL": {"const": "C"}, "TZ": {"const": "UTC"}}},
+    "os": {"const": "linux"}, "architecture": {"type": "string", "minLength": 1},
+    "limits": {"$ref": "#/$defs/limits"},
+    "planned": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/planned"}},
+    "unattempted": {"type": "array", "items": {"$ref": "#/$defs/slot"}},
+    "cases": {"type": "array", "maxItems": 10000, "items": {"$ref": "#/$defs/case"}},
+    "limitations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "bytes"], "properties": {
+      "path": {"type": "string", "pattern": "^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*$", "maxLength": 4096},
+      "sha256": {"$ref": "#/$defs/digest"}, "bytes": {"type": "integer", "minimum": 0, "maximum": 268435456}
+    }},
+    "slot": {"type": "object", "additionalProperties": false, "required": ["path", "category", "level"], "properties": {
+      "path": {"type": "string", "minLength": 1}, "category": {"type": "string", "minLength": 1}, "level": {"type": "integer", "minimum": 0, "maximum": 5}
+    }},
+    "planned": {"type": "object", "additionalProperties": false, "required": ["case_id", "operation", "input_sha256", "slots"], "properties": {
+      "case_id": {"type": "string", "minLength": 1}, "operation": {"$ref": "#/$defs/operation"}, "input_sha256": {"$ref": "#/$defs/digest"},
+      "slots": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/slot"}}
+    }},
+    "case": {"type": "object", "additionalProperties": false, "required": ["case_id", "request", "input", "stdout", "stderr", "process", "protocol_failure"], "properties": {
+      "case_id": {"type": "string", "minLength": 1}, "request": {"$ref": "#/$defs/artifact"}, "input": {"$ref": "#/$defs/artifact"},
+      "stdout": {"$ref": "#/$defs/artifact"}, "stderr": {"$ref": "#/$defs/artifact"}, "process": {"$ref": "#/$defs/process"},
+      "protocol_failure": {"type": ["string", "null"]}
+    }},
+    "process": {"type": "object", "additionalProperties": false, "required": ["exit_code", "signal", "failure", "elapsed_ms", "truncated"], "properties": {
+      "exit_code": {"type": ["integer", "null"]}, "signal": {"type": ["integer", "null"]}, "failure": {"type": ["string", "null"]},
+      "elapsed_ms": {"type": "integer", "minimum": 0}, "truncated": {"type": "boolean"}
+    }},
+    "limits": {"type": "object", "additionalProperties": false, "required": ["timeout_ms", "total_timeout_ms", "stdout_bytes", "stderr_bytes", "total_output_bytes", "total_request_bytes"], "properties": {
+      "timeout_ms": {"type": "integer", "minimum": 1, "maximum": 30000}, "total_timeout_ms": {"type": "integer", "minimum": 1, "maximum": 3600000},
+      "stdout_bytes": {"type": "integer", "minimum": 1, "maximum": 16777216}, "stderr_bytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+      "total_output_bytes": {"type": "integer", "minimum": 1, "maximum": 268435456}, "total_request_bytes": {"type": "integer", "minimum": 1, "maximum": 268435456}
+    }}
+  }
+}
+"##,
+    ),
     (
         "conformance-report",
         r##"{

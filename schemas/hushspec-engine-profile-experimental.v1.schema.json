@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-engine-profile-experimental.v1.schema.json",
+  "title": "Experimental external engine profile 0.1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "implementation", "executable", "args", "error_codes"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "implementation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version", "language"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 256},
+        "version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "language": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "executable": {"$ref": "#/$defs/file"},
+    "args": {"type": "array", "maxItems": 32, "items": {"type": "string", "maxLength": 4096}},
+    "error_codes": {"enum": ["registry", "none"]},
+    "materials": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/file"}}
+  },
+  "$defs": {
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

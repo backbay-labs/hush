@@ -23,6 +23,10 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-error-codes.v1.schema.json` | Schema for [`spec/registries/error-codes.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/error-codes.yaml) and for the `<name>.expect.yaml` sidecars that pin the code each `invalid/` vector is rejected with |
 | `hushspec-merge-vector.v1.schema.json` | The merge-vector directory convention under `fixtures/*/merge/` (`base.yaml`, `child-*.yaml`, `expected-*.yaml`, optional `fixture.yaml`) |
 | `hushspec-conformance-report.v1.schema.json` | Conformance report emitted by `hushspec-testkit --report`; see [Conformance Levels](conformance.md) |
+| `hushspec-engine-profile-experimental.v1.schema.json` | Experimental external engine identity, executable digest, arguments and build materials |
+| `hushspec-engine-request-experimental.v1.schema.json` | Experimental digest-bound external engine request, without expected answers |
+| `hushspec-engine-response-experimental.v1.schema.json` | Experimental engine observation and echoed request binding |
+| `hushspec-conformance-execution-experimental.v1.schema.json` | Experimental execution packet completion record, artifact digests and planned result slots |
 | `hushspec-report.v1.schema.json` | Evidence report 0.1: an aggregation over receipts and policy-in-effect events for one window, emitted by `h2h report --format json` |
 | `hushspec-evidence-profile-experimental.v1.schema.json` | Experimental 0.1.0 operator scope, ordered sources, byte digests and signer authorization |
 | `hushspec-evidence-inventory-experimental.v1.schema.json` | Experimental 0.1.0 independently acquired stream inventory and boundaries |

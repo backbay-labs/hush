@@ -97,7 +97,7 @@ replaceable launch pathname; that kernel handle is the sole symlink exception.
 
 ### Snapshot and corpus inventory
 
-Capture profile (1 MiB), executable (128 MiB), controller executable (128 MiB),
+Capture profile (1 MiB), executable (128 MiB), controller executable (256 MiB),
 materials (16 files / 16 MiB), manifest (8 MiB), and corpus files (16 MiB each,
 64 MiB aggregate / 4096 entries). Reject duplicate manifest paths, malformed
 digests, paths escaping `fixtures/`, duplicate physical input aliases, symlink

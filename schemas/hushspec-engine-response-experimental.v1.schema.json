@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hushspec.dev/schemas/hushspec-engine-response-experimental.v1.schema.json",
+  "title": "Experimental external engine response 0.1.0",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "result"],
+  "properties": {
+    "protocol": {"const": "0.1.0"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "case_id": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "operation": {"enum": ["parse", "validate", "merge", "resolve", "evaluate", "canonicalize"]},
+    "input_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "result": {"oneOf": [
+      {"type": "object", "additionalProperties": false, "required": ["status", "value"], "properties": {"status": {"const": "ok"}, "value": {"type": "object"}}},
+      {"type": "object", "additionalProperties": false, "required": ["status", "phase", "diagnostic"], "properties": {
+        "status": {"const": "rejected"}, "phase": {"enum": ["parse", "validate", "resolve", "canonicalize"]},
+        "diagnostic": {"type": "string", "minLength": 1}, "code": {"type": "string", "minLength": 1, "maxLength": 128}
+      }},
+      {"type": "object", "additionalProperties": false, "required": ["status"], "properties": {"status": {"const": "unsupported"}}},
+      {"type": "object", "additionalProperties": false, "required": ["status", "diagnostic"], "properties": {"status": {"const": "error"}, "diagnostic": {"type": "string", "minLength": 1}}}
+    ]}
+  }
+}

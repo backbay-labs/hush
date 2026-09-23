@@ -4,6 +4,7 @@ pub mod diff;
 pub mod emit;
 pub mod evidence;
 pub mod expect;
+pub mod external;
 pub mod fixture;
 pub mod r#gen;
 pub mod generated_schemas;
