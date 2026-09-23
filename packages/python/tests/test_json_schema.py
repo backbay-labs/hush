@@ -137,7 +137,7 @@ def test_core_schema_embeds_the_companion_schemas_verbatim():
 
     for key, def_name, file_name in EMBEDDED_EXTENSIONS:
         published = load_schema(file_name)
-        expected_id = f"https://hushspec.dev/schemas/{file_name}"
+        expected_id = f"https://hushspec.org/schemas/{file_name}"
 
         assert extensions["properties"][key]["$ref"] == expected_id
         assert extensions["properties"][key]["unevaluatedProperties"] is False

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-engine-request-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-engine-request-experimental.v1.schema.json",
   "title": "Experimental external engine request 0.1.0",
   "type": "object", "additionalProperties": false,
   "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "input"],

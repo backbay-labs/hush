@@ -86,7 +86,7 @@ fn fix_is_decision_neutral_and_idempotent_when_a_real_fix_is_applied() {
 fn fix_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();
     let modeline =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
     let content = format!(
         "{modeline}\nhushspec: \"0.1.0\"\nname: t\nrules:\n  forbidden_paths:\n    patterns:\n      - \"**/.ssh/**\"\n      - \"**/.aws/**\"\n      - \"**/.ssh/**\"\n"
     );
@@ -130,7 +130,7 @@ fn dry_run_preserves_leading_modeline() {
     let dir = tempfile::tempdir().unwrap();
     let policy = dir.path().join("modeline-dry-run.yaml");
     let modeline =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
     std::fs::write(
         &policy,
         format!(

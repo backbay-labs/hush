@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 # A document declaring the 1.0 series is accepted by an engine that supports
 # minor version 1.0 (core spec 2.2, 10); its semantics are those of 0.2.
 hushspec: "1.0.0"

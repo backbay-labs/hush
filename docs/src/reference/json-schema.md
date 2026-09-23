@@ -64,43 +64,42 @@ The registry schemas (`hushspec-registry-*.v0.schema.json`) describe the files u
 
 ## Where the schemas are served
 
-Each schema declares its own `$id`, and that `$id` is the URL it is published
-at:
+Each v1 schema declares its own `$id` under the project's owned domain:
 
 ```
-https://hushspec.dev/schemas/<file>
+https://hushspec.org/schemas/<file>
 ```
 
-The docs deployment (`.github/workflows/docs.yml`) copies `schemas/*.json`
-into the built site at `schemas/`, so the host serves exactly the schemas this
-repository ships. Alongside them it publishes:
+The Vercel website serves a static snapshot exported from a clean source commit
+using `python3 scripts/build_schema_index.py --site-root ../hush-ui/public`.
+Its build checks every indexed byte digest. Alongside the schemas it publishes:
 
-- `https://hushspec.dev/schemas/index.json` -- one entry per schema, carrying
-  its file name, `$id`, title and description, under a `host` field and the
-  `commit` the deploy was built from. It is built from the directory being
-  copied at deploy time, so it can never name a schema the site does not
-  serve.
-- `https://hushspec.dev/registries/<file>` -- every registry under
+- `https://hushspec.org/schemas/index.json` -- one entry per schema, carrying
+  its file name, `$id`, retrieval `url`, SHA-256, title and description, with the
+  source `commit`. The index also lists registry URLs and byte digests.
+- `https://hushspec.org/registries/<file>` -- every registry under
   [`spec/registries/`](https://github.com/backbay-labs/hush/tree/main/spec/registries),
   published so the normative lists are readable at a stable URL. Nothing
   resolves these over the network: the schemas above pin the registries by
   shape, and the SDKs embed them.
 
-`hushspec.dev` resolving depends on one maintainer-side step outside the
-workflow: pointing the domain's DNS at GitHub Pages and setting it as the
-repository's custom domain. The deploy does not depend on that having happened
--- the site is also served at its `github.io` address -- so until the domain is
-confirmed live, fetch any schema from raw GitHub instead, which always resolves
-and tracks `main` directly:
+Frozen v0 schemas keep their historical `hushspec.dev` identifiers byte for byte.
+The project does not operate that host: use the `.org` mirror's retrieval `url`
+for legacy schemas, without rewriting their IDs. Bundle predicate URIs are
+identifiers, not schema download URLs, and remain unchanged.
+
+The mdBook deployment also includes schema and registry copies as a documentation
+mirror; it does not configure the canonical host. Before the first website schema
+deployment, or for an exact revision, fetch a schema from GitHub, replacing `main`
+with the release commit or tag when pinning a version:
 
 ```
 https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v1.schema.json
 ```
 
-Both URLs serve the same file. They can differ for as long as it takes a
-deploy to run -- raw GitHub tracks `main` directly, while the canonical host
-serves the last successful docs deploy. Only the canonical one is what a
-schema's `$id` declares, so prefer it once it resolves.
+The canonical host serves its indexed source commit, while this fallback tracks
+`main`. They can differ until the website snapshot is updated. The index hashes
+check byte consistency; they do not independently authenticate the website.
 
 ## Usage
 
@@ -125,7 +124,7 @@ check-jsonschema --schemafile schemas/hushspec-core.v1.schema.json policy.yaml
 Add a `$schema` comment to your HushSpec YAML files for editor autocompletion and validation:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "1.0.0"
 name: "my-policy"
 
@@ -136,7 +135,7 @@ rules:
 ```
 
 See [Where the schemas are served](#where-the-schemas-are-served) for the raw
-GitHub URL to substitute until `hushspec.dev` is confirmed live.
+GitHub URL to substitute before the website schema snapshot is deployed.
 
 Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will pick up the schema directive and provide autocompletion, hover documentation, and inline validation. See the [Editor Setup](../guides/editor-setup.md) guide for the SchemaStore zero-configuration option and workspace-settings alternative.
 

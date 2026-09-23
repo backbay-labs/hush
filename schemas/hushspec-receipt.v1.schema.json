@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-receipt.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-receipt.v1.schema.json",
   "title": "HushSpec Decision Receipt v0.2",
   "description": "A self-contained, tamper-evident record of one HushSpec policy evaluation. Normative prose: spec/hushspec-receipt.md. A receipt identifies the resolved policy by content hash (spec/hushspec-canonical.md), the actor on whose behalf the action was evaluated, the action (never its content), the decision and why, the rule blocks and detectors that ran, and how the runtime applied the decision. Field order in this file is documentation order; receipts are hashed in canonical form (RFC 8785).",
   "type": "object",

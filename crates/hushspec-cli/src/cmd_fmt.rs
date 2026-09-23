@@ -952,7 +952,7 @@ mod tests {
     use hushspec::schema::MergeStrategy;
 
     const MODELINE: &str =
-        "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json";
+        "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json";
 
     #[test]
     fn fmt_preserves_leading_modeline() {

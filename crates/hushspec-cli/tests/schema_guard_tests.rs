@@ -84,7 +84,12 @@ fn every_schema_meta_validates_and_id_matches_filename() {
             .unwrap_or_else(|e| panic!("{} is not a valid schema: {e}", path.display()));
 
         let file = path.file_name().unwrap().to_string_lossy();
-        let want_id = format!("https://hushspec.dev/schemas/{file}");
+        let host = if file.ends_with(".v1.schema.json") {
+            "hushspec.org"
+        } else {
+            "hushspec.dev"
+        };
+        let want_id = format!("https://{host}/schemas/{file}");
         assert_eq!(
             doc["$id"].as_str(),
             Some(want_id.as_str()),
@@ -340,7 +345,7 @@ fn the_core_schema_embeds_the_companion_schemas_verbatim() {
 
     for (key, def_name, file_name) in EMBEDDED_EXTENSIONS {
         let published = read_schema(file_name);
-        let expected_id = format!("https://hushspec.dev/schemas/{file_name}");
+        let expected_id = format!("https://hushspec.org/schemas/{file_name}");
 
         assert_eq!(
             extensions["properties"][key]["$ref"].as_str(),
@@ -651,7 +656,7 @@ fn the_schemastore_entries_match_the_catalog_entry_shape() {
             let path = entry.unwrap().path();
             (path.extension()? == "json").then(|| {
                 format!(
-                    "https://hushspec.dev/schemas/{}",
+                    "https://hushspec.org/schemas/{}",
                     path.file_name().unwrap().to_string_lossy()
                 )
             })

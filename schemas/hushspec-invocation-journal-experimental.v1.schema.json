@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-invocation-journal-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-invocation-journal-experimental.v1.schema.json",
   "title": "Experimental trusted invocation evidence 0.1.0",
   "description": "A separate signed invocation entry or closing checkpoint. Structural validation alone is not verification: consumers must validate embedded policies and 0.2 receipts, signatures, sequence, immutable bindings and state transitions. Missing terminal evidence means unknown execution outcome.",
   "oneOf": [{"$ref": "#/$defs/entry"}, {"$ref": "#/$defs/checkpoint"}],

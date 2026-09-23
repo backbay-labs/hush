@@ -68,7 +68,14 @@ fn print_list(format: SchemaOutputFormat) -> i32 {
         .map(|(name, file)| SchemaEntry {
             name,
             file,
-            id: format!("https://hushspec.dev/schemas/{file}"),
+            id: format!(
+                "https://{}/schemas/{file}",
+                if file.ends_with(".v1.schema.json") {
+                    "hushspec.org"
+                } else {
+                    "hushspec.dev"
+                }
+            ),
         })
         .collect();
 
@@ -122,7 +129,17 @@ mod tests {
                 serde_json::from_str(body).unwrap_or_else(|e| panic!("{name} is not JSON: {e}"));
             assert_eq!(
                 parsed["$id"].as_str(),
-                Some(format!("https://hushspec.dev/schemas/{file}").as_str()),
+                Some(
+                    format!(
+                        "https://{}/schemas/{file}",
+                        if file.ends_with(".v1.schema.json") {
+                            "hushspec.org"
+                        } else {
+                            "hushspec.dev"
+                        }
+                    )
+                    .as_str()
+                ),
                 "{name} $id does not match its file name"
             );
         }

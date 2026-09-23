@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.2.0"
 description: "expect.receipt (evaluator-test 0.2): the members a case spells must equal the format 0.2 receipt produced under the fixed inputs of fixtures/receipts/expected/README.md"
 policy:

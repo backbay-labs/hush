@@ -117,7 +117,7 @@ describe('composed core schema', () => {
 
     for (const [key, defName, fileName] of EMBEDDED_EXTENSIONS) {
       const published = loadSchema(fileName);
-      const expectedId = `https://hushspec.dev/schemas/${fileName}`;
+      const expectedId = `https://hushspec.org/schemas/${fileName}`;
 
       expect(properties[key]['$ref']).toBe(expectedId);
       expect(properties[key]['unevaluatedProperties']).toBe(false);

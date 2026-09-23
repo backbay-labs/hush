@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.2.0"
 description: "expect.rule_trace (evaluator-test 0.2, receipt spec 4.3): the recorded trace is asserted in order and in full, including the blocks that were consulted and skipped"
 policy:

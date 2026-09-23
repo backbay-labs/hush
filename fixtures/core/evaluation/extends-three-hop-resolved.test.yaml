@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.1.0"
 description: "core 2.3, 4.2 and 5: the evaluation half of the three-hop chain in fixtures/core/merge/three-hop-chain/. The policy below is the resolved output of base.yaml <- mid.yaml <- child-three-hop.yaml; the cases show that a decision made against it really does come from all three hops -- the root's forbidden_paths, the middle hop's secret_patterns, and the leaf's egress and tool_access. An engine that merged only the leaf against the root, or stopped at the first hop, produces different decisions for these actions."
 policy:

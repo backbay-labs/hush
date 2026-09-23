@@ -568,8 +568,8 @@ fn init_permissive_preset() {
 /// template that was never updated.
 #[test]
 fn scaffolded_files_carry_schema_modelines() {
-    const CORE_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json\n";
-    const TEST_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json\n";
+    const CORE_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json\n";
+    const TEST_MODELINE: &str = "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json\n";
 
     for preset in ["default", "permissive", "strict"] {
         let tmp = TempDir::new().unwrap();
@@ -1194,7 +1194,7 @@ fn fmt_parse_error_reports_same_line_as_lint_with_modeline() {
 
     // `bogus_field` is an unknown field on line 5 -- deny_unknown_fields
     // rejects it at parse time with a "line 5" position in the error.
-    let content = r#"# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+    let content = r#"# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "0.1.0"
 name: t
 description: d

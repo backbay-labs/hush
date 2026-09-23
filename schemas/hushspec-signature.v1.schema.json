@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-signature.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-signature.v1.schema.json",
   "title": "HushSpec Policy Signature Envelope v0.2",
   "description": "A detached Ed25519 signature over the canonical form of a resolved HushSpec policy. Stored as a .sig JSON file next to the policy. Normative prose: spec/hushspec-signing.md. The signature covers the RFC 8785 canonical serialization of this object with the `signature` member removed.",
   "type": "object",

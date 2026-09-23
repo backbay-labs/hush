@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-keyring.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-keyring.v1.schema.json",
   "title": "HushSpec Trusted Keyring v0.2",
   "description": "The set of public keys a verifier trusts for policy signatures. Normative prose: spec/hushspec-signing.md section 5. A verifier MUST select the key whose key_id equals the envelope's key_id and MUST NOT fall back to any other key.",
   "type": "object",

@@ -11,9 +11,8 @@
 ^https://www\.npmjs\.com/package/
 
 # Not listed here on purpose:
-#   - https://hushspec.dev/... appears only in `$schema=` comments inside
-#     example policies. lychee does not read code blocks (no --include-verbatim),
-#     so those are never requested. If verbatim checking is ever turned on, that
-#     host must be live or excluded here.
+#   - Schema URLs in example code blocks are not requested without
+#     --include-verbatim. Published v1 URLs belong to hushspec.org; historical
+#     v0 identifiers retain hushspec.dev but use the documented .org mirror.
 #   - https://crates.io/crates/hushspec resolves today; leave it checked so the
 #     link breaks loudly if the crate is ever unpublished or renamed.

@@ -171,3 +171,28 @@ The container has no network and a read-only checkout. Exact SHA, version and
 target checks remain unchanged; no output filtering accepts malformed JSON.
 All ten workflow regressions pass. Actual hosted ARM64 execution remains a gate;
 the local ARM64 host cannot launch this x86-64 container without host emulation.
+
+Rehearsal `35896630956`, attempt 1, at `0682a31` subsequently passed all 26 CI
+jobs, five CLI artifact builds/smokes and bundle checks. Native runners covered
+Linux x64, both macOS architectures and Windows; Linux ARM64 smoke used QEMU.
+Publishing jobs were skipped. This establishes the workflow correction, not
+qualification of the later domain change or a public release.
+
+## Owned schema domain correction
+
+The owner approved correcting unpublished v1 IDs to `hushspec.org`. All 25 v1
+schemas change only identifier/reference hosts; v0 schema bytes, their frozen
+manifest, bundle predicate URIs and canonical policy hashes remain unchanged.
+The website snapshot distinguishes legacy `$id` values from owned mirror URLs
+and records its source commit and per-file digests.
+
+A bounded independent review covered the domain/export changes, website checks,
+explicit PyPI authentication selection and direct ARM smoke. It found one
+Important issue: clean Git checkouts with `core.autocrlf=true` can transform
+working-tree bytes, so copying those files misrepresented the named source
+commit and changed frozen schemas. A real CRLF-clone regression reproduced the
+failure. The exporter now hashes and writes pinned Git blobs; all five exporter
+tests pass, including that regression. No second independent review is claimed
+for this repair. Production delivery, registry permissions, integration-SHA
+qualification and complete SDK/installer correctness were outside this bounded
+review; their separate gates remain in the release plan.

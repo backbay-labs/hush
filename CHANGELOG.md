@@ -21,6 +21,11 @@ HushSpec follows the versioning policy in [`spec/versioning.md`](./spec/versioni
 
 ### Fixed
 
+- Pre-publication v1 schema IDs and editor URLs use the owned `hushspec.org`
+  domain. Frozen v0 files and IDs are unchanged and available as mirrors.
+- Policy reload is serialized with in-flight confirmation and receipt delivery;
+  observers run after recording and may reenter the guard. Confirmation and
+  custom-sink callbacks must not reenter the same guard.
 - CLI build provenance now refreshes when a packed branch ref becomes loose,
   including linked worktrees; executable build regressions cover both cases.
 - External-conformance planning bounds skipped cases and aggregate serialized

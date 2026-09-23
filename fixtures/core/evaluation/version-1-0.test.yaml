@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
 hushspec_test: "0.2.0"
 description: "A policy declaring hushspec 1.0.0 evaluates exactly as a 0.2.0 policy would (core spec 2.2, 10): the 1.0 series froze the 0.2 semantics"
 policy:

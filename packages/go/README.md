@@ -71,19 +71,20 @@ rejected with `E002`.
 ### JSON Schemas
 
 Policies validate against the `.v1.` schema lineage, published under
-`https://hushspec.dev/schemas/`. Point an editor at it with a modeline:
+`https://hushspec.org/schemas/`. Frozen v0 schemas are mirrored there with their
+original identifiers unchanged. Point an editor at v1 with a modeline:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 ```
 
 | Document | Schema URL |
 | --- | --- |
-| Policy | `https://hushspec.dev/schemas/hushspec-core.v1.schema.json` |
-| Receipt | `https://hushspec.dev/schemas/hushspec-receipt.v1.schema.json` |
-| Log entry | `https://hushspec.dev/schemas/hushspec-log-entry.v1.schema.json` |
-| Signature | `https://hushspec.dev/schemas/hushspec-signature.v1.schema.json` |
-| Bundle | `https://hushspec.dev/schemas/hushspec-bundle.v1.schema.json` |
+| Policy | `https://hushspec.org/schemas/hushspec-core.v1.schema.json` |
+| Receipt | `https://hushspec.org/schemas/hushspec-receipt.v1.schema.json` |
+| Log entry | `https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json` |
+| Signature | `https://hushspec.org/schemas/hushspec-signature.v1.schema.json` |
+| Bundle | `https://hushspec.org/schemas/hushspec-bundle.v1.schema.json` |
 
 The `.v0.` files are frozen copies retained for documents that declare a 0.x
 version; they are not edited, and `schemas/frozen-v0.json` pins their digests.

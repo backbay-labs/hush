@@ -108,7 +108,7 @@ fn v1_schemas_carry_v1_ids_and_are_not_marked_frozen() {
         let schema: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(
             schema["$id"].as_str().unwrap(),
-            format!("https://hushspec.dev/schemas/{name}"),
+            format!("https://hushspec.org/schemas/{name}"),
             "{name}: $id names the v1 file"
         );
         assert!(

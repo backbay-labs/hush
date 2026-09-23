@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-log-entry.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json",
   "title": "HushSpec Log Entry v0.1",
   "description": "One line of a hash-linked receipt log (spec/hushspec-log.md). Each entry wraps a decision receipt or a policy-in-effect event, names the previous entry's hash, carries its own hash over its canonical form, and may carry an Ed25519 signature over that hash. A verifier detects edited, deleted, inserted, or reordered lines from the entries alone.",
   "type": "object",

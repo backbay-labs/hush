@@ -9,7 +9,9 @@ declared distribution artifacts. Chio migration and Project D remain separate.
 
 ## Constraints
 
-- Preserve Core semantics, canonical identity, frozen schemas and existing tests.
+- Preserve Core semantics, canonical identity, all frozen v0 schema bytes and
+  existing tests. The owner approved correcting unpublished v1 schema IDs to
+  `hushspec.org`; this does not change bundle predicate URIs or policy hashes.
 - The owner explicitly chose to revoke the supplied credentials after publication.
   Do not place credentials in source, artifacts or logs. Post-publication
   revocation remains an owner action, not a completed release gate.
@@ -131,6 +133,16 @@ the checkout and approved the installer design using `hushspec.org`: pinned
 GitHub archives, SHA-256 verification and a rootless `~/.local/bin` installation.
 This does not authorize changing frozen schema identifiers or imply Homebrew
 access is available.
+
+The owner confirmed they do not own `hushspec.dev` and explicitly approved the
+pre-publication v1 domain correction. V1 schemas and editor URLs use
+`https://hushspec.org/schemas/`; v0 files retain their original bytes and IDs,
+with separate retrieval URLs in the website index. Website schema exports name
+a clean source commit and carry file digests checked during the static build.
+Pages remains a documentation mirror without the obsolete custom-domain CNAME.
+The repository's Pages mirror is configured for Actions deployment at
+`https://backbay-labs.github.io/hush/`, with no custom domain. Configuration alone
+does not establish a successful deployment or live schema delivery on Vercel.
 
 The supplied crates credential was retried and rejected with HTTP 401 and a
 token-format error. The existing GitHub `CRATES_TOKEN` was not overwritten and

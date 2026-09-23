@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-assessment-context-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-assessment-context-experimental.v1.schema.json",
   "title": "HushSpec assessment-context-experimental 0.1.0",
   "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
   "type": "object",

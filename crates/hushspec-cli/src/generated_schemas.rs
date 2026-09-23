@@ -176,7 +176,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "assessment-context-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-assessment-context-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-assessment-context-experimental.v1.schema.json",
   "title": "HushSpec assessment-context-experimental 0.1.0",
   "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
   "type": "object",
@@ -233,7 +233,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "bundle",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-bundle.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-bundle.v1.schema.json",
   "title": "HushSpec Policy Bundle v0.1",
   "description": "A policy bundle (spec/hushspec-bundle.md): a DSSE envelope whose payload is an in-toto Statement v1 carrying the resolved policy, its extends chain, and the resolver that produced them. The root of this schema is the envelope; the base64 payload cannot be validated in place, so a verifier decodes it and validates the result against #/$defs/Statement.",
   "type": "object",
@@ -502,7 +502,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "conformance-execution-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
   "title": "Experimental conformance execution record 0.1.0",
   "type": "object", "additionalProperties": false,
   "required": ["protocol", "run_id", "implementation", "requested_level", "outcome", "abort_reason", "generated_at", "declared_build_context", "controller", "engine", "profile", "manifest", "corpus", "builtins", "declared_materials", "args", "environment", "os", "architecture", "limits", "planned", "unattempted", "cases", "report", "limitations"],
@@ -571,7 +571,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "conformance-report",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-conformance-report.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-conformance-report.v1.schema.json",
   "title": "HushSpec Conformance Report v1",
   "description": "The machine-readable result of running the HushSpec conformance corpus against one implementation (core spec Section 8). A report names the implementation, pins the corpus by its manifest digest, states an outcome for each of the six conformance levels, and lists every vector it ran. It is the evidence behind a conformance statement (docs/src/reference/conformance-statement.md); a statement that cites a level MUST be backed by a report whose entry for that level is \"pass\".",
   "type": "object",
@@ -767,7 +767,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "core",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-core.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-core.v1.schema.json",
   "title": "HushSpec Core v1",
   "description": "Schema for HushSpec Core 1.x documents, which also accepts the frozen 0.x lineage (core spec 2.2). Validates portable, engine-neutral AI agent security rules.",
   "type": "object",
@@ -1482,19 +1482,19 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
       "properties": {
         "posture": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
+          "$ref": "https://hushspec.org/schemas/hushspec-posture.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Stateful capability and budget management, as defined by the posture companion schema."
         },
         "origins": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
+          "$ref": "https://hushspec.org/schemas/hushspec-origins.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Origin-aware policy profiles, as defined by the origins companion schema."
         },
         "detection": {
           "type": "object",
-          "$ref": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
+          "$ref": "https://hushspec.org/schemas/hushspec-detection.v1.schema.json",
           "unevaluatedProperties": false,
           "description": "Detection engine thresholds and configuration, as defined by the detection companion schema."
         }
@@ -1664,7 +1664,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "PostureExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
+      "$id": "https://hushspec.org/schemas/hushspec-posture.v1.schema.json",
       "title": "HushSpec Posture Extension v1",
       "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
       "type": "object",
@@ -1785,7 +1785,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "OriginsExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
+      "$id": "https://hushspec.org/schemas/hushspec-origins.v1.schema.json",
       "title": "HushSpec Origins Extension v1",
       "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
       "type": "object",
@@ -2098,7 +2098,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
     },
     "DetectionExtension": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
+      "$id": "https://hushspec.org/schemas/hushspec-detection.v1.schema.json",
       "title": "HushSpec Detection Extension v1",
       "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
       "type": "object",
@@ -2249,7 +2249,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "detection",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-detection.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-detection.v1.schema.json",
   "title": "HushSpec Detection Extension v1",
   "description": "Schema for the HushSpec Detection extension. Declares thresholds and configuration for content analysis guards.",
   "type": "object",
@@ -2398,7 +2398,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "engine-profile-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-engine-profile-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-engine-profile-experimental.v1.schema.json",
   "title": "Experimental external engine profile 0.1.0",
   "type": "object",
   "additionalProperties": false,
@@ -2435,7 +2435,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "engine-request-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-engine-request-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-engine-request-experimental.v1.schema.json",
   "title": "Experimental external engine request 0.1.0",
   "type": "object", "additionalProperties": false,
   "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "input"],
@@ -2480,7 +2480,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "engine-response-experimental",
         r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-engine-response-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-engine-response-experimental.v1.schema.json",
   "title": "Experimental external engine response 0.1.0",
   "type": "object", "additionalProperties": false,
   "required": ["protocol", "run_id", "case_id", "operation", "input_sha256", "result"],
@@ -2507,7 +2507,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "error-codes",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-error-codes.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-error-codes.v1.schema.json",
   "title": "HushSpec Error Code Registry v1",
   "description": "Schema for spec/registries/error-codes.yaml, the registry of stable identifiers an implementation reports when it refuses a HushSpec document, and for the <name>.expect.yaml sidecars that name the code an invalid/ vector must be rejected with.",
   "type": "object",
@@ -2618,7 +2618,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "evaluator-test",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json",
   "title": "HushSpec Evaluator Fixture v1",
   "description": "Schema for versioned evaluator fixtures used by the HushSpec reference evaluator and conformance testkit.",
   "type": "object",
@@ -2948,7 +2948,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "evidence-inventory-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evidence-inventory-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-evidence-inventory-experimental.v1.schema.json",
   "title": "HushSpec evidence-inventory-experimental 0.1.0",
   "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
   "type": "object",
@@ -3078,7 +3078,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "evidence-profile-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evidence-profile-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-evidence-profile-experimental.v1.schema.json",
   "title": "HushSpec evidence-profile-experimental 0.1.0",
   "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
   "type": "object",
@@ -3275,7 +3275,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "evidence-verification-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evidence-verification-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-evidence-verification-experimental.v1.schema.json",
   "title": "HushSpec evidence-verification-experimental 0.1.0",
   "description": "Experimental offline assurance companion. Not a certification or a change to stable HushSpec evidence formats.",
   "type": "object",
@@ -3723,7 +3723,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "framework-registry",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-framework-registry.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-framework-registry.v1.schema.json",
   "title": "HushSpec Framework Registry v1",
   "description": "Schema for spec/registries/frameworks.yaml, the registry of compliance frameworks that metadata.controls[].framework may name.",
   "type": "object",
@@ -3796,7 +3796,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "hash-vector",
         r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-hash-vector.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-hash-vector.v1.schema.json",
   "title": "HushSpec Canonical Form Test Vector v1",
   "description": "A test vector for spec/hushspec-canonical.md. Each vector pairs a resolved HushSpec document with the exact canonical JSON serialization and content hash a conformant implementation MUST produce for it. Vectors live under fixtures/core/hash/ and are generated by scripts/canonical_json.py.",
   "type": "object",
@@ -3848,7 +3848,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "invocation-journal-experimental",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-invocation-journal-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-invocation-journal-experimental.v1.schema.json",
   "title": "Experimental trusted invocation evidence 0.1.0",
   "description": "A separate signed invocation entry or closing checkpoint. Structural validation alone is not verification: consumers must validate embedded policies and 0.2 receipts, signatures, sequence, immutable bindings and state transitions. Missing terminal evidence means unknown execution outcome.",
   "oneOf": [{"$ref": "#/$defs/entry"}, {"$ref": "#/$defs/checkpoint"}],
@@ -3964,7 +3964,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "keyring",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-keyring.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-keyring.v1.schema.json",
   "title": "HushSpec Trusted Keyring v0.2",
   "description": "The set of public keys a verifier trusts for policy signatures. Normative prose: spec/hushspec-signing.md section 5. A verifier MUST select the key whose key_id equals the envelope's key_id and MUST NOT fall back to any other key.",
   "type": "object",
@@ -4035,7 +4035,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "log-entry",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-log-entry.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-log-entry.v1.schema.json",
   "title": "HushSpec Log Entry v0.1",
   "description": "One line of a hash-linked receipt log (spec/hushspec-log.md). Each entry wraps a decision receipt or a policy-in-effect event, names the previous entry's hash, carries its own hash over its canonical form, and may carry an Ed25519 signature over that hash. A verifier detects edited, deleted, inserted, or reordered lines from the entries alone.",
   "type": "object",
@@ -4309,7 +4309,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "merge-vector",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-merge-vector.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-merge-vector.v1.schema.json",
   "title": "HushSpec Merge Vector v1",
   "description": "The shape of a merge vector directory under fixtures/ (core spec Section 4, Merge Semantics; Section 8 Level 2). Merge vectors are a directory convention rather than a single file, so this schema describes the *descriptor* a conformance runner builds for one directory -- which is what the four SDK runners already reconstruct from the filenames -- and, under $defs/FixtureManifest, the optional fixture.yaml that sits in the directory.\n\nDiscovery. A merge vector directory is any directory under fixtures/ that holds a base.yaml beside at least one child-<name>.yaml. Runners walk fixtures/<module>/merge/ and its subdirectories; a vector that needs its own base -- a digest pin names one exact document, so a pin-match and a pin-mismatch case cannot share one -- gets a subdirectory instead of colliding with the shared base.\n\nFiles. base.yaml is the parent document. child-<name>.yaml is the overlay; its merge_strategy selects the strategy under test. expected-<name>.yaml is the document the merge MUST produce, matched to its child by replacing the leading 'child-' with 'expected-'. Any other *.yaml in the directory (an intermediate hop of a multi-hop chain, say) is inert: runners only iterate the child-*.yaml files.\n\nComposition. A child whose extends carries a '#sha256:' pin is resolved (core Section 2.3) with a loader scoped to the vector directory, which also accepts the bare references 'base' and 'base.yaml'; the pin is then actually checked. Every other child is composed with a direct merge(base, child), which is what the vectors are testing.\n\nRefusal. A vector that must be refused rather than merged carries no expected-<name>.yaml and is marked instead. Only two markings are honoured by all four SDK runners, so only these two are normative: an 'expect-reject' file in the directory, or 'reject: true' in the directory's fixture.yaml. Both are directory-wide; a refusal case therefore lives in its own subdirectory with its own base.yaml. The per-child spellings some runners additionally accept (a '<stem>.expect-reject' marker, a 'reject' name list, per-child entries under 'cases') are tolerated aliases, not portable.",
   "type": "object",
@@ -4427,7 +4427,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "origins",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-origins.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-origins.v1.schema.json",
   "title": "HushSpec Origins Extension v1",
   "description": "Schema for the HushSpec Origins extension. Declares origin-aware policy projection for multi-source agent workflows.",
   "type": "object",
@@ -4744,7 +4744,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "posture",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-posture.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-posture.v1.schema.json",
   "title": "HushSpec Posture Extension v1",
   "description": "Schema for the HushSpec Posture extension. Declares a state machine for capability and budget management.",
   "type": "object",
@@ -4869,7 +4869,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "receipt",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-receipt.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-receipt.v1.schema.json",
   "title": "HushSpec Decision Receipt v0.2",
   "description": "A self-contained, tamper-evident record of one HushSpec policy evaluation. Normative prose: spec/hushspec-receipt.md. A receipt identifies the resolved policy by content hash (spec/hushspec-canonical.md), the actor on whose behalf the action was evaluated, the action (never its content), the decision and why, the rule blocks and detectors that ran, and how the runtime applied the decision. Field order in this file is documentation order; receipts are hashed in canonical form (RFC 8785).",
   "type": "object",
@@ -5292,7 +5292,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "report",
         r##"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-report.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-report.v1.schema.json",
   "title": "HushSpec Evidence Report v0.1",
   "description": "An aggregation over decision receipts and policy-in-effect events for one window (`h2h report --format json`). A report is derived evidence: every number is counted from recorded receipts (spec/hushspec-receipt.md) and never re-evaluated, so a report cannot disagree with the receipts it summarizes. When the inputs were hash-linked logs (spec/hushspec-log.md), `chain_verified` says whether the chain verified; a report over a broken chain is only produced when the operator asked for one, and is stamped false.",
   "type": "object",
@@ -6032,7 +6032,7 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
         "signature",
         r#"{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-signature.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-signature.v1.schema.json",
   "title": "HushSpec Policy Signature Envelope v0.2",
   "description": "A detached Ed25519 signature over the canonical form of a resolved HushSpec policy. Stored as a .sig JSON file next to the policy. Normative prose: spec/hushspec-signing.md. The signature covers the RFC 8785 canonical serialization of this object with the `signature` member removed.",
   "type": "object",

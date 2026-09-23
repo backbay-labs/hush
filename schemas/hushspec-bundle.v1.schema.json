@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-bundle.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-bundle.v1.schema.json",
   "title": "HushSpec Policy Bundle v0.1",
   "description": "A policy bundle (spec/hushspec-bundle.md): a DSSE envelope whose payload is an in-toto Statement v1 carrying the resolved policy, its extends chain, and the resolver that produced them. The root of this schema is the envelope; the base64 payload cannot be validated in place, so a verifier decodes it and validates the result against #/$defs/Statement.",
   "type": "object",

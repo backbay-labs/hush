@@ -38,6 +38,9 @@ jobs:
       - name: Check release candidate selection and version agreement
         run: python3 scripts/test_release_workflow.py
 
+      - name: Check schema publication snapshots
+        run: python3 scripts/test_schema_publication.py
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'

@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.1",
   "fixtures_version": "1.0.0",
-  "generated_at": "2026-09-23T01:47:04Z",
+  "generated_at": "2026-09-23T18:00:50Z",
   "files": [
     {
       "path": "fixtures/adapters/mcp-contract.json",
@@ -229,7 +229,7 @@
     },
     {
       "path": "fixtures/core/evaluation/deny-over-warn-precedence.test.yaml",
-      "sha256": "c8adacdfa4b735ce32a68ecf2f650947c90c07b0fe196ea203d0231a3d3e3cb0",
+      "sha256": "5777ad231af49ecccb7df1f2f873ad50b4ea162970d0b070253f65bb1e763601",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -271,7 +271,7 @@
     },
     {
       "path": "fixtures/core/evaluation/extends-three-hop-resolved.test.yaml",
-      "sha256": "bd598b7e1e47e3fabd339e75dc85599060a8b19737b12b9a1a5dfad646a13adb",
+      "sha256": "166a0b4bb3185c2564083bbd316308dae814966c6382e4be667f5f65b3387da9",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -355,7 +355,7 @@
     },
     {
       "path": "fixtures/core/evaluation/receipt-expectation.test.yaml",
-      "sha256": "03b9e4c3f3d7056e21b665be1527924c95a98c490d7f69ac0e27d8760e67fadf",
+      "sha256": "58dcccfa14a12886778b3a903be7db515d6f49ffd86c26acda3cb1122f775ee0",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -376,14 +376,14 @@
     },
     {
       "path": "fixtures/core/evaluation/rule-blocks-disabled.test.yaml",
-      "sha256": "5fe9b27f480c7e7059b0d070a86f9e75f412e8a4901ba3128881eedb413e24d8",
+      "sha256": "f9b9fadaa426b3cf2d93d4a756a4473812b25ba5c2704ce9e15e9e54135df5b3",
       "category": "evaluation",
       "module": "core",
       "level": 3
     },
     {
       "path": "fixtures/core/evaluation/rule-trace.test.yaml",
-      "sha256": "e59e978449f5128413919c815436ca20c8785a18208cee69b839a5add70445d0",
+      "sha256": "335705132cbed16611ea3f01d39889a9f3c2769c5a906363af913b217294f2fd",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -404,7 +404,7 @@
     },
     {
       "path": "fixtures/core/evaluation/secret-severity-mapping.test.yaml",
-      "sha256": "7c075e416a1641666d6a151da3dde01f8de034900df149b1dc27a329eeeb167d",
+      "sha256": "69ff8199f41afec0b375dc6dc0958a6f8e54f860de81a837f02441372913aa0b",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -460,7 +460,7 @@
     },
     {
       "path": "fixtures/core/evaluation/tool-max-args-size.test.yaml",
-      "sha256": "825d10c11043d76a933454747a3661e06e20ca58708649eb1b2966f46456b1fb",
+      "sha256": "2a23516b3750ce866cf6dd329232556c991a52293638d9bf82a77b0c2d211865",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -474,7 +474,7 @@
     },
     {
       "path": "fixtures/core/evaluation/version-1-0.test.yaml",
-      "sha256": "44e5d7b592cec7423536c00041caf27b4fea4694199a1e70687e5b46c96c6633",
+      "sha256": "bbf2e2a964c6a8c3ea97a886cb11355e900367553caeac773ff6532b7c96519c",
       "category": "evaluation",
       "module": "core",
       "level": 3
@@ -1685,7 +1685,7 @@
     },
     {
       "path": "fixtures/core/valid/version-1-0.yaml",
-      "sha256": "d2c14409618e162f5dee3b472e0f4e1bf2ef011ffbb74313c2b50d9adfea0577",
+      "sha256": "0d8d80da852d399028d3dfe2e7d2cb76bbdd2714a394715f40097c148e72e611",
       "category": "valid",
       "module": "core",
       "level": 1
@@ -1755,7 +1755,7 @@
     },
     {
       "path": "fixtures/detection/evaluation/threat-intel.test.yaml",
-      "sha256": "a689041fa5971ce9e8d7421b1a200895c8370754853a334d175c16efb64e0f7f",
+      "sha256": "c2ec70e0b138f1680a2e8f393a233baba1519493461b2d18a0d975e1f0fc846b",
       "category": "evaluation",
       "module": "detection",
       "level": 3
@@ -1853,56 +1853,56 @@
     },
     {
       "path": "fixtures/library/devops/cicd-hardened.test.yaml",
-      "sha256": "3be8b416b7b47b500ef2bfb459888bd847223f034aa53b831eab695af16d01a7",
+      "sha256": "24c864cc0ad8e4094d74a28ccd46256c361c02aab0fa3bf03e57498b02cd6275",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/education/ferpa-student.test.yaml",
-      "sha256": "4601aa84643f8bba789f688f93c1717afd6100a67c3adb766c329002294ff7e6",
+      "sha256": "2183611bea1c860c825308d89aebe3a456a691e33fb8f6a72b3f256e60055e3f",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/finance/pci-dss.test.yaml",
-      "sha256": "1d2e3475b83327fa92f6c90e210e7571c1adf1d9bb960b29a7514296fad275e5",
+      "sha256": "18f86057ba6966d4c9eeb18d20e986296a3fac3366a544dec7644888247719a0",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/finance/soc2-base.test.yaml",
-      "sha256": "69ab71c1531b3845bd56878967491c907e9cdf71cab9c4d7c5fcec3072499173",
+      "sha256": "614b403ec89bc0214390d4b99efc1cc5483fcea7374e71ddb85186d64201372e",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/general/air-gapped.test.yaml",
-      "sha256": "1b32e47a96a28ab586baee51b0ccb5c785326ede1fb6cf6a5675858091da6346",
+      "sha256": "81d9579f59167bb9b6194867dae5148871142750a075100aecc0fb36af4b0e14",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/general/recommended.test.yaml",
-      "sha256": "db745d1116c8e7a247f97ffedfd492da2516d11e8f5a1df7851289cd9f93bfb2",
+      "sha256": "644a83b04f6e6bdb6b48e9b6b5e261b9a70edca7bab7f37819953e4193510831",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/government/fedramp-base.test.yaml",
-      "sha256": "8c06165c461340e9cef2123bef15e2cf24dab5ab9aa586c33647bf0d574946dd",
+      "sha256": "b1787c2a22e65968937fa147310d80c84dafe771b146f9a7c2551a2b92d8c129",
       "category": "library-suite",
       "module": "library",
       "level": 3
     },
     {
       "path": "fixtures/library/healthcare/hipaa-base.test.yaml",
-      "sha256": "30698423ceaf3034e096ed8f267b502da36a1a09f348037419b3109be6516a38",
+      "sha256": "f6d5bed02601b8c38550173eca4861577f69fa67687e20e18ee111522c225821",
       "category": "library-suite",
       "module": "library",
       "level": 3

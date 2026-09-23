@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-conformance-execution-experimental.v1.schema.json",
   "title": "Experimental conformance execution record 0.1.0",
   "type": "object", "additionalProperties": false,
   "required": ["protocol", "run_id", "implementation", "requested_level", "outcome", "abort_reason", "generated_at", "declared_build_context", "controller", "engine", "profile", "manifest", "corpus", "builtins", "declared_materials", "args", "environment", "os", "architecture", "limits", "planned", "unattempted", "cases", "report", "limitations"],

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json",
+  "$id": "https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json",
   "title": "HushSpec Evaluator Fixture v1",
   "description": "Schema for versioned evaluator fixtures used by the HushSpec reference evaluator and conformance testkit.",
   "type": "object",

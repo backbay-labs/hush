@@ -225,7 +225,7 @@ fn schema_prints_a_schema_by_short_name() {
     let parsed: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(
         parsed["$id"],
-        "https://hushspec.dev/schemas/hushspec-core.v1.schema.json"
+        "https://hushspec.org/schemas/hushspec-core.v1.schema.json"
     );
 }
 
@@ -780,7 +780,7 @@ fn fmt_still_formats_a_document_whose_only_comment_is_the_modeline() {
         tmp.path(),
         "modeline.yaml",
         &format!(
-            "# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json\n{SIMPLE_POLICY}"
+            "# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json\n{SIMPLE_POLICY}"
         ),
     );
 

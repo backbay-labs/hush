@@ -16,7 +16,7 @@ npm install @hushspec/core
 import { parseOrThrow, validate, evaluate } from '@hushspec/core';
 
 const policy = parseOrThrow(`
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "1.0.0"
 name: my-policy
 rules:

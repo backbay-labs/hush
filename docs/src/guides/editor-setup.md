@@ -2,7 +2,7 @@
 
 HushSpec documents are backed by JSON Schemas, published at stable URLs under
 their own `$id` (for example,
-`https://hushspec.dev/schemas/hushspec-core.v1.schema.json`). Any YAML-aware
+`https://hushspec.org/schemas/hushspec-core.v1.schema.json`). Any YAML-aware
 editor that speaks [`yaml-language-server`](https://github.com/redhat-developer/yaml-language-server)
 conventions -- VS Code (with the YAML extension), Neovim, JetBrains IDEs, and
 others -- can use these schemas for autocompletion, hover documentation, and
@@ -63,7 +63,7 @@ below for what's still pending.
 Add a `yaml-language-server` modeline as the **first line** of the file:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-core.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-core.v1.schema.json
 hushspec: "1.0.0"
 name: "my-policy"
 ```
@@ -78,7 +78,7 @@ Evaluator test files (the `*.test.yaml` fixtures `h2h init` scaffolds
 alongside a policy) use the evaluator-test schema instead:
 
 ```yaml
-# yaml-language-server: $schema=https://hushspec.dev/schemas/hushspec-evaluator-test.v1.schema.json
+# yaml-language-server: $schema=https://hushspec.org/schemas/hushspec-evaluator-test.v1.schema.json
 ```
 
 See the [JSON Schema reference](../reference/json-schema.md) for the full
@@ -93,7 +93,7 @@ your workspace settings:
 ```yaml
 # .vscode/settings.json
 "yaml.schemas": {
-  "https://hushspec.dev/schemas/hushspec-core.v1.schema.json": ["policies/*.yaml"]
+  "https://hushspec.org/schemas/hushspec-core.v1.schema.json": ["policies/*.yaml"]
 }
 ```
 
@@ -102,24 +102,19 @@ JSON Schema Mappings**, using the same URL and glob.)
 
 ## Interim fallback: raw GitHub URL
 
-The docs deploy publishes `schemas/*.json` alongside the mdBook site, so the
-host serves every schema at the `$id` its own document declares. What is left
-is maintainer-side and one-time: pointing the domain's DNS at GitHub Pages and
-setting it as the repository's custom domain. Until `hushspec.dev` is confirmed
-live, substitute the raw GitHub URL anywhere above; it always resolves and
-tracks `main` directly:
+The Vercel website serves a commit-pinned schema snapshot at `hushspec.org`.
+Before its first schema deployment, substitute a raw GitHub URL anywhere above.
+Use the release tag or commit instead of `main` when pinning an exact version:
 
 ```
 https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v1.schema.json
 ```
 
-Both URLs serve the same file, and can differ only for as long as it takes a
-docs deploy to run -- raw GitHub tracks `main` directly, while the canonical
-host serves the last successful deploy of it. Once `hushspec.dev` is live,
-prefer the canonical URL: it's the one the
-schemas' own `$id` fields declare, and the one the SchemaStore entries above
-point to. `https://hushspec.dev/schemas/index.json` lists everything the host
-serves, and is the quickest way to check whether it is live.
+The index at `https://hushspec.org/schemas/index.json` identifies the published
+source commit and file digests. V1 schemas use `.org` IDs; frozen v0 schemas
+retain their historical `.dev` IDs but are retrievable from the `.org` mirror.
+The project does not operate the legacy `.dev` host. A raw GitHub URL at `main`
+can be newer than the website snapshot.
 
 Offline, `h2h schema --list` and `h2h schema <name>` print the same schemas
 from the binary itself, with no network access at all.
@@ -132,7 +127,7 @@ repository is a separate, external PR, gated on the URLs above actually
 resolving. Roughly:
 
 1. Confirm every URL the entries name resolves over HTTPS.
-   `https://hushspec.dev/schemas/index.json` lists them all.
+   `https://hushspec.org/schemas/index.json` lists them all.
 2. Fork `SchemaStore/schemastore`.
 3. Insert the objects from [`docs/schemastore-entry.json`](https://github.com/backbay-labs/hush/blob/main/docs/schemastore-entry.json)'s
    `schemas` array into `src/api/json/catalog.json`'s own `schemas` array,
