@@ -11,6 +11,10 @@ class Blocks(unittest.TestCase):
     def test_long_fence_can_contain_short_fences(self):
         self.assertEqual(len(blocks('````md\n```py\nx\n```\n````\n')), 1)
 
+    def test_nested_blockquote_fences_are_not_lost(self):
+        self.assertEqual(blocks('> ```python\n> print(1)\n> ```\n'),
+                         [{'language':'python', 'code':'print(1)\n'}])
+
     def test_unknown_or_changed_block_fails(self):
         block = {'id': 'guide.md:1', 'code': 'print(1)\n', 'language': 'python'}
         with self.assertRaisesRegex(ValueError, 'unclassified'):

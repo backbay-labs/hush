@@ -1,13 +1,12 @@
 """Inventory fenced examples. Every source edit requires classification review.
 
-This lexer handles the fenced blocks used by this book, including indented
-list fences and fences containing shorter fences. The website's Markdown AST
-checker independently compares its parsed code-block inventory at export time.
+Use the CommonMark parser for nested lists/quotes and fences. The website's
+Markdown AST checker independently compares the code-block inventory at export.
 """
 import hashlib
 import json
 from pathlib import Path
-import re
+from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parent.parent
 INVENTORY = ROOT / 'docs/examples/blocks.json'
@@ -15,26 +14,9 @@ KINDS = {'runnable', 'fragment', 'operator-command', 'expected-output', 'negativ
 
 
 def blocks(markdown):
-    result = []
-    opened = None
-    code = []
-    for line in markdown.splitlines(keepends=True):
-        if opened is None:
-            match = re.match(r'^( *)(`{3,}|~{3,})([^\n]*)\n?$', line)
-            if match:
-                indent, fence, info = match.groups()
-                opened = (len(indent), fence, info.strip().split()[0] if info.strip() else '')
-        else:
-            indent, fence, language = opened
-            if re.match(r'^ *' + re.escape(fence[0]) + '{' + str(len(fence)) + r',}\s*$', line):
-                result.append({'language': language, 'code': ''.join(code)})
-                opened, code = None, []
-            else:
-                removed = min(indent, len(line) - len(line.lstrip(' ')))
-                code.append(line[removed:])
-    if opened:
-        raise ValueError('unclosed documentation fence')
-    return result
+    return [{'language':token.info.strip().split()[0] if token.info.strip() else '',
+             'code':token.content}
+            for token in MarkdownIt('commonmark').parse(markdown) if token.type=='fence']
 
 
 def sources():

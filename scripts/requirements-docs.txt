@@ -1,0 +1,4 @@
+# Documentation tooling only; not an SDK/runtime dependency.
+markdown-it-py==4.0.0
+PyYAML>=6.0,<7
+jsonschema[format]>=4.0,<5
