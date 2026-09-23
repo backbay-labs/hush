@@ -35,4 +35,3 @@ packages/go/hushspec/compiled_test.go:\b(FIXME|HACK|TODO|XXX|TBD)\b
 
 # Source links identify the unreleased branch containing the documented code;
 # the branch name occurs only in URL targets, not capability or delivery prose.
-docs/src/reference/sdk-conformance.md:\bwave[- ][0-6]\b

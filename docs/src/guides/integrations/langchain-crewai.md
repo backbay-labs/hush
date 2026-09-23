@@ -10,7 +10,7 @@ only record a denied decision do not prevent the function from running.
 | LangChain | `wrapLangChainTool`, `createLangChainCallbackHandler` | `hush_tool` | Use the ordinary guard at your handler |
 | CrewAI | No dedicated adapter | `secure_tool` | Use the ordinary guard at your handler |
 
-These adapters use structural interfaces and do not import a framework package.
+These adapters use structural interfaces without importing LangChain or CrewAI.
 Check the framework's dispatch lifecycle in your application.
 
 ## TypeScript wrapping
