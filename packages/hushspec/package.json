@@ -28,7 +28,7 @@
     "directory": "packages/hushspec"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "4.1.11",
     "typescript": "^5.7.0",
     "vitest": "4.1.11"
