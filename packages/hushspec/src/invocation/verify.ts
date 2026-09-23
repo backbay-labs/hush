@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { canonicalizeValue, type JsonValue } from '../canonical.js';
 import type { EvaluationAction } from '../evaluate.js';
-import { parseReceipt, receiptHash, type DecisionReceipt } from '../receipt.js';
+import { compactObject, parseReceipt, receiptHash, type DecisionReceipt } from '../receipt.js';
 import { keyIdFromPublicKey, verifyContentHash } from '../signing.js';
 import { hashJson, snapshotJson } from './json.js';
 import { AuthenticatedPolicy } from './policy.js';
@@ -35,7 +35,8 @@ export function assertBoundReceipt(receipt: DecisionReceipt, action: EvaluationA
     expected.content_size = Buffer.byteLength(action.content);
   }
   if (action.args_size !== undefined) expected.args_size = action.args_size;
-  if (action.context && Object.keys(action.context).length) expected.context = action.context;
+  const context = compactObject(action.context);
+  if (context !== undefined) expected.context = context;
   check(same(receipt.action, expected), 'receipt action binding mismatch');
   check(receipt.policy.content_hash === policy.resolution.content_hash &&
     receipt.policy.name === policy.resolution.spec.name &&

@@ -8,6 +8,9 @@ export { FileInvocationJournal, type InvocationJournal, type InvocationAcknowled
   type InvocationEvent, type InvocationCheckpoint } from './invocation/journal.js';
 export { verifyInvocationJournal, inspectInvocationJournal, type InvocationTrust,
   type InvocationVerification } from './invocation/verify.js';
+export { InvocationCoordinator, InvocationEvidenceError, type InvocationCoordinatorOptions,
+  type InvocationResult, type InvocationPrompt } from './invocation/coordinator.js';
+export { getPanicEpoch } from './evaluate.js';
 export type {
   Rules,
   ForbiddenPathsRule,

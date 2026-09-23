@@ -562,17 +562,25 @@ export function punycodeEncode(input: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 let panicActive = false;
+let panicEpoch = 0;
 
 export function activatePanic(): void {
+  panicEpoch++;
   panicActive = true;
 }
 
 export function deactivatePanic(): void {
+  panicEpoch++;
   panicActive = false;
 }
 
 export function isPanicActive(): boolean {
   return panicActive;
+}
+
+/** Invalidates captured invocation approval even after panic has been cleared. */
+export function getPanicEpoch(): number {
+  return panicEpoch;
 }
 
 export function panicPolicy(): HushSpec {
