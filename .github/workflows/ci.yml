@@ -149,6 +149,47 @@ jobs:
           path: target/external-conformance/
           if-no-files-found: error
 
+  trusted-mcp-pilot:
+    name: Trusted MCP Pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm --prefix packages/hushspec run build
+      - name: Invocation contract regressions
+        run: npm --prefix packages/hushspec test -- invocation
+      - name: Exercise contained coding workflow and real host crashes
+        run: node scripts/run_mcp_pilot.mjs --output target/project-c-pilot-ci
+      - name: Verify the retained packet with separately selected synthetic trust
+        run: node scripts/run_mcp_pilot.mjs --verify target/project-c-pilot-ci --trust target/project-c-pilot-ci.trust.json
+      - name: Verify failed qualification retains evidence
+        run: |
+          if node scripts/run_mcp_pilot.mjs --output target/project-c-pilot-fault-ci --fault counter; then
+            echo 'Injected counter fault unexpectedly qualified'
+            exit 1
+          fi
+          node --input-type=module -e "import fs from 'node:fs'; import assert from 'node:assert/strict'; const failure=JSON.parse(fs.readFileSync('target/project-c-pilot-fault-ci/failure.json','utf8')); assert.equal(failure.qualified,false); assert.equal(failure.error,'endpoint request counter mismatch'); assert(fs.existsSync('target/project-c-pilot-fault-ci/completed/journal/checkpoint.json'));"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trusted-mcp-pilot
+          path: |
+            target/project-c-pilot-ci
+            target/project-c-pilot-ci.trust.json
+            target/project-c-pilot-fault-ci
+          if-no-files-found: warn
+          retention-days: 14
+
   typescript:
     name: TypeScript
     runs-on: ubuntu-latest

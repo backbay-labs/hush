@@ -1,6 +1,6 @@
 # Project C: trusted MCP invocation boundary
 
-Status: proposed implementation contract. Implements roadmap C, not the independent-engine or external-adopter gates. Baseline: `96fb38442543dcb746c10fe4c0ea3333b3dfef7d` on `wave-6`.
+Status: implementation contract; see the separate qualification record for review and execution evidence. Implements roadmap C's first-party boundary/pilot slice, not the independent-engine or external-adopter gates. Baseline: `96fb38442543dcb746c10fe4c0ea3333b3dfef7d` on `wave-6`.
 
 ## Outcome and alternatives
 

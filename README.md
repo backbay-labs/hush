@@ -56,6 +56,12 @@ tests a captured executable against the L0-L3 corpus and retains its inputs,
 outputs and identity. The Go adapter is first-party bring-up, not independent
 engine or runtime-boundary qualification.
 
+The experimental [trusted invocation coordinator](docs/src/reference/trusted-invocation.md)
+checks a host-qualified MCP tool and its effects against one authenticated policy
+snapshot, records a durable permit, then dispatches. Its isolated coding pilot
+tests real edits, blocked operations and crash evidence. This is a scoped
+first-party demonstration, not external adoption or general MCP containment.
+
 ## Quickstart
 
 Build the `h2h` CLI from this checkout:
@@ -278,6 +284,10 @@ they adapt. Use the same policy across agent stacks.
 Rust applications can start from the
 [`guarded_agent` example](crates/hushspec/examples/guarded_agent.rs).
 [Adapter entry points →](docs/src/reference/sdk-api.md#framework-adapters)
+
+The existing adapters evaluate actions; they do not own dispatch or contain tool
+servers. For an opt-in TypeScript dispatch boundary, see the
+[trusted invocation pilot](docs/src/reference/trusted-invocation.md).
 
 <details>
 <summary><strong>SDK parity, optional features, and conformance</strong></summary>

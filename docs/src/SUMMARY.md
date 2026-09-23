@@ -38,6 +38,7 @@
 - [SDK API Contract](reference/sdk-api.md)
 - [Conformance Levels](reference/conformance.md)
 - [External Engine Conformance](reference/external-conformance.md)
+- [Trusted Invocation Pilot](reference/trusted-invocation.md)
 - [SDK Conformance Matrix](reference/sdk-conformance.md)
 - [Conformance Statement](reference/conformance-statement.md)
 - [Versioning](reference/versioning.md)

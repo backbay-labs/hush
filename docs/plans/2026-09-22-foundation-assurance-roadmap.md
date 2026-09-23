@@ -4,6 +4,15 @@ Date: 2026-09-22. Status: research and proposed direction, not an execution or r
 
 Research baseline: `wave-6`, `8c4bb871e6e8bd17076dace178779251b8ae4748`. The source had successful exact-head CI, but the findings below remain open. This proposal supplements [RFC 09](09-compliance-as-code-plan.md); it does not mark its checklist complete or supersede the [delivery ledger](STATUS.md).
 
+Execution update, 2026-09-23: A's evidence repairs and B's implementation-bound
+runner have separate qualification records. C now has an implemented opt-in
+coordinator and contained first-party coding pilot under its own
+[design](2026-09-23-project-c-design.md), [plan](2026-09-23-project-c-implementation.md)
+and [qualification record](2026-09-23-project-c-qualification.md). This does not
+close the independently authored engine running the same workflow, external
+adopter, outside assessor, merge or publication gates. The research baseline
+and requirements below remain historical context, not current readiness claims.
+
 ## Judgment and intended outcome
 
 Hush has a credible policy language and evidence substrate. The next investment should establish that its components compose into a trustworthy boundary, not add another SDK or a larger compliance catalog.
