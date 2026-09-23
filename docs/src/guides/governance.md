@@ -7,7 +7,7 @@ It does not grant permissions, authenticate its author, or prove compliance.
 
 Use `metadata` for policy version, owner/author and approver records, lifecycle,
 review dates, changelog entries, and control mappings. The field shapes are in
-[core section 2.5](../../../spec/hushspec-core.md#25-governance-metadata).
+[core section 2.5](../../../spec/hushspec-core.md#25-metadata).
 Validation rejects malformed dates and control references; advisory checks look
 for review and separation-of-duties concerns.
 

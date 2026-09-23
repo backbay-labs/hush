@@ -72,5 +72,5 @@ evidence when configuring retrieval.
 ## Check what your editor cannot
 
 Run `h2h validate --strict policy.yaml` to include resolution, then execute
-your [policy tests](getting-started.md#3-test-the-boundary). Test both permission
+your [policy tests](getting-started.md#6-test-the-policy). Test both permission
 and refusal paths. A green editor gutter is not a runtime enforcement result.

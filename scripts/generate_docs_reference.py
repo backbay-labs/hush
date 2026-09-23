@@ -18,11 +18,8 @@ def generate():
     text = '# Registries\n\nRegistries define portable vocabulary, not permission to extend a closed object.\nAn unknown action is denied; an unknown document field is rejected. Capability\nextensions are separately described by the posture specification.\n\n## Published inventory\n\n| Registry | Download | Role |\n| --- | --- | --- |\n'
     for p in sorted((ROOT / 'spec/registries').glob('*.yaml')):
         data = yaml.safe_load(p.read_text())
-        values = data.get('entries', data.get('codes', []))
         role = 'Closed portable vocabulary' if data.get('status') == 'closed' else 'Registered identifiers and compatibility rules'
         text += f'| [{p.stem}](../../../spec/registries/{p.name}) | [YAML](https://hushspec.org/registries/{p.name}) | {role} |\n'
-        if values and isinstance(values, list):
-            pass
     text += '\n## Version and ownership\n\nA registry can retain its original registry version while shipping in HushSpec\nv1. Read the registry header for its extension policy. Do not infer that an\narbitrary capability, detector or framework is supported merely because a\nstring fits its identifier grammar. [Conformance](conformance.md) is a separate\nclaim about behavior against a named corpus.\n'
     (OUT / 'registries.md').write_text(text)
     target = OUT / 'json-schema.md'

@@ -71,7 +71,7 @@ Use `h2h resolve agent.yaml` and review the result before evaluating it.
 
 Cycles, missing bases, malformed pins, digest mismatches and chains beyond the
 32-hop limit refuse the whole load. Do not recover by evaluating only the leaf.
-See [core resolution](../../spec/hushspec-core.md#26-resolution-protocol).
+See [core resolution](../../spec/hushspec-core.md#26-resolution).
 
 ## Strategy Comparison
 
